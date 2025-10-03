@@ -15,8 +15,8 @@
   "exclude": ["node_modules", "dist", "./test", "tests", "**/*.test.ts", "**/__tests__/**"],
 
   "references": [
-    { "path": "../schemas" },
-    { "path": "../argo-workflow-builders" }
+    { "path": "../schemas/tsconfig.json" },
+    { "path": "../argo-workflow-builders/tsconfig.json" }
 
   ]
 }

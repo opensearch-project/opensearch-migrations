@@ -2,15 +2,15 @@
   "name": "@opensearch-migrations/migration-workflow-templates",
   "version": "1.0.0",
   "scripts": {
-    "build": "npx tsgo && tsc-alias -p tsconfig.build.json",
-    "clean": "npx tsgo --build --clean",
+    "build": "npx tsgo && tsc-alias",
     "make-templates": "tsx makeTemplates.cjs",
-    "type-check": "npx tsgo --build --noEmit",
+    "pretype-check": "npm run -w @opensearch-migrations/schemas build && npm run -w @opensearch-migrations/argo-workflow-builders build",
+    "type-check": "npx tsgo --noEmit",
     "test": "jest --config ./jest.config.js"
   },
   "dependencies": {
-    "@opensearch-migrations/argo-workflow-builders": "*",
-    "@opensearch-migrations/schemas": "*",
+    "@opensearch-migrations/argo-workflow-builders": "workspace:*",
+    "@opensearch-migrations/schemas": "workspace:*",
     "@kubernetes/client-node": "^1.3.0",
     "@typescript/native-preview": "^7.0.0-dev.20250919.1"
   },

@@ -12,11 +12,10 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && npm exec -y tsc-alias -- -p tsconfig.build.json",
-    "type-check": "tsc -p tsconfig.build.json --noEmit",
-    "clean": "tsc --build --clean",
+    "build": "tsc && npm exec -y tsc-alias",
+    "type-check": "tsc --noEmit",
     "make-templates": "tsx makeTemplates.cjs",
-    "test": "jest --config ./jest.config.js"
+    "test": "jest"
   },
   "dependencies": {
     "@kubernetes/client-node": "^1.3.0",

@@ -2,8 +2,8 @@ import {expectTypeOf, IsAny} from "expect-type";
 import {
     BaseExpression,
     expr,
-} from "@/models/expression";
-import {DeepWiden} from "@/models/plainObject";
+    DeepWiden
+} from "../src";
 
 describe("expression type contracts", () => {
     it("expr.literal() produces the correct value/complexity types", () => {
