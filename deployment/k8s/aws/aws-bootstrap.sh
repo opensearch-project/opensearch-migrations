@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
     --repo-name) repo_name="$2"; shift 2 ;;
     --branch) branch="$2"; shift 2 ;;
     --tag) tag="$2"; shift 2 ;;
-    --skip-git-pull) skip_git_pull="$2"; shift 2 ;;
+    --skip-git-pull) skip_git_pull=true; shift 1 ;;
     --base-dir) base_dir="$2"; shift 2 ;;
     --build-images-chart-dir) build_images_chart_dir="$2"; shift 2 ;;
     --ma-chart-dir) ma_chart_dir="$2"; shift 2 ;;
@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --repo-name <val>                         (default: $repo_name)"
       echo "  --branch <val>                            (default: $branch)"
       echo "  --tag <val>                               (default: $tag)"
-      echo "  --skip-git-pull <true|false>              (default: $skip_git_pull)"
+      echo "  --skip-git-pull                           (default: $skip_git_pull)"
       echo "  --base-dir <path>                         (default: $base_dir)"
       echo "  --build-images-chart-dir <path>           (default: $build_images_chart_dir)"
       echo "  --ma-chart-dir <path>                     (default: $ma_chart_dir)"

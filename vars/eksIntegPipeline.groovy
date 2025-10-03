@@ -164,12 +164,13 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Build Docker Images') {
+            stage('Configure EKS Access Policy') {
                 steps {
-                    timeout(time: 1, unit: 'HOURS') {
+                    timeout(time: 30, unit: 'MINUTES') {
                         script {
+                            sh "npm install"
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 300, roleSessionName: 'jenkins-session') {
                                     def rawOutput = sh(
                                             script: """
                                               aws cloudformation describe-stacks \
@@ -193,7 +194,7 @@ def call(Map config = [:]) {
                                     if (!registryPair) {
                                         error("MIGRATIONS_ECR_REGISTRY key not found in MigrationsExportString output")
                                     }
-                                    def registryEndpoint = registryPair.split('=')[1]
+                                    env.registryEndpoint = registryPair.split('=')[1]
 
                                     def eksClusterPair = pairs.find { it.startsWith("MIGRATIONS_EKS_CLUSTER_NAME=") }
                                     if (!eksClusterPair) {
@@ -201,6 +202,22 @@ def call(Map config = [:]) {
                                     }
                                     env.eksClusterName = eksClusterPair.split('=')[1]
 
+                                    sh "aws eks create-access-entry --cluster-name ${env.eksClusterName} --principal-arn arn:aws:iam::${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole --type STANDARD"
+                                    sh "aws eks associate-access-policy --cluster-name ${env.eksClusterName} --principal-arn arn:aws:iam::${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy --access-scope type=cluster"
+                                    sh "aws eks update-kubeconfig --region us-east-1 --name ${env.eksClusterName}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            stage('Build Docker Images') {
+                steps {
+                    timeout(time: 1, unit: 'HOURS') {
+                        script {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                     def builderExists = sh(
                                             script: "docker buildx ls | grep -q '^ecr-builder'",
                                             returnStatus: true
@@ -211,7 +228,7 @@ def call(Map config = [:]) {
                                     } else {
                                         sh "docker buildx create --name ecr-builder --driver docker-container"
                                     }
-                                    //sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${registryEndpoint} -PimageArch=amd64 -Pbuilder=ecr-builder"
+                                    //sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -PimageArch=amd64 -Pbuilder=ecr-builder"
                                 }
                             }
                         }
@@ -248,7 +265,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "aws eks update-kubeconfig --region us-east-1 --name ${env.eksClusterName}"
+                                        //sh "aws eks update-kubeconfig --region us-east-1 --name ${env.eksClusterName}"
                                         sh "kubectl -n ma config current-context"
                                         sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids=0000 --skip-delete"
                                     }
@@ -268,7 +285,6 @@ def call(Map config = [:]) {
                             if (env.eksClusterName) {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "aws eks update-kubeconfig --region us-east-1 --name ${env.eksClusterName}"
                                         sh "kubectl -n ma config current-context"
                                         sh "kubectl -n ma get pods"
                                         sh "pipenv run app --delete-only"
