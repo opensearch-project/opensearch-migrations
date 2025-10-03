@@ -222,42 +222,39 @@ def call(Map config = [:]) {
 
                                     def clusterDetails = readJSON text: env.clusterDetailsJson
                                     def sourceCluster = clusterDetails.target
+                                    writeJSON file: '/tmp/source-cluster-config.json', json: [
+                                            endpoint: sourceCluster.endpoint,
+                                            allow_insecure: true,
+                                            sigv4: [
+                                                    region: "us-east-1",
+                                                    service: "es"
+                                            ],
+                                            version: env.sourceVer
+                                    ]
                                     sh """
-                                      cat > /tmp/source-cluster-config.json <<-EOF
-                                      {
-                                        "endpoint": "${sourceCluster.endpoint}",
-                                        "allow_insecure": true,
-                                        "sigv4": {
-                                          "region": "us-east-1",
-                                          "service": "es"
-                                        },
-                                        "version": "${env.sourceVer}"
-                                      }
-                                    EOF
-                                    
-                                      kubectl create configmap source-elasticsearch-7-10-migration-config \\
-                                        --from-file=cluster-config=/tmp/source-cluster-config.json \\
+                                      kubectl create configmap source-elasticsearch-7-10-migration-config \
+                                        --from-file=cluster-config=/tmp/source-cluster-config.json \
                                         --namespace ma --dry-run=client -o yaml | kubectl apply -f -
-                                        
+                                    
                                       kubectl -n ma get configmap source-elasticsearch-7-10-migration-config -o yaml
                                     """
+
                                     def targetCluster = clusterDetails.target
+                                    writeJSON file: '/tmp/target-cluster-config.json', json: [
+                                            endpoint: targetCluster.endpoint,
+                                            allow_insecure: true,
+                                            sigv4: [
+                                                    region: "us-east-1",
+                                                    service: "es"
+                                            ],
+                                            version: env.targetVer
+                                    ]
                                     sh """
-                                      cat > /tmp/target-cluster-config.json <<-EOF
-                                      {
-                                        "endpoint": "${targetCluster.endpoint}",
-                                        "allow_insecure": true,
-                                        "sigv4": {
-                                          "region": "us-east-1",
-                                          "service": "es"
-                                        },
-                                        "version": "${env.targetVer}"
-                                      }
-                                    EOF
-                                    
-                                      kubectl create configmap target-opensearch-1-3-migration-config \\
-                                        --from-file=cluster-config=/tmp/target-cluster-config.json \\
+                                      kubectl create configmap target-opensearch-1-3-migration-config \
+                                        --from-file=cluster-config=/tmp/target-cluster-config.json \
                                         --namespace ma --dry-run=client -o yaml | kubectl apply -f -
+                                    
+                                      kubectl -n ma get configmap target-opensearch-1-3-migration-config -o yaml
                                     """
 
                                 }
