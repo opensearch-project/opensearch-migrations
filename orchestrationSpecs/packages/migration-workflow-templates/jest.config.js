@@ -1,21 +1,39 @@
+const ignoreDep = "/node_modules/@opensearch-migrations/argo-workflow-builders/";
+
 /** @type {import('jest').Config} */
 module.exports = {
-    preset: "ts-jest",
+    rootDir: __dirname,
     testEnvironment: "node",
-    roots: ["<rootDir>/tests"],
-    moduleFileExtensions: ["ts", "js", "json", "yaml", "yml", "sh"],
 
+    // keep tests scoped to this package
+    roots: ["<rootDir>/tests"],
+    // testMatch: ["<rootDir>/tests/**/*.test.ts"],
+    testRegex: ["^" + require("path").join(__dirname, "tests") + "/.*\\.test\\.ts$"],
+
+    // only transform TS, not JS
     transform: {
-        "^.+\\.(ts|js)$": "ts-jest",              // Jest 29 syntax
-        "\\.(sh|ya?ml)$": "<rootDir>/tests/rawFileTransformer.cjs",
+        '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.test.json' }],
+        "\\.(sh|ya?ml)$": "<rootDir>/tests/rawFileTransformer.cjs"
     },
+
+    // ignore workspace deps (absolute-path friendly)
+    testPathIgnorePatterns: [
+        "/node_modules/",
+        ignoreDep
+    ],
+    modulePathIgnorePatterns: [
+        ignoreDep + "(tests|dist/tests)/"
+    ],
+    transformIgnorePatterns: [
+        "/node_modules/",
+        ignoreDep
+    ],
 
     moduleNameMapper: {
         "^@/(.*)$": "<rootDir>/src/$1",
-        // NOTE: add `$` so we don’t over-match and ensure a clean capture group
-        "^resources/(.*)$": "<rootDir>/resources/$1",   // <-- was src/resources
+        "^resources/(.*)$": "<rootDir>/resources/$1"
     },
 
-    // Optional niceties:
-    coveragePathIgnorePatterns: ["\\.sh$", "\\.ya?ml$"],
+    moduleFileExtensions: ["ts", "js", "json", "yaml", "yml", "sh"],
+    coveragePathIgnorePatterns: ["\\.sh$", "\\.ya?ml$"]
 };

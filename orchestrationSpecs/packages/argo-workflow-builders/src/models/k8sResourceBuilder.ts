@@ -10,13 +10,13 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
-import {ExtendScope, GenericScope, WorkflowAndTemplatesScope} from "@/argoWorkflowBuilders/models/workflowTypes";
-import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/argoWorkflowBuilders/models/templateBodyBuilder";
-import {PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
-import {UniqueNameConstraintAtDeclaration} from "@/argoWorkflowBuilders/models/scopeConstraints";
-import {AllowLiteralOrExpression} from "@/argoWorkflowBuilders/models/expression";
-import {TypeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/models/parameterSchemas";
+import {ExtendScope, GenericScope, WorkflowAndTemplatesScope} from "@/models/workflowTypes";
+import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/models/templateBodyBuilder";
+import {PlainObject} from "@/models/plainObject";
+import {UniqueNameConstraintAtDeclaration} from "@/models/scopeConstraints";
+import {AllowLiteralOrExpression} from "@/models/expression";
+import {TypeToken} from "@/models/sharedTypes";
 
 export type K8sActionVerb = "create" | "get" | "apply" | "delete" | "replace" | "patch";
 

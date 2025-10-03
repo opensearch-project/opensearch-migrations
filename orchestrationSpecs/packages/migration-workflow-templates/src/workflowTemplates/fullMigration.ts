@@ -4,32 +4,22 @@ import {
     PER_INDICES_SNAPSHOT_MIGRATION_CONFIG, RFS_OPTIONS,
     NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
     TARGET_CLUSTER_CONFIG, REPLAYER_OPTIONS, TARGET_CLUSTERS_MAP, SOURCE_CLUSTERS_MAP
-} from '@/workflowTemplates/userSchemas'
+} from '@opensearch-migrations/schemas'
 import {
     CommonWorkflowParameters,
     ImageParameters,
     LogicalOciImages,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
 import {ConfigManagementHelpers} from "@/workflowTemplates/configManagementHelpers";
-import {AllowLiteralOrExpression, expr} from "@/argoWorkflowBuilders/models/expression";
-import {makeParameterLoop} from "@/argoWorkflowBuilders/models/workflowTypes";
-import {configMapKey, defineParam, defineRequiredParam, InputParamDef} from "@/argoWorkflowBuilders/models/parameterSchemas";
-import {INTERNAL} from "@/argoWorkflowBuilders/models/taskBuilder";
-import {CreateOrGetSnapshot} from "@/workflowTemplates/createOrGetSnapshot";
+import {WorkflowBuilder, AllowLiteralOrExpression, expr, makeParameterLoop, configMapKey, defineParam, defineRequiredParam, InputParamDef,
+    selectInputsFieldsAsExpressionRecord, selectInputsForRegister, typeToken, INTERNAL, IMAGE_PULL_POLICY} from '@opensearch-migrations/argo-workflow-builders';
 import {DocumentBulkLoad} from "@/workflowTemplates/documentBulkLoad";
-import {IMAGE_PULL_POLICY} from '@/argoWorkflowBuilders/models/containerBuilder';
 import {MetadataMigration} from "@/workflowTemplates/metadataMigration";
-import {
-    selectInputsFieldsAsExpressionRecord,
-    selectInputsForRegister
-} from "@/argoWorkflowBuilders/models/parameterConversions";
-import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 import {
     SNAPSHOT_MIGRATION_CONFIG,
     NAMED_TARGET_CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG, PARAMETERIZED_MIGRATION_CONFIG, NAMED_SOURCE_CLUSTER_CONFIG
-} from "@/workflowTemplates/internalSchemas";
+} from "@opensearch-migrations/schemas";
 
 const latchCoordinationPrefixParam = {
     latchCoordinationPrefix: defineRequiredParam<string>({description: "Workflow session nonce"})

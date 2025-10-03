@@ -5,9 +5,9 @@ import {
     NonSerializedPlainObject,
     PlainObject,
     Serialized
-} from "@/argoWorkflowBuilders/models/plainObject";
-import {StripUndefined, TaskType, typeToken, TypeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
-import {InputParamDef, OutputParamDef} from "@/argoWorkflowBuilders/models/parameterSchemas";
+} from "@/models/plainObject";
+import {StripUndefined, TaskType, typeToken, TypeToken} from "@/models/sharedTypes";
+import {InputParamDef, OutputParamDef} from "@/models/parameterSchemas";
 
 export type ExpressionType = "govaluate" | "complicatedExpression";
 

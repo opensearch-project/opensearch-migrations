@@ -10,15 +10,15 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {AggregateType, DeepWiden, PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
+import {AggregateType, DeepWiden, PlainObject} from "@/models/plainObject";
 import {
     AllowLiteralOrExpression,
     BaseExpression,
     FromParameterExpression,
     StepOutputSource,
     TaskOutputSource
-} from "@/argoWorkflowBuilders/models/expression";
-import {typeToken, TypeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
+} from "@/models/expression";
+import {typeToken, TypeToken} from "@/models/sharedTypes";
 
 type DefaultSpec<T extends PlainObject> =
     | {

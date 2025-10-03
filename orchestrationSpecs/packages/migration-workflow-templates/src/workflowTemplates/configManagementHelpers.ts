@@ -3,15 +3,13 @@ import {
     NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
     SOURCE_CLUSTERS_MAP,
     TARGET_CLUSTERS_MAP
-} from '@/workflowTemplates/userSchemas'
+} from '@opensearch-migrations/schemas'
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {TemplateBuilder} from "@/argoWorkflowBuilders/models/templateBuilder";
-import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
-import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
-import {PARAMETERIZED_MIGRATION_CONFIG} from "@/workflowTemplates/internalSchemas";
+import {TemplateBuilder, WorkflowBuilder, typeToken} from "@opensearch-migrations/argo-workflow-builders";
+import {PARAMETERIZED_MIGRATION_CONFIG} from "@opensearch-migrations/schemas";
 
 import initTlhScript from "resources/configManagementHelpers/init.sh";
 import decrementTlhScript from "resources/configManagementHelpers/decrement.sh";

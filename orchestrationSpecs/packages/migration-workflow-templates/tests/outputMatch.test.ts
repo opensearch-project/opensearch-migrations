@@ -1,4 +1,4 @@
-import {renderWorkflowTemplate} from "@/argoWorkflowBuilders/renderers/argoResourceRenderer";
+import {renderWorkflowTemplate} from "@opensearch-migrations/argo-workflow-builders";
 import {AllWorkflowTemplates} from "@/workflowTemplates/allWorkflowTemplates";
 
 describe('test workflow template renderings', () => {

@@ -1,23 +1,13 @@
-import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {defineRequiredParam} from "@/argoWorkflowBuilders/models/parameterSchemas";
 import {z} from "zod";
-import {AllowLiteralOrExpression, BaseExpression, expr,} from "@/argoWorkflowBuilders/models/expression";
-import {
-    CLUSTER_CONFIG,
+import {WorkflowBuilder, AllowLiteralOrExpression, BaseExpression, expr, defineRequiredParam, INTERNAL, IMAGE_PULL_POLICY, MissingField, PlainObject, selectInputsForRegister, TypeToken, typeToken} from "@opensearch-migrations/argo-workflow-builders";
+import {COMPLETE_SNAPSHOT_CONFIG, CLUSTER_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
     KAFKA_SERVICES_CONFIG,
-    TARGET_CLUSTER_CONFIG
-} from "@/workflowTemplates/userSchemas";
-import {INTERNAL} from "@/argoWorkflowBuilders/models/taskBuilder";
-import {IMAGE_PULL_POLICY} from "@/argoWorkflowBuilders/models/containerBuilder";
-import {MissingField, PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
-import {selectInputsForRegister} from "@/argoWorkflowBuilders/models/parameterConversions";
-import {TypeToken, typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
-import {COMPLETE_SNAPSHOT_CONFIG} from "@/workflowTemplates/internalSchemas";
+    TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 
 const KafkaServicesConfig = z.object({
     broker_endpoints: z.string(),

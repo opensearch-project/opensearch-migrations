@@ -10,24 +10,24 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/models/parameterSchemas";
 import {
     DataScope,
     ExtendScope,
     GenericScope,
     InputParamsToExpressions,
     WorkflowAndTemplatesScope
-} from "@/argoWorkflowBuilders/models/workflowTypes";
+} from "@/models/workflowTypes";
 import {inputsToEnvVars, toEnvVarName, TypescriptError} from "@/utils";
-import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/argoWorkflowBuilders/models/templateBodyBuilder"; // <-- import TemplateRebinder
+import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/models/templateBodyBuilder"; // <-- import TemplateRebinder
 import {
     extendScope,
     FieldGroupConstraint,
     ScopeIsEmptyConstraint
-} from "@/argoWorkflowBuilders/models/scopeConstraints";
-import {PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
-import {AllowLiteralOrExpression, BaseExpression, toExpression} from "@/argoWorkflowBuilders/models/expression";
-import {TypeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
+} from "@/models/scopeConstraints";
+import {PlainObject} from "@/models/plainObject";
+import {AllowLiteralOrExpression, BaseExpression, toExpression} from "@/models/expression";
+import {TypeToken} from "@/models/sharedTypes";
 
 export type IMAGE_PULL_POLICY = "ALWAYS" | "NEVER" | "IF_NOT_PRESENT";
 

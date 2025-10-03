@@ -2,17 +2,21 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
+    "rootDir": "./src",
     "composite": true,
     "declaration": true,
     "declarationMap": true,
-    "baseUrl": "./src",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./src/*"],
+      "resources/*": ["./resources/*"]
     }
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"],
+  "exclude": ["node_modules", "dist", "./test", "tests", "**/*.test.ts", "**/__tests__/**"],
+
   "references": [
-    { "path": "../schemas" }
+    { "path": "../schemas" },
+    { "path": "../argo-workflow-builders" }
+
   ]
 }
