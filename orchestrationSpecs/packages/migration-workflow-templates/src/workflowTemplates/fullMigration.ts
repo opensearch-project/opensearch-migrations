@@ -1,9 +1,18 @@
 import {z} from 'zod';
 import {
+    COMPLETE_SNAPSHOT_CONFIG,
     METADATA_OPTIONS,
-    PER_INDICES_SNAPSHOT_MIGRATION_CONFIG, RFS_OPTIONS,
+    NAMED_SOURCE_CLUSTER_CONFIG,
+    NAMED_TARGET_CLUSTER_CONFIG,
     NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
-    TARGET_CLUSTER_CONFIG, REPLAYER_OPTIONS, TARGET_CLUSTERS_MAP, SOURCE_CLUSTERS_MAP
+    PARAMETERIZED_MIGRATION_CONFIG,
+    PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
+    REPLAYER_OPTIONS,
+    RFS_OPTIONS,
+    SNAPSHOT_MIGRATION_CONFIG,
+    SOURCE_CLUSTERS_MAP,
+    TARGET_CLUSTER_CONFIG,
+    TARGET_CLUSTERS_MAP
 } from '@opensearch-migrations/schemas'
 import {
     CommonWorkflowParameters,
@@ -12,14 +21,23 @@ import {
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {ConfigManagementHelpers} from "@/workflowTemplates/configManagementHelpers";
-import {WorkflowBuilder, AllowLiteralOrExpression, expr, makeParameterLoop, configMapKey, defineParam, defineRequiredParam, InputParamDef,
-    selectInputsFieldsAsExpressionRecord, selectInputsForRegister, typeToken, INTERNAL, IMAGE_PULL_POLICY} from '@opensearch-migrations/argo-workflow-builders';
+import {
+    AllowLiteralOrExpression,
+    configMapKey,
+    defineParam,
+    defineRequiredParam,
+    expr,
+    IMAGE_PULL_POLICY,
+    InputParamDef,
+    INTERNAL,
+    makeParameterLoop,
+    selectInputsFieldsAsExpressionRecord,
+    selectInputsForRegister,
+    typeToken,
+    WorkflowBuilder
+} from '@opensearch-migrations/argo-workflow-builders';
 import {DocumentBulkLoad} from "@/workflowTemplates/documentBulkLoad";
 import {MetadataMigration} from "@/workflowTemplates/metadataMigration";
-import {
-    SNAPSHOT_MIGRATION_CONFIG,
-    NAMED_TARGET_CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG, PARAMETERIZED_MIGRATION_CONFIG, NAMED_SOURCE_CLUSTER_CONFIG
-} from "@opensearch-migrations/schemas";
 
 const latchCoordinationPrefixParam = {
     latchCoordinationPrefix: defineRequiredParam<string>({description: "Workflow session nonce"})

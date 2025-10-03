@@ -1,5 +1,5 @@
 import {makeRequiredImageParametersForKeys} from "@/workflowTemplates/commonWorkflowTemplates";
-import {WorkflowBuilder, expr, BaseExpression, typeToken} from "@opensearch-migrations/argo-workflow-builders";
+import {BaseExpression, expr, typeToken, WorkflowBuilder} from "@opensearch-migrations/argo-workflow-builders";
 
 export function getS3EndpointResolverContainer(s3Endpoint: BaseExpression<string>) {
     const template = `

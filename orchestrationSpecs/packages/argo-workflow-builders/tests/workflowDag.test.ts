@@ -1,4 +1,4 @@
-import {OutputParamDef,TemplateBuilder,DagBuilder,INTERNAL,typeToken,WorkflowBuilder} from "../src";
+import {DagBuilder, INTERNAL, OutputParamDef, TemplateBuilder, typeToken, WorkflowBuilder} from "../src";
 import {expectTypeOf} from "expect-type";
 
 describe("paramsFns runtime validation", () => {

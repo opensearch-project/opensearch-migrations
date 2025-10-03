@@ -3,11 +3,27 @@ import {
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {z} from "zod";
-import {WorkflowBuilder, AllowLiteralOrExpression, BaseExpression, expr, defineRequiredParam, INTERNAL, IMAGE_PULL_POLICY, MissingField, PlainObject, selectInputsForRegister, TypeToken, typeToken} from "@opensearch-migrations/argo-workflow-builders";
-import {COMPLETE_SNAPSHOT_CONFIG, CLUSTER_CONFIG,
+import {
+    AllowLiteralOrExpression,
+    BaseExpression,
+    defineRequiredParam,
+    expr,
+    IMAGE_PULL_POLICY,
+    INTERNAL,
+    MissingField,
+    PlainObject,
+    selectInputsForRegister,
+    TypeToken,
+    typeToken,
+    WorkflowBuilder
+} from "@opensearch-migrations/argo-workflow-builders";
+import {
+    CLUSTER_CONFIG,
+    COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
     KAFKA_SERVICES_CONFIG,
-    TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
+    TARGET_CLUSTER_CONFIG
+} from "@opensearch-migrations/schemas";
 
 const KafkaServicesConfig = z.object({
     broker_endpoints: z.string(),

@@ -5,12 +5,20 @@ import {
 import {z} from "zod";
 import {
     CLUSTER_CONFIG,
+    COMPLETE_SNAPSHOT_CONFIG,
     METADATA_OPTIONS,
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
-import {typeToken, INTERNAL, inputsToEnvVars, inputsToEnvVarsList, remapRecordNames, transformZodObjectToParams, WorkflowBuilder, selectInputsFieldsAsExpressionRecord,
-    selectInputsForRegister, defineRequiredParam} from "@opensearch-migrations/argo-workflow-builders";
-import {COMPLETE_SNAPSHOT_CONFIG} from "@opensearch-migrations/schemas";
+import {
+    defineRequiredParam,
+    inputsToEnvVars,
+    INTERNAL,
+    selectInputsFieldsAsExpressionRecord,
+    selectInputsForRegister,
+    transformZodObjectToParams,
+    typeToken,
+    WorkflowBuilder
+} from "@opensearch-migrations/argo-workflow-builders";
 
 const COMMON_METADATA_PARAMETERS = {
     snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({ description:
