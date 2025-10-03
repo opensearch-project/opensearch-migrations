@@ -1,4 +1,4 @@
-import {typeToken, INTERNAL, CallerParams, WorkflowBuilder} from "../src";
+import {CallerParams, INTERNAL, typeToken, WorkflowBuilder} from "../src";
 
 describe("paramsFns runtime validation - comprehensive", () => {
     // Shared external templates with different parameter configurations
