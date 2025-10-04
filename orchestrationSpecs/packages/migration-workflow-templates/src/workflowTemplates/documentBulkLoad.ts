@@ -209,7 +209,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     s3Endpoint: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "endpoint"], ""),
                     s3Region: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "aws_region"], ""),
                     snapshotName: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["snapshotName"], ""),
-                    snapshotRepoPath: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig", "repoPath")
+                    snapshotRepoPath: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig", "s3RepoPathUri")
                 })))
     )
 

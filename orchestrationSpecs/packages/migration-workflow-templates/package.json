@@ -12,13 +12,11 @@
   },
   "dependencies": {
     "@opensearch-migrations/argo-workflow-builders": "*",
-    "@opensearch-migrations/schemas": "*",
-    "@kubernetes/client-node": "^1.3.0",
-    "@typescript/native-preview": "^7.0.0-dev.20250919.1",
-    "tsconfig-paths": "*"
+    "@opensearch-migrations/schemas": "*"
   },
   "devDependencies": {
     "@types/jest": "*",
-    "expect-type": "*"
+    "expect-type": "*",
+    "@typescript/native-preview": "*"
   }
 }
