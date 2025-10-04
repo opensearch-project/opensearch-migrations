@@ -9,9 +9,8 @@
     "declarationMap": true,
     "sourceMap": true,
 
-    "baseUrl": ".",
     "paths": {
-      "resources/*": ["resources/*"]    // add if you use this alias
+      "resources/*": ["./resources/*"]    // add if you use this alias
     }
   },
   "include": ["src"],

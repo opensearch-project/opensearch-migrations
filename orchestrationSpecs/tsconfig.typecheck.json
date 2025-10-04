@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "moduleResolution": "bundler",
+    "paths": {
+      "@opensearch-migrations/argo-workflow-builders": ["./packages/argo-workflow-builders/src/index.ts"],
+      "@opensearch-migrations/schemas": ["./packages/schemas/src/index.ts"]
+    }
+  },
+  "include": [
+    "./packages/argo-workflow-builders/src/**/*",
+    "./packages/migration-workflow-templates/src/**/*",
+    "./packages/schemas/src/**/*"
+  ]
+}
