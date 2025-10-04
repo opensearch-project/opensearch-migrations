@@ -1,5 +1,6 @@
 import {InputParamDef, InputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
 import {
+    AllowSerializedAggregateOrPrimitiveExpressionOrLiteral,
     BaseExpression,
     expr,
     ExpressionType,
@@ -178,10 +179,10 @@ type AllowExpressionIncludingSerialized<T extends PlainObject, C extends Express
     // Handle both aggregate T and already-serialized T to ensure we return a union of BaseExpression<U> | BaseExpression<Serialized<U>>
     T extends Serialized<infer U>
         ? U extends AggregateType
-            ? BaseExpression<U, C> | BaseExpression<Serialized<U>, C>
+            ? BaseExpression<Serialized<U>, C>
             : BaseExpression<T, C>
         : T extends AggregateType
-            ? BaseExpression<T, C> | BaseExpression<Serialized<T>, C>
+            ? BaseExpression<Serialized<T>, C>
             : BaseExpression<T, C>;
 
 /** Final, flattened return type: payloads come from register, undefined stripped. */

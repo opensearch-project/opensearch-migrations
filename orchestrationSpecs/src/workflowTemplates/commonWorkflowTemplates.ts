@@ -2,8 +2,6 @@ import {defineParam, defineRequiredParam, InputParamDef} from "@/argoWorkflowBui
 import {IMAGE_PULL_POLICY} from "@/argoWorkflowBuilders/models/containerBuilder";
 import {z} from "zod";
 import {
-    COMPLETE_SNAPSHOT_CONFIG,
-    DYNAMIC_SNAPSHOT_CONFIG,
     TARGET_CLUSTER_CONFIG
 } from "@/workflowTemplates/userSchemas";
 import {BaseExpression, expr} from "@/argoWorkflowBuilders/models/expression";
@@ -66,18 +64,6 @@ export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<Se
             expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "password"], ""),
     };
 }
-
-export const dynamicSnapshotConfigParam = {
-    snapshotConfig: defineRequiredParam<z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>>({
-        description: "Snapshot storage details (region, endpoint, etc)"
-    })
-};
-
-export const completeSnapshotConfigParam = {
-    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({
-        description: "Snapshot storage details (region, endpoint, etc)"
-    })
-};
 
 export function safeSpread<T>(list: T[]) {
     return list === undefined ? [] : list;

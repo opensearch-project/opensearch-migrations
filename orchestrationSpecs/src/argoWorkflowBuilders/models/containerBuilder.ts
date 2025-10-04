@@ -20,22 +20,16 @@ import {
 } from "@/argoWorkflowBuilders/models/workflowTypes";
 import {inputsToEnvVars, toEnvVarName, TypescriptError} from "@/utils";
 import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/argoWorkflowBuilders/models/templateBodyBuilder"; // <-- import TemplateRebinder
-import {ScopeIsEmptyConstraint} from "@/argoWorkflowBuilders/models/scopeConstraints";
+import {
+    extendScope,
+    FieldGroupConstraint,
+    ScopeIsEmptyConstraint
+} from "@/argoWorkflowBuilders/models/scopeConstraints";
 import {PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
-import {AllowLiteralOrExpression} from "@/argoWorkflowBuilders/models/expression";
+import {AllowLiteralOrExpression, BaseExpression, toExpression} from "@/argoWorkflowBuilders/models/expression";
 import {TypeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 export type IMAGE_PULL_POLICY = "ALWAYS" | "NEVER" | "IF_NOT_PRESENT";
-
-export function inputsToEnvVarNames<T extends Record<string, AllowLiteralOrExpression<string>>>(
-    inputs: T
-): Record<string, AllowLiteralOrExpression<string>> {
-    const result: Record<string, AllowLiteralOrExpression<string>> = {};
-    Object.entries(inputs).forEach(([key, value]) => {
-        result[toEnvVarName(key)] = value;
-    });
-    return result;
-}
 
 export class ContainerBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
@@ -121,12 +115,12 @@ export class ContainerBuilder<
         );
     }
 
-    addCommand(s: string[]):
+    addCommand(strArr: AllowLiteralOrExpression<string>[]):
         ContainerBuilder<ContextualScope, InputParamsScope,
-            ExtendScope<ContainerScope, { command: string[] }>, EnvScope, OutputParamsScope> {
+            ExtendScope<ContainerScope, { command: BaseExpression<string>[] }>, EnvScope, OutputParamsScope> {
         return new ContainerBuilder(this.contextualScope, this.inputsScope, {
                 ...this.bodyScope,
-                command: s
+                command: strArr.map(s=>toExpression(s))
             },
             this.envScope,  // Preserve env scope
             this.outputsScope,
@@ -193,6 +187,26 @@ export class ContainerBuilder<
         return this.addEnvVarUnchecked(name as string, value) as any;
     }
 
+    addEnvVarsFromRecord<
+        R extends EnvScope
+    >(
+        envVars: FieldGroupConstraint<EnvScope, R>
+    ): ContainerBuilder<
+        ContextualScope,
+        InputParamsScope,
+        ContainerScope,
+        ExtendScope<EnvScope, R>,
+        OutputParamsScope
+    > {
+        return new ContainerBuilder(
+            this.contextualScope,
+            this.inputsScope,
+            this.bodyScope,
+            extendScope(this.envScope, () => envVars as R),
+            this.outputsScope,
+            this.retryParameters);
+    }
+
     addEnvVars<NewEnvScope extends DataScope>(
         builderFn: (
             cb: ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, {}, OutputParamsScope>
@@ -247,8 +261,10 @@ export class ContainerBuilder<
         ModifiedInputs extends Record<string, AllowLiteralOrExpression<string>> =
             { [K in keyof InputParamsScope as Uppercase<string & K>]: AllowLiteralOrExpression<string> }
     >(
+        prefix: string,
+        suffix: string,
         modifierFn: (inputs: InputParamsToExpressions<InputParamsScope>) => ModifiedInputs =
-        inputsToEnvVars as any
+            (inputs: InputParamsToExpressions<InputParamsScope>) => inputsToEnvVars(inputs, prefix, suffix) as any
     ): ScopeIsEmptyConstraint<EnvScope,
         ContainerBuilder<
             ContextualScope,

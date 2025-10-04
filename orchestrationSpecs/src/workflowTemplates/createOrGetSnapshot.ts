@@ -4,11 +4,12 @@ import {
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {z} from "zod";
-import {CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG, DYNAMIC_SNAPSHOT_CONFIG} from "@/workflowTemplates/userSchemas";
+import {CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
 import {expr} from "@/argoWorkflowBuilders/models/expression";
 import {CreateSnapshot} from "@/workflowTemplates/createSnapshot";
 import {getAcceptedRegisterKeys, selectInputsForKeys} from "@/argoWorkflowBuilders/models/parameterConversions";
 import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
+import {COMPLETE_SNAPSHOT_CONFIG, DYNAMIC_SNAPSHOT_CONFIG} from "@/workflowTemplates/internalSchemas";
 
 export const CreateOrGetSnapshot = WorkflowBuilder.create({
     k8sResourceName: "create-or-get-snapshot",
@@ -29,6 +30,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         .addSteps(b => b
             .addStep("createSnapshot", CreateSnapshot, "snapshotWorkflow", c => c
                 .register({
+
                     ...selectInputsForKeys(b, getAcceptedRegisterKeys(c)),
                     snapshotConfig: expr.serialize(
                         expr.makeDict({

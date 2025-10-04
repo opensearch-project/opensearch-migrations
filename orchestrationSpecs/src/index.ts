@@ -1,17 +1,7 @@
 import * as k8s from '@kubernetes/client-node';
 import {renderWorkflowTemplate} from "@/argoWorkflowBuilders/renderers/argoResourceRenderer";
-import {CaptureReplay} from "@/workflowTemplates/captureReplay";
-import {CaptureProxy} from "@/workflowTemplates/captureProxy";
-import {CreateOrGetSnapshot} from "@/workflowTemplates/createOrGetSnapshot";
-import {CreateSnapshot} from "@/workflowTemplates/createSnapshot";
-import {DocumentBulkLoad} from "@/workflowTemplates/documentBulkLoad";
-import {FullMigration} from "@/workflowTemplates/fullMigration";
-import {LocalstackHelper} from "@/workflowTemplates/localstackHelper";
-import {MetadataMigration} from "@/workflowTemplates/metadataMigration";
-import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
-import {Replayer} from "@/workflowTemplates/replayer";
-import {SetupKafka} from "@/workflowTemplates/setupKafka";
-import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
+import {AllWorkflowTemplates} from "@/workflowTemplates/allWorkflowTemplates";
+
 
 // Parse command line arguments and environment variables
 function getNamespace(): string {
@@ -59,21 +49,6 @@ const showResources = getShowResources();
 console.log(`Target namespace: ${targetNamespace}`);
 console.log(`Create resources: ${createResources}`);
 console.log("OUTPUT: ");
-
-const templates = [
-    CaptureProxy,
-    CaptureReplay,
-    CreateOrGetSnapshot,
-    CreateSnapshot,
-    DocumentBulkLoad,
-    FullMigration,
-    LocalstackHelper,
-    MetadataMigration,
-    MigrationConsole,
-    Replayer,
-    SetupKafka,
-    TargetLatchHelpers,
-];
 
 // Initialize Kubernetes client
 const kc = new k8s.KubeConfig();
@@ -135,7 +110,7 @@ async function applyArgoWorkflowTemplate(workflowConfig: any, workflowName: stri
 async function deployAllWorkflows() {
     console.log("Deploying Argo WorkflowTemplates to Kubernetes...\n");
 
-    for (const wf of templates) {
+    for (const wf of AllWorkflowTemplates) {
         const finalConfig = renderWorkflowTemplate(wf);
 
         // Log the config for debugging
@@ -156,7 +131,7 @@ async function deployAllWorkflows() {
         console.log("\n");
     }
 
-    console.log(`Processed ${templates.length} templates.`);
+    console.log(`Processed ${AllWorkflowTemplates.length} templates.`);
 }
 
 deployAllWorkflows().catch(error => {

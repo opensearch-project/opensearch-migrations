@@ -71,18 +71,15 @@ describe("expression type contracts", () => {
 
         const result = expr.jsonPathStrict(expr.recordToString(obj), "a");
         expectTypeOf(result).toExtend<BaseExpression<{hello: string}>>();
-        console.log(result);
     });
 
     it("dig infers precise value type and enforces default type", () => {
-        // type PerIndices = {
-        //     metadata?: {
-        //         indices: string[];
-        //         loggingConfigurationOverrideConfigMap?: { mode?: string };
-        //     };
-        // };
-
-        type PerIndices = z.infer<typeof PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>;
+        type PerIndices = {
+            metadata?: {
+                indices: string[];
+                loggingConfigurationOverrideConfigMap?: { mode?: string };
+            };
+        };
 
         const cfg = expr.deserializeRecord(
             expr.recordToString(
