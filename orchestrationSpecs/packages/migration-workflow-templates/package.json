@@ -5,8 +5,9 @@
     "dev": "NODE_OPTIONS='--conditions=development' tsx src/makeTemplates.ts",
     "build": "npx tsgo",
     "make-templates": "tsx makeTemplates.cjs",
-    "pretype-check": "npm run -w @opensearch-migrations/schemas build && npm run -w @opensearch-migrations/argo-workflow-builders build",
-    "type-check": "npx tsgo --noEmit",
+    "type-check-deps": "npm run -w @opensearch-migrations/argo-workflow-builders type-check && npm run -w @opensearch-migrations/schemas type-check",
+    "type-check": "NODE_OPTIONS='--conditions=development' npx  tsgo -p ../../tsconfig.typecheck.json --noEmit",
+    "type-check-all": "npm run type-check && npm run type-check-deps",
     "test": "jest --config ./jest.config.js"
   },
   "dependencies": {

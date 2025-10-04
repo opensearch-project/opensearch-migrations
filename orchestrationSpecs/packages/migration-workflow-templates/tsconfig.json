@@ -6,9 +6,24 @@
     "composite": true,
     "declaration": true,
     "declarationMap": true,
+    "customConditions": ["development"],
     "paths": {
-      "resources/*": ["./resources/*"]
-    }
+      "resources/*": ["./resources/*"],
+      "@opensearch-migrations/argo-workflow-builders": [
+        "../argo-workflow-builders/src/index.ts"
+      ],
+      "@opensearch-migrations/argo-workflow-builders/*": [
+        "../argo-workflow-builders/src/*"
+      ],
+      "@opensearch-migrations/schemas": [
+        "../schemas/src/index.ts"
+      ],
+      "@opensearch-migrations/schemas/*": [
+        "../schemas/src/*"
+      ]
+    },
+    "disableSourceOfProjectReferenceRedirect": false,
+    "skipLibCheck": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "./test", "tests", "**/*.test.ts", "**/__tests__/**"],
@@ -16,6 +31,5 @@
   "references": [
     { "path": "../schemas/tsconfig.json" },
     { "path": "../argo-workflow-builders/tsconfig.json" }
-
   ]
 }
