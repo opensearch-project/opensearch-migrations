@@ -37,14 +37,11 @@
     "dist-process-config": "npm run start -w @opensearch-migrations/config-processor",
 
     "dev-make-templates": "npm run dev -w @opensearch-migrations/migration-workflow-templates -- ",
-    "dev-schema": "npm run dev -w @opensearch-migrations/schemas -- ",
+    "dev-schema": "npm run schema -w @opensearch-migrations/schemas -- ",
     "dev-process-config": "npm run dev -w @opensearch-migrations/config-processor",
 
     "type-check": "tsgo -p tsconfig.typecheck.json --noEmit",
     "make-templates": "npm run dev-make-templates -- ",
     "schema": "npm run dev-schema"
-  },
-  "dependencies": {
-    "tsconfig-paths": "^4.2.0"
   }
 }

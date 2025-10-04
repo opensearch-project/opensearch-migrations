@@ -8,7 +8,7 @@ export const KAFKA_SERVICES_CONFIG = z.object({
 export const S3_REPO_CONFIG = z.object({
     aws_region: z.string(),
     endpoint: z.string(),
-    repoPath: z.string()
+    s3RepoPathUri: z.string()
 });
 
 
@@ -20,9 +20,9 @@ export const PROXY_OPTIONS = z.object({
 
 export const REPLAYER_OPTIONS = z.object({
     enabled: z.boolean(),
-    speedupFactor: z.number(),
-    podReplicas: z.number(),
-    authHeaderOverride: z.optional(z.string()),
+    speedupFactor: z.number().optional(),
+    podReplicas: z.number().optional(),
+    authHeaderOverride: z.string().optional(),
     loggingConfigurationOverrideConfigMap: z.string().default(""),
     docTransformerBase64: z.string().default(""),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
@@ -109,7 +109,7 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
 });
 
 export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    indices: z.array(z.string()),
+    indices: z.array(z.string()).optional(),
     snapshotConfig: NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
     migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)
 });

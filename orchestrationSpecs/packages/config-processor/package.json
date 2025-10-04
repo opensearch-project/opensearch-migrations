@@ -1,0 +1,32 @@
+{
+  "name": "@opensearch-migrations/config-processor",
+  "version": "1.0.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "process-config": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --build --noEmit",
+    "start": "tsx src/cli.ts",
+    "dev": "NODE_OPTIONS='--conditions=development' tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@opensearch-migrations/schemas": "*",
+    "yaml": "^2.8.1",
+    "zod": "^4.0.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.13",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.3"
+  }
+}
