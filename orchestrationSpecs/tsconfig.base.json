@@ -23,6 +23,14 @@
     "moduleResolution": "node",
     "allowJs": false,
     "checkJs": false,
-    "maxNodeModuleJsDepth": 0
+    "maxNodeModuleJsDepth": 0,
+    "paths": {
+      "@opensearch-migrations/argo-workflow-builders": [
+        "./packages/argo-workflow-builders/src/index.ts"
+      ],
+      "@opensearch-migrations/schemas": [
+        "./packages/schemas/src/index.ts"
+      ]
+    }
   }
 }
