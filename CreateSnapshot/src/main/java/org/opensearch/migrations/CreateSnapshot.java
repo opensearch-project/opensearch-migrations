@@ -1,6 +1,5 @@
 package org.opensearch.migrations;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
@@ -12,6 +11,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICreateSnapshotContext;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
+import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.snapshot.creation.tracing.RootSnapshotContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -108,28 +108,6 @@ public class CreateSnapshot {
         String otelCollectorEndpoint;
     }
 
-    public static class EnvParameters {
-
-        private EnvParameters() {
-            throw new IllegalStateException("EnvParameters utility class should not instantiated");
-        }
-
-        public static void injectFromEnv(Args args) {
-            List<String> addedEnvParams = new ArrayList<>();
-            if (args.sourceArgs.username == null && System.getenv(ArgNameConstants.SOURCE_USERNAME_ENV_ARG) != null) {
-                args.sourceArgs.username = System.getenv(ArgNameConstants.SOURCE_USERNAME_ENV_ARG);
-                addedEnvParams.add(ArgNameConstants.SOURCE_USERNAME_ENV_ARG);
-            }
-            if (args.sourceArgs.password == null && System.getenv(ArgNameConstants.SOURCE_PASSWORD_ENV_ARG) != null) {
-                args.sourceArgs.password = System.getenv(ArgNameConstants.SOURCE_PASSWORD_ENV_ARG);
-                addedEnvParams.add(ArgNameConstants.SOURCE_PASSWORD_ENV_ARG);
-            }
-            if (!addedEnvParams.isEmpty()) {
-                log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
-            }
-        }
-    }
-
     @Getter
     @AllArgsConstructor
     public static class S3RepoInfo {
@@ -139,10 +117,9 @@ public class CreateSnapshot {
 
     public static void main(String[] args) throws Exception {
         System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_SOURCE_ARGS)));
-        Args arguments = new Args();
+        Args arguments = EnvVarParameterPuller.injectFromEnv(new Args(), "CREATE_SNAPSHOT_");
         JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
-        EnvParameters.injectFromEnv(arguments);
 
         if (arguments.help) {
             jCommander.usage();
