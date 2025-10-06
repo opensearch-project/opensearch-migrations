@@ -89,7 +89,6 @@ jobs:
         py-project:
           - migrationConsole/lib/console_link
           - migrationConsole/cluster_tools
-          - migrationConsole/console_api
           - k8sConfigMapUtilScripts
     env:
       WORKING_DIR: ./TrafficCapture/dockerSolution/src/main/docker/${{ matrix.py-project }}
