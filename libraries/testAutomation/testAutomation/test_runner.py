@@ -202,6 +202,7 @@ class TestRunner:
 
     def run(self, skip_delete: bool = False, keep_workflows: bool = False, developer_mode: bool = False,
             reuse_clusters: bool = False, test_reports_dir: str = None) -> None:
+        self.k8s_service.create_namespace(self.k8s_service.namespace)
         if developer_mode:
             workflow_templates_dir = (
                 "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/"
