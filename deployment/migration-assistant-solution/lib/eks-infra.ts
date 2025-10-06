@@ -23,6 +23,7 @@ export interface EKSInfraProps {
     buildImagesServiceAccountName?: string;
     argoWorkflowServiceAccountName?: string;
     migrationsServiceAccountName?: string;
+    migrationConsoleServiceAccountName?: string;
 }
 
 export class EKSInfra extends Construct {
@@ -36,6 +37,7 @@ export class EKSInfra extends Construct {
         const buildImagesServiceAccountName = props.buildImagesServiceAccountName ?? 'build-images-service-account';
         const argoWorkflowServiceAccountName = props.argoWorkflowServiceAccountName ?? 'argo-workflow-executor';
         const migrationsServiceAccountName = props.migrationsServiceAccountName ?? 'migrations-service-account';
+        const migrationConsoleServiceAccountName = props.migrationConsoleServiceAccountName ?? 'migration-console-access-role';
 
         const migrationSecurityGroup = new SecurityGroup(this, 'MigrationsSecurityGroup', {
             vpc: props.vpc,
@@ -152,9 +154,16 @@ export class EKSInfra extends Construct {
             serviceAccount: migrationsServiceAccountName,
             roleArn: podIdentityRole.roleArn,
         });
+        const migrationConsolePodIdentityAssociation = new CfnPodIdentityAssociation(this, 'MigrationConsolePodIdentityAssociation', {
+            clusterName: props.clusterName,
+            namespace: namespace,
+            serviceAccount: migrationConsoleServiceAccountName,
+            roleArn: podIdentityRole.roleArn,
+        });
         buildImagesPodIdentityAssociation.node.addDependency(this.cluster)
         argoWorkflowIdentityAssociation.node.addDependency(this.cluster)
         migrationsPodIdentityAssociation.node.addDependency(this.cluster)
+        migrationConsolePodIdentityAssociation.node.addDependency(this.cluster)
     }
 
     createDefaultPodIdentityRole(clusterName: string) {
