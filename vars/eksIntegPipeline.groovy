@@ -340,8 +340,8 @@ def call(Map config = [:]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "kubectl -n ma config current-context"
                                         sh "kubectl -n ma get pods"
-                                        //sh "pipenv run app --delete-only"
-                                        //sh "kubectl -n ma delete namespace ma"
+                                        sh "pipenv run app --delete-only"
+                                        sh "kubectl -n ma delete namespace ma"
                                     }
                                 }
                             }
