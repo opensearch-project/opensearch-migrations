@@ -220,7 +220,7 @@ def call(Map config = [:]) {
                                         aws eks update-kubeconfig --region us-east-1 --name $env.eksClusterName
                                     """
 
-                                    sh 'kubectl get namespace ma || kubectl create namespace ma'
+                                    sh 'kubectl create namespace ma --dry-run=client -o yaml | kubectl apply -f -'
                                     def clusterDetails = readJSON text: env.clusterDetailsJson
                                     def sourceCluster = clusterDetails.target
                                     writeJSON file: '/tmp/source-cluster-config.json', json: [
@@ -338,8 +338,8 @@ def call(Map config = [:]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "kubectl -n ma config current-context"
                                         sh "kubectl -n ma get pods"
-                                        sh "pipenv run app --delete-only"
-                                        sh "kubectl -n ma delete namespace ma"
+                                        //sh "pipenv run app --delete-only"
+                                        //sh "kubectl -n ma delete namespace ma"
                                     }
                                 }
                             }
