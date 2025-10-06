@@ -9,6 +9,7 @@ setup(
     entry_points={
         "console_scripts": [
             "console = console_link.cli:main",
+            "workflow = console_link.workflow.cli:main",
         ],
     },
     classifiers=[

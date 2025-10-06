@@ -404,8 +404,10 @@ def test_sigv4_authentication_signature(requests_mock, method, endpoint, data, h
         requests_mock.post(url, json={'hits': {'total': 0, 'hits': []}})
     # Mock datetime to return a specific timestamp
     specific_time = datetime.datetime(2025, 1, 1, 12, 0, 0)
-    with mock_aws() and patch("datetime.datetime") as mock_datetime:
-        mock_datetime.utcnow.return_value = specific_time
+    # Patch botocore's datetime usage instead of the datetime module itself
+    with mock_aws(), patch('botocore.auth.datetime') as mock_datetime:
+        mock_datetime.datetime.utcnow.return_value = specific_time
+        mock_datetime.datetime.strftime = datetime.datetime.strftime
 
         # Add default headers to the request
         headers = {

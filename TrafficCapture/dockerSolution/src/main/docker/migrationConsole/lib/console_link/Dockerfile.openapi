@@ -5,6 +5,7 @@ WORKDIR /app
 
 # Copy dependency files
 COPY Pipfile Pipfile.lock ./
+COPY setup.py ./
 
 # Install pipenv and dependencies
 RUN pip install pipenv && \
@@ -12,7 +13,6 @@ RUN pip install pipenv && \
 
 # Copy source code
 COPY console_link/ ./console_link/
-COPY setup.py ./
 
 # Install the package in development mode
 RUN pip install -e .
