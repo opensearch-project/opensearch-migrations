@@ -99,20 +99,22 @@ def call(Map config = [:]) {
                                 env.sourceClusterType = sourceClusterType ?: params.SOURCE_CLUSTER_TYPE
                                 env.targetClusterType = targetClusterType ?: params.TARGET_CLUSTER_TYPE
                                 def clusterContextValues = [
-                                    stage     : "<STAGE>",
-                                    vpcAZCount: 2,
-                                    clusters  : [
-                                        [
-                                                clusterId     : "source",
-                                                clusterVersion: "${env.sourceVer}",
-                                                clusterType   : "${env.sourceClusterType}"
-                                        ],
-                                        [
-                                                clusterId     : "target",
-                                                clusterVersion: "${env.targetVer}",
-                                                clusterType   : "${env.targetClusterType}"
+                                        stage      : "<STAGE>",
+                                        vpcAZCount : 2,
+                                        clusters   : [
+                                                [
+                                                        clusterId                 : "source",
+                                                        clusterVersion            : "${env.sourceVer}",
+                                                        clusterType               : "${env.sourceClusterType}",
+                                                        openAccessPolicyEnabled   : true
+                                                ],
+                                                [
+                                                        clusterId                 : "target",
+                                                        clusterVersion            : "${env.targetVer}",
+                                                        clusterType               : "${env.targetClusterType}",
+                                                        openAccessPolicyEnabled   : true
+                                                ]
                                         ]
-                                    ]
                                 ]
                                 def contextJsonStr = JsonOutput.prettyPrint(JsonOutput.toJson(clusterContextValues))
                                 writeFile (file: "${clusterContextFilePath}", text: contextJsonStr)
