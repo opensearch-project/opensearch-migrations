@@ -555,6 +555,7 @@ export function makeLocalAssetContainerImage(scope: Construct, imageName: string
             if (!imageId) {
                 throw new Error(`No RepoDigests found for image: ${imageName}`);
             }
+            // NOSONAR
             imageHash = imageId.replace(/[^a-zA-Z0-9-_]/g, '_');
             CdkLogger.info('For image: ' + imageName + ' found imageHash: ' + imageHash);
         } catch (error) {

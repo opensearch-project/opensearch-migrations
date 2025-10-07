@@ -111,12 +111,12 @@ export function useJSONFileUpload() {
   };
 
   const clearSuccessfulFiles = (results: FileProcessingResult[]) => {
-    const successfulFileNames = results
+    const successfulFileNames = new Set(results
       .filter((result) => result.success)
-      .map((result) => result.fileName.split(" [")[0]); // Remove line number if present
+      .map((result) => result.fileName.split(" [")[0])); // Remove line number if present
 
     setFiles((prevFiles) =>
-      prevFiles.filter((file) => !successfulFileNames.includes(file.name)),
+      prevFiles.filter((file) => !successfulFileNames.has(file.name)),
     );
   };
 
