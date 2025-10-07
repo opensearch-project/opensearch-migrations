@@ -106,6 +106,7 @@ RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo 'eval "$(register-python-argcomplete cluster_tools)"' >> ~/.bashrc && \
     echo 'source /.venv/bin/activate' >> ~/.bashrc && \
     echo 'console --config-file=/root/lib/console_link/services.yaml completion bash > /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
+    echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\t) \[\e[92m\]migration-console \[\e[0m\](\w) -> "' >> ~/.bashrc
 
 COPY workflows /root/workflows
