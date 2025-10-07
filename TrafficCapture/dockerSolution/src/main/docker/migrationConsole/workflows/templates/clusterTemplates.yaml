@@ -583,6 +583,9 @@ spec:
                     set -e
                     echo "Creating Elasticsearch keystore and adding AWS credentials"
                     echo 'y' | bin/elasticsearch-keystore create
+                    echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
+                    echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
+                    echo "http://localstack.ma.svc.cluster.local:4566" | bin/elasticsearch-keystore add --stdin s3.client.default.endpoint --force
                     # Copy keystore to shared volume location
                     cp /usr/share/elasticsearch/config/elasticsearch.keystore /shared/elasticsearch.keystore
                     chown 1000:0 /shared/elasticsearch.keystore
