@@ -132,10 +132,10 @@ class Metadata:
 
     def _init_from_config(self) -> None:
         config = self._config
-        self._snapshot_location = 's3' if 's3' in config["from_snapshot"] else 'fs'
+        self._snapshot_location = 's3' if 's3' in config["from_snapshot"] else 'node:fs'
         self._snapshot_name = config["from_snapshot"]["snapshot_name"]
 
-        if self._snapshot_location == 'fs':
+        if self._snapshot_location == 'node:fs':
             self._repo_path = config["from_snapshot"]["fs"]["repo_path"]
         else:
             self._s3_uri = config["from_snapshot"]["s3"]["repo_uri"]
@@ -210,7 +210,7 @@ class Metadata:
 
         if self._snapshot_location == 's3':
             self._add_s3_args(command_args=command_args)
-        elif self._snapshot_location == 'fs':
+        elif self._snapshot_location == 'node:fs':
             command_args.update({
                 "--file-system-repo-path": self._repo_path,
             })

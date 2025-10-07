@@ -8,10 +8,10 @@ import {Secret} from "aws-cdk-lib/aws-secretsmanager";
 import * as forge from 'node-forge';
 import {ClusterYaml, SnapshotYaml} from "./migration-services-yaml";
 import {CdkLogger} from "./cdk-logger";
-import {mkdtempSync, writeFileSync} from 'fs';
-import {join} from 'path';
-import {tmpdir} from 'os';
-import {execSync} from 'child_process';
+import {mkdtempSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {execSync} from 'node:child_process';
 
 export const MAX_IAM_ROLE_NAME_LENGTH = 64;
 export const MAX_STAGE_NAME_LENGTH = 15;
