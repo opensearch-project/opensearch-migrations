@@ -1,16 +1,16 @@
 [versions]
-aws-crt = "0.38.11"
+aws-crt = "0.39.0"
 aws-msk-iam-auth = "2.3.2"
-aws-sdk = "2.33.0"
-bouncycastle = "1.81"
+aws-sdk = "2.34.0"
+bouncycastle = "1.82"
 commons-collections = "4.5.0"
 commons-compress = "1.26.2"
 disruptor = "4.0.0"
 dockerapi = "3.6.0"
-errorprone = "2.41.0"
-graalvm = "24.2.2"
+errorprone = "2.42.0"
+graalvm = "25.0.0"
 groovy = "3.0.25"
-guava = "33.4.8-jre"
+guava = "33.5.0-jre"
 hamcrest = "3.0"
 httpclient5 = "5.5"
 jackson = "2.20.0"
@@ -24,21 +24,21 @@ jolt-core = "0.1.8"
 json = "20250517"
 junit-platform = "1.13.4"
 junit-jupiter = "5.13.4"
-kafka-clients = "4.0.0"
-log4j = "2.25.1"
-lombok = "1.18.38"
+kafka-clients = "4.1.0"
+log4j = "2.25.2"
+lombok = "1.18.42"
 lucene5 = '5.5.5'
 lucene6 = '6.6.6'
 lucene7 = '7.7.3'
 lucene9 = "9.12.1"
-mockito = "5.19.0"
+mockito = "5.20.0"
 netty = "4.1.124.Final"
 opensearch-testcontainers = "2.0.1"
-opentelemetry = "1.53.0"
+opentelemetry = "1.54.1"
 opentelemetry-semconv = "1.23.1-alpha"
-protobuf = "4.32.0"
-reactor-netty = "1.2.9"
-reactor-test = "3.7.9"
+protobuf = "4.32.1"
+reactor-netty = "1.2.10"
+reactor-test = "3.7.11"
 semver4j = "6.0.0"
 slf4j = "2.0.17"
 testcontainers = "1.21.3"
@@ -185,6 +185,6 @@ transitive-json-path         = { module = "com.jayway.jsonpath:json-path",      
 transitive-json-smart        = { module = "net.minidev:json-smart",                  version = "2.6.0"    }
 transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.21.2"   }
 transitive-snappy-java       = { module = "org.xerial.snappy:snappy-java",           version = "1.1.10.8" }
-transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.2.2"    }
+transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.2.3"    }
 transitive-xalan             = { module = "xalan:xalan",                             version = "2.7.3"    }
 transitive-xstream           = { module = "com.thoughtworks.xstream:xstream",        version = "1.4.21"   }

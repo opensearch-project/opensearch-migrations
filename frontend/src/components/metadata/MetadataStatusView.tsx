@@ -1,15 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { SessionStatusProps } from "../session/types";
-import { StatusFieldDefinition } from "../session/statusUtils";
-import { useMetadataStatus } from "../../hooks/apiFetch";
-import StatusContainer from "../session/StatusContainer";
+import { SessionStatusProps } from "@/components/session/types";
+import { StatusFieldDefinition } from "@/components/session/statusUtils";
+import { useMetadataStatus } from "@/hooks/apiFetch";
+import StatusContainer from "@/components/session/StatusContainer";
 import {
   StatusDisplay,
   DateDisplay,
   DurationDisplay,
-} from "../session/statusComponents";
+} from "@/components/session/statusComponents";
 import { METADATA_SCENARIOS } from "./mockData/metadataScenarios";
 import { MetadataDebugControls } from "./debug/MetadataDebugControls";
 import { MetadataStatus } from "@/generated/api";
@@ -70,7 +70,7 @@ export default function MetadataStatusView({
           finished={metadataData?.finished}
         />
       ),
-    }
+    },
   ];
 
   return (
@@ -82,6 +82,7 @@ export default function MetadataStatusView({
         data={metadataData}
         fields={fields}
         columns={2}
+        goToLocation="metadata"
       />
       <MetadataDebugControls
         onScenarioSelect={applyDebugScenario}

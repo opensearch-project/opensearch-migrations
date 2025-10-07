@@ -106,7 +106,7 @@ def test_create_session(mock_db, mock_env):
     )
     
     assert response.status_code == 201
-    mock_env.assert_called_once_with(config_file="/config/migration_services.yaml")
+    mock_env.assert_called_once_with(config={})
 
 
 def test_create_session_already_exists(mock_db, mock_env):
@@ -121,7 +121,7 @@ def test_create_session_already_exists(mock_db, mock_env):
     
     assert response.status_code == 409
     assert response.json()["detail"] == "Session already exists."
-    mock_env.assert_called_once_with(config_file="/config/migration_services.yaml")
+    mock_env.assert_called_once_with(config={})
 
 
 def test_update_session(mock_db, example_session):

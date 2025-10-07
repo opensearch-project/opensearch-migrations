@@ -102,6 +102,17 @@ export type FailureInfo = {
 };
 
 /**
+ * FileSystemSnapshotSource
+ */
+export type FileSystemSnapshotSource = {
+  type?: SnapshotSourceType;
+  /**
+   * Path
+   */
+  path: string;
+};
+
+/**
  * HTTPValidationError
  */
 export type HttpValidationError = {
@@ -286,6 +297,21 @@ export type NoAuth = {
 };
 
 /**
+ * S3SnapshotSource
+ */
+export type S3SnapshotSource = {
+  type?: SnapshotSourceType;
+  /**
+   * Uri
+   */
+  uri: string;
+  /**
+   * Region
+   */
+  region: string;
+};
+
+/**
  * Session
  */
 export type Session = {
@@ -347,6 +373,113 @@ export type SigV4Auth = {
 };
 
 /**
+ * SnapshotConfig
+ */
+export type SnapshotConfig = {
+  /**
+   * Snapshot Name
+   */
+  snapshot_name: string;
+  /**
+   * Repository Name
+   */
+  repository_name: string;
+  /**
+   * Index Allow
+   */
+  index_allow: Array<string>;
+  /**
+   * Source
+   */
+  source: FileSystemSnapshotSource | S3SnapshotSource;
+};
+
+/**
+ * SnapshotCreateResponse
+ */
+export type SnapshotCreateResponse = {
+  /**
+   * Detail
+   */
+  detail: string;
+};
+
+/**
+ * SnapshotDeleteResponse
+ */
+export type SnapshotDeleteResponse = {
+  /**
+   * Detail
+   */
+  detail: string;
+};
+
+/**
+ * SnapshotIndex
+ */
+export type SnapshotIndex = {
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Document Count
+   */
+  document_count: number | null;
+  /**
+   * Size Bytes
+   */
+  size_bytes: number;
+  /**
+   * Shard Count
+   */
+  shard_count?: number;
+};
+
+/**
+ * SnapshotIndexState
+ */
+export type SnapshotIndexState = "not_started" | "in_progress" | "completed";
+
+/**
+ * SnapshotIndexStatus
+ */
+export type SnapshotIndexStatus = {
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Document Count
+   */
+  document_count: number | null;
+  /**
+   * Size Bytes
+   */
+  size_bytes: number;
+  /**
+   * Shard Count
+   */
+  shard_count?: number;
+  status: SnapshotIndexState;
+};
+
+/**
+ * SnapshotIndexes
+ */
+export type SnapshotIndexes = {
+  /**
+   * Indexes
+   */
+  indexes: Array<SnapshotIndex>;
+};
+
+/**
+ * SnapshotSourceType
+ */
+export type SnapshotSourceType = "filesytem" | "s3";
+
+/**
  * SnapshotStatus
  */
 export type SnapshotStatus = {
@@ -389,6 +522,10 @@ export type SnapshotStatus = {
    * Shard Complete
    */
   shard_complete?: number | null;
+  /**
+   * Indexes
+   */
+  indexes?: Array<SnapshotIndexStatus> | null;
 };
 
 /**
@@ -653,6 +790,139 @@ export type SnapshotStatusResponses = {
 export type SnapshotStatusResponse =
   SnapshotStatusResponses[keyof SnapshotStatusResponses];
 
+export type SnapshotConfigData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/snapshot/";
+};
+
+export type SnapshotConfigErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type SnapshotConfigError =
+  SnapshotConfigErrors[keyof SnapshotConfigErrors];
+
+export type SnapshotConfigResponses = {
+  /**
+   * Successful Response
+   */
+  200: SnapshotConfig;
+};
+
+export type SnapshotConfigResponse =
+  SnapshotConfigResponses[keyof SnapshotConfigResponses];
+
+export type SnapshotIndexesData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: {
+    /**
+     * Index Pattern
+     */
+    index_pattern?: string | null;
+  };
+  url: "/sessions/{session_name}/snapshot/indexes";
+};
+
+export type SnapshotIndexesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type SnapshotIndexesError =
+  SnapshotIndexesErrors[keyof SnapshotIndexesErrors];
+
+export type SnapshotIndexesResponses = {
+  /**
+   * Successful Response
+   */
+  200: SnapshotIndexes;
+};
+
+export type SnapshotIndexesResponse =
+  SnapshotIndexesResponses[keyof SnapshotIndexesResponses];
+
+export type SnapshotCreateData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/snapshot/create";
+};
+
+export type SnapshotCreateErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type SnapshotCreateError =
+  SnapshotCreateErrors[keyof SnapshotCreateErrors];
+
+export type SnapshotCreateResponses = {
+  /**
+   * Successful Response
+   */
+  200: SnapshotCreateResponse;
+};
+
+export type SnapshotCreateResponse2 =
+  SnapshotCreateResponses[keyof SnapshotCreateResponses];
+
+export type SnapshotDeleteData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/snapshot/delete";
+};
+
+export type SnapshotDeleteErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type SnapshotDeleteError =
+  SnapshotDeleteErrors[keyof SnapshotDeleteErrors];
+
+export type SnapshotDeleteResponses = {
+  /**
+   * Successful Response
+   */
+  200: SnapshotDeleteResponse;
+};
+
+export type SnapshotDeleteResponse2 =
+  SnapshotDeleteResponses[keyof SnapshotDeleteResponses];
+
 export type MetadataMigrateData = {
   body: MetadataMigrateRequest;
   path: {
@@ -748,6 +1018,108 @@ export type BackfillStatusResponses = {
 
 export type BackfillStatusResponse =
   BackfillStatusResponses[keyof BackfillStatusResponses];
+
+export type BackfillStartData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/backfill/start";
+};
+
+export type BackfillStartErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type BackfillStartError = BackfillStartErrors[keyof BackfillStartErrors];
+
+export type BackfillStartResponses = {
+  /**
+   * Response Backfillstart
+   * Successful Response
+   */
+  200: {
+    [key: string]: string;
+  };
+};
+
+export type BackfillStartResponse =
+  BackfillStartResponses[keyof BackfillStartResponses];
+
+export type BackfillPauseData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/backfill/pause";
+};
+
+export type BackfillPauseErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type BackfillPauseError = BackfillPauseErrors[keyof BackfillPauseErrors];
+
+export type BackfillPauseResponses = {
+  /**
+   * Response Backfillpause
+   * Successful Response
+   */
+  200: {
+    [key: string]: string;
+  };
+};
+
+export type BackfillPauseResponse =
+  BackfillPauseResponses[keyof BackfillPauseResponses];
+
+export type BackfillStopData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/backfill/stop";
+};
+
+export type BackfillStopErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type BackfillStopError = BackfillStopErrors[keyof BackfillStopErrors];
+
+export type BackfillStopResponses = {
+  /**
+   * Response Backfillstop
+   * Successful Response
+   */
+  200: {
+    [key: string]: string;
+  };
+};
+
+export type BackfillStopResponse =
+  BackfillStopResponses[keyof BackfillStopResponses];
 
 export type ClusterSourceData = {
   body?: never;

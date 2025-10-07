@@ -10,6 +10,8 @@ __pycache__
 logs
 tmp/
 
+test_report.json
+
 **/build/
 **/builds/
 jenkinsdocker/**/nextBuildNumber
@@ -30,3 +32,5 @@ DocumentsFromSnapshotMigration/docker/snapshots/
 transformation/standardJavascriptTransforms/coverage
 transformation/standardJavascriptTransforms/node_modules
 transformation/standardJavascriptTransforms/package-lock.json
+orchestrationSpecs/dist
+orchestrationSpecs/node_modules

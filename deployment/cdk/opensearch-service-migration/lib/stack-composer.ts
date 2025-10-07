@@ -354,6 +354,8 @@ export class StackComposer {
             servicesYaml.client_options = new ClientOptions()
             servicesYaml.client_options.user_agent_extra = props.migrationsUserAgent
         }
+        // Resolve source cluster version even for disabled source clusters
+        const resolvedSourceClusterVersion = servicesYaml.source_cluster?.version ?? sourceClusterField?.version
         const existingSnapshotDefinition = this.getContextForType('snapshot', 'object', defaultValues, contextJSON)
         let snapshotYaml
         if (existingSnapshotDefinition) {
@@ -467,7 +469,7 @@ export class StackComposer {
                 extraArgs: reindexFromSnapshotExtraArgs,
                 clusterAuthDetails: servicesYaml.target_cluster?.auth,
                 skipClusterCertCheck: servicesYaml.target_cluster?.allowInsecure,
-                sourceClusterVersion: servicesYaml.source_cluster?.version,
+                sourceClusterVersion: resolvedSourceClusterVersion,
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
                 stage: stage,
@@ -585,6 +587,7 @@ export class StackComposer {
                 vpcDetails: networkStack.vpcDetails,
                 streamingSourceType: streamingSourceType,
                 servicesYaml: servicesYaml,
+                sourceClusterVersion: resolvedSourceClusterVersion,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,

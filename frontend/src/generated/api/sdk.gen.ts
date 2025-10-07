@@ -23,6 +23,18 @@ import type {
   SnapshotStatusData,
   SnapshotStatusResponses,
   SnapshotStatusErrors,
+  SnapshotConfigData,
+  SnapshotConfigResponses,
+  SnapshotConfigErrors,
+  SnapshotIndexesData,
+  SnapshotIndexesResponses,
+  SnapshotIndexesErrors,
+  SnapshotCreateData,
+  SnapshotCreateResponses,
+  SnapshotCreateErrors,
+  SnapshotDeleteData,
+  SnapshotDeleteResponses,
+  SnapshotDeleteErrors,
   MetadataMigrateData,
   MetadataMigrateResponses,
   MetadataMigrateErrors,
@@ -32,6 +44,15 @@ import type {
   BackfillStatusData,
   BackfillStatusResponses,
   BackfillStatusErrors,
+  BackfillStartData,
+  BackfillStartResponses,
+  BackfillStartErrors,
+  BackfillPauseData,
+  BackfillPauseResponses,
+  BackfillPauseErrors,
+  BackfillStopData,
+  BackfillStopResponses,
+  BackfillStopErrors,
   ClusterSourceData,
   ClusterSourceResponses,
   ClusterSourceErrors,
@@ -210,6 +231,70 @@ export const snapshotStatus = <ThrowOnError extends boolean = false>(
 };
 
 /**
+ * Get Snapshot Config
+ */
+export const snapshotConfig = <ThrowOnError extends boolean = false>(
+  options: Options<SnapshotConfigData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    SnapshotConfigResponses,
+    SnapshotConfigErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/snapshot/",
+    ...options,
+  });
+};
+
+/**
+ * Get Snapshot Indexes
+ */
+export const snapshotIndexes = <ThrowOnError extends boolean = false>(
+  options: Options<SnapshotIndexesData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    SnapshotIndexesResponses,
+    SnapshotIndexesErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/snapshot/indexes",
+    ...options,
+  });
+};
+
+/**
+ * Snapshot Create
+ */
+export const snapshotCreate = <ThrowOnError extends boolean = false>(
+  options: Options<SnapshotCreateData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    SnapshotCreateResponses,
+    SnapshotCreateErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/snapshot/create",
+    ...options,
+  });
+};
+
+/**
+ * Snapshot Delete
+ */
+export const snapshotDelete = <ThrowOnError extends boolean = false>(
+  options: Options<SnapshotDeleteData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    SnapshotDeleteResponses,
+    SnapshotDeleteErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/snapshot/delete",
+    ...options,
+  });
+};
+
+/**
  * Migrate Metadata
  * Migrate metadata for the given session.
  * If dry_run=True, only evaluates the migration without making changes.
@@ -251,7 +336,7 @@ export const metadataStatus = <ThrowOnError extends boolean = false>(
 };
 
 /**
- * Get Metadata Status
+ * Get Backfill Status
  */
 export const backfillStatus = <ThrowOnError extends boolean = false>(
   options: Options<BackfillStatusData, ThrowOnError>,
@@ -263,6 +348,54 @@ export const backfillStatus = <ThrowOnError extends boolean = false>(
   >({
     responseTransformer: backfillStatusResponseTransformer,
     url: "/sessions/{session_name}/backfill/status",
+    ...options,
+  });
+};
+
+/**
+ * Start Backfill
+ */
+export const backfillStart = <ThrowOnError extends boolean = false>(
+  options: Options<BackfillStartData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    BackfillStartResponses,
+    BackfillStartErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/backfill/start",
+    ...options,
+  });
+};
+
+/**
+ * Pause Backfill
+ */
+export const backfillPause = <ThrowOnError extends boolean = false>(
+  options: Options<BackfillPauseData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    BackfillPauseResponses,
+    BackfillPauseErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/backfill/pause",
+    ...options,
+  });
+};
+
+/**
+ * Stop Backfill
+ */
+export const backfillStop = <ThrowOnError extends boolean = false>(
+  options: Options<BackfillStopData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    BackfillStopResponses,
+    BackfillStopErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/backfill/stop",
     ...options,
   });
 };
