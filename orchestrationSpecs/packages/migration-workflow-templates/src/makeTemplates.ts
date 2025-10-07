@@ -34,9 +34,9 @@ function getOutputDirectory(): string|null {
 const outputDirectory = getOutputDirectory();
 const targetNamespace = getNamespace();
 
-async function createDirectoryIfNotExists(dirPath: string): void {
+function createDirectoryIfNotExists(dirPath: string): void {
     try {
-        await fs.mkdirSync(dirPath, {recursive:true});
+        fs.mkdirSync(dirPath, {recursive:true});
         console.log(`Directory created or already exists: ${dirPath}`);
     } catch (error) {
         console.error(`Error creating directory: ${error}`);

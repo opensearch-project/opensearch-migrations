@@ -4,6 +4,9 @@
   "workspaces": [
     "packages/*"
   ],
+  "dependencies": {
+    "zod": "^4.0.5"
+  },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.13",
@@ -31,17 +34,24 @@
 
     "predist-make-templates": "npm run build",
     "dist-make-templates": "npm run make-templates -w @opensearch-migrations/migration-workflow-templates -- ",
-    "predist-schema": "npm run build",
-    "dist-schema": "npm run schema -w @opensearch-migrations/schemas -- ",
-    "predist-process-config": "npm run build",
-    "dist-process-config": "npm run start -w @opensearch-migrations/config-processor",
+    "predist-transform-config": "npm run build",
+    "dist-transform-config": "npm run start-transform -w @opensearch-migrations/config-processor",
+    "predist-initialize-workflow-state": "npm run build",
+    "dist-initialize-workflow-state": "npm run start-initialize -w @opensearch-migrations/config-processor",
 
     "dev-make-templates": "npm run dev -w @opensearch-migrations/migration-workflow-templates -- ",
     "dev-schema": "npm run schema -w @opensearch-migrations/schemas -- ",
-    "dev-process-config": "npm run dev -w @opensearch-migrations/config-processor",
+    "dev-argo-schema": "npm run argo-schema -w @opensearch-migrations/schemas -- ",
+    "dev-make-sample": "npm run make-sample -w @opensearch-migrations/schemas -- ",
+    "dev-transform-config": "npm run dev-transform -w @opensearch-migrations/config-processor",
+    "dev-initialize-workflow-state": "npm run dev-initialize -w @opensearch-migrations/config-processor",
 
-    "type-check": "tsgo -p tsconfig.typecheck.json --noEmit",
+    "type-check": "tsgo -p tsconfig.typecheck.all.json --noEmit",
     "make-templates": "npm run dev-make-templates -- ",
-    "schema": "npm run dev-schema"
+    "schema": "npm run dev-schema",
+    "argo-schema": "npm run dev-argo-schema",
+    "make-sample": "npm run dev-make-sample",
+    "transform-config": "npm run dev-transform-config -- ",
+    "initialize-workflow-state": "npm run dev-initialize-workflow-state -- "
   }
 }

@@ -1,2 +1,2 @@
-export { StreamSchemaValidator } from './StreamSchemaValidator';
-export { MigrationConfigProcessor } from './MigrationConfigProcessor';
+export * from './StreamSchemaTransformer';
+export * from './MigrationInitializer';

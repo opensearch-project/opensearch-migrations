@@ -18,10 +18,10 @@
     "test": "jest"
   },
   "dependencies": {
-    "zod": "^4.0.5"
+    "zod": "*"
   },
   "devDependencies": {
-    "@types/jest": "^29.5.14"
+    "@types/jest": "*"
   },
   "files": [
     "dist",

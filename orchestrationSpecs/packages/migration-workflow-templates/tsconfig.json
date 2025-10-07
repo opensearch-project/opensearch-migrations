@@ -12,14 +12,8 @@
       "@opensearch-migrations/argo-workflow-builders": [
         "../argo-workflow-builders/src/index.ts"
       ],
-      "@opensearch-migrations/argo-workflow-builders/*": [
-        "../argo-workflow-builders/src/*"
-      ],
       "@opensearch-migrations/schemas": [
         "../schemas/src/index.ts"
-      ],
-      "@opensearch-migrations/schemas/*": [
-        "../schemas/src/*"
       ]
     },
     "disableSourceOfProjectReferenceRedirect": false,

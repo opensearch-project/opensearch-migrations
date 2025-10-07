@@ -52,19 +52,19 @@ export const TargetClusterParameters = {
 export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
     return {
         targetAwsRegion:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "region"], ""),
+            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "sigv4", "region"], ""),
         targetAwsSigningName:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "service"], ""),
+            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "sigv4", "service"], ""),
         targetCACert:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "caCert"], ""),
+            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "mtls", "caCert"], ""),
         targetClientSecretName:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "clientSecretName"], ""),
+            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "mtls", "clientSecretName"], ""),
         targetInsecure:
-            expr.dig(expr.deserializeRecord(targetConfig), ["allow_insecure"], false),
+            expr.dig(expr.deserializeRecord(targetConfig), ["allowInsecure"], false),
         targetUsername:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "username"], ""),
+            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "basic", "username"], ""),
         targetPassword:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "password"], ""),
+            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "basic", "password"], ""),
     };
 }
 
