@@ -24,7 +24,7 @@ IMAGE_NAME="/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64"
 
 echo "Looking up AMI based on image name for '$IMAGE_NAME' in all regions..."
 
- for region in $REGIONS; do
+for region in $REGIONS; do
     echo "Searching in region: $region"
     ami_id=$(aws ssm get-parameter \
         --region $region \
