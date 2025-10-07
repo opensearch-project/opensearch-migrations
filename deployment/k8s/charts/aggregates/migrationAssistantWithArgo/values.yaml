@@ -220,7 +220,7 @@ charts:
 
 
   strimzi-kafka-operator:
-    version: 0.45.0
+    version: 0.47.0
     repository: "https://strimzi.io/charts/"
     values:
       replicas: 1
