@@ -5,7 +5,7 @@ import { StackComposer } from "../lib/stack-composer";
 export function createApp(): App {
   const app = new App();
   const versionFile = readFileSync('../../../VERSION', 'utf-8');
-  const version = versionFile.replaceAll(/\n/g, '');
+  const version = versionFile.replaceAll('\n', '');
   Tags.of(app).add("migration_deployment", version);
 
   const account = process.env.CDK_DEFAULT_ACCOUNT;

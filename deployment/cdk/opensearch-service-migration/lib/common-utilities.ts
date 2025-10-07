@@ -188,7 +188,7 @@ export function createECSTaskRole(scope: Construct, serviceName: string, region:
     const excessCharacters = taskRoleName.length - MAX_IAM_ROLE_NAME_LENGTH
     if (excessCharacters > 0) {
         if (excessCharacters > serviceName.length) {
-            throw Error(`Unexpected ECS task role name length for proposed name: '${taskRoleName}' could not be reasonably truncated 
+            throw new Error(`Unexpected ECS task role name length for proposed name: '${taskRoleName}' could not be reasonably truncated 
                 below ${MAX_IAM_ROLE_NAME_LENGTH} characters`)
         }
         const truncatedServiceName = serviceName.slice(0, serviceName.length - excessCharacters)
@@ -540,7 +540,7 @@ export function isRegionGovCloud(region: string): boolean {
  * @returns {ContainerImage} - A `ContainerImage` object representing the Docker image asset.
  */
 export function makeLocalAssetContainerImage(scope: Construct, imageName: string): ContainerImage {
-        const sanitizedImageName = imageName.replace(/[^a-zA-Z0-9-_]/g, '_');
+        const sanitizedImageName = imageName.replaceAll(/[^a-zA-Z0-9-_]/g, '_');
         const tempDir = mkdtempSync(join(tmpdir(), 'docker-build-' + sanitizedImageName));
         const dockerfilePath = join(tempDir, 'Dockerfile');
 

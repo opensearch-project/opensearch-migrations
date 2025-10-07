@@ -32,7 +32,7 @@ export default function WorkflowWizard({
 
   // Initialize activeStepIndex from URL or default to 0
   const stepParam = searchParams?.get("step");
-  const initialStep = stepParam ? parseInt(stepParam, 10) : 0;
+  const initialStep = stepParam ? Number.parseInt(stepParam, 10) : 0;
 
   const [activeStepIndex, setActiveStepIndex] = useState(initialStep);
 
@@ -52,7 +52,7 @@ export default function WorkflowWizard({
     const query = search ? `?${search}` : "";
 
     // Update URL without refreshing the page
-    router.replace(`${window.location.pathname}${query}`, { scroll: false });
+    router.replace(`${globalThis.location.pathname}${query}`, { scroll: false });
   }, [activeStepIndex, sessionName, router, searchParams]);
 
   const handleNavigate = ({
