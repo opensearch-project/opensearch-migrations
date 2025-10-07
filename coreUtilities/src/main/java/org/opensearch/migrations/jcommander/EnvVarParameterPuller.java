@@ -1,14 +1,14 @@
 package org.opensearch.migrations.jcommander;
 
-import com.beust.jcommander.Parameter;
-import com.beust.jcommander.ParametersDelegate;
-import lombok.extern.slf4j.Slf4j;
-
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParametersDelegate;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Utility class to inject environment variables into JCommander parameter objects.
@@ -139,6 +139,10 @@ public class EnvVarParameterPuller {
         }
 
         return null;
+    }
+
+    public static String toEnvVarName(String fieldName) {
+        return toEnvVarName(fieldName, "", "");
     }
 
     /**
