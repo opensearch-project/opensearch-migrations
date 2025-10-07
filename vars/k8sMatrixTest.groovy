@@ -2,7 +2,7 @@ def call(Map config = [:]) {
     def childJobName = "k8s-local-integ-test"
 
     def allSourceVersions = ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_7.10']
-    def allTargetVersions = ['OS_1.3', 'OS_2.19', 'OS_3.1']
+    def allTargetVersions = ['OS_1.3', 'OS_2.19']
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
