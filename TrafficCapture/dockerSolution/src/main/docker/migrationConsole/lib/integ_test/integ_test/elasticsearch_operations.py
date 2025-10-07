@@ -94,10 +94,6 @@ class ElasticsearchV6_XOperationsLibrary(DefaultOperationsLibrary):
     pass
 
 
-class ElasticsearchV6_8OperationsLibrary(DefaultOperationsLibrary):
-    pass
-
-
 class ElasticsearchV7_XOperationsLibrary(DefaultOperationsLibrary):
     pass
 

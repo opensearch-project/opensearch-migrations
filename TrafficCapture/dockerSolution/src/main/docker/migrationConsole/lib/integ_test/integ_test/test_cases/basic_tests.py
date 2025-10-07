@@ -18,8 +18,8 @@ class Test0001SingleDocumentBackfill(MATestBase):
             (ElasticsearchV2_X, OpensearchV2_X),
             (ElasticsearchV5_X, OpensearchV1_X),
             (ElasticsearchV5_X, OpensearchV2_X),
-            (ElasticsearchV6_8, OpensearchV1_X),
-            (ElasticsearchV6_8, OpensearchV2_X),
+            (ElasticsearchV6_X, OpensearchV1_X),
+            (ElasticsearchV6_X, OpensearchV2_X),
             (ElasticsearchV7_X, OpensearchV1_X),
             (ElasticsearchV7_X, OpensearchV2_X),
         ]

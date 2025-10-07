@@ -1,5 +1,5 @@
 import logging
-from ..cluster_version import (ElasticsearchV5_X, ElasticsearchV6_8,
+from ..cluster_version import (ElasticsearchV5_X, ElasticsearchV6_X,
                                ElasticsearchV7_X, ElasticsearchV8_X,
                                OpensearchV1_X, OpensearchV2_X)
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
@@ -24,8 +24,8 @@ class Test0006OpenSearchBenchmarkBackfill(MATestBase):
         allow_combinations = [
             (ElasticsearchV5_X, OpensearchV1_X),
             (ElasticsearchV5_X, OpensearchV2_X),
-            (ElasticsearchV6_8, OpensearchV1_X),
-            (ElasticsearchV6_8, OpensearchV2_X),
+            (ElasticsearchV6_X, OpensearchV1_X),
+            (ElasticsearchV6_X, OpensearchV2_X),
             (ElasticsearchV7_X, OpensearchV1_X),
             (ElasticsearchV7_X, OpensearchV2_X),
             (ElasticsearchV8_X, OpensearchV1_X),
