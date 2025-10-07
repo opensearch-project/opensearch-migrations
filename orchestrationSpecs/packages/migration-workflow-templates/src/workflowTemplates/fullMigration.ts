@@ -105,16 +105,14 @@ export const FullMigration = WorkflowBuilder.create({
                         ...selectInputsForRegister(b, c)
                     });
                 },
-                {when: { templateExp: expr.dig(expr.deserializeRecord(b.inputs.metadataMigrationConfig),
-                            ["enabled"], false) }}
+                { when: expr.equals("", expr.asString(b.inputs.metadataMigrationConfig)) }
             )
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoad", c =>
                     c.register({
                         ...(selectInputsForRegister(b, c)),
                         sessionName: c.steps.idGenerator.id
                     }),
-                {when: {templateExp: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig),
-                            ["enabled"], false)}}
+                { when: expr.equals("", expr.asString(b.inputs.documentBackfillConfig)) }
             )
             .addStep("targetBackfillCompleteCheck", ConfigManagementHelpers, "decrementLatch", c =>
                 c.register({
@@ -180,7 +178,7 @@ export const FullMigration = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("fullDenormalized", t => t
+    .addTemplate("main", t => t
         .addRequiredInput("migrationConfigs", typeToken<z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG>[]>(),
             "List of server configurations to direct migrated traffic toward") // expand
 
@@ -202,33 +200,7 @@ export const FullMigration = WorkflowBuilder.create({
                 }))
         )
     )
-
-
-    .addTemplate("main", t => t
-        .addRequiredInput("sourceClusters", typeToken<z.infer<typeof SOURCE_CLUSTERS_MAP>>(),
-            "List of server configurations to migrate data from")
-        .addRequiredInput("targetClusters", typeToken<z.infer<typeof TARGET_CLUSTERS_MAP>>(),
-            "List of server configurations to direct migrated data to")
-        .addRequiredInput("sourceMigrationConfigs", typeToken<z.infer<typeof NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG>[]>(),
-            "List of server configurations to direct migrated traffic toward")
-
-        .addOptionalInput("useLocalStack", c => false)
-        .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
-
-        .addSteps(b => b
-            .addStep("init", ConfigManagementHelpers, "prepareConfigs", c =>
-                c.register({
-                    ...(selectInputsForRegister(b, c)),
-                    prefix: expr.concat(expr.literal("workflow-"), expr.getWorkflowValue("uid"))
-                }))
-            .addStep("fullMigration", INTERNAL, "fullDenormalized", c=>c.register({
-                    latchCoordinationPrefix: c.steps.init.outputs.prefix,
-                    migrationConfigs: expr.serialize(c.steps.init.outputs.denormalizedConfigArray)
-                })
-            )
-        )
-    )
-
+    
 
     .setEntrypoint("main")
     .getFullScope();

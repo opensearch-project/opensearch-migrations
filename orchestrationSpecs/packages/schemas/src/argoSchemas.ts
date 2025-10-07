@@ -14,14 +14,14 @@ export const NAMED_SOURCE_CLUSTER_CONFIG = SOURCE_CLUSTER_CONFIG.extend({
 });
 
 export const NAMED_TARGET_CLUSTER_CONFIG = TARGET_CLUSTER_CONFIG.extend({
-    name: z.string(), // override to required
+    name: z.string().regex(/^[a-zA-Z0-9_]+$/), // override to required
 });
 
-export const COMPLETE_SNAPSHOT_CONFIG = NORMALIZED_COMPLETE_SNAPSHOT_CONFIG.omit({ repoConfigName: true }).extend({
+export const COMPLETE_SNAPSHOT_CONFIG = NORMALIZED_COMPLETE_SNAPSHOT_CONFIG.extend({
     repoConfig: S3_REPO_CONFIG  // Replace string reference with actual config
 });
 
-export const DYNAMIC_SNAPSHOT_CONFIG = NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG.omit({ repoConfigName: true }).extend({
+export const DYNAMIC_SNAPSHOT_CONFIG = NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG.extend({
     repoConfig: S3_REPO_CONFIG  // Replace string reference with actual config
 });
 
@@ -32,6 +32,10 @@ export const SNAPSHOT_MIGRATION_CONFIG = NORMALIZED_SNAPSHOT_MIGRATION_CONFIG.om
 export const PARAMETERIZED_MIGRATION_CONFIG = z.object({
     sourceConfig: NAMED_SOURCE_CLUSTER_CONFIG,
     targetConfig: NAMED_TARGET_CLUSTER_CONFIG,
-    snapshotExtractAndLoadConfigArray: z.array(SNAPSHOT_MIGRATION_CONFIG),
-    replayerConfig: REPLAYER_OPTIONS,
+    snapshotExtractAndLoadConfigArray: z.array(SNAPSHOT_MIGRATION_CONFIG).optional(),
+    replayerConfig: REPLAYER_OPTIONS.optional(),
 })
+
+export const PARAMETERIZED_MIGRATION_CONFIG_ARRAYS = z.array(PARAMETERIZED_MIGRATION_CONFIG);
+
+export type ARGO_WORKFLOW_SCHEMA = z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG_ARRAYS>;

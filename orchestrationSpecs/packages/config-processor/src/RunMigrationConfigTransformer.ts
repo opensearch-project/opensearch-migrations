@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Readable } from 'stream';
-import { MigrationConfigProcessor } from './MigrationConfigProcessor';
 import { z } from 'zod';
+import {MigrationConfigTransformer} from "./MigrationConfigTransformer";
 
 async function main() {
     const args = process.argv.slice(2);
@@ -13,18 +13,12 @@ Usage: process-config [input-file]
 Process and validate migration configuration files.
 
 Arguments:
-  input-file    Path to input JSON file (optional, defaults to stdin)
-
-Examples:
-  process-config input.json
-  cat input.json | process-config
-  process-config < input.json
-  echo '{"key": "value"}' | process-config
-    `);
+  input-file    Path to input JSON file ('-' for stdin')
+`);
         process.exit(0);
     }
 
-    const processor = new MigrationConfigProcessor();
+    const processor = new MigrationConfigTransformer();
 
     try {
         let stream: Readable;
@@ -60,7 +54,3 @@ Examples:
 }
 
 main();
-
-// packages/config-processor/src/index.ts
-export { StreamSchemaValidator } from './StreamSchemaValidator';
-export { MigrationConfigProcessor } from './MigrationConfigProcessor';

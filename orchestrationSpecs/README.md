@@ -22,6 +22,48 @@ full-migration workflow, run
 
 `npm run schema`
 
+To generate a sample yaml file from the schema, including descriptions
+of fields and the types of the scalars, run
+
+```shell
+npm run make-sample
+```
+
+That will create something that looks like 
+```
+sourceClusters:
+  <NAME>:
+    endpoint: string
+    allowInsecure: boolean
+    version: string
+    authConfig:
+      # Option 1 (object):
+      ##basic:
+        ##username: string
+        ##password: string
+      # Option 2 (object):
+      ##sigv4:
+        ##region: string
+        ##service: string
+      # Option 3 (object):
+      ##mtls:
+        ##caCert: string
+        ##clientSecretName: string
+    snapshotRepo:
+      ##  The AWS region that the bucket reside in (us-east-2, etc)
+      #aws_region: string
+      ##  Override the default S3 endpoint for clients to connect to.  Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint
+      #endpoint: string
+      ##  s3:///BUCKETNAME/PATH
+      #s3RepoPathUri: string
+    proxy:
+      #loggingConfigurationOverrideConfigMap: string
+      #otelCollectorEndpoint: http://otel-collector:4317
+targetClusters:
+  <NAME>:
+...
+```
+
 ### Updating template and configuration models
 
 In addition to the commands above to generate the templates and schema,

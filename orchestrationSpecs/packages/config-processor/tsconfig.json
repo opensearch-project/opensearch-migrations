@@ -6,14 +6,18 @@
     "composite": true,
     "declaration": true,
     "declarationMap": true,
+    "customConditions": ["development"],
     "paths": {
-      "@/*": ["./*"],
-      "@opensearch-migrations/schemas": ["../schemas/src"]
-    }
+      "@opensearch-migrations/schemas": [
+        "../schemas/src/index.ts"
+      ]
+    },
+    "disableSourceOfProjectReferenceRedirect": false,
+    "skipLibCheck": true
   },
   "include": ["./src/**/*"],
-  "exclude": ["./node_modules", "./dist", "./test"],
+  "exclude": ["node_modules", "dist", "./test", "tests", "**/*.test.ts", "**/__tests__/**"],
   "references": [
-    { "path": "../schemas" }
+    { "path": "../schemas/tsconfig.json" }
   ]
 }
