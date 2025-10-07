@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from "react";
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 import {
   usePlayground,
   OutputDocument,
