@@ -9,6 +9,8 @@ spec:
   arguments:
     parameters:
       - name: cluster-name
-        value: "source-elasticsearch-8-18-test-cluster"
+        value: "elasticsearch-8-18-single-node"
       - name: namespace
         value: "ma"
+      - name: replicas
+        value: "3"

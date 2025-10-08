@@ -630,41 +630,64 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: replicas
       container:
         image: dtzar/helm-kubectl:latest
         command: [sh, -c]
         args:
           - |
-            # Add Elasticsearch Helm repository
+            set -e
+            
+            CLUSTER="{{inputs.parameters.cluster-name}}"
+            NAMESPACE="{{inputs.parameters.namespace}}"
+            REPLICAS="{{inputs.parameters.replicas}}"
+            
             helm repo add elastic https://helm.elastic.co
             helm repo update
             
-            cat > /tmp/elasticsearch.yml << 'EOF'
+            # Create the S3 credentials secret
+            kubectl create secret generic ${CLUSTER}-s3-creds \
+              --from-literal=s3.client.default.access_key="test" \
+              --from-literal=s3.client.default.secret_key="test" \
+              -n ${NAMESPACE} \
+              --dry-run=client -o yaml | kubectl apply -f -
+            
+            cat > /tmp/elasticsearch.yml << EOF
             network.host: 0.0.0.0
-            discovery.type: single-node
+            discovery.seed_hosts:
             xpack.security.enabled: false
             xpack.security.enrollment.enabled: false
             xpack.security.http.ssl.enabled: false
             xpack.security.transport.ssl.enabled: false
             xpack.ml.enabled: false
             xpack.watcher.enabled: false
+            EOF
+            
+            # append seed hosts lines
+            i=0
+            while [ $i -lt $REPLICAS ]; do
+              echo "  - ${CLUSTER}-${i}.${CLUSTER}-headless" >> /tmp/elasticsearch.yml
+              i=$((i+1))
+            done
+            
+            cat >> /tmp/elasticsearch.yml << EOF
             s3.client.default.endpoint: http://localstack.ma.svc.cluster.local:4566
             s3.client.default.path_style_access: true
             s3.client.default.protocol: http
             s3.client.default.region: us-east-2
             EOF
             
-            # Helm values for ES 8.19.4 with shared config directory
-            cat > /tmp/es-values.yaml << 'EOF'
+            # Render helm values
+            cat > /tmp/es-values.yaml << EOF
             fullnameOverride: {{inputs.parameters.cluster-name}}
             image: "docker.elastic.co/elasticsearch/elasticsearch"
             imageTag: "8.18.4"
             antiAffinity: "soft"
             esJavaOpts: "-Xmx1g -Xms1g"
             protocol: "http"
-            replicas: 1
+            replicas: 3
             createCert: false
-            clusterHealthCheckParams: "wait_for_status=yellow&timeout=3s"
+            clusterHealthCheckParams: "wait_for_status=yellow&timeout=5s"
             clusterName: "elasticsearch"
             masterService: ""
             clusterInitialMasterNodes: []
@@ -675,25 +698,18 @@ spec:
               failureThreshold: 10
             persistence:
               enabled: false
-            podDisruptionBudget:
-              create: false
-              enabled: false
             extraVolumes:
               - name: esconfig
                 emptyDir: {}
               - name: esconfigmap
                 configMap:
-                  name: "{{inputs.parameters.cluster-name}}-config"
+                  name: "{CLUSTER}-config"
             extraEnvs:
-              - name: ELASTIC_PASSWORD
-                value: "anything"
-              - name: "cluster.initial_master_nodes"
-                value: ""
+              - name: "ES_JAVA_OPTS"
+                value: "-Xmx1g -Xms1g"
             extraVolumeMounts:
-              # Make the EmptyDir the live config dir for the main container
               - name: esconfig
                 mountPath: /usr/share/elasticsearch/config
-    
             extraInitContainers:
               - name: prep-config-and-keystore
                 image: docker.elastic.co/elasticsearch/elasticsearch:8.18.4
@@ -701,59 +717,68 @@ spec:
                 args:
                   - |
                     set -e
-                    # Use EmptyDir as the live ES_PATH_CONF for both init and main
                     export ES_PATH_CONF=/mnt/esconfig
-                  
-                    # Seed config directory (don't preserve timestamps/attributes)
                     cp -r /usr/share/elasticsearch/config/* "$ES_PATH_CONF/"
-                  
-                    # Copy elasticsearch.yml from ConfigMap
                     if [ -f /tmp/cm/elasticsearch.yml ]; then
                       cp -f /tmp/cm/elasticsearch.yml "$ES_PATH_CONF/elasticsearch.yml"
                     fi
-                  
                     # Create keystore directly in ES_PATH_CONF (idempotent)
                     bin/elasticsearch-keystore create
-                    echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key
-                    echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key
-                  
-                    # Skip chown on mount point, just set permissions on files
-                    find "$ES_PATH_CONF" -mindepth 1 -type d -exec chmod 750 {} \;
-                    find "$ES_PATH_CONF" -type f -exec chmod 640 {} \;
-                    chmod 660 "$ES_PATH_CONF/elasticsearch.keystore"
+                    echo "${S3_ACCESS_KEY}" | bin/elasticsearch-keystore add --stdin --force s3.client.default.access_key
+                    echo "${S3_SECRET_KEY}" | bin/elasticsearch-keystore add --stdin --force s3.client.default.secret_key
+                    # fix permissions
+                    find "${ES_PATH_CONF}" -mindepth 1 -type d -exec chmod 750 {} \;
+                    find "${ES_PATH_CONF}" -type f -exec chmod 640 {} \;
+                    chmod 660 "${ES_PATH_CONF}/elasticsearch.keystore"
                 volumeMounts:
                   - name: esconfig
                     mountPath: /mnt/esconfig
                   - name: esconfigmap
                     mountPath: /tmp/cm
+                env:
+                  - name: S3_ACCESS_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: ${CLUSTER}-s3-creds
+                        key: s3.client.default.access_key
+                  - name: S3_SECRET_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: ${CLUSTER}-s3-creds
+                        key: s3.client.default.secret_key
             EOF
-    
-            # Install Elasticsearch 8.19.4
-            helm uninstall {{inputs.parameters.cluster-name}} --namespace {{inputs.parameters.namespace}}
             
-            helm install {{inputs.parameters.cluster-name}} elastic/elasticsearch \
+            # Create the ConfigMap
+            kubectl create configmap ${CLUSTER}-config \
+              --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
+              -n ${NAMESPACE} \
+              --dry-run=client -o yaml | kubectl apply -f -
+            
+            # Uninstall existing (if any)
+            helm uninstall ${CLUSTER} --namespace ${NAMESPACE} || true
+            
+            # Install via helm
+            helm install ${CLUSTER} elastic/elasticsearch \
             --version 8.5.1 \
-            --namespace {{inputs.parameters.namespace}} \
+            --namespace ${NAMESPACE} \
             --values /tmp/es-values.yaml \
             --set-file esConfig."elasticsearch\.yml"=/tmp/elasticsearch.yml
     
             # Cluster-config output
             cat > /tmp/cluster-config.json << EOF
             {
-              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
+              "endpoints": [
+                $(for i in $(seq 0 $((${REPLICAS}-1))); do
+                   echo "\"http://${CLUSTER}-${i}:9200\"$( [ $i -lt $((${REPLICAS}-1)) ] && echo "," )"
+                 done)
+              ],
               "allow_insecure": true,
-              "no_auth": true,
+              "credentials_secret": "${CLUSTER}-s3-creds",
               "version": "ES_8.18"
             }
             EOF
-            
-            # Create the elasticsearch.yml ConfigMap
-            kubectl create configmap {{inputs.parameters.cluster-name}}-config \
-              --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
-              -n {{inputs.parameters.namespace}} \
-              --dry-run=client -o yaml | kubectl apply -f -
     
-            echo "Elasticsearch 8.18.4 cluster created successfully"
+            echo "Elasticsearch 8.18.4 multi-node cluster created successfully"
             echo "Cluster config:"
             cat /tmp/cluster-config.json
       outputs:
