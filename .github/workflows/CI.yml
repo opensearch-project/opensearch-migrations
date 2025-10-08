@@ -196,7 +196,7 @@ jobs:
 
       - name: Show disk usage
         if: always()
-        run: | 
+        run: |
           df -h
           docker system df -v
 
@@ -249,7 +249,7 @@ jobs:
           docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
       - name: Show disk usage
         if: always()
-        run: | 
+        run: |
           df -h
           docker system df -v
       - name: Collect Docker, OpenSearch Benchmark, and Shared Logs
