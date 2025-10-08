@@ -281,7 +281,7 @@ def call(Map config = [:]) {
                                     } else {
                                         sh "docker buildx create --name ecr-builder --driver docker-container"
                                     }
-                                    //sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -PimageArch=amd64 -Pbuilder=ecr-builder"
+                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -PimageArch=amd64 -Pbuilder=ecr-builder"
                                 }
                             }
                         }
