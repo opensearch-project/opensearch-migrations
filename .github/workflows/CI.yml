@@ -197,9 +197,6 @@ jobs:
       - name: Show disk usage
         if: always()
         run: df -h
-      - name: Top-level directories
-        if: always()
-        run: du -h -d1 / | sort -hr | head -n 20
       - name: Detailed file sizes
         if: always()
         run: find / -type f -exec du -h {} + 2>/dev/null | sort -hr | head -n 1000
@@ -254,9 +251,6 @@ jobs:
       - name: Show disk usage
         if: always()
         run: df -h
-      - name: Top-level directories
-        if: always()
-        run: du -h -d1 / | sort -hr | head -n 20
       - name: Detailed file sizes
         if: always()
         run: find / -type f -exec du -h {} + 2>/dev/null | sort -hr | head -n 1000
@@ -269,9 +263,6 @@ jobs:
       - name: Show disk usage
         if: always()
         run: df -h
-      - name: Top-level directories
-        if: always()
-        run: du -h -d1 / | sort -hr | head -n 20
       - name: Detailed file sizes
         if: always()
         run: find / -type f -exec du -h {} + 2>/dev/null | sort -hr | head -n 1000
