@@ -198,7 +198,7 @@ jobs:
         if: always()
         run: df -h
       - name: Top-level directories
-        if: always()  
+        if: always()
         run: du -h -d1 / | sort -hr | head -n 20
       - name: Detailed file sizes
         if: always()
@@ -255,7 +255,7 @@ jobs:
         if: always()
         run: df -h
       - name: Top-level directories
-        if: always()  
+        if: always()
         run: du -h -d1 / | sort -hr | head -n 20
       - name: Detailed file sizes
         if: always()
@@ -270,7 +270,7 @@ jobs:
         if: always()
         run: df -h
       - name: Top-level directories
-        if: always()  
+        if: always()
         run: du -h -d1 / | sort -hr | head -n 20
       - name: Detailed file sizes
         if: always()
