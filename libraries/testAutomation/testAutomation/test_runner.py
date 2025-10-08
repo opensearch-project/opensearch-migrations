@@ -16,7 +16,7 @@ from typing import List, Optional, Tuple
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_7.10"]
+VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_7.10", "ES_8.18"]
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19"]
 MA_RELEASE_NAME = "ma"
 
@@ -384,10 +384,6 @@ def main() -> None:
         return test_runner.cleanup_clusters()
     if args.copy_logs_only:
         return test_runner.copy_logs()
-    if args.output_reports_summary_only:
-        if not args.test_reports_dir:
-            raise ValueError("The '--test-reports-dir' arg must be provided when using '--output-reports-summary-only")
-        return test_runner.collect_reports_and_print_summary(reports_dir=args.test_reports_dir)
     skip_delete = args.skip_delete
     keep_workflows = args.keep_workflows
     developer_mode = args.developer_mode
