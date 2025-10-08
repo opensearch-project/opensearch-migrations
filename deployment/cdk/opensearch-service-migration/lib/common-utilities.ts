@@ -540,7 +540,7 @@ export function isRegionGovCloud(region: string): boolean {
  * @returns {ContainerImage} - A `ContainerImage` object representing the Docker image asset.
  */
 export function makeLocalAssetContainerImage(scope: Construct, imageName: string): ContainerImage {
-        const sanitizedImageName = imageName.replaceAll(/[^a-zA-Z0-9-_]/, '_');
+        const sanitizedImageName = imageName.replaceAll(/[^a-zA-Z0-9-_]/g, '_');
         const tempDir = mkdtempSync(join(tmpdir(), 'docker-build-' + sanitizedImageName));
         const dockerfilePath = join(tempDir, 'Dockerfile');
 
@@ -555,7 +555,7 @@ export function makeLocalAssetContainerImage(scope: Construct, imageName: string
             if (!imageId) {
                 throw new Error(`No RepoDigests found for image: ${imageName}`);
             }
-            imageHash = imageId.replaceAll(/[^a-zA-Z0-9-_]/, '_');
+            imageHash = imageId.replaceAll(/[^a-zA-Z0-9-_]/g, '_');
             CdkLogger.info('For image: ' + imageName + ' found imageHash: ' + imageHash);
         } catch (error) {
             CdkLogger.error('Error fetching the actual hash for the image: ' + imageName + ' Error: ' + error);
