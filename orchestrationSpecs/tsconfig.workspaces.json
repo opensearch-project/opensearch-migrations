@@ -1,0 +1,8 @@
+{
+  "references": [
+    { "path": "packages/schemas/tsconfig.build.json" },
+    { "path": "packages/argo-workflow-builders/tsconfig.build.json" },
+    { "path": "packages/migration-workflow-templates/tsconfig.build.json" }
+//    { "path": "packages/config-processor" }
+  ]
+}
