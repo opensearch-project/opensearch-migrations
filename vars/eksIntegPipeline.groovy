@@ -289,43 +289,46 @@ def call(Map config = [:]) {
                 }
             }
 
-//            stage('Install Helm Chart') {
-//                steps {
-//                    timeout(time: 15, unit: 'MINUTES') {
-//                        dir('deployment/k8s/aws') {
-//                            script {
-//                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-//                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-//                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir /home/ec2-user/workspace/eks-integ-test --use-public-images false --skip-console-exec"
-//                                    }
-//                                }
-//                            }
-//                        }
-//                    }
-//                }
-//            }
+            stage('Install Helm Chart') {
+                steps {
+                    timeout(time: 15, unit: 'MINUTES') {
+                        dir('deployment/k8s/aws') {
+                            script {
+                                def clusterDetails = readJSON text: env.clusterDetailsJson
+                                def targetCluster = clusterDetails.target
+                                def securityGroupIds = "${targetCluster.securityGroupId}"
+                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                        sh "./aws-bootstrap.sh --security-group-ids \"${securityGroupIds}\" --skip-git-pull --base-dir /home/ec2-user/workspace/eks-integ-test --use-public-images false --skip-console-exec"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
-//            stage('Perform Python E2E Tests') {
-//                steps {
-//                    timeout(time: 2, unit: 'HOURS') {
-//                        dir('libraries/testAutomation') {
-//                            script {
-////                                def testIdsArg = ""
-////                                def testIdsResolved = testIds ?: params.TEST_IDS
-////                                if (testIdsResolved != "" && testIdsResolved != "all") {
-////                                    testIdsArg = "--test-ids='$testIdsResolved'"
-////                                }
-//                                sh "pipenv install --deploy"
-//                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-//                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-//                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids=0001 --reuse-clusters --skip-delete "
-//                                    }
+            stage('Perform Python E2E Tests') {
+                steps {
+                    timeout(time: 2, unit: 'HOURS') {
+                        dir('libraries/testAutomation') {
+                            script {
+//                                def testIdsArg = ""
+//                                def testIdsResolved = testIds ?: params.TEST_IDS
+//                                if (testIdsResolved != "" && testIdsResolved != "all") {
+//                                    testIdsArg = "--test-ids='$testIdsResolved'"
 //                                }
-//                            }
-//                        }
-//                    }
-//                }
-//            }
+                                sh "pipenv install --deploy"
+                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids=0001 --reuse-clusters --skip-delete "
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         post {
             always {
