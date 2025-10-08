@@ -8,7 +8,7 @@ import {
     Role,
     ServicePrincipal,
 } from "aws-cdk-lib/aws-iam";
-import {RemovalPolicy, Tags} from "aws-cdk-lib";
+import {RemovalPolicy, Stack, Tags} from "aws-cdk-lib";
 import {Repository} from "aws-cdk-lib/aws-ecr";
 
 
@@ -28,6 +28,7 @@ export interface EKSInfraProps {
 export class EKSInfra extends Construct {
     public readonly cluster: CfnCluster;
     public readonly ecrRepo: Repository;
+    public readonly snapshotRole: Role;
 
     constructor(scope: Construct, id: string, props: EKSInfraProps) {
         super(scope, id);
@@ -115,6 +116,23 @@ export class EKSInfra extends Construct {
         });
 
         const podIdentityRole = this.createDefaultPodIdentityRole(props.clusterName)
+        this.snapshotRole = new Role(scope, `SnapshotRole`, {
+            assumedBy: new ServicePrincipal('es.amazonaws.com'),  // Note that snapshots are not currently possible on AOSS
+            description: 'Role that grants OpenSearch Service permissions to access S3 to create snapshots',
+            roleName: `${props.clusterName}-snapshot-role`
+        });
+        this.snapshotRole.addToPolicy(new PolicyStatement({
+            effect: Effect.ALLOW,
+            actions: ['s3:ListBucket'],
+            resources: ['arn:aws:s3:::migrations-*'],
+        }));
+        this.snapshotRole.addToPolicy(new PolicyStatement({
+            effect: Effect.ALLOW,
+            actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
+            resources: ['arn:aws:s3:::migrations-*/*'],
+        }));
+        this.snapshotRole.grantPassRole(podIdentityRole);
+
         const buildImagesPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'BuildImagesPodIdentityAssociation', {
             clusterName: props.clusterName,
             namespace: namespace,
@@ -241,6 +259,12 @@ export class EKSInfra extends Construct {
                 ],
                 resources: ['*'],
             }),
+            // Allow passing default or user-provided snapshot role to OpenSearch service
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: ['iam:PassRole'],
+                resources: [`arn:aws:iam::${Stack.of(this).account}:role/*`]
+            })
         );
         return podIdentityRole
     }

@@ -156,6 +156,7 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             "AWS_CFN_REGION": this.region,
             "VPC_ID": vpc.vpcId,
             "EKS_CLUSTER_SECURITY_GROUP": eksInfra.cluster.attrClusterSecurityGroupId.toString(),
+            "SNAPSHOT_ROLE": eksInfra.snapshotRole.roleArn.toString(),
             "STAGE": stageParameter.valueAsString
         })
         new CfnOutput(this, 'MigrationsExportString', {
