@@ -6,9 +6,7 @@ import java.nio.charset.Charset;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Base64;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -16,6 +14,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
+import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
@@ -315,32 +314,8 @@ public class TrafficReplayer {
         private String transformerConfigFile;
     }
 
-    public static class EnvParameters {
-
-        private EnvParameters() {
-            throw new IllegalStateException("EnvParameters utility class should not instantiated");
-        }
-
-        public static void injectFromEnv(Parameters params) {
-            List<String> addedEnvParams = new ArrayList<>();
-            if (params.targetUsername == null && System.getenv(ArgNameConstants.TARGET_USERNAME_ENV_ARG) != null) {
-                params.targetUsername = System.getenv(ArgNameConstants.TARGET_USERNAME_ENV_ARG);
-                addedEnvParams.add(ArgNameConstants.TARGET_USERNAME_ENV_ARG);
-            }
-            if (params.targetPassword == null && System.getenv(ArgNameConstants.TARGET_PASSWORD_ENV_ARG) != null) {
-                params.targetPassword = System.getenv(ArgNameConstants.TARGET_PASSWORD_ENV_ARG);
-                addedEnvParams.add(ArgNameConstants.TARGET_PASSWORD_ENV_ARG);
-            }
-            if (!addedEnvParams.isEmpty()) {
-                log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
-            }
-        }
-    }
-
-
-
     private static Parameters parseArgs(String[] args) {
-        Parameters p = new Parameters();
+        Parameters p = EnvVarParameterPuller.injectFromEnv(new Parameters(), "TRAFFIC_REPLAYER_");
         JCommander jCommander = new JCommander(p);
         try {
             jCommander.parse(args);
@@ -351,7 +326,6 @@ public class TrafficReplayer {
             System.exit(2);
             return null;
         }
-        EnvParameters.injectFromEnv(p);
         return p;
     }
 

@@ -10,7 +10,6 @@ import {
 import {z} from "zod";
 import {BaseExpression, expr} from "@/argoWorkflowBuilders/models/expression";
 import {
-    COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
     RFS_OPTIONS,
     TARGET_CLUSTER_CONFIG
@@ -22,6 +21,7 @@ import {IMAGE_PULL_POLICY} from "@/argoWorkflowBuilders/models/containerBuilder"
 import {MISSING_FIELD} from "@/argoWorkflowBuilders/models/plainObject";
 import {selectInputsFieldsAsExpressionRecord, selectInputsForRegister} from "@/argoWorkflowBuilders/models/parameterConversions";
 import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
+import {COMPLETE_SNAPSHOT_CONFIG} from "@/workflowTemplates/internalSchemas";
 
 
 function getRfsReplicasetManifest
@@ -174,7 +174,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
                     rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
                     inputsAsEnvList: [
-                        ...inputsToEnvVarsList({...b.inputs})
+                        ...inputsToEnvVarsList({...b.inputs}, "RFS_", "_CMD_LINE_ARG")
                     ],
                     workflowName: expr.getWorkflowValue("name")
                 })
@@ -190,14 +190,14 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
 
-        .addOptionalInput("backfillConfig", c => ({} as z.infer<typeof RFS_OPTIONS>))
+        .addOptionalInput("documentBackfillConfig", c => ({} as z.infer<typeof RFS_OPTIONS>))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addSteps(b => b
             .addStep("createReplicaset", INTERNAL, "createReplicaset", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    ...selectInputsFieldsAsExpressionRecord(b.inputs.backfillConfig, c),
+                    ...selectInputsFieldsAsExpressionRecord(b.inputs.documentBackfillConfig, c),
                     ...(extractTargetKeysToExpressionMap(b.inputs.targetConfig)),
 
                     s3Endpoint: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "endpoint"], ""),

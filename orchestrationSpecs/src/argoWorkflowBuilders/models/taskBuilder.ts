@@ -331,7 +331,7 @@ export abstract class TaskBuilder<
             (this.contextualScope.templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K> :
             (((source as Workflow<any, any, any>).templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K>);
         const {paramsFn, opts} = unpackParams<InputsFrom<C, TemplateSource, K>, Label, LoopT>(args);
-        const params =
+        const params = inputs === undefined ? {} :
             this.getParamsFromCallback<InputsFrom<C, TemplateSource, K>, LoopT>(inputs, paramsFn as any, opts?.loopWith);
 
         if (source === INTERNAL) {
@@ -390,7 +390,7 @@ export abstract class TaskBuilder<
     ): ParamProviderCallbackObject<S, Label, Inputs, LoopT> {
         const tasksByName = this.getTaskOutputsByTaskName();
 
-        const defaultsRecord = buildDefaultsObject(inputs as any);
+        const defaultsRecord = inputs === undefined ? {} : buildDefaultsObject(inputs as any);
         const defaultKeys = Object.keys(defaultsRecord) as Extract<keyof DefaultsOfInputs<Inputs>, string>[];
 
         return {
