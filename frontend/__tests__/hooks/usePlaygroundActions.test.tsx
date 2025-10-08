@@ -13,7 +13,7 @@ const TEST_UUID = "test-uuid";
 const TEST_DOC_NAME = "Test Document";
 const TEST_DOC_CONTENT = "Test content";
 
-jest.mock("node:crypto", () => ({
+jest.mock("crypto", () => ({
   randomUUID: jest.fn(() => TEST_UUID),
 }));
 

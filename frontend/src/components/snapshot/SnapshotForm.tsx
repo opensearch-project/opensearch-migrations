@@ -97,7 +97,7 @@ export default function SnapshotConfigView({
     const source = snapshotConfig.source as S3SnapshotSource;
     configItems.push(
       { label: "S3 URI", value: source.uri },
-      { label: "AWS Region", value: source.region }
+      { label: "AWS Region", value: source.region },
     );
   }
   if (snapshotConfig.source.type === "filesytem") {

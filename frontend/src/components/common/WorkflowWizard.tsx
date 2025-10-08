@@ -52,7 +52,9 @@ export default function WorkflowWizard({
     const query = search ? `?${search}` : "";
 
     // Update URL without refreshing the page
-    router.replace(`${globalThis.location.pathname}${query}`, { scroll: false });
+    router.replace(`${globalThis.location.pathname}${query}`, {
+      scroll: false,
+    });
   }, [activeStepIndex, sessionName, router, searchParams]);
 
   const handleNavigate = ({

@@ -54,7 +54,7 @@ export default function TransformationSection() {
       if (!transformations.some((t) => t.id === id)) {
         delete newDimensions[id];
       }
-    };
+    }
     return newDimensions;
   };
 

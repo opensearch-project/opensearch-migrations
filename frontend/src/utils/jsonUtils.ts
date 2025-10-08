@@ -1,6 +1,5 @@
 export const readFileAsText = (file: File) => file.text();
 
-
 export const validateJsonContent = (content: string): string | null => {
   try {
     JSON.parse(content);
