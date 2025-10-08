@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "moduleResolution": "bundler",
+    "paths": {
+      "@opensearch-migrations/schemas": ["./packages/schemas/src/index.ts"]
+    }
+  },
+  "include": [
+    "./packages/config-processor/src/**/*",
+    "./packages/schemas/src/**/*"
+  ]
+}
