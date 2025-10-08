@@ -1,6 +1,6 @@
 import {Construct} from 'constructs';
 import {CfnCluster, CfnPodIdentityAssociation} from 'aws-cdk-lib/aws-eks';
-import {IVpc, Port, SecurityGroup} from 'aws-cdk-lib/aws-ec2';
+import {IVpc} from 'aws-cdk-lib/aws-ec2';
 import {
     Effect,
     ManagedPolicy, Policy,
@@ -8,7 +8,7 @@ import {
     Role,
     ServicePrincipal,
 } from "aws-cdk-lib/aws-iam";
-import {Fn, RemovalPolicy, Tags, Token} from "aws-cdk-lib";
+import {RemovalPolicy, Tags} from "aws-cdk-lib";
 import {Repository} from "aws-cdk-lib/aws-ecr";
 
 
@@ -18,7 +18,6 @@ export interface EKSInfraProps {
     ecrRepoName: string;
     stackName: string;
     vpcSubnetIds?: string[];
-    vpcSecurityGroupIds?: string[];
     namespace?: string;
     buildImagesServiceAccountName?: string;
     argoWorkflowServiceAccountName?: string;
@@ -38,21 +37,6 @@ export class EKSInfra extends Construct {
         const argoWorkflowServiceAccountName = props.argoWorkflowServiceAccountName ?? 'argo-workflow-executor';
         const migrationsServiceAccountName = props.migrationsServiceAccountName ?? 'migrations-service-account';
         const migrationConsoleServiceAccountName = props.migrationConsoleServiceAccountName ?? 'migration-console-access-role';
-
-        const migrationSecurityGroup = new SecurityGroup(this, 'MigrationsSecurityGroup', {
-            vpc: props.vpc,
-            allowAllOutbound: true,
-            allowAllIpv6Outbound: true,
-        })
-        migrationSecurityGroup.addIngressRule(migrationSecurityGroup, Port.allTraffic());
-        let securityGroupIds = [migrationSecurityGroup.securityGroupId]
-        if (props.vpcSecurityGroupIds) {
-            // Only add the inner join if it's safe (token or non-empty array)
-            if (props.vpcSecurityGroupIds && (Token.isUnresolved(props.vpcSecurityGroupIds) || props.vpcSecurityGroupIds.length > 0)) {
-                securityGroupIds.push(Fn.join(",", props.vpcSecurityGroupIds));
-            }
-            securityGroupIds = Fn.split(",", Fn.join(",", securityGroupIds));
-        }
 
         this.ecrRepo = new Repository(this, 'MigrationsECRRepository', {
             repositoryName: props.ecrRepoName,
@@ -109,7 +93,6 @@ export class EKSInfra extends Construct {
                 subnetIds: subnetIds,
                 endpointPrivateAccess: true,
                 endpointPublicAccess: true,
-                securityGroupIds: securityGroupIds
             },
             accessConfig: {
                 authenticationMode: 'API',
@@ -130,10 +113,6 @@ export class EKSInfra extends Construct {
                 }
             }
         });
-        migrationSecurityGroup.addIngressRule(
-            SecurityGroup.fromSecurityGroupId(this, "MigrationsEKSClusterDefaultSG", this.cluster.attrClusterSecurityGroupId),
-            Port.allTraffic()
-        );
 
         const podIdentityRole = this.createDefaultPodIdentityRole(props.clusterName)
         const buildImagesPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'BuildImagesPodIdentityAssociation', {

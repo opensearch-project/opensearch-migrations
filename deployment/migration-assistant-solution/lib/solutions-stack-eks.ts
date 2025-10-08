@@ -79,7 +79,6 @@ export class SolutionsInfrastructureEKSStack extends Stack {
 
         let vpc: IVpc;
         let vpcSubnetIds: string[] = []
-        let vpcSecurityGroupIds: string[] = []
         if (props.createVPC) {
             vpc = new Vpc(this, `Vpc`, {
                 // Using 10.212.0.0/16 to avoid default VPC CIDR range conflicts when using VPC peering
@@ -135,14 +134,7 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             addParameterLabel(parameterLabels, subnetIdsParameter, "Subnets")
             vpcSubnetIds = subnetIdsParameter.valueAsList
 
-            const securityGroupIdsParameter = new CfnParameter(this, 'VPCSecurityGroupIds', {
-                type: 'List<AWS::EC2::SecurityGroup::Id>',
-                description: '(Required) Select one or more security groups that will allow Source and/or Target cluster access',
-            });
-            addParameterLabel(parameterLabels, securityGroupIdsParameter, "Security Groups")
-            vpcSecurityGroupIds = securityGroupIdsParameter.valueAsList
-
-            importedVPCParameters.push(vpcIdParameter.logicalId, subnetIdsParameter.logicalId, securityGroupIdsParameter.logicalId)
+            importedVPCParameters.push(vpcIdParameter.logicalId, subnetIdsParameter.logicalId)
             vpc = importVPC(this, vpcIdParameter);
         }
 
@@ -150,7 +142,6 @@ export class SolutionsInfrastructureEKSStack extends Stack {
         const eksInfra = new EKSInfra(this, 'EKSInfra', {
             vpc,
             vpcSubnetIds,
-            vpcSecurityGroupIds,
             clusterName: eksClusterName,
             stackName: Fn.ref('AWS::StackName'),
             ecrRepoName: `migration-ecr-${stackMarker}`
@@ -164,6 +155,7 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             "AWS_ACCOUNT": this.account,
             "AWS_CFN_REGION": this.region,
             "VPC_ID": vpc.vpcId,
+            "EKS_CLUSTER_SECURITY_GROUP": eksInfra.cluster.attrClusterSecurityGroupId.toString(),
             "STAGE": stageParameter.valueAsString
         })
         new CfnOutput(this, 'MigrationsExportString', {
