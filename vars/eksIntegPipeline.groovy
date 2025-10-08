@@ -143,7 +143,6 @@ def call(Map config = [:]) {
                                 def clusterDetails = readJSON text: env.clusterDetailsJson
                                 def targetCluster = clusterDetails.target
                                 def vpcId = targetCluster.vpcId
-                                def securityGroupIds = "${targetCluster.securityGroupId}"
                                 def subnetIds = "${targetCluster.subnetIds}"
 
                                 sh "npm install"
@@ -153,7 +152,6 @@ def call(Map config = [:]) {
                                             cdk deploy Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} \
                                               --parameters Stage=${maStageName} \
                                               --parameters VPCId=${vpcId} \
-                                              --parameters VPCSecurityGroupIds=${securityGroupIds} \
                                               --parameters VPCSubnetIds=${subnetIds} \
                                               --require-approval never \
                                               --concurrency 3
