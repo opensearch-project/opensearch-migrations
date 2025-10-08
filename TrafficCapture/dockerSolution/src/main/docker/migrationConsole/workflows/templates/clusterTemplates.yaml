@@ -913,3 +913,80 @@ spec:
           - name: cluster-config
             valueFrom:
               path: /tmp/cluster-config.json
+
+    # OpenSearch 3.1 Single Node Template
+    - name: opensearch-3-1-single-node
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+      container:
+        image: dtzar/helm-kubectl:latest
+        command: [sh, -c]
+        args:
+          - |
+            helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+            helm repo update
+            
+            cat > /tmp/opensearch.yml << EOF
+            cluster.name: {{inputs.parameters.cluster-name}}
+            network.host: 0.0.0.0
+            discovery.type: single-node
+            EOF
+            
+            cat > /tmp/opensearch-values.yaml << 'EOF'
+            fullnameOverride: {{inputs.parameters.cluster-name}}
+            nodeGroup: ""
+            image:
+              repository: "opensearchproject/opensearch"
+              tag: "3.1.0"
+            singleNode: true
+            replicas: 1
+            extraEnvs:
+              - name: "OPENSEARCH_INITIAL_ADMIN_PASSWORD"
+                value: "MyStr0ngPassw0rd!"
+            resources:
+              requests:
+                cpu: "500m"
+                memory: "1Gi"
+              limits:
+                cpu: "1000m"
+                memory: "2Gi"
+            persistence:
+              enabled: false
+            opensearchJavaOpts: "-Xmx1g -Xms1g"
+            plugins:
+              enabled: true
+              installList:
+                - "repository-s3"
+            EOF
+            
+            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch \
+              --namespace {{inputs.parameters.namespace}} \
+              --values /tmp/opensearch-values.yaml \
+              --set-file config."opensearch\.yml"=/tmp/opensearch.yml
+            
+            cat > /tmp/cluster-config.json << EOF
+            {
+              "endpoint": "https://{{inputs.parameters.cluster-name}}:9200",
+              "allow_insecure": true,
+              "version": "OS_3.1",
+              "basic_auth": {
+                "username": "admin",
+                "password": "MyStr0ngPassw0rd!"
+              }
+            }
+            EOF
+            
+            kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              --namespace {{inputs.parameters.namespace}}
+            
+            echo "OpenSearch 3.1.0 cluster created successfully"
+            echo "Cluster config:"
+            cat /tmp/cluster-config.json
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              path: /tmp/cluster-config.json

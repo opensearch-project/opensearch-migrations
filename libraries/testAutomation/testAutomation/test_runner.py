@@ -17,7 +17,7 @@ logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logg
 logger = logging.getLogger(__name__)
 
 VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10"]
-VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19"]
+VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19", "OS_3.1"]
 MA_RELEASE_NAME = "ma"
 
 
