@@ -194,6 +194,19 @@ jobs:
           path: |
             **/build/jacoco/*.exec
 
+      - name: Show disk usage
+        if: always()
+        run: df -h
+      - name: Top-level directories
+        if: always()  
+        run: du -h -d1 / | sort -hr | head -n 20
+      - name: Detailed file sizes
+        if: always()
+        run: find / -type f -exec du -h {} + 2>/dev/null | sort -hr | head -n 1000
+      - name: Docker system df
+        if: always()
+        run: docker system df -v
+
   jacoco-aggregate:
     needs: [ gradle-tests ]
     runs-on: ubuntu-latest
@@ -238,9 +251,33 @@ jobs:
         run: gradle -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+      - name: Show disk usage
+        if: always()
+        run: df -h
+      - name: Top-level directories
+        if: always()  
+        run: du -h -d1 / | sort -hr | head -n 20
+      - name: Detailed file sizes
+        if: always()
+        run: find / -type f -exec du -h {} + 2>/dev/null | sort -hr | head -n 1000
+      - name: Docker system df
+        if: always()
+        run: docker system df -v
       - name: Run E2E test script
         run: |
           docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
+      - name: Show disk usage
+        if: always()
+        run: df -h
+      - name: Top-level directories
+        if: always()  
+        run: du -h -d1 / | sort -hr | head -n 20
+      - name: Detailed file sizes
+        if: always()
+        run: find / -type f -exec du -h {} + 2>/dev/null | sort -hr | head -n 1000
+      - name: Docker system df
+        if: always()
+        run: docker system df -v
       - name: Collect Docker, OpenSearch Benchmark, and Shared Logs
         if: always()
         run: |
