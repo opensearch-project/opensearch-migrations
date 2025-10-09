@@ -20,15 +20,15 @@ spec:
           - name: bootstrapServers
             valueFrom:
               expression: "tasks.deploy-kafka-cluster.outputs.parameters.bootstrapServers"
-          - name: captureProxyKafkaSecret
+          - name: captureProxykafkaClientSecretBundle
             valueFrom:
-              expression: "tasks.create-capture-proxy-bundle.outputs.parameters.kafkaSecret"
-          - name: replayerKafkaSecret
+              expression: "tasks.create-capture-proxy-bundle.outputs.parameters.kafkaClientSecretBundle"
+          - name: replayerkafkaClientSecretBundle
             valueFrom:
-              expression: "tasks.create-replayer-bundle.outputs.parameters.kafkaSecret"
-          - name: consoleKafkaSecret
+              expression: "tasks.create-replayer-bundle.outputs.parameters.kafkaClientSecretBundle"
+          - name: consolekafkaClientSecretBundle
             valueFrom:
-              expression: "tasks.create-console-bundle.outputs.parameters.kafkaSecret"
+              expression: "tasks.create-console-bundle.outputs.parameters.kafkaClientSecretBundle"
       dag:
         tasks:
           - name: deploy-kafka-cluster
@@ -203,7 +203,7 @@ spec:
             value: "/opt/kafka-config"
       outputs:
         parameters:
-          - name: kafkaSecret
+          - name: kafkaClientSecretBundle
             valueFrom:
               path: /tmp/secret_name
       script:

@@ -99,7 +99,7 @@ spec:
                 - name: kafka-topic
                   value: "{{tasks.kafka-topic-setup.outputs.parameters.topicName}}"
                 - name: kafka-secret-name
-                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.captureProxyKafkaSecret}}"
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.captureProxykafkaClientSecretBundle}}"
                 - name: capture-proxy-image
                   value: "{{=fromJSON(inputs.parameters['image-config'])['capture-proxy']['image']}}"
                 - name: capture-proxy-pull-policy
@@ -139,7 +139,7 @@ spec:
                 - name: kafka-traffic-group-id
                   value: "{{tasks.id-generator.id}}"
                 - name: kafka-secret-name
-                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.replayerKafkaSecret}}"
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.replayerkafkaClientSecretBundle}}"
                 - name: replicas
                   value: "1"
                 - name: traffic-replayer-image
@@ -167,9 +167,9 @@ spec:
                       "standard": ""
                     }
                 - name: kafka-secret-name
-                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.consoleKafkaSecret}}"
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.consolekafkaClientSecretBundle}}"
                 - name: command
-                  value: /root/start-console.sh
+                  value: tail -f /dev/null
                 - name: migration-console-image
                   value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['image']}}"
                 - name: migration-console-pull-policy
