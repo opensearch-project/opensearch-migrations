@@ -1,0 +1,971 @@
+"""Service layer for workflow operations.
+
+This module provides a service layer that encapsulates all workflow business logic,
+making it reusable by CLI commands, REST APIs, or other interfaces.
+"""
+
+import logging
+import os
+import time
+import copy
+from typing import Dict, Any, Optional, Tuple, TypedDict, List
+from datetime import datetime
+
+import yaml
+import requests
+from kubernetes import client
+
+from ..models.config import WorkflowConfig
+
+logger = logging.getLogger(__name__)
+
+# Terminal workflow phases
+ENDING_PHASES = ["Succeeded", "Failed", "Error", "Stopped", "Terminated"]
+
+
+class WorkflowTemplateResult(TypedDict):
+    """Result of template loading operation."""
+    success: bool
+    workflow_spec: Dict[str, Any]
+    source: str
+    error: Optional[str]
+
+
+class WorkflowSubmitResult(TypedDict):
+    """Result of workflow submission operation."""
+    success: bool
+    workflow_name: str
+    workflow_uid: str
+    namespace: str
+    phase: Optional[str]
+    output_message: Optional[str]
+    error: Optional[str]
+
+
+class WorkflowStopResult(TypedDict):
+    """Result of workflow stop operation."""
+    success: bool
+    workflow_name: str
+    namespace: str
+    message: str
+    error: Optional[str]
+
+
+class WorkflowApproveResult(TypedDict):
+    """Result of workflow approve/resume operation."""
+    success: bool
+    workflow_name: str
+    namespace: str
+    message: str
+    error: Optional[str]
+
+
+class WorkflowListResult(TypedDict):
+    """Result of workflow list operation."""
+    success: bool
+    workflows: List[str]
+    count: int
+    error: Optional[str]
+
+
+class WorkflowStatusResult(TypedDict):
+    """Result of workflow status operation."""
+    success: bool
+    workflow_name: str
+    namespace: str
+    phase: str
+    progress: str
+    started_at: Optional[str]
+    finished_at: Optional[str]
+    steps: List[Dict[str, str]]
+    error: Optional[str]
+
+
+class WorkflowService:
+    """Service class for workflow operations.
+
+    This class encapsulates all workflow business logic including:
+    - Template loading from file system or environment
+    - Parameter injection from configuration
+    - Workflow submission to Argo
+    - Workflow status monitoring
+
+    The service is stateless (except for caching the default template) and
+    can be reused by any interface (CLI, API, scripts).
+    """
+
+    def __init__(self):
+        """Initialize the WorkflowService."""
+        self._default_workflow: Optional[Dict[str, Any]] = None
+
+    def get_default_workflow_spec(self) -> Dict[str, Any]:
+        """Get the embedded hello-world workflow specification with approval gate.
+
+        Returns:
+            Dict containing the default workflow spec with suspend node
+        """
+        if self._default_workflow is None:
+            # Generate unique message for verification
+            timestamp = datetime.now().isoformat()
+
+            self._default_workflow = {
+                "metadata": {
+                    "generateName": "hello-world-",
+                    "labels": {
+                        "workflows.argoproj.io/completed": "false"
+                    }
+                },
+                "spec": {
+                    "serviceAccountName": "argo-workflow-executor",
+                    "templates": [
+                        {
+                            "name": "main",
+                            "steps": [
+                                [
+                                    {
+                                        "name": "step1",
+                                        "template": "hello-step"
+                                    }
+                                ],
+                                [
+                                    {
+                                        "name": "approval-gate",
+                                        "template": "approve"
+                                    }
+                                ],
+                                [
+                                    {
+                                        "name": "step2",
+                                        "template": "goodbye-step"
+                                    }
+                                ]
+                            ]
+                        },
+                        {
+                            "name": "hello-step",
+                            "container": {
+                                "name": "",
+                                "image": "busybox",
+                                "command": ["sh", "-c"],
+                                "args": [
+                                    f'echo "Step 1: Hello from workflow at {timestamp}"'
+                                ],
+                                "resources": {}
+                            }
+                        },
+                        {
+                            "name": "approve",
+                            "suspend": {}
+                        },
+                        {
+                            "name": "goodbye-step",
+                            "outputs": {
+                                "parameters": [
+                                    {
+                                        "name": "message",
+                                        "valueFrom": {
+                                            "path": "/tmp/message.txt"
+                                        }
+                                    }
+                                ]
+                            },
+                            "container": {
+                                "name": "",
+                                "image": "busybox",
+                                "command": ["sh", "-c"],
+                                "args": [
+                                    f'echo "Step 2: Goodbye from workflow at {timestamp}" | tee /tmp/message.txt'
+                                ],
+                                "resources": {}
+                            }
+                        }
+                    ],
+                    "entrypoint": "main",
+                    "arguments": {}
+                }
+            }
+
+        return copy.deepcopy(self._default_workflow)
+
+    def load_workflow_template(
+        self,
+        template_path: Optional[str] = None
+    ) -> WorkflowTemplateResult:
+        """Load workflow template from file path or use default.
+
+        Args:
+            template_path: Optional file path to workflow YAML
+
+        Returns:
+            WorkflowTemplateResult dict with success status, workflow_spec, source, and error
+        """
+        # Determine the template path
+        path = template_path or os.environ.get('WORKFLOW_TEMPLATE_PATH')
+
+        if not path:
+            # No template path specified, use default
+            logger.info("No WORKFLOW_TEMPLATE_PATH set, using default hello-world workflow")
+            return WorkflowTemplateResult(
+                success=True,
+                workflow_spec=self.get_default_workflow_spec(),
+                source='embedded',
+                error=None
+            )
+
+        # Try to load from file
+        try:
+            logger.info(f"Loading workflow template from: {path}")
+
+            with open(path, 'r') as f:
+                template_data = yaml.safe_load(f)
+
+            if not template_data:
+                raise ValueError("Template file is empty")
+
+            # Basic validation - check for required workflow structure
+            if 'spec' not in template_data:
+                raise ValueError("Template must contain 'spec' section")
+
+            logger.info(f"Successfully loaded workflow template from: {path}")
+            return WorkflowTemplateResult(
+                success=True,
+                workflow_spec=template_data,
+                source=path,
+                error=None
+            )
+
+        except FileNotFoundError:
+            error_msg = f"Template file not found: {path}"
+            logger.error(error_msg)
+            # Fall back to default on error
+            logger.info("Falling back to default hello-world workflow")
+            return WorkflowTemplateResult(
+                success=False,
+                workflow_spec=self.get_default_workflow_spec(),
+                source='embedded',
+                error=error_msg
+            )
+
+        except yaml.YAMLError as e:
+            error_msg = f"Invalid YAML in template file {path}: {e}"
+            logger.error(error_msg)
+            # Fall back to default on error
+            logger.info("Falling back to default hello-world workflow")
+            return WorkflowTemplateResult(
+                success=False,
+                workflow_spec=self.get_default_workflow_spec(),
+                source='embedded',
+                error=error_msg
+            )
+
+        except Exception as e:
+            error_msg = f"Error loading template from {path}: {e}"
+            logger.error(error_msg)
+            # Fall back to default on error
+            logger.info("Falling back to default hello-world workflow")
+            return WorkflowTemplateResult(
+                success=False,
+                workflow_spec=self.get_default_workflow_spec(),
+                source='embedded',
+                error=error_msg
+            )
+
+    def inject_parameters(
+        self,
+        workflow_spec: Dict[str, Any],
+        config: Optional[WorkflowConfig]
+    ) -> Dict[str, Any]:
+        """Inject parameters from WorkflowConfig into workflow specification.
+
+        Args:
+            workflow_spec: The workflow specification dict
+            config: WorkflowConfig containing parameters to inject
+
+        Returns:
+            Modified workflow_spec with parameters injected
+        """
+        # Create deep copy to avoid mutating the input
+        workflow = copy.deepcopy(workflow_spec)
+
+        # If no config or config is empty, return workflow as-is
+        if not config or not config.data:
+            logger.debug("No config provided or config is empty, no parameters to inject")
+            return workflow
+
+        # Get parameters from config
+        config_params = config.data.get('parameters', {})
+
+        if not config_params:
+            logger.debug("No parameters found in config")
+            return workflow
+
+        logger.info(f"Injecting {len(config_params)} parameters from config")
+
+        # Ensure spec.arguments.parameters exists
+        if 'spec' not in workflow:
+            workflow['spec'] = {}
+        if 'arguments' not in workflow['spec']:
+            workflow['spec']['arguments'] = {}
+        if 'parameters' not in workflow['spec']['arguments']:
+            workflow['spec']['arguments']['parameters'] = []
+
+        params_list = workflow['spec']['arguments']['parameters']
+
+        # Inject each parameter from config
+        for param_name, param_value in config_params.items():
+            # Check if parameter already exists in workflow
+            existing_param = None
+            for param in params_list:
+                if param.get('name') == param_name:
+                    existing_param = param
+                    break
+
+            if existing_param:
+                # Update existing parameter
+                existing_param['value'] = param_value
+                logger.debug(f"Updated existing parameter: {param_name}")
+            else:
+                # Add new parameter
+                params_list.append({
+                    'name': param_name,
+                    'value': param_value
+                })
+                logger.debug(f"Added new parameter: {param_name}")
+
+        return workflow
+
+    def submit_workflow_to_argo(
+        self,
+        workflow_spec: Dict[str, Any],
+        namespace: str,
+        argo_server: str,
+        token: Optional[str] = None,
+        insecure: bool = False
+    ) -> WorkflowSubmitResult:
+        """Submit workflow to Argo Workflows via REST API.
+
+        Args:
+            workflow_spec: Complete workflow specification
+            namespace: Kubernetes namespace
+            argo_server: Argo Server URL
+            token: Bearer token for authentication
+            insecure: Whether to skip TLS verification
+
+        Returns:
+            WorkflowSubmitResult dict with success status, workflow_name, workflow_uid, and error
+        """
+        try:
+            # Prepare the request body
+            request_body = {
+                "namespace": namespace,
+                "serverDryRun": False,
+                "workflow": workflow_spec
+            }
+
+            # Ensure namespace is set in workflow metadata
+            if 'metadata' not in workflow_spec:
+                request_body['workflow']['metadata'] = {}
+            request_body['workflow']['metadata']['namespace'] = namespace
+
+            # Prepare headers
+            headers = {
+                "Content-Type": "application/json"
+            }
+
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+            # Submit the workflow
+            url = f"{argo_server}/api/v1/workflows/{namespace}"
+
+            logger.info(f"Submitting workflow to {url}")
+            logger.debug(f"Workflow spec: {workflow_spec}")
+
+            response = requests.post(
+                url,
+                json=request_body,
+                headers=headers,
+                verify=not insecure
+            )
+
+            response.raise_for_status()
+
+            # Parse response
+            result = response.json()
+            workflow_name = result.get("metadata", {}).get("name", "unknown")
+            workflow_uid = result.get("metadata", {}).get("uid", "unknown")
+
+            logger.info(f"Workflow {workflow_name} submitted successfully")
+
+            return WorkflowSubmitResult(
+                success=True,
+                workflow_name=workflow_name,
+                workflow_uid=workflow_uid,
+                namespace=namespace,
+                phase=None,
+                output_message=None,
+                error=None
+            )
+
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Failed to submit workflow: {e}"
+            logger.error(error_msg)
+
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"Failed to submit workflow: {error_detail}"
+                except:
+                    error_msg = f"Failed to submit workflow: {e.response.text}"
+
+            return WorkflowSubmitResult(
+                success=False,
+                workflow_name="",
+                workflow_uid="",
+                namespace=namespace,
+                phase=None,
+                output_message=None,
+                error=error_msg
+            )
+
+        except Exception as e:
+            error_msg = f"Unexpected error submitting workflow: {e}"
+            logger.exception(error_msg)
+
+            return WorkflowSubmitResult(
+                success=False,
+                workflow_name="",
+                workflow_uid="",
+                namespace=namespace,
+                phase=None,
+                output_message=None,
+                error=error_msg
+            )
+
+    def list_workflows(
+        self,
+        namespace: str,
+        argo_server: str,
+        token: Optional[str] = None,
+        insecure: bool = False,
+        exclude_completed: bool = False,
+        phase_filter: Optional[str] = None
+    ) -> WorkflowListResult:
+        """List workflows in a namespace via Argo Workflows REST API.
+
+        Args:
+            namespace: Kubernetes namespace
+            argo_server: Argo Server URL
+            token: Bearer token for authentication
+            insecure: Whether to skip TLS verification
+            exclude_completed: Only return running workflows
+            phase_filter: Filter by specific phase
+
+        Returns:
+            WorkflowListResult dict with success status, workflows list, count, and error
+        """
+        try:
+            # Prepare headers
+            headers = {
+                "Content-Type": "application/json"
+            }
+
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+            # Construct URL for list endpoint
+            url = f"{argo_server}/api/v1/workflows/{namespace}"
+
+            logger.info(f"Listing workflows in namespace {namespace} (exclude_completed={exclude_completed})")
+            logger.debug(f"List request URL: {url}")
+
+            # Make GET request to list workflows
+            response = requests.get(
+                url,
+                headers=headers,
+                verify=not insecure
+            )
+
+            # Handle response
+            if response.status_code == 200:
+                result = response.json()
+                items = result.get("items", [])
+
+                # Filter workflows based on flags
+                workflow_names = []
+                for item in items:
+                    name = item.get("metadata", {}).get("name", "")
+                    if not name:
+                        continue
+
+                    phase = item.get("status", {}).get("phase", "Unknown")
+
+                    # Apply exclude_completed filter if specified
+                    if exclude_completed and phase in ENDING_PHASES:
+                        continue
+
+                    # Apply phase_filter - special case for 'Running' with suspended check
+                    if phase_filter == 'Running':
+                        # For 'Running' phase, check if workflow has a suspend node that's actually running
+                        # This ensures we only show workflows waiting for approval, not already approved
+                        if phase != 'Running':
+                            continue
+
+                        # Check nodes to see if there's an active suspend
+                        nodes = item.get("status", {}).get("nodes", {})
+                        has_active_suspend = False
+
+                        for node_id, node in nodes.items():
+                            node_type = node.get("type", "")
+                            node_phase = node.get("phase", "")
+
+                            # A workflow is waiting for approval if it has a Suspend node in Running phase
+                            if node_type == "Suspend" and node_phase == "Running":
+                                has_active_suspend = True
+                                break
+
+                        if not has_active_suspend:
+                            continue
+                    elif phase_filter and phase != phase_filter:
+                        # For other phase filters, do exact match
+                        continue
+
+                    workflow_names.append(name)
+
+                logger.info(f"Found {len(workflow_names)} workflows in namespace {namespace}")
+                return WorkflowListResult(
+                    success=True,
+                    workflows=workflow_names,
+                    count=len(workflow_names),
+                    error=None
+                )
+            else:
+                error_msg = f"Failed to list workflows: HTTP {response.status_code}"
+                try:
+                    error_detail = response.json()
+                    error_msg = f"Failed to list workflows: {error_detail}"
+                except:
+                    error_msg = f"Failed to list workflows: {response.text}"
+
+                logger.error(error_msg)
+                return WorkflowListResult(
+                    success=False,
+                    workflows=[],
+                    count=0,
+                    error=error_msg
+                )
+
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Network error listing workflows: {e}"
+            logger.error(error_msg)
+
+            return WorkflowListResult(
+                success=False,
+                workflows=[],
+                count=0,
+                error=str(e)
+            )
+
+        except Exception as e:
+            error_msg = f"Unexpected error listing workflows: {e}"
+            logger.exception(error_msg)
+
+            return WorkflowListResult(
+                success=False,
+                workflows=[],
+                count=0,
+                error=str(e)
+            )
+
+    def get_workflow_status(
+        self,
+        workflow_name: str,
+        namespace: str,
+        argo_server: str,
+        token: Optional[str] = None,
+        insecure: bool = False
+    ) -> WorkflowStatusResult:
+        """Get detailed status of a specific workflow.
+
+        Args:
+            workflow_name: Name of the workflow
+            namespace: Kubernetes namespace
+            argo_server: Argo Server URL
+            token: Optional bearer token for authentication
+            insecure: Whether to skip TLS verification
+
+        Returns:
+            WorkflowStatusResult with detailed status information
+        """
+        try:
+            # Prepare headers
+            headers = {
+                "Content-Type": "application/json"
+            }
+
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+            # Get workflow details
+            url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
+
+            logger.info(f"Getting status for workflow {workflow_name}")
+
+            response = requests.get(
+                url,
+                headers=headers,
+                verify=not insecure
+            )
+
+            if response.status_code != 200:
+                error_msg = f"Failed to get workflow status: HTTP {response.status_code}"
+                return WorkflowStatusResult(
+                    success=False,
+                    workflow_name=workflow_name,
+                    namespace=namespace,
+                    phase="Unknown",
+                    progress="0/0",
+                    started_at=None,
+                    finished_at=None,
+                    steps=[],
+                    error=error_msg
+                )
+
+            workflow = response.json()
+            status = workflow.get("status", {})
+
+            phase = status.get("phase", "Unknown")
+            progress = status.get("progress", "0/0")
+            started_at = status.get("startedAt")
+            finished_at = status.get("finishedAt")
+
+            # Parse nodes to extract step information
+            steps = []
+            nodes = status.get("nodes", {})
+
+            # Find all step nodes (nodes with display names that represent actual steps)
+            for node_id, node in nodes.items():
+                node_type = node.get("type", "")
+                display_name = node.get("displayName", "")
+                node_phase = node.get("phase", "Unknown")
+                started_at = node.get("startedAt", "")
+
+                # Include Pod and Suspend nodes (actual executable steps)
+                if node_type in ["Pod", "Suspend"]:
+                    steps.append({
+                        "name": display_name,
+                        "phase": node_phase,
+                        "type": node_type,
+                        "started_at": started_at
+                    })
+
+            # Sort steps chronologically by start time
+            # Nodes without startedAt (pending) will sort to the end
+            steps.sort(key=lambda x: x.get("started_at", "9999-99-99"))
+
+            return WorkflowStatusResult(
+                success=True,
+                workflow_name=workflow_name,
+                namespace=namespace,
+                phase=phase,
+                progress=progress,
+                started_at=started_at,
+                finished_at=finished_at,
+                steps=steps,
+                error=None
+            )
+
+        except Exception as e:
+            error_msg = f"Error getting workflow status: {e}"
+            logger.error(error_msg)
+
+            return WorkflowStatusResult(
+                success=False,
+                workflow_name=workflow_name,
+                namespace=namespace,
+                phase="Unknown",
+                progress="0/0",
+                started_at=None,
+                finished_at=None,
+                steps=[],
+                error=error_msg
+            )
+
+    def stop_workflow(
+        self,
+        workflow_name: str,
+        namespace: str,
+        argo_server: str,
+        token: Optional[str] = None,
+        insecure: bool = False
+    ) -> WorkflowStopResult:
+        """Stop a running workflow via Argo Workflows REST API.
+
+        Args:
+            workflow_name: Name of the workflow to stop
+            namespace: Kubernetes namespace
+            argo_server: Argo Server URL
+            token: Bearer token for authentication
+            insecure: Whether to skip TLS verification
+
+        Returns:
+            WorkflowStopResult dict with success status, message, and error
+        """
+        try:
+            # Prepare headers
+            headers = {
+                "Content-Type": "application/json"
+            }
+
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+            # Construct URL for stop endpoint
+            url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}/stop"
+
+            logger.info(f"Stopping workflow {workflow_name} in namespace {namespace}")
+            logger.debug(f"Stop request URL: {url}")
+
+            # Make PUT request to stop the workflow
+            response = requests.put(
+                url,
+                headers=headers,
+                verify=not insecure
+            )
+
+            # Handle response
+            if response.status_code == 200:
+                logger.info(f"Workflow {workflow_name} stopped successfully")
+                return WorkflowStopResult(
+                    success=True,
+                    workflow_name=workflow_name,
+                    namespace=namespace,
+                    message=f"Workflow {workflow_name} stopped successfully",
+                    error=None
+                )
+            elif response.status_code == 404:
+                error_msg = f"Workflow {workflow_name} not found in namespace {namespace}"
+                logger.error(error_msg)
+                return WorkflowStopResult(
+                    success=False,
+                    workflow_name=workflow_name,
+                    namespace=namespace,
+                    message=error_msg,
+                    error=error_msg
+                )
+            else:
+                error_msg = f"Failed to stop workflow: HTTP {response.status_code}"
+                try:
+                    error_detail = response.json()
+                    error_msg = f"Failed to stop workflow: {error_detail}"
+                except:
+                    error_msg = f"Failed to stop workflow: {response.text}"
+
+                logger.error(error_msg)
+                return WorkflowStopResult(
+                    success=False,
+                    workflow_name=workflow_name,
+                    namespace=namespace,
+                    message=error_msg,
+                    error=error_msg
+                )
+
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Network error stopping workflow: {e}"
+            logger.error(error_msg)
+
+            return WorkflowStopResult(
+                success=False,
+                workflow_name=workflow_name,
+                namespace=namespace,
+                message=error_msg,
+                error=str(e)
+            )
+
+        except Exception as e:
+            error_msg = f"Unexpected error stopping workflow: {e}"
+            logger.exception(error_msg)
+
+            return WorkflowStopResult(
+                success=False,
+                workflow_name=workflow_name,
+                namespace=namespace,
+                message=error_msg,
+                error=str(e)
+            )
+
+    def approve_workflow(
+        self,
+        workflow_name: str,
+        namespace: str,
+        argo_server: str,
+        token: Optional[str] = None,
+        insecure: bool = False
+    ) -> WorkflowApproveResult:
+        """Approve/resume a suspended workflow via Argo Workflows REST API.
+
+        Args:
+            workflow_name: Name of the workflow to approve
+            namespace: Kubernetes namespace
+            argo_server: Argo Server URL
+            token: Bearer token for authentication
+            insecure: Whether to skip TLS verification
+
+        Returns:
+            WorkflowApproveResult dict with success status, message, and error
+        """
+        try:
+            # Prepare headers
+            headers = {
+                "Content-Type": "application/json"
+            }
+
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+            # Construct URL for resume endpoint
+            url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}/resume"
+
+            logger.info(f"Resuming workflow {workflow_name} in namespace {namespace}")
+            logger.debug(f"Resume request URL: {url}")
+
+            # Make PUT request to resume the workflow
+            response = requests.put(
+                url,
+                headers=headers,
+                verify=not insecure
+            )
+
+            # Handle response
+            if response.status_code == 200:
+                logger.info(f"Workflow {workflow_name} resumed successfully")
+                return WorkflowApproveResult(
+                    success=True,
+                    workflow_name=workflow_name,
+                    namespace=namespace,
+                    message=f"Workflow {workflow_name} resumed successfully",
+                    error=None
+                )
+            elif response.status_code == 404:
+                error_msg = f"Workflow {workflow_name} not found in namespace {namespace}"
+                logger.error(error_msg)
+                return WorkflowApproveResult(
+                    success=False,
+                    workflow_name=workflow_name,
+                    namespace=namespace,
+                    message=error_msg,
+                    error=error_msg
+                )
+            else:
+                error_msg = f"Failed to resume workflow: HTTP {response.status_code}"
+                try:
+                    error_detail = response.json()
+                    error_msg = f"Failed to resume workflow: {error_detail}"
+                except:
+                    error_msg = f"Failed to resume workflow: {response.text}"
+
+                logger.error(error_msg)
+                return WorkflowApproveResult(
+                    success=False,
+                    workflow_name=workflow_name,
+                    namespace=namespace,
+                    message=error_msg,
+                    error=error_msg
+                )
+
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Network error resuming workflow: {e}"
+            logger.error(error_msg)
+
+            return WorkflowApproveResult(
+                success=False,
+                workflow_name=workflow_name,
+                namespace=namespace,
+                message=error_msg,
+                error=str(e)
+            )
+
+        except Exception as e:
+            error_msg = f"Unexpected error resuming workflow: {e}"
+            logger.exception(error_msg)
+
+            return WorkflowApproveResult(
+                success=False,
+                workflow_name=workflow_name,
+                namespace=namespace,
+                message=error_msg,
+                error=str(e)
+            )
+
+    def wait_for_workflow_completion(
+        self,
+        namespace: str,
+        workflow_name: str,
+        timeout: int = 120,
+        interval: int = 2
+    ) -> Tuple[str, Optional[str]]:
+        """Wait for workflow to reach terminal state and retrieve output.
+
+        Args:
+            namespace: Kubernetes namespace
+            workflow_name: Name of workflow to monitor
+            timeout: Maximum seconds to wait
+            interval: Seconds between status checks
+
+        Returns:
+            Tuple of (phase, output_message)
+
+        Raises:
+            TimeoutError: If timeout is exceeded
+        """
+        start_time = time.time()
+        custom_api = client.CustomObjectsApi()
+
+        while time.time() - start_time < timeout:
+            try:
+                # Get workflow status
+                workflow = custom_api.get_namespaced_custom_object(
+                    group="argoproj.io",
+                    version="v1alpha1",
+                    namespace=namespace,
+                    plural="workflows",
+                    name=workflow_name
+                )
+
+                phase = workflow.get("status", {}).get("phase", "Unknown")
+                elapsed = int(time.time() - start_time)
+
+                logger.debug(f"[{elapsed}s] Workflow {workflow_name} phase: {phase}")
+
+                # Check if workflow reached a terminal state
+                if phase in ENDING_PHASES:
+                    # Extract output parameter
+                    output_message = None
+                    nodes = workflow.get("status", {}).get("nodes", {})
+
+                    for node_id, node in nodes.items():
+                        outputs = node.get("outputs", {})
+                        parameters = outputs.get("parameters", [])
+
+                        for param in parameters:
+                            if param.get("name") == "message":
+                                output_message = param.get("value", "").strip()
+                                break
+
+                        if output_message:
+                            break
+
+                    logger.info(f"Workflow {workflow_name} completed with phase: {phase}")
+                    return phase, output_message
+
+                # Wait before next check
+                time.sleep(interval)
+
+            except Exception as e:
+                logger.error(f"Error checking workflow status: {e}")
+                raise
+
+        # Timeout reached
+        error_msg = f"Workflow {workflow_name} did not complete within {timeout} seconds"
+        logger.error(error_msg)
+        raise TimeoutError(error_msg)

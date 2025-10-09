@@ -14,7 +14,7 @@ rules:
     resources: ["secrets"]
     verbs: ["list"]
   - apiGroups: [ "" ]
-    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log"]
+    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log", "services"]
     verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
   - apiGroups: [""]
     resources: ["pods/attach"]

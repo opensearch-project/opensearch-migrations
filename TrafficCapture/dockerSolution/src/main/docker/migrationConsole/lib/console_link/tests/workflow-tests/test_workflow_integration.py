@@ -9,7 +9,9 @@ import logging
 import os
 import pytest
 import tempfile
+import time
 import uuid
+import requests
 from click.testing import CliRunner
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
@@ -25,7 +27,7 @@ logger = logging.getLogger(__name__)
 @pytest.fixture(scope="session")
 def k3s_container():
     """Set up k3s container for all workflow tests"""
-    print("\nStarting k3s container for workflow tests...")
+    logger.info("\nStarting k3s container for workflow tests...")
 
     # Start k3s container
     container = K3SContainer(image="rancher/k3s:latest")
@@ -47,13 +49,125 @@ def k3s_container():
 
     yield container
 
-    print("\nCleaning up k3s container...")
+    logger.info("\nCleaning up k3s container...")
     # Clean up
     container.stop()
     if os.path.exists(kubeconfig_path):
         os.unlink(kubeconfig_path)
     if 'KUBECONFIG' in os.environ:
         del os.environ['KUBECONFIG']
+
+
+@pytest.fixture(scope="session")
+def argo_workflows(k3s_container):
+    """Install Argo Workflows in the k3s cluster"""
+    logger.info("\nInstalling Argo Workflows in k3s...")
+
+    # Argo Workflows version to install
+    argo_version = "v3.5.12"
+    argo_namespace = "argo"
+
+    v1 = client.CoreV1Api()
+    apps_v1 = client.AppsV1Api()
+
+    # Create argo namespace
+    namespace = client.V1Namespace(
+        metadata=client.V1ObjectMeta(name=argo_namespace)
+    )
+    try:
+        v1.create_namespace(body=namespace)
+        logger.info(f"Created namespace: {argo_namespace}")
+    except ApiException as e:
+        if e.status != 409:  # Ignore if already exists
+            raise
+        logger.info(f"Namespace {argo_namespace} already exists")
+
+    # Download and apply the Argo Workflows manifest
+    manifest_url = f"https://github.com/argoproj/argo-workflows/releases/download/{argo_version}/quick-start-minimal.yaml"
+
+    try:
+        logger.info(f"Downloading Argo Workflows manifest from {manifest_url}")
+        response = requests.get(manifest_url, timeout=30)
+        response.raise_for_status()
+        manifest_content = response.text
+
+        # Write manifest to temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(manifest_content)
+            manifest_path = f.name
+
+        # Apply the manifest using Kubernetes Python client
+        logger.info("Applying Argo Workflows manifest...")
+        from kubernetes import utils
+        k8s_client = client.ApiClient()
+
+        try:
+            utils.create_from_yaml(
+                k8s_client,
+                manifest_path,
+                namespace=argo_namespace
+            )
+            logger.info("Argo Workflows manifest applied successfully")
+        except Exception as apply_error:
+            # Some resources might already exist, which is okay
+            logger.info(f"Note during apply: {apply_error}")
+            logger.info("Continuing with installation verification...")
+
+        # Clean up temporary file
+        if os.path.exists(manifest_path):
+            os.unlink(manifest_path)
+
+    except Exception as e:
+        logger.info(f"Error installing Argo Workflows: {e}")
+        raise
+
+    # Wait for Argo Workflows pods to be ready
+    logger.info("Waiting for Argo Workflows pods to be ready...")
+    max_wait_time = 120  # 2 minutes
+    start_time = time.time()
+
+    while time.time() - start_time < max_wait_time:
+        try:
+            # Check if argo-server deployment is ready
+            server_deployment = apps_v1.read_namespaced_deployment(
+                name="argo-server",
+                namespace=argo_namespace
+            )
+
+            # Check if workflow-controller deployment is ready
+            controller_deployment = apps_v1.read_namespaced_deployment(
+                name="workflow-controller",
+                namespace=argo_namespace
+            )
+
+            server_ready = (
+                server_deployment.status.ready_replicas is not None and
+                server_deployment.status.ready_replicas >= 1
+            )
+
+            controller_ready = (
+                controller_deployment.status.ready_replicas is not None and
+                controller_deployment.status.ready_replicas >= 1
+            )
+
+            if server_ready and controller_ready:
+                logger.info("Argo Workflows is ready!")
+                break
+
+        except ApiException:
+            pass  # Deployments might not exist yet
+
+        time.sleep(2)
+    else:
+        raise TimeoutError("Argo Workflows pods did not become ready in time")
+
+    yield {
+        "namespace": argo_namespace,
+        "version": argo_version
+    }
+
+    # Cleanup is handled by k3s_container fixture
+    logger.info("\nArgo Workflows cleanup (handled by k3s container cleanup)")
 
 
 @pytest.fixture(scope="function")
@@ -70,7 +184,7 @@ def test_namespace(k3s_container):
 
     try:
         v1.create_namespace(body=namespace)
-        print(f"\nCreated test namespace: {namespace_name}")
+        logger.info(f"\nCreated test namespace: {namespace_name}")
     except ApiException as e:
         if e.status != 409:  # Ignore if already exists
             raise
@@ -78,7 +192,7 @@ def test_namespace(k3s_container):
     yield namespace_name
 
     # Clean up the namespace after the test
-    print(f"\nDeleting test namespace: {namespace_name}")
+    logger.info(f"\nDeleting test namespace: {namespace_name}")
     try:
         v1.delete_namespace(name=namespace_name)
     except ApiException as e:
@@ -397,6 +511,192 @@ class TestWorkflowCLICommands:
         result = runner.invoke(workflow_cli, ['util', 'completions', 'fish'])
         assert result.exit_code == 0
         assert "complete" in result.output
+
+
+@pytest.mark.slow
+class TestArgoWorkflows:
+    """Integration tests for Argo Workflows installation in k3s"""
+
+    def test_argo_workflows_installation(self, argo_workflows):
+        """Test that Argo Workflows is properly installed in k3s"""
+        argo_namespace = argo_workflows["namespace"]
+        argo_version = argo_workflows["version"]
+
+        logger.info(f"\nVerifying Argo Workflows {argo_version} installation in namespace {argo_namespace}")
+
+        v1 = client.CoreV1Api()
+        apps_v1 = client.AppsV1Api()
+
+        # Verify argo namespace exists
+        namespaces = v1.list_namespace()
+        namespace_names = [ns.metadata.name for ns in namespaces.items]
+        assert argo_namespace in namespace_names, f"Argo namespace {argo_namespace} not found"
+        logger.info(f"✓ Namespace {argo_namespace} exists")
+
+        # Verify argo-server deployment exists and is ready
+        server_deployment = apps_v1.read_namespaced_deployment(
+            name="argo-server",
+            namespace=argo_namespace
+        )
+        assert server_deployment is not None, "argo-server deployment not found"
+        assert server_deployment.status.ready_replicas >= 1, "argo-server deployment not ready"
+        logger.info(f"✓ argo-server deployment is ready ({server_deployment.status.ready_replicas} replicas)")
+
+        # Verify workflow-controller deployment exists and is ready
+        controller_deployment = apps_v1.read_namespaced_deployment(
+            name="workflow-controller",
+            namespace=argo_namespace
+        )
+        assert controller_deployment is not None, "workflow-controller deployment not found"
+        assert controller_deployment.status.ready_replicas >= 1, "workflow-controller deployment not ready"
+        logger.info(
+            f"✓ workflow-controller deployment is ready ({controller_deployment.status.ready_replicas} replicas)")
+
+        # Verify argo-server service exists
+        services = v1.list_namespaced_service(namespace=argo_namespace)
+        service_names = [svc.metadata.name for svc in services.items]
+        assert "argo-server" in service_names, "argo-server service not found"
+        logger.info(f"✓ argo-server service exists")
+
+        # Verify pods are running
+        pods = v1.list_namespaced_pod(namespace=argo_namespace)
+        running_pods = [pod for pod in pods.items if pod.status.phase == "Running"]
+        assert len(running_pods) >= 2, f"Expected at least 2 running pods, found {len(running_pods)}"
+        logger.info(f"✓ Found {len(running_pods)} running pods in {argo_namespace} namespace")
+
+        for pod in running_pods:
+            logger.info(f"  - {pod.metadata.name}: {pod.status.phase}")
+
+        logger.info(f"\n✓ Argo Workflows {argo_version} is successfully installed and running!")
+
+    def test_workflow_submit_hello_world(self, argo_workflows):
+        """Test submitting a hello-world workflow to Argo via Kubernetes API with output verification"""
+        argo_namespace = argo_workflows["namespace"]
+
+        logger.info(f"\nTesting workflow submission to Argo in namespace {argo_namespace}")
+
+        # Create unique message for this test
+        test_message = f"hello world from test {uuid.uuid4().hex[:8]}"
+
+        # Create workflow specification as a Kubernetes custom resource with output parameter
+        workflow_spec = {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Workflow",
+            "metadata": {
+                "generateName": "test-hello-world-",
+                "namespace": argo_namespace,
+                "labels": {
+                    "workflows.argoproj.io/completed": "false"
+                }
+            },
+            "spec": {
+                "templates": [
+                    {
+                        "name": "hello-world",
+                        "outputs": {
+                            "parameters": [
+                                {
+                                    "name": "message",
+                                    "valueFrom": {
+                                        "path": "/tmp/message.txt"
+                                    }
+                                }
+                            ]
+                        },
+                        "container": {
+                            "image": "busybox",
+                            "command": ["sh", "-c"],
+                            "args": [f'echo "{test_message}" | tee /tmp/message.txt']
+                        }
+                    }
+                ],
+                "entrypoint": "hello-world"
+            }
+        }
+
+        # Submit workflow using Kubernetes API
+        custom_api = client.CustomObjectsApi()
+
+        try:
+            logger.info("Submitting workflow via Kubernetes API...")
+
+            # Create the workflow custom resource
+            result = custom_api.create_namespaced_custom_object(
+                group="argoproj.io",
+                version="v1alpha1",
+                namespace=argo_namespace,
+                plural="workflows",
+                body=workflow_spec
+            )
+
+            workflow_name = result.get("metadata", {}).get("name")
+            workflow_uid = result.get("metadata", {}).get("uid")
+
+            assert workflow_name is not None, "Workflow name not returned"
+            assert workflow_name.startswith("test-hello-world-"), f"Unexpected workflow name: {workflow_name}"
+            assert workflow_uid is not None, "Workflow UID not returned"
+
+            logger.info(f"✓ Workflow submitted successfully!")
+            logger.info(f"  Name: {workflow_name}")
+            logger.info(f"  UID: {workflow_uid}")
+
+            # Wait for workflow to complete
+            logger.info("Waiting for workflow to complete...")
+            max_wait = 60  # 60 seconds timeout
+            start_time = time.time()
+            workflow_phase = "Unknown"
+
+            while time.time() - start_time < max_wait:
+                workflow = custom_api.get_namespaced_custom_object(
+                    group="argoproj.io",
+                    version="v1alpha1",
+                    namespace=argo_namespace,
+                    plural="workflows",
+                    name=workflow_name
+                )
+
+                workflow_phase = workflow.get("status", {}).get("phase", "Unknown")
+                logger.info(f"  Workflow phase: {workflow_phase}")
+
+                # Check if workflow reached a terminal state
+                if workflow_phase in ["Succeeded", "Failed", "Error"]:
+                    break
+
+                time.sleep(2)
+
+            assert workflow is not None, "Workflow not found in Kubernetes"
+            assert workflow["metadata"]["name"] == workflow_name
+            logger.info(f"✓ Workflow verified in Kubernetes")
+
+            # Verify workflow succeeded
+            assert workflow_phase == "Succeeded", f"Workflow did not succeed, phase: {workflow_phase}"
+            logger.info(f"✓ Workflow completed successfully with phase: {workflow_phase}")
+
+            # Extract and verify output parameter
+            output_message = None
+            nodes = workflow.get("status", {}).get("nodes", {})
+
+            for node_id, node in nodes.items():
+                outputs = node.get("outputs", {})
+                parameters = outputs.get("parameters", [])
+
+                for param in parameters:
+                    if param.get("name") == "message":
+                        output_message = param.get("value", "").strip()
+                        break
+
+                if output_message:
+                    break
+
+            assert output_message is not None, "Could not retrieve workflow output"
+            assert test_message in output_message, \
+                f"Output doesn't match expected message. Expected: '{test_message}', Got: '{output_message}'"
+
+            logger.info(f"✓ Container output verified: {output_message}")
+            logger.info(f"✓ Output verification successful - container executed correctly!")
+
+        except ApiException as e:
+            pytest.fail(f"Failed to submit workflow via Kubernetes API: {e}")
 
 
 def test_k3s_container_support():
