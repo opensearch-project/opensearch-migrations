@@ -98,8 +98,8 @@ spec:
                   value: "{{tasks.kafka-cluster-setup.outputs.parameters.bootstrapServers}}"
                 - name: kafka-topic
                   value: "{{tasks.kafka-topic-setup.outputs.parameters.topicName}}"
-                - name: kafka-secret-name
-                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.captureProxykafkaClientSecretBundle}}"
+                - name: kafka-client-secret-bundle
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.captureProxyKafkaClientSecretBundle}}"
                 - name: capture-proxy-image
                   value: "{{=fromJSON(inputs.parameters['image-config'])['capture-proxy']['image']}}"
                 - name: capture-proxy-pull-policy
@@ -138,8 +138,8 @@ spec:
                   value: "{{tasks.kafka-topic-setup.outputs.parameters.topicName}}"
                 - name: kafka-traffic-group-id
                   value: "{{tasks.id-generator.id}}"
-                - name: kafka-secret-name
-                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.replayerkafkaClientSecretBundle}}"
+                - name: kafka-client-secret-bundle
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.replayerKafkaClientSecretBundle}}"
                 - name: replicas
                   value: "1"
                 - name: traffic-replayer-image
@@ -166,8 +166,8 @@ spec:
                       "broker_endpoints": "{{tasks.kafka-cluster-setup.outputs.parameters.bootstrapServers}}",
                       "standard": ""
                     }
-                - name: kafka-secret-name
-                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.consolekafkaClientSecretBundle}}"
+                - name: kafka-client-secret-bundle
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.consoleKafkaClientSecretBundle}}"
                 - name: command
                   value: tail -f /dev/null
                 - name: migration-console-image

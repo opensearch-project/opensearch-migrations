@@ -20,13 +20,13 @@ spec:
           - name: bootstrapServers
             valueFrom:
               expression: "tasks.deploy-kafka-cluster.outputs.parameters.bootstrapServers"
-          - name: captureProxykafkaClientSecretBundle
+          - name: captureProxyKafkaClientSecretBundle
             valueFrom:
               expression: "tasks.create-capture-proxy-bundle.outputs.parameters.kafkaClientSecretBundle"
-          - name: replayerkafkaClientSecretBundle
+          - name: replayerKafkaClientSecretBundle
             valueFrom:
               expression: "tasks.create-replayer-bundle.outputs.parameters.kafkaClientSecretBundle"
-          - name: consolekafkaClientSecretBundle
+          - name: consoleKafkaClientSecretBundle
             valueFrom:
               expression: "tasks.create-console-bundle.outputs.parameters.kafkaClientSecretBundle"
       dag:

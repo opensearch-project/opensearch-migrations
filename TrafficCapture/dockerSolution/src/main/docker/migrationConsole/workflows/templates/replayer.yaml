@@ -13,7 +13,7 @@ spec:
             - name: target-url
             - name: traffic-replayer-image
             - name: traffic-replayer-pull-policy
-            - name: kafka-secret-name
+            - name: kafka-client-secret-bundle
 
             # required, but has defaults
             - name: replicas
@@ -219,4 +219,4 @@ spec:
                 volumes:
                 - name: kafka-config
                   secret:
-                    secretName: {{inputs.parameters.kafka-secret-name}}
+                    secretName: {{inputs.parameters.kafka-client-secret-bundle}}

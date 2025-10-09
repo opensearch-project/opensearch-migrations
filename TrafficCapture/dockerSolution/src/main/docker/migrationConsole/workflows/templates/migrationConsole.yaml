@@ -42,17 +42,15 @@ spec:
           - name: config-contents
           - name: migration-console-image
           - name: migration-console-pull-policy
-          - name: kafka-secret-name
+          - name: kafka-client-secret-bundle
           - name: use-localstack-aws-creds
             value: "false"
       container:
         image: "{{inputs.parameters.migration-console-image}}"
         imagePullPolicy: "{{inputs.parameters.migration-console-pull-policy}}"
-        {{- if ne inputs.parameters.kafka-secret-name "" }}
         volumeMounts:
         - name: kafka-config
           mountPath: "/opt/kafka-config"
-        {{- end }}
         command: ["/bin/sh", "-c"]
         args:
           - |
@@ -80,17 +78,15 @@ spec:
             cat /config/migration_services.yaml
             echo ---
 
-            if [ "{{inputs.parameters.kafka-secret-name}}" = "" ]; then
-              echo "WARNING: No kafka-secret-name provided. Kafka functionality will be limited or unavailable."
+            if [ "{{inputs.parameters.kafka-client-secret-bundle}}" = "" ]; then
+              echo "WARNING: No kafka-client-secret-bundle provided. Kafka functionality will be limited or unavailable."
             fi
             
             {{inputs.parameters.command}}
-        {{- if ne inputs.parameters.kafka-secret-name "" }}
         volumes:
         - name: kafka-config
           secret:
-            secretName: "{{inputs.parameters.kafka-secret-name}}"
-        {{- end }}
+            secretName: "{{inputs.parameters.kafka-client-secret-bundle}}"
 
     - name: deploy-console-with-config
       inputs:
@@ -100,7 +96,7 @@ spec:
           - name: name
           - name: migration-console-image
           - name: migration-console-pull-policy
-          - name: kafka-secret-name
+          - name: kafka-client-secret-bundle
       outputs:
         parameters:
           - name: deployment-name
@@ -129,11 +125,9 @@ spec:
                   - name: main
                     image: "{{inputs.parameters.migration-console-image}}"
                     imagePullPolicy: "{{inputs.parameters.migration-console-pull-policy}}"
-                    {{- if ne inputs.parameters.kafka-secret-name "" }}
                     volumeMounts:
                     - name: kafka-config
                       mountPath: "/opt/kafka-config"
-                    {{- end }}
                     command:
                       - "/bin/sh"
                       - "-c"
@@ -152,17 +146,15 @@ spec:
                         cat /config/migration_services.yaml
                         echo ---
 
-                        if [ "{{inputs.parameters.kafka-secret-name}}" = "" ]; then
-                          echo "WARNING: No kafka-secret-name provided. Kafka functionality will be limited or unavailable."
+                        if [ "{{inputs.parameters.kafka-client-secret-bundle}}" = "" ]; then
+                          echo "WARNING: No kafka-client-secret-bundle provided. Kafka functionality will be limited or unavailable."
                         fi
           
                         {{inputs.parameters.command}}
-                  {{- if ne inputs.parameters.kafka-secret-name "" }}
                   volumes:
                   - name: kafka-config
                     secret:
-                      secretName: {{inputs.parameters.kafka-secret-name}}
-                  {{- end }}
+                      secretName: {{inputs.parameters.kafka-client-secret-bundle}}
 
     - name: run-console
       inputs:
@@ -178,7 +170,7 @@ spec:
             value: ""
           - name: kafka-info
             value: ""
-          - name: kafka-secret-name
+          - name: kafka-client-secret-bundle
       steps:
         - - name: get-console-config
             template: get-console-config
@@ -204,8 +196,8 @@ spec:
                   value: "{{inputs.parameters.migration-console-image}}"
                 - name: migration-console-pull-policy
                   value: "{{inputs.parameters.migration-console-pull-policy}}"
-                - name: kafka-secret-name
-                  value: "{{inputs.parameters.kafka-secret-name}}"
+                - name: kafka-client-secret-bundle
+                  value: "{{inputs.parameters.kafka-client-secret-bundle}}"
 
     - name: deploy-console
       inputs:
@@ -223,7 +215,7 @@ spec:
             value: ""
           - name: target-cluster
             value: ""
-          - name: kafka-secret-name
+          - name: kafka-client-secret-bundle
       outputs:
         parameters:
           - name: deployment-name
@@ -256,5 +248,5 @@ spec:
                   value: "{{inputs.parameters.migration-console-image}}"
                 - name: migration-console-pull-policy
                   value: "{{inputs.parameters.migration-console-pull-policy}}"
-                - name: kafka-secret-name
-                  value: "{{inputs.parameters.kafka-secret-name}}"
+                - name: kafka-client-secret-bundle
+                  value: "{{inputs.parameters.kafka-client-secret-bundle}}"
