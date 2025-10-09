@@ -1,12 +1,17 @@
-'use client';
+"use client";
 
-import React from 'react';
-import Header from '@cloudscape-design/components/header';
-import Container from '@cloudscape-design/components/container';
-import Alert from '@cloudscape-design/components/alert';
-import ExpandableSection from '@cloudscape-design/components/expandable-section';
-import { KeyValuePairs } from '@cloudscape-design/components';
-import { StatusFieldDefinition, generateLoadingItems, generateDataItems } from './statusUtils';
+import React, { useCallback } from "react";
+import Header from "@cloudscape-design/components/header";
+import Container from "@cloudscape-design/components/container";
+import Alert from "@cloudscape-design/components/alert";
+import ExpandableSection from "@cloudscape-design/components/expandable-section";
+import { Button, KeyValuePairs } from "@cloudscape-design/components";
+import {
+  StatusFieldDefinition,
+  generateLoadingItems,
+  generateDataItems,
+} from "./statusUtils";
+import { useRouter } from "next/navigation";
 
 interface StatusContainerProps<T> {
   readonly title: string;
@@ -15,16 +20,19 @@ interface StatusContainerProps<T> {
   readonly data: T | null;
   readonly fields: StatusFieldDefinition[];
   readonly columns?: number;
+  readonly goToLocation?: string;
 }
 
-export default function StatusContainer<T>({ 
-  title, 
-  isLoading, 
+export default function StatusContainer<T>({
+  title,
+  isLoading,
   error,
   data,
   fields,
-  columns = 2
+  columns = 2,
+  goToLocation,
 }: StatusContainerProps<T>) {
+  const router = useRouter();
   const renderLoadingState = () => {
     return (
       <KeyValuePairs columns={columns} items={generateLoadingItems(fields)} />
@@ -46,13 +54,36 @@ export default function StatusContainer<T>({
         <KeyValuePairs columns={columns} items={generateDataItems(fields)} />
       );
     }
-    
     return null;
   };
 
+  const onClick = useCallback(() => {
+    if (goToLocation) {
+      router.push(goToLocation);
+    }
+  }, [router, goToLocation]);
   return (
-    <Container header={<Header variant="h2">{title}</Header>}>
-      {isLoading ? renderLoadingState() : error ? renderErrorState() : renderDataState()}
+    <Container
+      header={
+        <Header
+          variant="h2"
+          actions={
+            !!goToLocation && (
+              <Button variant="primary" onClick={onClick}>
+                Go to {title}
+              </Button>
+            )
+          }
+        >
+          {title}
+        </Header>
+      }
+    >
+      {isLoading
+        ? renderLoadingState()
+        : data
+          ? renderDataState()
+          : renderErrorState()}
     </Container>
   );
 }

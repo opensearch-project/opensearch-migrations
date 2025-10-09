@@ -37,8 +37,9 @@ export interface SolutionsInfrastructureStackEKSProps extends StackProps {
 }
 
 function importVPC(stack: Stack, vpdIdParameter: CfnParameter): IVpc {
-    return Vpc.fromLookup(stack, 'ImportedVPC', {
+    return Vpc.fromVpcAttributes(stack, 'ImportedVPC', {
         vpcId: vpdIdParameter.valueAsString,
+        availabilityZones: Fn.getAzs()
     });
 }
 
@@ -77,6 +78,8 @@ export class SolutionsInfrastructureEKSStack extends Stack {
         const solutionsUserAgent = `AwsSolution/${props.solutionId}/${props.solutionVersion}`
 
         let vpc: IVpc;
+        let vpcSubnetIds: string[] = []
+        let vpcSecurityGroupIds: string[] = []
         if (props.createVPC) {
             vpc = new Vpc(this, `Vpc`, {
                 // Using 10.212.0.0/16 to avoid default VPC CIDR range conflicts when using VPC peering
@@ -121,22 +124,33 @@ export class SolutionsInfrastructureEKSStack extends Stack {
         else {
             const vpcIdParameter = new CfnParameter(this, 'VPCId', {
                 type: 'AWS::EC2::VPC::Id',
-                description: 'Select a VPC, we recommend choosing the VPC of the target cluster.'
+                description: '(Required) Select a VPC, we recommend choosing the VPC of the target cluster.'
             });
             addParameterLabel(parameterLabels, vpcIdParameter, "VPC")
 
-            const privateSubnetIdsParameter = new CfnParameter(this, 'VPCPrivateSubnetIds', {
+            const subnetIdsParameter = new CfnParameter(this, 'VPCSubnetIds', {
                 type: 'List<AWS::EC2::Subnet::Id>',
-                description: 'Select Private Subnets in the selected VPC. Please provide two subnets at least, corresponding with the availability zones selected previously.'
+                description: '(Required) Select at least two private/public subnets, each in a unique Availability Zone.'
             });
-            addParameterLabel(parameterLabels, privateSubnetIdsParameter, "Private Subnets")
-            importedVPCParameters.push(vpcIdParameter.logicalId, privateSubnetIdsParameter.logicalId)
+            addParameterLabel(parameterLabels, subnetIdsParameter, "Subnets")
+            vpcSubnetIds = subnetIdsParameter.valueAsList
+
+            const securityGroupIdsParameter = new CfnParameter(this, 'VPCSecurityGroupIds', {
+                type: 'List<AWS::EC2::SecurityGroup::Id>',
+                description: '(Required) Select one or more security groups that will allow Source and/or Target cluster access',
+            });
+            addParameterLabel(parameterLabels, securityGroupIdsParameter, "Security Groups")
+            vpcSecurityGroupIds = securityGroupIdsParameter.valueAsList
+
+            importedVPCParameters.push(vpcIdParameter.logicalId, subnetIdsParameter.logicalId, securityGroupIdsParameter.logicalId)
             vpc = importVPC(this, vpcIdParameter);
         }
 
         const eksClusterName = `migration-eks-cluster-${stackMarker}`
         const eksInfra = new EKSInfra(this, 'EKSInfra', {
             vpc,
+            vpcSubnetIds,
+            vpcSecurityGroupIds,
             clusterName: eksClusterName,
             stackName: Fn.ref('AWS::StackName'),
             ecrRepoName: `migration-ecr-${stackMarker}`

@@ -1,13 +1,8 @@
 def call(Map config = [:]) {
-    ['jobName', 'sourceVersion', 'targetVersion'].each { key ->
-        if (!config[key]) {
-            throw new RuntimeException("The ${key} argument must be provided to k8sLocalDeployment()")
-        }
-    }
-    def jobName = config.jobName
-    def sourceVersion = config.sourceVersion
-    def targetVersion = config.targetVersion
-    def testIdsArg = config.testIdsArg ?: ""
+    def jobName = config.jobName ?: "k8s-local-integ-test"
+    def sourceVersion = config.sourceVersion ?: ""
+    def targetVersion = config.targetVersion ?: ""
+    def testIds = config.testIds ?: ""
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -15,10 +10,21 @@ def call(Map config = [:]) {
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            choice(
+                    name: 'SOURCE_VERSION',
+                    choices: ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10'],
+                    description: 'Pick a specific source version'
+            )
+            choice(
+                    name: 'TARGET_VERSION',
+                    choices: ['OS_1.3', 'OS_2.19', 'OS_3.1'],
+                    description: 'Pick a specific target version'
+            )
+            string(name: 'TEST_IDS', defaultValue: 'all', description: 'Test IDs to execute. Use comma separated list e.g. "0001,0004" or "all" for all tests')
         }
 
         options {
-            timeout(time: 1, unit: 'HOURS')
+            timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
         }
@@ -93,11 +99,20 @@ def call(Map config = [:]) {
 
             stage('Perform Python E2E Tests') {
                 steps {
-                    timeout(time: 15, unit: 'MINUTES') {
+                    timeout(time: 2, unit: 'HOURS') {
                         dir('libraries/testAutomation') {
                             script {
+                                def sourceVer = sourceVersion ?: params.SOURCE_VERSION
+                                def targetVer = targetVersion ?: params.TARGET_VERSION
+                                currentBuild.description = "${sourceVer} → ${targetVer}"
+                                def testIdsArg = ""
+                                def testIdsResolved = testIds ?: params.TEST_IDS
+                                if (testIdsResolved != "" && testIdsResolved != "all") {
+                                    testIdsArg = "--test-ids='$testIdsResolved'"
+                                }
                                 sh "pipenv install --deploy"
-                                sh "pipenv run app --source-version=$sourceVersion --target-version=$targetVersion $testIdsArg --skip-delete"
+                                sh "mkdir -p ./reports"
+                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --skip-delete --test-reports-dir='./reports'"
                             }
                         }
                     }
@@ -111,7 +126,8 @@ def call(Map config = [:]) {
                         script {
                             sh "pipenv install --deploy"
                             sh "pipenv run app --copy-logs-only"
-                            archiveArtifacts artifacts: 'logs/**', fingerprint: true, onlyIfSuccessful: false
+                            archiveArtifacts artifacts: 'logs/**, reports/**', fingerprint: true, onlyIfSuccessful: false
+                            sh "rm -rf ./reports"
                             sh "pipenv run app --delete-only"
                         }
                     }

@@ -18,6 +18,7 @@ from console_link.models.ecs_service import ECSService
 from console_link.models.kafka import StandardKafka
 from console_link.models.metrics_source import Component
 from console_link.models.replayer_ecs import ECSReplayer
+from console_link.models.snapshot import FileSystemSnapshot
 from console_link.models.utils import DeploymentStatus
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
@@ -458,8 +459,7 @@ def test_cli_snapshot_status(runner, mocker):
 
 
 def test_cli_snapshot_delete_with_acknowledgement(runner, mocker):
-    mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
-    mock.return_value.text = "Successfully deleted"
+    mock = mocker.patch.object(FileSystemSnapshot, 'delete', autospec=True)
 
     # Test snapshot status
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'delete', '--acknowledge-risk'],
@@ -625,9 +625,9 @@ def test_get_backfill_status_with_deep_check(runner, mocker):
         pending=1
     )
     mocked_detailed_status = "Remaining shards: 43"
-    mock_ecs_service_call = mocker.patch.object(ECSService, 'get_instance_statuses', autspec=True,
+    mock_ecs_service_call = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
                                                 return_value=mocked_running_status)
-    mock_detailed_status_call = mocker.patch('console_link.models.backfill_rfs.get_detailed_status', autspec=True,
+    mock_detailed_status_call = mocker.patch('console_link.models.backfill_rfs.get_detailed_status', autospec=True,
                                              return_value=mocked_detailed_status)
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),

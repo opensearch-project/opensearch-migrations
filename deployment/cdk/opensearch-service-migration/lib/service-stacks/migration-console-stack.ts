@@ -28,6 +28,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly fargateCpuArch: CpuArchitecture,
     readonly targetGroups?: ELBTargetGroup[],
     readonly servicesYaml: ServicesYaml,
+    readonly sourceClusterVersion?: string,
     readonly otelCollectorEnabled?: boolean,
     readonly managedServiceSourceSnapshotEnabled?: boolean
 }
@@ -188,7 +189,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
         // Upload the services.yaml file to Parameter Store
         servicesYaml.metadata_migration = new MetadataMigrationYaml();
-        servicesYaml.metadata_migration.source_cluster_version = props.servicesYaml.source_cluster?.version
+        servicesYaml.metadata_migration.source_cluster_version = props.sourceClusterVersion
         if (props.otelCollectorEnabled) {
             const otelSidecarEndpoint = OtelCollectorSidecar.getOtelLocalhostEndpoint();
             if (servicesYaml.metadata_migration) {

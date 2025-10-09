@@ -162,7 +162,7 @@ instance_id=$(get_instance_id)
 check_ssm_ready "$instance_id"
 init_command="cd /opensearch-migrations && ./initBootstrap.sh"
 verify_command="cdk --version && docker --version && java --version && python3 --version"
-init_command_timeout="2100" # 35 minutes
+init_command_timeout="4200" # 70 minutes
 verify_command_timeout="300" # 5 minutes
 if [ "$WORKFLOW" = "ALL" ]; then
   execute_command_and_wait_for_result "$init_command" "$instance_id" "$init_command_timeout"

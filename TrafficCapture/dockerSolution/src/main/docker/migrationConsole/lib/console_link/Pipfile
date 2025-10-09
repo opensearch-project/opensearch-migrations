@@ -23,7 +23,7 @@ pytest-mock = "*"
 requests-mock = "*"
 coverage = "*"
 moto = "*"
-testcontainers = "*"
+testcontainers = {extras = ["k3s"], version = "*"}
 httpx = "*"
 
 [requires]

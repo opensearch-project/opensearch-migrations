@@ -23,6 +23,8 @@ spec:
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
+      - name: otel-collector-endpoint
+        value: "http://otel-collector:4317"
 
   templates:
     # Main workflow template
@@ -346,6 +348,8 @@ spec:
                   value: "{{inputs.parameters.s3-config}}"
                 - name: image-config
                   value: "{{inputs.parameters.image-config}}"
+                - name: otel-collector-endpoint
+                  value: "{{workflow.parameters.otel-collector-endpoint}}"
         - - name: pipeline-snapshot-to-target
             template: pipeline-snapshot-to-target
             withParam: "{{inputs.parameters.targets}}"
@@ -452,6 +456,8 @@ spec:
                   value: "{{inputs.parameters.image-config}}"
                 - name: localstack-enabled
                   value: "{{inputs.parameters.localstack-enabled}}"
+                - name: otel-collector-endpoint
+                  value: "{{workflow.parameters.otel-collector-endpoint}}"
         # Check target readiness after processing and bump it to the next phase if ready
         - - name: target-backfill-complete-check
             templateRef:
@@ -469,17 +475,17 @@ spec:
                   value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['image']}}"
                 - name: etcd-utils-pull-policy
                   value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
-        - - name: run-replayer-for-target
-            template: run-replayer-for-target
-            when: "{{steps.target-backfill-complete-check.outputs.parameters.should-finalize}} == true"
-            arguments:
-              parameters:
-                - name: target-config
-                  value: "{{inputs.parameters.target-config}}"
-                - name: image-config
-                  value: "{{inputs.parameters.image-config}}"
+        # Enable once Capture and Replay support has been added: https://opensearch.atlassian.net/browse/MIGRATIONS-2607
+        # - - name: run-replayer-for-target
+        #     template: run-replayer-for-target
+        #     when: "{{steps.target-backfill-complete-check.outputs.parameters.should-finalize}} == true"
+        #     arguments:
+        #       parameters:
+        #         - name: target-config
+        #           value: "{{inputs.parameters.target-config}}"
+        #         - name: image-config
+        #           value: "{{inputs.parameters.image-config}}"
 
-    # This is where we'd start running live-replay
     - name: run-replayer-for-target
       inputs:
         parameters:

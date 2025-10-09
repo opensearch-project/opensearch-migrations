@@ -12,7 +12,7 @@ import {
   Alert,
 } from "@cloudscape-design/components";
 import { sessionCreate } from "@/generated/api";
-import DebugCommands from "@/components/playground/debug/DebugCommands";
+import DebugCommands from "@/components/debug/DebugCommands";
 
 export default function CreateSessionPage() {
   const [name, setName] = useState("");

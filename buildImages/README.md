@@ -34,5 +34,5 @@ The following gradle command can be used after setting up the previous steps to 
 
 Or customized to use a specific registry endpoint and architecture
 ```shell
-./gradlew buildImagesToRegistry -PregistryEndpoint=123456789012.dkr.ecr.us-west-2.amazonaws.com/my-ecr-repo -PimageArch=arm64
+./gradlew buildImagesToRegistry -PregistryEndpoint=123456789012.dkr.ecr.us-west-2.amazonaws.com/my-ecr-repo -PimageArch=amd64
 ```

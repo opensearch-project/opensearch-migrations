@@ -3,9 +3,9 @@ import { Certificate, ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 import { Provider } from 'aws-cdk-lib/custom-resources';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { CustomResource, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib/core';
-import * as path from 'path';
+import * as path from 'node:path';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
-import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { PolicyStatement, Role, ServicePrincipal, ManagedPolicy } from 'aws-cdk-lib/aws-iam';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 
 export class AcmCertificateImporter extends Construct {
@@ -20,12 +20,20 @@ export class AcmCertificateImporter extends Construct {
         });
 
         const partition = Stack.of(this).partition;
-        lambdaRole.addManagedPolicy({
-            managedPolicyArn: `arn:${partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole`
-        });
-        lambdaRole.addManagedPolicy({
-            managedPolicyArn: `arn:${partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole`
-        });
+        lambdaRole.addManagedPolicy(
+            ManagedPolicy.fromManagedPolicyArn(
+                this,
+                'LambdaBasicExecutionRolePolicy',
+                `arn:${partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole`
+            )
+        );
+        lambdaRole.addManagedPolicy(
+            ManagedPolicy.fromManagedPolicyArn(
+                this,
+                'LambdaVPCAccessExecutionRolePolicy',
+                `arn:${partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole`
+            )
+        );
         lambdaRole.addToPolicy(new PolicyStatement({
             actions: ['acm:ImportCertificate', 'acm:DeleteCertificate'],
             resources: ['*'],

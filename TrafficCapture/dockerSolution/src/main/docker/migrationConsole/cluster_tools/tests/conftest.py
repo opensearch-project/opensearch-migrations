@@ -27,8 +27,9 @@ def wait_for_opensearch(url, max_retries=30, retry_interval=2):
 
 def create_opensearch_container():
     """Create and start an OpenSearch container."""
-    container = OpenSearchContainer("opensearchproject/opensearch:2.11.0")
+    container = OpenSearchContainer("opensearchproject/opensearch:2.19.1")
     container.with_env("discovery.type", "single-node")
+    container.with_env("OPENSEARCH_JAVA_OPTS", "-Xms2g -Xmx2g")
     container.start()
 
     url = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(9200)}"

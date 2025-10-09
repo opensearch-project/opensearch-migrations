@@ -46,6 +46,10 @@ images:
     repository: migrations/migration_console
     tag: latest
     pullPolicy: IfNotPresent
+  etcdUtils:
+    repository: migrations/migration_console
+    tag: latest
+    pullPolicy: IfNotPresent
 
 # Default AWS values are dummy values for LocalStack usage
 aws:
@@ -54,6 +58,7 @@ aws:
   account: "123456789012"
 
 stageName: dev
+developerModeEnabled: false
 
 defaultBucketConfiguration:
   create: true
@@ -81,6 +86,7 @@ installer:
   rbac:
     create: true
 
+# For OTEL Operator
 extraOtelConfiguration:
   version: "0.124.0"
   configs:
@@ -91,13 +97,61 @@ extraOtelConfiguration:
       - jaeger
       - xray
 
+# For OTEL Daemonset
+otelConfiguration:
+  serviceAccountName: "migrations-service-account"
+  collectorConfig: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+    processors:
+      batch:
+        timeout: 10s
+        send_batch_size: 8192
+        send_batch_max_size: 10000
+    extensions:
+      zpages:
+        endpoint: :55679
+      pprof:
+        endpoint: :1888
+      health_check:
+    exporters:
+      debug:
+        verbosity: detailed
+        sampling_initial: 5
+        sampling_thereafter: 200
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        send_timestamps: true
+        metric_expiration: 5m
+        enable_open_metrics: true
+      otlp/jaeger: # Jaeger supports OTLP directly. The default port for OTLP/gRPC is 4317
+        endpoint: jaeger-collector:4317
+        tls:
+          insecure: true
+    service:
+      extensions: [ zpages, pprof, health_check ]
+      pipelines:
+        metrics:
+          receivers: [ otlp ]
+          processors: [ batch ]
+          exporters: [ prometheus ]
+        traces:
+          receivers: [ otlp ]
+          processors: [ batch ]
+          exporters: [ otlp/jaeger ]
+        logs:
+          receivers: [ otlp ]
+          processors:
+          exporters: [ debug ]
 
 charts:
-
   # Coordinate workflows, maybe RFS, maybe more
   etcd:
-    version: "11.2.1"
-    repository: "https://charts.bitnami.com/bitnami"
+    version: "1.1.2"
+    repository: "https://groundhog2k.github.io/helm-charts"
     values:
       preUpgrade:
         enabled: false
@@ -166,7 +220,7 @@ charts:
 
 
   strimzi-kafka-operator:
-    version: 0.45.0
+    version: 0.47.0
     repository: "https://strimzi.io/charts/"
     values:
       replicas: 1
@@ -209,7 +263,7 @@ charts:
           failureThreshold: 1
 
   argo-workflows:
-    version: "0.45.11"
+    version: "0.45.24"
     repository: "https://argoproj.github.io/argo-helm"
     values:
       fullnameOverride: "argo"
@@ -401,7 +455,6 @@ charts:
           storageSpec:
             volumeClaimTemplate:
               spec:
-                storageClassName: standard
                 accessModes: [ "ReadWriteOnce" ]
                 resources:
                   requests:

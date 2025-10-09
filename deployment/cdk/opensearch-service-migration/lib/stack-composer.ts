@@ -1,6 +1,6 @@
 import {Construct} from "constructs";
 import {Duration, Stack, StackProps} from "aws-cdk-lib";
-import {readFileSync} from 'fs';
+import {readFileSync} from 'node:fs';
 import {OpenSearchDomainStack} from "./opensearch-domain-stack";
 import {EngineVersion, TLSSecurityPolicy} from "aws-cdk-lib/aws-opensearchservice";
 import * as defaultValuesJson from "../default-values.json"
@@ -62,7 +62,7 @@ export class StackComposer {
         // Values provided by the CLI will always be represented as a string and need to be parsed
         if (typeof option === 'string') {
             if (expectedType === 'number') {
-                return parseInt(option)
+                return Number.parseInt(option)
             }
             if (expectedType === 'boolean' || expectedType === 'object') {
                 try {
@@ -77,7 +77,7 @@ export class StackComposer {
         }
         // Values provided by the cdk.context.json should be of the desired type
         if (typeof option !== expectedType) {
-            throw new Error(`Type provided by cdk.context.json for ${optionName} was ${typeof option} but expected ${expectedType}`)
+            throw new TypeError(`Type provided by cdk.context.json for ${optionName} was ${typeof option} but expected ${expectedType}`)
         }
         return option
     }
@@ -354,6 +354,8 @@ export class StackComposer {
             servicesYaml.client_options = new ClientOptions()
             servicesYaml.client_options.user_agent_extra = props.migrationsUserAgent
         }
+        // Resolve source cluster version even for disabled source clusters
+        const resolvedSourceClusterVersion = servicesYaml.source_cluster?.version ?? sourceClusterField?.version
         const existingSnapshotDefinition = this.getContextForType('snapshot', 'object', defaultValues, contextJSON)
         let snapshotYaml
         if (existingSnapshotDefinition) {
@@ -467,7 +469,7 @@ export class StackComposer {
                 extraArgs: reindexFromSnapshotExtraArgs,
                 clusterAuthDetails: servicesYaml.target_cluster?.auth,
                 skipClusterCertCheck: servicesYaml.target_cluster?.allowInsecure,
-                sourceClusterVersion: servicesYaml.source_cluster?.version,
+                sourceClusterVersion: resolvedSourceClusterVersion,
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
                 stage: stage,
@@ -585,6 +587,7 @@ export class StackComposer {
                 vpcDetails: networkStack.vpcDetails,
                 streamingSourceType: streamingSourceType,
                 servicesYaml: servicesYaml,
+                sourceClusterVersion: resolvedSourceClusterVersion,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,

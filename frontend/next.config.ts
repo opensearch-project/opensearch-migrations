@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-const { execSync } = require('child_process');
+const { execSync } = require('node:child_process');
 
 function getGitMostRecentTag() {
   return execOrUnknown('git describe --tags --abbrev=0 HEAD');
@@ -48,7 +48,7 @@ const nextConfig: NextConfig = {
     return config;
   },
   eslint: {
-    dirs: ["src/app", "src/component", "src/context", "src/hooks", "src/lib","src/types", "src/utils"]
+    dirs: ["src/app", "src/components", "src/context", "src/hooks", "src/lib","src/types", "src/utils"]
   },
   trailingSlash: true,
   output: 'export'

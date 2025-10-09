@@ -39,7 +39,7 @@ function applyRules(node, rules) {
 
 function main(context) {
   if (!context.rules && !context.get("rules")) {
-    throw Error(
+    throw new Error(
       "Expected rules to be defined in the context.  Example: " +
         JSON.stringify(
           { rules: [{ when: { type: "foo" }, set: { type: "bar" } }] },

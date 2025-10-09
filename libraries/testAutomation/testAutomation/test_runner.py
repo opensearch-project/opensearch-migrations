@@ -2,9 +2,12 @@ import argparse
 import ast
 from dataclasses import dataclass, field
 import datetime
+import json
 from k8s_service import K8sService, HelmCommandFailed
 import logging
+import os
 import random
+import re
 import string
 import sys
 from tabulate import tabulate
@@ -13,8 +16,8 @@ from typing import List, Optional, Tuple
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_5.6"]
-VALID_TARGET_VERSIONS = ["OS_2.19"]
+VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10"]
+VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19", "OS_3.1"]
 MA_RELEASE_NAME = "ma"
 
 
@@ -75,7 +78,7 @@ class TestRunner:
             row = [version_label]
             test_results = {test.name: "✓" if test.result == "passed" else "X" for test in report.tests}
             for name in all_test_names:
-                row.append(test_results.get(name, ""))
+                row.append(test_results.get(name, "N/A"))
             matrix_rows.append(row)
 
         # Build test description rows
@@ -85,7 +88,7 @@ class TestRunner:
                 test_descriptions.setdefault(test.name, test.description)
 
         # Print Test Matrix
-        headers = ["Version"] + all_test_names
+        headers = ["Version"] + [name[:8] for name in all_test_names]
         print("\nTest Matrix:")
         print(tabulate(matrix_rows, headers=headers, tablefmt="fancy_grid"))
 
@@ -105,7 +108,34 @@ class TestRunner:
         summary = TestSummary(**data.get("summary"))
         return TestReport(tests=tests, summary=summary)
 
-    def run_tests(self, source_version: str, target_version: str, keep_workflows: bool = False) -> bool:
+    def write_report_to_file(self, base_dir: str, report_data: dict, source_version: str, target_version: str):
+        dir_normal = base_dir.rstrip("/")
+        source_version_normal = source_version.lower().replace("_", "-").replace(".", "-")
+        target_version_normal = target_version.lower().replace("_", "-").replace(".", "-")
+        file_name = (f"{dir_normal}/test-report-{source_version_normal}-to-{target_version_normal}-"
+                     f"{self.unique_id}.json")
+        with open(file_name, "w", encoding="utf-8") as f:
+            json.dump(report_data, f, indent=2, ensure_ascii=False)
+
+    def collect_reports_and_print_summary(self, reports_dir: str):
+        reports = []
+
+        # Iterate over files in the directory
+        for file_name in os.listdir(reports_dir):
+            if file_name.endswith(".json"):
+                file_path = os.path.join(reports_dir, file_name)
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        test_data = json.load(f)
+                    test_report = self._parse_test_report(test_data)
+                    reports.append(test_report)
+                except (OSError, json.JSONDecodeError) as e:
+                    print(f"⚠️ Skipping {file_name}, error: {e}")
+
+        self._print_summary_table(reports=reports)
+
+    def run_tests(self, source_version: str, target_version: str, keep_workflows: bool = False,
+                  reuse_clusters: bool = False, test_reports_dir: str = None) -> bool:
         """Runs pytest tests."""
         logger.info(f"Executing migration test cases with pytest and test ID filters: {self.test_ids}")
         command_list = [
@@ -121,6 +151,8 @@ class TestRunner:
             command_list.append(f"--test_ids={','.join(self.test_ids)}")
         if keep_workflows:
             command_list.append("--keep_workflows")
+        if reuse_clusters:
+            command_list.append("--reuse_clusters")
         command_list.append("-s")
         self.k8s_service.exec_migration_console_cmd(command_list=command_list)
         output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
@@ -129,6 +161,9 @@ class TestRunner:
                                                                    unbuffered=False)
         test_data = ast.literal_eval(cmd_response)
         logger.debug(f"Received the following test data: {test_data}")
+        if test_reports_dir:
+            self.write_report_to_file(base_dir=test_reports_dir, report_data=test_data, source_version=source_version,
+                                      target_version=target_version)
         test_report = self._parse_test_report(test_data)
         print(f"Test cases passed: {test_report.summary.passed}")
         print(f"Test cases failed: {test_report.summary.failed}")
@@ -137,7 +172,27 @@ class TestRunner:
             return False
         return True
 
+    def cleanup_clusters(self) -> None:
+        pattern = re.compile(r"^(source|target)-(opensearch|elasticsearch)")
+        for install in self.k8s_service.get_helm_installations():
+            if pattern.match(install):
+                self.k8s_service.helm_uninstall(release_name=install)
+        for configmap in self.k8s_service.get_configmaps():
+            if pattern.match(configmap) and configmap.endswith("migration-config"):
+                self.k8s_service.delete_configmap(configmap_name=configmap)
+
+        # Cleanup non-Helm Kubernetes resources (ES 1.x and 2.x)
+        try:
+            self.k8s_service.run_command([
+                "kubectl", "delete", "all,configmap,secret",
+                "-l", "migration-test=true",
+                "--ignore-not-found"
+            ], ignore_errors=True)
+        except Exception as e:
+            logger.warning(f"Failed to cleanup labeled Kubernetes resources: {e}")
+
     def cleanup_deployment(self) -> None:
+        self.cleanup_clusters()
         self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
         self.k8s_service.wait_for_all_healthy_pods()
         self.k8s_service.delete_all_pvcs()
@@ -145,20 +200,36 @@ class TestRunner:
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
 
-    def run(self, skip_delete: bool = False, keep_workflows: bool = False) -> None:
+    def run(self, skip_delete: bool = False, keep_workflows: bool = False, developer_mode: bool = False,
+            reuse_clusters: bool = False, test_reports_dir: str = None) -> None:
+        self.k8s_service.create_namespace(self.k8s_service.namespace)
+        if developer_mode:
+            workflow_templates_dir = (
+                "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/"
+                "workflows/templates/"
+            )
+            self.k8s_service.run_command([
+                "kubectl", "apply", "-f", workflow_templates_dir, "-n", "ma"
+            ])
+            logger.info("Applied workflow templates directory")
+
         for source_version, target_version in self.combinations:
             try:
                 logger.info(f"Performing helm deployment for migration testing environment "
                             f"from {source_version} to {target_version}")
 
-                if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME):
+                chart_values = {"developerModeEnabled": "true"} if developer_mode else None
+                if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME,
+                                                     values=chart_values):
                     raise HelmCommandFailed("Helm install of Migrations Assistant chart failed")
 
                 self.k8s_service.wait_for_all_healthy_pods()
 
                 tests_passed = self.run_tests(source_version=source_version,
                                               target_version=target_version,
-                                              keep_workflows=keep_workflows)
+                                              keep_workflows=keep_workflows,
+                                              reuse_clusters=reuse_clusters,
+                                              test_reports_dir=test_reports_dir)
 
                 if not tests_passed:
                     raise TestsFailed(f"Tests failed (or no tests executed) for migrations "
@@ -235,9 +306,14 @@ def parse_args() -> argparse.Namespace:
         help="If set, only perform deletion operations."
     )
     parser.add_argument(
+        "--delete-clusters-only",
+        action="store_true",
+        help="If set, only perform cluster deletion operations."
+    )
+    parser.add_argument(
         "--copy-logs-only",
         action="store_true",
-        help="If set, only copy found argo workflow logs to this local directory."
+        help="If set, only copy found argo workflow logs to the current directory."
     )
     parser.add_argument(
         '--unique-id',
@@ -249,6 +325,35 @@ def parse_args() -> argparse.Namespace:
         "--keep-workflows",
         action="store_true",
         help="If set, will not delete argo workflows created by integration tests"
+    )
+    parser.add_argument(
+        "--developer-mode",
+        action="store_true",
+        help="If set, will enable the developer mode flag for the Migration Assistant helm chart"
+    )
+    parser.add_argument(
+        "--reuse-clusters",
+        action="store_true",
+        help="If set, the integration tests will reuse existing clusters that match the naming pattern "
+             "e.g. 'target-opensearch-2-19-*'. If a cluster does not exist the integration test will create it and "
+             "leave it running once the test completes for other tests to use. The cleanup operation for this library "
+             "will remove all source and target clusters that match this pattern as well."
+    )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="An aggregate flag to apply developer settings for "
+             "testing [--skip-delete, --reuse-clusters, --keep-workflows, --developer-mode]"
+    )
+    parser.add_argument(
+        "--test-reports-dir",
+        default=None,
+        help="If provided, will output generated test reports to this directory path"
+    )
+    parser.add_argument(
+        "--output-reports-summary-only",
+        action="store_true",
+        help="If set, only print the summary table for existing reports in the provided '--test-reports-dir'"
     )
     parser.add_argument(
         "--test-ids",
@@ -275,9 +380,28 @@ def main() -> None:
 
     if args.delete_only:
         return test_runner.cleanup_deployment()
-    elif args.copy_logs_only:
+    if args.delete_clusters_only:
+        return test_runner.cleanup_clusters()
+    if args.copy_logs_only:
         return test_runner.copy_logs()
-    test_runner.run(skip_delete=args.skip_delete, keep_workflows=args.keep_workflows)
+    if args.output_reports_summary_only:
+        if not args.test_reports_dir:
+            raise ValueError("The '--test-reports-dir' arg must be provided when using '--output-reports-summary-only")
+        return test_runner.collect_reports_and_print_summary(reports_dir=args.test_reports_dir)
+    skip_delete = args.skip_delete
+    keep_workflows = args.keep_workflows
+    developer_mode = args.developer_mode
+    reuse_clusters = args.reuse_clusters
+    if args.dev:
+        skip_delete = True
+        keep_workflows = True
+        developer_mode = True
+        reuse_clusters = True
+    test_runner.run(skip_delete=skip_delete,
+                    keep_workflows=keep_workflows,
+                    developer_mode=developer_mode,
+                    reuse_clusters=reuse_clusters,
+                    test_reports_dir=args.test_reports_dir)
 
 
 if __name__ == "__main__":

@@ -1,66 +1,40 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
+  Alert,
   Box,
   Button,
+  ColumnLayout,
   Container,
+  ExpandableSection,
   Header,
   SpaceBetween,
-  StatusIndicator,
-  Alert,
-  KeyValuePairs,
   Spinner,
-  ExpandableSection,
 } from "@cloudscape-design/components";
-import { systemHealth } from "@/generated/api";
+import { HealthApiResponse } from "@/generated/api";
 import { getSiteReadiness, setSiteReadiness } from "@/lib/site-readiness";
-import { withTimeLimit } from "@/utils/async";
-import DebugCommands from "@/components/playground/debug/DebugCommands";
-
-const DEFAULT_POLLING_INTERVAL_MS = 5000;
+import DebugCommands from "@/components/debug/DebugCommands";
+import Image from "next/image";
+import { usePollingSystemHealth } from "@/hooks/apiPoll";
+import router from "next/router";
+import { useCallback, useState } from "react";
 
 export default function LoadingPage() {
-  const [isReady, setIsReady] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const router = useRouter();
+  const [debugError, setDebugError] = useState<string | null>(null);
+  const [debugIsReady, setDebugIsReady] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    const pollHealth = async () => {
-      if (getSiteReadiness()) {
-        setIsReady(true);
-        return true;
-      }
-      try {
-        const res = await withTimeLimit(
-          systemHealth(),
-          DEFAULT_POLLING_INTERVAL_MS,
-        );
-        if (res.data?.status === "ok") {
-          setIsReady(true);
-          setSiteReadiness(true);
-          return true;
-        } else {
-          setErrorMessage(JSON.stringify(res.error, null, 2));
-        }
-      } catch (err) {
-        const formatted =
-          err instanceof Error ? { name: err.name, message: err.message } : err;
-        setErrorMessage(JSON.stringify(formatted, null, 2));
-      }
-      return false;
-    };
+  const { data, error } = usePollingSystemHealth(
+    !getSiteReadiness(),
+    (data: HealthApiResponse) => {
+      const ready = data?.status === "ok";
+      if (ready) setSiteReadiness(true);
+      return ready;
+    },
+  );
+  const isReady = debugIsReady ?? getSiteReadiness() ?? data?.status === "ok";
+  const errorMessage = debugError ?? error ?? null;
 
-    const startPolling = async () => {
-      if (await pollHealth()) return;
-      const interval = setInterval(async () => {
-        if (await pollHealth()) clearInterval(interval);
-      }, DEFAULT_POLLING_INTERVAL_MS);
-    };
-
-    startPolling();
-  }, []);
+  const startMigration = useCallback(() => router.push("/createSession"), []);
 
   return (
     <SpaceBetween size="l">
@@ -68,56 +42,57 @@ export default function LoadingPage() {
         variant="h1"
         actions={
           <SpaceBetween direction="horizontal" size="xs">
-            <Button iconName="refresh" disabled={isReady}></Button>
+            <Button iconName="refresh" disabled={isReady} />
           </SpaceBetween>
         }
       >
         OpenSearch Migration Assistant
       </Header>
-      <Box variant="p">
-        Monitor the progress of your migration setup and prepare for next steps.
-      </Box>
 
       <Container
-        header={<Header variant="h2">CloudFormation Setup in Progress</Header>}
+        header={
+          <Header variant="h2" description="Steps to migrate your cluster.">
+            Migration Overview
+          </Header>
+        }
       >
-        <SpaceBetween size="l">
-          <Alert
-            type="info"
-            header={isReady ? "Setup complete" : "Setup in progress"}
-            dismissible={false}
+        <ColumnLayout columns={3} variant="text-grid">
+          <SpaceBetween size="xs">
+            <Box fontSize="heading-s" fontWeight="bold">
+              <span>Step 1: Create snapshot</span>
+            </Box>
+            <Box variant="p">
+              Create a copy of your source clusters data with a snapshot.
+            </Box>
+          </SpaceBetween>
+
+          <SpaceBetween size="xs">
+            <Box fontSize="heading-s" fontWeight="bold">
+              <span>Step 2: Migrate metadata</span>
+            </Box>
+            <Box variant="p">
+              Create the structure of your clusters indices and mappings.
+            </Box>
+          </SpaceBetween>
+
+          <SpaceBetween size="xs">
+            <Box fontSize="heading-s" fontWeight="bold">
+              <span>Step 3: Execute backfill</span>
+            </Box>
+            <Box variant="p">Reindex data into the target cluster.</Box>
+          </SpaceBetween>
+        </ColumnLayout>
+
+        <Box textAlign="center">
+          <Button
+            variant="primary"
+            onClick={startMigration}
+            disabled={!isReady}
+            data-testid="overview-start-migration"
           >
-            {!isReady && <Spinner size="normal" />}
-            {isReady
-              ? "The CloudFormation stack has been successfully created. You can now proceed with the data migration process."
-              : "The CloudFormation stack is currently being created. This process typically takes 10–15 minutes to complete."}
-            {!isReady && errorMessage && (
-              <ExpandableSection headerText="Details">
-                <pre>Error Message: {errorMessage}</pre>
-              </ExpandableSection>
-            )}
-          </Alert>
-
-          <KeyValuePairs
-            items={[
-              {
-                label: "Status",
-                value: isReady ? (
-                  <StatusIndicator type="success">Complete</StatusIndicator>
-                ) : (
-                  <StatusIndicator type="in-progress">
-                    In progress
-                  </StatusIndicator>
-                ),
-              },
-            ]}
-          />
-
-          <Box variant="p">
-            You will be notified when the CloudFormation setup is complete. You
-            can close this page and return later – your progress will be saved.
-          </Box>
-        </SpaceBetween>
+            Start migration data
+          </Button>
+        </Box>
       </Container>
 
       <Container
@@ -125,36 +100,63 @@ export default function LoadingPage() {
           <Header
             variant="h2"
             actions={
-              isReady && (
-                <Button
-                  variant="primary"
-                  onClick={() => router.push("/migration")}
-                  data-testid="start-migration-button"
-                >
-                  Start data migration
-                </Button>
-              )
+              <Button
+                variant="primary"
+                disabled={!isReady}
+                onClick={startMigration}
+                data-testid="start-migration-button"
+              >
+                Start migration data
+              </Button>
             }
           >
-            Next Steps
+            Migration Assistant Setup
           </Header>
         }
       >
-        <SpaceBetween size="m">
-          <Box variant="p">
+        <SpaceBetween size="l">
+          <Alert
+            type={isReady ? "success" : "info"}
+            header={isReady ? "Setup is complete" : "Setup is in progress"}
+            dismissible={false}
+          >
+            {!isReady && <Spinner size="normal" />}
             {isReady
-              ? "Your infrastructure is ready. You can now begin the data migration process."
-              : "Once the infrastructure setup is complete, you'll need to configure your migration parameters."}
+              ? "The Migration Assistant has been successfully created. You can now proceed with the data migration process."
+              : "The Migration Assistant setup is in progress. This process typically takes 10–15 minutes to complete. You may close this page and return later as your progress will be saved."}
+            {!isReady && errorMessage && (
+              <ExpandableSection headerText="Details">
+                <pre>Error Message: {errorMessage}</pre>
+              </ExpandableSection>
+            )}
+          </Alert>
+
+          <Box textAlign="center">
+            <Image
+              src="/robot-dog-162x114.svg"
+              width={162}
+              height={114}
+              alt=""
+              style={{ alignContent: "center" }}
+            />
+            <br />
+            <Box variant="p">
+              Welcome to your OpenSearch Migration Assistant. Please wait while
+              setup is in progress.
+            </Box>
           </Box>
         </SpaceBetween>
       </Container>
+
       <DebugCommands>
         <SpaceBetween size="xs" direction="horizontal">
-          <Button onClick={() => setIsReady(true)}>Simulate Loaded</Button>
-          <Button onClick={() => setIsReady(false)}>Simulate Loading</Button>
+          <Button onClick={() => setDebugIsReady(true)}>Simulate Loaded</Button>
+          <Button onClick={() => setDebugIsReady(false)}>
+            Simulate Loading
+          </Button>
           <Button
             onClick={() =>
-              setErrorMessage(
+              setDebugError(
                 JSON.stringify({ error: "simulated", details: "N/A" }),
               )
             }
@@ -163,8 +165,8 @@ export default function LoadingPage() {
           </Button>
           <Button
             onClick={() => {
-              setIsReady(false);
-              setErrorMessage(null);
+              setDebugIsReady(null);
+              setDebugError(null);
             }}
           >
             Reset

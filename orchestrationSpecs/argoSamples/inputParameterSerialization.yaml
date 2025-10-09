@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: test-dig-
+spec:
+  serviceAccountName: argo-workflow-executor
+  entrypoint: test-dig
+  templates:
+    - name: test-dig
+      inputs:
+        parameters:
+          - name: migrationConfig
+            default: "{\"k\":4}"
+          - name: dr
+            # Without marshalling the contents to JSON representation, the expression that uses the parameter below
+            # fails to insert the json contents, even if it's wrapped within a toJSON() and the expression fails
+            # (leaving just the original input EXPRESSION, as it appears here - argo's normal failure mode)
+            value: "{{=toJSON(sprig.dig('documentBackfillConfigs', 'options', {'a':9}, fromJSON(inputs.parameters.migrationConfig)))}}"
+          - name: drBase64
+            value: "{{=toBase64(sprig.dig('documentBackfillConfigs', 'options', toJSON({'a':9}), fromJSON(inputs.parameters.migrationConfig)))}}"
+      container:
+        image: alpine:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -x
+            echo "=== Testing dig function ==="
+            echo "Input JSON: {{inputs.parameters.migrationConfig}}"
+            echo ""
+            echo "{{inputs.parameters.drBase64}}" | base64 -d
+            echo ""
+            echo "{{=toBase64(toJSON(sprig.dig('documentBackfillConfigs', 'options', toJSON({'a':9}), fromJSON(inputs.parameters.migrationConfig))))}}" | base64 -d
+            echo ""
+            echo "{{=toBase64(toJSON(sprig.dig('documentBackfillConfigs', 'options', {'a':9}, fromJSON(inputs.parameters.migrationConfig))))}}" | base64 -d
+            echo ""
+            echo "{{=toBase64(toJSON(fromJSON(inputs.parameters.dr)))}}" | base64 -d
+            echo ""
+            echo "=== Test complete ==="

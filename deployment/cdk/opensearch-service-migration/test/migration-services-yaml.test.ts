@@ -350,4 +350,61 @@ describe('Migration Services YAML Tests', () => {
         expect(Object.keys(parsedFromYaml).length).toEqual(expectedFields.length)
         expect(new Set(Object.keys(parsedFromYaml))).toEqual(new Set(expectedFields))
     });
+
+    test('Test that services yaml includes source version in metadata when source cluster is disabled', () => {
+        const contextOptions = {
+            vpcEnabled: true,
+            migrationAssistanceEnabled: true,
+            migrationConsoleServiceEnabled: true,
+            sourceCluster: {
+                "version": "ES_7.9",
+                "disabled": true
+            },
+            targetCluster: {
+                "endpoint": "https://target-cluster",
+                "auth": {
+                    "type": "basic",
+                    "userSecretArn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc",
+                }
+            },
+            reindexFromSnapshotServiceEnabled: true,
+            trafficReplayerServiceEnabled: true,
+        }
+
+        const stacks = createStackComposer(contextOptions)
+
+        const migrationConsoleStack: MigrationConsoleStack = (stacks.stacks.filter((s) => s instanceof MigrationConsoleStack)[0]) as MigrationConsoleStack
+        const migrationConsoleStackTemplate = Template.fromStack(migrationConsoleStack)
+
+        const valueCapture = new Capture();
+        migrationConsoleStackTemplate.hasResourceProperties("AWS::SSM::Parameter", {
+            Type: "String",
+            Name: Match.stringLikeRegexp("/migration/.*/.*/servicesYamlFile"),
+            Value: valueCapture,
+        });
+        const value = valueCapture.asObject()
+        expect(value).toBeDefined();
+        expect(value['Fn::Join']).toBeInstanceOf(Array);
+        expect(value['Fn::Join'][1]).toBeInstanceOf(Array)
+        // join the strings together to get the yaml file contents
+        const yamlFileContents = value['Fn::Join'][1].join('')
+        const parsedFromYaml = yaml.parse(yamlFileContents);
+
+        expect(parsedFromYaml.metadata_migration).toBeDefined();
+        expect(parsedFromYaml.metadata_migration.source_cluster_version).toBe("ES_7.9")
+
+        expect(parsedFromYaml.target_cluster).toBeDefined();
+        expect(parsedFromYaml.target_cluster.basic_auth).toBeDefined();
+        expect(parsedFromYaml.target_cluster.basic_auth.user_secret_arn).toBe(contextOptions.targetCluster.auth.userSecretArn);
+
+        expect(parsedFromYaml.metrics_source).toBeDefined();
+        expect(parsedFromYaml.metrics_source.cloudwatch).toBeDefined();
+
+        expect(parsedFromYaml.kafka).toBeDefined();
+
+        // Validates that the file has the expected fields
+        const expectedFields = ['target_cluster', 'metrics_source', 'backfill', 'snapshot', 'metadata_migration', 'replay', 'kafka'];
+        expect(Object.keys(parsedFromYaml).length).toEqual(expectedFields.length)
+        expect(new Set(Object.keys(parsedFromYaml))).toEqual(new Set(expectedFields))
+    });
 });

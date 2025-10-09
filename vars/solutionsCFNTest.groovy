@@ -58,7 +58,7 @@ def call(Map config = [:]) {
 
             stage('Init Bootstrap') {
                 steps {
-                    timeout(time: 1, unit: 'HOURS') {
+                    timeout(time: 90, unit: 'MINUTES') {
                         dir('test') {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {

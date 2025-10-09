@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, UTC
+import os
 from fastapi import HTTPException, Body, APIRouter
 from pydantic import BaseModel, ValidationError
 from typing import Dict, List
@@ -44,11 +45,19 @@ def single_session(session_name: str) -> Session | None:
 def create_session(session: SessionBase) -> Session:
     try:
         now = datetime.now(UTC)
+        config_file_path = "/config/migration_services.yaml"
+        env: Environment
+        if os.path.exists(config_file_path):
+            env = Environment(config_file=config_file_path)
+        else:
+            default_config: Dict = {}
+            env = Environment(config=default_config)
+
         session = Session(
             name=session.name,
             created=now,
             updated=now,
-            env=Environment(config_file="/config/migration_services.yaml")
+            env=env
         )
         session_db.create_session(session)
     except session_db.SessionNameContainsInvalidCharacters:
@@ -79,8 +88,9 @@ def update_session(session_name: str, data: Dict = Body(...)) -> Session:
                 continue
                 
             # Allow updating any other field
-            if hasattr(session_dict, key):
+            if key:
                 session_dict[key] = value
+        logger.info(f"Creating session from {session_dict}")
         updated_session = Session.model_validate(session_dict)
         session_db.update_session(updated_session)
     except ValidationError as e:
@@ -96,3 +106,5 @@ def delete_session(session_name: str) -> SessionDeleteResponse:
         return SessionDeleteResponse(detail=f"Session '{session_name}' deleted.")
     except session_db.SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found.")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Unable to delete session: {e}")

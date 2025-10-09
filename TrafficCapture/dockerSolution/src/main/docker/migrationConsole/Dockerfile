@@ -11,10 +11,13 @@ RUN ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
 
 ARG HELM_VERSION="3.14.0"
 ARG KUBECTL_VERSION="1.32.1"
+ARG KAFKA_VERSION="3.9.1"
 
 # Get kafka distribution and unpack to 'kafka'
 RUN mkdir -p /root/kafka-tools/kafka && \
-    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz -o /tmp/kafka.tgz && \
+    url_cdn="https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/kafka_2.13-${KAFKA_VERSION}.tgz" && \
+    url_archive="https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/kafka_2.13-${KAFKA_VERSION}.tgz" && \
+    curl --retry 2 --retry-delay 5 --retry-connrefused -fSL "$url_cdn" -o /tmp/kafka.tgz || curl  --retry 5 --retry-delay 5 --retry-connrefused -fSL "$url_archive" -o /tmp/kafka.tgz && \
     tar -xzf /tmp/kafka.tgz -C /root/kafka-tools/kafka --strip-components=1 && \
     rm -f /tmp/kafka.tgz
 RUN mkdir -p /root/kafka-tools/aws && \
@@ -103,6 +106,7 @@ RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo 'eval "$(register-python-argcomplete cluster_tools)"' >> ~/.bashrc && \
     echo 'source /.venv/bin/activate' >> ~/.bashrc && \
     echo 'console --config-file=/root/lib/console_link/services.yaml completion bash > /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
+    echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\t) \[\e[92m\]migration-console \[\e[0m\](\w) -> "' >> ~/.bashrc
 
 COPY workflows /root/workflows
