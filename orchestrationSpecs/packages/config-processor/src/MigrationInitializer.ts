@@ -35,7 +35,7 @@ export class MigrationInitializer {
                 hasReplayersConfigured = true;
             }
 
-            for (const snapshots of c.snapshotExtractAndLoadConfigArray) {
+            for (const snapshots of c.snapshotExtractAndLoadConfigArray??[]) {
                 for (const m of snapshots.migrations) {
                     count += 1;
                 }

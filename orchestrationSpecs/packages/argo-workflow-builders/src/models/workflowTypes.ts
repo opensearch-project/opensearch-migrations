@@ -20,7 +20,7 @@ import {
     ParameterSource,
     WorkflowParameterSource
 } from "./expression";
-import {PlainObject} from "./plainObject";
+import {NonSerializedPlainObject, PlainObject} from "./plainObject";
 
 // Specific scope types for different purposes
 export type WorkflowAndTemplatesScope<
@@ -151,7 +151,7 @@ export type LoopWithParam<T extends PlainObject> = {
     value: BaseExpression<T[]>
 }
 
-export function makeParameterLoop<T extends PlainObject>(expr: BaseExpression<T[]>) {
+export function makeParameterLoop<T extends NonSerializedPlainObject>(expr: BaseExpression<T[]>) {
     return {
         loopWith: "params",
         value: expr

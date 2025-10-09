@@ -1,4 +1,4 @@
-// scripts/clean-artifacts.js
+// buildScripts/clean-artifacts.js
 const fs = require('fs');
 const p = require('path');
 

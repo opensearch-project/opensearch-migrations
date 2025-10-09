@@ -9,7 +9,7 @@ import {
 import {z} from "zod";
 import {
     COMPLETE_SNAPSHOT_CONFIG,
-    CONSOLE_SERVICES_CONFIG_FILE,
+    CONSOLE_SERVICES_CONFIG_FILE, getZodKeys,
     RFS_OPTIONS,
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
@@ -34,7 +34,7 @@ function getRfsReplicasetManifest
 (args: {
     workflowName: BaseExpression<string>,
     sessionName: BaseExpression<string>,
-    numPods: BaseExpression<number>,
+    podReplicas: BaseExpression<number>,
 
     useLocalstackAwsCreds: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
@@ -67,7 +67,7 @@ function getRfsReplicasetManifest
             },
         },
         spec: {
-            replicas: args.numPods,
+            replicas: args.podReplicas,
             selector: {
                 matchLabels: {
                     app: "bulk-loader",
@@ -153,7 +153,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
 
     .addTemplate("createReplicaset", t => t
         .addRequiredInput("sessionName", typeToken<string>())
-        .addOptionalInput("numPods", c => 1)
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
 
         .addRequiredInput("snapshotName", typeToken<string>())
@@ -170,7 +169,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 action: "create",
                 setOwnerReference: true,
                 manifest: getRfsReplicasetManifest({
-                    numPods: b.inputs.numPods,
+                    podReplicas: b.inputs.podReplicas,
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     useCustomLogging:
                         expr.equals(expr.literal(""),
@@ -180,7 +179,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
                     rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
                     inputsAsEnvList: [
-                        ...inputsToEnvVarsList({...b.inputs}, "RFS_", "_CMD_LINE_ARG")
+                        ...inputsToEnvVarsList({...b.inputs}, "JCOMMANDER")
                     ],
                     workflowName: expr.getWorkflowValue("name")
                 })
@@ -190,20 +189,20 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
 
     .addTemplate("createReplicasetFromConfig", t => t
         .addRequiredInput("sessionName", typeToken<string>())
-        .addOptionalInput("numPods", c => 1)
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
 
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
 
-        .addOptionalInput("documentBackfillConfig", c => ({} as z.infer<typeof RFS_OPTIONS>))
+        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addSteps(b => b
             .addStep("createReplicaset", INTERNAL, "createReplicaset", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    ...selectInputsFieldsAsExpressionRecord(b.inputs.documentBackfillConfig, c),
+                    ...selectInputsFieldsAsExpressionRecord(expr.deserializeRecord(b.inputs.documentBackfillConfig), c,
+                        getZodKeys(RFS_OPTIONS)),
                     ...(extractTargetKeysToExpressionMap(b.inputs.targetConfig)),
 
                     s3Endpoint: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "endpoint"], ""),
@@ -220,7 +219,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addOptionalInput("indices", c => [] as readonly string[])
-        .addOptionalInput("backfillConfig", c => ({} as z.infer<typeof RFS_OPTIONS>))
+        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
 
         .addSteps(b => b

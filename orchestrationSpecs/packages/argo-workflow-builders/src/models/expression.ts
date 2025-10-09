@@ -445,7 +445,7 @@ class ExprBuilder {
         return new AsStringExpression(e);
     }
 
-    cast<FROM extends BaseExpression<any, any>>(v: FROM) {
+    cast<FROM extends AllowLiteralOrExpression<any, any>>(v: FROM) {
         return {
             to<TO extends PlainObject>(): BaseExpression<TO, ExprC<FROM>> {
                 return v as unknown as BaseExpression<TO, ExprC<FROM>>;
@@ -498,6 +498,14 @@ class ExprBuilder {
 
     not<C extends ExpressionType>(data: AllowLiteralOrExpression<boolean, C>) {
         return fn<boolean, C>("!", toExpression(data));
+    }
+
+    isEmpty(data: AllowLiteralOrExpression<any, any>): BaseExpression<boolean, "complicatedExpression"> {
+        return this.equals(0, expr.length(expr.asString(data)));
+    }
+
+    empty<T extends PlainObject>(): BaseExpression<T> {
+        return this.cast(this.literal("")).to<T>();
     }
 
     add<

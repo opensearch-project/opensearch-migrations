@@ -1,5 +1,9 @@
 import {z} from "zod";
 
+export function getZodKeys<T extends z.ZodRawShape>(schema: z.ZodObject<T>): readonly (keyof T)[] {
+    return Object.keys(schema.shape) as (keyof T)[];
+}
+
 export const KAFKA_SERVICES_CONFIG = z.object({
     broker_endpoints: z.string().describe("Specify an external kafka broker list if using one other than the one managed by the workflow"),
     standard: z.string()
@@ -7,7 +11,7 @@ export const KAFKA_SERVICES_CONFIG = z.object({
 
 export const S3_REPO_CONFIG = z.object({
     aws_region: z.string().describe("The AWS region that the bucket reside in (us-east-2, etc)"),
-    endpoint: z.string().optional()
+    endpoint: z.string().default("")
         .describe("Override the default S3 endpoint for clients to connect to.  " +
             "Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"),
     s3RepoPathUri: z.string().describe("s3:///BUCKETNAME/PATH")
@@ -17,34 +21,35 @@ export const S3_REPO_CONFIG = z.object({
 export const PROXY_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default(""),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
+    setHeaders: z.array(z.string()).optional(),
 });
 
 export const REPLAYER_OPTIONS = z.object({
-    speedupFactor: z.number().optional(),
-    podReplicas: z.number().optional(),
-    authHeaderOverride: z.string().optional(),
+    speedupFactor: z.number().default(1.1),
+    podReplicas: z.number().default(1),
+    authHeaderOverride: z.string().default(""),
     loggingConfigurationOverrideConfigMap: z.string().default(""),
-    docTransformerBase64: z.string().default(""),
-    otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
+    // docTransformerBase64: z.string().default(""),
+    // otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
 });
 
 export const METADATA_OPTIONS = z.object({
-    componentTemplateAllowlist: z.array(z.string()).optional(),
-    indexAllowlist: z.array(z.string()).optional(),
-    indexTemplateAllowlist: z.array(z.string()).optional(),
+    componentTemplateAllowlist: z.array(z.string()).default([]),
+    indexAllowlist: z.array(z.string()).default([]),
+    indexTemplateAllowlist: z.array(z.string()).default([]),
 
-    allowLooseVersionMatching: z.boolean().optional(),
-    clusterAwarenessAttributes: z.number().optional(),
-    disableCompression: z.boolean().optional(),
+    allowLooseVersionMatching: z.boolean().default(true),
+    clusterAwarenessAttributes: z.number().default(1),
     loggingConfigurationOverrideConfigMap: z.string().default(""),
-    multiTypeBehavior: z.union(["NONE", "UNION", "SPLIT"].map(s=>z.literal(s))).optional(),
+    multiTypeBehavior: z.union(["NONE", "UNION", "SPLIT"].map(s=>z.literal(s))).default("NONE"),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
-    output: z.union(["HUMAN_READABLE", "JSON"].map(s=>z.literal(s))).optional(),
+    output: z.union(["HUMAN_READABLE", "JSON"].map(s=>z.literal(s))).default("HUMAN_READABLE"),
     transformerBase64: z.string().default(""),
 });
 
 export const RFS_OPTIONS = z.object({
-    indexAllowlist: z.array(z.string()).optional(),
+    indexAllowlist: z.array(z.string()).default([]),
+    podReplicas: z.number().default(1),
 
     loggingConfigurationOverrideConfigMap: z.string().default(""),
     allowLooseVersionMatching: z.boolean().default(true).describe(""),
@@ -109,7 +114,7 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
 });
 
 export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    indices: z.array(z.string()).optional(),
+    indices: z.array(z.string()).default([]),
     snapshotConfig: NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
     migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
 });

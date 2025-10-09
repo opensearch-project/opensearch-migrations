@@ -21,7 +21,7 @@ import {
 } from "./workflowTypes";
 import {TemplateBodyBuilder} from "./templateBodyBuilder";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
-import {PlainObject} from "./plainObject";
+import {NonSerializedPlainObject, PlainObject} from "./plainObject";
 import {
     AllTasksAsOutputReferenceable,
     getTaskOutputsByTaskName,
@@ -150,7 +150,7 @@ export class StepsBuilder<
         Name extends string,
         TemplateSource,
         K extends KeyFor<ContextualScope, TemplateSource>,
-        LoopT extends PlainObject = never
+        LoopT extends NonSerializedPlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         source: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TemplateSource>,

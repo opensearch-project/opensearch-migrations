@@ -6,7 +6,7 @@ import {
     TargetClusterParameters
 } from "./commonWorkflowTemplates";
 import {z} from "zod";
-import {REPLAYER_OPTIONS, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
+import {getZodKeys, REPLAYER_OPTIONS, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {
     BaseExpression,
     expr,
@@ -90,10 +90,7 @@ export const Replayer = WorkflowBuilder.create({
 
 
     .addTemplate("deployReplayer", t => t // TODO: rename to createDeployment to be consistent w/ createReplicaset
-        .addOptionalInput("numPods", c => 1)
-
         .addInputsFromRecord(TargetClusterParameters)
-
         .addInputsFromRecord(transformZodObjectToParams(REPLAYER_OPTIONS))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
 
@@ -102,7 +99,7 @@ export const Replayer = WorkflowBuilder.create({
                 action: "create",
                 setOwnerReference: true,
                 manifest: getReplayerDeploymentManifest({
-                    podReplicas: b.inputs.podReplicas,
+                    podReplicas: expr.literal(0),//b.inputs.podReplicas,
                     useCustomLogging:
                         expr.equals(expr.literal(""),
                             expr.nullCoalesce(b.inputs.loggingConfigurationOverrideConfigMap, expr.literal(""))),
@@ -111,7 +108,7 @@ export const Replayer = WorkflowBuilder.create({
                     replayerImageName: b.inputs.imageTrafficReplayerLocation,
                     replayerImagePullPolicy: b.inputs.imageTrafficReplayerPullPolicy,
                     inputsAsEnvList: inputsToEnvVarsList(remapRecordNames(b.inputs, {"targetInsecure": "insecure"}),
-                            "REPLAYER_", "_CMD_LINE_ARG"),
+                            "JCOMMANDER"),
                     workflowName: expr.getWorkflowValue("name")
                 })
             }))
@@ -126,7 +123,7 @@ export const Replayer = WorkflowBuilder.create({
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("replayerConfig", typeToken<z.infer<typeof REPLAYER_OPTIONS>>())
 
-        .addOptionalInput("numPods", c => 1)
+        .addOptionalInput("podReplicas", c => 1)
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
 
@@ -135,9 +132,11 @@ export const Replayer = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     ...extractTargetKeysToExpressionMap(b.inputs.targetConfig),
-                    ...selectInputsFieldsAsExpressionRecord(b.inputs.replayerConfig, c)
+                    ...selectInputsFieldsAsExpressionRecord(expr.deserializeRecord(b.inputs.replayerConfig), c,
+                        getZodKeys(REPLAYER_OPTIONS))
                 })))
     )
 
 
     .getFullScope();
+

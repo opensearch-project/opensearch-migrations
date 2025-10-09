@@ -7,7 +7,7 @@
     "start-transform": "tsx src/RunMigrationConfigTransformer.ts",
     "start-initialize": "tsx src/RunMigrationConfigTransformer.ts",
     "dev-transform": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationConfigTransformer.ts",
-    "dev-initialize": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationInitializer.ts -- --etcd-endpoints http://localhost:2379 --etcd-user root --etcd-password password --prefix test"
+    "dev-initialize": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationInitializer.ts -- --etcd-endpoints http://localhost:2379 --etcd-user root --etcd-password password "
   },
   "bin": {
     "process-config": "./dist/cli.js"

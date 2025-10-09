@@ -18,8 +18,8 @@
     "typescript": "^5.9.3"
   },
   "scripts": {
-    "clean:artifacts": "node scripts/clean-artifacts.js",
-    "clean:node": "node scripts/clean-node.js",
+    "clean:artifacts": "node buildScripts/clean-artifacts.js",
+    "clean:node": "node buildScripts/clean-node.js",
     "clean:hard": "npm run clean:artifacts && npm run clean:node",
 
     "reinstall": "npm run clean:hard && npm install",
@@ -43,8 +43,8 @@
     "dev-schema": "npm run schema -w @opensearch-migrations/schemas -- ",
     "dev-argo-schema": "npm run argo-schema -w @opensearch-migrations/schemas -- ",
     "dev-make-sample": "npm run make-sample -w @opensearch-migrations/schemas -- ",
-    "dev-transform-config": "npm run dev-transform -w @opensearch-migrations/config-processor",
-    "dev-initialize-workflow-state": "npm run dev-initialize -w @opensearch-migrations/config-processor",
+    "dev-transform-config": "npm run dev-transform -w @opensearch-migrations/config-processor -- ",
+    "dev-initialize-workflow-state": "npm run dev-initialize -w @opensearch-migrations/config-processor -- ",
 
     "type-check": "tsgo -p tsconfig.typecheck.all.json --noEmit",
     "make-templates": "npm run dev-make-templates -- ",

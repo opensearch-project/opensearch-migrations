@@ -29,7 +29,7 @@ import {
     TaskRebinder
 } from "./taskBuilder";
 import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "./templateBodyBuilder";
-import {PlainObject} from "./plainObject";
+import {NonSerializedPlainObject, PlainObject} from "./plainObject";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {NamedTask} from "./sharedTypes";
 
@@ -136,7 +136,7 @@ export class DagBuilder<
         Name extends string,
         TemplateSource,
         K extends KeyFor<ContextualScope, TemplateSource>,
-        LoopT extends PlainObject = never
+        LoopT extends NonSerializedPlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, TaskScope>,
         source: UniqueNameConstraintOutsideDeclaration<Name, TaskScope, TemplateSource>,

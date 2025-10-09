@@ -27,27 +27,9 @@
           "password": "admin"
         }
       }
-    },
-    "target2": {
-      "endpoint": "https://opensearch-cluster-master-headless:9200",
-      "allowInsecure": true,
-      "authConfig": {
-        "basic": {
-          "username": "admin",
-          "password": "admin"
-        }
-      }
     }
-
   },
   migrationConfigs: [
-    {
-      "fromSource": "source1",
-      "toTarget": "target2",
-      "replayerConfig": {
-        "podReplicas": 0
-      }
-    },
     {
       "fromSource": "source1",
       "toTarget": "target1",

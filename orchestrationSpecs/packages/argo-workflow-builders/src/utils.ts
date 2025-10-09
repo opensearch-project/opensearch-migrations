@@ -1,4 +1,4 @@
-import {AllowLiteralOrExpression, expr} from "./models/expression";
+import {AllowLiteralOrExpression, BaseExpression, expr} from "./models/expression";
 import {z} from "zod";
 import {defineParam, defineRequiredParam} from "./models/parameterSchemas";
 import {PlainObject} from "./models/plainObject";
@@ -50,7 +50,7 @@ export function toEnvVarName(str: string, prefix:string, suffix:string): string 
         .toUpperCase() + suffix;
 }
 
-export function inputsToEnvVars<T extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
+export function inputsToPlainEnvVars<T extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
     inputs: T,
     prefix: string,
     suffix: string
@@ -62,12 +62,36 @@ export function inputsToEnvVars<T extends Record<string, AllowLiteralOrExpressio
     return result as any;
 }
 
+export function inputsToJCommanderEnvVars<T extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
+    inputs: T
+): { "JCOMMANDER_OPTS": BaseExpression<string> } {
+    const result: BaseExpression<string>[] = [];
+    Object.entries(inputs).forEach(([key, value]) => {
+        result.push(expr.ternary(expr.isEmpty(value), expr.literal(""),
+            expr.concat(expr.literal(" --"+key+" "), expr.cast(value).to<string>())));
+    });
+    return { "JCOMMANDER_OPTS":  expr.concat(...result) };
+}
+
+export function inputsToEnvVars<
+    T extends Record<string, AllowLiteralOrExpression<PlainObject>>,
+    M extends "JCOMMANDER" | {prefix: string, suffix: string}
+>(
+    inputs: T,
+    mode: M
+): M extends "JCOMMANDER"
+    ? { "JCOMMANDER_OPTS": BaseExpression<string> }
+    : { [K in keyof T as (string & K)]: T[K] } {
+    return (mode === "JCOMMANDER"
+        ? inputsToJCommanderEnvVars(inputs)
+        : inputsToPlainEnvVars(inputs, (mode as any).prefix, (mode as any).suffix)) as any;
+}
+
 export function inputsToEnvVarsList<T extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
     inputs: T,
-    prefix: string,
-    suffix: string
+    mode: "JCOMMANDER" | {prefix: string, suffix: string}
 ) {
-    return Object.entries(inputsToEnvVars(inputs, prefix, suffix)).map(([name, value]) => ({name, value}));
+    return Object.entries(inputsToEnvVars(inputs, mode)).map(([name, value]) => ({name, value}));
 }
 
 // Helper to check if a Zod type has a default value

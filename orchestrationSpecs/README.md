@@ -92,7 +92,8 @@ rm k8sResources/*yaml ; \
 kc delete workflows `kc get workflow 2>&1 | tail -n +2  | grep -v "No resources"  | cut -f 1 -d \  ` ; \
 kc delete workflowtemplates `kc get workflowtemplates 2>&1 | tail -n +2  | grep -v "No resources"  | cut -f 1 -d \  ` ; \
 npm run make-templates -- --outputDirectory ${PWD}/k8sResources && \
-kc create -f k8sResources
+kc create -f k8sResources && 
+./scripts/createSampleMigration.ts
 ```
 
 I'll add something to handle `kc create -f createMigration.yaml` once I wire up

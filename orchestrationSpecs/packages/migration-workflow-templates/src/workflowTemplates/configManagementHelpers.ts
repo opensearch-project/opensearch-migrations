@@ -35,22 +35,6 @@ export const ConfigManagementHelpers = WorkflowBuilder.create({
     parallelism: 1
 })
     .addParams(CommonWorkflowParameters)
-    .addTemplate("prepareConfigs", t => t
-        .addInputs(addCommonTargetLatchInputs)
-        .addRequiredInput("targetClusters", typeToken<z.infer<typeof TARGET_CLUSTERS_MAP>>())
-        .addRequiredInput("sourceClusters", typeToken<z.infer<typeof SOURCE_CLUSTERS_MAP>>())
-        .addRequiredInput("sourceMigrationConfigs", typeToken<z.infer<typeof NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG>[]>())
-
-        .addContainer(b => b
-            .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)
-            .addInputsAsEnvVars("WF_SETUP_", "")
-            .addCommand(["sh", "-c"])
-            .addArgs([initTlhScript])
-
-            .addPathOutput("prefix", "/tmp/prefix", typeToken<string>())
-            .addPathOutput("denormalizedConfigArray", "/tmp/denormalizedConfigs", typeToken<z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG>[]>())
-        )
-    )
 
 
     .addTemplate("decrementLatch", t => t
@@ -59,7 +43,7 @@ export const ConfigManagementHelpers = WorkflowBuilder.create({
         .addRequiredInput("processorId", typeToken<string>())
         .addContainer(b => b
             .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)
-            .addInputsAsEnvVars("", "")
+            .addInputsAsEnvVars({prefix:"", suffix: ""})
             .addCommand(["sh", "-c"])
             .addArgs([decrementTlhScript])
 
@@ -72,7 +56,7 @@ export const ConfigManagementHelpers = WorkflowBuilder.create({
         .addInputs(addCommonTargetLatchInputs)
         .addContainer(b => b
             .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)
-            .addInputsAsEnvVars("", "")
+            .addInputsAsEnvVars({prefix: "", suffix: ""})
             .addCommand(["sh", "-c"])
             .addArgs([cleanupTlhScript])
         )

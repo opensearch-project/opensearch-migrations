@@ -78,7 +78,6 @@ export function selectInputsForKeys<
 
     for (const k of keys) {
         if (Object.prototype.hasOwnProperty.call(src, k as string)) {
-            // TS is happy because k ∈ keyof BuilderT["inputs"]
             (out as any)[k] = src[k as string];
         }
     }
@@ -175,7 +174,7 @@ type CleanPayload<V> = StripUndefined<PayloadOf<V>>;
 
 /** Helper type for serialized expressions similar to AllowSerializedAggregateOrPrimitiveExpressionOrLiteral */
 type AllowExpressionIncludingSerialized<T extends PlainObject, C extends ExpressionType = ExpressionType> =
-    // Handle both aggregate T and already-serialized T to ensure we return a union of BaseExpression<U> | BaseExpression<Serialized<U>>
+// Handle both aggregate T and already-serialized T to ensure we return a union of BaseExpression<U> | BaseExpression<Serialized<U>>
     T extends Serialized<infer U>
         ? U extends AggregateType
             ? BaseExpression<Serialized<U>, C>
@@ -189,39 +188,80 @@ type SelectedExprRecord<T extends Record<string, any>, CB> =
     { [K in _ReqKeys<T, CB>]: AllowExpressionIncludingSerialized<CleanPayload<_R<CB>[K]>, any> } &
     { [K in _OptKeys<T, CB>]?: AllowExpressionIncludingSerialized<CleanPayload<_R<CB>[K]>, any> };
 
+
+// === Utilities: required/optional key detection ===
+// type RequiredKeys<T> = {
+//     [K in keyof T]-?: {} extends Pick<T, K> ? never : K
+// }[keyof T];
+//
+// type OptionalKeys<T> = Exclude<keyof T, RequiredKeys<T>>;
+
+// === Your existing set-equality checker for the keys tuple ===
+type KeyListMatches<
+    R extends Record<PropertyKey, unknown>,
+    K extends readonly PropertyKey[]
+> =
+    Exclude<keyof R, K[number]> extends never
+        ? Exclude<K[number], keyof R> extends never
+            ? K
+            : ["extra keys in argument", Exclude<K[number], keyof R>]
+        : ["missing keys from argument", Exclude<keyof R, K[number]>];
+
+// === New: Guard that enforces "all optional keys of R are present in CB.defaultKeys" ===
+// - If R has no optional keys, it's OK even if CB.defaultKeys is omitted.
+// - If R has optional keys, CB.defaultKeys must include all of them (compile-time).
+type OptionalKeysGuard<
+    R extends Record<PropertyKey, unknown>,
+    D extends Partial<R>,
+    CB extends {
+        defaults: D;
+        defaultKeys?: readonly (Extract<keyof D, string>)[];
+        register: (arg: any, ...rest: any[]) => any;
+    }
+> =
+// If there are no optional keys in R, we're fine.
+    OptionalKeys<R> extends never
+        ? unknown
+        : NonNullable<CB["defaultKeys"]> extends readonly any[]
+            ? Exclude<
+                OptionalKeys<R>,
+                // defaultKeys elements are subset of D's keys; D ⊆ R, so intersect with R to be clean
+                Extract<NonNullable<CB["defaultKeys"]>[number], keyof R>
+            > extends never
+                ? unknown
+                : ["optional keys must appear in CB.defaultKeys",
+                    Exclude<
+                        OptionalKeys<R>,
+                        Extract<NonNullable<CB["defaultKeys"]>[number], keyof R>
+                    >
+                ]
+            : ["CB.defaultKeys is required for optional keys", OptionalKeys<R>];
+
 export function selectInputsFieldsAsExpressionRecord<
-    T extends Serialized<Record<string, NonSerializedPlainObject>>,
-    D extends Record<string, Primitive>,
+    T extends Record<PropertyKey, PlainObject>,
+    D extends Partial<T>,
     CB extends {
         defaults: D;
         defaultKeys?: readonly (Extract<keyof D, string>)[];
         register: (arg: any, ...rest: any[]) => any;
         parameterKeys?: readonly string[];
-    }
+    },
+    K extends readonly (keyof T)[]
 >(
     P: BaseExpression<T>,
-    c: CB
+    c: CB,
+    expressionsKeys: KeyListMatches<T, K> & OptionalKeysGuard<T, D, CB>
 ): SelectedExprRecord<T, CB> {
-    // Get the keys available in defaults (template input keys)  
-    const defaultKeys = Array.isArray(c.defaultKeys) ? c.defaultKeys : Object.keys(c.defaults);
-
-    const callbackKeys = getAcceptedRegisterKeys(c);
-    // Choose keys: prefer the callback's declared parameter keys; otherwise fall back to defaults keys
-    const keys = callbackKeys.length > 0
-        ? callbackKeys
-        : defaultKeys;
-
     const out: any = {};
-    for (const k of keys) {
+    for (const k of expressionsKeys) {
         const dh = (c.defaults as any)[k];
 
         if (dh && typeof dh === "object" && "expression" in dh) {
-            out[k] = expr.dig(expr.deserializeRecord(P) as any, [k as any], "");
+            out[k] = expr.dig(P as any, [k as any], "");
         } else {
-            out[k] = expr.jsonPathStrict(P as any, k as any);
+            out[k] = expr.jsonPathStrict(expr.serialize(P), k as any);
         }
     }
-
     return out as SelectedExprRecord<T, CB>;
 }
 

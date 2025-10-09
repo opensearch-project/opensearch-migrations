@@ -5,12 +5,12 @@ import {
 import {z} from "zod";
 import {
     CLUSTER_CONFIG,
-    COMPLETE_SNAPSHOT_CONFIG,
+    COMPLETE_SNAPSHOT_CONFIG, getZodKeys,
     METADATA_OPTIONS,
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
 import {
-    defineRequiredParam,
+    defineRequiredParam, expr,
     inputsToEnvVars,
     INTERNAL,
     selectInputsFieldsAsExpressionRecord,
@@ -48,7 +48,7 @@ export const MetadataMigration = WorkflowBuilder.create({
                 // {
                 //   ...remapRecordNames(b.inputs.metadataMigrationConfig, {}),
                 // },
-                "METADATA_", "_CMD_LINE_ARG"))
+                "JCOMMANDER"))
             .addCommand(["/root/metadataMigration/bin/MetadataMigration", b.inputs.commandMode])
         )
     )
@@ -65,7 +65,8 @@ export const MetadataMigration = WorkflowBuilder.create({
             .addStep("metadataEvaluate", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    ...selectInputsFieldsAsExpressionRecord(b.inputs.metadataMigrationConfig, c),
+                    ...selectInputsFieldsAsExpressionRecord(expr.deserializeRecord(b.inputs.metadataMigrationConfig), c,
+                        getZodKeys(METADATA_OPTIONS)),
                     commandMode: "evaluate"
                 })
             )
@@ -73,7 +74,8 @@ export const MetadataMigration = WorkflowBuilder.create({
             .addStep("metadataMigrate", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    ...selectInputsFieldsAsExpressionRecord(b.inputs.metadataMigrationConfig, c),
+                    ...selectInputsFieldsAsExpressionRecord(expr.deserializeRecord(b.inputs.metadataMigrationConfig), c,
+                        getZodKeys(METADATA_OPTIONS)),
                     commandMode: "migrate"
                 })
             )

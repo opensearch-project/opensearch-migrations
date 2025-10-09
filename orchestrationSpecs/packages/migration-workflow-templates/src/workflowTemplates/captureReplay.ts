@@ -47,12 +47,12 @@ export const CaptureReplay = WorkflowBuilder.create({
         .addSteps(b => b.addStepGroup(c => c))
 
         .addExpressionOutput("kafkaName", b => expr.ternary(
-            expr.equals("", b.inputs.providedKafkaK8sName),
+            expr.isEmpty(b.inputs.providedKafkaK8sName),
             b.inputs.createdKafkaName,
             b.inputs.providedKafkaK8sName
         ))
         .addExpressionOutput("bootstrapServers", b => expr.ternary(
-            expr.equals("", b.inputs.providedKafkaBootstrapServers),
+            expr.isEmpty(b.inputs.providedKafkaBootstrapServers),
             b.inputs.createdKafkaName,
             b.inputs.providedKafkaK8sName
         ))
@@ -97,7 +97,7 @@ export const CaptureReplay = WorkflowBuilder.create({
                         )
                     }),
                 {
-                    when: expr.equals("", b.inputs.providedKafkaBootstrapServers),
+                    when: { templateExp: expr.isEmpty(b.inputs.providedKafkaBootstrapServers) },
                     dependencies: ["idGenerator"]
                 }
             )

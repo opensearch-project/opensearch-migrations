@@ -29,7 +29,8 @@ module.exports = {
     ],
 
     moduleNameMapper: {
-        "^@/(.*)$": "<rootDir>/src/$1",
+        "@opensearch-migrations/argo-workflow-builders": "<rootDir>/../argo-workflow-builders/src",
+        "@opensearch-migrations/schemas": "<rootDir>/../schemas/src",
         "^resources/(.*)$": "<rootDir>/resources/$1"
     },
 

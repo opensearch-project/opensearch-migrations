@@ -84,7 +84,12 @@ export class ContainerBuilder<
     }
 
     protected getBody() {
-        return {container: this.bodyScope};
+        return {
+            container: {
+                ...this.bodyScope,
+                env: this.envScope as Record<string, BaseExpression<any>>
+            }
+        };
     }
 
     // Update existing methods to preserve EnvScope type parameter
@@ -257,10 +262,12 @@ export class ContainerBuilder<
         ModifiedInputs extends Record<string, AllowLiteralOrExpression<string>> =
             { [K in keyof InputParamsScope as Uppercase<string & K>]: AllowLiteralOrExpression<string> }
     >(
-        prefix: string,
-        suffix: string,
+        mode: "JCOMMANDER" | {
+            prefix: string,
+            suffix: string
+        },
         modifierFn: (inputs: InputParamsToExpressions<InputParamsScope>) => ModifiedInputs =
-            (inputs: InputParamsToExpressions<InputParamsScope>) => inputsToEnvVars(inputs, prefix, suffix) as any
+            (inputs: InputParamsToExpressions<InputParamsScope>) => inputsToEnvVars(inputs, mode) as any
     ): ScopeIsEmptyConstraint<EnvScope,
         ContainerBuilder<
             ContextualScope,

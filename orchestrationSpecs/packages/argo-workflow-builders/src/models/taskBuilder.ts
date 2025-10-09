@@ -10,7 +10,7 @@ import {
     WorkflowAndTemplatesScope
 } from "./workflowTypes";
 import {Workflow} from "./workflowBuilder";
-import {DeepWiden, PlainObject} from "./plainObject";
+import {DeepWiden, NonSerializedPlainObject, PlainObject} from "./plainObject";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {NamedTask, TaskType} from "./sharedTypes";
@@ -100,7 +100,7 @@ export type ParamProviderCallbackObject<
     TasksScope extends Record<string, TasksWithOutputs<any, any>>,
     Label extends TaskType,
     Inputs extends InputParametersRecord,
-    LoopItemsType extends PlainObject = never
+    LoopItemsType extends NonSerializedPlainObject = never
 > =
     {
         register: (params: ParamsWithLiteralsOrExpressionsIncludingSerialized<CallerParams<Inputs>>) => ParamsPushedSymbol;
@@ -109,7 +109,7 @@ export type ParamProviderCallbackObject<
         defaults: DefaultsOfInputs<Inputs>;
         defaultKeys?: readonly (Extract<keyof DefaultsOfInputs<Inputs>, string>)[];
     } & AllTasksAsOutputReferenceable<TasksScope, Label>
-    & IfNever<LoopItemsType, {}, { item: AllowSerializedAggregateOrPrimitiveExpressionOrLiteral<LoopItemsType> }>;
+    & IfNever<LoopItemsType, {}, { item: BaseExpression<LoopItemsType> }>;
 
 /**
  * ParamsRegistrationFn is an alias placeholder that defines the callback that addTasks uses.
@@ -118,7 +118,7 @@ export type ParamsRegistrationFn<
     TaskScope extends TasksOutputsScope,
     Inputs extends InputParametersRecord,
     Label extends TaskType,
-    LoopT extends PlainObject
+    LoopT extends NonSerializedPlainObject
 > = (ctx: ParamProviderCallbackObject<TaskScope, Label, Inputs, LoopT>) => ParamsPushedSymbol;
 
 // Tri-state discriminator for inputs: "empty" | "allOptional" | "hasRequired"
@@ -148,7 +148,7 @@ export type ParamsTuple<
     Name extends string,
     S extends TasksOutputsScope,
     Label extends TaskType,
-    LoopT extends PlainObject,
+    LoopT extends NonSerializedPlainObject,
     OptsType extends TaskOpts<LoopT> = TaskOpts<LoopT>
 > =
     InputKind<I> extends "empty"
@@ -170,7 +170,7 @@ export type ParamsTuple<
 export function unpackParams<
     I extends InputParametersRecord,
     Label extends TaskType,
-    LoopT extends PlainObject
+    LoopT extends NonSerializedPlainObject
 >(
     args: readonly unknown[]
 ): {
@@ -288,7 +288,7 @@ export abstract class TaskBuilder<
 
     protected getParamsFromCallback<
         Inputs extends InputParametersRecord,
-        LoopT extends PlainObject = never
+        LoopT extends NonSerializedPlainObject = never
     >(
         inputs: Inputs,
         fn: ParamsRegistrationFn<S, Inputs, Label, LoopT>,
@@ -313,7 +313,7 @@ export abstract class TaskBuilder<
         Name extends string,
         TemplateSource,                      // typeof INTERNAL | Workflow<...>
         K extends KeyFor<C, TemplateSource>, // tie K to S so key autocompletes
-        LoopT extends PlainObject,
+        LoopT extends NonSerializedPlainObject,
         OptsType extends TaskOpts<LoopT> = TaskOpts<LoopT>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, S>,
@@ -381,7 +381,7 @@ export abstract class TaskBuilder<
 
     protected buildParamProviderCallbackObject<
         Inputs extends InputParametersRecord,
-        LoopT extends PlainObject = never
+        LoopT extends NonSerializedPlainObject = never
     >(
         inputs: Inputs,
         register: (params: ParamsWithLiteralsOrExpressionsIncludingSerialized<CallerParams<Inputs>>) => ParamsPushedSymbol,
@@ -408,7 +408,7 @@ export abstract class TaskBuilder<
 
     protected callTemplate<
         TKey extends Extract<keyof TemplateSignaturesScope, string>,
-        LoopT extends PlainObject = never
+        LoopT extends NonSerializedPlainObject = never
     >(
         name: string,
         templateKey: TKey,

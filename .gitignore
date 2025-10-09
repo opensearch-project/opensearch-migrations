@@ -34,3 +34,4 @@ orchestrationSpecs/dist/
 orchestrationSpecs/node_modules/
 orchestrationSpecs/packages/**/dist/
 orchestrationSpecs/packages/**/node_modules/
+orchestrationSpecs/packages/migration-workflow-templates/k8sResources

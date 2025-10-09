@@ -185,7 +185,7 @@ function makeOptionalDict<
     T extends PlainObject,
     SCHEMA extends PlainObject
 >(label: string, v: BaseExpression<T>, tt: TypeToken<SCHEMA>) {
-    return expr.ternary(expr.equals("", expr.asString(v)), expr.literal({}),
+    return expr.ternary(expr.isEmpty(v), expr.literal({}),
         expr.makeDict({[label]: expr.stringToRecord(tt, expr.asString(v))}));
 }
 
