@@ -88,18 +88,16 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 60, unit: 'MINUTES') {
                         dir('test') {
-                            env.sourceVer = sourceVersion ?: params.SOURCE_VERSION
-                            env.targetVer = targetVersion ?: params.TARGET_VERSION
-                            env.sourceClusterType = sourceClusterType ?: params.SOURCE_CLUSTER_TYPE
-                            env.targetClusterType = targetClusterType ?: params.TARGET_CLUSTER_TYPE
-                            deployClusters(
+                            script {
+                                env.sourceVer = sourceVersion ?: params.SOURCE_VERSION
+                                env.targetVer = targetVersion ?: params.TARGET_VERSION
+                                env.sourceClusterType = sourceClusterType ?: params.SOURCE_CLUSTER_TYPE
+                                env.targetClusterType = targetClusterType ?: params.TARGET_CLUSTER_TYPE
+                                deployClusters(
                                     stage: "${maStageName}",
-                                    clusterContextFilePath: "${clusterContextFilePath}",
-                                    sourceVersion: env.sourceVer,
-                                    targetVersion: env.targetVer,
-                                    sourceClusterType: env.sourceClusterType,
-                                    targetClusterType: env.targetClusterType
-                            )
+                                    clusterContextFilePath: "${clusterContextFilePath}"
+                                )
+                            }
                         }
                     }
                 }
