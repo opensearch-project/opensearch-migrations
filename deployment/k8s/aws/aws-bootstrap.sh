@@ -25,7 +25,6 @@ build_images=false
 keep_build_images_job_alive=false
 use_public_images=true
 skip_console_exec=false
-security_group_ids=""
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -44,7 +43,6 @@ while [[ $# -gt 0 ]]; do
     --keep-build-images-job-alive) keep_build_images_job_alive=true; shift 1 ;;
     --skip-console-exec) skip_console_exec=true; shift 1 ;;
     --release-version) RELEASE_VERSION="$2"; shift 2 ;;
-    --security-group-ids) security_group_ids="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo "Options:"
@@ -62,7 +60,6 @@ while [[ $# -gt 0 ]]; do
       echo "  --keep-build-images-job-alive             (default: $keep_build_images_job_alive)"
       echo "  --skip-console-exec                       (default: $skip_console_exec)"
       echo "  --release-version <val>                   (default: $RELEASE_VERSION)"
-      echo "  --security-group-ids <id1,id2,...>        (max 4, Specify security groups to apply to MA services to allow source/target cluster access)"
       exit 0
       ;;
     *)
@@ -73,15 +70,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- validation ---
-user_sg_array=()
-if [[ -n "$security_group_ids" ]]; then
-  IFS=',' read -r -a user_sg_array <<< "$security_group_ids"
-  if [[ ${#user_sg_array[@]} -gt 4 ]]; then
-    echo "Error: A maximum of 4 user-specified security group IDs is allowed (got ${#user_sg_array[@]})."
-    exit 1
-  fi
-fi
-
 if [[ "$build_images" == "true" && "$use_public_images" == "true" ]]; then
   echo "Note: --build-images is enabled, so public images will NOT be used."
   use_public_images=false
@@ -181,14 +169,6 @@ aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_
 
 kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace "$namespace"
 kubectl config set-context --current --namespace="$namespace" >/dev/null 2>&1
-
-combined_sg_array=("${user_sg_array[@]}" "$EKS_CLUSTER_SECURITY_GROUP")
-echo "Using the following security groups for the 'default' NodeClass: ${combined_sg_array[*]}"
-sg_json=$(printf '{"id":"%s"},' "${combined_sg_array[@]}")
-sg_json="[${sg_json%,}]"  # remove trailing comma
-kubectl patch nodeclass default \
-  --type=merge \
-  -p "{\"spec\":{\"securityGroupSelectorTerms\":$sg_json}}"
 
 if ! helm status aws-efs-csi-driver -n kube-system >/dev/null 2>&1; then
   echo "Installing aws-efs-csi-driver Helm chart..."

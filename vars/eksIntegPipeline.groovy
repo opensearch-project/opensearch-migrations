@@ -201,6 +201,12 @@ def call(Map config = [:]) {
                                     }
                                     env.eksClusterName = eksClusterPair.split('=')[1]
 
+                                    def clusterSecurityGroupPair = pairs.find { it.startsWith("EKS_CLUSTER_SECURITY_GROUP=") }
+                                    if (!clusterSecurityGroupPair) {
+                                        error("EKS_CLUSTER_SECURITY_GROUP key not found in MigrationsExportString output")
+                                    }
+                                    env.clusterSecurityGroup = clusterSecurityGroupPair.split('=')[1]
+
                                     def principalArn = 'arn:aws:iam::$MIGRATIONS_TEST_ACCOUNT_ID:role/JenkinsDeploymentRole'
 
                                     sh """
@@ -258,6 +264,27 @@ def call(Map config = [:]) {
                                       kubectl -n ma get configmap target-opensearch-1-3-migration-config -o yaml
                                     """
 
+                                    sh """
+                                      set -e
+                                    
+                                      # Check if the ingress rule from clusterSecurityGroup already exists
+                                      exists=\$(aws ec2 describe-security-groups \
+                                        --group-ids $targetCluster.securityGroupId \
+                                        --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
+                                        --output text)
+                                    
+                                      if [ -z "\$exists" ]; then
+                                        echo "Ingress rule not found. Adding..."
+                                        aws ec2 authorize-security-group-ingress \
+                                          --group-id $targetCluster.securityGroupId \
+                                          --protocol -1 \
+                                          --port -1 \
+                                          --source-group $env.clusterSecurityGroup
+                                      else
+                                        echo "Ingress rule already exists. Skipping."
+                                      fi
+                                    """
+
                                 }
                             }
                         }
@@ -294,12 +321,9 @@ def call(Map config = [:]) {
                     timeout(time: 15, unit: 'MINUTES') {
                         dir('deployment/k8s/aws') {
                             script {
-                                def clusterDetails = readJSON text: env.clusterDetailsJson
-                                def targetCluster = clusterDetails.target
-                                def securityGroupIds = "${targetCluster.securityGroupId}"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./aws-bootstrap.sh --security-group-ids \"${securityGroupIds}\" --skip-git-pull --base-dir /home/ec2-user/workspace/eks-integ-test --use-public-images false --skip-console-exec"
+                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir /home/ec2-user/workspace/eks-integ-test --use-public-images false --skip-console-exec"
                                     }
                                 }
                             }
