@@ -93,7 +93,7 @@ def call(Map config = [:]) {
                                 env.targetVer = targetVersion ?: params.TARGET_VERSION
                                 env.sourceClusterType = sourceClusterType ?: params.SOURCE_CLUSTER_TYPE
                                 env.targetClusterType = targetClusterType ?: params.TARGET_CLUSTER_TYPE
-                                deployClusters(
+                                deployClustersStep(
                                     stage: "${maStageName}",
                                     clusterContextFilePath: "${clusterContextFilePath}"
                                 )
