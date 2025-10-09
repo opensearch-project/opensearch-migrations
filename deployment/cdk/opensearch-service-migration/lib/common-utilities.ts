@@ -8,10 +8,10 @@ import {Secret} from "aws-cdk-lib/aws-secretsmanager";
 import * as forge from 'node-forge';
 import {ClusterYaml, SnapshotYaml} from "./migration-services-yaml";
 import {CdkLogger} from "./cdk-logger";
-import {mkdtempSync, writeFileSync} from 'fs';
-import {join} from 'path';
-import {tmpdir} from 'os';
-import {execSync} from 'child_process';
+import {mkdtempSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {execSync} from 'node:child_process';
 
 export const MAX_IAM_ROLE_NAME_LENGTH = 64;
 export const MAX_STAGE_NAME_LENGTH = 15;
@@ -188,7 +188,7 @@ export function createECSTaskRole(scope: Construct, serviceName: string, region:
     const excessCharacters = taskRoleName.length - MAX_IAM_ROLE_NAME_LENGTH
     if (excessCharacters > 0) {
         if (excessCharacters > serviceName.length) {
-            throw Error(`Unexpected ECS task role name length for proposed name: '${taskRoleName}' could not be reasonably truncated 
+            throw new Error(`Unexpected ECS task role name length for proposed name: '${taskRoleName}' could not be reasonably truncated 
                 below ${MAX_IAM_ROLE_NAME_LENGTH} characters`)
         }
         const truncatedServiceName = serviceName.slice(0, serviceName.length - excessCharacters)
@@ -540,7 +540,7 @@ export function isRegionGovCloud(region: string): boolean {
  * @returns {ContainerImage} - A `ContainerImage` object representing the Docker image asset.
  */
 export function makeLocalAssetContainerImage(scope: Construct, imageName: string): ContainerImage {
-        const sanitizedImageName = imageName.replace(/[^a-zA-Z0-9-_]/g, '_');
+        const sanitizedImageName = imageName.replaceAll(/[^a-zA-Z0-9-_]/g, '_');
         const tempDir = mkdtempSync(join(tmpdir(), 'docker-build-' + sanitizedImageName));
         const dockerfilePath = join(tempDir, 'Dockerfile');
 
@@ -555,7 +555,7 @@ export function makeLocalAssetContainerImage(scope: Construct, imageName: string
             if (!imageId) {
                 throw new Error(`No RepoDigests found for image: ${imageName}`);
             }
-            imageHash = imageId.replace(/[^a-zA-Z0-9-_]/g, '_');
+            imageHash = imageId.replaceAll(/[^a-zA-Z0-9-_]/g, '_');
             CdkLogger.info('For image: ' + imageName + ' found imageHash: ' + imageHash);
         } catch (error) {
             CdkLogger.error('Error fetching the actual hash for the image: ' + imageName + ' Error: ' + error);
