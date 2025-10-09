@@ -32,6 +32,7 @@ ElasticsearchV7_X = ClusterVersion("ES_7.x")
 ElasticsearchV8_X = ClusterVersion("ES_8.x")
 OpensearchV1_X = ClusterVersion("OS_1.x")
 OpensearchV2_X = ClusterVersion("OS_2.x")
+OpensearchV3_X = ClusterVersion("OS_3.x")
 
 
 def is_incoming_version_supported(limiting_version: ClusterVersion, incoming_version: ClusterVersion):

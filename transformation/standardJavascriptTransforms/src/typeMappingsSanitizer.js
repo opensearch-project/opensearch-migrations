@@ -393,7 +393,7 @@ function deepCloneMap(map) {
             clonedValue = value.map(item => (item instanceof Map ? deepCloneMap(item) : item));
         } else if (value !== null && typeof value === 'object') {
             // For plain objects, use JSON methods (assumes JSON-safe objects)
-            clonedValue = JSON.parse(JSON.stringify(value));
+            clonedValue = structuredClone(value);
         } else {
             clonedValue = value;
         }

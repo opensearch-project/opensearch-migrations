@@ -168,6 +168,20 @@ class K8sService:
             logger.info(f"Waiting for PVCs to be deleted. Remaining: {[pvc.metadata.name for pvc in remaining_pvcs]}")
             time.sleep(poll_interval)
 
+    def create_namespace(self, namespace: str) -> CompletedProcess | None:
+        logger.info(f"Ensuring namespace '{namespace}' exists")
+
+        check_cmd = ["kubectl", "get", "namespace", namespace]
+        result = self.run_command(check_cmd, ignore_errors=True)
+
+        if result is None or result.returncode != 0:
+            logger.info(f"Namespace '{namespace}' not found. Creating it now...")
+            create_cmd = ["kubectl", "create", "namespace", namespace]
+            return self.run_command(create_cmd)
+        else:
+            logger.info(f"Namespace '{namespace}' already exists")
+            return result
+
     def check_helm_release_exists(self, release_name: str) -> bool:
         logger.info(f"Checking if {release_name} is already deployed in '{self.namespace}' namespace")
         check_command = ["helm", "status", release_name, "-n", self.namespace]

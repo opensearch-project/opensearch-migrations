@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-const { execSync } = require('child_process');
+const { execSync } = require('node:child_process');
 
 function getGitMostRecentTag() {
   return execOrUnknown('git describe --tags --abbrev=0 HEAD');

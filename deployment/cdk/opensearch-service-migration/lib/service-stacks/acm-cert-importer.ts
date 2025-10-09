@@ -3,7 +3,7 @@ import { Certificate, ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 import { Provider } from 'aws-cdk-lib/custom-resources';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { CustomResource, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib/core';
-import * as path from 'path';
+import * as path from 'node:path';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import { PolicyStatement, Role, ServicePrincipal, ManagedPolicy } from 'aws-cdk-lib/aws-iam';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';

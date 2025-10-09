@@ -89,7 +89,6 @@ jobs:
         py-project:
           - migrationConsole/lib/console_link
           - migrationConsole/cluster_tools
-          - migrationConsole/console_api
           - k8sConfigMapUtilScripts
     env:
       WORKING_DIR: ./TrafficCapture/dockerSolution/src/main/docker/${{ matrix.py-project }}
@@ -194,6 +193,12 @@ jobs:
           path: |
             **/build/jacoco/*.exec
 
+      - name: Show disk usage
+        if: always()
+        run: |
+          df -h
+          docker system df -v
+
   jacoco-aggregate:
     needs: [ gradle-tests ]
     runs-on: ubuntu-latest
@@ -241,6 +246,11 @@ jobs:
       - name: Run E2E test script
         run: |
           docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
+      - name: Show disk usage
+        if: always()
+        run: |
+          df -h
+          docker system df -v
       - name: Collect Docker, OpenSearch Benchmark, and Shared Logs
         if: always()
         run: |

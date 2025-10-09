@@ -17,7 +17,7 @@ def call(Map config = [:]) {
             )
             choice(
                     name: 'TARGET_VERSION',
-                    choices: ['OS_1.3', 'OS_2.19'],
+                    choices: ['OS_1.3', 'OS_2.19', 'OS_3.1'],
                     description: 'Pick a specific target version'
             )
             string(name: 'TEST_IDS', defaultValue: 'all', description: 'Test IDs to execute. Use comma separated list e.g. "0001,0004" or "all" for all tests')

@@ -2,7 +2,7 @@ import { App, Tags } from 'aws-cdk-lib';
 import { createApp } from '../bin/createApp';
 import { StackComposer } from '../lib/stack-composer';
 
-jest.mock('fs', () => ({
+jest.mock('node:fs', () => ({
   readFileSync: jest.fn().mockReturnValue('1.0.0\n'),
 }));
 
