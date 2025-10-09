@@ -86,13 +86,19 @@ export class EKSInfra extends Construct {
         });
 
         let subnetIds
-        if (props.vpcSubnetIds) {
+        if (props.vpcSubnetIds && props.vpcSubnetIds.length > 0) {
             subnetIds = props.vpcSubnetIds
         } else {
             subnetIds = []
             for (const subnet of props.vpc.privateSubnets) {
                 Tags.of(subnet).add(`kubernetes.io/cluster/${props.clusterName}`, 'shared');
                 Tags.of(subnet).add('kubernetes.io/role/internal-elb', '1');
+                subnetIds.push(subnet.subnetId)
+            }
+            // Add public subnets for EKS when creating VPC
+            for (const subnet of props.vpc.publicSubnets) {
+                Tags.of(subnet).add(`kubernetes.io/cluster/${props.clusterName}`, 'shared');
+                Tags.of(subnet).add('kubernetes.io/role/elb', '1');
                 subnetIds.push(subnet.subnetId)
             }
         }
