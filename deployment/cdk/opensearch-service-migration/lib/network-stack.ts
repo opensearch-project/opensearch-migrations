@@ -93,7 +93,7 @@ export class VpcDetails {
                 return subnetType
             }
         }
-        throw Error(`Unable to find subnet ids: [${subnetIds}] in VPC: ${vpc.vpcId}. Please ensure all subnet ids exist and are of the same subnet type`)
+        throw new Error(`Unable to find subnet ids: [${subnetIds}] in VPC: ${vpc.vpcId}. Please ensure all subnet ids exist and are of the same subnet type`)
     }
 
     private validateProvidedSubnetIds(vpc: IVpc, vpcSubnetIds: string[], azCount: number) {
@@ -107,7 +107,7 @@ export class VpcDetails {
             subnetFilters: [SubnetFilter.byIds(vpcSubnetIds)]
         })
         if (uniqueAzSubnets.subnetIds.length != vpcSubnetIds.length) {
-            throw Error(`Not all subnet ids provided: [${vpcSubnetIds}] were in a unique AZ`)
+            throw new Error(`Not all subnet ids provided: [${vpcSubnetIds}] were in a unique AZ`)
         }
         return uniqueAzSubnets
     }
