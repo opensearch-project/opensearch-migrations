@@ -282,6 +282,7 @@ helm install "$namespace" "${ma_chart_dir}" \
   --set stageName="${STAGE}" \
   --set aws.region="${AWS_CFN_REGION}" \
   --set aws.account="${AWS_ACCOUNT}" \
+  --set defaultBucketConfiguration.snapshotRoleArn="${SNAPSHOT_ROLE}" \
   $IMAGE_FLAGS \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 
