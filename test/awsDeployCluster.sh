@@ -119,7 +119,6 @@ npm install
 cd ..
 # Replace preliminary placeholders in CDK context
 cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
-sed -i -e "s/<STAGE>/$STAGE/g" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
 
 cd amazon-opensearch-service-sample-cdk
 cdk deploy "*" --require-approval never --concurrency 3

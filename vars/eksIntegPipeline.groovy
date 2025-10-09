@@ -1,5 +1,3 @@
-import groovy.json.JsonOutput
-
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eks-integ"
     def jobName = config.jobName ?: "eks-integ-test"
@@ -7,11 +5,8 @@ def call(Map config = [:]) {
     def targetVersion = config.targetVersion ?: ""
     def sourceClusterType = config.sourceClusterType ?: ""
     def targetClusterType = config.targetClusterType ?: ""
+    def testIds = config.testIds ?: "0001"
     def clusterContextFilePath = "tmp/cluster-context-integ-${currentBuild.number}.json"
-    def time = new Date().getTime()
-    def testUniqueId = config.testUniqueId ?: "integ_full_${time}_${currentBuild.number}"
-    def testDir = "/root/lib/integ_test/integ_test"
-    def integTestCommand = config.integTestCommand ?: "${testDir}/ma_workflow_test.py"
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
@@ -93,42 +88,18 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 60, unit: 'MINUTES') {
                         dir('test') {
-                            script {
-                                env.sourceVer = sourceVersion ?: params.SOURCE_VERSION
-                                env.targetVer = targetVersion ?: params.TARGET_VERSION
-                                env.sourceClusterType = sourceClusterType ?: params.SOURCE_CLUSTER_TYPE
-                                env.targetClusterType = targetClusterType ?: params.TARGET_CLUSTER_TYPE
-                                def clusterContextValues = [
-                                        stage      : "<STAGE>",
-                                        vpcAZCount : 2,
-                                        clusters   : [
-                                                [
-                                                        clusterId                 : "source",
-                                                        clusterVersion            : "${env.sourceVer}",
-                                                        clusterType               : "${env.sourceClusterType}",
-                                                        openAccessPolicyEnabled   : true
-                                                ],
-                                                [
-                                                        clusterId                 : "target",
-                                                        clusterVersion            : "${env.targetVer}",
-                                                        clusterType               : "${env.targetClusterType}",
-                                                        openAccessPolicyEnabled   : true
-                                                ]
-                                        ]
-                                ]
-                                def contextJsonStr = JsonOutput.prettyPrint(JsonOutput.toJson(clusterContextValues))
-                                writeFile (file: "${clusterContextFilePath}", text: contextJsonStr)
-                                sh "echo 'Using cluster context file options: ' && cat ${clusterContextFilePath}"
-                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${clusterContextFilePath}"
-                                    }
-                                }
-
-                                def rawJsonFile = readFile "tmp/cluster-details-${maStageName}.json"
-                                echo "Cluster details JSON:\n${rawJsonFile}"
-                                env.clusterDetailsJson = rawJsonFile
-                            }
+                            env.sourceVer = sourceVersion ?: params.SOURCE_VERSION
+                            env.targetVer = targetVersion ?: params.TARGET_VERSION
+                            env.sourceClusterType = sourceClusterType ?: params.SOURCE_CLUSTER_TYPE
+                            env.targetClusterType = targetClusterType ?: params.TARGET_CLUSTER_TYPE
+                            deployClusters(
+                                    stage: "${maStageName}",
+                                    clusterContextFilePath: "${clusterContextFilePath}",
+                                    sourceVersion: env.sourceVer,
+                                    targetVersion: env.targetVer,
+                                    sourceClusterType: env.sourceClusterType,
+                                    targetClusterType: env.targetClusterType
+                            )
                         }
                     }
                 }
@@ -171,44 +142,34 @@ def call(Map config = [:]) {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 1200, roleSessionName: 'jenkins-session') {
                                     def rawOutput = sh(
-                                            script: """
-                                              aws cloudformation describe-stacks \
-                                              --stack-name Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} \
-                                              --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
-                                              --output text
-                                            """,
-                                            returnStdout: true
+                                        script: """
+                                          aws cloudformation describe-stacks \
+                                          --stack-name Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} \
+                                          --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
+                                          --output text
+                                        """,
+                                        returnStdout: true
                                     ).trim()
                                     if (!rawOutput) {
                                         error("Could not retrieve CloudFormation Output 'MigrationsExportString' from stack Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX}")
                                     }
-
-                                    def pairs = rawOutput.split(';').collect { it.trim().replaceFirst(/^export\s+/, '') }
-                                    if (!pairs || pairs.size() == 0) {
+                                    def exportsMap = rawOutput.split(';')
+                                            .collect { it.trim().replaceFirst(/^export\s+/, '') }
+                                            .findAll { it.contains('=') }
+                                            .collectEntries {
+                                                def (key, value) = it.split('=', 2)
+                                                [(key): value]
+                                            }
+                                    if (!exportsMap) {
                                         error("No key=value pairs found in MigrationsExportString output")
                                     }
-                                    echo "Found ${pairs.size()} key=value pairs in MigrationsExportString output"
+                                    echo "Found ${exportsMap.size()} key=value pairs in MigrationsExportString output"
+                                    env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']
+                                    env.eksClusterName = exportsMap['MIGRATIONS_EKS_CLUSTER_NAME']
+                                    env.clusterSecurityGroup = exportsMap['EKS_CLUSTER_SECURITY_GROUP']
 
-                                    def registryPair = pairs.find { it.startsWith("MIGRATIONS_ECR_REGISTRY=") }
-                                    if (!registryPair) {
-                                        error("MIGRATIONS_ECR_REGISTRY key not found in MigrationsExportString output")
-                                    }
-                                    env.registryEndpoint = registryPair.split('=')[1]
-
-                                    def eksClusterPair = pairs.find { it.startsWith("MIGRATIONS_EKS_CLUSTER_NAME=") }
-                                    if (!eksClusterPair) {
-                                        error("MIGRATIONS_EKS_CLUSTER_NAME key not found in MigrationsExportString output")
-                                    }
-                                    env.eksClusterName = eksClusterPair.split('=')[1]
-
-                                    def clusterSecurityGroupPair = pairs.find { it.startsWith("EKS_CLUSTER_SECURITY_GROUP=") }
-                                    if (!clusterSecurityGroupPair) {
-                                        error("EKS_CLUSTER_SECURITY_GROUP key not found in MigrationsExportString output")
-                                    }
-                                    env.clusterSecurityGroup = clusterSecurityGroupPair.split('=')[1]
-
+                                    // Add access policy for Jenkins deployment role to perform kubectl commands
                                     def principalArn = 'arn:aws:iam::$MIGRATIONS_TEST_ACCOUNT_ID:role/JenkinsDeploymentRole'
-
                                     sh """
                                         if aws eks describe-access-entry --cluster-name $env.eksClusterName --principal-arn $principalArn >/dev/null 2>&1; then
                                           echo "Access entry already exists, skipping create."
@@ -226,6 +187,7 @@ def call(Map config = [:]) {
                                         aws eks update-kubeconfig --region us-east-1 --name $env.eksClusterName
                                     """
 
+                                    // TODO: Remove this source and target cluster configmaps when integ test utilizes workflow CLI to generate
                                     sh 'kubectl create namespace ma --dry-run=client -o yaml | kubectl apply -f -'
                                     def clusterDetails = readJSON text: env.clusterDetailsJson
                                     def sourceCluster = clusterDetails.source
@@ -264,9 +226,8 @@ def call(Map config = [:]) {
                                       kubectl -n ma get configmap target-opensearch-1-3-migration-config -o yaml
                                     """
 
+                                    // Modify source/target security group to allow EKS cluster security group
                                     sh """
-                                      set -e
-                                    
                                       # Check if the ingress rule from clusterSecurityGroup already exists
                                       exists=\$(aws ec2 describe-security-groups \
                                         --group-ids $targetCluster.securityGroupId \
@@ -337,15 +298,15 @@ def call(Map config = [:]) {
                     timeout(time: 2, unit: 'HOURS') {
                         dir('libraries/testAutomation') {
                             script {
-//                                def testIdsArg = ""
-//                                def testIdsResolved = testIds ?: params.TEST_IDS
-//                                if (testIdsResolved != "" && testIdsResolved != "all") {
-//                                    testIdsArg = "--test-ids='$testIdsResolved'"
-//                                }
+                                def testIdsArg = ""
+                                def testIdsResolved = testIds ?: params.TEST_IDS
+                                if (testIdsResolved != "" && testIdsResolved != "all") {
+                                    testIdsArg = "--test-ids='$testIdsResolved'"
+                                }
                                 sh "pipenv install --deploy"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids=0001 --reuse-clusters --skip-delete "
+                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --reuse-clusters --skip-delete "
                                     }
                                 }
                             }
@@ -363,7 +324,6 @@ def call(Map config = [:]) {
                             if (env.eksClusterName) {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "kubectl -n ma config current-context"
                                         sh "kubectl -n ma get pods"
                                         //sh "pipenv run app --delete-only"
                                         //sh "kubectl -n ma delete namespace ma"
