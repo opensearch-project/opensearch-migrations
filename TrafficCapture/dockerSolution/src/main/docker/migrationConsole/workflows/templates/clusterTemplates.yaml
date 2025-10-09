@@ -508,6 +508,137 @@ spec:
             valueFrom:
               path: /tmp/cluster-config.json
 
+    # Elasticsearch 6.8 Single Node Template
+    - name: elasticsearch-6-8-single-node
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+      container:
+        image: dtzar/helm-kubectl:latest
+        command: [sh, -c]
+        args:
+          - |
+            # Add Elasticsearch Helm repository
+            helm repo add elastic https://helm.elastic.co
+            helm repo update
+            
+            # Create Elasticsearch configuration for ES 6.8.23 OSS (minimal config)
+            cat > /tmp/elasticsearch.yml << EOF
+            bootstrap.system_call_filter: false
+            network.host: 0.0.0.0
+            discovery.type: single-node
+            transport.port: 9300
+            http.port: 9200
+            EOF
+            
+            # Create Helm values file for ES 6.8.23 with OSS image and disabled readiness probe
+            cat > /tmp/es-values.yaml << 'EOF'
+            fullnameOverride: {{inputs.parameters.cluster-name}}
+            image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
+            imageTag: "6.8.23"
+            antiAffinity: "soft"
+            esJavaOpts: "-Xmx512m -Xms512m -XX:UseAVX=0 -Dcom.amazonaws.sdk.disableMBeans=true"
+            protocol: "http"
+            replicas: 1
+            createCert: false
+            
+            clusterHealthCheckParams: "wait_for_status=yellow&timeout=1s"
+            
+            masterService: ""
+            
+            # Disable probes to avoid transient warnings
+            readinessProbe: {}
+            livenessProbe: {}
+            
+            extraEnvs:
+              - name: "cluster.initial_master_nodes"
+                value: ""
+              - name: "node.roles"
+                value: ""
+            
+            sysctlInitContainer:
+              enabled: true
+            
+            persistence:
+              enabled: false
+            
+            podDisruptionBudget:
+              create: false
+              enabled: false
+            
+            extraInitContainers:
+              - name: install-s3-plugin
+                image: docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23
+                command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
+                volumeMounts:
+                  - name: plugins
+                    mountPath: /usr/share/elasticsearch/plugins
+              - name: inject-aws-creds
+                image: docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23
+                command:
+                  - sh
+                  - -c
+                  - |
+                    set -e
+                    echo "Creating Elasticsearch keystore and adding AWS credentials"
+                    echo 'y' | bin/elasticsearch-keystore create
+                    echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
+                    echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
+                    echo "http://localstack.ma.svc.cluster.local:4566" | bin/elasticsearch-keystore add --stdin s3.client.default.endpoint --force
+                    # Copy keystore to shared volume location
+                    cp /usr/share/elasticsearch/config/elasticsearch.keystore /shared/elasticsearch.keystore
+                    chown 1000:0 /shared/elasticsearch.keystore
+                    chmod 660 /shared/elasticsearch.keystore
+                    echo "Keystore created and saved to shared volume"
+                volumeMounts:
+                  - name: elasticsearch-keystore
+                    mountPath: /shared
+            
+            extraVolumes:
+              - name: plugins
+                emptyDir: {}
+              - name: elasticsearch-keystore
+                emptyDir: {}
+            
+            extraVolumeMounts:
+              - name: plugins
+                mountPath: /usr/share/elasticsearch/plugins
+              - name: elasticsearch-keystore
+                mountPath: /usr/share/elasticsearch/config/elasticsearch.keystore
+                subPath: elasticsearch.keystore
+            EOF
+            
+            # Install Elasticsearch 6.8.23
+            helm install {{inputs.parameters.cluster-name}} elastic/elasticsearch \
+              --version 8.5.1 \
+              --namespace {{inputs.parameters.namespace}} \
+              --values /tmp/es-values.yaml \
+              --set-file esConfig."elasticsearch\.yml"=/tmp/elasticsearch.yml
+            
+            # Generate cluster configuration output
+            cat > /tmp/cluster-config.json << EOF
+            {
+              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
+              "allow_insecure": true,
+              "no_auth": true,
+              "version": "ES_6.8"
+            }
+            EOF
+
+            kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              --namespace {{inputs.parameters.namespace}}
+            
+            echo "Elasticsearch 6.8.23 cluster created successfully"
+            echo "Cluster config:"
+            cat /tmp/cluster-config.json
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              path: /tmp/cluster-config.json
+
     # Elasticsearch 7.10 Single Node Template
     - name: elasticsearch-7-10-single-node
       inputs:
@@ -775,6 +906,83 @@ spec:
               --namespace {{inputs.parameters.namespace}}
             
             echo "OpenSearch 2.19.1 cluster created successfully"
+            echo "Cluster config:"
+            cat /tmp/cluster-config.json
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              path: /tmp/cluster-config.json
+
+    # OpenSearch 3.1 Single Node Template
+    - name: opensearch-3-1-single-node
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+      container:
+        image: dtzar/helm-kubectl:latest
+        command: [sh, -c]
+        args:
+          - |
+            helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+            helm repo update
+            
+            cat > /tmp/opensearch.yml << EOF
+            cluster.name: {{inputs.parameters.cluster-name}}
+            network.host: 0.0.0.0
+            discovery.type: single-node
+            EOF
+            
+            cat > /tmp/opensearch-values.yaml << 'EOF'
+            fullnameOverride: {{inputs.parameters.cluster-name}}
+            nodeGroup: ""
+            image:
+              repository: "opensearchproject/opensearch"
+              tag: "3.1.0"
+            singleNode: true
+            replicas: 1
+            extraEnvs:
+              - name: "OPENSEARCH_INITIAL_ADMIN_PASSWORD"
+                value: "MyStr0ngPassw0rd!"
+            resources:
+              requests:
+                cpu: "500m"
+                memory: "1Gi"
+              limits:
+                cpu: "1000m"
+                memory: "2Gi"
+            persistence:
+              enabled: false
+            opensearchJavaOpts: "-Xmx1g -Xms1g"
+            plugins:
+              enabled: true
+              installList:
+                - "repository-s3"
+            EOF
+            
+            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch \
+              --namespace {{inputs.parameters.namespace}} \
+              --values /tmp/opensearch-values.yaml \
+              --set-file config."opensearch\.yml"=/tmp/opensearch.yml
+            
+            cat > /tmp/cluster-config.json << EOF
+            {
+              "endpoint": "https://{{inputs.parameters.cluster-name}}:9200",
+              "allow_insecure": true,
+              "version": "OS_3.1",
+              "basic_auth": {
+                "username": "admin",
+                "password": "MyStr0ngPassw0rd!"
+              }
+            }
+            EOF
+            
+            kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              --namespace {{inputs.parameters.namespace}}
+            
+            echo "OpenSearch 3.1.0 cluster created successfully"
             echo "Cluster config:"
             cat /tmp/cluster-config.json
       outputs:

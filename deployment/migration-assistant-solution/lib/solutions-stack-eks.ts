@@ -92,8 +92,6 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             vpc.publicSubnets.forEach((subnet, index) => {
                 Tags.of(subnet)
                     .add("Name", `migration-assistant-public-subnet-${index + 1}-${stageParameter.valueAsString}`);
-                // Enable auto-assign public IP for public subnets
-                (subnet.node.defaultChild as any).mapPublicIpOnLaunch = true;
             });
             vpc.privateSubnets.forEach((subnet, index) => {
                 Tags.of(subnet)

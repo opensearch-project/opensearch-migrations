@@ -1,6 +1,6 @@
 import {Construct} from "constructs";
 import {Duration, Stack, StackProps} from "aws-cdk-lib";
-import {readFileSync} from 'fs';
+import {readFileSync} from 'node:fs';
 import {OpenSearchDomainStack} from "./opensearch-domain-stack";
 import {EngineVersion, TLSSecurityPolicy} from "aws-cdk-lib/aws-opensearchservice";
 import * as defaultValuesJson from "../default-values.json"
@@ -62,7 +62,7 @@ export class StackComposer {
         // Values provided by the CLI will always be represented as a string and need to be parsed
         if (typeof option === 'string') {
             if (expectedType === 'number') {
-                return parseInt(option)
+                return Number.parseInt(option)
             }
             if (expectedType === 'boolean' || expectedType === 'object') {
                 try {
@@ -77,7 +77,7 @@ export class StackComposer {
         }
         // Values provided by the cdk.context.json should be of the desired type
         if (typeof option !== expectedType) {
-            throw new Error(`Type provided by cdk.context.json for ${optionName} was ${typeof option} but expected ${expectedType}`)
+            throw new TypeError(`Type provided by cdk.context.json for ${optionName} was ${typeof option} but expected ${expectedType}`)
         }
         return option
     }
