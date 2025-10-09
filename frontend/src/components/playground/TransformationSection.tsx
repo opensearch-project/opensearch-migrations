@@ -36,11 +36,11 @@ export default function TransformationSection() {
     dimensions: Record<string, { rowSpan: number }>,
   ) => {
     const newDimensions = { ...dimensions };
-    transformations.forEach((transform) => {
+    for (const transform of transformations) {
       if (!newDimensions[transform.id]) {
         newDimensions[transform.id] = { rowSpan: 1 };
       }
-    });
+    }
     return newDimensions;
   };
 
@@ -49,11 +49,12 @@ export default function TransformationSection() {
     dimensions: Record<string, { rowSpan: number }>,
   ) => {
     const newDimensions = { ...dimensions };
-    Object.keys(newDimensions).forEach((id) => {
+    const ids = Object.keys(newDimensions);
+    for (const id of ids) {
       if (!transformations.some((t) => t.id === id)) {
         delete newDimensions[id];
       }
-    });
+    }
     return newDimensions;
   };
 

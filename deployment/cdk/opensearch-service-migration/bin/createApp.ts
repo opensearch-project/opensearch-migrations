@@ -1,11 +1,11 @@
 import { App, Tags } from 'aws-cdk-lib';
-import { readFileSync } from 'fs';
+import { readFileSync } from 'node:fs';
 import { StackComposer } from "../lib/stack-composer";
 
 export function createApp(): App {
   const app = new App();
   const versionFile = readFileSync('../../../VERSION', 'utf-8');
-  const version = versionFile.replace(/\n/g, '');
+  const version = versionFile.replaceAll('\n', '');
   Tags.of(app).add("migration_deployment", version);
 
   const account = process.env.CDK_DEFAULT_ACCOUNT;

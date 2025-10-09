@@ -86,6 +86,7 @@ export class MigrationServiceCore extends Stack {
             logGroupName: `/migration/${props.stage}/${props.defaultDeployId}/${props.serviceName}`
         });
 
+        const multilineRe = /^(\[[A-Z ]{1,5}\] )?\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/;
         const serviceContainer = serviceTaskDef.addContainer("ServiceContainer", {
             image: serviceImage,
             containerName: props.serviceName,
@@ -100,7 +101,7 @@ export class MigrationServiceCore extends Stack {
                 // and  "[ERROR] 2024-12-31 23:59:59..."
                 // and  "2024-12-31 23:59:59..."
                 // and  "2024-12-31T23:59:59..."
-                multilinePattern: "^(\\[[A-Z ]{1,5}\\] )?\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}",
+                multilinePattern: multilineRe.source,
                 // Defer buffering behavior to log4j2 for greater flexibility
                 mode: AwsLogDriverMode.BLOCKING,
             }),
