@@ -19,7 +19,7 @@ branch="main"
 tag=""
 skip_git_pull=false
 
-base_dir="./opensearch-migrations"
+base_dir="../../../../opensearch-migrations"
 build_images_chart_dir="${base_dir}/deployment/k8s/charts/components/buildImages"
 ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
 namespace="ma"
@@ -131,6 +131,70 @@ get_cfn_export() {
     fi
     echo "${values[$choice]}"
   fi
+}
+
+deploy_dashboard() {
+  local dashboard_name="$1"
+  local dashboard_file="$2"
+  local stage="${STAGE}"
+  local region="${AWS_CFN_REGION}"
+  local account="${AWS_ACCOUNT}"
+
+  echo "Deploying dashboard: ${dashboard_name}"
+  if [[ ! -f "$dashboard_file" ]]; then
+    echo "ERROR: dashboard file not found: $dashboard_file"
+    exit 1
+  fi
+
+  # token substitution with unique variable handling
+  local processed_json
+  processed_json="$(cat "$dashboard_file" \
+    | sed "s/placeholder-region/${region}/g" \
+    | sed "s/placeholder-stage/${stage}/g" \
+    | sed "s/placeholder-qualifier/${stage}/g" \
+    | sed "s/MA_STAGE/${stage}/g" \
+    | sed "s/MA_QUALIFIER/${stage}/g" \
+    | sed "s/REGION/${region}/g" \
+    | sed "s/ACCOUNT_ID/${account}/g")"
+  
+  # Remove duplicate variables with same ID/pattern
+  processed_json="$(echo "$processed_json" | jq '
+    .variables |= (
+      group_by(.id) | 
+      map(.[0])
+    ) |
+    .variables |= (
+      group_by(.pattern // "") |
+      map(.[0])
+    )
+  ')"
+
+  # validate + minify
+  if ! echo "$processed_json" | jq -e . >/dev/null; then
+    echo "ERROR: Invalid JSON after substitution for ${dashboard_name} (${dashboard_file})"
+    exit 1
+  fi
+  local tmp_json
+  tmp_json="$(mktemp)"
+  echo "$processed_json" | jq -c . > "$tmp_json"
+
+  # deterministic dashboard name
+  local full_name="MA-${stage}-${region}-${dashboard_name}"
+
+  # put-dashboard with file:// to avoid shell escaping problems
+  aws cloudwatch put-dashboard \
+    --region "$region" \
+    --dashboard-name "$full_name" \
+    --dashboard-body "file://${tmp_json}" >/dev/null
+
+  # read-back sanity (optional)
+  if aws cloudwatch get-dashboard --region "$region" --dashboard-name "$full_name" >/dev/null 2>&1; then
+    echo "OK: Dashboard available: ${full_name}"
+  else
+    echo "WARN: Could not read back dashboard: ${full_name}"
+  fi
+
+  rm -f "$tmp_json"
 }
 
 # Check required tools
@@ -282,6 +346,12 @@ helm install "$namespace" "${ma_chart_dir}" \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 
 kubectl -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s
+
+echo "Deploying CloudWatch dashboards..."
+deploy_dashboard "CaptureReplay" "${base_dir}/deployment/cdk/opensearch-service-migration/lib/components/capture-replay-dashboard.json"
+deploy_dashboard "ReindexFromSnapshot" "${base_dir}/deployment/cdk/opensearch-service-migration/lib/components/reindex-from-snapshot-dashboard.json"
+echo "All dashboards deployed to CloudWatch"
+
 cmd="kubectl -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
 echo "Accessing migration console with command: $cmd"
 eval "$cmd"
