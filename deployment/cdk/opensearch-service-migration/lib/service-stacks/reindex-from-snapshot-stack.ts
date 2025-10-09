@@ -77,7 +77,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         const extraArgsDict = parseArgsToDict(props.extraArgs)
         const storagePath = "/storage"
         const planningSize = props.maxShardSizeGiB ?? 80;
-        const planningSizeBuffer = 1.10
+        const planningSizeBuffer = 1.1
         const maxShardSizeGiB = planningSize * planningSizeBuffer
         const maxShardSizeBytes = maxShardSizeGiB * (1024 ** 3)
         if (props.skipClusterCertCheck != false) { // when true or unspecified, add the flag
@@ -126,7 +126,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
 
         // Calculate the volume size based on the max shard size
         // Have space for the snapshot and an unpacked copy, with buffer
-        const shardVolumeSizeGiBBufferMultiple = 1.10
+        const shardVolumeSizeGiBBufferMultiple = 1.1
         const shardVolumeSizeGiB = Math.max(
             Math.ceil(maxShardSizeGiB * 2 * shardVolumeSizeGiBBufferMultiple),
             1

@@ -5,7 +5,10 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 const isBrowserUnavailable = () => {
   const undefStr = "undefined";
-  return undefStr === typeof window || undefStr === typeof window.localStorage;
+  return (
+    undefStr === typeof globalThis ||
+    undefStr === typeof globalThis.localStorage
+  );
 };
 
 export function getSiteReadiness(): boolean {
