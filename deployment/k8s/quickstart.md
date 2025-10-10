@@ -99,7 +99,7 @@ As you can see from the charts/ directory for our various component and aggregat
 This will deploy our main Migration Assistant Helm chart which will create the needed resources to perform the Migration Assistant suite of migration tooling
 
 ```shell
-helm install ma -n ma charts/aggregates/migrationAssistant --create-namespace
+helm install ma -n ma charts/aggregates/migrationAssistantWithArgo --create-namespace
 ```
 
 To see all helm deployments for this namespace

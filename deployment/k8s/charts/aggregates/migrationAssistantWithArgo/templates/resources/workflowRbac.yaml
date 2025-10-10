@@ -34,7 +34,7 @@ rules:
 
   # Kafka resources permissions
   - apiGroups: ["kafka.strimzi.io"]
-    resources: ["kafkas", "kafkatopics", "kafkanodepools"]
+    resources: ["kafkas", "kafkatopics", "kafkanodepools", "kafkausers"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # Allow Argo workflow to perform Helm installs for source and target clusters

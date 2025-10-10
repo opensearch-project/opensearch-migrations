@@ -67,6 +67,7 @@ spec:
           - name: frontside-port
           - name: capture-proxy-image
           - name: capture-proxy-pull-policy
+          - name: kafka-client-secret-bundle
 
           # required, but has defaults
           - name: replicas
@@ -129,6 +130,9 @@ spec:
                 - name: proxy
                   image: {{inputs.parameters.capture-proxy-image}}
                   imagePullPolicy: {{inputs.parameters.capture-proxy-pull-policy}}
+                  volumeMounts:
+                  - name: kafka-config
+                    mountPath: "/opt/kafka-config"
                   env:
                     # Required parameters
                     - name: BACKSIDE_URI_STRING
@@ -158,7 +162,7 @@ spec:
 
                     # Optional parameters that may be empty
                     - name: KAFKA_PROPERTIES_FILE
-                      value: "{{inputs.parameters.kafka-properties-file}}"
+                      value: "/opt/kafka-config/kafka.properties"
                     - name: KAFKA_CONNECTION
                       value: "{{inputs.parameters.kafka-connection}}"
                     - name: KAFKA_TOPIC
@@ -223,3 +227,7 @@ spec:
 
                   ports:
                   - containerPort: {{inputs.parameters.frontside-port}}
+                volumes:
+                - name: kafka-config
+                  secret:
+                    secretName: {{inputs.parameters.kafka-client-secret-bundle}}
