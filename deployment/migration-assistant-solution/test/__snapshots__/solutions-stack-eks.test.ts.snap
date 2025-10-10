@@ -24,7 +24,6 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
           "Parameters": [
             "VPCId",
             "VPCSubnetIds",
-            "VPCSecurityGroupIds",
           ],
         },
         {
@@ -39,9 +38,6 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
       "ParameterLabels": {
         "VPCId": {
           "default": "VPC",
-        },
-        "VPCSecurityGroupIds": {
-          "default": "Security Groups",
         },
         "VPCSubnetIds": {
           "default": "Subnets",
@@ -138,6 +134,20 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
             {
               "Ref": "VPCId",
             },
+            "; export EKS_CLUSTER_SECURITY_GROUP=",
+            {
+              "Fn::GetAtt": [
+                "EKSInfraMigrationsEKSCluster4497841A",
+                "ClusterSecurityGroupId",
+              ],
+            },
+            "; export SNAPSHOT_ROLE=",
+            {
+              "Fn::GetAtt": [
+                "SnapshotRole53D7C789",
+                "Arn",
+              ],
+            },
             "; export STAGE=",
             {
               "Ref": "Stage",
@@ -161,10 +171,6 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
     "VPCId": {
       "Description": "(Required) Select a VPC, we recommend choosing the VPC of the target cluster.",
       "Type": "AWS::EC2::VPC::Id",
-    },
-    "VPCSecurityGroupIds": {
-      "Description": "(Required) Select one or more security groups that will allow Source and/or Target cluster access",
-      "Type": "List<AWS::EC2::SecurityGroup::Id>",
     },
     "VPCSubnetIds": {
       "Description": "(Required) Select at least two private/public subnets, each in a unique Availability Zone.",
@@ -343,6 +349,37 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
       },
       "Type": "AWS::EKS::PodIdentityAssociation",
     },
+    "EKSInfraMigrationConsolePodIdentityAssociationBCF7460B": {
+      "DependsOn": [
+        "EKSInfraMigrationsEKSCluster4497841A",
+      ],
+      "Properties": {
+        "ClusterName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Namespace": "ma",
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsPodIdentityRole873942CE",
+            "Arn",
+          ],
+        },
+        "ServiceAccount": "migration-console-access-role",
+      },
+      "Type": "AWS::EKS::PodIdentityAssociation",
+    },
     "EKSInfraMigrationsECRRepositoryEAD8241B": {
       "DeletionPolicy": "Delete",
       "Properties": {
@@ -407,32 +444,6 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
         "ResourcesVpcConfig": {
           "EndpointPrivateAccess": true,
           "EndpointPublicAccess": true,
-          "SecurityGroupIds": {
-            "Fn::Split": [
-              ",",
-              {
-                "Fn::Join": [
-                  ",",
-                  [
-                    {
-                      "Fn::GetAtt": [
-                        "EKSInfraMigrationsSecurityGroup8BCFC8DB",
-                        "GroupId",
-                      ],
-                    },
-                    {
-                      "Fn::Join": [
-                        ",",
-                        {
-                          "Ref": "VPCSecurityGroupIds",
-                        },
-                      ],
-                    },
-                  ],
-                ],
-              },
-            ],
-          },
           "SubnetIds": {
             "Ref": "VPCSubnetIds",
           },
@@ -710,6 +721,22 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
               "Effect": "Allow",
               "Resource": "*",
             },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:aws:iam::",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":role/*",
+                  ],
+                ],
+              },
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -780,64 +807,95 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
       },
       "Type": "AWS::IAM::Role",
     },
-    "EKSInfraMigrationsSecurityGroup8BCFC8DB": {
+    "EKSInfraMigrationsPodIdentityRoleDefaultPolicy701D83EF": {
       "Properties": {
-        "GroupDescription": "TestMigrationAssistantStack/EKSInfra/MigrationsSecurityGroup",
-        "SecurityGroupEgress": [
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "SnapshotRole53D7C789",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EKSInfraMigrationsPodIdentityRoleDefaultPolicy701D83EF",
+        "Roles": [
           {
-            "CidrIp": "0.0.0.0/0",
-            "Description": "Allow all outbound traffic by default",
-            "IpProtocol": "-1",
-          },
-          {
-            "CidrIpv6": "::/0",
-            "Description": "Allow all outbound ipv6 traffic by default",
-            "IpProtocol": "-1",
+            "Ref": "EKSInfraMigrationsPodIdentityRole873942CE",
           },
         ],
-        "VpcId": {
-          "Ref": "VPCId",
-        },
       },
-      "Type": "AWS::EC2::SecurityGroup",
+      "Type": "AWS::IAM::Policy",
     },
-    "EKSInfraMigrationsSecurityGroupfromTestMigrationAssistantStackEKSInfraMigrationsEKSClusterDefaultSGB9B387E7ALLTRAFFICB4BFD1CE": {
+    "SnapshotRole53D7C789": {
       "Properties": {
-        "Description": "from TestMigrationAssistantStackEKSInfraMigrationsEKSClusterDefaultSGB9B387E7:ALL TRAFFIC",
-        "GroupId": {
-          "Fn::GetAtt": [
-            "EKSInfraMigrationsSecurityGroup8BCFC8DB",
-            "GroupId",
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "es.amazonaws.com",
+              },
+            },
           ],
+          "Version": "2012-10-17",
         },
-        "IpProtocol": "-1",
-        "SourceSecurityGroupId": {
-          "Fn::GetAtt": [
-            "EKSInfraMigrationsEKSCluster4497841A",
-            "ClusterSecurityGroupId",
+        "Description": "Role that grants OpenSearch Service permissions to access S3 to create snapshots",
+        "RoleName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+              "-snapshot-role",
+            ],
           ],
         },
       },
-      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Type": "AWS::IAM::Role",
     },
-    "EKSInfraMigrationsSecurityGroupfromTestMigrationAssistantStackEKSInfraMigrationsSecurityGroup64E68E37ALLTRAFFICEE0DE2F2": {
+    "SnapshotRoleDefaultPolicyBDD7C46A": {
       "Properties": {
-        "Description": "from TestMigrationAssistantStackEKSInfraMigrationsSecurityGroup64E68E37:ALL TRAFFIC",
-        "GroupId": {
-          "Fn::GetAtt": [
-            "EKSInfraMigrationsSecurityGroup8BCFC8DB",
-            "GroupId",
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:ListBucket",
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::migrations-*",
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+              ],
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::migrations-*/*",
+            },
           ],
+          "Version": "2012-10-17",
         },
-        "IpProtocol": "-1",
-        "SourceSecurityGroupId": {
-          "Fn::GetAtt": [
-            "EKSInfraMigrationsSecurityGroup8BCFC8DB",
-            "GroupId",
-          ],
-        },
+        "PolicyName": "SnapshotRoleDefaultPolicyBDD7C46A",
+        "Roles": [
+          {
+            "Ref": "SnapshotRole53D7C789",
+          },
+        ],
       },
-      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Type": "AWS::IAM::Policy",
     },
   },
   "Rules": {
@@ -987,6 +1045,20 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             "; export AWS_CFN_REGION=us-west-1; export VPC_ID=",
             {
               "Ref": "Vpc8378EB38",
+            },
+            "; export EKS_CLUSTER_SECURITY_GROUP=",
+            {
+              "Fn::GetAtt": [
+                "EKSInfraMigrationsEKSCluster4497841A",
+                "ClusterSecurityGroupId",
+              ],
+            },
+            "; export SNAPSHOT_ROLE=",
+            {
+              "Fn::GetAtt": [
+                "SnapshotRole53D7C789",
+                "Arn",
+              ],
             },
             "; export STAGE=",
             {
@@ -1181,6 +1253,37 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
       },
       "Type": "AWS::EKS::PodIdentityAssociation",
     },
+    "EKSInfraMigrationConsolePodIdentityAssociationBCF7460B": {
+      "DependsOn": [
+        "EKSInfraMigrationsEKSCluster4497841A",
+      ],
+      "Properties": {
+        "ClusterName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Namespace": "ma",
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsPodIdentityRole873942CE",
+            "Arn",
+          ],
+        },
+        "ServiceAccount": "migration-console-access-role",
+      },
+      "Type": "AWS::EKS::PodIdentityAssociation",
+    },
     "EKSInfraMigrationsECRRepositoryEAD8241B": {
       "DeletionPolicy": "Delete",
       "Properties": {
@@ -1245,17 +1348,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
         "ResourcesVpcConfig": {
           "EndpointPrivateAccess": true,
           "EndpointPublicAccess": true,
-          "SecurityGroupIds": {
-            "Fn::Split": [
-              ",",
-              {
-                "Fn::GetAtt": [
-                  "EKSInfraMigrationsSecurityGroup8BCFC8DB",
-                  "GroupId",
-                ],
-              },
-            ],
-          },
           "SubnetIds": [],
         },
         "RoleArn": {
@@ -1531,6 +1623,22 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
               "Effect": "Allow",
               "Resource": "*",
             },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:aws:iam::",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":role/*",
+                  ],
+                ],
+              },
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -1601,64 +1709,31 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
       },
       "Type": "AWS::IAM::Role",
     },
-    "EKSInfraMigrationsSecurityGroup8BCFC8DB": {
+    "EKSInfraMigrationsPodIdentityRoleDefaultPolicy701D83EF": {
       "Properties": {
-        "GroupDescription": "TestMigrationAssistantStack/EKSInfra/MigrationsSecurityGroup",
-        "SecurityGroupEgress": [
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "SnapshotRole53D7C789",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EKSInfraMigrationsPodIdentityRoleDefaultPolicy701D83EF",
+        "Roles": [
           {
-            "CidrIp": "0.0.0.0/0",
-            "Description": "Allow all outbound traffic by default",
-            "IpProtocol": "-1",
-          },
-          {
-            "CidrIpv6": "::/0",
-            "Description": "Allow all outbound ipv6 traffic by default",
-            "IpProtocol": "-1",
+            "Ref": "EKSInfraMigrationsPodIdentityRole873942CE",
           },
         ],
-        "VpcId": {
-          "Ref": "Vpc8378EB38",
-        },
       },
-      "Type": "AWS::EC2::SecurityGroup",
-    },
-    "EKSInfraMigrationsSecurityGroupfromTestMigrationAssistantStackEKSInfraMigrationsEKSClusterDefaultSGB9B387E7ALLTRAFFICB4BFD1CE": {
-      "Properties": {
-        "Description": "from TestMigrationAssistantStackEKSInfraMigrationsEKSClusterDefaultSGB9B387E7:ALL TRAFFIC",
-        "GroupId": {
-          "Fn::GetAtt": [
-            "EKSInfraMigrationsSecurityGroup8BCFC8DB",
-            "GroupId",
-          ],
-        },
-        "IpProtocol": "-1",
-        "SourceSecurityGroupId": {
-          "Fn::GetAtt": [
-            "EKSInfraMigrationsEKSCluster4497841A",
-            "ClusterSecurityGroupId",
-          ],
-        },
-      },
-      "Type": "AWS::EC2::SecurityGroupIngress",
-    },
-    "EKSInfraMigrationsSecurityGroupfromTestMigrationAssistantStackEKSInfraMigrationsSecurityGroup64E68E37ALLTRAFFICEE0DE2F2": {
-      "Properties": {
-        "Description": "from TestMigrationAssistantStackEKSInfraMigrationsSecurityGroup64E68E37:ALL TRAFFIC",
-        "GroupId": {
-          "Fn::GetAtt": [
-            "EKSInfraMigrationsSecurityGroup8BCFC8DB",
-            "GroupId",
-          ],
-        },
-        "IpProtocol": "-1",
-        "SourceSecurityGroupId": {
-          "Fn::GetAtt": [
-            "EKSInfraMigrationsSecurityGroup8BCFC8DB",
-            "GroupId",
-          ],
-        },
-      },
-      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Type": "AWS::IAM::Policy",
     },
     "S3VpcEndpoint1F0CDE18": {
       "Properties": {
@@ -1694,6 +1769,70 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
         },
       },
       "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "SnapshotRole53D7C789": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "es.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "Role that grants OpenSearch Service permissions to access S3 to create snapshots",
+        "RoleName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+              "-snapshot-role",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "SnapshotRoleDefaultPolicyBDD7C46A": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:ListBucket",
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::migrations-*",
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+              ],
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::migrations-*/*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "SnapshotRoleDefaultPolicyBDD7C46A",
+        "Roles": [
+          {
+            "Ref": "SnapshotRole53D7C789",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "Vpc8378EB38": {
       "Properties": {
