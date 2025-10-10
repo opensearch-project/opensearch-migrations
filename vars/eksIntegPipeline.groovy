@@ -348,8 +348,8 @@ def call(Map config = [:]) {
                                         echo "List resources not removed by helm uninstall:"
                                         sh "kubectl get all,pvc,configmap,secret,servicemonitor,workflow -n ma -o wide"
                                         sh "kubectl -n ma delete namespace ma"
-                                        sh "cd $WORKSPACE/deployment/migration-assistant-solution && cdk destroy Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} --require-approval never --concurrency 3"
-                                        sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --require-approval never --concurrency 3 && rm -f cdk.context.json"
+                                        sh "cd $WORKSPACE/deployment/migration-assistant-solution && cdk destroy Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} --force --concurrency 3"
+                                        sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json"
                                     }
                                 }
                             }
