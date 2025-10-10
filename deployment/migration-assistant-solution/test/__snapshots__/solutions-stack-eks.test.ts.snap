@@ -1256,7 +1256,14 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
               },
             ],
           },
-          "SubnetIds": [],
+          "SubnetIds": [
+            {
+              "Ref": "VpcPrivateSubnet1Subnet536B997A",
+            },
+            {
+              "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+            },
+          ],
         },
         "RoleArn": {
           "Fn::GetAtt": [
@@ -1816,6 +1823,28 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
       "Properties": {
         "Tags": [
           {
+            "Key": {
+              "Fn::Join": [
+                "",
+                [
+                  "kubernetes.io/cluster/migration-eks-cluster-",
+                  {
+                    "Ref": "Stage",
+                  },
+                  "-",
+                  {
+                    "Ref": "AWS::Region",
+                  },
+                ],
+              ],
+            },
+            "Value": "shared",
+          },
+          {
+            "Key": "kubernetes.io/role/internal-elb",
+            "Value": "1",
+          },
+          {
             "Key": "Name",
             "Value": {
               "Fn::Join": [
@@ -1884,6 +1913,28 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             "Value": "Private",
           },
           {
+            "Key": {
+              "Fn::Join": [
+                "",
+                [
+                  "kubernetes.io/cluster/migration-eks-cluster-",
+                  {
+                    "Ref": "Stage",
+                  },
+                  "-",
+                  {
+                    "Ref": "AWS::Region",
+                  },
+                ],
+              ],
+            },
+            "Value": "shared",
+          },
+          {
+            "Key": "kubernetes.io/role/internal-elb",
+            "Value": "1",
+          },
+          {
             "Key": "Name",
             "Value": {
               "Fn::Join": [
@@ -1940,6 +1991,28 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
       ],
       "Properties": {
         "Tags": [
+          {
+            "Key": {
+              "Fn::Join": [
+                "",
+                [
+                  "kubernetes.io/cluster/migration-eks-cluster-",
+                  {
+                    "Ref": "Stage",
+                  },
+                  "-",
+                  {
+                    "Ref": "AWS::Region",
+                  },
+                ],
+              ],
+            },
+            "Value": "shared",
+          },
+          {
+            "Key": "kubernetes.io/role/internal-elb",
+            "Value": "1",
+          },
           {
             "Key": "Name",
             "Value": {
@@ -2021,6 +2094,28 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           {
             "Key": "aws-cdk:subnet-type",
             "Value": "Private",
+          },
+          {
+            "Key": {
+              "Fn::Join": [
+                "",
+                [
+                  "kubernetes.io/cluster/migration-eks-cluster-",
+                  {
+                    "Ref": "Stage",
+                  },
+                  "-",
+                  {
+                    "Ref": "AWS::Region",
+                  },
+                ],
+              ],
+            },
+            "Value": "shared",
+          },
+          {
+            "Key": "kubernetes.io/role/internal-elb",
+            "Value": "1",
           },
           {
             "Key": "Name",
