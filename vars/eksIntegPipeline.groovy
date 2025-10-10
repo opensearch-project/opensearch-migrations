@@ -1,3 +1,10 @@
+static def expandVersionString(String input) {
+    input.replaceAll(/^(ES|OS)_(\d+)\.(\d+)$/) { full, prefix, major, minor ->
+        def name = (prefix == 'ES') ? 'elasticsearch' : 'opensearch'
+        return "${name}-${major}-${minor}"
+    }
+}
+
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eks-integ"
     def jobName = config.jobName ?: "eks-integ-test"
@@ -26,7 +33,7 @@ def call(Map config = [:]) {
             )
             choice(
                     name: 'TARGET_VERSION',
-                    choices: ['OS_1.3', 'OS_2.19'],
+                    choices: ['OS_1.3', 'OS_2.19', 'OS_3.1'],
                     description: 'Pick a specific target version'
             )
             choice(
@@ -95,7 +102,11 @@ def call(Map config = [:]) {
                                 env.targetClusterType = targetClusterType ?: params.TARGET_CLUSTER_TYPE
                                 deployClustersStep(
                                     stage: "${maStageName}",
-                                    clusterContextFilePath: "${clusterContextFilePath}"
+                                    clusterContextFilePath: "${clusterContextFilePath}",
+                                    sourceVer: env.sourceVer,
+                                    sourceClusterType: env.sourceClusterType,
+                                    targetVer: env.targetVer,
+                                    targetClusterType: env.targetClusterType
                                 )
                             }
                         }
@@ -189,6 +200,10 @@ def call(Map config = [:]) {
                                     sh 'kubectl create namespace ma --dry-run=client -o yaml | kubectl apply -f -'
                                     def clusterDetails = readJSON text: env.clusterDetailsJson
                                     def sourceCluster = clusterDetails.source
+                                    def targetCluster = clusterDetails.target
+                                    def sourceVersionExpanded = expandVersionString("${env.sourceVer}")
+                                    def targetVersionExpanded = expandVersionString("${env.targetVer}")
+                                    // Source configmap
                                     writeJSON file: '/tmp/source-cluster-config.json', json: [
                                             endpoint: sourceCluster.endpoint,
                                             allow_insecure: true,
@@ -199,14 +214,13 @@ def call(Map config = [:]) {
                                             version: env.sourceVer
                                     ]
                                     sh """
-                                      kubectl create configmap source-elasticsearch-7-10-migration-config \
+                                      kubectl create configmap source-${sourceVersionExpanded}-migration-config \
                                         --from-file=cluster-config=/tmp/source-cluster-config.json \
                                         --namespace ma --dry-run=client -o yaml | kubectl apply -f -
                                     
-                                      kubectl -n ma get configmap source-elasticsearch-7-10-migration-config -o yaml
+                                      kubectl -n ma get configmap source-${sourceVersionExpanded}-migration-config -o yaml
                                     """
-
-                                    def targetCluster = clusterDetails.target
+                                    // Target configmap
                                     writeJSON file: '/tmp/target-cluster-config.json', json: [
                                             endpoint: targetCluster.endpoint,
                                             allow_insecure: true,
@@ -217,11 +231,11 @@ def call(Map config = [:]) {
                                             version: env.targetVer
                                     ]
                                     sh """
-                                      kubectl create configmap target-opensearch-1-3-migration-config \
+                                      kubectl create configmap target-${targetVersionExpanded}-migration-config \
                                         --from-file=cluster-config=/tmp/target-cluster-config.json \
                                         --namespace ma --dry-run=client -o yaml | kubectl apply -f -
                                     
-                                      kubectl -n ma get configmap target-opensearch-1-3-migration-config -o yaml
+                                      kubectl -n ma get configmap target-${targetVersionExpanded}-migration-config -o yaml
                                     """
 
                                     // Modify source/target security group to allow EKS cluster security group
@@ -325,6 +339,8 @@ def call(Map config = [:]) {
                                         sh "kubectl -n ma get pods"
                                         //sh "pipenv run app --delete-only"
                                         //sh "kubectl -n ma delete namespace ma"
+                                        //sh "cd deployment/migration-assistant-solution && cdk destroy Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX}"
+                                        //sh "cd test/amazon-opensearch-service-sample-cdk && cdk destroy '*' && rm -f cdk.context.json"
                                     }
                                 }
                             }

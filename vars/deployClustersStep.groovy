@@ -1,24 +1,36 @@
-#!/usr/bin/env groovy
-import groovy.json.JsonOutput
-
 def call(Map config = [:]) {
+    def clusters = []
+
+    if (config.sourceVer) {
+        clusters << [
+                clusterId               : "source",
+                clusterVersion          : "${config.sourceVer}",
+                clusterType             : "${config.sourceClusterType}",
+                openAccessPolicyEnabled : true
+        ]
+    } else {
+        echo "Source cluster not added because version was not provided"
+    }
+
+    if (config.targetVer) {
+        clusters << [
+                clusterId               : "target",
+                clusterVersion          : "${config.targetVer}",
+                clusterType             : "${config.targetClusterType}",
+                openAccessPolicyEnabled : true
+        ]
+    } else {
+        echo "Target cluster not added because version was not provided"
+    }
+
+    if (clusters.isEmpty()) {
+        error("No clusters were defined. Provide at least source or target cluster.")
+    }
+
     def clusterContextValues = [
             stage      : "${config.stage}",
             vpcAZCount : config.vpcAZCount ?: 2,
-            clusters   : [
-                    [
-                            clusterId               : "source",
-                            clusterVersion          : "${env.sourceVer}",
-                            clusterType             : "${env.sourceClusterType}",
-                            openAccessPolicyEnabled : true
-                    ],
-                    [
-                            clusterId               : "target",
-                            clusterVersion          : "${env.targetVer}",
-                            clusterType             : "${env.targetClusterType}",
-                            openAccessPolicyEnabled : true
-                    ]
-            ]
+            clusters   : clusters
     ]
 
     def contextJsonStr = JsonOutput.prettyPrint(JsonOutput.toJson(clusterContextValues))
