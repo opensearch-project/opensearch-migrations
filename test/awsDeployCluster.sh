@@ -12,7 +12,7 @@ write_cluster_outputs() {
   local outfile="$2"
 
   stacks=$(aws cloudformation list-stacks \
-    --query "StackSummaries[].StackName" \
+    --query "StackSummaries[?StackStatus!='DELETE_COMPLETE' && StackStatus!='DELETE_IN_PROGRESS'].StackName" \
     --output text | tr '\t' '\n')
 
   if [[ -z "$stacks" ]]; then
