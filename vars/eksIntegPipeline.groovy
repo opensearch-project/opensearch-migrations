@@ -1,14 +1,15 @@
 static def expandVersionString(String input) {
+    def trimmed = input.trim()
     def pattern = ~/^(ES|OS)_(\d+)\.(\d+)$/
-    def matcher = input =~ pattern
-    if (matcher.matches()) {
-        def prefix = matcher[0][1]
-        def major  = matcher[0][2]
-        def minor  = matcher[0][3]
-        def name = (prefix == 'ES') ? 'elasticsearch' : 'opensearch'
-        return "${name}-${major}-${minor}"
+    def matcher = trimmed =~ pattern
+    if (!matcher.matches()) {
+        error("Invalid version string format: '${input}'. Expected something like ES_7.10 or OS_1.3")
     }
-    return input  // fallback if not matched
+    def prefix = matcher[0][1]
+    def major  = matcher[0][2]
+    def minor  = matcher[0][3]
+    def name   = (prefix == 'ES') ? 'elasticsearch' : 'opensearch'
+    return "${name}-${major}-${minor}"
 }
 
 def call(Map config = [:]) {
@@ -87,15 +88,15 @@ def call(Map config = [:]) {
                 }
             }
 
-//            stage('Build') {
-//                steps {
-//                    timeout(time: 1, unit: 'HOURS') {
-//                        script {
-//                            sh './gradlew clean build --no-daemon --stacktrace'
-//                        }
-//                    }
-//                }
-//            }
+            stage('Build') {
+                steps {
+                    timeout(time: 1, unit: 'HOURS') {
+                        script {
+                            sh './gradlew clean build --no-daemon --stacktrace'
+                        }
+                    }
+                }
+            }
 
             stage('Deploy Clusters') {
                 steps {
@@ -287,7 +288,7 @@ def call(Map config = [:]) {
                                     } else {
                                         sh "docker buildx create --name ecr-builder --driver docker-container"
                                     }
-                                    //sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -PimageArch=amd64 -Pbuilder=ecr-builder"
+                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -PimageArch=amd64 -Pbuilder=ecr-builder"
                                 }
                             }
                         }
@@ -343,10 +344,12 @@ def call(Map config = [:]) {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "kubectl -n ma get pods"
-                                        //sh "pipenv run app --delete-only"
-                                        //sh "kubectl -n ma delete namespace ma"
-                                        //sh "cd deployment/migration-assistant-solution && cdk destroy Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX}"
-                                        //sh "cd test/amazon-opensearch-service-sample-cdk && cdk destroy '*' && rm -f cdk.context.json"
+                                        sh "pipenv run app --delete-only"
+                                        echo "List resources not removed by helm uninstall:"
+                                        sh "kubectl get all,pvc,configmap,secret,servicemonitor,workflow -n ma -o wide"
+                                        sh "kubectl -n ma delete namespace ma"
+                                        sh "cd deployment/migration-assistant-solution && cdk destroy Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX}"
+                                        sh "cd test/amazon-opensearch-service-sample-cdk && cdk destroy '*' && rm -f cdk.context.json"
                                     }
                                 }
                             }
