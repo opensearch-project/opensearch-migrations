@@ -29,8 +29,8 @@ def call(Map config = [:]) {
         }
 
         triggers {
-            // Scheduled run every 6 hours
-            cron('H */6 * * *')
+            // Trigger once per day at a hashed minute around 10 PM
+            cron('H 22 * * *')
         }
 
         stages {

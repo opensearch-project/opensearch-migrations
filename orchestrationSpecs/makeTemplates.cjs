@@ -1,5 +1,5 @@
 // dev.cjs
-const fs = require('fs');
+const fs = require('node:fs');
 
 // Register the .sh extension handler FIRST
 require.extensions['.sh'] = (module, filename) => {

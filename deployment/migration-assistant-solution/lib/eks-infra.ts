@@ -73,7 +73,7 @@ export class EKSInfra extends Construct {
         });
 
         let subnetIds
-        if (props.vpcSubnetIds) {
+        if (props.vpcSubnetIds && props.vpcSubnetIds.length > 0) {
             subnetIds = props.vpcSubnetIds
         } else {
             subnetIds = []

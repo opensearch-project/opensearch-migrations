@@ -4,7 +4,7 @@ import {
   CloudFormationCustomResourceResponse,
 } from 'aws-lambda';
 import { ACMClient, ImportCertificateCommand, DeleteCertificateCommand } from '@aws-sdk/client-acm';
-import * as https from 'https';
+import * as https from 'node:https';
 import * as forge from 'node-forge';
 
 export const handler = async (event: CloudFormationCustomResourceEvent, context: Context): Promise<CloudFormationCustomResourceResponse> => {
