@@ -26,8 +26,7 @@ describe('Solutions stack', () => {
         });
         verifyParameters(template, {
             vpcIdEnabled: false,
-            vpcSubnetsEnabled: false,
-            vpcSecurityGroupsEnabled: false
+            vpcSubnetsEnabled: false
         })
     });
 
@@ -45,8 +44,7 @@ describe('Solutions stack', () => {
         });
         verifyParameters(template, {
             vpcIdEnabled: true,
-            vpcSubnetsEnabled: true,
-            vpcSecurityGroupsEnabled: true
+            vpcSubnetsEnabled: true
         })
     });
 
@@ -66,8 +64,7 @@ describe('Solutions stack', () => {
         });
         verifyParameters(template, {
             vpcIdEnabled: false,
-            vpcSubnetsEnabled: false,
-            vpcSecurityGroupsEnabled: false
+            vpcSubnetsEnabled: false
         })
     });
 
@@ -94,11 +91,10 @@ describe('Solutions stack', () => {
         template.resourceCountIs('AWS::EC2::NatGateway', props.natGatewayCount);
         template.resourceCountIs('AWS::ServiceCatalogAppRegistry::Application', 1);
         template.resourceCountIs('AWS::EKS::Cluster', 1);
-        template.resourceCountIs('AWS::IAM::Role', 3);
+        template.resourceCountIs('AWS::IAM::Role', 4);
     }
 
-    function verifyParameters(template: Template, props: { vpcIdEnabled: boolean, vpcSubnetsEnabled: boolean,
-        vpcSecurityGroupsEnabled: boolean }) {
+    function verifyParameters(template: Template, props: { vpcIdEnabled: boolean, vpcSubnetsEnabled: boolean}) {
         template.hasParameter('Stage', {
             Type: 'String',
             Default: "dev",
@@ -111,11 +107,6 @@ describe('Solutions stack', () => {
         if (props.vpcSubnetsEnabled) {
             template.hasParameter('VPCSubnetIds', {
                 Type: 'List<AWS::EC2::Subnet::Id>'
-            });
-        }
-        if (props.vpcSecurityGroupsEnabled) {
-            template.hasParameter('VPCSecurityGroupIds', {
-                Type: 'List<AWS::EC2::SecurityGroup::Id>'
             });
         }
     }
