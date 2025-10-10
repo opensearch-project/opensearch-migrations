@@ -16,6 +16,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
+import lombok.Getter;
 import lombok.SneakyThrows;
 
 /**
@@ -44,6 +45,7 @@ public class JsonCommandLineParser {
     private static final String JSON_FILE_FLAG = "---JSON-FILE";
     public static final String JCOMMANDER_COMMAND_JSON_FIELD_NAME = "jcommanderCommand";
 
+    @Getter
     private final JCommander jCommander;
     private final List<Object> mainObjects = new ArrayList<>();
     private final Map<String, Object> commandObjects = new LinkedHashMap<>();
@@ -136,13 +138,6 @@ public class JsonCommandLineParser {
      */
     public String getParsedCommand() {
         return jCommander.getParsedCommand();
-    }
-
-    /**
-     * Get the underlying JCommander instance if needed for advanced usage
-     */
-    public JCommander getJCommander() {
-        return jCommander;
     }
 
     @AllArgsConstructor
@@ -244,6 +239,9 @@ public class JsonCommandLineParser {
     private void parseJson(OuterParsedArgs parsedArgs) throws Exception {
         JsonNode rootNode = objectMapper.readTree(parsedArgs.jsonContent);
 
+        // Build combined parameter map from ALL objects that will be populated
+        validateAllKeysAreParameters(parsedArgs, rootNode);
+
         for (Object obj : mainObjects) {
             populateFromJson(obj, rootNode);
         }
@@ -255,6 +253,31 @@ public class JsonCommandLineParser {
             Field parsedCommandField = JCommander.class.getDeclaredField("parsedCommand");
             parsedCommandField.setAccessible(true);
             parsedCommandField.set(jCommander, parsedArgs.commandName);
+        }
+    }
+
+    private void validateAllKeysAreParameters(OuterParsedArgs parsedArgs, JsonNode rootNode) throws InvocationTargetException, IllegalAccessException, NoSuchMethodException, InstantiationException {
+        var allParameters = new HashSet<>();
+        for (Object obj : mainObjects) {
+            allParameters.addAll(buildParameterMap(obj, obj.getClass()).keySet());
+        }
+        if (parsedArgs.commandName != null) {
+            Object commandObj = commandObjects.get(parsedArgs.commandName);
+            allParameters.addAll(buildParameterMap(commandObj, commandObj.getClass()).keySet());
+        }
+
+        var unrecognizedKeys = new ArrayList<>();
+        var jsonKeys = rootNode.fieldNames();
+        while (jsonKeys.hasNext()) {
+            String jsonKey = jsonKeys.next();
+            if (!JCOMMANDER_COMMAND_JSON_FIELD_NAME.equals(jsonKey) && !allParameters.contains(jsonKey)) {
+                unrecognizedKeys.add(jsonKey);
+            }
+        }
+
+        if (!unrecognizedKeys.isEmpty()) {
+            throw new IllegalArgumentException(
+                "Unrecognized parameter(s) in JSON: " + unrecognizedKeys + ". " + "Valid parameters: " + allParameters);
         }
     }
 
@@ -334,6 +357,9 @@ public class JsonCommandLineParser {
     private static void buildParameterMapRecursive(Object obj, Class<?> clazz, Map<String, FieldInfo> map)
         throws IllegalAccessException, NoSuchMethodException, InvocationTargetException, InstantiationException
     {
+        if (clazz.getSuperclass() != null) {
+            buildParameterMapRecursive(obj, clazz.getSuperclass(), map);
+        }
         for (Field field : clazz.getDeclaredFields()) {
             Parameter param = field.getAnnotation(Parameter.class);
             if (param != null) {

@@ -11,6 +11,8 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 class JsonCommandLineParserTest {
 
     static class SimpleArgs {
@@ -704,5 +706,84 @@ class JsonCommandLineParserTest {
         Assertions.assertEquals(3.14159, args.doubleVal, 0.0001);
         Assertions.assertEquals(2.71f, args.floatVal, 0.01f);
         Assertions.assertTrue(args.booleanVal);
+    }
+
+    @Test
+    void testUnrecognizedJsonKey() throws Exception {
+        SimpleArgs args = new SimpleArgs();
+
+        JsonCommandLineParser parser = JsonCommandLineParser.newBuilder()
+            .addObject(args)
+            .build();
+
+        String json = "{\"name\":\"test\",\"unknownParameter\":\"value\"}";
+
+        Exception exception = assertThrows(IllegalArgumentException.class, () -> {
+            parser.parse(new String[]{"---INLINE-JSON", json});
+        });
+
+        Assertions.assertTrue(exception.getMessage().contains("Unrecognized parameter"));
+        Assertions.assertTrue(exception.getMessage().contains("unknownParameter"));
+    }
+
+    @Test
+    void testMultipleUnrecognizedJsonKeys() throws Exception {
+        SimpleArgs args = new SimpleArgs();
+
+        JsonCommandLineParser parser = JsonCommandLineParser.newBuilder()
+            .addObject(args)
+            .build();
+
+        String json = "{\"name\":\"test\",\"typo1\":\"value1\",\"typo2\":\"value2\"}";
+
+        Exception exception = assertThrows(IllegalArgumentException.class, () -> {
+            parser.parse(new String[]{"---INLINE-JSON", json});
+        });
+
+        Assertions.assertTrue(exception.getMessage().contains("Unrecognized parameter"));
+        Assertions.assertTrue(exception.getMessage().contains("typo1"));
+        Assertions.assertTrue(exception.getMessage().contains("typo2"));
+    }
+
+    @Test
+    void testTypoInParameterName() throws Exception {
+        MainArgs args = new MainArgs();
+
+        JsonCommandLineParser parser = JsonCommandLineParser.newBuilder()
+            .addObject(args)
+            .build();
+
+        // Typo: "snapshotNam" instead of "snapshotName"
+        String json = "{\"snapshotNam\":\"test\"}";
+
+        Exception exception = assertThrows(IllegalArgumentException.class, () -> {
+            parser.parse(new String[]{"---INLINE-JSON", json});
+        });
+
+        Assertions.assertTrue(exception.getMessage().contains("Unrecognized parameter"));
+        Assertions.assertTrue(exception.getMessage().contains("snapshotNam"));
+        // Should show valid parameters to help user
+        Assertions.assertTrue(exception.getMessage().contains("Valid parameters"));
+    }
+
+    @Test
+    void testUnrecognizedJsonKeyWithCommand() throws Exception {
+        GlobalArgs globalArgs = new GlobalArgs();
+        MigrateCommand migrateCmd = new MigrateCommand();
+
+        JsonCommandLineParser parser = JsonCommandLineParser.newBuilder()
+            .addObject(globalArgs)
+            .addCommand(migrateCmd)
+            .build();
+
+        // "invalidKey" doesn't belong to GlobalArgs or MigrateCommand
+        String json = "{\"source\":\"/src\",\"target\":\"/dst\",\"invalidKey\":\"value\"}";
+
+        Exception exception = assertThrows(IllegalArgumentException.class, () -> {
+            parser.parse(new String[]{"migrate", "---INLINE-JSON", json});
+        });
+
+        Assertions.assertTrue(exception.getMessage().contains("Unrecognized parameter"));
+        Assertions.assertTrue(exception.getMessage().contains("invalidKey"));
     }
 }
