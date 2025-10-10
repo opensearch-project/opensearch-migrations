@@ -9,7 +9,8 @@ def call(Map config = [:]) {
                 clusterId               : "source",
                 clusterVersion          : "${config.sourceVer}",
                 clusterType             : "${config.sourceClusterType}",
-                openAccessPolicyEnabled : true
+                openAccessPolicyEnabled : true,
+                domainRemovalPolicy     : "DESTROY"
         ]
     } else {
         echo "Source cluster not added because version was not provided"
@@ -20,7 +21,8 @@ def call(Map config = [:]) {
                 clusterId               : "target",
                 clusterVersion          : "${config.targetVer}",
                 clusterType             : "${config.targetClusterType}",
-                openAccessPolicyEnabled : true
+                openAccessPolicyEnabled : true,
+                domainRemovalPolicy     : "DESTROY"
         ]
     } else {
         echo "Target cluster not added because version was not provided"

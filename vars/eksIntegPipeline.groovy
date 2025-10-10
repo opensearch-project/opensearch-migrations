@@ -336,7 +336,7 @@ def call(Map config = [:]) {
         }
         post {
             always {
-                timeout(time: 15, unit: 'MINUTES') {
+                timeout(time: 45, unit: 'MINUTES') {
                     dir('libraries/testAutomation') {
                         script {
                             sh "pipenv install --deploy"
