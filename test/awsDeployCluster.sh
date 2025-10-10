@@ -117,7 +117,6 @@ cd amazon-opensearch-service-sample-cdk && git pull
 npm install
 
 cd ..
-# Replace preliminary placeholders in CDK context
 cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
 
 cd amazon-opensearch-service-sample-cdk

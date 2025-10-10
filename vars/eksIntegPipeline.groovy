@@ -1,8 +1,14 @@
 static def expandVersionString(String input) {
-    input.replaceAll(/^(ES|OS)_(\d+)\.(\d+)$/) { full, prefix, major, minor ->
+    def pattern = ~/^(ES|OS)_(\d+)\.(\d+)$/
+    def matcher = input =~ pattern
+    if (matcher.matches()) {
+        def prefix = matcher[0][1]
+        def major  = matcher[0][2]
+        def minor  = matcher[0][3]
         def name = (prefix == 'ES') ? 'elasticsearch' : 'opensearch'
         return "${name}-${major}-${minor}"
     }
+    return input  // fallback if not matched
 }
 
 def call(Map config = [:]) {
