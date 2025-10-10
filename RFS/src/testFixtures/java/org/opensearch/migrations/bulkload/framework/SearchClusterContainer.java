@@ -80,6 +80,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         return Collections.unmodifiableMap(merged);
     }
 
+    public static final ContainerVersion ES_V8_19 = Elasticsearch8Version.fromTag("8.19.4");
     public static final ContainerVersion ES_V8_18 = Elasticsearch8Version.fromTag("8.18.4");
     public static final ContainerVersion ES_V8_17 = Elasticsearch8Version.fromTag("8.17.5");
     public static final ContainerVersion ES_V8_16 = Elasticsearch8Version.fromTag("8.16.6");
