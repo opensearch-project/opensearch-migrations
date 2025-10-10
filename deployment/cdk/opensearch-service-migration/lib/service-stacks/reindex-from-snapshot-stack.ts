@@ -90,7 +90,8 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--lucene-dir", `"${storagePath}/lucene"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-host", osClusterEndpoint)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-shard-size-bytes", `${Math.ceil(maxShardSizeBytes)}`)
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-connections", props.reindexFromSnapshotWorkerSize === "maximum" ? "100" : "10")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-connections", props.reindexFromSnapshotWorkerSize === "maximum" ? "100" : "20")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--initial-lease-duration", "PT60M")
         if (props.clusterAuthDetails.sigv4) {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-aws-service-signing-name", props.clusterAuthDetails.sigv4.serviceSigningName)
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-aws-region", props.clusterAuthDetails.sigv4.region)
@@ -162,7 +163,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
                     size: Size.gibibytes(shardVolumeSizeGiB),
                     volumeType: EbsDeviceVolumeType.GP3,
                     fileSystemType: FileSystemType.XFS,
-                    throughput: props.reindexFromSnapshotWorkerSize === "maximum" ? 450 : 125,
+                    throughput: props.reindexFromSnapshotWorkerSize === "maximum" ? 450 : 250,
                     tagSpecifications: [{
                         tags: {
                             Name: `rfs-snapshot-volume-${props.stage}`,
@@ -191,8 +192,8 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             mountPoints: mountPoints,
             taskRolePolicies: servicePolicies,
             cpuArchitecture: props.fargateCpuArch,
-            taskCpuUnits: props.reindexFromSnapshotWorkerSize === "maximum" ? 16 * 1024 : 2 * 1024,
-            taskMemoryLimitMiB: props.reindexFromSnapshotWorkerSize === "maximum" ? 32 * 1024 : 4 * 1024,
+            taskCpuUnits: props.reindexFromSnapshotWorkerSize === "maximum" ? 16 * 1024 : 4 * 1024,
+            taskMemoryLimitMiB: props.reindexFromSnapshotWorkerSize === "maximum" ? 32 * 1024 : 8 * 1024,
             ephemeralStorageGiB: ephemeralStorageGiB,
             environment: {
                 "RFS_COMMAND": command,
