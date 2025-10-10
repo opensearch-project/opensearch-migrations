@@ -20,7 +20,7 @@ write_cluster_outputs() {
     return 1
   fi
 
-  network_stack_name=$(echo "$stacks" | grep "NetworkInfra-${stage}")
+  network_stack_name=$(echo "$stacks" | grep "NetworkInfra-${stage}" | head -n 1)
   vpc_id=$(aws cloudformation describe-stacks \
     --stack-name "$network_stack_name" \
     --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue" \
