@@ -1,3 +1,6 @@
+#!/usr/bin/env groovy
+import groovy.json.JsonOutput
+
 def call(Map config = [:]) {
     def clusters = []
 
