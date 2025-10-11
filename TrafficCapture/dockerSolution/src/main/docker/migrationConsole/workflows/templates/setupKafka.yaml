@@ -19,16 +19,16 @@ spec:
               expression: "inputs.parameters.kafkaName"
           - name: bootstrapServers
             valueFrom:
-              expression: "tasks.deploy-kafka-cluster.outputs.parameters.bootstrapServers"
+              expression: "tasks['deploy-kafka-cluster'].outputs.parameters.bootstrapServers"
           - name: captureProxyKafkaClientSecretBundle
             valueFrom:
-              expression: "tasks.create-capture-proxy-bundle.outputs.parameters.kafkaClientSecretBundle"
+              expression: "tasks['create-capture-proxy-bundle'].outputs.parameters.kafkaClientSecretBundle"
           - name: replayerKafkaClientSecretBundle
             valueFrom:
-              expression: "tasks.create-replayer-bundle.outputs.parameters.kafkaClientSecretBundle"
+              expression: "tasks['create-replayer-bundle'].outputs.parameters.kafkaClientSecretBundle"
           - name: consoleKafkaClientSecretBundle
             valueFrom:
-              expression: "tasks.create-console-bundle.outputs.parameters.kafkaClientSecretBundle"
+              expression: "tasks['create-console-bundle'].outputs.parameters.kafkaClientSecretBundle"
       dag:
         tasks:
           - name: deploy-kafka-cluster
@@ -38,16 +38,8 @@ spec:
                 - name: kafkaName
                   value: "{{inputs.parameters.kafkaName}}"
 
-          - name: export-cluster-ca
-            dependencies: [deploy-kafka-cluster]
-            template: export-cluster-ca
-            arguments:
-              parameters:
-                - name: kafkaName
-                  value: "{{inputs.parameters.kafkaName}}"
-
           - name: create-capture-proxy-bundle
-            dependencies: [deploy-kafka-cluster, export-cluster-ca]
+            dependencies: [deploy-kafka-cluster]
             template: create-kafka-client-bundle
             arguments:
               parameters:
@@ -56,10 +48,10 @@ spec:
                 - name: role
                   value: "capture-proxy"
                 - name: bootstrapServers
-                  value: "{{tasks.deploy-kafka-cluster.outputs.parameters.bootstrapServers}}"
+                  value: "{{tasks['deploy-kafka-cluster'].outputs.parameters.bootstrapServers}}"
 
           - name: create-replayer-bundle
-            dependencies: [deploy-kafka-cluster, export-cluster-ca]
+            dependencies: [deploy-kafka-cluster]
             template: create-kafka-client-bundle
             arguments:
               parameters:
@@ -68,10 +60,10 @@ spec:
                 - name: role
                   value: "replayer"
                 - name: bootstrapServers
-                  value: "{{tasks.deploy-kafka-cluster.outputs.parameters.bootstrapServers}}"
+                  value: "{{tasks['deploy-kafka-cluster'].outputs.parameters.bootstrapServers}}"
 
           - name: create-console-bundle
-            dependencies: [deploy-kafka-cluster, export-cluster-ca]
+            dependencies: [deploy-kafka-cluster]
             template: create-kafka-client-bundle
             arguments:
               parameters:
@@ -80,7 +72,7 @@ spec:
                 - name: role
                   value: "console"
                 - name: bootstrapServers
-                  value: "{{tasks.deploy-kafka-cluster.outputs.parameters.bootstrapServers}}"
+                  value: "{{tasks['deploy-kafka-cluster'].outputs.parameters.bootstrapServers}}"
 
     - name: deploy-kafka-cluster
       inputs:
@@ -90,7 +82,7 @@ spec:
         parameters:
         - name: bootstrapServers
           valueFrom:
-            expression: "tasks.deploy-kafka-cluster-kraft.outputs.parameters.bootstrapServers"
+            expression: "tasks['deploy-kafka-cluster-kraft'].outputs.parameters.bootstrapServers"
       dag:
         tasks:
           - name: deploy-kraft-node-pool
@@ -217,11 +209,12 @@ spec:
           CA_SECRET="{{inputs.parameters.kafkaName}}-cluster-ca-cert"
           NS="{{inputs.parameters.targetNamespace}}"
           MOUNT="{{inputs.parameters.mountPath}}"
+          BOOTSTRAP="{{inputs.parameters.bootstrapServers}}"
 
           WORK="$(mktemp -d)"
           trap 'rm -rf "$WORK"' EXIT
 
-          echo "${USERNAME}-properties" > /tmp/secret_name
+          echo "${USERNAME}-kafka-client-config" > /tmp/secret_name
 
           # 1) Create KafkaUser (SCRAM) - Secret ${USERNAME} will be created by Strimzi
           cat <<EOF | kubectl apply -f -
@@ -264,16 +257,16 @@ spec:
           ssl.truststore.type=PKCS12
           ssl.truststore.location=${MOUNT}/ca.p12
           ssl.truststore.password=${TRUSTPASS}
-          bootstrap.servers={{inputs.parameters.bootstrapServers}}
+          bootstrap.servers=${BOOTSTRAP}
           client.id=${USERNAME}
           EOF
 
           # 5) Create a bundle of the secrets for easy mounting by apps
-          kubectl -n "$NS" create secret generic "${USERNAME}-properties" \
+          kubectl -n "$NS" delete secret "${USERNAME}-kafka-client-config" --ignore-not-found
+          kubectl -n "$NS" create secret generic "${USERNAME}-kafka-client-config" \
             --from-file=kafka.properties="$WORK/kafka.properties" \
             --from-file=ca.p12="$WORK/ca.p12" \
-            --from-file=ca.password="$WORK/ca.password" \
-            --save-config --apply
+            --from-file=ca.password="$WORK/ca.password"
 
     - name: create-kafka-topic
       inputs:
