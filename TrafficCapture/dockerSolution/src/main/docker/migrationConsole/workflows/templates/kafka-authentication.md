@@ -50,39 +50,51 @@ Strimzi creates the ca cert in the cluster, located in `{kafkaName}--cluster-ca-
 
 #### User generation through Strimzi
 
-The Strimzi operator support creating users, after being created the credentials for the user are stored within the k8 cluster with a name matching the username.
+The Strimzi operator supports creating users. After creation, Strimzi stores the user credentials in a Kubernetes secret named `${USERNAME}`. The workflow then creates an additional bundle secret named `${USERNAME}-kafka-client-config` containing the complete client configuration.
 
 ```yaml
     apiVersion: kafka.strimzi.io/v1beta2
     kind: KafkaUser
     metadata:
-    name: "${USERNAME}"
-    labels:
+      name: "${USERNAME}"
+      labels:
         strimzi.io/cluster: "${KAFKA_NAME}"
     spec:
-    authentication:
+      authentication:
         type: scram-sha-512
-    authorization:
+      authorization:
         type: simple
-        ...
+        acls:
+          - operation: Describe
+            resource: { type: topic, name: "*", patternType: literal }
+          - operation: Describe
+            resource: { type: group, name: "*", patternType: literal }
 ```
 
 ### Client configuration
 
-Kakfa has a convention for connect configs [link](https://kafka.apache.org/documentation/#connectconfigs) passed as file to an application such as [kcat](https://github.com/edenhill/kcat).  The following is an example of how this can be configured.
+Kafka has a convention for connect configs [link](https://kafka.apache.org/documentation/#connectconfigs) passed as file to an application such as [kcat](https://github.com/edenhill/kcat). The workflow generates a complete `kafka.properties` file with the following format:
 
 ```
 security.protocol=SASL_SSL
 sasl.mechanism=SCRAM-SHA-512
 sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="..." password="...";
 ssl.truststore.type=PKCS12
-ssl.truststore.location=ca.p12
+ssl.truststore.location=/opt/kafka-config/ca.p12
 ssl.truststore.password="..."
-bootstrap.servers=myKafka.svc
+bootstrap.servers={kafkaName}-kafka-bootstrap.{namespace}.svc:9093
+client.id={username}
 ```
 
-Feeding configuration file path such as the following will be read from and used when connecting to the kafka brokers.
+Note: The `ssl.truststore.location` uses the absolute path `/opt/kafka-config` where the secret bundle is mounted in the application container.
+
+Applications can reference the configuration file when connecting to Kafka brokers:
 
 ```shell
 --command-config /opt/kafka-config/kafka.properties
 ```
+
+The complete client configuration bundle (`${USERNAME}-kafka-client-config` secret) contains:
+- `kafka.properties` - Complete Kafka client configuration
+- `ca.p12` - Cluster CA certificate in PKCS12 format
+- `ca.password` - Password for the CA certificate
