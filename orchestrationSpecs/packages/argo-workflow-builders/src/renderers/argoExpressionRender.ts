@@ -11,7 +11,7 @@ import {
     FunctionExpression,
     InfixExpression,
     LiteralExpression,
-    RecordFieldSelectExpression,
+    RecordFieldSelectExpression, RecordGetExpression,
     TaskDataExpression,
     TemplateReplacementExpression,
     TernaryExpression,
@@ -111,6 +111,13 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = fa
         const l = formatExpression(ae.left, useIdentifierMarkers);
         const r = formatExpression(ae.right, useIdentifierMarkers);
         return formattedResult(`${l.text} ${ae.operator} ${r.text}`, true);
+    }
+
+    if (isGetExpression(expr)) {
+        const ge = expr as RecordGetExpression<any, any, any>;
+        const inner = formatExpression(ge.source, useIdentifierMarkers);
+        return formattedResult(`${inner.text}['${ge.key}']`, true);
+
     }
 
     if (isPathExpression(expr)) {
@@ -237,6 +244,10 @@ export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<
 
 export function isPathExpression(e: AnyExpr): e is RecordFieldSelectExpression<any, any, any> {
     return e.kind === "path";
+}
+
+export function isGetExpression(e: AnyExpr): e is RecordGetExpression<any, any, any> {
+    return e.kind === "get";
 }
 
 export function isTaskData(e: AnyExpr): e is TaskDataExpression<any> {

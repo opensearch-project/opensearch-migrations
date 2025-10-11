@@ -6,7 +6,7 @@ export type MissingField = typeof MISSING_FIELD;
 export class Serialized<OutputT> {
     readonly _resultType!: OutputT; // phantom only for typing
     public constructor(public readonly : string) {}
-};
+}
 
 // PlainObject type system for constraining values to serializable plain objects
 export type Primitive = string | number | boolean | MissingField;

@@ -44,7 +44,7 @@ export const METADATA_OPTIONS = z.object({
     multiTypeBehavior: z.union(["NONE", "UNION", "SPLIT"].map(s=>z.literal(s))).default("NONE"),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
     output: z.union(["HUMAN_READABLE", "JSON"].map(s=>z.literal(s))).default("HUMAN_READABLE"),
-    transformerBase64: z.string().default(""),
+    transformerConfigBase64: z.string().default(""),
 });
 
 export const RFS_OPTIONS = z.object({
@@ -87,7 +87,7 @@ export const HTTP_AUTH_MTLS = z.object({
 export const CLUSTER_CONFIG = z.object({
     endpoint: z.string(),
     allowInsecure: z.boolean().optional(),
-    version: z.string().optional(),
+    version: z.string().default("ES 7.10"),
     authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
 });
 

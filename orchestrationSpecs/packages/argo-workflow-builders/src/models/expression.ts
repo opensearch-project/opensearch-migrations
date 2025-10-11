@@ -137,6 +137,37 @@ export class InfixExpression<
     }
 }
 
+type PlainRecord = Record<string, NonSerializedPlainObject>;
+type ResultOfExpr<E> = E extends BaseExpression<infer U, any> ? U : never;
+type KeysOfUnion<T> = T extends any ? keyof T : never;
+type MembersWithKey<T, K extends PropertyKey> =
+    T extends any ? (K extends keyof T ? T : never) : never;
+
+// Deeply exclude `undefined` from any PlainObject (arrays + records).
+type DeepStripUndefined<T> =
+// keep MissingField as-is
+    T extends MissingField ? MissingField :
+        // Serialized payload preserved; scrub inside the payload
+        T extends Serialized<infer U> ? Serialized<DeepStripUndefined<U>> :
+            // arrays
+            T extends readonly (infer U)[] ? readonly DeepStripUndefined<U>[] :
+                // objects (including records)
+                T extends object ? { [K in keyof T]: DeepStripUndefined<T[K]> } :
+                    // primitives / strings / numbers / booleans
+                    Exclude<T, undefined>;
+
+export class RecordGetExpression<
+    E extends BaseExpression<PlainRecord, any>,
+    // infer T from E's result
+    T extends PlainRecord = ResultOfExpr<E>,
+    // const generic preserves literal-ness for editor autocomplete
+    const K extends Extract<keyof NonMissing<T>, string> = Extract<keyof NonMissing<T>, string>
+> extends BaseExpression<SegmentsValueStrict<T, readonly [K]>, "complicatedExpression"> {
+    constructor(public readonly source: E, public readonly key: K) {
+        super("get");
+    }
+}
+
 // Helper types for dict operations
 type NormalizeValue<V> =
     V extends BaseExpression<infer U, infer C> ? BaseExpression<U, C> :
@@ -610,15 +641,59 @@ class ExprBuilder {
     }
 
     // Record Handling
+
     hasKey<
-        T extends Record<string, PlainObject>,
-        K extends keyof T & string
-    >(obj: BaseExpression<T>, key: K) {
-        return new InfixExpression("in", this.literal(key), obj, typeToken<boolean>())
+        T extends Record<string, PlainObject> | MissingField,
+        // union of keys across all record members (excluding MissingField)
+        const K extends Extract<KeysOfUnion<Exclude<T, MissingField>>, string>
+    >(
+        obj: BaseExpression<T, any>,
+        key: K
+    ): BaseExpression<boolean, "complicatedExpression"> {
+        return new InfixExpression<boolean, ExprC<typeof obj>, "govaluate">(
+            "in",
+            this.literal(key),
+            obj,
+            typeToken<boolean>()
+        ) as any;
     }
 
     keys<T extends Record<string, any>>(obj: BaseExpression<T>) {
         return fn<string[], ExpressionType, "complicatedExpression">("keys", obj);
+    }
+
+    // A "loose" version: works with unions, never collapses to `never`
+    getLoose<
+        E extends BaseExpression<Record<string, any>, any>,
+        T  extends Record<string, any> = ResultOf<E>,
+        const K extends Extract<KeysOfUnion<NonMissing<T>>, string> =
+            Extract<KeysOfUnion<NonMissing<T>>, string>,
+        TK extends Record<string, any> = MembersWithKey<NonMissing<T>, K>
+    >(
+        recordExpr: NoAny<E>,
+        key: K
+    ): BaseExpression<
+        DeepStripUndefined<SegmentsValueStrict<TK, readonly [K]>>,
+        "complicatedExpression"
+    > {
+        // Render as EXPR[KEY], same as your `get` node:
+        return new RecordGetExpression<
+            BaseExpression<TK, ExprC<E>>,
+            TK,
+            K
+        >(recordExpr as unknown as BaseExpression<TK, ExprC<E>>, key) as any;
+    }
+
+    get<
+        E extends BaseExpression<PlainRecord, any>,
+        T extends PlainRecord = ResultOfExpr<E>,
+        const K extends Extract<keyof NonMissing<T>, string> = Extract<keyof NonMissing<T>, string>
+    >(
+        // NoAny<E> makes this parameter become `never` if ResultOf<E> is `any`
+        recordExpr: NoAny<E>,
+        key: K
+    ): BaseExpression<SegmentsValueStrict<T, readonly [K]>, "complicatedExpression"> {
+        return new RecordGetExpression<E, T, K>(recordExpr, key);
     }
 
     /**
@@ -674,6 +749,31 @@ class ExprBuilder {
     ): BaseExpression<any, "complicatedExpression"> {
         const path = _segmentsToPath(segs);
         return new RecordFieldSelectExpression(source, path) as any;
+    }
+
+    omit<
+        E extends BaseExpression<PlainRecord, any>,
+        T extends PlainRecord = ResultOfExpr<E>,
+        const Keys extends readonly (Extract<keyof NonMissing<T>, string>)[] = readonly (Extract<keyof NonMissing<T>, string>)[]
+    >(
+        recordExpr: NoAny<E>,
+        ...keys: Keys
+    ): BaseExpression<Omit<NonMissing<T>, Keys[number]>, "complicatedExpression"> {
+        const keyExprs = keys.map(k =>
+            widenComplexity(this.literal(k))
+        ) as readonly BaseExpression<string, "complicatedExpression">[];
+
+        const args: readonly BaseExpression<any, "complicatedExpression">[] = [
+            widenComplexity(recordExpr),
+            ...keyExprs
+        ];
+
+        return new FunctionExpression<
+            Omit<NonMissing<T>, Keys[number]>,
+            any,
+            "complicatedExpression",
+            "complicatedExpression"
+        >("sprig.omit", args);
     }
 
     deserializeRecord<R extends AggregateType, CIn extends ExpressionType>(data: BaseExpression<Serialized<R>,CIn>) {
