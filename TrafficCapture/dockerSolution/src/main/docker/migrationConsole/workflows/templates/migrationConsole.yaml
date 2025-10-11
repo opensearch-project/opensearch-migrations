@@ -67,7 +67,7 @@ spec:
             echo $HOSTNAME > /tmp/podname
             
             base64 -d > /config/migration_services.yaml << EOF
-            {{= toBase64(inputs.parameters['config-contents']) }}
+            {{=toBase64(inputs.parameters.configContents)}}
             EOF
             
             . /etc/profile.d/venv.sh
@@ -83,16 +83,16 @@ spec:
             fi
             
             {{inputs.parameters.command}}
-        volumes:
-        - name: kafka-config
-          secret:
-            secretName: "{{inputs.parameters.kafka-client-secret-bundle}}"
+      volumes:
+      - name: kafka-config
+        secret:
+          secretName: "{{inputs.parameters.kafka-client-secret-bundle}}"
 
     - name: deploy-console-with-config
       inputs:
         parameters:
           - name: command
-          - name: config-contents
+          - name: configContents
           - name: name
           - name: migration-console-image
           - name: migration-console-pull-policy
@@ -135,7 +135,7 @@ spec:
                         set -e
           
                         base64 -d > /config/migration_services.yaml << EOF
-                        {{= toBase64(inputs.parameters['config-contents']) }}
+                        {{=toBase64(inputs.parameters.configContents)}}
                         EOF
                       
                         . /etc/profile.d/venv.sh
@@ -151,10 +151,10 @@ spec:
                         fi
           
                         {{inputs.parameters.command}}
-                  volumes:
-                  - name: kafka-config
-                    secret:
-                      secretName: {{inputs.parameters.kafka-client-secret-bundle}}
+                volumes:
+                - name: kafka-config
+                  secret:
+                    secretName: {{inputs.parameters.kafka-client-secret-bundle}}
 
     - name: run-console
       inputs:
@@ -240,7 +240,7 @@ spec:
               parameters:
                 - name: name
                   value: "{{=let n=inputs.parameters.name; n == '' ? 'diagnostic-console-' + workflow.uid : n}}"
-                - name: config-contents
+                - name: configContents
                   value: "{{steps.get-console-config.outputs.parameters.config-contents}}"
                 - name: command
                   value: "{{inputs.parameters.command}}"

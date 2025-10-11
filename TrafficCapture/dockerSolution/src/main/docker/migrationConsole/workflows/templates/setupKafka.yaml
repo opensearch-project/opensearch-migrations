@@ -274,12 +274,8 @@ spec:
           - name: kafkaName
           - name: topicName
           - name: topicPartitions
-            value: ""
-          - name: defaultTopicPartitions
             value: "1"
           - name: topicReplicas
-            value: ""
-          - name: defaultTopicReplicas
             value: "1"
       outputs:
         parameters:
@@ -298,8 +294,8 @@ spec:
             labels:
               strimzi.io/cluster: {{inputs.parameters.kafkaName}}
           spec:
-            partitions: {{=let v=inputs.parameters['topicPartitions']; (v==nil || v=='') ? inputs.parameters['defaultTopicPartitions'] : v}}
-            replicas:   {{=let v=inputs.parameters['topicReplicas'];   (v==nil || v=='') ? inputs.parameters['defaultTopicReplicas']   : v}}
+            partitions: {{inputs.parameters.topicPartitions}}
+            replicas: {{inputs.parameters.topicReplicas}}
             config:
               retention.ms: 604800000
               segment.bytes: 1073741824
