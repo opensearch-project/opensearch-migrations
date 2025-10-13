@@ -2,8 +2,7 @@
 
 import os
 import pytest
-from unittest.mock import Mock, patch, mock_open, MagicMock
-import yaml
+from unittest.mock import Mock, patch, mock_open
 
 from console_link.workflow.services.workflow_service import WorkflowService
 from console_link.workflow.models.config import WorkflowConfig
@@ -372,7 +371,7 @@ class TestWorkflowServiceSubmission:
         # Workflow without namespace in metadata
         workflow_spec = {'metadata': {'name': 'test'}, 'spec': {}}
 
-        service.submit_workflow_to_argo(
+        _result = service.submit_workflow_to_argo(
             workflow_spec=workflow_spec,
             namespace='custom-namespace',
             argo_server='https://localhost:2746'

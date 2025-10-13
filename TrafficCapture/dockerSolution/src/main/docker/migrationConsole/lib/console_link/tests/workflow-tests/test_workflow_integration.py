@@ -83,7 +83,10 @@ def argo_workflows(k3s_container):
         logger.info(f"Namespace {argo_namespace} already exists")
 
     # Download and apply the Argo Workflows manifest
-    manifest_url = f"https://github.com/argoproj/argo-workflows/releases/download/{argo_version}/quick-start-minimal.yaml"
+    manifest_url = (
+        f"https://github.com/argoproj/argo-workflows/releases/download/"
+        f"{argo_version}/quick-start-minimal.yaml"
+    )
 
     try:
         logger.info(f"Downloading Argo Workflows manifest from {manifest_url}")
@@ -550,7 +553,8 @@ class TestArgoWorkflows:
         assert controller_deployment is not None, "workflow-controller deployment not found"
         assert controller_deployment.status.ready_replicas >= 1, "workflow-controller deployment not ready"
         logger.info(
-            f"✓ workflow-controller deployment is ready ({controller_deployment.status.ready_replicas} replicas)")
+            f"✓ workflow-controller deployment is ready "
+            f"({controller_deployment.status.ready_replicas} replicas)")
 
         # Verify argo-server service exists
         services = v1.list_namespaced_service(namespace=argo_namespace)
@@ -636,7 +640,7 @@ class TestArgoWorkflows:
             assert workflow_name.startswith("test-hello-world-"), f"Unexpected workflow name: {workflow_name}"
             assert workflow_uid is not None, "Workflow UID not returned"
 
-            logger.info(f"✓ Workflow submitted successfully!")
+            logger.info("✓ Workflow submitted successfully!")
             logger.info(f"  Name: {workflow_name}")
             logger.info(f"  UID: {workflow_uid}")
 
@@ -666,7 +670,7 @@ class TestArgoWorkflows:
 
             assert workflow is not None, "Workflow not found in Kubernetes"
             assert workflow["metadata"]["name"] == workflow_name
-            logger.info(f"✓ Workflow verified in Kubernetes")
+            logger.info("✓ Workflow verified in Kubernetes")
 
             # Verify workflow succeeded
             assert workflow_phase == "Succeeded", f"Workflow did not succeed, phase: {workflow_phase}"

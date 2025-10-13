@@ -415,7 +415,7 @@ class WorkflowService:
                 try:
                     error_detail = e.response.json()
                     error_msg = f"Failed to submit workflow: {error_detail}"
-                except:
+                except Exception:
                     error_msg = f"Failed to submit workflow: {e.response.text}"
 
             return WorkflowSubmitResult(
@@ -544,7 +544,7 @@ class WorkflowService:
                 try:
                     error_detail = response.json()
                     error_msg = f"Failed to list workflows: {error_detail}"
-                except:
+                except Exception:
                     error_msg = f"Failed to list workflows: {response.text}"
 
                 logger.error(error_msg)
@@ -758,7 +758,7 @@ class WorkflowService:
                 try:
                     error_detail = response.json()
                     error_msg = f"Failed to stop workflow: {error_detail}"
-                except:
+                except Exception:
                     error_msg = f"Failed to stop workflow: {response.text}"
 
                 logger.error(error_msg)
@@ -861,7 +861,7 @@ class WorkflowService:
                 try:
                     error_detail = response.json()
                     error_msg = f"Failed to resume workflow: {error_detail}"
-                except:
+                except Exception:
                     error_msg = f"Failed to resume workflow: {response.text}"
 
                 logger.error(error_msg)

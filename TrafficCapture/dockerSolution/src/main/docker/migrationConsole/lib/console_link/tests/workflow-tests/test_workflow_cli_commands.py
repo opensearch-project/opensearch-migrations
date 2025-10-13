@@ -1,12 +1,9 @@
 """Integration tests for workflow CLI commands."""
 
-import pytest
 from click.testing import CliRunner
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 from console_link.workflow.cli import workflow_cli
-from console_link.workflow.services.workflow_service import WorkflowService
-from console_link.workflow.models.store import WorkflowConfigStore
 from console_link.workflow.models.config import WorkflowConfig
 
 

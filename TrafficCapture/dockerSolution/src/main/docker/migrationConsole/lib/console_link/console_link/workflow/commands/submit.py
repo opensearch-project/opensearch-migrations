@@ -3,8 +3,6 @@
 import logging
 import os
 import click
-import time
-from kubernetes import client
 
 from ..models.utils import ExitCode
 from ..models.store import WorkflowConfigStore
@@ -19,10 +17,8 @@ ENDING_PHASES = ["Succeeded", "Failed", "Error", "Stopped", "Terminated"]
 @click.command(name="submit")
 @click.option(
     '--argo-server',
-    default=lambda: os.environ.get(
-        'ARGO_SERVER',
-        f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}:{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}"
-    ),
+    default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
+            f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
     help='Argo Server URL (default: auto-detected from Kubernetes service env vars, or ARGO_SERVER env var)'
 )
 @click.option(
@@ -97,7 +93,7 @@ def submit_command(ctx, argo_server, namespace, name, insecure, token, wait, tim
 
         if template_result['error']:
             click.echo(f"Warning: {template_result['error']}", err=True)
-            click.echo(f"Using default workflow instead", err=True)
+            click.echo("Using default workflow instead", err=True)
 
         click.echo(f"Using workflow template from: {template_result['source']}")
         workflow_spec = template_result['workflow_spec']

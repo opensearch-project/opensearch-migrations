@@ -1,7 +1,7 @@
 """Unit tests for WorkflowConfigStore class."""
 
 import pytest
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock
 from kubernetes.client.rest import ApiException
 
 from console_link.workflow.models.store import WorkflowConfigStore

@@ -14,10 +14,8 @@ logger = logging.getLogger(__name__)
 @click.argument('workflow_name', required=False)
 @click.option(
     '--argo-server',
-    default=lambda: os.environ.get(
-        'ARGO_SERVER',
-        f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}:{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}"
-    ),
+    default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
+            f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
     help='Argo Server URL (default: auto-detected from Kubernetes service env vars, or ARGO_SERVER env var)'
 )
 @click.option(
