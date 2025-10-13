@@ -341,6 +341,8 @@ def call(Map config = [:]) {
                         script {
                             sh "pipenv install --deploy"
                             if (env.eksClusterName) {
+                                def clusterDetails = readJSON text: env.clusterDetailsJson
+                                def targetCluster = clusterDetails.target
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "kubectl -n ma get pods"
@@ -348,6 +350,33 @@ def call(Map config = [:]) {
                                         echo "List resources not removed by helm uninstall:"
                                         sh "kubectl get all,pvc,configmap,secret,servicemonitor,workflow -n ma -o wide"
                                         sh "kubectl -n ma delete namespace ma"
+                                        // Remove added security group rule to allow proper cleanup of stacks
+                                        sh """
+                                          echo "Checking if source/target security group $targetCluster.securityGroupId exists..."
+                                        
+                                          if ! aws ec2 describe-security-groups --group-ids $targetCluster.securityGroupId >/dev/null 2>&1; then
+                                            echo "Security group $targetCluster.securityGroupId does not exist. Skipping cleanup."
+                                            exit 0
+                                          fi
+                                        
+                                          echo "Checking for existing ingress rule to remove..."
+                                        
+                                          exists=\$(aws ec2 describe-security-groups \
+                                            --group-ids $targetCluster.securityGroupId \
+                                            --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
+                                            --output json)
+                                        
+                                          if [ "\$exists" != "[]" ]; then
+                                            echo "Ingress rule found. Revoking..."
+                                            aws ec2 revoke-security-group-ingress \
+                                              --group-id $targetCluster.securityGroupId \
+                                              --protocol -1 \
+                                              --port -1 \
+                                              --source-group $env.clusterSecurityGroup
+                                          else
+                                            echo "No ingress rule to revoke."
+                                          fi
+                                        """
                                         sh "cd $WORKSPACE/deployment/migration-assistant-solution && cdk destroy Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} --force --concurrency 3"
                                         sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json"
                                     }
