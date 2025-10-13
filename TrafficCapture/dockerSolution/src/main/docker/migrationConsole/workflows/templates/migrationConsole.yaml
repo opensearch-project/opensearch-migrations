@@ -68,7 +68,7 @@ spec:
             echo $HOSTNAME > /tmp/podname
             
             base64 -d > /config/migration_services.yaml << EOF
-            {{=toBase64(inputs.parameters.configContents)}}
+            {{= toBase64(inputs.parameters['config-contents']) }}
             EOF
             
             . /etc/profile.d/venv.sh
