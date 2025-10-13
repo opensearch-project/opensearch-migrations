@@ -11,7 +11,13 @@
  */
 
 import {InputParametersRecord} from "./parameterSchemas";
-import {ExtendScope, GenericScope, TemplateSigEntry, TemplateSignaturesScopeTyped} from "./workflowTypes";
+import {
+    ExtendScope,
+    GenericScope,
+    LowercaseOnly,
+    TemplateSigEntry,
+    TemplateSignaturesScopeTyped
+} from "./workflowTypes";
 import {TypescriptError} from "../utils";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {TemplateBuilder} from "./templateBuilder";
@@ -23,9 +29,6 @@ type MetadataScopeBase = {
     serviceAccountName?: string,
     parallelism?: number
 };
-
-type LowercaseOnly<S extends string> =
-    S extends Lowercase<S> ? S : never;
 
 type SuspendTemplateBodyT = { body: { suspend: {} }, inputs: [], outputs?: [] };
 

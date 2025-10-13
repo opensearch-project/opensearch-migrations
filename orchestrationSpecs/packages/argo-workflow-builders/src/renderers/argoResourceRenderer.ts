@@ -144,12 +144,14 @@ function formatBody(body: GenericScope) {
                 }
             };
         } else if (body.container !== undefined) {
-            const {env, ...rest} = body.container;
+            const {container, ...restOfBody} = body;
+            const {env, ...restOfContainer} = container;
             return {
                 container: {
                     ...(env === undefined ? {} : {env: formatContainerEnvs(env)}),
-                    ...transformExpressionsDeep(rest)
-                }
+                    ...transformExpressionsDeep(restOfContainer)
+                },
+                ...transformExpressionsDeep(restOfBody)
             };
         } else if (body.suspend !== undefined) {
             return {suspend: {}};

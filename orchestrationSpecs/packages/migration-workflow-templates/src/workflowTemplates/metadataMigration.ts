@@ -115,7 +115,21 @@ export const MetadataMigration = WorkflowBuilder.create({
 
         .addContainer(b=>b
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
+            // .addCommand(["tail", "-f", "/dev/null"])
             .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
+            .addVolumesFromRecord({
+                'test-creds':  {
+                    configMap: {
+                        name: expr.literal("localstack-test-creds"),
+                        optional: true
+                    },
+                    mountPath: "/config/credentials",
+                    readOnly: true
+                }
+            })
+            .addEnvVar("AWS_SHARED_CREDENTIALS_FILE",
+                expr.ternary(b.inputs.useLocalStack, expr.literal("/config/credentials/configuration"), expr.literal(""))
+            )
             .addArgs([
                 b.inputs.commandMode,
                 expr.literal("---INLINE-JSON"),

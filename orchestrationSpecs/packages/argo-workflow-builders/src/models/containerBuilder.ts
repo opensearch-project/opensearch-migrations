@@ -15,7 +15,7 @@ import {
     DataScope,
     ExtendScope,
     GenericScope,
-    InputParamsToExpressions,
+    InputParamsToExpressions, LowercaseOnly,
     WorkflowAndTemplatesScope
 } from "./workflowTypes";
 import {inputsToEnvVars, TypescriptError} from "../utils";
@@ -31,6 +31,7 @@ export class ContainerBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
     ContainerScope extends GenericScope,
+    VolumeScope extends GenericScope,
     EnvScope extends DataScope,
     OutputParamsScope extends OutputParametersRecord
 > extends TemplateBodyBuilder<
@@ -38,13 +39,14 @@ export class ContainerBuilder<
     InputParamsScope,
     ContainerScope,
     OutputParamsScope,
-    ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, EnvScope, any>,
+    ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, any>,
     GenericScope
 > {
     constructor(
         contextualScope: ContextualScope,
         inputsScope: InputParamsScope,
         bodyScope: ContainerScope,
+        public readonly volumeScope: VolumeScope,
         public readonly envScope: EnvScope,
         outputsScope: OutputParamsScope,
         retryParameters: RetryParameters
@@ -76,18 +78,30 @@ export class ContainerBuilder<
                 ContextualScope,
                 InputParamsScope,
                 NewBodyScope,
+                VolumeScope,
                 EnvScope,
                 NewOutputScope
-            >(ctx, inputs, body, this.envScope, outputs, retry) as unknown as Self;
+            >(ctx, inputs, body, this.volumeScope, this.envScope, outputs, retry) as unknown as Self;
 
         super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, rebind);
     }
 
     protected getBody() {
+        const volumes = Object.entries(this.volumeScope).map(([name, config]) => ({
+            name,
+            configMap: config.configMap
+        }));
+        const volumeMounts = Object.entries(this.volumeScope).map(([name, config]) => ({
+        name,
+            mountPath: config.mountPath,
+            readOnly: config.readOnly
+        }));
         return {
+            ...(volumes.length > 0 && { volumes }),
             container: {
                 ...this.bodyScope,
-                env: this.envScope as Record<string, BaseExpression<any>>
+                env: this.envScope as Record<string, BaseExpression<any>>,
+                ...(volumeMounts.length > 0 && { volumeMounts })
             }
         };
     }
@@ -103,6 +117,7 @@ export class ContainerBuilder<
                 image: AllowLiteralOrExpression<string>,
                 pullPolicy: AllowLiteralOrExpression<string>
             }>,
+            VolumeScope,
             EnvScope,
             OutputParamsScope
         > {
@@ -110,6 +125,7 @@ export class ContainerBuilder<
             this.contextualScope,
             this.inputsScope,
             {...this.bodyScope, image, pullPolicy},
+            this.volumeScope,
             this.envScope,
             this.outputsScope,
             this.retryParameters
@@ -117,12 +133,19 @@ export class ContainerBuilder<
     }
 
     addCommand(strArr: AllowLiteralOrExpression<string>[]):
-        ContainerBuilder<ContextualScope, InputParamsScope,
-            ExtendScope<ContainerScope, { command: BaseExpression<string>[] }>, EnvScope, OutputParamsScope> {
+        ContainerBuilder<
+            ContextualScope,
+            InputParamsScope,
+            ExtendScope<ContainerScope, { command: BaseExpression<string>[] }>,
+            VolumeScope,
+            EnvScope,
+            OutputParamsScope
+        > {
         return new ContainerBuilder(this.contextualScope, this.inputsScope, {
                 ...this.bodyScope,
                 command: strArr.map(s=>toExpression(s))
             },
+            this.volumeScope,
             this.envScope,  // Preserve env scope
             this.outputsScope,
             this.retryParameters
@@ -130,12 +153,19 @@ export class ContainerBuilder<
     }
 
     addArgs(a: AllowLiteralOrExpression<string>[]):
-        ContainerBuilder<ContextualScope, InputParamsScope,
-            ExtendScope<ContainerScope, { args: AllowLiteralOrExpression<string>[] }>, EnvScope, OutputParamsScope> {
+        ContainerBuilder<
+            ContextualScope,
+            InputParamsScope,
+            ExtendScope<ContainerScope, { args: AllowLiteralOrExpression<string>[] }>,
+            VolumeScope,
+            EnvScope,
+            OutputParamsScope
+        > {
         return new ContainerBuilder(this.contextualScope, this.inputsScope, {
                 ...this.bodyScope,
                 args: a
             },
+            this.volumeScope,
             this.envScope,  // Preserve env scope
             this.outputsScope,
             this.retryParameters
@@ -149,6 +179,7 @@ export class ContainerBuilder<
             ContextualScope,
             InputParamsScope,
             ContainerScope,
+            VolumeScope,
             EnvScope,
             ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>
         > {
@@ -166,9 +197,39 @@ export class ContainerBuilder<
             ContextualScope,
             InputParamsScope,
             ContainerScope,
+            VolumeScope,
             EnvScope,
             NewOut
-        >(this.contextualScope, this.inputsScope, this.bodyScope, this.envScope, newOutputs, this.retryParameters);
+        >(
+            this.contextualScope,
+            this.inputsScope,
+            this.bodyScope,
+            this.volumeScope,
+            this.envScope,
+            newOutputs,
+            this.retryParameters);
+    }
+
+    addVolumesFromRecord<
+        R extends { [K in keyof R & string as LowercaseOnly<K>]: VolumeScope[K] }
+    >(
+        volumes: FieldGroupConstraint<VolumeScope, R>
+    ): ContainerBuilder<
+        ContextualScope,
+        InputParamsScope,
+        ContainerScope,
+        ExtendScope<VolumeScope, R>,
+        EnvScope,
+        OutputParamsScope
+    > {
+        return new ContainerBuilder(
+            this.contextualScope,
+            this.inputsScope,
+            this.bodyScope,
+            extendScope(this.volumeScope, () => volumes as R),
+            this.envScope,
+            this.outputsScope,
+            this.retryParameters);
     }
 
     addEnvVar<Name extends string>(
@@ -182,6 +243,7 @@ export class ContainerBuilder<
         ContextualScope,
         InputParamsScope,
         ContainerScope,
+        VolumeScope,
         ExtendScope<EnvScope, { [K in Name]: AllowLiteralOrExpression<string> }>,
         OutputParamsScope
     > {
@@ -196,6 +258,7 @@ export class ContainerBuilder<
         ContextualScope,
         InputParamsScope,
         ContainerScope,
+        VolumeScope,
         ExtendScope<EnvScope, R>,
         OutputParamsScope
     > {
@@ -203,6 +266,7 @@ export class ContainerBuilder<
             this.contextualScope,
             this.inputsScope,
             this.bodyScope,
+            this.volumeScope,
             extendScope(this.envScope, () => envVars as R),
             this.outputsScope,
             this.retryParameters);
@@ -210,15 +274,16 @@ export class ContainerBuilder<
 
     addEnvVars<NewEnvScope extends DataScope>(
         builderFn: (
-            cb: ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, {}, OutputParamsScope>
-        ) => ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, NewEnvScope, OutputParamsScope>
+            cb: ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, {}, {}, OutputParamsScope>
+        ) => ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, {}, NewEnvScope, OutputParamsScope>
     ): ScopeIsEmptyConstraint<EnvScope,
-        ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, NewEnvScope, OutputParamsScope>
+        ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, {}, NewEnvScope, OutputParamsScope>
     > {
         const emptyEnvBuilder = new ContainerBuilder(
             this.contextualScope,
             this.inputsScope,
             this.bodyScope,
+            this.volumeScope,
             {},
             this.outputsScope,
             this.retryParameters
@@ -236,6 +301,7 @@ export class ContainerBuilder<
         ContextualScope,
         InputParamsScope,
         ContainerScope,
+        VolumeScope,
         ExtendScope<EnvScope, { [K in Name]: AllowLiteralOrExpression<string> }>,
         OutputParamsScope
     > {
@@ -249,6 +315,7 @@ export class ContainerBuilder<
             this.contextualScope,
             this.inputsScope,
             {...this.bodyScope, env: {...currentEnv, [name as string]: value}},
+            this.volumeScope,
             newEnvScope,
             this.outputsScope,
             this.retryParameters
@@ -273,6 +340,7 @@ export class ContainerBuilder<
             ContextualScope,
             InputParamsScope,
             ContainerScope,
+            VolumeScope,
             ModifiedInputs,
             OutputParamsScope
         >> {
@@ -285,6 +353,7 @@ export class ContainerBuilder<
                 ...this.bodyScope,
                 env: envVars
             },
+            this.volumeScope,
             envVars,
             this.outputsScope,
             this.retryParameters

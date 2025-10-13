@@ -212,17 +212,17 @@ export class TemplateBuilder<
     }
 
     addContainer<
-        FirstBuilder extends ContainerBuilder<ContextualScope, InputParamsScope, any, any, any>,
-        FinalBuilder extends ContainerBuilder<ContextualScope, InputParamsScope, any, any, any>
+        FirstBuilder extends ContainerBuilder<ContextualScope, InputParamsScope, any, any, any, any>,
+        FinalBuilder extends ContainerBuilder<ContextualScope, InputParamsScope, any, any, any, any>
     >(
         builderFn: ScopeIsEmptyConstraint<BodyScope,
-            (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, OutputParamsScope>) => FinalBuilder>,
+            (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}, OutputParamsScope>) => FinalBuilder>,
         factory?: (context: ContextualScope, inputs: InputParamsScope) => FirstBuilder
     ): FinalBuilder
     {
-        const fn = builderFn as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}>) => FinalBuilder;
+        const fn = builderFn as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}, {}>) => FinalBuilder;
         return fn((factory ??
-            ((c, i) => new ContainerBuilder(c, i, {}, {}, {}, {})))
+            ((c, i) => new ContainerBuilder(c, i, {}, {}, {}, {}, {})))
         (this.contextualScope, this.inputScope));
     }
 

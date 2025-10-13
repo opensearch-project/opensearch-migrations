@@ -22,6 +22,9 @@ import {
 } from "./expression";
 import {NonSerializedPlainObject, PlainObject} from "./plainObject";
 
+export type LowercaseOnly<S extends string> =
+    S extends Lowercase<S> ? S : never;
+
 // Specific scope types for different purposes
 export type WorkflowAndTemplatesScope<
     TemplateSignatures extends TemplateSignaturesScopeTyped<Record<string, { inputs: any; outputs?: any }>> =
