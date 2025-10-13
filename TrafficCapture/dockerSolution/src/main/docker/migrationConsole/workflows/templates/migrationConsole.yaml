@@ -43,7 +43,7 @@ spec:
           - name: migration-console-image
           - name: migration-console-pull-policy
           - name: kafka-client-secret-bundle
-            value: ""
+            value: "dummy-secret"
           - name: use-localstack-aws-creds
             value: "false"
       container:
@@ -99,7 +99,7 @@ spec:
           - name: migration-console-image
           - name: migration-console-pull-policy
           - name: kafka-client-secret-bundle
-            value: ""
+            value: "dummy-secret"
       outputs:
         parameters:
           - name: deployment-name
@@ -157,7 +157,7 @@ spec:
                 volumes:
                 - name: kafka-config
                   secret:
-                    secretName: {{inputs.parameters.kafka-client-secret-bundle}}
+                    secretName: "{{inputs.parameters.kafka-client-secret-bundle}}"
                     optional: true
 
     - name: run-console
@@ -175,7 +175,7 @@ spec:
           - name: kafka-info
             value: ""
           - name: kafka-client-secret-bundle
-            value: ""
+            value: "dummy-secret"
       steps:
         - - name: get-console-config
             template: get-console-config
@@ -221,7 +221,7 @@ spec:
           - name: target-cluster
             value: ""
           - name: kafka-client-secret-bundle
-            value: ""
+            value: "dummy-secret"
       outputs:
         parameters:
           - name: deployment-name
