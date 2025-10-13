@@ -101,7 +101,7 @@ export class StreamSchemaTransformer<
      * Transform validated input to output format
      * Override this method in subclasses for custom transformations
      */
-    transform(input: z.infer<TInput>): z.infer<TOutput> {
+    async transform(input: z.infer<TInput>): Promise<z.infer<TOutput>> {
         throw new Error('transform() must be implemented by subclass');
     }
 
@@ -123,7 +123,7 @@ export class StreamSchemaTransformer<
         const validatedInput = this.validateInput(rawData);
 
         // 3. Transform
-        const transformed = this.transform(validatedInput);
+        const transformed = await this.transform(validatedInput);
 
         // 4. Validate output
         const validatedOutput = this.validateOutput(transformed);

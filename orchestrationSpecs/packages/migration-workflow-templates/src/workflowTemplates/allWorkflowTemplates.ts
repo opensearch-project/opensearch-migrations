@@ -4,7 +4,6 @@ import {CreateOrGetSnapshot} from "./createOrGetSnapshot";
 import {CreateSnapshot} from "./createSnapshot";
 import {DocumentBulkLoad} from "./documentBulkLoad";
 import {FullMigration} from "./fullMigration";
-import {LocalstackHelper} from "./localstackHelper";
 import {MetadataMigration} from "./metadataMigration";
 import {MigrationConsole} from "./migrationConsole";
 import {Replayer} from "./replayer";
@@ -18,7 +17,6 @@ export const AllWorkflowTemplates = [
     CreateSnapshot,
     DocumentBulkLoad,
     FullMigration,
-    LocalstackHelper,
     MetadataMigration,
     MigrationConsole,
     Replayer,

@@ -1,13 +1,51 @@
 import {
-    DYNAMIC_SNAPSHOT_CONFIG,
     OVERALL_MIGRATION_CONFIG,
-    PARAMETERIZED_MIGRATION_CONFIG_ARRAYS, SNAPSHOT_MIGRATION_CONFIG
+    PARAMETERIZED_MIGRATION_CONFIG_ARRAYS,
+    S3_REPO_CONFIG,
+    SNAPSHOT_MIGRATION_CONFIG
 } from '@opensearch-migrations/schemas';
 import {deepStrict, StreamSchemaTransformer} from './StreamSchemaTransformer';
 import { z } from 'zod';
+import {promises as dns} from "dns";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG_ARRAYS>;
+
+async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string> {
+    // Determine protocol based on localstack vs localstacks
+    const isSecure = /^localstacks:\/\//i.test(s3Endpoint);
+    const protocol = isSecure ? 'https://' : 'http://';
+
+    // Extract hostname and port
+    const withoutPrefix = s3Endpoint.replace(/^localstacks?:\/\//i, '');
+    const portMatch = withoutPrefix.match(/:\d+/);
+    const port = portMatch ? portMatch[0] : '';
+
+    const localStackHostName = withoutPrefix
+        .replace(/\/.*$/, '')  // Remove path
+        .replace(/:\d+$/, '');  // Remove port
+
+    try {
+        const result = await dns.lookup(localStackHostName);
+        let s3Ip = result.address;
+
+        if (result.family === 6) {
+            s3Ip = `[${s3Ip}]`;
+        }
+
+        return `${protocol}${s3Ip}${port}`;
+    } catch (error) {
+        console.log(`Failed to resolve ${localStackHostName}, using original endpoint`);
+        return s3Endpoint;
+    }
+}
+
+async function rewriteEndpointIfLocalStack(snapshotRepo: z.infer<typeof S3_REPO_CONFIG>): Promise<z.infer<typeof S3_REPO_CONFIG>> {
+    if (/^localstacks?:\/\//i.test(snapshotRepo.endpoint)) {
+        snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint);
+    }
+    return snapshotRepo;
+}
 
 export class MigrationConfigTransformer extends StreamSchemaTransformer<
     typeof OVERALL_MIGRATION_CONFIG,
@@ -25,11 +63,12 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     /**
      * Custom transformation logic
      */
-    transform(input: InputConfig): OutputConfig {
+    async transform(input: InputConfig): Promise<OutputConfig> {
         const seen = new Set<string>();
         const duplicates = new Set<string>();
 
-        const output = input.migrationConfigs.map(mc => {
+        // Use Promise.all to handle all async operations
+        const output = await Promise.all(input.migrationConfigs.map(async mc => {
             let {fromSource, toTarget, snapshotExtractAndLoadConfigs, replayerConfig} = mc;
 
             const keyPair = `${fromSource} => ${toTarget}`;
@@ -40,12 +79,12 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
             const sourceCluster = input.sourceClusters[fromSource];
             if (sourceCluster.proxy === undefined) {
-                console.warn(`Replayer is configured for ${fromSource} but a proxy is not.  " + 
+                console.warn(`Replayer is configured for ${fromSource} but a proxy is not. " + 
                        "A replayer won't be configured for the target (${toTarget})`);
                 replayerConfig = undefined;
             }
-            const newSnapshotConfig =
-                snapshotExtractAndLoadConfigs?.map(sc=> {
+            const newSnapshotConfig = snapshotExtractAndLoadConfigs === undefined ? undefined :
+                await Promise.all(snapshotExtractAndLoadConfigs.map(async sc => {
                     const {snapshotConfig, indices, migrations} = sc;
                     if (snapshotConfig !== undefined && sourceCluster.snapshotRepo === undefined) {
                         throw Error(`Configured a snapshot repo with ${snapshotConfig}, for ${fromSource}. but the source cluster definition does not define a repo.`);
@@ -55,10 +94,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                         migrations,
                         snapshotConfig: {
                             snapshotName: snapshotConfig.snapshotName,
-                            repoConfig: (sourceCluster.snapshotRepo === undefined ? {} : sourceCluster.snapshotRepo)
+                            repoConfig: (sourceCluster.snapshotRepo === undefined ? {} :
+                                await rewriteEndpointIfLocalStack(sourceCluster.snapshotRepo))
                         }
                     } as z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>;
-                }
+                })
             )
             return {
                 sourceConfig: {...sourceCluster, name: fromSource},
@@ -66,7 +106,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 ...(newSnapshotConfig === undefined ? {} : { snapshotExtractAndLoadConfigArray: newSnapshotConfig }),
                 ...(replayerConfig === undefined ? {} : { replayerConfig})
             };
-        }) as OutputConfig;
+        })) as OutputConfig;
         if (duplicates.size > 0) {
             throw new Error("Found duplicate source-target bindings.  This is most likely an error.  " +
                 "Define separate sources with an equivalent structure if you think you need this.\n" +

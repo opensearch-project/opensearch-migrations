@@ -57,18 +57,19 @@ base64 -d > /config/migration_services.yaml_ << EOF
 {{FILE_CONTENTS}}
 EOF
 
-cat /config/migration_services.yaml_ | jq 'def normalizeAuthConfig:
+cat /config/migration_services.yaml_ | 
+jq 'def normalizeAuthConfig:
   if has("authConfig") then
-    if (.authConfig | has("username") and has("password")) then
-      .basic_auth = .authConfig
-    elif (.authConfig | has("region")) then
-      .sigv4_auth = .authConfig
-    elif (.authConfig | has("caCert") and has("clientSecretName")) then
-      .mtls_auth = .authConfig
+    if (.authConfig | has("basic")) then
+      .basic_auth = .authConfig.basic
+    elif (.authConfig | has("sigv4")) then
+      .sigv4_auth = .authConfig.sigv4
+    elif (.authConfig | has("mtls")) then
+      .mtls_auth = .authConfig.mtls
     else
       .
     end
-    | del(.authConfig)
+    | del(.authConfig, .name, .proxy, .snapshotRepo)
   else
     .
   end;

@@ -11,8 +11,8 @@
       },
       "snapshotRepo": {
         "aws_region": "us-east-2",
-        "endpoint": "http://ma-localstack:4566",
-        "s3RepoPathUri": "s3://snapshotbucket/snapshot"
+        "endpoint": "http://10.109.241.116:4566",
+        "s3RepoPathUri": "s3://snapshot"
       },
       "proxy": { }
     }
@@ -37,9 +37,7 @@
       "snapshotExtractAndLoadConfigs": [
         {
           "indices": [ "index_3", "index_4" ],
-          "snapshotConfig": {
-            "snapshotName": "indices_3_and_4"
-          },
+          "snapshotConfig": {},
           "migrations": [
             {
               "metadataMigrationConfig": {

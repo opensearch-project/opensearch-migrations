@@ -239,7 +239,7 @@ type OptionalKeysGuard<
 
 export function selectInputsFieldsAsExpressionRecord<
     T extends Record<PropertyKey, PlainObject>,
-    D extends Partial<T>,
+    D extends Record<string, any>,
     CB extends {
         defaults: D;
         defaultKeys?: readonly (Extract<keyof D, string>)[];
@@ -250,7 +250,7 @@ export function selectInputsFieldsAsExpressionRecord<
 >(
     P: BaseExpression<T>,
     c: CB,
-    expressionsKeys: KeyListMatches<T, K> & OptionalKeysGuard<T, D, CB>
+    expressionsKeys: KeyListMatches<T, K>
 ): SelectedExprRecord<T, CB> {
     const out: any = {};
     for (const k of expressionsKeys) {
