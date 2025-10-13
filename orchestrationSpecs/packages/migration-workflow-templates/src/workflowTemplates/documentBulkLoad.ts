@@ -189,7 +189,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
 
     .addTemplate("createReplicasetFromConfig", t => t
         .addRequiredInput("sessionName", typeToken<string>())
-        .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
 
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
@@ -208,7 +207,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     s3Endpoint: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "endpoint"], ""),
                     s3Region: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "aws_region"], ""),
                     snapshotName: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["snapshotName"], ""),
-                    snapshotRepoPath: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig", "s3RepoPathUri")
+                    snapshotRepoPath: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig", "s3RepoPathUri"),
+                    useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false)
                 })))
     )
 
@@ -217,7 +217,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("sessionName", typeToken<string>())
-        .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addOptionalInput("indices", c => [] as readonly string[])
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))

@@ -103,7 +103,6 @@ export const FullMigration = WorkflowBuilder.create({
             expr.empty<z.infer<typeof RFS_OPTIONS>>())
 
         .addInputsFromRecord(latchCoordinationPrefixParam)
-        .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b => b
@@ -150,7 +149,6 @@ export const FullMigration = WorkflowBuilder.create({
             )
         )
         .addRequiredInput("latchCoordinationPrefix", typeToken<string>())
-        .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b => b
@@ -192,7 +190,6 @@ export const FullMigration = WorkflowBuilder.create({
             c => expr.empty<z.infer<typeof REPLAYER_OPTIONS>>())
 
         .addRequiredInput("latchCoordinationPrefix", typeToken<string>())
-        .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b=>b
@@ -217,7 +214,6 @@ export const FullMigration = WorkflowBuilder.create({
             "List of server configurations to direct migrated traffic toward") // expand
 
         .addRequiredInput("latchCoordinationPrefix", typeToken<string>())
-        .addOptionalInput("useLocalStack", c => false)
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
 
         .addSteps(b => b

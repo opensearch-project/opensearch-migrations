@@ -11,7 +11,7 @@
       },
       "snapshotRepo": {
         "aws_region": "us-east-2",
-        "endpoint": "http://10.109.241.116:4566",
+        "endpoint": "localstack://10.109.241.116:4566",
         "s3RepoPathUri": "s3://snapshot"
       },
       "proxy": { }

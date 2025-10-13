@@ -26,7 +26,6 @@ const COMMON_METADATA_PARAMETERS = {
             "Snapshot storage details (region, endpoint, etc)"}),
     sourceConfig: defineRequiredParam<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>(),
     targetConfig: defineRequiredParam<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
-    useLocalStack: defineRequiredParam<boolean>({description: "Only used for local testing" }),
     ...makeRequiredImageParametersForKeys(["MigrationConsole"])
 };
 
@@ -115,7 +114,6 @@ export const MetadataMigration = WorkflowBuilder.create({
 
         .addContainer(b=>b
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
-            // .addCommand(["tail", "-f", "/dev/null"])
             .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
             .addVolumesFromRecord({
                 'test-creds':  {
@@ -128,7 +126,10 @@ export const MetadataMigration = WorkflowBuilder.create({
                 }
             })
             .addEnvVar("AWS_SHARED_CREDENTIALS_FILE",
-                expr.ternary(b.inputs.useLocalStack, expr.literal("/config/credentials/configuration"), expr.literal(""))
+                expr.ternary(
+                    expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
+                    expr.literal("/config/credentials/configuration"),
+                    expr.literal(""))
             )
             .addArgs([
                 b.inputs.commandMode,

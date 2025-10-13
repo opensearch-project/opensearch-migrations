@@ -38,9 +38,9 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                     snapshotConfig: expr.serialize(
                         expr.makeDict({
                             repoConfig: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig"),
-                            snapshotName: expr.toLowerCase(b.inputs.autocreateSnapshotName)
+                            snapshotName: expr.toLowerCase(b.inputs.autocreateSnapshotName),
                         })
-                    )
+                    ),
                 }), {when: expr.equals(b.inputs.alreadyDefinedName, expr.literal("")) }
             )
         )

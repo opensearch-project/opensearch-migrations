@@ -1,4 +1,5 @@
 import {
+    DENORMALIZED_S3_REPO_CONFIG,
     OVERALL_MIGRATION_CONFIG,
     PARAMETERIZED_MIGRATION_CONFIG_ARRAYS,
     S3_REPO_CONFIG,
@@ -25,26 +26,24 @@ async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string
         .replace(/\/.*$/, '')  // Remove path
         .replace(/:\d+$/, '');  // Remove port
 
-    try {
-        const result = await dns.lookup(localStackHostName);
-        let s3Ip = result.address;
+    const result = await dns.lookup(localStackHostName);
+    let s3Ip = result.address;
 
-        if (result.family === 6) {
-            s3Ip = `[${s3Ip}]`;
-        }
-
-        return `${protocol}${s3Ip}${port}`;
-    } catch (error) {
-        console.log(`Failed to resolve ${localStackHostName}, using original endpoint`);
-        return s3Endpoint;
+    if (result.family === 6) {
+        s3Ip = `[${s3Ip}]`;
     }
+
+    return `${protocol}${s3Ip}${port}`;
 }
 
-async function rewriteEndpointIfLocalStack(snapshotRepo: z.infer<typeof S3_REPO_CONFIG>): Promise<z.infer<typeof S3_REPO_CONFIG>> {
-    if (/^localstacks?:\/\//i.test(snapshotRepo.endpoint)) {
+async function rewriteEndpointIfLocalStack(snapshotRepo: z.infer<typeof S3_REPO_CONFIG>):
+    Promise<z.infer<typeof DENORMALIZED_S3_REPO_CONFIG>>
+{
+    const useLocalStack = /^localstacks?:\/\//i.test(snapshotRepo.endpoint);
+    if (useLocalStack) {
         snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint);
     }
-    return snapshotRepo;
+    return {...snapshotRepo, useLocalStack };
 }
 
 export class MigrationConfigTransformer extends StreamSchemaTransformer<
