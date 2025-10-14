@@ -61,7 +61,7 @@ def call(Map config = [:]) {
 
                         echo "📋 Source versions: ${sourceVersions}"
                         echo "📋 Target versions: ${targetVersions}"
-                        echo "📋 Total created pipelines: ${sourceVersions.size() * targetVersions.size()}"
+                        echo "📋 Total created pipelines: ${targetVersions.size()}"
 
                         // Create parallel jobs map
                         def jobs = [:]
