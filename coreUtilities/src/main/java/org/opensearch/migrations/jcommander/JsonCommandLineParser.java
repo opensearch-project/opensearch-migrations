@@ -50,7 +50,7 @@ public class JsonCommandLineParser {
     private final List<Object> mainObjects = new ArrayList<>();
     private final Map<String, Object> commandObjects = new LinkedHashMap<>();
 
-    private JsonCommandLineParser(Builder builder) throws Exception {
+    private JsonCommandLineParser(Builder builder) throws InvocationTargetException, NoSuchMethodException, InstantiationException, IllegalAccessException {
         // Validate that no Parameters use reserved flags
         validateNoReservedFlags(builder.mainObjects);
         for (Object commandObj : builder.commandObjects.values()) {
@@ -161,7 +161,7 @@ public class JsonCommandLineParser {
         return new String(Files.readAllBytes(Paths.get(jsonArg)));
     }
 
-    private OuterParsedArgs detectMode(String[] args) throws Exception {
+    private OuterParsedArgs detectMode(String[] args) throws IOException {
         if (args.length == 0) {
             return new OuterParsedArgs();
         }
@@ -177,7 +177,6 @@ public class JsonCommandLineParser {
                 break;
             } else if (JSON_FILE_FLAG.equals(args[i])) {
                 jsonFlagIndex = i;
-                isInline = false;
                 break;
             }
         }
@@ -236,7 +235,7 @@ public class JsonCommandLineParser {
         return new OuterParsedArgs(jsonContent, commandName);
     }
 
-    private void parseJson(OuterParsedArgs parsedArgs) throws Exception {
+    private void parseJson(OuterParsedArgs parsedArgs) throws JsonProcessingException, InvocationTargetException, IllegalAccessException, NoSuchMethodException, InstantiationException, NoSuchFieldException {
         JsonNode rootNode = objectMapper.readTree(parsedArgs.jsonContent);
 
         // Build combined parameter map from ALL objects that will be populated
@@ -281,13 +280,13 @@ public class JsonCommandLineParser {
         }
     }
 
-    private static void validateNoReservedFlags(List<Object> objects) throws Exception {
+    private static void validateNoReservedFlags(List<Object> objects) throws NoSuchMethodException, InvocationTargetException, InstantiationException, IllegalAccessException {
         for (Object obj : objects) {
             validateNoReservedFlagsRecursive(obj, obj.getClass());
         }
     }
 
-    private static void validateNoReservedFlagsRecursive(Object obj, Class<?> clazz) throws Exception {
+    private static void validateNoReservedFlagsRecursive(Object obj, Class<?> clazz) throws NoSuchMethodException, InvocationTargetException, InstantiationException, IllegalAccessException {
         for (Field field : clazz.getDeclaredFields()) {
             Parameter param = field.getAnnotation(Parameter.class);
             if (param != null) {
@@ -316,7 +315,9 @@ public class JsonCommandLineParser {
         }
     }
 
-    private static void populateFromJson(Object obj, JsonNode jsonNode) throws Exception {
+    private static void populateFromJson(Object obj, JsonNode jsonNode)
+        throws InvocationTargetException, IllegalAccessException, NoSuchMethodException, InstantiationException, JsonProcessingException
+    {
         Map<String, FieldInfo> parameterMap = buildParameterMap(obj, obj.getClass());
 
         var fieldNames = jsonNode.fieldNames();
