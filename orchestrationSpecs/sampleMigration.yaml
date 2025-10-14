@@ -1,0 +1,60 @@
+{
+  sourceClusters: {
+    "source1": {
+      "endpoint": "https://elasticsearch-master-headless:9200",
+      "allowInsecure": true,
+      "authConfig": {
+        "basic": {
+          "username": "admin",
+          "password": "admin"
+        }
+      },
+      "snapshotRepo": {
+        "aws_region": "us-east-2",
+        "endpoint": "localstack://10.109.241.116:4566",
+        "s3RepoPathUri": "s3://snapshot"
+      },
+      "proxy": { }
+    }
+  },
+  targetClusters: {
+    "target1": {
+      "endpoint": "https://opensearch-cluster-master-headless:9200",
+      "allowInsecure": true,
+      "authConfig": {
+        "basic": {
+          "username": "admin",
+          "password": "admin"
+        }
+      }
+    }
+  },
+  migrationConfigs: [
+    {
+      "fromSource": "source1",
+      "toTarget": "target1",
+
+      "snapshotExtractAndLoadConfigs": [
+        {
+          "indices": [ "index_3", "index_4" ],
+          "snapshotConfig": {},
+          "migrations": [
+            {
+              "metadataMigrationConfig": {
+              },
+              "documentBackfillConfig": {
+                "documentsPerBulkRequest": 1000,
+                "# I think that max connections is the effective concurrency count": "",
+                "// this is ignored too": "",
+                "maxConnections": 4
+              }
+            }
+          ]
+        }
+      ],
+      "replayerConfig": {
+        "podReplicas": 0
+      }
+    }
+  ]
+}

@@ -8,6 +8,7 @@ import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.cli.OutputFormat;
 import org.opensearch.migrations.commands.*;
+import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -39,32 +40,30 @@ public class MetadataMigration {
         var metadataArgs = new MetadataArgs();
         var migrateArgs = new MigrateArgs();
         var evaluateArgs = new EvaluateArgs();
-        var jCommander = JCommander.newBuilder()
+        var argsParser = JsonCommandLineParser.newBuilder()
             .addObject(metadataArgs)
             .addCommand(migrateArgs)
             .addCommand(evaluateArgs)
             .build();
-        jCommander.parse(args);
-        EnvArgs.injectFromEnv(migrateArgs);
-        EnvArgs.injectFromEnv(evaluateArgs);
-        
+        argsParser.parse(args);
+
         if (migrateArgs.outputFormat == OutputFormat.JSON || evaluateArgs.outputFormat == OutputFormat.JSON) {
             outputFormat.set(OutputFormat.JSON);
         } else {
             outputFormat.set(OutputFormat.HUMAN_READABLE);
         }
 
-        if (metadataArgs.help || jCommander.getParsedCommand() == null) {
-            printTopLevelHelp(jCommander);
+        if (metadataArgs.help || argsParser.getParsedCommand() == null) {
+            printTopLevelHelp(argsParser.getJCommander());
             return;
         }
 
         if (migrateArgs.help || evaluateArgs.help) {
-            printCommandUsage(jCommander);
+            printCommandUsage(argsParser.getJCommander());
             return;
         }
 
-        var result = runCommand(jCommander, metadataArgs, migrateArgs, evaluateArgs);
+        var result = runCommand(argsParser.getJCommander(), metadataArgs, migrateArgs, evaluateArgs);
 
         // Output format determines which version is printed to the user
         writeOutput(result.asCliOutput());
