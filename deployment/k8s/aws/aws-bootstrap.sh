@@ -139,55 +139,48 @@ deploy_dashboard() {
   local stage="${STAGE}"
   local region="${AWS_CFN_REGION}"
   local account="${AWS_ACCOUNT}"
+  local qualifier="${QUALIFIER}"
 
   echo "Deploying dashboard: ${dashboard_name}"
-  if [[ ! -f "$dashboard_file" ]]; then
-    echo "ERROR: dashboard file not found: $dashboard_file"
-    exit 1
-  fi
+  [[ -f "$dashboard_file" ]] || { echo "ERROR: dashboard file not found: $dashboard_file"; exit 1; }
 
-  # token substitution with unique variable handling
+  # JSON aware token replacement
   local processed_json
-  processed_json="$(cat "$dashboard_file" \
-    | sed "s/placeholder-region/${region}/g" \
-    | sed "s/placeholder-stage/${stage}/g" \
-    | sed "s/placeholder-qualifier/${stage}/g" \
-    | sed "s/MA_STAGE/${stage}/g" \
-    | sed "s/MA_QUALIFIER/${stage}/g" \
-    | sed "s/REGION/${region}/g" \
-    | sed "s/ACCOUNT_ID/${account}/g")"
-  
-  # Remove duplicate variables with same ID/pattern
-  processed_json="$(echo "$processed_json" | jq '
-    .variables |= (
-      group_by(.id) | 
-      map(.[0])
-    ) |
-    .variables |= (
-      group_by(.pattern // "") |
-      map(.[0])
+  processed_json="$(jq \
+    --arg region "$region" \
+    --arg stage "$stage" \
+    --arg qualifier "$qualifier" \
+    --arg account "$account" \
+    '
+    def repl(s; v):
+      if type=="string" then gsub(s; v) else . end;
+    walk(
+        repl("REGION"; $region)
+      | repl("MA_STAGE"; $stage)
+      | repl("MA_QUALIFIER"; $qualifier)
+      | repl("ACCOUNT_ID"; $account)
     )
-  ')"
+    ' < "$dashboard_file")" || { echo "ERROR: failed to process JSON"; exit 1; }
 
-  # validate + minify
-  if ! echo "$processed_json" | jq -e . >/dev/null; then
+  # Validate JSON
+  echo "$processed_json" | jq -e . >/dev/null || {
     echo "ERROR: Invalid JSON after substitution for ${dashboard_name} (${dashboard_file})"
     exit 1
-  fi
+  }
+
+  # Minify and push
   local tmp_json
   tmp_json="$(mktemp)"
   echo "$processed_json" | jq -c . > "$tmp_json"
 
-  # deterministic dashboard name
+  # Deterministic dashboard name
   local full_name="MA-${stage}-${region}-${dashboard_name}"
-
-  # put-dashboard with file:// to avoid shell escaping problems
   aws cloudwatch put-dashboard \
     --region "$region" \
     --dashboard-name "$full_name" \
     --dashboard-body "file://${tmp_json}" >/dev/null
 
-  # read-back sanity (optional)
+  # Validate dashboards on CW
   if aws cloudwatch get-dashboard --region "$region" --dashboard-name "$full_name" >/dev/null 2>&1; then
     echo "OK: Dashboard available: ${full_name}"
   else
@@ -348,8 +341,8 @@ helm install "$namespace" "${ma_chart_dir}" \
 kubectl -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s
 
 echo "Deploying CloudWatch dashboards..."
-deploy_dashboard "CaptureReplay" "${base_dir}/deployment/cdk/opensearch-service-migration/lib/components/capture-replay-dashboard.json"
-deploy_dashboard "ReindexFromSnapshot" "${base_dir}/deployment/cdk/opensearch-service-migration/lib/components/reindex-from-snapshot-dashboard.json"
+deploy_dashboard "CaptureReplay" "${base_dir}/deployment/k8s/dashboards/capture-replay-dashboard.json"
+deploy_dashboard "ReindexFromSnapshot" "${base_dir}/deployment/k8s/dashboards/reindex-from-snapshot-dashboard.json"
 echo "All dashboards deployed to CloudWatch"
 
 cmd="kubectl -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
