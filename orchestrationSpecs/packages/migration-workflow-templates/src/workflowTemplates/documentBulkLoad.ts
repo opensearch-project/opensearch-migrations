@@ -20,13 +20,16 @@ import {
     expr,
     IMAGE_PULL_POLICY,
     inputsToEnvVarsList,
-    INTERNAL,
+    INTERNAL, makeDirectTypeProxy, makeStringTypeProxy,
     MISSING_FIELD,
     selectInputsFieldsAsExpressionRecord,
     selectInputsForRegister,
     transformZodObjectToParams,
     typeToken,
     WorkflowBuilder
+} from "@opensearch-migrations/argo-workflow-builders";
+import {
+    ReplicaSet
 } from "@opensearch-migrations/argo-workflow-builders";
 
 
@@ -42,32 +45,37 @@ function getRfsReplicasetManifest
 
     rfsImageName: BaseExpression<string>,
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
-    inputsAsEnvList: Record<string, any>[],
-}) {
+    inputsAsEnvList: {name: string, value: any}[],
+}): ReplicaSet {
     const baseContainerDefinition = {
         name: "bulk-loader",
-        image: args.rfsImageName,
-        imagePullPolicy: args.rfsImagePullPolicy,
+        image: makeStringTypeProxy(args.rfsImageName),
+        imagePullPolicy: makeStringTypeProxy(args.rfsImagePullPolicy),
         env: [
             ...args.inputsAsEnvList,
             {name: "LUCENE_DIR", value: expr.literal("/tmp")}
         ]
     };
-    const finalContainerDefinition =
-        setupTestCredsForContainer(args.useLocalstackAwsCreds,
-            setupLog4jConfigForContainer(args.useCustomLogging, args.loggingConfigMap,
-                { container: baseContainerDefinition, volumes: []}));
+
+    const finalContainerDefinition= setupTestCredsForContainer(
+        args.useLocalstackAwsCreds,
+        setupLog4jConfigForContainer(
+            args.useCustomLogging,
+            args.loggingConfigMap,
+            { container: baseContainerDefinition, volumes: []}
+        )
+    );
     return {
         apiVersion: "apps/v1",
         kind: "ReplicaSet",
         metadata: {
-            name: expr.concat(args.sessionName, expr.literal("-reindex-from-snapshot")),
+            name: makeStringTypeProxy(expr.concat(args.sessionName, expr.literal("-reindex-from-snapshot"))),
             labels: {
-                "workflows.argoproj.io/workflow": args.workflowName
+                "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName)
             },
         },
         spec: {
-            replicas: args.podReplicas,
+            replicas: makeDirectTypeProxy(args.podReplicas),
             selector: {
                 matchLabels: {
                     app: "bulk-loader",
@@ -77,16 +85,16 @@ function getRfsReplicasetManifest
                 metadata: {
                     labels: {
                         app: "bulk-loader",
-                        "workflows.argoproj.io/workflow": args.workflowName,
+                        "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                     },
                 },
                 spec: {
                     containers: [finalContainerDefinition.container],
-                    volumes: finalContainerDefinition.volumes
-                },
-            },
+                    volumes: [...finalContainerDefinition.volumes]
+                }
+            }
         }
-    }
+    } as ReplicaSet;
 }
 
 
@@ -169,12 +177,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 action: "create",
                 setOwnerReference: true,
                 manifest: getRfsReplicasetManifest({
-                    podReplicas: b.inputs.podReplicas,
+                    podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
-                    useCustomLogging:
-                        expr.equals(expr.literal(""),
-                            expr.nullCoalesce(b.inputs.loggingConfigurationOverrideConfigMap, expr.literal(""))),
-                    useLocalstackAwsCreds: b.inputs.useLocalStack,
+                    useCustomLogging: expr.not(expr.isEmpty(b.inputs.loggingConfigurationOverrideConfigMap)),
+                    useLocalstackAwsCreds: expr.deserializeRecord(b.inputs.useLocalStack),
                     sessionName: b.inputs.sessionName,
                     rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
                     rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
@@ -227,11 +233,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c)
                 }))
             .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    kafkaInfo: MISSING_FIELD,
-                    sourceConfig: MISSING_FIELD
-                }))
+                c.register(selectInputsForRegister(b, c)))
             .addStep("waitForCompletion", INTERNAL, "waitForCompletion", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),

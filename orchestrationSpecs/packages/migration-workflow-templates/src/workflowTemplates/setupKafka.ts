@@ -2,7 +2,7 @@ import {
     BaseExpression,
     expr,
     INTERNAL,
-    selectInputsForRegister,
+    selectInputsForRegister, Serialized,
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
@@ -147,8 +147,8 @@ function makeDeployKafkaNodePool(kafkaName: BaseExpression<string>) {
 function makeKafkaTopicManifest(args: {
     kafkaName: BaseExpression<string>,
     topicName: BaseExpression<string>,
-    topicPartitions: BaseExpression<number>,
-    topicReplicas: BaseExpression<number>
+    topicPartitions: BaseExpression<Serialized<number>>,
+    topicReplicas: BaseExpression<Serialized<number>>
 }) {
     return {
         apiVersion: "kafka.strimzi.io/v1beta2",
@@ -225,13 +225,13 @@ export const SetupKafka = WorkflowBuilder.create({
         .addDag(b => b
             .addTask("deployPool", INTERNAL, "deployKafkaNodePool", c =>
                     c.register({kafkaName: b.inputs.kafkaName}),
-                {when: b.inputs.useKraft})
+                {when: expr.cast(b.inputs.useKraft).to<boolean>()})
             .addTask("deployKafkaClusterKraft", INTERNAL, "deployKafkaClusterKraft", c =>
                     c.register(selectInputsForRegister(b, c)),
-                {when: b.inputs.useKraft})
+                {when: expr.cast(b.inputs.useKraft).to<boolean>()})
             .addTask("deployKafkaClusterZookeeper", INTERNAL, "deployKafkaClusterZookeeper", c =>
                     c.register(selectInputsForRegister(b, c)),
-                {when: expr.not(b.inputs.useKraft)})
+                {when: expr.not(expr.cast(b.inputs.useKraft).to<boolean>())})
         )
         .addExpressionOutput("kafkaName", c => c.inputs.kafkaName)
         .addExpressionOutput("bootstrapServers", c =>

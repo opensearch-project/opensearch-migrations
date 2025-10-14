@@ -62,6 +62,12 @@ export function widenComplexity<
     return v as BaseExpression<T, C>;
 }
 
+export class UnquotedTypeWrapper<T extends PlainObject> extends BaseExpression<T, "complicatedExpression"> {
+    constructor(public readonly value: BaseExpression<T>) {
+        super("strip_surrounding_quotes_in_serialized_output");
+    }
+}
+
 export class LiteralExpression<T extends PlainObject>
     extends BaseExpression<T, "govaluate"> {
     constructor(public readonly value: T) {
@@ -363,7 +369,7 @@ export type WORKFLOW_VALUES =
     | "duration"
     | "scheduledTime";
 
-export type WrapSerialize<T extends PlainObject> = T extends AggregateType ? Serialized<T> : T;
+export type WrapSerialize<T extends PlainObject> = T extends string ? T : Serialized<T>;
 export type UnwrapSerialize<T extends PlainObject> = T extends Serialized<infer U> ? U : T;
 type ConditionalWrap<T extends PlainObject, S extends ParameterSource> =
     S extends WorkflowParameterSource | InputParameterSource ? WrapSerialize<T> : T;
@@ -575,13 +581,6 @@ class ExprBuilder {
         return new InfixExpression("||", l, r);
     }
 
-    nullCoalesce<T extends PlainObject, CIn extends ExpressionType>(
-        v: BaseExpression<T | MissingField, any>,
-        d: AllowLiteralOrExpression<DeepWiden<T>, CIn>
-    ) {
-        return fn<DeepWiden<T>,CIn,"complicatedExpression">("nullCoalesce", v, toExpression(d));
-    }
-
     // String functions
     concat<ES extends readonly BaseExpression<string, any>[]>(...es: ES): BaseExpression<string, "govaluate"> {
         return new ConcatExpression(es);
@@ -776,7 +775,7 @@ class ExprBuilder {
         >("sprig.omit", args);
     }
 
-    deserializeRecord<R extends AggregateType, CIn extends ExpressionType>(data: BaseExpression<Serialized<R>,CIn>) {
+    deserializeRecord<R extends PlainObject, CIn extends ExpressionType>(data: BaseExpression<Serialized<R>,CIn>) {
         return fn<R,CIn,"complicatedExpression">("fromJSON", data);
     }
 
@@ -877,3 +876,14 @@ class ExprBuilder {
 export const expr = new ExprBuilder();
 
 export default expr;
+
+
+// This function and the next tie into the renderer
+export function makeDirectTypeProxy<T extends (boolean|number)>(value: BaseExpression<T>): T {
+    return new UnquotedTypeWrapper(value) as any as T;
+}
+
+// This function and the next tie into the renderer
+export function makeStringTypeProxy<T extends string>(value: BaseExpression<T>): T {
+    return value as any as T;
+}
