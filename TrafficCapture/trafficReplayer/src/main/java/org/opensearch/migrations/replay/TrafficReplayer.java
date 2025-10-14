@@ -14,7 +14,6 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
-import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
@@ -315,7 +314,7 @@ public class TrafficReplayer {
     }
 
     private static Parameters parseArgs(String[] args) {
-        Parameters p = EnvVarParameterPuller.injectFromEnv(new Parameters(), "TRAFFIC_REPLAYER_");
+        Parameters p = new Parameters();
         JCommander jCommander = new JCommander(p);
         try {
             jCommander.parse(args);

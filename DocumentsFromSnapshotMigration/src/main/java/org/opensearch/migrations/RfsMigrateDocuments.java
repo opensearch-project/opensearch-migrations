@@ -46,7 +46,6 @@ import org.opensearch.migrations.bulkload.worker.RegularDocumentReaderEngine;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
-import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -355,7 +354,7 @@ public class RfsMigrateDocuments {
         System.setProperty("log4j2.shutdownHookEnabled", "false");
         log.info("Starting RfsMigrateDocuments with workerId=" + workerId);
 
-        Args arguments = EnvVarParameterPuller.injectFromEnv(new Args(), "RFS_");
+        Args arguments = new Args();
         JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
 
