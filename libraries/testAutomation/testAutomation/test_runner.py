@@ -198,7 +198,7 @@ class TestRunner:
         self.k8s_service.copy_log_files(destination=destination)
 
     def run(self, skip_delete: bool = False, keep_workflows: bool = False, developer_mode: bool = False,
-            reuse_clusters: bool = False, test_reports_dir: str = None) -> None:
+            reuse_clusters: bool = False, test_reports_dir: str = None, copy_logs: bool = False) -> None:
         self.k8s_service.create_namespace(self.k8s_service.namespace)
         if developer_mode:
             workflow_templates_dir = (
@@ -212,7 +212,9 @@ class TestRunner:
 
         combos_with_failures = []
         test_reports = []
+        last_combination = self.combinations[-1]
         for source_version, target_version in self.combinations:
+            is_last = (source_version, target_version) == last_combination
             try:
                 logger.info(f"Performing helm deployment for migration testing environment "
                             f"from {source_version} to {target_version}")
@@ -243,6 +245,10 @@ class TestRunner:
                 logger.error(f"Helm command failed with error: {helmError}. Testing may be incomplete")
             except TimeoutError as timeoutError:
                 logger.error(f"Timeout error encountered: {timeoutError}. Testing may be incomplete")
+
+            # We need to copy logs once and before the migration console is uninstalled
+            if is_last and copy_logs:
+                self.copy_logs()
 
             if not skip_delete:
                 self.cleanup_deployment()
@@ -309,9 +315,9 @@ def parse_args() -> argparse.Namespace:
         help="If set, only perform cluster deletion operations."
     )
     parser.add_argument(
-        "--copy-logs-only",
+        "--copy-logs",
         action="store_true",
-        help="If set, only copy found argo workflow logs to the current directory."
+        help="If set, will copy found argo workflow logs to the current directory."
     )
     parser.add_argument(
         '--unique-id',
@@ -382,8 +388,6 @@ def main() -> None:
         return test_runner.cleanup_deployment()
     if args.delete_clusters_only:
         return test_runner.cleanup_clusters()
-    if args.copy_logs_only:
-        return test_runner.copy_logs()
     if args.output_reports_summary_only:
         if not args.test_reports_dir:
             raise ValueError("The '--test-reports-dir' arg must be provided when using '--output-reports-summary-only")
@@ -406,7 +410,8 @@ def main() -> None:
                     keep_workflows=keep_workflows,
                     developer_mode=developer_mode,
                     reuse_clusters=reuse_clusters,
-                    test_reports_dir=args.test_reports_dir)
+                    test_reports_dir=args.test_reports_dir,
+                    copy_logs=args.copy_logs)
 
 
 if __name__ == "__main__":

@@ -116,7 +116,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "kubectl config use-context minikube"
-                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --skip-delete --test-reports-dir='./reports'"
+                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs"
                             }
                         }
                     }
@@ -130,7 +130,6 @@ def call(Map config = [:]) {
                         script {
                             sh "pipenv install --deploy"
                             sh "kubectl config use-context minikube"
-                            sh "pipenv run app --copy-logs-only"
                             archiveArtifacts artifacts: 'logs/**, reports/**', fingerprint: true, onlyIfSuccessful: false
                             sh "rm -rf ./reports"
                             sh "pipenv run app --delete-only"
