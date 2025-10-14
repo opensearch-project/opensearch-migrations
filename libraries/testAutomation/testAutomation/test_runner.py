@@ -265,6 +265,7 @@ def _generate_unique_id() -> str:
     random_part = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
     return f"{random_part}-{timestamp}"
 
+
 def get_version_combinations(source_version, target_version):
     source_list = VALID_SOURCE_VERSIONS if source_version == "all" else [source_version]
     target_list = VALID_TARGET_VERSIONS if target_version == "all" else [target_version]
@@ -272,6 +273,7 @@ def get_version_combinations(source_version, target_version):
     # Cartesian product of source and target lists
     combos = [(s, t) for s in source_list for t in target_list]
     return combos
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -396,7 +398,8 @@ def main() -> None:
         developer_mode = True
         reuse_clusters = True
     if len(combinations) > 1 and (skip_delete or reuse_clusters):
-        logger.warning("Disabling the --skip-delete and --reuse-clusters options, as they cannot be used with more than one version combination")
+        logger.warning("Disabling the --skip-delete and --reuse-clusters options, as they cannot be used with more "
+                       "than one version combination")
         skip_delete = False
         reuse_clusters = False
     test_runner.run(skip_delete=skip_delete,
