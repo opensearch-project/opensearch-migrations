@@ -135,7 +135,7 @@ class TestRunner:
         self._print_summary_table(reports=reports)
 
     def run_tests(self, source_version: str, target_version: str, keep_workflows: bool = False,
-                  reuse_clusters: bool = False, test_reports_dir: str = None) -> bool:
+                  reuse_clusters: bool = False, test_reports_dir: str = None) -> TestReport:
         """Runs pytest tests."""
         logger.info(f"Executing migration test cases with pytest and test ID filters: {self.test_ids}")
         command_list = [
@@ -167,10 +167,7 @@ class TestRunner:
         test_report = self._parse_test_report(test_data)
         print(f"Test cases passed: {test_report.summary.passed}")
         print(f"Test cases failed: {test_report.summary.failed}")
-        self._print_summary_table(reports=[test_report])
-        if test_report.summary.passed == 0 or test_report.summary.failed > 0:
-            return False
-        return True
+        return test_report
 
     def cleanup_clusters(self) -> None:
         pattern = re.compile(r"^(source|target)-(opensearch|elasticsearch)")
@@ -211,8 +208,10 @@ class TestRunner:
             self.k8s_service.run_command([
                 "kubectl", "apply", "-f", workflow_templates_dir, "-n", "ma"
             ])
-            logger.info("Applied workflow templates directory")
+            logger.info("Applied local workflow templates directory")
 
+        combos_with_failures = []
+        test_reports = []
         for source_version, target_version in self.combinations:
             try:
                 logger.info(f"Performing helm deployment for migration testing environment "
@@ -225,15 +224,18 @@ class TestRunner:
 
                 self.k8s_service.wait_for_all_healthy_pods()
 
-                tests_passed = self.run_tests(source_version=source_version,
-                                              target_version=target_version,
-                                              keep_workflows=keep_workflows,
-                                              reuse_clusters=reuse_clusters,
-                                              test_reports_dir=test_reports_dir)
+                test_report = self.run_tests(source_version=source_version,
+                                             target_version=target_version,
+                                             keep_workflows=keep_workflows,
+                                             reuse_clusters=reuse_clusters,
+                                             test_reports_dir=test_reports_dir)
+                test_reports.append(test_report)
+                tests_failed = test_report.summary.passed == 0 or test_report.summary.failed > 0
 
-                if not tests_passed:
-                    raise TestsFailed(f"Tests failed (or no tests executed) for migrations "
-                                      f"from {source_version} to {target_version}.")
+                if tests_failed:
+                    logger.warning(f"Tests failed (or no tests executed) for migrations "
+                                   f"from {source_version} to {target_version}.")
+                    combos_with_failures.append(f"{source_version} -> {target_version}")
                 else:
                     logger.info(f"Tests passed successfully for migrations "
                                 f"from {source_version} to {target_version}.")
@@ -245,6 +247,10 @@ class TestRunner:
             if not skip_delete:
                 self.cleanup_deployment()
 
+        self._print_summary_table(reports=test_reports)
+        if combos_with_failures:
+            raise TestsFailed(f"The following combinations had test failures (or no test cases executed): "
+                              f"{combos_with_failures}")
         logger.info("Test execution completed.")
 
 
@@ -259,41 +265,31 @@ def _generate_unique_id() -> str:
     random_part = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
     return f"{random_part}-{timestamp}"
 
+def get_version_combinations(source_version, target_version):
+    source_list = VALID_SOURCE_VERSIONS if source_version == "all" else [source_version]
+    target_list = VALID_TARGET_VERSIONS if target_version == "all" else [target_version]
 
-def parse_version_string(version_str: str) -> (string, string, string):
-    """Parse a string in format ES|OS_x.y and return the distinct pieces as (cluster_type, major, minor)"""
-    try:
-        cluster_type_part, version_part = version_str.split('_', 1)
-        major_str, minor_str = version_part.split('.', 1)
-
-        cluster_type = cluster_type_part.lower()
-        major = int(major_str)
-
-        try:
-            minor = int(minor_str)
-        except ValueError:
-            minor = minor_str
-
-        return cluster_type, major, minor
-    except (ValueError, AttributeError):
-        raise ValueError(f"Invalid version string format: '{version_str}'")
-
+    # Cartesian product of source and target lists
+    combos = [(s, t) for s in source_list for t in target_list]
+    return combos
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Process inputs for test automation runner"
     )
+    source_versions = VALID_SOURCE_VERSIONS + ['all']
+    target_versions = VALID_TARGET_VERSIONS + ['all']
     parser.add_argument(
         "--source-version",
-        choices=VALID_SOURCE_VERSIONS,
+        choices=source_versions,
         default="ES_5.6",
-        help=f"Source version to use. Must be one of: {', '.join(VALID_SOURCE_VERSIONS)}"
+        help=f"Source version to use. Must be one of: {', '.join(source_versions)}"
     )
     parser.add_argument(
         "--target-version",
-        choices=VALID_TARGET_VERSIONS,
+        choices=target_versions,
         default="OS_2.19",
-        help=f"Target version to use. Must be one of: {', '.join(VALID_TARGET_VERSIONS)}"
+        help=f"Target version to use. Must be one of: {', '.join(target_versions)}"
     )
     parser.add_argument(
         "--skip-delete",
@@ -371,7 +367,9 @@ def main() -> None:
     helm_charts_base_path = f"{helm_k8s_base_path}/charts"
     ma_chart_path = f"{helm_charts_base_path}/aggregates/migrationAssistantWithArgo"
 
-    combinations = [(args.source_version, args.target_version)]
+    combinations = get_version_combinations(source_version=args.source_version, target_version=args.target_version)
+    logger.info("Detected the following version combinations to test:\n" +
+                "\n".join([f"- {src} → {tgt}" for src, tgt in combinations]))
     test_runner = TestRunner(k8s_service=k8s_service,
                              unique_id=args.unique_id,
                              test_ids=args.test_ids,
@@ -397,6 +395,10 @@ def main() -> None:
         keep_workflows = True
         developer_mode = True
         reuse_clusters = True
+    if len(combinations) > 1 and (skip_delete or reuse_clusters):
+        logger.warning("Disabling the --skip-delete and --reuse-clusters options, as they cannot be used with more than one version combination")
+        skip_delete = False
+        reuse_clusters = False
     test_runner.run(skip_delete=skip_delete,
                     keep_workflows=keep_workflows,
                     developer_mode=developer_mode,
