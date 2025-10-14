@@ -83,7 +83,7 @@ type controls to fail.
 ## Argo-Workflows Builder 
 
 For more information on how to use the builder library to construct 
-Argo Workflows, see the [Argo Builder Library README](./src/argoWorkflowBuilders/README.md)
+Argo Workflows, see the [Argo Builder Library README](./packages/argo-workflow-builders/README.md).
 
 ## Quick Loading Workflows into Argo
 
