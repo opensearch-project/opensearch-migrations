@@ -8,6 +8,7 @@ commons-compress = "1.26.2"
 disruptor = "4.0.0"
 dockerapi = "3.6.0"
 errorprone = "2.42.0"
+errorprone-slf4j = "0.1.22"
 graalvm = "25.0.0"
 groovy = "3.0.25"
 guava = "33.5.0-jre"
@@ -67,6 +68,7 @@ docker-java-core = { module = "com.github.docker-java:docker-java-core", version
 docker-java-transport-httpclient5 = { module = "com.github.docker-java:docker-java-transport-httpclient5", version.ref = "dockerapi" }
 
 errorprone = { module = "com.google.errorprone:error_prone_core", version.ref = "errorprone" }
+errorprone-slf4j = { module = "jp.skypencil.errorprone.slf4j:errorprone-slf4j", version.ref = "errorprone-slf4j" }
 
 groovy = { module = "org.codehaus.groovy:groovy-all", version.ref = "groovy" }
 

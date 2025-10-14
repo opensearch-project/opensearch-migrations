@@ -29,8 +29,8 @@ public class SanitizerCli implements Runnable {
             BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile))) {
             
             Stats stats = sanitizeDashboardsFromFile(scanner, writer);
-            log.info("Input file {} is sanitized and output available at %", sourceFile, outputFile);
-            log.info(stats.printStats());
+            log.atInfo().setMessage("Input file {} is sanitized and output available at {}").addArgument(sourceFile).addArgument(outputFile).log();
+            log.atInfo().setMessage("{}").addArgument(stats.printStats()).log();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -50,7 +50,7 @@ public class SanitizerCli implements Runnable {
             
             cli.run();
         } catch (ParameterException e) {
-            log.error(e.getMessage());
+            log.atError().setCause(e).setMessage("Parameter error").log();
             jCommander.usage();
             return;
         }
