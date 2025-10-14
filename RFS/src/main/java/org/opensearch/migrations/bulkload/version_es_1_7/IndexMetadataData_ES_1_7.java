@@ -31,6 +31,7 @@ public class IndexMetadataData_ES_1_7 implements IndexMetadata {
     }
 
     public IndexMetadataData_ES_1_7(ObjectNode rawJson, String indexName) {
+        validateRawJson(rawJson);
         this.rawJson = rawJson;
         this.indexName = indexName;
     }

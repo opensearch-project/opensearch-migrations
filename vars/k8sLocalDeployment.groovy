@@ -12,12 +12,12 @@ def call(Map config = [:]) {
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
             choice(
                     name: 'SOURCE_VERSION',
-                    choices: ['ES_5.6', 'ES_7.10'],
+                    choices: ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10'],
                     description: 'Pick a specific source version'
             )
             choice(
                     name: 'TARGET_VERSION',
-                    choices: ['OS_1.3', 'OS_2.19'],
+                    choices: ['OS_1.3', 'OS_2.19', 'OS_3.1'],
                     description: 'Pick a specific target version'
             )
             string(name: 'TEST_IDS', defaultValue: 'all', description: 'Test IDs to execute. Use comma separated list e.g. "0001,0004" or "all" for all tests')
@@ -112,6 +112,7 @@ def call(Map config = [:]) {
                                 }
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
+                                sh "kubectl config use-context minikube"
                                 sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --skip-delete --test-reports-dir='./reports'"
                             }
                         }
@@ -125,6 +126,7 @@ def call(Map config = [:]) {
                     dir('libraries/testAutomation') {
                         script {
                             sh "pipenv install --deploy"
+                            sh "kubectl config use-context minikube"
                             sh "pipenv run app --copy-logs-only"
                             archiveArtifacts artifacts: 'logs/**, reports/**', fingerprint: true, onlyIfSuccessful: false
                             sh "rm -rf ./reports"

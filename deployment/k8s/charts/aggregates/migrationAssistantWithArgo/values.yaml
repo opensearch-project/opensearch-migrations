@@ -150,8 +150,8 @@ otelConfiguration:
 charts:
   # Coordinate workflows, maybe RFS, maybe more
   etcd:
-    version: "11.2.1"
-    repository: "https://charts.bitnami.com/bitnami"
+    version: "1.1.2"
+    repository: "https://groundhog2k.github.io/helm-charts"
     values:
       preUpgrade:
         enabled: false
@@ -220,7 +220,7 @@ charts:
 
 
   strimzi-kafka-operator:
-    version: 0.45.0
+    version: 0.47.0
     repository: "https://strimzi.io/charts/"
     values:
       replicas: 1

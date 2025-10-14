@@ -16,8 +16,8 @@ from typing import List, Optional, Tuple
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_7.10"]
-VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19"]
+VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10"]
+VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19", "OS_3.1"]
 MA_RELEASE_NAME = "ma"
 
 
@@ -202,6 +202,7 @@ class TestRunner:
 
     def run(self, skip_delete: bool = False, keep_workflows: bool = False, developer_mode: bool = False,
             reuse_clusters: bool = False, test_reports_dir: str = None) -> None:
+        self.k8s_service.create_namespace(self.k8s_service.namespace)
         if developer_mode:
             workflow_templates_dir = (
                 "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/"
