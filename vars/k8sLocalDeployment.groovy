@@ -15,13 +15,13 @@ def call(Map config = [:]) {
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
             choice(
                     name: 'SOURCE_VERSION',
-                    choices: ['(all)'] + allSourceVersions,
-                    description: 'Pick a specific source version, or "(all)"'
+                    choices: ['all'] + allSourceVersions,
+                    description: 'Pick a specific source version, or "all"'
             )
             choice(
                     name: 'TARGET_VERSION',
-                    choices: ['(all)'] + allTargetVersions,
-                    description: 'Pick a specific target version, or "(all)"'
+                    choices: ['all'] + allTargetVersions,
+                    description: 'Pick a specific target version, or "all"'
             )
             string(name: 'TEST_IDS', defaultValue: 'all', description: 'Test IDs to execute. Use comma separated list e.g. "0001,0004" or "all" for all tests')
         }

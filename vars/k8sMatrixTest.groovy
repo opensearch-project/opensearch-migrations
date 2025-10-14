@@ -12,13 +12,13 @@ def call(Map config = [:]) {
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
             choice(
                     name: 'SOURCE_VERSION',
-                    choices: ['(all)'] + allSourceVersions,
-                    description: 'Pick a specific source version, or "(all)"'
+                    choices: ['all'] + allSourceVersions,
+                    description: 'Pick a specific source version, or "all"'
             )
             choice(
                     name: 'TARGET_VERSION',
-                    choices: ['(all)'] + allTargetVersions,
-                    description: 'Pick a specific target version, or "(all)"'
+                    choices: ['all'] + allTargetVersions,
+                    description: 'Pick a specific target version, or "all"'
             )
         }
 
@@ -57,7 +57,7 @@ def call(Map config = [:]) {
                         // Determine which combinations to run. We currently will launch a separate k8sLocalDeployment job for
                         // each target version, and will let it run against the single source version specified or all source versions
                         def sourceVersions = params.SOURCE_VERSION
-                        def targetVersions = params.TARGET_VERSION == '(all)' ? allTargetVersions : [params.TARGET_VERSION]
+                        def targetVersions = params.TARGET_VERSION == 'all' ? allTargetVersions : [params.TARGET_VERSION]
 
                         echo "📋 Source versions: ${sourceVersions}"
                         echo "📋 Target versions: ${targetVersions}"
