@@ -371,7 +371,7 @@ class TestWorkflowServiceSubmission:
         # Workflow without namespace in metadata
         workflow_spec = {'metadata': {'name': 'test'}, 'spec': {}}
 
-        _result = service.submit_workflow_to_argo(
+        service.submit_workflow_to_argo(
             workflow_spec=workflow_spec,
             namespace='custom-namespace',
             argo_server='https://localhost:2746'

@@ -93,7 +93,8 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
                     click.echo("Use --all to see completed workflows")
                 return
 
-            click.echo(f"Found {list_result['count']} workflow(s) in namespace {namespace}:\n")
+            click.echo(f"Found {list_result['count']} workflow(s) in namespace {namespace}:")
+            click.echo("")
 
             # Sort workflows alphabetically by name
             sorted_workflows = sorted(list_result['workflows'])
@@ -115,6 +116,91 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
         ctx.exit(ExitCode.FAILURE.value)
 
 
+def _get_phase_symbol(phase: str) -> str:
+    """Get symbol for workflow phase.
+    
+    Args:
+        phase: Workflow phase
+        
+    Returns:
+        Symbol character for the phase
+    """
+    phase_symbols = {
+        'Running': '*',
+        'Succeeded': '+',
+        'Failed': '-',
+        'Error': '-',
+        'Pending': '>',
+        'Stopped': 'X',
+    }
+    return phase_symbols.get(phase, '?')
+
+
+def _get_step_symbol(step_phase: str, step_type: str) -> str:
+    """Get symbol for workflow step.
+    
+    Args:
+        step_phase: Step phase
+        step_type: Step type
+        
+    Returns:
+        Symbol string for the step
+    """
+    if step_phase == 'Succeeded':
+        return '  +'
+    elif step_phase == 'Running':
+        return '  |' if step_type == 'Suspend' else '  *'
+    elif step_phase in ('Failed', 'Error'):
+        return '  -'
+    elif step_phase == 'Pending':
+        return '  >'
+    else:
+        return '  ?'
+
+
+def _display_workflow_header(name: str, phase: str, progress: str, started_at: str, finished_at: str):
+    """Display workflow header information.
+    
+    Args:
+        name: Workflow name
+        phase: Workflow phase
+        progress: Workflow progress
+        started_at: Start timestamp
+        finished_at: Finish timestamp
+    """
+    phase_symbol = _get_phase_symbol(phase)
+    click.echo(f"[{phase_symbol}] Workflow: {name}")
+    click.echo(f"  Phase: {phase}")
+    click.echo(f"  Progress: {progress}")
+    if started_at:
+        click.echo(f"  Started: {started_at}")
+    if finished_at:
+        click.echo(f"  Finished: {finished_at}")
+
+
+def _display_workflow_steps(steps: list):
+    """Display workflow steps.
+    
+    Args:
+        steps: List of step dictionaries
+    """
+    if not steps:
+        return
+        
+    click.echo("\n  Steps:")
+    for step in steps:
+        step_name = step['name']
+        step_phase = step['phase']
+        step_type = step['type']
+        
+        symbol = _get_step_symbol(step_phase, step_type)
+        
+        if step_type == 'Suspend' and step_phase == 'Running':
+            click.echo(f"{symbol} {step_name} - WAITING FOR APPROVAL")
+        else:
+            click.echo(f"{symbol} {step_name} ({step_phase})")
+
+
 def _display_workflow_status(result: dict):
     """Display formatted workflow status.
 
@@ -127,47 +213,5 @@ def _display_workflow_status(result: dict):
     started_at = result['started_at']
     finished_at = result['finished_at']
 
-    # Header with workflow name and overall status
-    phase_symbol = {
-        'Running': '*',
-        'Succeeded': '+',
-        'Failed': '-',
-        'Error': '-',
-        'Pending': '>',
-        'Stopped': 'X',
-    }.get(phase, '?')
-
-    click.echo(f"[{phase_symbol}] Workflow: {name}")
-    click.echo(f"  Phase: {phase}")
-    click.echo(f"  Progress: {progress}")
-    if started_at:
-        click.echo(f"  Started: {started_at}")
-    if finished_at:
-        click.echo(f"  Finished: {finished_at}")
-
-    # Display steps
-    if result['steps']:
-        click.echo(f"\n  Steps:")
-        for step in result['steps']:
-            step_name = step['name']
-            step_phase = step['phase']
-            step_type = step['type']
-
-            if step_phase == 'Succeeded':
-                symbol = '  +'
-            elif step_phase == 'Running':
-                if step_type == 'Suspend':
-                    symbol = '  |'
-                else:
-                    symbol = '  *'
-            elif step_phase == 'Failed' or step_phase == 'Error':
-                symbol = '  -'
-            elif step_phase == 'Pending':
-                symbol = '  >'
-            else:
-                symbol = '  ?'
-
-            if step_type == 'Suspend' and step_phase == 'Running':
-                click.echo(f"{symbol} {step_name} - WAITING FOR APPROVAL")
-            else:
-                click.echo(f"{symbol} {step_name} ({step_phase})")
+    _display_workflow_header(name, phase, progress, started_at, finished_at)
+    _display_workflow_steps(result['steps'])

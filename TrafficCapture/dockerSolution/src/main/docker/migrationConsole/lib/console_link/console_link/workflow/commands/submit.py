@@ -63,6 +63,65 @@ ENDING_PHASES = ["Succeeded", "Failed", "Error", "Stopped", "Terminated"]
     default='default',
     help='Configuration session name to load parameters from (default: default)'
 )
+def _load_and_inject_config(service: WorkflowService, workflow_spec: dict, namespace: str, session: str) -> dict:
+    """Load configuration and inject parameters into workflow spec.
+    
+    Args:
+        service: WorkflowService instance
+        workflow_spec: Workflow specification
+        namespace: Kubernetes namespace
+        session: Session name
+        
+    Returns:
+        Updated workflow spec with injected parameters
+    """
+    try:
+        store = WorkflowConfigStore(namespace=namespace)
+        config = store.load_config(session_name=session)
+
+        if config:
+            click.echo(f"Injecting parameters from session: {session}")
+            return service.inject_parameters(workflow_spec, config)
+        else:
+            logger.debug(f"No configuration found for session: {session}")
+            return workflow_spec
+    except Exception as e:
+        logger.warning(f"Could not load workflow config: {e}")
+        return workflow_spec
+
+
+def _handle_workflow_wait(service: WorkflowService, namespace: str, workflow_name: str, timeout: int, wait_interval: int):
+    """Handle waiting for workflow completion.
+    
+    Args:
+        service: WorkflowService instance
+        namespace: Kubernetes namespace
+        workflow_name: Name of workflow
+        timeout: Timeout in seconds
+        wait_interval: Interval between checks
+    """
+    click.echo(f"\nWaiting for workflow to complete (timeout: {timeout}s)...")
+
+    try:
+        phase, output_message = service.wait_for_workflow_completion(
+            namespace=namespace,
+            workflow_name=workflow_name,
+            timeout=timeout,
+            interval=wait_interval
+        )
+
+        click.echo(f"\nWorkflow completed with phase: {phase}")
+
+        if output_message:
+            click.echo(f"Container output: {output_message}")
+
+    except TimeoutError as e:
+        click.echo(f"\n{str(e)}", err=True)
+        click.echo(f"Workflow {workflow_name} is still running", err=True)
+    except Exception as e:
+        click.echo(f"\nError monitoring workflow: {str(e)}", err=True)
+
+
 @click.pass_context
 def submit_command(ctx, argo_server, namespace, name, insecure, token, wait, timeout, wait_interval, session):
     """Submit a workflow to Argo Workflows.
@@ -85,10 +144,7 @@ def submit_command(ctx, argo_server, namespace, name, insecure, token, wait, tim
         WORKFLOW_TEMPLATE_PATH=/path/to/workflow.yaml workflow submit
     """
     try:
-        # Initialize the service layer
         service = WorkflowService()
-
-        # Load workflow template (from WORKFLOW_TEMPLATE_PATH or default)
         template_result = service.load_workflow_template()
 
         if template_result['error']:
@@ -98,28 +154,16 @@ def submit_command(ctx, argo_server, namespace, name, insecure, token, wait, tim
         click.echo(f"Using workflow template from: {template_result['source']}")
         workflow_spec = template_result['workflow_spec']
 
-        # Try to load configuration from store for parameter injection
-        try:
-            store = WorkflowConfigStore(namespace=namespace)
-            config = store.load_config(session_name=session)
-
-            if config:
-                click.echo(f"Injecting parameters from session: {session}")
-                workflow_spec = service.inject_parameters(workflow_spec, config)
-            else:
-                logger.debug(f"No configuration found for session: {session}")
-        except Exception as e:
-            logger.warning(f"Could not load workflow config: {e}")
-            # Continue without parameter injection
+        # Load configuration and inject parameters
+        workflow_spec = _load_and_inject_config(service, workflow_spec, namespace, session)
 
         # Add name or generateName if provided
         if name:
             workflow_spec['metadata']['name'] = name
         elif 'name' not in workflow_spec['metadata'] and 'generateName' not in workflow_spec['metadata']:
-            # Set a default generateName if neither name nor generateName is present
             workflow_spec['metadata']['generateName'] = 'workflow-'
 
-        # Submit the workflow using the service layer
+        # Submit the workflow
         submit_result = service.submit_workflow_to_argo(
             workflow_spec=workflow_spec,
             namespace=namespace,
@@ -135,7 +179,7 @@ def submit_command(ctx, argo_server, namespace, name, insecure, token, wait, tim
         workflow_name = submit_result['workflow_name']
         workflow_uid = submit_result['workflow_uid']
 
-        click.echo(f"Workflow submitted successfully!")
+        click.echo("Workflow submitted successfully")
         click.echo(f"  Name: {workflow_name}")
         click.echo(f"  UID: {workflow_uid}")
         click.echo(f"  Namespace: {namespace}")
@@ -144,27 +188,7 @@ def submit_command(ctx, argo_server, namespace, name, insecure, token, wait, tim
 
         # Wait for workflow completion if requested
         if wait:
-            click.echo(f"\nWaiting for workflow to complete (timeout: {timeout}s)...")
-
-            try:
-                phase, output_message = service.wait_for_workflow_completion(
-                    namespace=namespace,
-                    workflow_name=workflow_name,
-                    timeout=timeout,
-                    interval=wait_interval
-                )
-
-                click.echo(f"\nWorkflow completed with phase: {phase}")
-
-                # Display output if available
-                if output_message:
-                    click.echo(f"Container output: {output_message}")
-
-            except TimeoutError as e:
-                click.echo(f"\n{str(e)}", err=True)
-                click.echo(f"Workflow {workflow_name} is still running", err=True)
-            except Exception as e:
-                click.echo(f"\nError monitoring workflow: {str(e)}", err=True)
+            _handle_workflow_wait(service, namespace, workflow_name, timeout, wait_interval)
 
     except Exception as e:
         logger.exception(f"Unexpected error submitting workflow: {e}")

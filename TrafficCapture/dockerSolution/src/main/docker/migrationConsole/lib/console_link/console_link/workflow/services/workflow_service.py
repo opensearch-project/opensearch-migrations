@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 # Terminal workflow phases
 ENDING_PHASES = ["Succeeded", "Failed", "Error", "Stopped", "Terminated"]
 
+# Constants
+FALLBACK_MESSAGE = "Falling back to default hello-world workflow"
+CONTENT_TYPE_JSON = "application/json"
+
 
 class WorkflowTemplateResult(TypedDict):
     """Result of template loading operation."""
@@ -237,8 +241,7 @@ class WorkflowService:
         except FileNotFoundError:
             error_msg = f"Template file not found: {path}"
             logger.error(error_msg)
-            # Fall back to default on error
-            logger.info("Falling back to default hello-world workflow")
+            logger.info(FALLBACK_MESSAGE)
             return WorkflowTemplateResult(
                 success=False,
                 workflow_spec=self.get_default_workflow_spec(),
@@ -249,8 +252,7 @@ class WorkflowService:
         except yaml.YAMLError as e:
             error_msg = f"Invalid YAML in template file {path}: {e}"
             logger.error(error_msg)
-            # Fall back to default on error
-            logger.info("Falling back to default hello-world workflow")
+            logger.info(FALLBACK_MESSAGE)
             return WorkflowTemplateResult(
                 success=False,
                 workflow_spec=self.get_default_workflow_spec(),
@@ -261,8 +263,7 @@ class WorkflowService:
         except Exception as e:
             error_msg = f"Error loading template from {path}: {e}"
             logger.error(error_msg)
-            # Fall back to default on error
-            logger.info("Falling back to default hello-world workflow")
+            logger.info(FALLBACK_MESSAGE)
             return WorkflowTemplateResult(
                 success=False,
                 workflow_spec=self.get_default_workflow_spec(),
@@ -369,7 +370,7 @@ class WorkflowService:
 
             # Prepare headers
             headers = {
-                "Content-Type": "application/json"
+                "Content-Type": CONTENT_TYPE_JSON
             }
 
             if token:
@@ -465,72 +466,18 @@ class WorkflowService:
             WorkflowListResult dict with success status, workflows list, count, and error
         """
         try:
-            # Prepare headers
-            headers = {
-                "Content-Type": "application/json"
-            }
-
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-
-            # Construct URL for list endpoint
+            headers = self._prepare_headers(token)
             url = f"{argo_server}/api/v1/workflows/{namespace}"
 
             logger.info(f"Listing workflows in namespace {namespace} (exclude_completed={exclude_completed})")
             logger.debug(f"List request URL: {url}")
 
-            # Make GET request to list workflows
-            response = requests.get(
-                url,
-                headers=headers,
-                verify=not insecure
-            )
+            response = requests.get(url, headers=headers, verify=not insecure)
 
-            # Handle response
             if response.status_code == 200:
                 result = response.json()
                 items = result.get("items", [])
-
-                # Filter workflows based on flags
-                workflow_names = []
-                for item in items:
-                    name = item.get("metadata", {}).get("name", "")
-                    if not name:
-                        continue
-
-                    phase = item.get("status", {}).get("phase", "Unknown")
-
-                    # Apply exclude_completed filter if specified
-                    if exclude_completed and phase in ENDING_PHASES:
-                        continue
-
-                    # Apply phase_filter - special case for 'Running' with suspended check
-                    if phase_filter == 'Running':
-                        # For 'Running' phase, check if workflow has a suspend node that's actually running
-                        # This ensures we only show workflows waiting for approval, not already approved
-                        if phase != 'Running':
-                            continue
-
-                        # Check nodes to see if there's an active suspend
-                        nodes = item.get("status", {}).get("nodes", {})
-                        has_active_suspend = False
-
-                        for node_id, node in nodes.items():
-                            node_type = node.get("type", "")
-                            node_phase = node.get("phase", "")
-
-                            # A workflow is waiting for approval if it has a Suspend node in Running phase
-                            if node_type == "Suspend" and node_phase == "Running":
-                                has_active_suspend = True
-                                break
-
-                        if not has_active_suspend:
-                            continue
-                    elif phase_filter and phase != phase_filter:
-                        # For other phase filters, do exact match
-                        continue
-
-                    workflow_names.append(name)
+                workflow_names = self._filter_workflows(items, exclude_completed, phase_filter)
 
                 logger.info(f"Found {len(workflow_names)} workflows in namespace {namespace}")
                 return WorkflowListResult(
@@ -540,13 +487,7 @@ class WorkflowService:
                     error=None
                 )
             else:
-                error_msg = f"Failed to list workflows: HTTP {response.status_code}"
-                try:
-                    error_detail = response.json()
-                    error_msg = f"Failed to list workflows: {error_detail}"
-                except Exception:
-                    error_msg = f"Failed to list workflows: {response.text}"
-
+                error_msg = self._format_error_message("list workflows", response)
                 logger.error(error_msg)
                 return WorkflowListResult(
                     success=False,
@@ -558,7 +499,6 @@ class WorkflowService:
         except requests.exceptions.RequestException as e:
             error_msg = f"Network error listing workflows: {e}"
             logger.error(error_msg)
-
             return WorkflowListResult(
                 success=False,
                 workflows=[],
@@ -569,7 +509,6 @@ class WorkflowService:
         except Exception as e:
             error_msg = f"Unexpected error listing workflows: {e}"
             logger.exception(error_msg)
-
             return WorkflowListResult(
                 success=False,
                 workflows=[],
@@ -598,38 +537,16 @@ class WorkflowService:
             WorkflowStatusResult with detailed status information
         """
         try:
-            # Prepare headers
-            headers = {
-                "Content-Type": "application/json"
-            }
-
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-
-            # Get workflow details
+            headers = self._prepare_headers(token)
             url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
 
             logger.info(f"Getting status for workflow {workflow_name}")
 
-            response = requests.get(
-                url,
-                headers=headers,
-                verify=not insecure
-            )
+            response = requests.get(url, headers=headers, verify=not insecure)
 
             if response.status_code != 200:
                 error_msg = f"Failed to get workflow status: HTTP {response.status_code}"
-                return WorkflowStatusResult(
-                    success=False,
-                    workflow_name=workflow_name,
-                    namespace=namespace,
-                    phase="Unknown",
-                    progress="0/0",
-                    started_at=None,
-                    finished_at=None,
-                    steps=[],
-                    error=error_msg
-                )
+                return self._create_error_status_result(workflow_name, namespace, error_msg)
 
             workflow = response.json()
             status = workflow.get("status", {})
@@ -639,29 +556,7 @@ class WorkflowService:
             started_at = status.get("startedAt")
             finished_at = status.get("finishedAt")
 
-            # Parse nodes to extract step information
-            steps = []
-            nodes = status.get("nodes", {})
-
-            # Find all step nodes (nodes with display names that represent actual steps)
-            for node_id, node in nodes.items():
-                node_type = node.get("type", "")
-                display_name = node.get("displayName", "")
-                node_phase = node.get("phase", "Unknown")
-                started_at = node.get("startedAt", "")
-
-                # Include Pod and Suspend nodes (actual executable steps)
-                if node_type in ["Pod", "Suspend"]:
-                    steps.append({
-                        "name": display_name,
-                        "phase": node_phase,
-                        "type": node_type,
-                        "started_at": started_at
-                    })
-
-            # Sort steps chronologically by start time
-            # Nodes without startedAt (pending) will sort to the end
-            steps.sort(key=lambda x: x.get("started_at", "9999-99-99"))
+            steps = self._extract_workflow_steps(status.get("nodes", {}))
 
             return WorkflowStatusResult(
                 success=True,
@@ -678,18 +573,7 @@ class WorkflowService:
         except Exception as e:
             error_msg = f"Error getting workflow status: {e}"
             logger.error(error_msg)
-
-            return WorkflowStatusResult(
-                success=False,
-                workflow_name=workflow_name,
-                namespace=namespace,
-                phase="Unknown",
-                progress="0/0",
-                started_at=None,
-                finished_at=None,
-                steps=[],
-                error=error_msg
-            )
+            return self._create_error_status_result(workflow_name, namespace, error_msg)
 
     def stop_workflow(
         self,
@@ -712,13 +596,7 @@ class WorkflowService:
             WorkflowStopResult dict with success status, message, and error
         """
         try:
-            # Prepare headers
-            headers = {
-                "Content-Type": "application/json"
-            }
-
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
+            headers = self._prepare_headers(token)
 
             # Construct URL for stop endpoint
             url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}/stop"
@@ -815,13 +693,7 @@ class WorkflowService:
             WorkflowApproveResult dict with success status, message, and error
         """
         try:
-            # Prepare headers
-            headers = {
-                "Content-Type": "application/json"
-            }
-
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
+            headers = self._prepare_headers(token)
 
             # Construct URL for resume endpoint
             url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}/resume"
@@ -896,6 +768,143 @@ class WorkflowService:
                 message=error_msg,
                 error=str(e)
             )
+
+    def _prepare_headers(self, token: Optional[str] = None) -> Dict[str, str]:
+        """Prepare HTTP headers for API requests.
+        
+        Args:
+            token: Optional bearer token for authentication
+            
+        Returns:
+            Dictionary of HTTP headers
+        """
+        headers = {"Content-Type": CONTENT_TYPE_JSON}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    def _format_error_message(self, operation: str, response) -> str:
+        """Format error message from HTTP response.
+        
+        Args:
+            operation: Description of the operation that failed
+            response: HTTP response object
+            
+        Returns:
+            Formatted error message
+        """
+        error_msg = f"Failed to {operation}: HTTP {response.status_code}"
+        try:
+            error_detail = response.json()
+            error_msg = f"Failed to {operation}: {error_detail}"
+        except Exception:
+            error_msg = f"Failed to {operation}: {response.text}"
+        return error_msg
+
+    def _filter_workflows(
+        self,
+        items: List[Dict[str, Any]],
+        exclude_completed: bool,
+        phase_filter: Optional[str]
+    ) -> List[str]:
+        """Filter workflow items based on criteria.
+        
+        Args:
+            items: List of workflow items from API
+            exclude_completed: Whether to exclude completed workflows
+            phase_filter: Optional phase to filter by
+            
+        Returns:
+            List of workflow names matching criteria
+        """
+        workflow_names = []
+        for item in items:
+            name = item.get("metadata", {}).get("name", "")
+            if not name:
+                continue
+
+            phase = item.get("status", {}).get("phase", "Unknown")
+
+            if exclude_completed and phase in ENDING_PHASES:
+                continue
+
+            if phase_filter == 'Running':
+                if phase != 'Running':
+                    continue
+                if not self._has_active_suspend(item):
+                    continue
+            elif phase_filter and phase != phase_filter:
+                continue
+
+            workflow_names.append(name)
+        return workflow_names
+
+    def _has_active_suspend(self, workflow_item: Dict[str, Any]) -> bool:
+        """Check if workflow has an active suspend node.
+        
+        Args:
+            workflow_item: Workflow item from API
+            
+        Returns:
+            True if workflow has active suspend node
+        """
+        nodes = workflow_item.get("status", {}).get("nodes", {})
+        for node in nodes.values():
+            if node.get("type") == "Suspend" and node.get("phase") == "Running":
+                return True
+        return False
+
+    def _extract_workflow_steps(self, nodes: Dict[str, Any]) -> List[Dict[str, str]]:
+        """Extract step information from workflow nodes.
+        
+        Args:
+            nodes: Dictionary of workflow nodes
+            
+        Returns:
+            List of step dictionaries with name, phase, type, and started_at
+        """
+        steps = []
+        for node in nodes.values():
+            node_type = node.get("type", "")
+            if node_type in ["Pod", "Suspend"]:
+                steps.append({
+                    "name": node.get("displayName", ""),
+                    "phase": node.get("phase", "Unknown"),
+                    "type": node_type,
+                    "started_at": node.get("startedAt", "")
+                })
+        
+        # Sort chronologically by start time
+        steps.sort(key=lambda x: x.get("started_at", "9999-99-99"))
+        return steps
+
+    def _create_error_status_result(
+        self,
+        workflow_name: str,
+        namespace: str,
+        error_msg: str
+    ) -> WorkflowStatusResult:
+        """Create an error status result.
+        
+        Args:
+            workflow_name: Name of the workflow
+            namespace: Kubernetes namespace
+            error_msg: Error message
+            
+        Returns:
+            WorkflowStatusResult with error information
+        """
+        return WorkflowStatusResult(
+            success=False,
+            workflow_name=workflow_name,
+            namespace=namespace,
+            phase="Unknown",
+            progress="0/0",
+            started_at=None,
+            finished_at=None,
+            steps=[],
+            error=error_msg
+        )
 
     def wait_for_workflow_completion(
         self,

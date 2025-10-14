@@ -697,7 +697,7 @@ class TestArgoWorkflows:
                 f"Output doesn't match expected message. Expected: '{test_message}', Got: '{output_message}'"
 
             logger.info(f"✓ Container output verified: {output_message}")
-            logger.info(f"✓ Output verification successful - container executed correctly!")
+            logger.info("✓ Output verification successful - container executed correctly!")
 
         except ApiException as e:
             pytest.fail(f"Failed to submit workflow via Kubernetes API: {e}")
