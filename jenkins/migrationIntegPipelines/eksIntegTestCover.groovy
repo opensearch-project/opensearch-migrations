@@ -5,6 +5,6 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
          remote: "${gitUrl}"])
 
-// Shared library function (location from root: vars/k8sLocalDeployment.groovy)
+// Shared library function (location from root: vars/eksIntegPipeline.groovy)
 eksIntegPipeline()
 
