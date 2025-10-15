@@ -141,12 +141,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-env
-      - name: Restore Docker Cache
-        uses: AndreKurait/docker-cache@0.6.0
-        with:
-          key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
-          # Delegate cache saving to python-e2e-tests
-          read-only: true
+      # - name: Restore Docker Cache
+      #   uses: AndreKurait/docker-cache@0.6.0
+      #   with:
+      #     key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
+      #     # Delegate cache saving to python-e2e-tests
+      #     read-only: true
 
       - name: Run Gradle tests with striping
         run: |
@@ -183,6 +183,11 @@ jobs:
           name: test-reports-gradle-tests-stripe-${{ matrix.index }}
           path: |
             **/build/reports/tests/
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: true
 
       - name: Upload Codecov report artifact for stripe ${{ matrix.index }}
         if: always()
