@@ -186,32 +186,32 @@ def call(Map config = [:]) {
 
                                     // Add access policy for Jenkins deployment role to perform kubectl commands
                                     def principalArn = 'arn:aws:iam::$MIGRATIONS_TEST_ACCOUNT_ID:role/JenkinsDeploymentRole'
-                                    sh '''
-                                        if aws eks describe-access-entry --cluster-name $eksClusterName --principal-arn $principalArn >/dev/null 2>&1; then
+                                    sh """
+                                        if aws eks describe-access-entry --cluster-name $env.eksClusterName --principal-arn $principalArn >/dev/null 2>&1; then
                                           echo "Access entry already exists, skipping create."
                                         else
-                                          aws eks create-access-entry --cluster-name $eksClusterName --principal-arn $principalArn --type STANDARD
+                                          aws eks create-access-entry --cluster-name $env.eksClusterName --principal-arn $principalArn --type STANDARD
                                         fi
                                         
                                         aws eks associate-access-policy \
-                                          --cluster-name $eksClusterName \
+                                          --cluster-name $env.eksClusterName \
                                           --principal-arn $principalArn \
                                           --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
                                           --access-scope type=cluster
                                         
                                         # Update kubeconfig to use this role
-                                        aws eks update-kubeconfig --region us-east-1 --name $eksClusterName
-                                        
+                                        aws eks update-kubeconfig --region us-east-1 --name $env.eksClusterName
+
                                         # Wait until kubectl is fully ready
                                         for i in {1..10}; do
                                           if kubectl get namespace default >/dev/null 2>&1; then
                                             echo "kubectl is ready for use"
                                             break
                                           fi
-                                          echo "Waiting for kubectl to be ready... ($i/10)"
+                                          echo "Waiting for kubectl to be ready... (\$i/10)"
                                           sleep 5
                                         done
-                                    '''
+                                    """
 
                                     // TODO: Remove this source and target cluster configmaps when integ test utilizes workflow CLI to generate
                                     sh 'kubectl create namespace ma --dry-run=client -o yaml | kubectl apply -f -'
