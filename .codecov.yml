@@ -28,5 +28,5 @@ ignore:
   - "**/jest.config.js"
   - "**/coverage/**/*"
   - "**/frontend/out/**"
-  - "**/frontend/src/generated/**"
+  - "**/generated/**"
   - "**/orchestrationSpecs/**"
