@@ -201,6 +201,16 @@ def call(Map config = [:]) {
                                         
                                         # Update kubeconfig to use this role
                                         aws eks update-kubeconfig --region us-east-1 --name $env.eksClusterName
+
+                                        # Wait until kubectl is fully ready
+                                        for i in {1..10}; do
+                                          if kubectl get namespace default >/dev/null 2>&1; then
+                                            echo "kubectl is ready for use"
+                                            break
+                                          fi
+                                          echo "Waiting for kubectl to be ready... ($i/10)"
+                                          sleep 5
+                                        done
                                     """
 
                                     // TODO: Remove this source and target cluster configmaps when integ test utilizes workflow CLI to generate
