@@ -1,8 +1,8 @@
 def call(Map config = [:]) {
     def childJobName = "k8s-local-integ-test"
 
-    def allSourceVersions = ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_7.10']
-    def allTargetVersions = ['OS_1.3', 'OS_2.19']
+    def allSourceVersions = ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10']
+    def allTargetVersions = ['OS_1.3', 'OS_2.19', 'OS_3.1']
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -12,13 +12,13 @@ def call(Map config = [:]) {
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
             choice(
                     name: 'SOURCE_VERSION',
-                    choices: ['(all)'] + allSourceVersions,
-                    description: 'Pick a specific source version, or "(all)"'
+                    choices: ['all'] + allSourceVersions,
+                    description: 'Pick a specific source version, or "all"'
             )
             choice(
                     name: 'TARGET_VERSION',
-                    choices: ['(all)'] + allTargetVersions,
-                    description: 'Pick a specific target version, or "(all)"'
+                    choices: ['all'] + allTargetVersions,
+                    description: 'Pick a specific target version, or "all"'
             )
         }
 
@@ -54,13 +54,14 @@ def call(Map config = [:]) {
             stage('Create and Monitor Integ Tests') {
                 steps {
                     script {
-                        // Determine which combinations to run
-                        def sourceVersions = params.SOURCE_VERSION == '(all)' ? allSourceVersions : [params.SOURCE_VERSION]
-                        def targetVersions = params.TARGET_VERSION == '(all)' ? allTargetVersions : [params.TARGET_VERSION]
+                        // Determine which combinations to run. We currently will launch a separate k8sLocalDeployment job for
+                        // each target version, and will let it run against the single source version specified or all source versions
+                        def sourceVersions = params.SOURCE_VERSION
+                        def targetVersions = params.TARGET_VERSION == 'all' ? allTargetVersions : [params.TARGET_VERSION]
 
                         echo "📋 Source versions: ${sourceVersions}"
                         echo "📋 Target versions: ${targetVersions}"
-                        echo "📋 Total combinations: ${sourceVersions.size() * targetVersions.size()}"
+                        echo "📋 Total created pipelines: ${targetVersions.size()}"
 
                         // Create parallel jobs map
                         def jobs = [:]
@@ -68,51 +69,50 @@ def call(Map config = [:]) {
 
                         sh "mkdir -p libraries/testAutomation/reports"
 
-                        sourceVersions.each { source ->
-                            targetVersions.each { target ->
-                                def combination = "${source}_to_${target}"
-                                def displayName = "${source} → ${target}"
+                        targetVersions.each { target ->
+                            def source = sourceVersions
+                            def combination = "${source}_to_${target}"
+                            def displayName = "${source} → ${target}"
 
-                                jobs[displayName] = {
-                                    try {
-                                        def result = build(
+                            jobs[displayName] = {
+                                try {
+                                    def result = build(
                                             job: childJobName,
                                             parameters: [
-                                                string(name: 'SOURCE_VERSION', value: source),
-                                                string(name: 'TARGET_VERSION', value: target),
-                                                string(name: 'GIT_REPO_URL', value: params.GIT_REPO_URL),
-                                                string(name: 'GIT_BRANCH', value: params.GIT_BRANCH)
+                                                    string(name: 'SOURCE_VERSION', value: source),
+                                                    string(name: 'TARGET_VERSION', value: target),
+                                                    string(name: 'GIT_REPO_URL', value: params.GIT_REPO_URL),
+                                                    string(name: 'GIT_BRANCH', value: params.GIT_BRANCH)
                                             ],
                                             wait: true,
                                             propagate: false // Don't fail parent if child fails
-                                        )
+                                    )
 
-                                        copyArtifacts(
-                                                projectName: childJobName,
-                                                selector: specific("${result.number}"),
-                                                filter: 'reports/**',
-                                                target: "libraries/testAutomation/reports",
-                                                flatten: true,
-                                                optional: true
-                                        )
+                                    copyArtifacts(
+                                            projectName: childJobName,
+                                            selector: specific("${result.number}"),
+                                            filter: 'reports/**',
+                                            target: "libraries/testAutomation/reports",
+                                            flatten: true,
+                                            optional: true
+                                    )
 
-                                        results[displayName] = [
-                                            result: result.result,
-                                            url: result.absoluteUrl,
-                                            number: result.number,
+                                    results[displayName] = [
+                                            result  : result.result,
+                                            url     : result.absoluteUrl,
+                                            number  : result.number,
                                             duration: result.duration
-                                        ]
+                                    ]
 
-                                    } catch (Exception e) {
-                                        echo "💥 ${displayName}: EXCEPTION - ${e.message}"
-                                        results[displayName] = [
-                                            result: 'EXCEPTION',
-                                            url: '',
-                                            number: 0,
+                                } catch (Exception e) {
+                                    echo "💥 ${displayName}: EXCEPTION - ${e.message}"
+                                    results[displayName] = [
+                                            result  : 'EXCEPTION',
+                                            url     : '',
+                                            number  : 0,
                                             duration: 0,
-                                            error: e.message
-                                        ]
-                                    }
+                                            error   : e.message
+                                    ]
                                 }
                             }
                         }
