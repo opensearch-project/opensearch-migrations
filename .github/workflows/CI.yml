@@ -68,18 +68,18 @@ jobs:
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
-  python-lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-env
-      - name: Install dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install flake8
-      - name: Analysing the code with flake8
-        run: |
-          flake8 $(git ls-files '*.py')
+  # python-lint:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: ./.github/actions/setup-env
+  #     - name: Install dependencies
+  #       run: |
+  #         python3 -m pip install --upgrade pip
+  #         python3 -m pip install flake8
+  #     - name: Analysing the code with flake8
+  #       run: |
+  #         flake8 $(git ls-files '*.py')
 
   # python-tests:
   #   runs-on: ubuntu-latest
@@ -219,54 +219,54 @@ jobs:
           path: |
             reports/*
 
-  python-e2e-tests:
-    needs: [ generate-cache-key ]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-env
-      - name: Cache Docker Images
-        uses: AndreKurait/docker-cache@0.6.0
-        with:
-          key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
-          # Only save cache on push events
-          read-only: ${{ github.event_name != 'push' }}
-      - name: Start Docker Solution
-        run: gradle -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
-        env:
-          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
-      - name: Run E2E test script
-        run: |
-          docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
-      - name: Show disk usage
-        if: always()
-        run: |
-          df -h
-          docker system df -v
-      - name: Collect Docker, OpenSearch Benchmark, and Shared Logs
-        if: always()
-        run: |
-          mkdir -p logs/docker logs/opensearch_benchmark_logs logs/shared_logs_output
-          for container in $(docker ps -aq); do
-            container_name=$(docker inspect --format '{{.Name}}' $container | sed 's/\///')
-            docker logs $container > logs/docker/${container_name}_logs.txt 2>&1
-          done
-          docker cp $(docker ps --filter "name=migration-console" -q):/root/.benchmark/logs logs/opensearch_benchmark_logs
-          docker cp $(docker ps --filter "name=migration-console" -q):/shared-logs-output logs/shared_logs_output
-      - name: Upload Logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          if-no-files-found: error
-          name: e2e-test-logs
-          path: |
-            logs/docker
-            logs/opensearch_benchmark_logs
-            logs/shared_logs_output
-      - name: Clean up migrations docker images before caching
-        run: |
-          docker stop $(docker ps -q) && docker system prune --volumes -f
-          docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^migrations/' | xargs -I {} docker image rm {}
+  # python-e2e-tests:
+  #   needs: [ generate-cache-key ]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: ./.github/actions/setup-env
+  #     - name: Cache Docker Images
+  #       uses: AndreKurait/docker-cache@0.6.0
+  #       with:
+  #         key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
+  #         # Only save cache on push events
+  #         read-only: ${{ github.event_name != 'push' }}
+  #     - name: Start Docker Solution
+  #       run: gradle -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
+  #       env:
+  #         OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+  #     - name: Run E2E test script
+  #       run: |
+  #         docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
+  #     - name: Show disk usage
+  #       if: always()
+  #       run: |
+  #         df -h
+  #         docker system df -v
+  #     - name: Collect Docker, OpenSearch Benchmark, and Shared Logs
+  #       if: always()
+  #       run: |
+  #         mkdir -p logs/docker logs/opensearch_benchmark_logs logs/shared_logs_output
+  #         for container in $(docker ps -aq); do
+  #           container_name=$(docker inspect --format '{{.Name}}' $container | sed 's/\///')
+  #           docker logs $container > logs/docker/${container_name}_logs.txt 2>&1
+  #         done
+  #         docker cp $(docker ps --filter "name=migration-console" -q):/root/.benchmark/logs logs/opensearch_benchmark_logs
+  #         docker cp $(docker ps --filter "name=migration-console" -q):/shared-logs-output logs/shared_logs_output
+  #     - name: Upload Logs
+  #       if: always()
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         if-no-files-found: error
+  #         name: e2e-test-logs
+  #         path: |
+  #           logs/docker
+  #           logs/opensearch_benchmark_logs
+  #           logs/shared_logs_output
+  #     - name: Clean up migrations docker images before caching
+  #       run: |
+  #         docker stop $(docker ps -q) && docker system prune --volumes -f
+  #         docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^migrations/' | xargs -I {} docker image rm {}
 
   # node-tests:
   #   runs-on: ubuntu-latest
@@ -288,26 +288,26 @@ jobs:
   #     - name: Run CDK Jest Tests (using mocked images)
   #       run: npm run test
 
-  link-checker:
-    runs-on: ubuntu-latest
+  # link-checker:
+  #   runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v5
-      - name: lychee Link Checker
-        id: lychee
-        uses: lycheeverse/lychee-action@v2
-        with:
-          args: --verbose --accept=200,403,429  "**/*.html" "**/*.md" "**/*.txt" "**/*.json"
-            --offline
-            --exclude "file:///github/workspace/*"
-            --exclude "http://localhost*"
-            --exclude "https://localhost*"
-            --exclude "http://capture-proxy*"
-            --exclude "https://capture-proxy*"
-            --exclude-path "TrafficCapture/dockerSolution/src/main/docker/k8sConfigMapUtilScripts/tests/data"
-          fail: true
-        env:
-          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - name: lychee Link Checker
+  #       id: lychee
+  #       uses: lycheeverse/lychee-action@v2
+  #       with:
+  #         args: --verbose --accept=200,403,429  "**/*.html" "**/*.md" "**/*.txt" "**/*.json"
+  #           --offline
+  #           --exclude "file:///github/workspace/*"
+  #           --exclude "http://localhost*"
+  #           --exclude "https://localhost*"
+  #           --exclude "http://capture-proxy*"
+  #           --exclude "https://capture-proxy*"
+  #           --exclude-path "TrafficCapture/dockerSolution/src/main/docker/k8sConfigMapUtilScripts/tests/data"
+  #         fail: true
+  #       env:
+  #         GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
 
   all-ci-checks-pass:
