@@ -1,0 +1,540 @@
+Description: (SO0290) - The AWS CloudFormation template for deployment of the migration-assistant-for-amazon-opensearch-service. Version v2.5.8
+AWSTemplateFormatVersion: "2010-09-09"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Imported VPC parameters
+        Parameters:
+          - VPCId
+          - VPCAvailabilityZones
+          - VPCPrivateSubnetIds
+      - Label:
+          default: Additional parameters
+        Parameters:
+          - Stage
+    ParameterLabels:
+      VPCId:
+        default: VPC
+      VPCAvailabilityZones:
+        default: Availability Zones
+      VPCPrivateSubnetIds:
+        default: Private Subnets
+Mappings:
+  Solution:
+    Config:
+      CodeVersion: v2.5.8
+      KeyPrefix: migration-assistant-for-amazon-opensearch-service/v2.5.8
+      S3Bucket: solutions
+      SendAnonymousUsage: "No"
+      SolutionId: SO0290
+  BootstrapEC2InstanceAmiMapEF3D2AB0:
+    af-south-1:
+      ami: ami-056f571bb0e6f424b
+    ap-east-1:
+      ami: ami-005362651c93532ef
+    ap-east-2:
+      ami: ami-07bd067b2afd36c9d
+    ap-northeast-1:
+      ami: ami-0d4aa492f133a3068
+    ap-northeast-2:
+      ami: ami-099099dff4384719c
+    ap-northeast-3:
+      ami: ami-0c3d48d3539dae8d5
+    ap-south-1:
+      ami: ami-0f9708d1cd2cfee41
+    ap-south-2:
+      ami: ami-058a677191f2d3b4b
+    ap-southeast-1:
+      ami: ami-088d74defe9802f14
+    ap-southeast-2:
+      ami: ami-0c462b53550d4fca8
+    ap-southeast-3:
+      ami: ami-06ab30fd4fdb3ed9d
+    ap-southeast-4:
+      ami: ami-0d42e9612aefb98da
+    ap-southeast-5:
+      ami: ami-01e13e3c781810a30
+    ap-southeast-6:
+      ami: ami-011236e3336b1fe14
+    ap-southeast-7:
+      ami: ami-0e4f6ae724df740e7
+    ca-central-1:
+      ami: ami-029c5475368ac7adc
+    ca-west-1:
+      ami: ami-080ada25b460a6622
+    eu-central-1:
+      ami: ami-08697da0e8d9f59ec
+    eu-central-2:
+      ami: ami-06bfd82c089bb1f7a
+    eu-north-1:
+      ami: ami-04c08fd8aa14af291
+    eu-south-1:
+      ami: ami-0f75ff17d5b995930
+    eu-south-2:
+      ami: ami-093f87ac3f1e31f91
+    eu-west-1:
+      ami: ami-04f25a69b566c844b
+    eu-west-2:
+      ami: ami-0336cdd409ab5eec4
+    eu-west-3:
+      ami: ami-0d8c6c2b092ebb980
+    il-central-1:
+      ami: ami-044c25ddea94bf84c
+    me-central-1:
+      ami: ami-0f661f38a53d919c7
+    me-south-1:
+      ami: ami-0115748e9cebc5543
+    mx-central-1:
+      ami: ami-0e439f4aa57d84983
+    sa-east-1:
+      ami: ami-07c0cae188e21a093
+    us-east-1:
+      ami: ami-052064a798f08f0d3
+    us-east-2:
+      ami: ami-077b630ef539aa0b5
+    us-west-1:
+      ami: ami-0b967c22fe917319b
+    us-west-2:
+      ami: ami-0caa91d6b7bee0ed0
+    us-gov-west-1:
+      ami: ami-08f42c51760f3e3af
+    us-gov-east-1:
+      ami: ami-0c16bde0528963329
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    Description: Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select a VPC, we recommend choosing the VPC of the target cluster.
+  VPCAvailabilityZones:
+    Type: List<AWS::EC2::AvailabilityZone::Name>
+    Description: Select Availability Zones in the selected VPC. Please provide two zones at least, corresponding with the private subnets selected next.
+  VPCPrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select Private Subnets in the selected VPC. Please provide two subnets at least, corresponding with the availability zones selected previously.
+Resources:
+  AppRegistry968496A3:
+    Type: AWS::ServiceCatalogAppRegistry::Application
+    Properties:
+      Description: Service Catalog application to track and manage all your resources for the solution migration-assistant-for-amazon-opensearch-service
+      Name:
+        Fn::Join:
+          - "-"
+          - - migration-assistant-for-amazon-opensearch-service
+            - Ref: AWS::Region
+            - Ref: AWS::AccountId
+            - Fn::Join:
+                - ""
+                - - Ref: Stage
+                  - "-"
+                  - Ref: AWS::Region
+      Tags:
+        Solutions:ApplicationType: AWS-Solutions
+        Solutions:SolutionID: SO0290
+        Solutions:SolutionName: migration-assistant-for-amazon-opensearch-service
+        Solutions:SolutionVersion: v2.5.8
+  AppRegistryAssociation:
+    Type: AWS::ServiceCatalogAppRegistry::ResourceAssociation
+    Properties:
+      Application:
+        Fn::GetAtt:
+          - AppRegistry968496A3
+          - Id
+      Resource:
+        Ref: AWS::StackId
+      ResourceType: CFN_STACK
+  DefaultApplicationAttributesFC1CC26B:
+    Type: AWS::ServiceCatalogAppRegistry::AttributeGroup
+    Properties:
+      Attributes:
+        applicationType: AWS-Solutions
+        version: v2.5.8
+        solutionID: SO0290
+        solutionName: migration-assistant-for-amazon-opensearch-service
+      Description: Attribute group for solution information
+      Name:
+        Fn::Join:
+          - "-"
+          - - Ref: AWS::Region
+            - Fn::Join:
+                - ""
+                - - Ref: Stage
+                  - "-"
+                  - Ref: AWS::Region
+            - attributes
+  DefaultApplicationAttributesApplicationAttributeGroupAssociation7d49af2dc917A220365A:
+    Type: AWS::ServiceCatalogAppRegistry::AttributeGroupAssociation
+    Properties:
+      Application:
+        Fn::GetAtt:
+          - AppRegistry968496A3
+          - Id
+      AttributeGroup:
+        Fn::GetAtt:
+          - DefaultApplicationAttributesFC1CC26B
+          - Id
+  BootstrapShellDoc:
+    Type: AWS::SSM::Document
+    Properties:
+      Content:
+        schemaVersion: "1.0"
+        description: Document to hold regional settings for Session Manager
+        sessionType: Standard_Stream
+        inputs:
+          cloudWatchLogGroupName: ""
+          cloudWatchEncryptionEnabled: true
+          cloudWatchStreamingEnabled: false
+          kmsKeyId: ""
+          runAsEnabled: false
+          runAsDefaultUser: ""
+          idleSessionTimeout: "60"
+          maxSessionDuration: ""
+          shellProfile:
+            linux: cd /opensearch-migrations && sudo -s
+      DocumentType: Session
+      Name:
+        Fn::Join:
+          - ""
+          - - BootstrapShellDoc-
+            - Ref: Stage
+            - "-"
+            - Ref: AWS::Region
+  BootstrapRole9F5149C7:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+        Version: "2012-10-17"
+      Description: EC2 Bootstrap Role
+      ManagedPolicyArns:
+        - Fn::Join:
+            - ""
+            - - "arn:"
+              - Ref: AWS::Partition
+              - :iam::aws:policy/AdministratorAccess
+  BootstrapRoleDefaultPolicy73F5FAC5:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action:
+              - cloudformation:DescribeStackResource
+              - cloudformation:SignalResource
+            Effect: Allow
+            Resource:
+              Ref: AWS::StackId
+        Version: "2012-10-17"
+      PolicyName: BootstrapRoleDefaultPolicy73F5FAC5
+      Roles:
+        - Ref: BootstrapRole9F5149C7
+  BootstrapInstanceProfile27016621:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Fn::Join:
+          - ""
+          - - bootstrap-instance-profile-
+            - Ref: Stage
+            - "-"
+            - Ref: AWS::Region
+      Roles:
+        - Ref: BootstrapRole9F5149C7
+  BootstrapSecurityGroupF430C916:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Migration-Assistant-Infra-Import-VPC/BootstrapSecurityGroup
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic by default
+          IpProtocol: "-1"
+        - CidrIpv6: ::/0
+          Description: Allow all outbound ipv6 traffic by default
+          IpProtocol: "-1"
+      VpcId:
+        Ref: VPCId
+  BootstrapEC2InstanceInstanceProfile987ED32E:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: BootstrapRole9F5149C7
+  BootstrapEC2Instance36A69AF7f9a6ee8c83da60b8:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Ref: VPCAvailabilityZones
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 50
+      IamInstanceProfile:
+        Ref: BootstrapEC2InstanceInstanceProfile987ED32E
+      ImageId:
+        Fn::FindInMap:
+          - BootstrapEC2InstanceAmiMapEF3D2AB0
+          - Ref: AWS::Region
+          - ami
+      InstanceType: t3.large
+      LaunchTemplate:
+        LaunchTemplateName: MigrationAssistantInfraImportVPCBootstrapEC2InstanceLaunchTemplateBCC4CF62
+        Version:
+          Fn::GetAtt:
+            - BootstrapEC2InstanceLaunchTemplate3BA48394
+            - LatestVersionNumber
+      SecurityGroupIds:
+        - Fn::GetAtt:
+            - BootstrapSecurityGroupF430C916
+            - GroupId
+      SubnetId:
+        Fn::Select:
+          - 0
+          - Ref: VPCPrivateSubnetIds
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Join:
+              - ""
+              - - bootstrap-instance-
+                - Ref: Stage
+                - "-"
+                - Ref: AWS::Region
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+            - ""
+            - - |-
+                #!/bin/bash
+                # fingerprint: 0fec4baf75e85835
+                (
+                  set +e
+                  /opt/aws/bin/cfn-init -v --region 
+              - Ref: AWS::Region
+              - " --stack "
+              - Ref: AWS::StackName
+              - |-2
+                 --resource BootstrapEC2Instance36A69AF7f9a6ee8c83da60b8 -c default
+                  /opt/aws/bin/cfn-signal -e $? --region 
+              - Ref: AWS::Region
+              - " --stack "
+              - Ref: AWS::StackName
+              - |-2
+                 --resource BootstrapEC2Instance36A69AF7f9a6ee8c83da60b8
+                  cat /var/log/cfn-init.log >&2
+                )
+    DependsOn:
+      - BootstrapRoleDefaultPolicy73F5FAC5
+      - BootstrapRole9F5149C7
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT5M
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          default:
+            - config
+        config:
+          files:
+            /opensearch-migrations/initBootstrap.sh:
+              content: |-
+                #!/bin/bash
+
+                usage() {
+                  echo "Usage: $0 [--tag <tag_name>] [--branch <branch_name>]"
+                  exit 1
+                }
+
+                tag=""
+                branch=""
+
+                # Parse options
+                while [[ "$#" -gt 0 ]]; do
+                  case $1 in
+                    --tag)
+                      if [ -n "$branch" ]; then
+                        echo "Error: You cannot specify both --tag and --branch."
+                        usage
+                      fi
+                      tag="$2"
+                      shift
+                      ;;
+                    --branch)
+                      if [ -n "$tag" ]; then
+                        echo "Error: You cannot specify both --tag and --branch."
+                        usage
+                      fi
+                      branch="$2"
+                      shift
+                      ;;
+                    *)
+                      echo "Unknown parameter passed: $1"
+                      usage
+                      ;;
+                  esac
+                  shift
+                done
+
+                yum update && yum install -y git java-11-amazon-corretto-devel docker nodejs https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm
+                systemctl start docker
+                git init
+                git remote | grep "origin" || git remote add -f origin https://github.com/opensearch-project/opensearch-migrations.git
+
+                if [ -n "$branch" ]; then
+                  git checkout $branch
+                elif [ -n "$tag" ]; then
+                  git checkout tags/$tag
+                else
+                  latest_release_tag=$(curl -s https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | jq -r ".tag_name")
+                  git checkout tags/$latest_release_tag
+                fi
+
+                cd deployment/cdk/opensearch-service-migration || exit
+
+                if [[ -n "$VPC_ID" ]]; then
+                  sed -i "s|<VPC_ID>|$VPC_ID|g" /opensearch-migrations/deployment/cdk/opensearch-service-migration/cdk.context.json
+                fi
+                if [[ -n "$STAGE" ]]; then
+                  sed -i "s|<STAGE>|$STAGE|g" /opensearch-migrations/deployment/cdk/opensearch-service-migration/cdk.context.json
+                fi
+
+                npm install -g aws-cdk 2>&1
+                npm install 2>&1
+                ./buildDockerImages.sh
+              encoding: plain
+              mode: "000744"
+              owner: root
+              group: root
+          commands:
+            "000":
+              command:
+                Fn::Join:
+                  - ""
+                  - - echo "export MIGRATIONS_APP_REGISTRY_ARN=
+                    - Fn::GetAtt:
+                        - AppRegistry968496A3
+                        - Arn
+                    - ; export MIGRATIONS_USER_AGENT=AwsSolution/SO0290/v2.5.8; export VPC_ID=
+                    - Ref: VPCId
+                    - ; export STAGE=
+                    - Ref: Stage
+                    - '" > /etc/profile.d/solutionsEnv.sh'
+  BootstrapEC2InstanceLaunchTemplate3BA48394:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        MetadataOptions:
+          HttpTokens: required
+      LaunchTemplateName: MigrationAssistantInfraImportVPCBootstrapEC2InstanceLaunchTemplateBCC4CF62
+  CDKMetadata:
+    Type: AWS::CDK::Metadata
+    Properties:
+      Analytics: v2:deflate64:H4sIAAAAAAAA/3VQXWsCQQz8Lb7vxfOgpb5VLJRCC6J9LzHNaXRvd9kPRZb97+X8Qlv6NMMwSSbTQG5GY6gHuA8VfW8rLUvIi4i0VdPWfKBzYlY9naHHjiN7hfvwlQP7nRATRtR2hc55XkmI/gB52pqJc1oIo1jTz8452OSJJyFYkqs8idHLMkV+9Ta5v8qNvagQOpi25sVS6thEJdhBnlvNxwM9zqwWOhyzntibCREN8czbVk7GX1JRTA3kBVPyEg/XHPfCZeh2Qc/fMRlaf3LnNEYuRV3+LGr09Ah1hdqtEerB87ndYY//Nne259vy7gspRRn7zbAJw11Tw2gMD4NNEKl8MlE6hvkJfwDz9HZF1gEAAA==
+    Condition: CDKMetadataAvailable
+Conditions:
+  CDKMetadataAvailable:
+    Fn::Or:
+      - Fn::Or:
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - af-south-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - ap-east-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - ap-northeast-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - ap-northeast-2
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - ap-northeast-3
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - ap-south-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - ap-south-2
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - ap-southeast-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - ap-southeast-2
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - ap-southeast-3
+      - Fn::Or:
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - ap-southeast-4
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - ca-central-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - ca-west-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - cn-north-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - cn-northwest-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - eu-central-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - eu-central-2
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - eu-north-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - eu-south-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - eu-south-2
+      - Fn::Or:
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - eu-west-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - eu-west-2
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - eu-west-3
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - il-central-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - me-central-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - me-south-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - sa-east-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - us-east-1
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - us-east-2
+          - Fn::Equals:
+              - Ref: AWS::Region
+              - us-west-1
+      - Fn::Equals:
+          - Ref: AWS::Region
+          - us-west-2
+
