@@ -39,8 +39,8 @@ jobs:
           echo '{' > workflow-info.json
           echo '  "pr_number": "${{ github.event.pull_request.number }}",' >> workflow-info.json
           echo '  "commit": "${{ github.event.pull_request.head.sha || github.event.after || github.sha }}",' >> workflow-info.json
-          echo '  "branch": "${{ github.ref }}",' >> workflow-info.json
-          echo '  "commit_parent": "${{ github.event.pull_request.base.sha || github.event.before || github.base.sha }}",' >> workflow-info.json
+          echo '  "branch": "${{ github.base_ref }}",' >> workflow-info.json
+          # echo '  "commit_parent": "${{ github.event.pull_request.base.sha || github.event.before || github.base.sha }}",' >> workflow-info.json
           echo '  "build_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",' >> workflow-info.json
           echo '  "build": "${{ github.run_id }}"' >> workflow-info.json
           echo '}' >> workflow-info.json
