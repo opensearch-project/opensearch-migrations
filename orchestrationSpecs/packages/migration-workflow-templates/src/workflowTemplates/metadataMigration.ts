@@ -29,7 +29,7 @@ const COMMON_METADATA_PARAMETERS = {
     ...makeRequiredImageParametersForKeys(["MigrationConsole"])
 };
 
-export function makeAuthDict(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
+export function makeTargetAuthDict(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
     // const safeAuthConfig = expr.stripUndefined(expr.get(expr.deserializeRecord(targetConfig), "authConfig"));
     const safeAuthConfig = (expr.getLoose(expr.deserializeRecord(targetConfig), "authConfig"));
     return expr.ternary(
@@ -60,7 +60,7 @@ export function makeAuthDict(targetConfig: BaseExpression<Serialized<z.infer<typ
 
 export function makeTargetParamDict(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
     return expr.mergeDicts(
-        makeAuthDict(targetConfig),
+        makeTargetAuthDict(targetConfig),
         expr.makeDict({
             "targetHost": expr.jsonPathStrict(targetConfig, "endpoint"),
             "targetInsecure": expr.dig(expr.deserializeRecord(targetConfig), ["allowInsecure"], false)

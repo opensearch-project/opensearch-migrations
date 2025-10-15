@@ -61,9 +61,9 @@ async function applyArgoWorkflowTemplate(workflowConfig: any, workflowName: stri
         const filePath = path.join(outputDirectory, `${workflowName}.yaml`);
         try {
             fs.writeFileSync(filePath, textFormattedResource, 'utf8');
-            console.log('File written successfully (synchronous).');
+            console.log(`File written successfully (${filePath}).`);
         } catch (error) {
-            console.error('Error writing file synchronously:', error);
+            console.error(`Error writing file ${filePath}:`, error);
         }
     }
 }

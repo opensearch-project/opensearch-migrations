@@ -117,7 +117,8 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoad", c =>
                     c.register({
                         ...(selectInputsForRegister(b, c)),
-                        sessionName: c.steps.idGenerator.id
+                        sessionName: c.steps.idGenerator.id,
+                        sourceVersion: expr.jsonPathStrict(b.inputs.sourceConfig, "version")
                     }),
                 { when: { templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)) }}
             )
