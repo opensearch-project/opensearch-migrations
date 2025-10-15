@@ -1,0 +1,25 @@
+{
+  "name": "@opensearch-migrations/schemas",
+  "version": "1.0.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./*": null,
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --build --noEmit",
+    "schema": "tsx src/dumpSchema.ts",
+    "argo-schema": "tsx src/dumpArgoSchema.ts",
+    "make-sample": "tsx src/makeSample.ts"
+  },
+  "dependencies": {
+    "zod": "*",
+    "@asteasolutions/zod-to-openapi": "^8.1.0"
+  }
+}
