@@ -183,16 +183,12 @@ jobs:
           name: test-reports-gradle-tests-stripe-${{ matrix.index }}
           path: |
             **/build/reports/tests/
-
-      - name: Publish Jacoco report artifact for stripe ${{ matrix.index }}
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
         with:
-          if-no-files-found: error
-          name: coverage-exec-artifacts-gradle-tests-stripe-${{ matrix.index }}
-          path: |
-            **/build/jacoco/*.exec
-
+          fail_ci_if_error: true
+          verbose: true
       - name: Show disk usage
         if: always()
         run: |

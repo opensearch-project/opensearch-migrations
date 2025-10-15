@@ -42,17 +42,17 @@ jobs:
           pattern: coverage-reports-*
           run-id: ${{ github.event.workflow_run.id }}
 
-      - name: Upload coverage report
-        uses: codecov/codecov-action@v5
-        with:
-          fail_ci_if_error: true
-          files: /**/coverage-reports/**/*.*
-          flags: unittests
-          override_branch: ${{ env.workflow-info_branch }}
-          override_commit: ${{ env.workflow-info_commit }}
-          override_pr: ${{ env.workflow-info_pr_number }}
-          commit_parent: ${{ env.workflow-info_commit_parent }}
-          override_build_url: ${{ env.workflow-info_build_url }}
-          override_build:  ${{ env.workflow-info_build }}
-          token: ${{ secrets.CODECOV_TOKEN }}
-          verbose: true
+      # - name: Upload coverage report
+      #   uses: codecov/codecov-action@v5
+      #   with:
+      #     fail_ci_if_error: true
+      #     files: /**/coverage-reports/**/*.*
+      #     flags: unittests
+      #     override_branch: ${{ env.workflow-info_branch }}
+      #     override_commit: ${{ env.workflow-info_commit }}
+      #     override_pr: ${{ env.workflow-info_pr_number }}
+      #     commit_parent: ${{ env.workflow-info_commit_parent }}
+      #     override_build_url: ${{ env.workflow-info_build_url }}
+      #     override_build:  ${{ env.workflow-info_build }}
+      #     token: ${{ secrets.CODECOV_TOKEN }}
+      #     verbose: true
