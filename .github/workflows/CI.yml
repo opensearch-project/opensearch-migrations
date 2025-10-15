@@ -184,14 +184,14 @@ jobs:
           path: |
             **/build/reports/tests/
 
-      - name: Publish Jacoco report artifact for stripe ${{ matrix.index }}
+      - name: Upload Codecov report artifact for stripe ${{ matrix.index }}
         if: always()
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
-          name: coverage-exec-artifacts-gradle-tests-stripe-${{ matrix.index }}
+          name: coverage-report-artifacts-gradle-tests-stripe-${{ matrix.index }}
           path: |
-            **/build/jacoco/*.exec
+            **/lcov.info
 
       - name: Show disk usage
         if: always()
@@ -203,29 +203,21 @@ jobs:
     needs: [ gradle-tests ]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-env
-      - name: Create clean .exec directory
-        run: rm -rf build/jacocoMerged && mkdir -p build/jacocoMerged
-
-      - name: Download all JaCoCo .exec files into directory expected by jacocoAggregateReport
+      - name: Download all codecov reports
         uses: actions/download-artifact@v5
         with:
-          path: build/jacocoMerged
-          pattern: coverage-exec-artifacts-gradle-tests-*
-          merge-multiple: true
+          path: reports
+          pattern: coverage-report-artifacts-gradle-tests-*
+          merge-multiple: false
 
-      - name: Generate aggregate JaCoCo report
-        run: gradle jacocoAggregateReport --stacktrace
-
-      - name: Upload Aggregate JaCoCo report
+      - name: Upload Coverate Artifacts
         uses: actions/upload-artifact@v4
         if: always()
         with:
           if-no-files-found: error
           name: coverage-reports-gradle-tests-aggregate
           path: |
-            build/reports/jacoco/mergedReport/*
+            reports/*
 
   python-e2e-tests:
     needs: [ generate-cache-key ]
