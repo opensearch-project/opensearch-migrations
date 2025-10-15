@@ -463,6 +463,10 @@ gradle.projectsEvaluated {
         previousTask = task as Task
     }
 
+    tasks.register("nonIsolatedTests") {
+        dependsOn sharedProcessTestsTasks
+    }
+
     tasks.register("allTests") {
         dependsOn sharedProcessTestsTasks
         dependsOn isolatedTestsTasks

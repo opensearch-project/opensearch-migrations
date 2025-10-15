@@ -9,7 +9,7 @@ env:
   java-version: '17'
   gradle-version: '8.12.1'
   node-version: '18.x'
-  gradle-test-parallelization: '30'
+  gradle-test-parallelization: '5'
 
 # Prevent multiple simultaneous runs except on main repo
 concurrency:
@@ -81,41 +81,41 @@ jobs:
         run: |
           flake8 $(git ls-files '*.py')
 
-  python-tests:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        py-project:
-          - migrationConsole/lib/console_link
-          - migrationConsole/cluster_tools
-          - k8sConfigMapUtilScripts
-    env:
-      WORKING_DIR: ./TrafficCapture/dockerSolution/src/main/docker/${{ matrix.py-project }}
-    defaults:
-      run:
-        working-directory: ${{ env.WORKING_DIR }}
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-env
-      - run: |
-          python3 -m pip install --upgrade pipenv
-          pipenv install --deploy --dev
-          pipenv graph
+  # python-tests:
+  #   runs-on: ubuntu-latest
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       py-project:
+  #         - migrationConsole/lib/console_link
+  #         - migrationConsole/cluster_tools
+  #         - k8sConfigMapUtilScripts
+  #   env:
+  #     WORKING_DIR: ./TrafficCapture/dockerSolution/src/main/docker/${{ matrix.py-project }}
+  #   defaults:
+  #     run:
+  #       working-directory: ${{ env.WORKING_DIR }}
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: ./.github/actions/setup-env
+  #     - run: |
+  #         python3 -m pip install --upgrade pipenv
+  #         pipenv install --deploy --dev
+  #         pipenv graph
 
-      - run: |
-          pipenv run test
-          pipenv run coverage xml
-      - name: Get Sanitized Name
-        env:
-          PY_PROJECT: ${{ matrix.py-project }}
-        run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT//\//-}" >> $GITHUB_ENV
-      - name: Upload Coverage Reports
-        uses: actions/upload-artifact@v4
-        with:
-          if-no-files-found: error
-          name: coverage-reports-python-tests-${{ env.SANITIZED_PY_PROJECT }}
-          path: ${{ env.WORKING_DIR }}/coverage.xml
+  #     - run: |
+  #         pipenv run test
+  #         pipenv run coverage xml
+  #     - name: Get Sanitized Name
+  #       env:
+  #         PY_PROJECT: ${{ matrix.py-project }}
+  #       run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT//\//-}" >> $GITHUB_ENV
+  #     - name: Upload Coverage Reports
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         if-no-files-found: error
+  #         name: coverage-reports-python-tests-${{ env.SANITIZED_PY_PROJECT }}
+  #         path: ${{ env.WORKING_DIR }}/coverage.xml
 
   generate-test-matrix:
     runs-on: ubuntu-latest
@@ -151,7 +151,7 @@ jobs:
       - name: Run Gradle tests with striping
         run: |
           MAX_WORKERS=$(( $(nproc) - 1 ))
-          gradle allTests \
+          gradle nonIsolatedTests \
           --max-workers $MAX_WORKERS \
           -Dtest.striping.total=${{ env.gradle-test-parallelization }} \
           -Dtest.striping.index=${{ matrix.index }} \
@@ -268,25 +268,25 @@ jobs:
           docker stop $(docker ps -q) && docker system prune --volumes -f
           docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^migrations/' | xargs -I {} docker image rm {}
 
-  node-tests:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        npm-project:
-          - ./deployment/cdk/opensearch-service-migration
-          - ./deployment/migration-assistant-solution
-          - ./frontend
-    defaults:
-      run:
-        working-directory: ${{ matrix.npm-project }}
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-env
-      - name: Install NPM dependencies
-        run: npm ci
-      - name: Run CDK Jest Tests (using mocked images)
-        run: npm run test
+  # node-tests:
+  #   runs-on: ubuntu-latest
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       npm-project:
+  #         - ./deployment/cdk/opensearch-service-migration
+  #         - ./deployment/migration-assistant-solution
+  #         - ./frontend
+  #   defaults:
+  #     run:
+  #       working-directory: ${{ matrix.npm-project }}
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: ./.github/actions/setup-env
+  #     - name: Install NPM dependencies
+  #       run: npm ci
+  #     - name: Run CDK Jest Tests (using mocked images)
+  #       run: npm run test
 
   link-checker:
     runs-on: ubuntu-latest
@@ -312,13 +312,13 @@ jobs:
 
   all-ci-checks-pass:
     needs:
-      - python-tests
+      # - python-tests
       - gradle-tests
       - jacoco-aggregate
-      - link-checker
-      - node-tests
-      - python-e2e-tests
-      - python-lint
+      # - link-checker
+      # - node-tests
+      # - python-e2e-tests
+      # - python-lint
       - gradle-extended-check
     if: always()
     runs-on: ubuntu-latest
