@@ -106,12 +106,12 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
         click.echo(f"Workflow: {workflow_name}")
         click.echo(f"Namespace: {namespace}")
         click.echo(f"Phase: {status_result['phase']}")
-        click.echo(f"Progress: {status_result['progress']}")
         if status_result['started_at']:
             click.echo(f"Started: {status_result['started_at']}")
         click.echo("=" * 60)
 
-        # Display steps
+        # Display steps and collect suspended steps
+        suspended_steps = []
         if status_result['steps']:
             click.echo("\nWorkflow Steps:")
             click.echo("-" * 60)
@@ -120,8 +120,9 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
                 step_name = step['name']
                 step_phase = step['phase']
                 
-                # Highlight suspended steps
+                # Collect suspended steps for approval selection
                 if step_type == 'Suspend' and step_phase == 'Running':
+                    suspended_steps.append(step_name)
                     click.echo(f"  → {step_name} [{step_type}] - {step_phase} ⏸️  (WAITING FOR APPROVAL)")
                 else:
                     status_icon = "✓" if step_phase == "Succeeded" else "●"
@@ -130,10 +131,39 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
         
         # Interactive confirmation unless --acknowledge is passed
         if not acknowledge:
-            click.echo("\nThis will resume the workflow and allow it to continue execution.")
-            if not click.confirm("Do you want to approve and resume this workflow?"):
+            if not suspended_steps:
+                click.echo("\nNo suspended steps found waiting for approval.")
+                ctx.exit(ExitCode.SUCCESS.value)
+            
+            click.echo("\nSelect an action:")
+            click.echo("-" * 60)
+            
+            # Display suspended steps with numbers
+            for idx, step_name in enumerate(suspended_steps):
+                click.echo(f"  [{idx}] Approve and resume: {step_name}")
+            
+            click.echo(f"  [c] Cancel")
+            click.echo("-" * 60)
+            
+            # Get user selection
+            choice = click.prompt("\nEnter your choice", type=str).strip().lower()
+            
+            if choice == 'c':
                 click.echo("Approval cancelled.")
                 ctx.exit(ExitCode.SUCCESS.value)
+            
+            # Validate numeric choice
+            try:
+                choice_idx = int(choice)
+                if choice_idx < 0 or choice_idx >= len(suspended_steps):
+                    click.echo(f"Error: Invalid choice. Please select 0-{len(suspended_steps)-1} or 'c'", err=True)
+                    ctx.exit(ExitCode.FAILURE.value)
+                
+                selected_step = suspended_steps[choice_idx]
+                click.echo(f"\nApproving step: {selected_step}")
+            except ValueError:
+                click.echo(f"Error: Invalid input. Please enter a number (0-{len(suspended_steps)-1}) or 'c'", err=True)
+                ctx.exit(ExitCode.FAILURE.value)
 
         # Resume the workflow
         result = service.approve_workflow(
