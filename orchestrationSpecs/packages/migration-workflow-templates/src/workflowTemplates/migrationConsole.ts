@@ -5,7 +5,7 @@ import {
 import {z} from "zod";
 import {
     AllowLiteralOrExpression,
-    BaseExpression,
+    BaseExpression, defineParam,
     defineRequiredParam,
     expr,
     IMAGE_PULL_POLICY,
@@ -31,18 +31,14 @@ const KafkaServicesConfig = z.object({
 })
 
 const configComponentParameters = {
-    kafkaInfo: defineRequiredParam<z.infer<typeof KafkaServicesConfig> | MissingField>({
-        description: "Snapshot configuration information (JSON)"
-    }),
-    sourceConfig: defineRequiredParam<z.infer<typeof CLUSTER_CONFIG> | MissingField>({
-        description: "Source cluster configuration (JSON)"
-    }),
-    targetConfig: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG> | MissingField>({
-        description: "Target cluster configuration (JSON)"
-    }),
-    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG> | MissingField>({
-        description: "Snapshot configuration information (JSON)"
-    }),
+    kafkaInfo: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof KafkaServicesConfig>>(),
+        description: "Snapshot configuration information (JSON)"}),
+    sourceConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof CLUSTER_CONFIG>>(),
+        description: "Source cluster configuration (JSON)"}),
+    targetConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof TARGET_CLUSTER_CONFIG>>(),
+        description: "Target cluster configuration (JSON)"}),
+    snapshotConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
+        description: "Snapshot configuration information (JSON)"})
 };
 
 const SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE = `
@@ -102,13 +98,17 @@ def normalizeRepoConfig:
     .
   end;
 
+def removeUseLocalStack:
+  del(.useLocalStack);
+
 # Apply recursively to catch nested objects
 def recurseNormalize:
   (normalizeAuthConfig
    | normalizeAllowInsecure
    | normalizeRepoPath
    | normalizeSnapshotName
-   | normalizeRepoConfig)
+   | normalizeRepoConfig
+   | removeUseLocalStack)
   | with_entries(.value |= (if type=="object" then (.|recurseNormalize) else . end));
 
 . | recurseNormalize

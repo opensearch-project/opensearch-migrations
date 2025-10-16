@@ -46,6 +46,7 @@ import org.opensearch.migrations.bulkload.worker.RegularDocumentReaderEngine;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -59,7 +60,6 @@ import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.IValueValidator;
-import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
@@ -355,11 +355,11 @@ public class RfsMigrateDocuments {
         log.info("Starting RfsMigrateDocuments with workerId=" + workerId);
 
         Args arguments = new Args();
-        JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
+        var jCommander = JsonCommandLineParser.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
 
         if (arguments.help) {
-            jCommander.usage();
+            jCommander.getJCommander().usage();
             return;
         }
 

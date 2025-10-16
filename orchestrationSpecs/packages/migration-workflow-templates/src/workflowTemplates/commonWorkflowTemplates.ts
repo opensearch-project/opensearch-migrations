@@ -1,13 +1,13 @@
 import {z} from "zod";
 import {TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {
-    BaseExpression,
+    BaseExpression, Container,
     defineParam,
     defineRequiredParam,
     expr,
     IMAGE_PULL_POLICY,
-    InputParamDef,
-    Serialized
+    InputParamDef, makeDirectTypeProxy, makeStringTypeProxy,
+    Serialized, Volume
 } from "@opensearch-migrations/argo-workflow-builders";
 
 export const CommonWorkflowParameters = {
@@ -68,15 +68,14 @@ export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<Se
     };
 }
 
-export function safeSpread<T>(list: T[]) {
-    return list === undefined ? [] : list;
-}
-
-export type ContainerVolumePair = { container: Record<string, any>, volumes: Record<string, any>[]};
+export type ContainerVolumePair = {
+    readonly container: Container,
+    readonly volumes: Volume[]
+};
 
 export function setupTestCredsForContainer(
     useLocalStack: BaseExpression<boolean>,
-    def: ContainerVolumePair)
+    def: ContainerVolumePair): ContainerVolumePair
 {
     const TEST_CREDS_VOLUME_NAME = "localstack-test-creds";
     const {volumeMounts, env, ...restOfContainer} = def.container;
@@ -86,22 +85,22 @@ export function setupTestCredsForContainer(
             {
                 name: TEST_CREDS_VOLUME_NAME,
                 configMap: {
-                    name: expr.literal("localstack-test-creds"),
-                    optional: expr.not(useLocalStack)
+                    name: makeStringTypeProxy(expr.literal("localstack-test-creds")),
+                    optional: makeDirectTypeProxy(expr.not(useLocalStack))
                 }
             }
         ],
         container: {
             ...restOfContainer,
             env: [
-                ...safeSpread(env),
+                ...(env === undefined ? [] : env),
                 {
                     name: "AWS_SHARED_CREDENTIALS_FILE",
-                    value: expr.ternary(useLocalStack, expr.literal("/config/credentials"), expr.literal(""))
+                    value: makeStringTypeProxy(expr.ternary(useLocalStack, expr.literal("/config/credentials"), expr.literal("")))
                 }
             ],
             volumeMounts: [
-                ...safeSpread(volumeMounts),
+                ...(volumeMounts === undefined ? [] : volumeMounts),
                 {
                     name: TEST_CREDS_VOLUME_NAME,
                     mountPath: "/config/credentials",
@@ -109,7 +108,7 @@ export function setupTestCredsForContainer(
                 }
             ]
         }
-    }
+    } as const;
 }
 
 const DEFAULT_LOGGING_CONFIGURATION_CONFIGMAP_NAME = "default-logging-configuration";
@@ -146,7 +145,7 @@ export function setupLog4jConfigForContainer(
     customLoggingEnabled: BaseExpression<boolean>,
     loggingConfigMapName: BaseExpression<string>,
     def: ContainerVolumePair,
-    existingJavaOpts: BaseExpression<string>=expr.literal(" "))
+    existingJavaOpts: BaseExpression<string>=expr.literal(" ")): ContainerVolumePair
 {
     const {volumeMounts, env, ...restOfContainer} = def.container;
     const LOG4J_CONFIG_VOLUME_NAME = "log4j-configuration";
@@ -156,33 +155,33 @@ export function setupLog4jConfigForContainer(
             {
                 name: LOG4J_CONFIG_VOLUME_NAME,
                 configMap: {
-                    name: expr.ternary(
-                        expr.equals(expr.literal(""),
-                            expr.nullCoalesce(loggingConfigMapName, expr.literal(""))),
+                    name: makeStringTypeProxy(expr.ternary(
+                        expr.isEmpty(loggingConfigMapName),
                         expr.literal(DEFAULT_LOGGING_CONFIGURATION_CONFIGMAP_NAME),
-                        loggingConfigMapName),
-                    optional: expr.not(customLoggingEnabled)
+                        loggingConfigMapName)),
+                    optional: makeDirectTypeProxy(expr.not(customLoggingEnabled))
                 }
             }
         ],
         container: {
             ...restOfContainer,
             env: [
-                ...safeSpread(env),
+                ...(env === undefined ? [] : env),
                 {
                     name: "JAVA_OPTS",
                     value:
-                        expr.concatWith(" ",
+                        makeStringTypeProxy(expr.concatWith(" ",
                             existingJavaOpts,
                             expr.ternary(
                                 customLoggingEnabled,
                                 expr.literal("-Dlog4j2.configurationFile=/config/logConfiguration"),
                                 expr.literal("")),
                             )
+                        )
                 }
             ],
             volumeMounts: [
-                ...safeSpread(volumeMounts),
+                ...(volumeMounts === undefined ? [] : volumeMounts),
                 {
                     name: LOG4J_CONFIG_VOLUME_NAME,
                     mountPath: "/config/logConfiguration",
@@ -190,5 +189,5 @@ export function setupLog4jConfigForContainer(
                 }
             ]
         }
-    }
+    } as const;
 }

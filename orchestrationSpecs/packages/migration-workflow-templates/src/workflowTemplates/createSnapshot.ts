@@ -48,9 +48,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addSteps(b => b
             .addStep("getConsoleConfig", MigrationConsole, "getConsoleConfig", c =>
                 c.register({
-                    ...selectInputsForRegister(b, c),
-                    kafkaInfo: MISSING_FIELD,
-                    targetConfig: MISSING_FIELD
+                    ...selectInputsForRegister(b, c)
                 }))
 
             .addStep("createSnapshot", MigrationConsole, "runMigrationCommand", c =>

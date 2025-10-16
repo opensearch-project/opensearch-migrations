@@ -3,21 +3,25 @@ package org.opensearch.migrations.jcommander;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
+import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.Parameters;
 import com.beust.jcommander.ParametersDelegate;
+import com.beust.jcommander.converters.IParameterSplitter;
+import com.beust.jcommander.converters.NoConverter;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * <p>
@@ -39,8 +43,9 @@ import lombok.SneakyThrows;
  *   JSON file:   java App ---JSON-FILE /path/to/config.json migrate
  * </p>
  */
+@Slf4j
 public class JsonCommandLineParser {
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
     private static final String INLINE_JSON_FLAG = "---INLINE-JSON";
     private static final String JSON_FILE_FLAG = "---JSON-FILE";
     public static final String JCOMMANDER_COMMAND_JSON_FIELD_NAME = "jcommanderCommand";
@@ -50,7 +55,8 @@ public class JsonCommandLineParser {
     private final List<Object> mainObjects = new ArrayList<>();
     private final Map<String, Object> commandObjects = new LinkedHashMap<>();
 
-    private JsonCommandLineParser(Builder builder) throws InvocationTargetException, NoSuchMethodException, InstantiationException, IllegalAccessException {
+    private JsonCommandLineParser(Builder builder, ObjectMapper objectMapper) throws ReflectiveOperationException {
+        this.objectMapper = objectMapper;
         // Validate that no Parameters use reserved flags
         validateNoReservedFlags(builder.mainObjects);
         for (Object commandObj : builder.commandObjects.values()) {
@@ -115,7 +121,12 @@ public class JsonCommandLineParser {
 
         @SneakyThrows
         public JsonCommandLineParser build() {
-            return new JsonCommandLineParser(this);
+            return build(new ObjectMapper());
+        }
+
+        @SneakyThrows
+        public JsonCommandLineParser build(ObjectMapper objectMapper) {
+            return new JsonCommandLineParser(this, objectMapper);
         }
     }
 
@@ -140,7 +151,6 @@ public class JsonCommandLineParser {
         return jCommander.getParsedCommand();
     }
 
-    @AllArgsConstructor
     private static class OuterParsedArgs {
         final String jsonContent;
         final String commandName;
@@ -148,6 +158,18 @@ public class JsonCommandLineParser {
         public OuterParsedArgs() {
             this.commandName = null;
             this.jsonContent = null;
+        }
+
+        public OuterParsedArgs(String jsonContent, String commandName) {
+            this.commandName = commandName;
+            String trimmedContent = jsonContent.trim();
+            this.jsonContent = (trimmedContent.startsWith("{") || trimmedContent.startsWith("[")) ? jsonContent :
+                decodeBase64String(jsonContent);
+        }
+
+        private String decodeBase64String(String str) {
+            log.atInfo().setMessage("Decoding argument as base64").log(); // don't show the contents because they might include sensitive data
+            return new String(Base64.getDecoder().decode(str));
         }
 
         boolean isJsonMode() { return jsonContent != null; }
@@ -223,7 +245,7 @@ public class JsonCommandLineParser {
                     }
                 }
             }
-            return new OuterParsedArgs(jsonContent,commandName);
+            return new OuterParsedArgs(jsonContent, commandName);
         } else if (args.length == 3) {
             throw new IllegalArgumentException(
                 "Unexpected argument: '" + (jsonFlagIndex == 0 ? args[2] : args[0]) + "'. " +
@@ -235,19 +257,21 @@ public class JsonCommandLineParser {
         return new OuterParsedArgs(jsonContent, commandName);
     }
 
-    private void parseJson(OuterParsedArgs parsedArgs) throws JsonProcessingException, InvocationTargetException, IllegalAccessException, NoSuchMethodException, InstantiationException, NoSuchFieldException {
+    private void parseJson(OuterParsedArgs parsedArgs) throws JsonProcessingException, ReflectiveOperationException
+    {
+
         JsonNode rootNode = objectMapper.readTree(parsedArgs.jsonContent);
 
         // Build combined parameter map from ALL objects that will be populated
         validateAllKeysAreParameters(parsedArgs, rootNode);
 
         for (Object obj : mainObjects) {
-            populateFromJson(obj, rootNode);
+            populateFromJson(objectMapper, obj, rootNode);
         }
 
         if (parsedArgs.commandName != null) {
             Object commandObj = commandObjects.get(parsedArgs.commandName);
-            populateFromJson(commandObj, rootNode);
+            populateFromJson(objectMapper, commandObj, rootNode);
 
             Field parsedCommandField = JCommander.class.getDeclaredField("parsedCommand");
             parsedCommandField.setAccessible(true);
@@ -255,7 +279,9 @@ public class JsonCommandLineParser {
         }
     }
 
-    private void validateAllKeysAreParameters(OuterParsedArgs parsedArgs, JsonNode rootNode) throws InvocationTargetException, IllegalAccessException, NoSuchMethodException, InstantiationException {
+    private void validateAllKeysAreParameters(OuterParsedArgs parsedArgs, JsonNode rootNode)
+        throws ReflectiveOperationException
+    {
         var allParameters = new HashSet<>();
         for (Object obj : mainObjects) {
             allParameters.addAll(buildParameterMap(obj, obj.getClass()).keySet());
@@ -280,13 +306,15 @@ public class JsonCommandLineParser {
         }
     }
 
-    private static void validateNoReservedFlags(List<Object> objects) throws NoSuchMethodException, InvocationTargetException, InstantiationException, IllegalAccessException {
+    private static void validateNoReservedFlags(List<Object> objects) throws ReflectiveOperationException {
         for (Object obj : objects) {
             validateNoReservedFlagsRecursive(obj, obj.getClass());
         }
     }
 
-    private static void validateNoReservedFlagsRecursive(Object obj, Class<?> clazz) throws NoSuchMethodException, InvocationTargetException, InstantiationException, IllegalAccessException {
+    private static void validateNoReservedFlagsRecursive(Object obj, Class<?> clazz)
+        throws ReflectiveOperationException
+    {
         for (Field field : clazz.getDeclaredFields()) {
             Parameter param = field.getAnnotation(Parameter.class);
             if (param != null) {
@@ -315,9 +343,8 @@ public class JsonCommandLineParser {
         }
     }
 
-    private static void populateFromJson(Object obj, JsonNode jsonNode)
-        throws InvocationTargetException, IllegalAccessException, NoSuchMethodException, InstantiationException, JsonProcessingException
-    {
+    private static void populateFromJson(ObjectMapper objectMapper, Object obj, JsonNode jsonNode)
+        throws ReflectiveOperationException, JsonProcessingException {
         Map<String, FieldInfo> parameterMap = buildParameterMap(obj, obj.getClass());
 
         var fieldNames = jsonNode.fieldNames();
@@ -332,7 +359,7 @@ public class JsonCommandLineParser {
             FieldInfo fieldInfo = parameterMap.get(jsonKey);
             if (fieldInfo != null) {
                 fieldInfo.field.setAccessible(true);
-                setFieldValue(fieldInfo.field, fieldInfo.owner, valueNode);
+                setFieldValue(objectMapper, fieldInfo.field, fieldInfo.owner, valueNode);
             }
         }
     }
@@ -348,7 +375,7 @@ public class JsonCommandLineParser {
     }
 
     private static Map<String, FieldInfo> buildParameterMap(Object rootObj, Class<?> clazz)
-        throws InvocationTargetException, IllegalAccessException, NoSuchMethodException, InstantiationException
+        throws ReflectiveOperationException
     {
         Map<String, FieldInfo> map = new HashMap<>();
         buildParameterMapRecursive(rootObj, clazz, map);
@@ -356,7 +383,7 @@ public class JsonCommandLineParser {
     }
 
     private static void buildParameterMapRecursive(Object obj, Class<?> clazz, Map<String, FieldInfo> map)
-        throws IllegalAccessException, NoSuchMethodException, InvocationTargetException, InstantiationException
+        throws ReflectiveOperationException
     {
         if (clazz.getSuperclass() != null) {
             buildParameterMapRecursive(obj, clazz.getSuperclass(), map);
@@ -405,8 +432,66 @@ public class JsonCommandLineParser {
         return result.toString();
     }
 
-    private static void setFieldValue(Field field, Object obj, JsonNode valueNode)
-        throws IllegalAccessException, JsonProcessingException {
+    private static IStringConverter<?> instantiateConverter(Class<? extends IStringConverter<?>> converterClass)
+        throws ReflectiveOperationException {
+        try {
+            // Try default constructor first
+            return converterClass.getDeclaredConstructor().newInstance();
+        } catch (NoSuchMethodException e) {
+            // Some converters might need a String argument (for error messages)
+            try {
+                return converterClass.getDeclaredConstructor(String.class).newInstance("PREFIX:");
+            } catch (NoSuchMethodException e2) {
+                throw new IllegalArgumentException("Cannot instantiate converter: " + converterClass.getName(), e);
+            }
+        }
+    }
+
+    private static void setFieldValue(ObjectMapper objectMapper, Field field, Object obj, JsonNode valueNode)
+        throws JsonProcessingException, ReflectiveOperationException {
+
+        // Check if field has @Parameter annotation with converter
+        Parameter param = field.getAnnotation(Parameter.class);
+        if (param != null && param.converter() != null && !param.converter().equals(NoConverter.class)) {
+            // Use the specified converter
+            IStringConverter<?> converter = instantiateConverter(param.converter());
+
+            Object value;
+            if (valueNode.isNull()) {
+                value = null;
+            } else if (valueNode.isArray() && List.class.isAssignableFrom(field.getType())) {
+                // Handle list parameters with converters
+                List<Object> list = new ArrayList<>();
+
+                // Check if there's also a splitter defined
+                if (param.splitter() != null && !param.splitter().equals(NoSplitter.class)) {
+                    // If splitter is defined, join array elements and let splitter handle it
+                    String joinedValue = StreamSupport.stream(valueNode.spliterator(), false)
+                        .map(JsonNode::asText)
+                        .collect(Collectors.joining(","));
+
+                    IParameterSplitter splitter = param.splitter().getDeclaredConstructor().newInstance();
+                    for (String item : splitter.split(joinedValue)) {
+                        list.add(converter.convert(item));
+                    }
+                } else {
+                    // No splitter, convert each array element
+                    for (JsonNode item : valueNode) {
+                        list.add(converter.convert(item.asText()));
+                    }
+                }
+                value = list;
+            } else {
+                // Convert single value
+                String textValue = valueNode.asText();
+                value = converter.convert(textValue);
+            }
+
+            field.set(obj, value);
+            return;
+        }
+
+        // Fall back to existing logic if no converter specified
         Class<?> fieldType = field.getType();
 
         if (valueNode.isNull()) {
