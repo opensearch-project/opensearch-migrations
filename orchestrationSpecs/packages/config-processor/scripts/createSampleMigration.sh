@@ -8,14 +8,13 @@ TEMPORARY_FILE=$(mktemp)
 # Ensure cleanup on exit
 trap "rm -f $TEMPORARY_FILE" EXIT
 
-echo "Running configuration conversion..."
-npm run dev-transform-config --silent -- ../../sampleMigration.yaml > "$TEMPORARY_FILE"
-
 UUID=$(uuidgen)
 echo "Generated unique prefix: $UUID"
 
-echo "Running initialize..."
-npm run dev-initialize-workflow-state -- --prefix $UUID "$TEMPORARY_FILE"
+CONFIG_FILENAME=../../sampleMigration.yaml
+
+echo "Running configuration conversion..."
+npm run dev-initialize --silent -- --user-config $CONFIG_FILENAME --prefix $UUID > "$TEMPORARY_FILE"
 
 echo "Applying workflow to Kubernetes..."
 cat <<EOF | kubectl create -f -
