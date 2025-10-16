@@ -147,18 +147,14 @@ deploy_dashboard() {
   # JSON aware token replacement
   local processed_json
   processed_json="$(jq \
-    --arg region "$region" \
-    --arg stage "$stage" \
-    --arg qualifier "$qualifier" \
-    --arg account "$account" \
     '
     def repl(s; v):
       if type=="string" then gsub(s; v) else . end;
     walk(
-        repl("REGION"; $region)
-      | repl("MA_STAGE"; $stage)
-      | repl("MA_QUALIFIER"; $qualifier)
-      | repl("ACCOUNT_ID"; $account)
+        repl("REGION"; "placeholder-region")
+      | repl("MA_STAGE"; "placeholder-stage")
+      | repl("MA_QUALIFIER"; "placeholder-qualifier")
+      | repl("ACCOUNT_ID"; "placeholder-account-id")
     )
     ' < "$dashboard_file")" || { echo "ERROR: failed to process JSON"; exit 1; }
 
