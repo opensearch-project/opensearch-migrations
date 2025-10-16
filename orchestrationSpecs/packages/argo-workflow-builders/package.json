@@ -1,0 +1,31 @@
+{
+  "name": "@opensearch-migrations/argo-workflow-builders",
+  "version": "1.0.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./*": null,
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --noEmit",
+    "make-templates": "tsx makeTemplates.cjs",
+    "test": "jest"
+  },
+  "dependencies": {
+    "zod": "*"
+  },
+  "devDependencies": {
+    "@types/jest": "*"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ]
+}
