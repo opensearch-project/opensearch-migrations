@@ -21,9 +21,9 @@ public class RefSafeHolderTest {
 
     @Test
     void testCloseWithNullResource() {
-        var holder = RefSafeHolder.create(null);
-        assertNull(holder.get());
-        assertEquals("RefSafeHolder{null}", holder.toString());
-        holder.close();
+        try (var holder = RefSafeHolder.create(null)) {
+            assertNull(holder.get());
+            assertEquals("RefSafeHolder{null}", holder.toString());
+        }
     }
 }

@@ -6,6 +6,7 @@ plugins {
     // Apply the java Plugin to add support for Java.
     id 'java'
     id 'java-test-fixtures'
+    id 'net.ltgt.errorprone'
 }
 
 // Force resolution of all versions of dependencies explicitly listed in the version catalog even if
@@ -45,6 +46,9 @@ configurations {
 }
 
 dependencies {
+    errorprone libs.errorprone
+    errorprone libs.errorprone.slf4j
+
     bomAliases.each { alias ->
         def lib = libVersions.findLibrary(alias).get().get()
         enforcedAlignment(enforcedPlatform(lib)) {
@@ -67,6 +71,17 @@ dependencies {
     // JUnit Jupiter
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.errorprone.enabled = true
+    options.errorprone.disableWarningsInGeneratedCode = true
+    options.errorprone {
+        allDisabledChecksAsWarnings = true
+        disableAllChecks = true
+        check('Slf4jPlaceholderMismatch', net.ltgt.gradle.errorprone.CheckSeverity.ERROR)
+        check('MustBeClosed', net.ltgt.gradle.errorprone.CheckSeverity.ERROR)
+    }
 }
 
 tasks.named('test') {
