@@ -13,6 +13,7 @@ spec:
             - name: target-url
             - name: traffic-replayer-image
             - name: traffic-replayer-pull-policy
+            - name: kafka-client-secret-bundle
 
             # required, but has defaults
             - name: replicas
@@ -94,6 +95,9 @@ spec:
                 - name: replayer
                   image: {{inputs.parameters.traffic-replayer-image}}
                   imagePullPolicy: {{inputs.parameters.traffic-replayer-pull-policy}}
+                  volumeMounts:
+                  - name: kafka-config
+                    mountPath: "/opt/kafka-config"
                   env:
                     # Required parameters
                     - name: TARGET_URL
@@ -149,7 +153,7 @@ spec:
                     - name: KAFKA_TRAFFIC_GROUP_ID
                       value: "{{inputs.parameters.kafka-traffic-group-id}}"
                     - name: KAFKA_TRAFFIC_PROPERTY_FILE
-                      value: "{{inputs.parameters.kafka-traffic-property-file}}"
+                      value: "/opt/kafka-config/kafka.properties"
                     - name: KAFKA_TRAFFIC_ENABLE_MSK_AUTH
                       value: "{{inputs.parameters.kafka-traffic-enable-msk-auth}}"
           
@@ -212,4 +216,7 @@ spec:
           
                       echo "Starting traffic replayer with arguments: ${ARGS[*]}"
                       exec /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer "${ARGS[@]}"
-
+                volumes:
+                - name: kafka-config
+                  secret:
+                    secretName: {{inputs.parameters.kafka-client-secret-bundle}}
