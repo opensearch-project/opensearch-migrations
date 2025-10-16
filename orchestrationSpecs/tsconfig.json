@@ -1,40 +1,8 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "commonjs",
-    "lib": ["ES2022"],
-    "outDir": "./dist",
-    "rootDir": ".",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "removeComments": false,
-    "noImplicitAny": true,
-    "strictNullChecks": true,
-    "strictFunctionTypes": true,
-    "noImplicitThis": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "noErrorTruncation": true,
-    "extendedDiagnostics": true,
-    "moduleResolution": "node",
-//    "baseUrl": "./",
-    "paths": {
-      "@/*": ["./src/*"],
-      "resources/*": ["./resources/*"]
-    },
-    "incremental": true,
-    "tsBuildInfoFile": "..tsbuildinfo",
-    "allowJs": false,
-    "checkJs": false,
-    "maxNodeModuleJsDepth": 0
-  },
-  "types": ["jest", "node"],
-  "include": ["src/**/*", "tests/**/*"],
-  "exclude": ["node_modules", "dist", "build"]
+  "references": [
+    { "path": "./packages/schemas" },
+    { "path": "./packages/argo-workflow-builders" },
+    { "path": "./packages/migration-workflow-templates"},
+    { "path": "./packages/config-processor" }
+  ]
 }

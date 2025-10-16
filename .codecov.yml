@@ -6,3 +6,27 @@ coverage:
       default:
         # Only fail if the coverage decreases by more than 1%
         threshold: 1%
+
+ignore:
+  - "**/build/**"
+  - "**/buildSrc/**"
+  - "**/*Test*/**"
+  - "**/*test*/**"
+  - "**/node_modules/**"
+  - "**/cdk.out/**"
+  - "**/config/**"
+  - "**/*.xml"
+  - "**/*.config"
+  - "**/migrationAssistantWithArgo/**"
+  - "**/dashboardsSanitizer/**"
+  - "**/DocumentsFromSnapshotMigration/docker/**"
+  - "**/jenkinsdocker/**"
+  - "**/__init__.py"
+  - "**/testAutomation/**"
+  - "**/integ_test/**"
+  - "**/setup.py"
+  - "**/jest.config.js"
+  - "**/coverage/**/*"
+  - "**/frontend/out/**"
+  - "**/generated/**"
+  - "**/orchestrationSpecs/**"

@@ -2,37 +2,6 @@
 subprojects {
     apply plugin: 'java'
     apply plugin: 'maven-publish'
-
-    // TODO: Expand to do more static checking in more projects
-    if (project.name == "trafficReplayer" || project.name == "trafficCaptureProxyServer") {
-        dependencies {
-            annotationProcessor libs.errorprone
-        }
-        tasks.named('compileJava', JavaCompile) {
-            if (project.name == "trafficReplayer" || project.name == "trafficCaptureProxyServer") {
-                options.fork = true
-                // Taken from https://errorprone.info/docs/installation
-                options.forkOptions.jvmArgs += [
-                    '--add-exports', 'jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED',
-                    '--add-exports', 'jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED',
-                    '--add-exports', 'jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED',
-                    '--add-exports', 'jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED',
-                    '--add-exports', 'jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED',
-                    '--add-exports', 'jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED',
-                    '--add-exports', 'jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED',
-                    '--add-exports', 'jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED',
-                    '--add-opens', 'jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED',
-                    '--add-opens', 'jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED',
-                ]
-
-                options.compilerArgs += [
-                        "-XDcompilePolicy=simple",
-                        "-Xplugin:ErrorProne -XepDisableAllChecks -Xep:MustBeClosed:ERROR -XepDisableWarningsInGeneratedCode",
-                        "--should-stop=ifError=FLOW"
-                ]
-            }
-        }
-    }
 }
 
 allprojects {

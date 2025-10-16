@@ -42,11 +42,16 @@ spec:
           - name: config-contents
           - name: migration-console-image
           - name: migration-console-pull-policy
+          - name: kafka-client-secret-bundle
+            value: "dummy-secret"
           - name: use-localstack-aws-creds
             value: "false"
       container:
         image: "{{inputs.parameters.migration-console-image}}"
         imagePullPolicy: "{{inputs.parameters.migration-console-pull-policy}}"
+        volumeMounts:
+        - name: kafka-config
+          mountPath: "/opt/kafka-config"
         command: ["/bin/sh", "-c"]
         args:
           - |
@@ -73,17 +78,28 @@ spec:
             echo ---
             cat /config/migration_services.yaml
             echo ---
+
+            if [ "{{inputs.parameters.kafka-client-secret-bundle}}" = "" ]; then
+              echo "WARNING: No kafka-client-secret-bundle provided. Kafka functionality will be limited or unavailable."
+            fi
             
             {{inputs.parameters.command}}
+      volumes:
+      - name: kafka-config
+        secret:
+          secretName: "{{inputs.parameters.kafka-client-secret-bundle}}"
+          optional: true
 
     - name: deploy-console-with-config
       inputs:
         parameters:
           - name: command
-          - name: config-contents
+          - name: configContents
           - name: name
           - name: migration-console-image
           - name: migration-console-pull-policy
+          - name: kafka-client-secret-bundle
+            value: "dummy-secret"
       outputs:
         parameters:
           - name: deployment-name
@@ -112,6 +128,9 @@ spec:
                   - name: main
                     image: "{{inputs.parameters.migration-console-image}}"
                     imagePullPolicy: "{{inputs.parameters.migration-console-pull-policy}}"
+                    volumeMounts:
+                    - name: kafka-config
+                      mountPath: "/opt/kafka-config"
                     command:
                       - "/bin/sh"
                       - "-c"
@@ -119,7 +138,7 @@ spec:
                         set -e
           
                         base64 -d > /config/migration_services.yaml << EOF
-                        {{= toBase64(inputs.parameters['config-contents']) }}
+                        {{=toBase64(inputs.parameters.configContents)}}
                         EOF
                       
                         . /etc/profile.d/venv.sh
@@ -129,8 +148,17 @@ spec:
                         echo ---
                         cat /config/migration_services.yaml
                         echo ---
+
+                        if [ "{{inputs.parameters.kafka-client-secret-bundle}}" = "" ]; then
+                          echo "WARNING: No kafka-client-secret-bundle provided. Kafka functionality will be limited or unavailable."
+                        fi
           
                         {{inputs.parameters.command}}
+                volumes:
+                - name: kafka-config
+                  secret:
+                    secretName: "{{inputs.parameters.kafka-client-secret-bundle}}"
+                    optional: true
 
     - name: run-console
       inputs:
@@ -146,6 +174,8 @@ spec:
             value: ""
           - name: kafka-info
             value: ""
+          - name: kafka-client-secret-bundle
+            value: "dummy-secret"
       steps:
         - - name: get-console-config
             template: get-console-config
@@ -171,6 +201,8 @@ spec:
                   value: "{{inputs.parameters.migration-console-image}}"
                 - name: migration-console-pull-policy
                   value: "{{inputs.parameters.migration-console-pull-policy}}"
+                - name: kafka-client-secret-bundle
+                  value: "{{inputs.parameters.kafka-client-secret-bundle}}"
 
     - name: deploy-console
       inputs:
@@ -188,6 +220,8 @@ spec:
             value: ""
           - name: target-cluster
             value: ""
+          - name: kafka-client-secret-bundle
+            value: "dummy-secret"
       outputs:
         parameters:
           - name: deployment-name
@@ -212,7 +246,7 @@ spec:
               parameters:
                 - name: name
                   value: "{{=let n=inputs.parameters.name; n == '' ? 'diagnostic-console-' + workflow.uid : n}}"
-                - name: config-contents
+                - name: configContents
                   value: "{{steps.get-console-config.outputs.parameters.config-contents}}"
                 - name: command
                   value: "{{inputs.parameters.command}}"
@@ -220,3 +254,5 @@ spec:
                   value: "{{inputs.parameters.migration-console-image}}"
                 - name: migration-console-pull-policy
                   value: "{{inputs.parameters.migration-console-pull-policy}}"
+                - name: kafka-client-secret-bundle
+                  value: "{{inputs.parameters.kafka-client-secret-bundle}}"

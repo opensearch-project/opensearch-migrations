@@ -32,7 +32,7 @@ public class TransformationLoader {
         );
         var inProgressProviders = new ArrayList<IJsonTransformerProvider>();
         for (var provider : transformerProviders) {
-            log.info("Adding IJsonTransfomerProvider: " + provider);
+            log.atInfo().setMessage("Adding IJsonTransfomerProvider: {}").addArgument(provider).log();
             inProgressProviders.add(provider);
         }
         providers = Collections.unmodifiableList(inProgressProviders);
