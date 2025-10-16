@@ -123,9 +123,9 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
                 # Collect suspended steps for approval selection
                 if step_type == 'Suspend' and step_phase == 'Running':
                     suspended_steps.append(step_name)
-                    click.echo(f"  → {step_name} [{step_type}] - {step_phase} ⏸️  (WAITING FOR APPROVAL)")
+                    click.echo(f"  > {step_name} [{step_type}] - {step_phase} (WAITING FOR APPROVAL)")
                 else:
-                    status_icon = "✓" if step_phase == "Succeeded" else "●"
+                    status_icon = "+" if step_phase == "Succeeded" else "*"
                     click.echo(f"  {status_icon} {step_name} [{step_type}] - {step_phase}")
             click.echo("-" * 60)
         
@@ -175,7 +175,7 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
         )
 
         if result['success']:
-            click.echo(f"\n✓ Workflow {workflow_name} resumed successfully")
+            click.echo(f"\nWorkflow {workflow_name} resumed successfully")
         else:
             click.echo(f"\nError: {result['message']}", err=True)
             ctx.exit(ExitCode.FAILURE.value)
