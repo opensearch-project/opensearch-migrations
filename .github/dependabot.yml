@@ -27,13 +27,15 @@ updates:
         patterns:
           - "*"
     ignore:
+      - dependency-name: "com.avast.gradle.docker-compose"
+      - dependency-name: "io.netty:*"
+      - dependency-name: "io.opentelemetry.semconv:*"
+      - dependency-name: "org.apache.commons:commons-compress"
+      - dependency-name: "org.apache.lucene:*"
       - dependency-name: "org.gradle.toolchains.foojay-resolver-convention"
+      - dependency-name: "org.jcommander:jcommander"
       - dependency-name: "org.opensearch:*"
       - dependency-name: "org.opensearch.plugin:*"
-      - dependency-name: "org.apache.lucene:*"
-      - dependency-name: "io.opentelemetry.semconv:*"
-      - dependency-name: "io.netty:*"
-      - dependency-name: "org.apache.commons:commons-compress"
         update-types:
           - "version-update:semver-major"
           - "version-update:semver-minor"
