@@ -18,7 +18,7 @@ ENDING_PHASES = ["Succeeded", "Failed", "Error", "Stopped", "Terminated"]
 @click.option(
     '--argo-server',
     default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
-            f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
+    f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
     help='Argo Server URL (default: auto-detected from Kubernetes service env vars, or ARGO_SERVER env var)'
 )
 @click.option(
@@ -65,13 +65,13 @@ ENDING_PHASES = ["Succeeded", "Failed", "Error", "Stopped", "Terminated"]
 )
 def _load_and_inject_config(service: WorkflowService, workflow_spec: dict, namespace: str, session: str) -> dict:
     """Load configuration and inject parameters into workflow spec.
-    
+
     Args:
         service: WorkflowService instance
         workflow_spec: Workflow specification
         namespace: Kubernetes namespace
         session: Session name
-        
+
     Returns:
         Updated workflow spec with injected parameters
     """
@@ -92,7 +92,7 @@ def _load_and_inject_config(service: WorkflowService, workflow_spec: dict, names
 
 def _handle_workflow_wait(service: WorkflowService, namespace: str, workflow_name: str, timeout: int, wait_interval: int):
     """Handle waiting for workflow completion.
-    
+
     Args:
         service: WorkflowService instance
         namespace: Kubernetes namespace

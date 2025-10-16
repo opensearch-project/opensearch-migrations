@@ -771,10 +771,10 @@ class WorkflowService:
 
     def _prepare_headers(self, token: Optional[str] = None) -> Dict[str, str]:
         """Prepare HTTP headers for API requests.
-        
+
         Args:
             token: Optional bearer token for authentication
-            
+
         Returns:
             Dictionary of HTTP headers
         """
@@ -785,11 +785,11 @@ class WorkflowService:
 
     def _format_error_message(self, operation: str, response) -> str:
         """Format error message from HTTP response.
-        
+
         Args:
             operation: Description of the operation that failed
             response: HTTP response object
-            
+
         Returns:
             Formatted error message
         """
@@ -808,12 +808,12 @@ class WorkflowService:
         phase_filter: Optional[str]
     ) -> List[str]:
         """Filter workflow items based on criteria.
-        
+
         Args:
             items: List of workflow items from API
             exclude_completed: Whether to exclude completed workflows
             phase_filter: Optional phase to filter by
-            
+
         Returns:
             List of workflow names matching criteria
         """
@@ -841,10 +841,10 @@ class WorkflowService:
 
     def _has_active_suspend(self, workflow_item: Dict[str, Any]) -> bool:
         """Check if workflow has an active suspend node.
-        
+
         Args:
             workflow_item: Workflow item from API
-            
+
         Returns:
             True if workflow has active suspend node
         """
@@ -856,10 +856,10 @@ class WorkflowService:
 
     def _extract_workflow_steps(self, nodes: Dict[str, Any]) -> List[Dict[str, str]]:
         """Extract step information from workflow nodes.
-        
+
         Args:
             nodes: Dictionary of workflow nodes
-            
+
         Returns:
             List of step dictionaries with name, phase, type, and started_at
         """
@@ -873,7 +873,7 @@ class WorkflowService:
                     "type": node_type,
                     "started_at": node.get("startedAt", "")
                 })
-        
+
         # Sort chronologically by start time
         steps.sort(key=lambda x: x.get("started_at", "9999-99-99"))
         return steps
@@ -885,12 +885,12 @@ class WorkflowService:
         error_msg: str
     ) -> WorkflowStatusResult:
         """Create an error status result.
-        
+
         Args:
             workflow_name: Name of the workflow
             namespace: Kubernetes namespace
             error_msg: Error message
-            
+
         Returns:
             WorkflowStatusResult with error information
         """

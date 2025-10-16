@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 @click.option(
     '--argo-server',
     default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
-            f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
+    f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
     help='Argo Server URL (default: auto-detected from Kubernetes service env vars, or ARGO_SERVER env var)'
 )
 @click.option(
@@ -118,10 +118,10 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
 
 def _get_phase_symbol(phase: str) -> str:
     """Get symbol for workflow phase.
-    
+
     Args:
         phase: Workflow phase
-        
+
     Returns:
         Symbol character for the phase
     """
@@ -138,11 +138,11 @@ def _get_phase_symbol(phase: str) -> str:
 
 def _get_step_symbol(step_phase: str, step_type: str) -> str:
     """Get symbol for workflow step.
-    
+
     Args:
         step_phase: Step phase
         step_type: Step type
-        
+
     Returns:
         Symbol string for the step
     """
@@ -160,7 +160,7 @@ def _get_step_symbol(step_phase: str, step_type: str) -> str:
 
 def _display_workflow_header(name: str, phase: str, progress: str, started_at: str, finished_at: str):
     """Display workflow header information.
-    
+
     Args:
         name: Workflow name
         phase: Workflow phase
@@ -180,21 +180,21 @@ def _display_workflow_header(name: str, phase: str, progress: str, started_at: s
 
 def _display_workflow_steps(steps: list):
     """Display workflow steps.
-    
+
     Args:
         steps: List of step dictionaries
     """
     if not steps:
         return
-        
+
     click.echo("\n  Steps:")
     for step in steps:
         step_name = step['name']
         step_phase = step['phase']
         step_type = step['type']
-        
+
         symbol = _get_step_symbol(step_phase, step_type)
-        
+
         if step_type == 'Suspend' and step_phase == 'Running':
             click.echo(f"{symbol} {step_name} - WAITING FOR APPROVAL")
         else:
