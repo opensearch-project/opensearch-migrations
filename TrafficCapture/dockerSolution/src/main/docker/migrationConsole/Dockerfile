@@ -84,6 +84,13 @@ COPY VERSION /root/VERSION
 
 WORKDIR /root
 COPY lib /root/lib
+
+# Copy workflow scripts and resources, set environment variable
+COPY lib/console_link/tests/workflow-tests/resources/scripts /opt/workflow-scripts
+COPY lib/console_link/tests/workflow-tests/resources/*.yaml /opt/workflow-scripts/
+RUN chmod +x /opt/workflow-scripts/*.sh
+ENV WORKFLOW_SCRIPT_DIR=/opt/workflow-scripts
+
 WORKDIR /root/lib/console_link
 RUN pipenv install --deploy
 WORKDIR /root/lib/integ_test
