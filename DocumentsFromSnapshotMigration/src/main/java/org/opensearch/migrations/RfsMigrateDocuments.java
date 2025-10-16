@@ -298,28 +298,6 @@ public class RfsMigrateDocuments {
         private String transformerConfigFile;
     }
 
-    public static class EnvParameters {
-
-        private EnvParameters() {
-            throw new IllegalStateException("EnvParameters utility class should not instantiated");
-        }
-
-        public static void injectFromEnv(Args args) {
-            List<String> addedEnvParams = new ArrayList<>();
-            if (args.targetArgs.username == null && System.getenv(ArgNameConstants.TARGET_USERNAME_ENV_ARG) != null) {
-                args.targetArgs.username = System.getenv(ArgNameConstants.TARGET_USERNAME_ENV_ARG);
-                addedEnvParams.add(ArgNameConstants.TARGET_USERNAME_ENV_ARG);
-            }
-            if (args.targetArgs.password == null && System.getenv(ArgNameConstants.TARGET_PASSWORD_ENV_ARG) != null) {
-                args.targetArgs.password = System.getenv(ArgNameConstants.TARGET_PASSWORD_ENV_ARG);
-                addedEnvParams.add(ArgNameConstants.TARGET_PASSWORD_ENV_ARG);
-            }
-            if (!addedEnvParams.isEmpty()) {
-                log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
-            }
-        }
-    }
-
     public static class NoWorkLeftException extends Exception {
         public NoWorkLeftException(String message) {
             super(message);
@@ -379,7 +357,6 @@ public class RfsMigrateDocuments {
         Args arguments = new Args();
         JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
-        EnvParameters.injectFromEnv(arguments);
 
         if (arguments.help) {
             jCommander.usage();

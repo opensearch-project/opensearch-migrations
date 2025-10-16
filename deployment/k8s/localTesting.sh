@@ -19,6 +19,8 @@ kubectl port-forward services/elasticsearch-master 19200:9200 &
 kubectl port-forward services/opensearch-cluster-master 29200:9200 &
 
 kubectl port-forward svc/argo-server 2746:2746 &
+kubectl port-forward svc/etcd-headless 2379:2379 &
+kubectl port-forward svc/localstack 4566:4566 &
 kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090 &
 kubectl port-forward svc/jaeger-query 16686:16686 &
 kubectl port-forward svc/kube-prometheus-stack-grafana  9000:80 &

@@ -19,12 +19,18 @@ dependencies {
     implementation libs.protobuf.java
     implementation libs.slf4j.api
 
+    // We can move the JsonCommandLineParser into its own library in the future.
+    // I hate polluting a core library with a big dependency.
+    implementation libs.jackson.databind
+    implementation libs.jackson.core
+
+    // JCommander
+    implementation libs.jcommander
+    implementation libs.jcommander
+
     testImplementation libs.log4j.api
     testImplementation libs.log4j.core
     testImplementation libs.log4j.slf4j2.impl
-
-    // JCommander
-    compileOnly libs.jcommander
 
     // OpenTelemetry core
     api libs.opentelemetry.api
