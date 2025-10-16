@@ -1,11 +1,16 @@
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "../models/parameterSchemas";
-import {toArgoExpression} from "./argoExpressionRender";
+import {
+    REMOVE_NEXT_QUOTE_SENTINEL,
+    REMOVE_PREVIOUS_QUOTE_SENTINEL,
+    toArgoExpressionString
+} from "./argoExpressionRender";
 import {StepGroup} from "../models/stepsBuilder";
 import {MISSING_FIELD, PlainObject} from "../models/plainObject";
 import {GenericScope, LoopWithUnion} from "../models/workflowTypes";
 import {WorkflowBuilder} from "../models/workflowBuilder";
 import {BaseExpression} from "../models/expression";
 import {NamedTask} from "../models/sharedTypes";
+import { stringify as toYaml } from 'yaml';
 
 function isDefault<T extends PlainObject>(
     p: InputParamDef<T, boolean>
@@ -77,7 +82,7 @@ function renderWithLoop<T extends PlainObject>(loopWith: LoopWithUnion<T>) {
     } else if (loopWith.loopWith == "sequence") {
         return {withSequence: loopWith.count};
     } else if (loopWith.loopWith == "params") {
-        return {withParam: `${toArgoExpression(loopWith.value)}`};
+        return {withParam: `${toArgoExpressionString(loopWith.value)}`};
     } else {
         throw new Error(`Expected loopWith value; got ${loopWith}`);
     }
@@ -110,8 +115,8 @@ function formatStepOrTask<T extends NamedTask & { withLoop?: unknown }>(step: T)
         ...(undefined === when       ? {} : {
             when:
                 (when && typeof when === "object" && "templateExp" in when) ?
-                `${toArgoExpression(when.templateExp, "Outer")}` :
-                    `${toArgoExpression(when, "IdentifierOnly")}`
+                `${toArgoExpressionString(when.templateExp, "Outer")}` :
+                    `${toArgoExpressionString(when, "IdentifierOnly")}`
         }),
         ...{"arguments": {parameters: (formatArguments(args) as object)}},
         ...rest
@@ -124,6 +129,15 @@ function formatContainerEnvs(envVars: Record<string, BaseExpression<any>>) {
         result.push({name: key, value: transformExpressionsDeep(value)});
     });
     return result;
+}
+
+export function unwrapPlaceholdersAndStringify(obj: any): string {
+    const result = toYaml(obj, { lineWidth: 0});
+    // in this yaml output, the value won't need to be quoted when it starts with a string -
+    // as long as REMOVE_PREVIOUS_QUOTE_SENTINEL starts with a character, there won't actually be a quote
+    return result
+        .replace(new RegExp(`${REMOVE_PREVIOUS_QUOTE_SENTINEL}`, 'g'), '')
+        .replace(new RegExp(`${REMOVE_NEXT_QUOTE_SENTINEL}`, 'g'), '');
 }
 
 function formatBody(body: GenericScope) {
@@ -139,7 +153,7 @@ function formatBody(body: GenericScope) {
             const {manifest, ...rest} = body.resource;
             return {
                 resource: {
-                    manifest: JSON.stringify(transformExpressionsDeep(manifest)),
+                    manifest: unwrapPlaceholdersAndStringify(transformExpressionsDeep(manifest)),
                     ...transformExpressionsDeep(rest)
                 }
             };
@@ -170,9 +184,9 @@ function formatOutputSource(def: OutputParamDef<any>) {
                 case "path":
                     return {path: def.path};
                 case "expression":
-                    return {expression: toArgoExpression(def.expression, "None")};
+                    return {expression: toArgoExpressionString(def.expression, "None")};
                 case "parameter":
-                    return {parameter: toArgoExpression(def.parameter)};
+                    return {parameter: toArgoExpressionString(def.parameter)};
                 case "jsonPath":
                     return {jsonPath: def.jsonPath};
                 case "jqFilter":
@@ -184,7 +198,7 @@ function formatOutputSource(def: OutputParamDef<any>) {
                 case "supplied":
                     return {supplied: def.supplied};
                 case "default":
-                    return {default: toArgoExpression(def.default)};
+                    return {default: toArgoExpressionString(def.default)};
                 default:
                     throw new Error(`Unsupported output parameter type: ${(def as any).fromWhere}`);
             }
@@ -237,30 +251,22 @@ function assertPlainObject(v: unknown): asserts v is Record<string, unknown> {
     throw new Error(`Expected plain object; got ${Object.prototype.toString.call(v)}`);
 }
 
-// Output type mapping: replace any Expression with toArgoExpression's return type, recurse through arrays/objects
-type ReplaceExpressions<T> =
-    T extends BaseExpression<any> ? ReturnType<typeof toArgoExpression> :
-        T extends readonly (infer U)[] ? ReadonlyArray<ReplaceExpressions<U>> :
-            T extends (infer U)[] ? Array<ReplaceExpressions<U>> :
-                T extends object ? { [K in keyof T]: ReplaceExpressions<T[K]> } :
-                    T;
-
 /**
  * Recursively transforms any Expression instances found within records and arrays.
  * Asserts when non-plain objects are found since they shouldn't exist in this model.
  */
-export function transformExpressionsDeep<T>(input: T): ReplaceExpressions<T> {
-    function visit<U>(node: U): ReplaceExpressions<U> {
+export function transformExpressionsDeep<T>(input: T) {
+    function visit(node: any): any {
         if (node instanceof BaseExpression) {
-            return `${toArgoExpression(node)}` as ReplaceExpressions<U>;
+            return toArgoExpressionString(node);
         }
 
         if (isPrimitiveLiteral(node)) {
-            return node as ReplaceExpressions<U>;
+            return node;
         }
 
         if (Array.isArray(node)) {
-            return (node as unknown[]).map(visit) as ReplaceExpressions<U>;
+            return (node as unknown[]).map(visit);
         }
 
         // sending destructured output into this function is useful & the runtime creates that object
@@ -271,7 +277,7 @@ export function transformExpressionsDeep<T>(input: T): ReplaceExpressions<T> {
         for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
             out[k] = visit(v);
         }
-        return out as ReplaceExpressions<U>;
+        return out;
     }
 
     return visit(input);

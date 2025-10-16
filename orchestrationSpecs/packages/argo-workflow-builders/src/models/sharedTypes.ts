@@ -44,3 +44,5 @@ export type NamedTask<
         | { template?: never; templateRef: { template: string, name: string } }
     ) &
     WorkflowTask<IN, OUT, LoopT> & Extra;
+
+export { PlainObject };

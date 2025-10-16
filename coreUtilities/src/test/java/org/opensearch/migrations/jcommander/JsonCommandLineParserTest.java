@@ -166,6 +166,44 @@ class JsonCommandLineParserTest {
     }
 
     @Test
+    void testSimpleJsonBase64() throws Exception {
+        SimpleArgs args = new SimpleArgs();
+
+        JsonCommandLineParser parser = JsonCommandLineParser.newBuilder()
+            .addObject(args)
+            .build();
+
+        String json = "{\"name\":\"base64Test\",\"count\":42,\"enabled\":true}";
+        String base64 = java.util.Base64.getEncoder().encodeToString(json.getBytes());
+        parser.parse(new String[]{"---INLINE-JSON", base64});
+
+        Assertions.assertEquals("base64Test", args.name);
+        Assertions.assertEquals(42, args.count);
+        Assertions.assertTrue(args.enabled);
+    }
+
+    @Test
+    void testBase64WithCommand() throws Exception {
+        GlobalArgs globalArgs = new GlobalArgs();
+        MigrateCommand migrateCmd = new MigrateCommand();
+
+        JsonCommandLineParser parser = JsonCommandLineParser.newBuilder()
+            .addObject(globalArgs)
+            .addCommand(migrateCmd)
+            .build();
+
+        String json = "{\"verbose\":true,\"source\":\"/src\",\"target\":\"/dst\",\"batchSize\":500}";
+        String base64 = java.util.Base64.getEncoder().encodeToString(json.getBytes());
+        parser.parse(new String[]{"migrate", "---INLINE-JSON", base64});
+
+        Assertions.assertTrue(globalArgs.verbose);
+        Assertions.assertEquals("migrate", parser.getParsedCommand());
+        Assertions.assertEquals("/src", migrateCmd.source);
+        Assertions.assertEquals("/dst", migrateCmd.target);
+        Assertions.assertEquals(500, migrateCmd.batchSize);
+    }
+
+    @Test
     void testParametersDelegate() throws Exception {
         MainArgs args = new MainArgs();
 

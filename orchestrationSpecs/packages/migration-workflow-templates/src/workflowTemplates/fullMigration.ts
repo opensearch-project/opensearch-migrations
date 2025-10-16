@@ -117,22 +117,23 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoad", c =>
                     c.register({
                         ...(selectInputsForRegister(b, c)),
-                        sessionName: c.steps.idGenerator.id
+                        sessionName: c.steps.idGenerator.id,
+                        sourceVersion: expr.jsonPathStrict(b.inputs.sourceConfig, "version")
                     }),
                 { when: { templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)) }}
             )
-            .addStep("targetBackfillCompleteCheck", ConfigManagementHelpers, "decrementLatch", c =>
-                c.register({
-                    ...(selectInputsForRegister(b, c)),
-                    prefix: b.inputs.latchCoordinationPrefix,
-                    targetName: expr.jsonPathStrict(b.inputs.targetConfig, "name"),
-                    processorId: c.steps.idGenerator.id
-                }))
-            // TODO - move this upward
-            .addStep("runReplayerForTarget", INTERNAL, "runReplayerForTarget", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c)
-                }))
+            // .addStep("targetBackfillCompleteCheck", ConfigManagementHelpers, "decrementLatch", c =>
+            //     c.register({
+            //         ...(selectInputsForRegister(b, c)),
+            //         prefix: b.inputs.latchCoordinationPrefix,
+            //         targetName: expr.jsonPathStrict(b.inputs.targetConfig, "name"),
+            //         processorId: c.steps.idGenerator.id
+            //     }))
+            // // TODO - move this upward
+            // .addStep("runReplayerForTarget", INTERNAL, "runReplayerForTarget", c =>
+            //     c.register({
+            //         ...selectInputsForRegister(b, c)
+            //     }))
         )
     )
 

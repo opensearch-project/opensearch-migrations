@@ -25,7 +25,7 @@ import {PlainObject} from "./plainObject";
 import {AllowLiteralOrExpression, BaseExpression, toExpression} from "./expression";
 import {TypeToken} from "./sharedTypes";
 
-export type IMAGE_PULL_POLICY = "ALWAYS" | "NEVER" | "IF_NOT_PRESENT";
+export type IMAGE_PULL_POLICY = "Always" | "Never" | "IfNotPresent";
 
 export class ContainerBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
