@@ -19,7 +19,7 @@ branch="main"
 tag=""
 skip_git_pull=false
 
-base_dir="../../../../opensearch-migrations"
+base_dir="./opensearch-migrations"
 build_images_chart_dir="${base_dir}/deployment/k8s/charts/components/buildImages"
 ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
 namespace="ma"
