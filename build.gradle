@@ -4,8 +4,8 @@ import groovy.json.JsonOutput
 plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
 //    id "com.dorongold.task-tree" version "4.0.1"
-    id "com.diffplug.spotless" version '7.2.1'
-    id 'io.freefair.lombok' version '8.14.2' apply false
+    id "com.diffplug.spotless" version '8.0.0'
+    id 'io.freefair.lombok' version '9.0.0' apply false
     id 'me.champeau.jmh' version '0.7.3' apply false
     id 'com.gradleup.shadow' version '8.3.8' apply false
     id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
