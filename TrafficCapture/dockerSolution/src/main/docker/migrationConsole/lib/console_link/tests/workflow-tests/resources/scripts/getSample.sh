@@ -5,7 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SAMPLE_CONFIG="$SCRIPT_DIR/../sample-config.yaml"
+SAMPLE_CONFIG="$SCRIPT_DIR/sample-config.yaml"
 
 # Check if sample config exists
 if [ ! -f "$SAMPLE_CONFIG" ]; then
