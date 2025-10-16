@@ -18,6 +18,7 @@ if [[ -z "${WF_TEMPLATES_DIR}" ]]; then
 fi
 
 # Add labels to each YAML file before applying
+FILES_UPDATED=0
 for template_file in $TEMPLATES_DIR/*.yaml; do
   echo "Processing $template_file..."
 
@@ -28,13 +29,21 @@ for template_file in $TEMPLATES_DIR/*.yaml; do
     .metadata.labels.version = "'$RELEASE_VERSION'" |
     .metadata.labels.managed-by = "'$MANAGED_BY'"' - > $temp_file
 
-  kubectl apply -f $temp_file -n $NAMESPACE
+  if kubectl apply -f $temp_file -n $NAMESPACE | grep -q "configured\|created"; then
+    FILES_UPDATED=1
+  fi
 
   rm $temp_file
   echo "Applied $template_file"
 done
 
 echo "All workflow templates have been applied to namespace $NAMESPACE"
+
+if [ $FILES_UPDATED -eq 1 ]; then
+  echo -e "\033[0;33m✓ Files were updated or created\033[0m"
+else
+  echo -e "\033[0;32m✓ No changes - all files unchanged\033[0m"
+fi
 
 # List all workflow templates that were just installed/updated
 echo "Current workflow templates:"

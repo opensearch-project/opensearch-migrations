@@ -50,7 +50,7 @@ spec:
             dependencies: [ id-generator ]
             arguments:
               parameters:
-                - name: kafka-name
+                - name: kafkaName
                   value: "{{inputs.parameters.kafka-prefix}}-{{=last(split(tasks['id-generator'].id, '-'))}}"
 
           - name: get-brokers-list
@@ -59,9 +59,9 @@ spec:
             arguments:
               parameters:
                 - name: created-kafka-name
-                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.kafka-name}}"
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.kafkaName}}"
                 - name: created-bootstrap-servers
-                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.bootstrap-servers}}"
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.bootstrapServers}}"
                 - name: provided-kafka-bootstrap-servers
                   value: "{{inputs.parameters.provided-kafka-bootstrap-servers}}"
                 - name: provided-kafka-k8s-name
@@ -71,21 +71,21 @@ spec:
             templateRef:
               name: kafka-setup
               template: create-kafka-topic
-            dependencies: [ get-brokers-list ]
+            dependencies: [ kafka-cluster-setup ]
             arguments:
               parameters:
-                - name: kafka-name
-                  value: "{{tasks.get-brokers-list.outputs.parameters.kafka-name}}"
-                - name: topic-name
+                - name: kafkaName
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.kafkaName}}"
+                - name: topicName
                   value: "{{=let v=inputs.parameters['topic-name']; v == '' ? inputs.parameters['session-name'] : v}}"
-                - name: topic-partitions
+                - name: topicPartitions
                   value: "{{inputs.parameters.topic-partitions}}"
 
           - name: deploy-capture-proxy
             templateRef:
               name: capture-proxy
               template: deploy-capture-proxy
-            dependencies: [ get-brokers-list, kafka-topic-setup ]
+            dependencies: [ kafka-cluster-setup, kafka-topic-setup ]
             arguments:
               parameters:
                 - name: backside-uri-string
@@ -95,9 +95,11 @@ spec:
                 - name: frontside-port
                   value: "{{inputs.parameters.proxy-listen-port}}"
                 - name: kafka-connection
-                  value: "{{tasks.get-brokers-list.outputs.parameters.bootstrap-servers}}"
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.bootstrapServers}}"
                 - name: kafka-topic
-                  value: "{{tasks.kafka-topic-setup.outputs.parameters.topic-name}}"
+                  value: "{{tasks.kafka-topic-setup.outputs.parameters.topicName}}"
+                - name: kafka-client-secret-bundle
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.captureProxyKafkaClientSecretBundle}}"
                 - name: capture-proxy-image
                   value: "{{=fromJSON(inputs.parameters['image-config'])['capture-proxy']['image']}}"
                 - name: capture-proxy-pull-policy
@@ -119,7 +121,7 @@ spec:
             templateRef:
               name: replayer
               template: deploy-replayer
-            dependencies: [ get-brokers-list, kafka-topic-setup ]
+            dependencies: [ kafka-cluster-setup, kafka-topic-setup ]
             arguments:
               parameters:
                 - name: target-url
@@ -131,11 +133,13 @@ spec:
                 - name: speedup-factor
                   value: "20.0"
                 - name: kafka-traffic-brokers
-                  value: "{{tasks.get-brokers-list.outputs.parameters.bootstrap-servers}}"
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.bootstrapServers}}"
                 - name: kafka-traffic-topic
-                  value: "{{tasks.kafka-topic-setup.outputs.parameters.topic-name}}"
+                  value: "{{tasks.kafka-topic-setup.outputs.parameters.topicName}}"
                 - name: kafka-traffic-group-id
                   value: "{{tasks.id-generator.id}}"
+                - name: kafka-client-secret-bundle
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.replayerKafkaClientSecretBundle}}"
                 - name: replicas
                   value: "1"
                 - name: traffic-replayer-image
@@ -147,7 +151,7 @@ spec:
             templateRef:
               name: migration-console-template
               template: deploy-console
-            dependencies: [ get-brokers-list ]
+            dependencies: [ kafka-cluster-setup ]
             arguments:
               parameters:
                 - name: name
@@ -159,9 +163,11 @@ spec:
                 - name: kafka-info
                   value: |
                     {
-                      "broker_endpoints": "{{tasks.get-brokers-list.outputs.parameters.bootstrap-servers}}",
+                      "broker_endpoints": "{{tasks.kafka-cluster-setup.outputs.parameters.bootstrapServers}}",
                       "standard": ""
                     }
+                - name: kafka-client-secret-bundle
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.consoleKafkaClientSecretBundle}}"
                 - name: command
                   value: tail -f /dev/null
                 - name: migration-console-image
