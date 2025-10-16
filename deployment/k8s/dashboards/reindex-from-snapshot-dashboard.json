@@ -35,7 +35,7 @@
             "inputType": "input",
             "id": "ACCOUNT_ID",
             "label": "Account ID",
-            "defaultValue": "ACCOUNT_ID",
+            "defaultValue": "placeholder-account-id",
             "visible": false
         },
         {
