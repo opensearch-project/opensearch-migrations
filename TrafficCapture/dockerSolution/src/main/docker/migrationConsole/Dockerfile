@@ -42,6 +42,15 @@ RUN ARCH=$(cat /arch.env) && \
     mv etcd-${ETCD_VER}-linux-${ARCH}/etcdctl /etcd/bin && \
     rm -rf etcd-${ETCD_VER}-linux-amd64 etcd.tar.gz
 
+# Install Node.js for config processor
+RUN ARCH=$(cat /arch.env) && \
+    NODE_VERSION="20.20.0" && \
+    if [ "$ARCH" = "amd64" ]; then NODE_ARCH="x64"; else NODE_ARCH="arm64"; fi && \
+    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" -o /tmp/node.tar.xz && \
+    mkdir -p /usr/local/lib/nodejs && \
+    tar -xJf /tmp/node.tar.xz -C /usr/local/lib/nodejs --strip-components=1 && \
+    rm -f /tmp/node.tar.xz
+
 
 FROM ${BASE_IMAGE}
 
@@ -54,6 +63,9 @@ ENV PIPENV_MAX_DEPTH=1
 COPY --from=migration-console-base /root/kafka-tools /root/kafka-tools
 COPY --from=migration-console-base /k8s/bin/ /usr/local/bin
 COPY --from=migration-console-base /etcd/bin/ /usr/local/bin
+COPY --from=migration-console-base /usr/local/lib/nodejs /usr/local/lib/nodejs
+
+ENV PATH="/usr/local/lib/nodejs/bin:${PATH}"
 
 RUN kubectl completion bash > /etc/bash_completion.d/kubectl && \
     helm completion bash > /etc/bash_completion.d/helm
@@ -109,7 +121,8 @@ RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\t) \[\e[92m\]migration-console \[\e[0m\](\w) -> "' >> ~/.bashrc
 
-COPY workflows /root/workflows
+# Copy config processor from staging
+COPY staging/config-processor /root/config-processor
 
 # Set ENV to control startup script in /bin/sh mode
 ENV ENV=/root/.bashrc
