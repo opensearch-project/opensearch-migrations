@@ -36,8 +36,14 @@ logger = logging.getLogger(__name__)
     '--token',
     help='Bearer token for authentication'
 )
+@click.option(
+    '--acknowledge',
+    is_flag=True,
+    default=False,
+    help='Skip interactive confirmation and approve immediately'
+)
 @click.pass_context
-def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token):
+def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token, acknowledge):
     """Approve/resume a suspended workflow in Argo Workflows.
 
     If workflow_name is not provided, auto-detects the single workflow
@@ -46,6 +52,7 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token)
     Example:
         workflow approve
         workflow approve my-workflow
+        workflow approve --acknowledge
         workflow approve --argo-server https://10.105.13.185:2746 --insecure
     """
 
@@ -81,6 +88,53 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token)
             workflow_name = list_result['workflows'][0]
             click.echo(f"Auto-detected workflow: {workflow_name}")
 
+        # Get workflow status to display details
+        status_result = service.get_workflow_status(
+            workflow_name=workflow_name,
+            namespace=namespace,
+            argo_server=argo_server,
+            token=token,
+            insecure=insecure
+        )
+
+        if not status_result['success']:
+            click.echo(f"Error getting workflow status: {status_result['error']}", err=True)
+            ctx.exit(ExitCode.FAILURE.value)
+
+        # Display workflow information
+        click.echo("\n" + "=" * 60)
+        click.echo(f"Workflow: {workflow_name}")
+        click.echo(f"Namespace: {namespace}")
+        click.echo(f"Phase: {status_result['phase']}")
+        click.echo(f"Progress: {status_result['progress']}")
+        if status_result['started_at']:
+            click.echo(f"Started: {status_result['started_at']}")
+        click.echo("=" * 60)
+
+        # Display steps
+        if status_result['steps']:
+            click.echo("\nWorkflow Steps:")
+            click.echo("-" * 60)
+            for step in status_result['steps']:
+                step_type = step['type']
+                step_name = step['name']
+                step_phase = step['phase']
+                
+                # Highlight suspended steps
+                if step_type == 'Suspend' and step_phase == 'Running':
+                    click.echo(f"  → {step_name} [{step_type}] - {step_phase} ⏸️  (WAITING FOR APPROVAL)")
+                else:
+                    status_icon = "✓" if step_phase == "Succeeded" else "●"
+                    click.echo(f"  {status_icon} {step_name} [{step_type}] - {step_phase}")
+            click.echo("-" * 60)
+        
+        # Interactive confirmation unless --acknowledge is passed
+        if not acknowledge:
+            click.echo("\nThis will resume the workflow and allow it to continue execution.")
+            if not click.confirm("Do you want to approve and resume this workflow?"):
+                click.echo("Approval cancelled.")
+                ctx.exit(ExitCode.SUCCESS.value)
+
         # Resume the workflow
         result = service.approve_workflow(
             workflow_name=workflow_name,
@@ -91,9 +145,9 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token)
         )
 
         if result['success']:
-            click.echo(f"Workflow {workflow_name} resumed successfully")
+            click.echo(f"\n✓ Workflow {workflow_name} resumed successfully")
         else:
-            click.echo(f"Error: {result['message']}", err=True)
+            click.echo(f"\nError: {result['message']}", err=True)
             ctx.exit(ExitCode.FAILURE.value)
 
     except Exception as e:
