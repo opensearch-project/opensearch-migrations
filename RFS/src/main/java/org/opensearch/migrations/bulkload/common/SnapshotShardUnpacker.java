@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.common;
 
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
