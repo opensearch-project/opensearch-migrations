@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: approval-workflow-
+spec:
+  entrypoint: main
+  templates:
+    - name: main
+      steps:
+        - - name: step1
+            template: echo-message
+            arguments:
+              parameters:
+                - name: message
+                  value: "Step 1: Before Approval"
+        
+        - - name: approval
+            template: approval-gate
+        
+        - - name: step2
+            template: echo-message
+            arguments:
+              parameters:
+                - name: message
+                  value: "Step 2: After Approval"
+    
+    - name: echo-message
+      inputs:
+        parameters:
+          - name: message
+      container:
+        image: busybox:latest
+        command: [echo]
+        args: ["{{inputs.parameters.message}}"]
+    
+    - name: approval-gate
+      suspend: {}

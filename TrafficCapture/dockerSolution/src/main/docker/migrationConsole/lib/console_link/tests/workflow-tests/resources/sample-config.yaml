@@ -1,0 +1,19 @@
+# Sample test workflow configuration
+# This config demonstrates how parameters flow through the workflow
+
+workflowName: "test-workflow"
+
+# Parameters that will be injected into the workflow
+parameters:
+  message: "Hello from test config"
+  iterations: 3
+  environment: "test"
+  requiresApproval: true
+  approver: "test-user"
+
+# Workflow settings
+settings:
+  timeout: 300
+  retryAttempts: 2
+  logLevel: "info"
+  namespace: "ma"

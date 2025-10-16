@@ -158,20 +158,18 @@ def _get_step_symbol(step_phase: str, step_type: str) -> str:
         return '  ?'
 
 
-def _display_workflow_header(name: str, phase: str, progress: str, started_at: str, finished_at: str):
+def _display_workflow_header(name: str, phase: str, started_at: str, finished_at: str):
     """Display workflow header information.
 
     Args:
         name: Workflow name
         phase: Workflow phase
-        progress: Workflow progress
         started_at: Start timestamp
         finished_at: Finish timestamp
     """
     phase_symbol = _get_phase_symbol(phase)
     click.echo(f"[{phase_symbol}] Workflow: {name}")
     click.echo(f"  Phase: {phase}")
-    click.echo(f"  Progress: {progress}")
     if started_at:
         click.echo(f"  Started: {started_at}")
     if finished_at:
@@ -209,9 +207,8 @@ def _display_workflow_status(result: dict):
     """
     name = result['workflow_name']
     phase = result['phase']
-    progress = result['progress']
     started_at = result['started_at']
     finished_at = result['finished_at']
 
-    _display_workflow_header(name, phase, progress, started_at, finished_at)
+    _display_workflow_header(name, phase, started_at, finished_at)
     _display_workflow_steps(result['steps'])
