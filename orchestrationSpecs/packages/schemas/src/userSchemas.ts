@@ -53,11 +53,11 @@ export const RFS_OPTIONS = z.object({
 
     loggingConfigurationOverrideConfigMap: z.string().default(""),
     allowLooseVersionMatching: z.boolean().default(true).describe(""),
-    docTransformerBase64: z.string().default(""),
-    documentsPerBulkRequest: z.number().default(0),
-    initialLeaseDuration: z.string().default(""),
-    maxConnections: z.number().default(0),
-    maxShardSizeBytes: z.number().default(0),
+    docTransformerConfigBase64: z.string().default(""),
+    documentsPerBulkRequest: z.number().default(0x7fffffff),
+    initialLeaseDuration: z.string().default("PT10M"),
+    maxConnections: z.number().default(10),
+    maxShardSizeBytes: z.number().default(80*1024*1024*1024),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
 });
 
@@ -83,11 +83,12 @@ export const HTTP_AUTH_MTLS = z.object({
     })
 });
 
+export const CLUSTER_VERSION_STRING = z.string().default("ES 7.10");
 
 export const CLUSTER_CONFIG = z.object({
     endpoint: z.string(),
     allowInsecure: z.boolean().optional(),
-    version: z.string().default("ES 7.10"),
+    version: CLUSTER_VERSION_STRING,
     authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
 });
 

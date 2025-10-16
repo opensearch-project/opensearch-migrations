@@ -12,7 +12,7 @@ import {
     expr,
     IMAGE_PULL_POLICY,
     inputsToEnvVarsList,
-    INTERNAL,
+    INTERNAL, makeStringTypeProxy,
     remapRecordNames,
     selectInputsFieldsAsExpressionRecord,
     selectInputsForRegister,
@@ -33,15 +33,15 @@ function getReplayerDeploymentManifest
     replayerImageName: BaseExpression<string>,
     replayerImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
 
-    inputsAsEnvList: Record<string, any>[]
+    inputsAsEnvList: {name: string, value: string}[]
 }) {
     const baseContainerDefinition = {
         name: "replayer",
-        image: args.replayerImageName,
-        imagePullPolicy: args.replayerImagePullPolicy,
+        image: makeStringTypeProxy(args.replayerImageName),
+        imagePullPolicy: makeStringTypeProxy(args.replayerImagePullPolicy),
         env: [
             ...args.inputsAsEnvList,
-            {name: "LUCENE_DIR", value: expr.literal("/tmp")}
+            {name: "LUCENE_DIR", value: makeStringTypeProxy(expr.literal("/tmp"))}
         ]
     };
     const finalContainerDefinition =
@@ -100,9 +100,7 @@ export const Replayer = WorkflowBuilder.create({
                 setOwnerReference: true,
                 manifest: getReplayerDeploymentManifest({
                     podReplicas: expr.literal(0),//b.inputs.podReplicas,
-                    useCustomLogging:
-                        expr.equals(expr.literal(""),
-                            expr.nullCoalesce(b.inputs.loggingConfigurationOverrideConfigMap, expr.literal(""))),
+                    useCustomLogging: expr.equals(expr.literal(""), b.inputs.loggingConfigurationOverrideConfigMap),
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     sessionName: expr.literal(""),//b.inputs.sessionName,
                     replayerImageName: b.inputs.imageTrafficReplayerLocation,

@@ -117,8 +117,8 @@ export const CaptureReplay = WorkflowBuilder.create({
                         kafkaName: c.tasks.getBrokersList.outputs.kafkaName,
                         topicName:
                             expr.ternary(expr.equals(b.inputs.topicName, ""), b.inputs.sessionName, b.inputs.topicName),
-                        topicPartitions: b.inputs.topicPartitions,
-                        topicReplicas: b.inputs.topicReplicas
+                        topicPartitions: expr.deserializeRecord(b.inputs.topicPartitions),
+                        topicReplicas: expr.deserializeRecord(b.inputs.topicReplicas)
                     }),
                 {dependencies: ["getBrokersList"]}
             )
@@ -126,7 +126,7 @@ export const CaptureReplay = WorkflowBuilder.create({
             .addTask("deployCaptureProxy", CaptureProxy, "deployCaptureProxy", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
-                        listenerPort: b.inputs.proxyListenPort,
+                        listenerPort: expr.deserializeRecord(b.inputs.proxyListenPort),
                         kafkaConnection: c.tasks.getBrokersList.outputs.bootstrapServers,
                         kafkaTopic: c.tasks.kafkaTopicSetup.outputs.topicName
                     }),
@@ -135,7 +135,7 @@ export const CaptureReplay = WorkflowBuilder.create({
             .addTask("proxyService", CaptureProxy, "deployProxyService", c =>
                     c.register({
                         serviceName: b.inputs.sessionName,
-                        port: b.inputs.proxyListenPort
+                        port: expr.deserializeRecord(b.inputs.proxyListenPort)
                     }),
                 {dependencies: ["deployCaptureProxy"]}
             )
@@ -160,8 +160,7 @@ export const CaptureReplay = WorkflowBuilder.create({
                                 broker_endpoints: c.tasks.getBrokersList.outputs.bootstrapServers,
                                 standard: ""
                             })
-                        ),
-                        snapshotConfig: MISSING_FIELD,
+                        )
                     }),
                 {dependencies: ["getBrokersList"]}
             )
