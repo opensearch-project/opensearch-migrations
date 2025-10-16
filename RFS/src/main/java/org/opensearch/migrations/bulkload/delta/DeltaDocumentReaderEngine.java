@@ -46,10 +46,6 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
             .collect(Collectors.toCollection(
                 () -> new TreeSet<>(Comparator.comparing(ShardFileInfo::key))));
         
-        // TODO: Refactor this away from here for shard downloading and base it on filesToUnpack
-        // Currently, for S3 cases, uses TransferManager to download snapshot files
-        unpackerFactory.getRepoAccessor().prepBlobFiles(shardMetadata);
-        
         return unpackerFactory.create(
             filesToUnpack,
             indexName,
