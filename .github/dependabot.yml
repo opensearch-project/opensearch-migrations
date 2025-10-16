@@ -27,6 +27,7 @@ updates:
         patterns:
           - "*"
     ignore:
+      - dependency-name: "com.avast.gradle.docker-compose"
       - dependency-name: "io.netty:*"
       - dependency-name: "io.opentelemetry.semconv:*"
       - dependency-name: "org.apache.commons:commons-compress"
