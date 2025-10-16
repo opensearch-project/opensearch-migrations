@@ -452,8 +452,7 @@ public class RfsMigrateDocuments {
 
             var unpackerFactory = new SnapshotShardUnpacker.Factory(
                 repoAccessor,
-                luceneDirPath,
-                sourceResourceProvider.getBufferSizeInBytes()
+                luceneDirPath
             );
 
             run(

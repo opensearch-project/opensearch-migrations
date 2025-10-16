@@ -290,8 +290,7 @@ public class SourceTestBase {
             DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
             SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(
                 repoAccessor,
-                tempDir,
-                sourceResourceProvider.getBufferSizeInBytes()
+                tempDir
             );
 
             final int ms_window = 1000;
