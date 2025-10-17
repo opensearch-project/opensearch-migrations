@@ -83,9 +83,10 @@ def argo_workflows(k3s_container):
         logger.info(f"Namespace {argo_namespace} already exists")
 
     # Download and apply the Argo Workflows manifest
+    # Using install.yaml instead of quick-start-minimal.yaml for lighter installation
     manifest_url = (
         f"https://github.com/argoproj/argo-workflows/releases/download/"
-        f"{argo_version}/quick-start-minimal.yaml"
+        f"{argo_version}/install.yaml"
     )
 
     try:
@@ -128,8 +129,12 @@ def argo_workflows(k3s_container):
     logger.info("Waiting for Argo Workflows pods to be ready...")
     max_wait_time = 300  # 5 minutes
     start_time = time.time()
+    check_interval = 5
+    last_status_log = 0
 
     while time.time() - start_time < max_wait_time:
+        elapsed = time.time() - start_time
+        
         try:
             # Check if argo-server deployment is ready
             server_deployment = apps_v1.read_namespaced_deployment(
@@ -153,14 +158,72 @@ def argo_workflows(k3s_container):
                 controller_deployment.status.ready_replicas >= 1
             )
 
+            # Log detailed status every 15 seconds
+            if elapsed - last_status_log >= 15:
+                logger.info(f"\n[{elapsed:.0f}s] Deployment Status Check:")
+                logger.info(f"  argo-server: {server_deployment.status.ready_replicas or 0}/"
+                           f"{server_deployment.status.replicas or 0} ready, "
+                           f"{server_deployment.status.available_replicas or 0} available, "
+                           f"{server_deployment.status.unavailable_replicas or 0} unavailable")
+                logger.info(f"  workflow-controller: {controller_deployment.status.ready_replicas or 0}/"
+                           f"{controller_deployment.status.replicas or 0} ready, "
+                           f"{controller_deployment.status.available_replicas or 0} available, "
+                           f"{controller_deployment.status.unavailable_replicas or 0} unavailable")
+                
+                # Get pod status details
+                pods = v1.list_namespaced_pod(namespace=argo_namespace)
+                logger.info(f"  Total pods in namespace: {len(pods.items)}")
+                
+                for pod in pods.items:
+                    pod_name = pod.metadata.name
+                    phase = pod.status.phase
+                    
+                    # Get container statuses
+                    container_statuses = []
+                    if pod.status.container_statuses:
+                        for cs in pod.status.container_statuses:
+                            state = "Unknown"
+                            reason = ""
+                            if cs.state.running:
+                                state = "Running"
+                            elif cs.state.waiting:
+                                state = "Waiting"
+                                reason = cs.state.waiting.reason or ""
+                            elif cs.state.terminated:
+                                state = "Terminated"
+                                reason = cs.state.terminated.reason or ""
+                            
+                            container_statuses.append(f"{cs.name}:{state}{':'+reason if reason else ''}")
+                    
+                    logger.info(f"    - {pod_name}: {phase} [{', '.join(container_statuses) if container_statuses else 'no containers'}]")
+                
+                # Get recent events for debugging
+                try:
+                    events = v1.list_namespaced_event(
+                        namespace=argo_namespace,
+                        limit=10,
+                        field_selector="type=Warning"
+                    )
+                    if events.items:
+                        logger.info("  Recent Warning Events:")
+                        for event in events.items[:5]:  # Show last 5 warnings
+                            logger.info(f"    - {event.involved_object.name}: {event.reason} - {event.message}")
+                except Exception as e:
+                    logger.debug(f"Could not fetch events: {e}")
+                
+                last_status_log = elapsed
+
             if server_ready and controller_ready:
-                logger.info("Argo Workflows is ready!")
+                logger.info(f"\n[{elapsed:.0f}s] ✓ Argo Workflows is ready!")
                 break
 
-        except ApiException:
-            pass  # Deployments might not exist yet
+        except ApiException as e:
+            # Log API exceptions during deployment checks
+            if elapsed - last_status_log >= 15:
+                logger.info(f"[{elapsed:.0f}s] Deployments not yet available: {e.reason}")
+                last_status_log = elapsed
 
-        time.sleep(5)
+        time.sleep(check_interval)
     else:
         # Argo failed to start - print logs for debugging
         logger.error("Argo Workflows pods did not become ready in time")
