@@ -126,7 +126,7 @@ def argo_workflows(k3s_container):
 
     # Wait for Argo Workflows pods to be ready
     logger.info("Waiting for Argo Workflows pods to be ready...")
-    max_wait_time = 120  # 2 minutes
+    max_wait_time = 300  # 5 minutes
     start_time = time.time()
 
     while time.time() - start_time < max_wait_time:
@@ -160,7 +160,7 @@ def argo_workflows(k3s_container):
         except ApiException:
             pass  # Deployments might not exist yet
 
-        time.sleep(2)
+        time.sleep(5)
     else:
         raise TimeoutError("Argo Workflows pods did not become ready in time")
 
