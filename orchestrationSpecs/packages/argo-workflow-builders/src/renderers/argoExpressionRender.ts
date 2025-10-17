@@ -11,12 +11,15 @@ import {
     FunctionExpression,
     InfixExpression,
     LiteralExpression,
-    RecordFieldSelectExpression, RecordGetExpression,
+    RecordFieldSelectExpression, RecordGetExpression, UnquotedTypeWrapper,
     TaskDataExpression,
     TemplateReplacementExpression,
     TernaryExpression,
     WorkflowValueExpression,
 } from "../models/expression";
+
+export const REMOVE_PREVIOUS_QUOTE_SENTINEL = "REMOVE_PREVIOUS_QUOTE_SENTINEL";
+export const REMOVE_NEXT_QUOTE_SENTINEL = "REMOVE_NEXT_QUOTE_SENTINEL";
 
 /** Lightweight erased type to avoid deep generic instantiation */
 type AnyExpr = BaseExpression<any, any>;
@@ -36,7 +39,7 @@ function formatArgoFormattedToString(useMarkers: boolean, expr: AnyExpr, rendere
 
 export type MarkerStyle = "Outer" | "None" | "IdentifierOnly";
 
-export function toArgoExpression(expr: AnyExpr, useMarkers: MarkerStyle = "Outer"): string {
+export function toArgoExpressionString(expr: AnyExpr, useMarkers: MarkerStyle = "Outer"): string {
     if (isTemplateExpression(expr)) {
         const f = expr as TemplateReplacementExpression;
         let result = f.template;
@@ -48,7 +51,11 @@ export function toArgoExpression(expr: AnyExpr, useMarkers: MarkerStyle = "Outer
     }
 
     const rval = formatExpression(expr, useMarkers === "IdentifierOnly", true);
-    return formatArgoFormattedToString(useMarkers === "Outer", expr, rval);
+    const formattedRval = formatArgoFormattedToString(useMarkers === "Outer", expr, rval);
+    if (isSpecialStripQuotesDirective(expr)) {
+        return `${REMOVE_PREVIOUS_QUOTE_SENTINEL}${formattedRval}${REMOVE_NEXT_QUOTE_SENTINEL}`;
+    }
+    return formattedRval;
 }
 
 /** Returns the Argo-formatted string plus whether the expression was compound. */
@@ -73,7 +80,7 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = fa
     if (isConcatExpression(expr)) {
         const ce = expr as ConcatExpression<BaseExpression<string, any>[]>;
         const parts = ce.expressions.map(e => formatExpression(e, useIdentifierMarkers));
-        const text = parts.map(p => p.text).join(ce.separator ? " + \"" + ce.separator + "\" + " : "+");
+        const text = parts.map(p => p.text).join(ce.separator ? " + '" + ce.separator + "' + " : "+");
         const compound = (ce.expressions.length > 1) || !!ce.separator || parts.some(p => p.compound);
         return formattedResult(text, compound);
     }
@@ -193,6 +200,11 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = fa
         return formattedResult(useIdentifierMarkers ? `{{${expandedName}}}` : expandedName, false);
     }
 
+    if (isSpecialStripQuotesDirective(expr)) {
+        const e = expr as UnquotedTypeWrapper<any>;
+        return formatExpression(e.value, useIdentifierMarkers); // skip right by here
+    }
+
     throw new Error(`Unsupported expression kind: ${(expr as any).kind}`);
 }
 
@@ -264,4 +276,8 @@ export function isTernaryExpression(e: AnyExpr): e is TernaryExpression<any, any
 
 export function isWorkflowValue(e: AnyExpr): e is WorkflowValueExpression {
     return e.kind === "workflow_value";
+}
+
+export function isSpecialStripQuotesDirective(e: AnyExpr): e is UnquotedTypeWrapper<any> {
+    return e.kind === "strip_surrounding_quotes_in_serialized_output";
 }
