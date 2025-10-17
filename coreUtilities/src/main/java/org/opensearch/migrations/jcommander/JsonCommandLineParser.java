@@ -21,6 +21,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * <p>
@@ -42,6 +43,7 @@ import lombok.SneakyThrows;
  *   JSON file:   java App ---JSON-FILE /path/to/config.json migrate
  * </p>
  */
+@Slf4j
 public class JsonCommandLineParser {
     private final ObjectMapper objectMapper;
     private static final String INLINE_JSON_FLAG = "---INLINE-JSON";
@@ -162,7 +164,12 @@ public class JsonCommandLineParser {
             this.commandName = commandName;
             String trimmedContent = jsonContent.trim();
             this.jsonContent = (trimmedContent.startsWith("{") || trimmedContent.startsWith("[")) ? jsonContent :
-                new String(Base64.getDecoder().decode(jsonContent));
+                decodeBase64String(jsonContent);
+        }
+
+        private String decodeBase64String(String str) {
+            log.atInfo().setMessage("Decoding argument as base64").log(); // don't show the contents because they might include sensitive data
+            return new String(Base64.getDecoder().decode(str));
         }
 
         boolean isJsonMode() { return jsonContent != null; }
