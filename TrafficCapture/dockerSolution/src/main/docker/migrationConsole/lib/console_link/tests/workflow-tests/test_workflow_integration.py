@@ -162,6 +162,60 @@ def argo_workflows(k3s_container):
 
         time.sleep(5)
     else:
+        # Argo failed to start - print logs for debugging
+        logger.error("Argo Workflows pods did not become ready in time")
+        logger.error("Printing container logs for debugging:")
+        
+        try:
+            # Get all pods in the argo namespace
+            pods = v1.list_namespaced_pod(namespace=argo_namespace)
+            
+            for pod in pods.items:
+                pod_name = pod.metadata.name
+                logger.error(f"\n{'='*80}")
+                logger.error(f"Logs for pod: {pod_name}")
+                logger.error(f"Status: {pod.status.phase}")
+                logger.error(f"{'='*80}")
+                
+                # Get logs for each container in the pod
+                if pod.spec.containers:
+                    for container in pod.spec.containers:
+                        container_name = container.name
+                        try:
+                            logger.error(f"\nContainer: {container_name}")
+                            logger.error("-" * 80)
+                            logs = v1.read_namespaced_pod_log(
+                                name=pod_name,
+                                namespace=argo_namespace,
+                                container=container_name,
+                                tail_lines=100  # Last 100 lines
+                            )
+                            logger.error(logs)
+                        except ApiException as log_error:
+                            logger.error(f"Failed to get logs for container {container_name}: {log_error}")
+                
+                # Also check init containers if they exist
+                if pod.spec.init_containers:
+                    for init_container in pod.spec.init_containers:
+                        container_name = init_container.name
+                        try:
+                            logger.error(f"\nInit Container: {container_name}")
+                            logger.error("-" * 80)
+                            logs = v1.read_namespaced_pod_log(
+                                name=pod_name,
+                                namespace=argo_namespace,
+                                container=container_name,
+                                tail_lines=100  # Last 100 lines
+                            )
+                            logger.error(logs)
+                        except ApiException as log_error:
+                            logger.error(f"Failed to get logs for init container {container_name}: {log_error}")
+                
+                logger.error("")  # Empty line between pods
+                
+        except Exception as e:
+            logger.error(f"Failed to retrieve pod logs: {e}")
+        
         raise TimeoutError("Argo Workflows pods did not become ready in time")
 
     yield {

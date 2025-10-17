@@ -731,6 +731,10 @@ class WorkflowService:
             List of workflow names matching criteria
         """
         workflow_names = []
+        # Handle case when items is None (no workflows exist)
+        if items is None:
+            return workflow_names
+        
         for item in items:
             name = item.get("metadata", {}).get("name", "")
             if not name:
@@ -779,7 +783,8 @@ class WorkflowService:
         steps = []
         for node in nodes.values():
             node_type = node.get("type", "")
-            if node_type in ["Pod", "Suspend"]:
+            # Include Pod and Suspend steps, plus Skipped steps to show conditional logic
+            if node_type in ["Pod", "Suspend", "Skipped"]:
                 steps.append({
                     "name": node.get("displayName", ""),
                     "phase": node.get("phase", "Unknown"),

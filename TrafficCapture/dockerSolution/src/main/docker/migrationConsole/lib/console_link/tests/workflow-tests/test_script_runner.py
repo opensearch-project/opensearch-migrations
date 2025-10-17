@@ -20,8 +20,8 @@ class TestScriptRunner:
         sample = runner.get_sample_config()
 
         assert sample
-        assert "workflowName" in sample
-        assert "test-workflow" in sample
+        assert "parameters" in sample
+        assert "message" in sample
 
     def test_transform_config(self):
         """Test config transformation."""

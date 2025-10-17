@@ -1,19 +1,14 @@
-# Sample test workflow configuration
-# This config demonstrates how parameters flow through the workflow
+# Sample workflow configuration
+# Only includes parameters that are actually used by the workflow system
 
-workflowName: "test-workflow"
-
-# Parameters that will be injected into the workflow
+# Parameters that will be injected into the workflow template
 parameters:
-  message: "Hello from test config"
-  iterations: 3
-  environment: "test"
-  requiresApproval: true
-  approver: "test-user"
-
-# Workflow settings
-settings:
-  timeout: 300
-  retryAttempts: 2
-  logLevel: "info"
-  namespace: "ma"
+  # Message to display in the workflow
+  message: "Hello from workflow"
+  
+  # Whether the workflow requires manual approval before proceeding
+  # Set to true to pause workflow for approval, false to skip approval step
+  requiresApproval: false
+  
+  # User who can approve the workflow (only used when requiresApproval is true)
+  approver: ""

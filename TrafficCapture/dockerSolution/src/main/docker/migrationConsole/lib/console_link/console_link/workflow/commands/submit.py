@@ -148,19 +148,33 @@ def submit_command(ctx, argo_server, namespace, name, insecure, token, wait, tim
         workflow submit --wait --timeout 300
         WORKFLOW_TEMPLATE_PATH=/path/to/workflow.yaml workflow submit
     """
+    # First check if configuration exists (outside try-except to avoid traceback on exit)
+    store = WorkflowConfigStore(namespace=namespace)
+    config = store.load_config(session_name=session)
+    
+    if not config:
+        click.echo(f"Error: No workflow configuration found for session '{session}'", err=True)
+        click.echo("\nPlease configure the workflow first using 'workflow configure'", err=True)
+        click.echo("This will set up the proper migration workflow template and parameters.", err=True)
+        ctx.exit(ExitCode.FAILURE.value)
+
     try:
+
         service = WorkflowService()
         template_result = service.load_workflow_template()
 
         if template_result['error']:
-            click.echo(f"Warning: {template_result['error']}", err=True)
-            click.echo("Using default workflow instead", err=True)
+            click.echo(f"Error: {template_result['error']}", err=True)
+            click.echo("\nPlease configure the workflow first using 'workflow configure'", err=True)
+            click.echo("or set the WORKFLOW_TEMPLATE_PATH environment variable.", err=True)
+            ctx.exit(ExitCode.FAILURE.value)
 
         click.echo(f"Using workflow template from: {template_result['source']}")
         workflow_spec = template_result['workflow_spec']
 
-        # Load configuration and inject parameters
-        workflow_spec = _load_and_inject_config(service, workflow_spec, namespace, session)
+        # Inject parameters from configuration
+        click.echo(f"Injecting parameters from session: {session}")
+        workflow_spec = service.inject_parameters(workflow_spec, config)
 
         # Add name or generateName if provided
         if name:

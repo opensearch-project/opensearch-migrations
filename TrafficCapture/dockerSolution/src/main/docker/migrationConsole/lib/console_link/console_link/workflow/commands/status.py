@@ -103,22 +103,38 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
                     )
 
                     if completed_result['success'] and completed_result['count'] > 0:
-                        # Get the most recent completed workflow
+                        # Get the most recent completed workflow by finish time
                         click.echo("\nShowing last completed workflow:")
                         click.echo("")
 
-                        # Get status for the first workflow (most recent)
-                        last_workflow = sorted(completed_result['workflows'])[0]
-                        result = service.get_workflow_status(
-                            workflow_name=last_workflow,
-                            namespace=namespace,
-                            argo_server=argo_server,
-                            token=token,
-                            insecure=insecure
-                        )
-
-                        if result['success']:
-                            _display_workflow_status(result)
+                        # Get status for all workflows to find the most recent by finish time
+                        workflow_statuses = []
+                        for wf_name in completed_result['workflows']:
+                            wf_result = service.get_workflow_status(
+                                workflow_name=wf_name,
+                                namespace=namespace,
+                                argo_server=argo_server,
+                                token=token,
+                                insecure=insecure
+                            )
+                            if wf_result['success'] and wf_result['finished_at']:
+                                workflow_statuses.append(wf_result)
+                        
+                        # Sort by finished_at timestamp (most recent first)
+                        if workflow_statuses:
+                            workflow_statuses.sort(key=lambda x: x['finished_at'], reverse=True)
+                            _display_workflow_status(workflow_statuses[0])
+                        elif completed_result['workflows']:
+                            # Fallback to first workflow if no finish times available
+                            result = service.get_workflow_status(
+                                workflow_name=completed_result['workflows'][0],
+                                namespace=namespace,
+                                argo_server=argo_server,
+                                token=token,
+                                insecure=insecure
+                            )
+                            if result['success']:
+                                _display_workflow_status(result)
 
                         click.echo("\nUse --all to see all completed workflows")
                     else:
@@ -186,6 +202,8 @@ def _get_step_symbol(step_phase: str, step_type: str) -> str:
         return '  -'
     elif step_phase == 'Pending':
         return '  >'
+    elif step_phase == 'Skipped':
+        return '  ~'
     else:
         return '  ?'
 
@@ -225,8 +243,17 @@ def _display_workflow_steps(steps: list):
 
         symbol = _get_step_symbol(step_phase, step_type)
 
-        if step_type == 'Suspend' and step_phase == 'Running':
-            click.echo(f"{symbol} {step_name} - WAITING FOR APPROVAL")
+        # Special handling for Suspend steps
+        if step_type == 'Suspend':
+            if step_phase == 'Running':
+                click.echo(f"{symbol} {step_name} - WAITING FOR APPROVAL")
+            elif step_phase == 'Succeeded':
+                click.echo(f"{symbol} {step_name} (Approved)")
+            else:
+                click.echo(f"{symbol} {step_name} ({step_phase})")
+        # Special handling for Skipped steps with approval-related names
+        elif step_phase == 'Skipped' and 'approval' in step_name.lower():
+            click.echo(f"{symbol} {step_name} (Not Required)")
         else:
             click.echo(f"{symbol} {step_name} ({step_phase})")
 

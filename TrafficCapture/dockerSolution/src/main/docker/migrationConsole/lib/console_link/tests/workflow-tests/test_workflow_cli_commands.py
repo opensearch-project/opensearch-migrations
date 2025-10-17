@@ -27,6 +27,11 @@ class TestWorkflowCLICommands:
             'error': None
         }
 
+        mock_service.inject_parameters.return_value = {
+            'metadata': {'generateName': 'test-'},
+            'spec': {}
+        }
+
         mock_service.submit_workflow_to_argo.return_value = {
             'success': True,
             'workflow_name': 'test-workflow-abc',
@@ -37,10 +42,11 @@ class TestWorkflowCLICommands:
             'error': None
         }
 
-        # Mock the store
+        # Mock the store with a valid config
         mock_store = Mock()
         mock_store_class.return_value = mock_store
-        mock_store.load_config.return_value = None
+        mock_config = WorkflowConfig({'parameters': {'message': 'test'}})
+        mock_store.load_config.return_value = mock_config
 
         result = runner.invoke(workflow_cli, ['submit'])
 
@@ -65,6 +71,11 @@ class TestWorkflowCLICommands:
             'error': None
         }
 
+        mock_service.inject_parameters.return_value = {
+            'metadata': {'generateName': 'test-'},
+            'spec': {}
+        }
+
         mock_service.submit_workflow_to_argo.return_value = {
             'success': True,
             'workflow_name': 'test-workflow-abc',
@@ -77,10 +88,11 @@ class TestWorkflowCLICommands:
 
         mock_service.wait_for_workflow_completion.return_value = ('Succeeded', 'Hello World')
 
-        # Mock the store
+        # Mock the store with a valid config
         mock_store = Mock()
         mock_store_class.return_value = mock_store
-        mock_store.load_config.return_value = None
+        mock_config = WorkflowConfig({'parameters': {'message': 'test'}})
+        mock_store.load_config.return_value = mock_config
 
         result = runner.invoke(workflow_cli, ['submit', '--wait', '--timeout', '60'])
 
