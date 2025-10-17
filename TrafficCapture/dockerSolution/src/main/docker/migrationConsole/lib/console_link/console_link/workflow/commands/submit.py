@@ -14,55 +14,6 @@ logger = logging.getLogger(__name__)
 ENDING_PHASES = ["Succeeded", "Failed", "Error", "Stopped", "Terminated"]
 
 
-@click.command(name="submit")
-@click.option(
-    '--argo-server',
-    default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
-    f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
-    help='Argo Server URL (default: auto-detected from Kubernetes service env vars, or ARGO_SERVER env var)'
-)
-@click.option(
-    '--namespace',
-    default='ma',
-    help='Kubernetes namespace for the workflow (default: ma)'
-)
-@click.option(
-    '--name',
-    help='Workflow name (will use generateName if not provided)'
-)
-@click.option(
-    '--insecure',
-    is_flag=True,
-    default=False,
-    help='Skip TLS certificate verification'
-)
-@click.option(
-    '--token',
-    help='Bearer token for authentication'
-)
-@click.option(
-    '--wait',
-    is_flag=True,
-    default=False,
-    help='Wait for workflow completion (default: return immediately after submission)'
-)
-@click.option(
-    '--timeout',
-    default=120,
-    type=int,
-    help='Timeout in seconds to wait for workflow completion (only used with --wait, default: 120)'
-)
-@click.option(
-    '--wait-interval',
-    default=2,
-    type=int,
-    help='Interval in seconds between status checks (only used with --wait, default: 2)'
-)
-@click.option(
-    '--session',
-    default='default',
-    help='Configuration session name to load parameters from (default: default)'
-)
 def _load_and_inject_config(service: WorkflowService, workflow_spec: dict, namespace: str, session: str) -> dict:
     """Load configuration and inject parameters into workflow spec.
 
@@ -122,6 +73,55 @@ def _handle_workflow_wait(service: WorkflowService, namespace: str, workflow_nam
         click.echo(f"\nError monitoring workflow: {str(e)}", err=True)
 
 
+@click.command(name="submit")
+@click.option(
+    '--argo-server',
+    default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
+    f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
+    help='Argo Server URL (default: auto-detected from Kubernetes service env vars, or ARGO_SERVER env var)'
+)
+@click.option(
+    '--namespace',
+    default='ma',
+    help='Kubernetes namespace for the workflow (default: ma)'
+)
+@click.option(
+    '--name',
+    help='Workflow name (will use generateName if not provided)'
+)
+@click.option(
+    '--insecure',
+    is_flag=True,
+    default=False,
+    help='Skip TLS certificate verification'
+)
+@click.option(
+    '--token',
+    help='Bearer token for authentication'
+)
+@click.option(
+    '--wait',
+    is_flag=True,
+    default=False,
+    help='Wait for workflow completion (default: return immediately after submission)'
+)
+@click.option(
+    '--timeout',
+    default=120,
+    type=int,
+    help='Timeout in seconds to wait for workflow completion (only used with --wait, default: 120)'
+)
+@click.option(
+    '--wait-interval',
+    default=2,
+    type=int,
+    help='Interval in seconds between status checks (only used with --wait, default: 2)'
+)
+@click.option(
+    '--session',
+    default='default',
+    help='Configuration session name to load parameters from (default: default)'
+)
 @click.pass_context
 def submit_command(ctx, argo_server, namespace, name, insecure, token, wait, timeout, wait_interval, session):
     """Submit a workflow to Argo Workflows.

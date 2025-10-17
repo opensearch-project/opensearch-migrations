@@ -88,10 +88,42 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
             if list_result['count'] == 0:
                 if show_all:
                     click.echo(f"No workflows found in namespace {namespace}")
+                    return
                 else:
+                    # No active workflows, try to get the last completed workflow
                     click.echo(f"No running workflows found in namespace {namespace}")
-                    click.echo("Use --all to see completed workflows")
-                return
+
+                    # Try to get completed workflows
+                    completed_result = service.list_workflows(
+                        namespace=namespace,
+                        argo_server=argo_server,
+                        token=token,
+                        insecure=insecure,
+                        exclude_completed=False
+                    )
+
+                    if completed_result['success'] and completed_result['count'] > 0:
+                        # Get the most recent completed workflow
+                        click.echo("\nShowing last completed workflow:")
+                        click.echo("")
+
+                        # Get status for the first workflow (most recent)
+                        last_workflow = sorted(completed_result['workflows'])[0]
+                        result = service.get_workflow_status(
+                            workflow_name=last_workflow,
+                            namespace=namespace,
+                            argo_server=argo_server,
+                            token=token,
+                            insecure=insecure
+                        )
+
+                        if result['success']:
+                            _display_workflow_status(result)
+
+                        click.echo("\nUse --all to see all completed workflows")
+                    else:
+                        click.echo("Use --all to see completed workflows")
+                    return
 
             click.echo(f"Found {list_result['count']} workflow(s) in namespace {namespace}:")
             click.echo("")

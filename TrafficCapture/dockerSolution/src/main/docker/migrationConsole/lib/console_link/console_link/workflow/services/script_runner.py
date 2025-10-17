@@ -12,11 +12,11 @@ logger = logging.getLogger(__name__)
 
 class ScriptRunner:
     """Runs workflow scripts with standard interface."""
-    
+
     def __init__(self, script_dir: Optional[Path] = None):
         """
         Initialize with script directory path.
-        
+
         Args:
             script_dir: Optional path to scripts. If None, uses WORKFLOW_SCRIPT_DIR env var or test resources.
         """
@@ -39,12 +39,12 @@ class ScriptRunner:
                 self.script_dir = test_resources
         else:
             self.script_dir = Path(script_dir)
-        
+
         if not self.script_dir.exists():
             raise ValueError(f"Script directory not found: {self.script_dir}")
-        
+
         logger.debug(f"ScriptRunner initialized with script_dir: {self.script_dir}")
-    
+
     def run_script(
         self,
         script_name: str,
@@ -53,30 +53,30 @@ class ScriptRunner:
     ) -> str:
         """
         Run a script with standard interface.
-        
+
         Args:
             script_name: Name of script (e.g., 'getSample.sh')
             input_data: Optional data to pass via stdin
             *args: Additional command line arguments
-            
+
         Returns:
             Script stdout output
-            
+
         Raises:
             FileNotFoundError: If script doesn't exist
             subprocess.CalledProcessError: If script fails
         """
         script_path = self.script_dir / script_name
-        
+
         if not script_path.exists():
             raise FileNotFoundError(f"Script not found: {script_path}")
-        
+
         cmd = [str(script_path)] + list(args)
-        
+
         logger.debug(f"Running script: {' '.join(cmd)}")
         if input_data:
             logger.debug(f"Input data length: {len(input_data)} bytes")
-        
+
         try:
             result = subprocess.run(
                 cmd,
@@ -86,25 +86,25 @@ class ScriptRunner:
                 check=True,
                 cwd=str(self.script_dir)
             )
-            
+
             logger.debug(f"Script completed successfully")
             return result.stdout.strip()
-            
+
         except subprocess.CalledProcessError as e:
             logger.error(f"Script failed with exit code {e.returncode}")
             logger.error(f"stderr: {e.stderr}")
             raise
-    
+
     def get_sample_config(self) -> str:
         """Get sample workflow configuration."""
         logger.info("Getting sample configuration")
         return self.run_script("getSample.sh")
-    
+
     def transform_config(self, config_data: str) -> str:
         """Transform configuration."""
         logger.info("Transforming configuration")
         return self.run_script("transformConfig.sh", config_data, "-")
-    
+
     def init_workflow(self, config_data: str, prefix: Optional[str] = None) -> str:
         """Initialize workflow state, returns prefix."""
         logger.info(f"Initializing workflow with prefix: {prefix or 'auto-generated'}")
@@ -112,7 +112,7 @@ class ScriptRunner:
         if prefix:
             args.append(prefix)
         return self.run_script("initWorkflow.sh", config_data, *args)
-    
+
     def submit_workflow(
         self,
         config_data: str,

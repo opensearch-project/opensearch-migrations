@@ -100,102 +100,13 @@ class WorkflowService:
 
     def __init__(self):
         """Initialize the WorkflowService."""
-        self._default_workflow: Optional[Dict[str, Any]] = None
-
-    def get_default_workflow_spec(self) -> Dict[str, Any]:
-        """Get the embedded hello-world workflow specification with approval gate.
-
-        Returns:
-            Dict containing the default workflow spec with suspend node
-        """
-        if self._default_workflow is None:
-            # Generate unique message for verification
-            timestamp = datetime.now().isoformat()
-
-            self._default_workflow = {
-                "metadata": {
-                    "generateName": "hello-world-",
-                    "labels": {
-                        "workflows.argoproj.io/completed": "false"
-                    }
-                },
-                "spec": {
-                    "serviceAccountName": "argo-workflow-executor",
-                    "templates": [
-                        {
-                            "name": "main",
-                            "steps": [
-                                [
-                                    {
-                                        "name": "step1",
-                                        "template": "hello-step"
-                                    }
-                                ],
-                                [
-                                    {
-                                        "name": "approval-gate",
-                                        "template": "approve"
-                                    }
-                                ],
-                                [
-                                    {
-                                        "name": "step2",
-                                        "template": "goodbye-step"
-                                    }
-                                ]
-                            ]
-                        },
-                        {
-                            "name": "hello-step",
-                            "container": {
-                                "name": "",
-                                "image": "busybox",
-                                "command": ["sh", "-c"],
-                                "args": [
-                                    f'echo "Step 1: Hello from workflow at {timestamp}"'
-                                ],
-                                "resources": {}
-                            }
-                        },
-                        {
-                            "name": "approve",
-                            "suspend": {}
-                        },
-                        {
-                            "name": "goodbye-step",
-                            "outputs": {
-                                "parameters": [
-                                    {
-                                        "name": "message",
-                                        "valueFrom": {
-                                            "path": "/tmp/message.txt"
-                                        }
-                                    }
-                                ]
-                            },
-                            "container": {
-                                "name": "",
-                                "image": "busybox",
-                                "command": ["sh", "-c"],
-                                "args": [
-                                    f'echo "Step 2: Goodbye from workflow at {timestamp}" | tee /tmp/message.txt'
-                                ],
-                                "resources": {}
-                            }
-                        }
-                    ],
-                    "entrypoint": "main",
-                    "arguments": {}
-                }
-            }
-
-        return copy.deepcopy(self._default_workflow)
+        pass
 
     def load_workflow_template(
         self,
         template_path: Optional[str] = None
     ) -> WorkflowTemplateResult:
-        """Load workflow template from file path or use default.
+        """Load workflow template from file path.
 
         Args:
             template_path: Optional file path to workflow YAML
@@ -207,13 +118,17 @@ class WorkflowService:
         path = template_path or os.environ.get('WORKFLOW_TEMPLATE_PATH')
 
         if not path:
-            # No template path specified, use default
-            logger.info("No WORKFLOW_TEMPLATE_PATH set, using default hello-world workflow")
+            # No template path specified - this is now an error
+            error_msg = (
+                "No workflow template path specified. "
+                "Please set WORKFLOW_TEMPLATE_PATH environment variable or provide template_path parameter."
+            )
+            logger.error(error_msg)
             return WorkflowTemplateResult(
-                success=True,
-                workflow_spec=self.get_default_workflow_spec(),
-                source='embedded',
-                error=None
+                success=False,
+                workflow_spec={},
+                source='none',
+                error=error_msg
             )
 
         # Try to load from file
@@ -241,33 +156,30 @@ class WorkflowService:
         except FileNotFoundError:
             error_msg = f"Template file not found: {path}"
             logger.error(error_msg)
-            logger.info(FALLBACK_MESSAGE)
             return WorkflowTemplateResult(
                 success=False,
-                workflow_spec=self.get_default_workflow_spec(),
-                source='embedded',
+                workflow_spec={},
+                source='none',
                 error=error_msg
             )
 
         except yaml.YAMLError as e:
             error_msg = f"Invalid YAML in template file {path}: {e}"
             logger.error(error_msg)
-            logger.info(FALLBACK_MESSAGE)
             return WorkflowTemplateResult(
                 success=False,
-                workflow_spec=self.get_default_workflow_spec(),
-                source='embedded',
+                workflow_spec={},
+                source='none',
                 error=error_msg
             )
 
         except Exception as e:
             error_msg = f"Error loading template from {path}: {e}"
             logger.error(error_msg)
-            logger.info(FALLBACK_MESSAGE)
             return WorkflowTemplateResult(
                 success=False,
-                workflow_spec=self.get_default_workflow_spec(),
-                source='embedded',
+                workflow_spec={},
+                source='none',
                 error=error_msg
             )
 
@@ -314,6 +226,10 @@ class WorkflowService:
 
         # Inject each parameter from config
         for param_name, param_value in config_params.items():
+            # Convert boolean values to lowercase strings for Argo Workflows
+            if isinstance(param_value, bool):
+                param_value = str(param_value).lower()
+
             # Check if parameter already exists in workflow
             existing_param = None
             for param in params_list:
@@ -324,14 +240,14 @@ class WorkflowService:
             if existing_param:
                 # Update existing parameter
                 existing_param['value'] = param_value
-                logger.debug(f"Updated existing parameter: {param_name}")
+                logger.debug(f"Updated existing parameter: {param_name} = {param_value}")
             else:
                 # Add new parameter
                 params_list.append({
                     'name': param_name,
                     'value': param_value
                 })
-                logger.debug(f"Added new parameter: {param_name}")
+                logger.debug(f"Added new parameter: {param_name} = {param_value}")
 
         return workflow
 

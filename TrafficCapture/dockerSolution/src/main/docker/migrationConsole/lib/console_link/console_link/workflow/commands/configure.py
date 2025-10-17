@@ -19,22 +19,9 @@ session_name = 'default'
 
 def _get_empty_config_template() -> str:
     """Return empty configuration template"""
-    return """# Workflow Configuration
-# Edit this file to configure your migration workflow
-# Add any YAML/JSON configuration you need
-
-# Example:
-# targets:
-#   target-name:
-#     endpoint: "https://target:9200"
-#     auth:
-#       username: "admin"
-#       password: "password"
-#
-# source-migration-configurations:
-#   - source:
-#       endpoint: "https://source-cluster:9200"
-"""
+    from ..services.script_runner import ScriptRunner
+    runner = ScriptRunner()
+    return runner.get_sample_config()
 
 
 def _launch_editor_for_config(config: Optional[WorkflowConfig] = None) -> CommandResult[WorkflowConfig]:
@@ -197,3 +184,36 @@ def clear_config(ctx, confirm):
     except Exception as e:
         logger.exception(f"Failed to clear configuration: {e}")
         raise click.ClickException(f"Failed to clear configuration: {e}")
+
+
+@configure_group.command(name="sample")
+@click.option('--format', type=click.Choice(['yaml', 'json']), default='yaml',
+              help='Output format')
+@click.option('--load', is_flag=True, help='Load sample into current session')
+@click.pass_context
+def sample_config(ctx, format, load):
+    """Show or load sample configuration"""
+    try:
+        from ..services.script_runner import ScriptRunner
+        runner = ScriptRunner()
+        sample_content = runner.get_sample_config()
+
+        if load:
+            # Load sample into session
+            store = get_store(ctx)
+            config = WorkflowConfig.from_yaml(sample_content)
+            _save_config(store, config, session_name)
+            click.echo("Sample configuration loaded successfully")
+            click.echo("\nUse 'workflow configure view' to see it")
+            click.echo("Use 'workflow configure edit' to modify it")
+        else:
+            # Just display the sample
+            if format == 'json':
+                config = WorkflowConfig.from_yaml(sample_content)
+                click.echo(config.to_json())
+            else:
+                click.echo(sample_content)
+
+    except Exception as e:
+        logger.exception(f"Failed to get sample configuration: {e}")
+        raise click.ClickException(f"Failed to get sample: {e}")

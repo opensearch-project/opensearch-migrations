@@ -119,7 +119,7 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
                 step_type = step['type']
                 step_name = step['name']
                 step_phase = step['phase']
-                
+
                 # Collect suspended steps for approval selection
                 if step_type == 'Suspend' and step_phase == 'Running':
                     suspended_steps.append(step_name)
@@ -128,41 +128,42 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
                     status_icon = "+" if step_phase == "Succeeded" else "*"
                     click.echo(f"  {status_icon} {step_name} [{step_type}] - {step_phase}")
             click.echo("-" * 60)
-        
+
         # Interactive confirmation unless --acknowledge is passed
         if not acknowledge:
             if not suspended_steps:
                 click.echo("\nNo suspended steps found waiting for approval.")
                 ctx.exit(ExitCode.SUCCESS.value)
-            
+
             click.echo("\nSelect an action:")
             click.echo("-" * 60)
-            
+
             # Display suspended steps with numbers
             for idx, step_name in enumerate(suspended_steps):
                 click.echo(f"  [{idx}] Approve and resume: {step_name}")
-            
+
             click.echo(f"  [c] Cancel")
             click.echo("-" * 60)
-            
+
             # Get user selection
             choice = click.prompt("\nEnter your choice", type=str).strip().lower()
-            
+
             if choice == 'c':
                 click.echo("Approval cancelled.")
                 ctx.exit(ExitCode.SUCCESS.value)
-            
+
             # Validate numeric choice
             try:
                 choice_idx = int(choice)
                 if choice_idx < 0 or choice_idx >= len(suspended_steps):
-                    click.echo(f"Error: Invalid choice. Please select 0-{len(suspended_steps)-1} or 'c'", err=True)
+                    click.echo(f"Error: Invalid choice. Please select 0-{len(suspended_steps) - 1} or 'c'", err=True)
                     ctx.exit(ExitCode.FAILURE.value)
-                
+
                 selected_step = suspended_steps[choice_idx]
                 click.echo(f"\nApproving step: {selected_step}")
             except ValueError:
-                click.echo(f"Error: Invalid input. Please enter a number (0-{len(suspended_steps)-1}) or 'c'", err=True)
+                click.echo(
+                    f"Error: Invalid input. Please enter a number (0-{len(suspended_steps) - 1}) or 'c'", err=True)
                 ctx.exit(ExitCode.FAILURE.value)
 
         # Resume the workflow

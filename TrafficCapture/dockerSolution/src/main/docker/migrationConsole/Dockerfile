@@ -89,6 +89,7 @@ COPY lib /root/lib
 COPY lib/console_link/tests/workflow-tests/resources /opt/workflow-resources
 RUN chmod +x /opt/workflow-resources/scripts/*.sh
 ENV WORKFLOW_SCRIPT_DIR=/opt/workflow-resources/scripts
+ENV WORKFLOW_TEMPLATE_PATH=/opt/workflow-resources/hello-world-workflow.yaml
 
 WORKDIR /root/lib/console_link
 RUN pipenv install --deploy

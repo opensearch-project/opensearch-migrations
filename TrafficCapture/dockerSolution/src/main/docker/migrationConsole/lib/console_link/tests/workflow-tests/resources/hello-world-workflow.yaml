@@ -2,7 +2,9 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   generateName: hello-world-
+  namespace: ma
 spec:
+  serviceAccountName: argo-workflow-executor
   entrypoint: main
   arguments:
     parameters:
