@@ -699,11 +699,9 @@ spec:
                   - |
                     set -e
                     echo "Creating Elasticsearch keystore and adding AWS credentials"
-                    bin/elasticsearch-keystore create -f
+                    echo 'y' | bin/elasticsearch-keystore create
                     echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
                     echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
-                    chown 1000:0 /usr/share/elasticsearch/config/elasticsearch.keystore
-                    chmod 600 /usr/share/elasticsearch/config/elasticsearch.keystore
                     # Copy keystore to shared volume location
                     cp /usr/share/elasticsearch/config/elasticsearch.keystore /shared/elasticsearch.keystore
                     echo "Keystore created and saved to shared volume"
@@ -1077,8 +1075,6 @@ spec:
         parameters:
           - name: cluster-config
             valueFrom:
-<<<<<<< HEAD
-=======
               path: /tmp/cluster-config.json
 
     # OpenSearch 3.1 Single Node Template
@@ -1156,5 +1152,4 @@ spec:
         parameters:
           - name: cluster-config
             valueFrom:
->>>>>>> origin/main
               path: /tmp/cluster-config.json

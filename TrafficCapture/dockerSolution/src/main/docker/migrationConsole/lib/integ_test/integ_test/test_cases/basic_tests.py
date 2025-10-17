@@ -1,12 +1,7 @@
 import logging
 from ..cluster_version import (
-<<<<<<< HEAD
-    ElasticsearchV1_X, ElasticsearchV2_X, ElasticsearchV5_X, ElasticsearchV7_X, ElasticsearchV8_X,
-    OpensearchV1_X, OpensearchV2_X
-=======
     ElasticsearchV1_X, ElasticsearchV2_X, ElasticsearchV5_X, ElasticsearchV6_X, ElasticsearchV7_X,
-    OpensearchV1_X, OpensearchV2_X, OpensearchV3_X
->>>>>>> origin/main
+    ElasticsearchV8_X, OpensearchV1_X, OpensearchV2_X, OpensearchV3_X
 )
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
@@ -31,12 +26,10 @@ class Test0001SingleDocumentBackfill(MATestBase):
             (ElasticsearchV6_X, OpensearchV3_X),
             (ElasticsearchV7_X, OpensearchV1_X),
             (ElasticsearchV7_X, OpensearchV2_X),
-<<<<<<< HEAD
+            (ElasticsearchV7_X, OpensearchV3_X),
             (ElasticsearchV8_X, OpensearchV1_X),
             (ElasticsearchV8_X, OpensearchV2_X),
-=======
-            (ElasticsearchV7_X, OpensearchV3_X),
->>>>>>> origin/main
+            (ElasticsearchV8_X, OpensearchV3_X),
         ]
         migrations_required = [MigrationType.BACKFILL]
         description = "Performs backfill migration for a single document."
