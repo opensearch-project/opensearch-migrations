@@ -93,8 +93,7 @@ class WorkflowService:
     - Workflow submission to Argo
     - Workflow status monitoring
 
-    The service is stateless (except for caching the default template) and
-    can be reused by any interface (CLI, API, scripts).
+    The service is stateless and can be reused by any interface (CLI, API, scripts).
     """
 
     def __init__(self):
@@ -116,7 +115,7 @@ class WorkflowService:
         path = template_path or os.environ.get('WORKFLOW_TEMPLATE_PATH')
 
         if not path:
-            # No template path specified - this is now an error
+            # No template path specified - this is an error
             error_msg = (
                 "No workflow template path specified. "
                 "Please set WORKFLOW_TEMPLATE_PATH environment variable or provide template_path parameter."

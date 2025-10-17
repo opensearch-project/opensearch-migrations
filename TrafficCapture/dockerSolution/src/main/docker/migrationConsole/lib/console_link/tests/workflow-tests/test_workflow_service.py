@@ -11,35 +11,17 @@ from console_link.workflow.models.config import WorkflowConfig
 class TestWorkflowServiceTemplateLoading:
     """Test suite for workflow template loading functionality."""
 
-    def test_get_default_workflow_spec(self):
-        """Test that default workflow spec is returned correctly."""
-        service = WorkflowService()
-
-        workflow = service.get_default_workflow_spec()
-
-        # Verify structure
-        assert 'metadata' in workflow
-        assert 'spec' in workflow
-        assert 'templates' in workflow['spec']
-        assert 'entrypoint' in workflow['spec']
-        assert workflow['spec']['entrypoint'] == 'main'
-
-        # Verify it returns a copy (not the cached instance)
-        workflow2 = service.get_default_workflow_spec()
-        assert workflow is not workflow2
-        assert workflow == workflow2
-
     def test_load_workflow_template_default_no_env_var(self):
-        """Test loading default workflow when WORKFLOW_TEMPLATE_PATH is not set."""
+        """Test loading workflow when WORKFLOW_TEMPLATE_PATH is not set - should fail."""
         service = WorkflowService()
 
         with patch.dict(os.environ, {}, clear=True):
             result = service.load_workflow_template()
 
-        assert result['success'] is True
-        assert result['source'] == 'embedded'
-        assert result['error'] is None
-        assert 'spec' in result['workflow_spec']
+        assert result['success'] is False
+        assert result['source'] == 'none'
+        assert result['error'] is not None
+        assert 'No workflow template path specified' in result['error']
 
     def test_load_workflow_template_from_explicit_path(self):
         """Test loading workflow from explicit path parameter."""
@@ -95,12 +77,10 @@ spec:
         with patch('builtins.open', side_effect=FileNotFoundError("File not found")):
             result = service.load_workflow_template('/missing/workflow.yaml')
 
-        # Should fall back to default
+        # Should return error
         assert result['success'] is False
-        assert result['source'] == 'embedded'
+        assert result['source'] == 'none'
         assert 'not found' in result['error']
-        # Still returns a valid workflow spec (the default)
-        assert 'spec' in result['workflow_spec']
 
     def test_load_workflow_template_invalid_yaml(self):
         """Test handling of invalid YAML syntax."""
@@ -117,11 +97,10 @@ metadata:
         with patch('builtins.open', mock_open(read_data=invalid_yaml)):
             result = service.load_workflow_template('/tmp/invalid.yaml')
 
-        # Should fall back to default
+        # Should return error
         assert result['success'] is False
-        assert result['source'] == 'embedded'
+        assert result['source'] == 'none'
         assert 'Invalid YAML' in result['error'] or 'YAML' in result['error']
-        assert 'spec' in result['workflow_spec']
 
     def test_load_workflow_template_empty_file(self):
         """Test handling of empty template file."""
@@ -130,9 +109,9 @@ metadata:
         with patch('builtins.open', mock_open(read_data="")):
             result = service.load_workflow_template('/tmp/empty.yaml')
 
-        # Should fall back to default
+        # Should return error
         assert result['success'] is False
-        assert result['source'] == 'embedded'
+        assert result['source'] == 'none'
         assert 'empty' in result['error'].lower()
 
     def test_load_workflow_template_missing_spec(self):
@@ -147,9 +126,9 @@ metadata:
         with patch('builtins.open', mock_open(read_data=invalid_workflow)):
             result = service.load_workflow_template('/tmp/no-spec.yaml')
 
-        # Should fall back to default
+        # Should return error
         assert result['success'] is False
-        assert result['source'] == 'embedded'
+        assert result['source'] == 'none'
         assert 'spec' in result['error']
 
 

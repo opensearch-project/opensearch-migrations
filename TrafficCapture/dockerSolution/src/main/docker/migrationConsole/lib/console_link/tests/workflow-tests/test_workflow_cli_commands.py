@@ -217,6 +217,22 @@ class TestWorkflowCLICommands:
             'error': None
         }
 
+        # Mock get_workflow_status to return workflow details
+        mock_service.get_workflow_status.return_value = {
+            'success': True,
+            'workflow_name': 'test-workflow',
+            'namespace': 'ma',
+            'phase': 'Running',
+            'progress': '1/2',
+            'started_at': '2024-01-01T10:00:00Z',
+            'finished_at': None,
+            'steps': [
+                {'name': 'step1', 'phase': 'Succeeded', 'type': 'Pod', 'started_at': '2024-01-01T10:00:00Z'},
+                {'name': 'approval', 'phase': 'Running', 'type': 'Suspend', 'started_at': '2024-01-01T10:01:00Z'}
+            ],
+            'error': None
+        }
+
         mock_service.approve_workflow.return_value = {
             'success': True,
             'workflow_name': 'test-workflow',
@@ -225,7 +241,7 @@ class TestWorkflowCLICommands:
             'error': None
         }
 
-        result = runner.invoke(workflow_cli, ['approve'])
+        result = runner.invoke(workflow_cli, ['approve', '--acknowledge'])
 
         assert result.exit_code == 0
         assert 'Auto-detected workflow' in result.output
