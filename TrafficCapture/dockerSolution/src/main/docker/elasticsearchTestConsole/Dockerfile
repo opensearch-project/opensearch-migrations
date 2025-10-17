@@ -2,7 +2,12 @@
 FROM amazonlinux:2023 AS builder
 
 # Build deps (toolchain + headers)
-RUN dnf install -y --setopt=install_weak_deps=False \
+RUN dnf install -y \
+      --setopt=install_weak_deps=False \
+      --setopt=tsflags=nodocs \
+      --setopt=keepcache=False \
+      --setopt=plugins=0 \
+      --setopt=logfilelevel=0 \
       gcc \
       libffi-devel \
       make \
@@ -37,7 +42,12 @@ ENV PIP_ROOT_USER_ACTION ignore
 ENV LANG C.UTF-8
 
 # Minimal runtime deps (no compilers, no *-devel)
-RUN dnf install -y --setopt=install_weak_deps=False \
+RUN dnf install -y \
+      --setopt=install_weak_deps=False \
+      --setopt=tsflags=nodocs \
+      --setopt=keepcache=False \
+      --setopt=plugins=0 \
+      --setopt=logfilelevel=0 \
         curl-minimal \
         diffutils \
         git \
@@ -54,7 +64,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
         python3.11-pip \
         tar \
         unzip \
-        vim \
+        vim-minimal \
         wget \
         zlib \
         && \
