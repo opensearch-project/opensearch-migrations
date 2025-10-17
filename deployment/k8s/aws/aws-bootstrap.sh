@@ -144,25 +144,19 @@ deploy_dashboard() {
   echo "Deploying dashboard: ${dashboard_name}"
   [[ -f "$dashboard_file" ]] || { echo "ERROR: dashboard file not found: $dashboard_file"; exit 1; }
 
-  # JSON aware token replacement
+  # Load and validate JSON
   local processed_json
-  processed_json="$(jq \
-    '
-    def repl(s; v):
-      if type=="string" then gsub(s; v) else . end;
-    walk(
-        repl("REGION"; "placeholder-region")
-      | repl("MA_STAGE"; "placeholder-stage")
-      | repl("MA_QUALIFIER"; "placeholder-qualifier")
-      | repl("ACCOUNT_ID"; "placeholder-account-id")
-    )
-    ' < "$dashboard_file")" || { echo "ERROR: failed to process JSON"; exit 1; }
+  processed_json="$(cat "$dashboard_file")" || { echo "ERROR: failed to read JSON"; exit 1; }
 
-  # Validate JSON
   echo "$processed_json" | jq -e . >/dev/null || {
-    echo "ERROR: Invalid JSON after substitution for ${dashboard_name} (${dashboard_file})"
-    exit 1
+      echo "ERROR: Invalid JSON for ${dashboard_name} (${dashboard_file})"
+      exit 1
   }
+
+  # Check for variables block
+  if ! echo "$processed_json" | jq -e '.variables | length >= 1' >/dev/null; then
+    echo "WARN: No .variables[] found in dashboards JSON"
+  fi
 
   # Minify and push
   local tmp_json
@@ -176,7 +170,7 @@ deploy_dashboard() {
     --dashboard-name "$full_name" \
     --dashboard-body "file://${tmp_json}" >/dev/null
 
-  # Validate dashboards on CW
+  # Validate dashboards on CloudWatch
   if aws cloudwatch get-dashboard --region "$region" --dashboard-name "$full_name" >/dev/null 2>&1; then
     echo "OK: Dashboard available: ${full_name}"
   else
