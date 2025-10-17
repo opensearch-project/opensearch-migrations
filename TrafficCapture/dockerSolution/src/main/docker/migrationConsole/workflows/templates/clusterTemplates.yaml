@@ -680,7 +680,6 @@ spec:
               - name: "AWS_REGION"
                 value: "us-east-2"
             
-              
             persistence:
               enabled: false
             
@@ -708,7 +707,6 @@ spec:
                 volumeMounts:
                   - name: elasticsearch-keystore
                     mountPath: /shared
-                    
             
             extraVolumes:
               - name: plugins
