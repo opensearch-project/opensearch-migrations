@@ -83,23 +83,12 @@ If you are ever curious what images are in your Minikube environment the followi
 minikube image ls
 ```
 
-
-
-## Update Helm Chart dependencies
-
-As you can see from the charts/ directory for our various component and aggregate charts, Helm will package and place its dependent charts in this directory. The following helper script will go through each of our charts and perform the helm dependency update  command so that the required dependencies are in place to deploy the desired charts
-
-```shell
-./update_deps.sh
-```
-
-
 ## Deploy the Migration Assistant Helm chart
 
 This will deploy our main Migration Assistant Helm chart which will create the needed resources to perform the Migration Assistant suite of migration tooling
 
 ```shell
-helm install ma -n ma charts/aggregates/migrationAssistant --create-namespace
+helm install ma -n ma charts/aggregates/migrationAssistantWithArgo --create-namespace
 ```
 
 To see all helm deployments for this namespace
@@ -114,95 +103,13 @@ To view the pods that were created and are initializing
 kubectl -n ma get pods
 ```
 
-
-## Deploy test clusters with Helm chart
-
-Next to simulate an actual migration environment we should create both a source cluster and target cluster that we will migrate data between . The below chart will create an Elasticsearch 7.10 source cluster and an OpenSearch 2.16 target cluster, but could be supplied different values to customize the source and target versions or settings by modifying the /charts/aggregates/testClusters/values.yaml . We don’t need to wait for the Migration Assistant pods to finish initializing before deploying our test clusters with the below command.
-
-```shell
-helm install tc -n ma charts/aggregates/testClusters
-```
-
-
 ## Access the Migration Console
 
 Open a shell to the Migration Console pod
 
 ```shell
-kubectl -n ma exec -it deploy/ma-migration-console -c console -- /bin/bash
+kubectl -n ma exec --stdin --tty migration-console-0 -- /bin/bash
 ```
-
-
-## Ingest test data into source cluster
-
-From the Migration Console this could be done with the default OpenSearch Benchmark workloads
-
-```shell
-console clusters run-test-benchmarks
-```
-
-Or by manually ingesting data
-
-```shell
-console clusters curl source_cluster -XPUT /my-test-index/_doc/1 -H "Content-Type: application/json" -d '{"message": "Hello, world!"}'
-```
-
-The current indices and documents for both clusters can then be viewed with
-
-```shell
-console clusters cat-indices
-```
-
-## Create a Snapshot
-
-Before performing a Metadata or Backfill migration, we should first create a snapshot of our source cluster which will be utilized by both migrations and remove any need for these migrations to send traffic to the source cluster
-
-```shell
-console snapshot create
-```
-
-The status of the snapshot being created can be viewed with
-
-```shell
-console snapshot status
-```
-
-
-## Perform Metadata Migration
-
-Often as an initial migration, we can perform a Metadata migration to migrate metadata, such as index settings, to the target cluster
-
-```shell
-console metadata migrate
-```
-
-The migrated index metadata can then be viewed with
-
-```shell
-console clusters cat-indices
-```
-
-
-## Perform Backfill Migration
-
-Once ready, the backfill migration can be triggered to start
-
-```shell
-console backfill start
-```
-
-As the backfill migration is in progress, we can check the documents being migrated to the target cluster
-
-```shell
-console clusters cat-indices --refresh
-```
-
-Once the backfill migration is completed, we can stop the backfill process
-
-```shell
-console backfill stop
-```
-
 
 ## Cleanup
 
@@ -212,14 +119,14 @@ After exiting the Migration Console
 migration-console (~) -> exit
 ```
 
-To remove both our Migration Assistant and Test Clusters Helm deployments, as well as any created volumes:
+To remove the Migration Assistant Helm deployment (and its installed chart dependencies), as well as any created volumes:
 
 ```shell
-helm uninstall -n ma ma tc
+helm uninstall -n ma ma
 kubectl -n ma delete pvc --all
 ```
 
-To remove the Minikube container:
+To remove the Minikube container (only necessary if no longer using Minikube):
 
 ```shell
 ./minikubeLocal.sh --delete

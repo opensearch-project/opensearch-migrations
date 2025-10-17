@@ -31,27 +31,6 @@ jobs:
           key=$(echo "${file_contents}" | sha1sum | awk '{print $1}')
           echo "key=${key}" >> "$GITHUB_OUTPUT"
 
-  workflow-info:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create JSON Artifact
-        run: |
-          echo '{' > workflow-info.json
-          echo '  "pr_number": "${{ github.event.pull_request.number }}",' >> workflow-info.json
-          echo '  "commit": "${{ github.event.pull_request.head.sha || github.event.after || github.sha }}",' >> workflow-info.json
-          echo '  "branch": "${{ github.ref }}",' >> workflow-info.json
-          echo '  "commit_parent": "${{ github.event.pull_request.base.sha || github.event.before || github.base.sha }}",' >> workflow-info.json
-          echo '  "build_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",' >> workflow-info.json
-          echo '  "build": "${{ github.run_id }}"' >> workflow-info.json
-          echo '}' >> workflow-info.json
-          echo "workflow-info.json created"
-      - name: Upload JSON Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: workflow-info
-          path: workflow-info.json
-
-
   gradle-extended-check:
     runs-on: ubuntu-latest
     strategy:
@@ -110,12 +89,13 @@ jobs:
         env:
           PY_PROJECT: ${{ matrix.py-project }}
         run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT//\//-}" >> $GITHUB_ENV
-      - name: Upload Coverage Reports
-        uses: actions/upload-artifact@v4
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
         with:
-          if-no-files-found: error
-          name: coverage-reports-python-tests-${{ env.SANITIZED_PY_PROJECT }}
-          path: ${{ env.WORKING_DIR }}/coverage.xml
+          fail_ci_if_error: true
+          flags: unittests
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
   generate-test-matrix:
     runs-on: ubuntu-latest
@@ -151,7 +131,7 @@ jobs:
       - name: Run Gradle tests with striping
         run: |
           MAX_WORKERS=$(( $(nproc) - 1 ))
-          gradle allTests \
+          gradle allTests mergeJacocoReports \
           --max-workers $MAX_WORKERS \
           -Dtest.striping.total=${{ env.gradle-test-parallelization }} \
           -Dtest.striping.index=${{ matrix.index }} \
@@ -184,48 +164,19 @@ jobs:
           path: |
             **/build/reports/tests/
 
-      - name: Publish Jacoco report artifact for stripe ${{ matrix.index }}
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
         with:
-          if-no-files-found: error
-          name: coverage-exec-artifacts-gradle-tests-stripe-${{ matrix.index }}
-          path: |
-            **/build/jacoco/*.exec
+          fail_ci_if_error: true
+          flags: unittests
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
       - name: Show disk usage
         if: always()
         run: |
           df -h
           docker system df -v
-
-  jacoco-aggregate:
-    needs: [ gradle-tests ]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-env
-      - name: Create clean .exec directory
-        run: rm -rf build/jacocoMerged && mkdir -p build/jacocoMerged
-
-      - name: Download all JaCoCo .exec files into directory expected by jacocoAggregateReport
-        uses: actions/download-artifact@v5
-        with:
-          path: build/jacocoMerged
-          pattern: coverage-exec-artifacts-gradle-tests-*
-          merge-multiple: true
-
-      - name: Generate aggregate JaCoCo report
-        run: gradle jacocoAggregateReport --stacktrace
-
-      - name: Upload Aggregate JaCoCo report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          if-no-files-found: error
-          name: coverage-reports-gradle-tests-aggregate
-          path: |
-            build/reports/jacoco/mergedReport/*
 
   python-e2e-tests:
     needs: [ generate-cache-key ]
@@ -295,6 +246,13 @@ jobs:
         run: npm ci
       - name: Run CDK Jest Tests (using mocked images)
         run: npm run test
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: true
+          flags: unittests
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
   link-checker:
     runs-on: ubuntu-latest
@@ -322,7 +280,6 @@ jobs:
     needs:
       - python-tests
       - gradle-tests
-      - jacoco-aggregate
       - link-checker
       - node-tests
       - python-e2e-tests

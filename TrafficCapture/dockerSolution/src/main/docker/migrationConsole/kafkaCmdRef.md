@@ -9,6 +9,13 @@ When running these commands in an AWS environment, the following piece should be
 --command-config ../../aws/msk-iam-auth.properties
 ```
 
+### Kubernetes / Amazon EKS
+
+When running on a kubernetes cluster the command configuration is mounted onto the file system, add the following argument
+```shell
+--command-config /opt/kafka-config/kafka.properties
+```
+
 ### Topics
 
 List all Topics

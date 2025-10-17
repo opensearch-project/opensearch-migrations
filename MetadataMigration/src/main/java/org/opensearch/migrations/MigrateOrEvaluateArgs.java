@@ -9,7 +9,6 @@ import org.opensearch.migrations.cli.OutputFormat;
 import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
-import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
 import lombok.Getter;
@@ -118,12 +117,5 @@ public class MigrateOrEvaluateArgs {
                 arity = 1,
                 description = "Path to the JSON configuration file of metadata transformers.")
         private String transformerConfigFile;
-    }
-
-    static class MultiTypeResolutionBehaviorConverter implements IStringConverter<IndexMappingTypeRemoval.MultiTypeResolutionBehavior> {
-        @Override
-        public IndexMappingTypeRemoval.MultiTypeResolutionBehavior convert(String value) {
-            return IndexMappingTypeRemoval.MultiTypeResolutionBehavior.valueOf(value.toUpperCase());
-        }
     }
 }
