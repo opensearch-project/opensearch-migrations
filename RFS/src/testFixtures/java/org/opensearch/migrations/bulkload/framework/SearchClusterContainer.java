@@ -158,7 +158,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             "path.repo", CLUSTER_SNAPSHOT_DIR,
             "index.store.type", "mmapfs",
             "bootstrap.system_call_filter", "false",
-            "ES_JAVA_OPTS", "-Xms2g -Xmx2g -XX:-UseContainerSupport -Dlog4j2.disable.jmx=true -Dlog4j2.disableJmx=true",
+            "ES_JAVA_OPTS", "-Xms2g -Xmx2g -Dlog4j2.disable.jmx=true -Dlog4j2.disableJmx=true",
             "cluster.routing.allocation.disk.watermark.low", "100%",
             "cluster.routing.allocation.disk.watermark.high", "100%",
             "cluster.routing.allocation.disk.watermark.flood_stage", "100%"
@@ -194,7 +194,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         ELASTICSEARCH_7(
             overrideAndRemoveEnv(
                 BASE.getEnvVariables(),
-                Map.of("xpack.security.enabled", "false"),
+                Map.of("xpack.security.enabled", "false",
+                        "ES_JAVA_OPTS", "-Xms2g -Xmx2g -XX:-UseContainerSupport -Dlog4j2.disable.jmx=true -Dlog4j2.disableJmx=true"),
                 Set.of()
             )),
         ELASTICSEARCH_8(
@@ -208,8 +209,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                     Map.entry("cluster.name", "docker-test-cluster"),
                     Map.entry("node.name", "test-node"),
                     Map.entry("xpack.ml.enabled", "false"),
-                    Map.entry("xpack.watcher.enabled", "false")
-                ),
+                    Map.entry("xpack.watcher.enabled", "false"),
+                    Map.entry("ES_JAVA_OPTS", "-Xms2g -Xmx2g -XX:-UseContainerSupport -Dlog4j2.disable.jmx=true -Dlog4j2.disableJmx=true")
+                    ),
                 Set.of("bootstrap.system_call_filter")  // don't set it for ES 8x
             )),
         OPENSEARCH(
