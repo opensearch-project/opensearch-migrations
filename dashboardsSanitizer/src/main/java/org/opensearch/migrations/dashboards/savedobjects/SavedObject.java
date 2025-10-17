@@ -74,7 +74,7 @@ public class SavedObject {
             try {
                 return (ObjectNode)objectMapper.readTree(attrs.get(attribute).asText());
             } catch (JsonProcessingException e) {
-                log.error("Parsing of the locatorJSON: {} has failed", e);
+                log.atError().setCause(e).setMessage("Parsing of the locatorJSON has failed").log();
             }
         }
 

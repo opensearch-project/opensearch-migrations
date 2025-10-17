@@ -16,7 +16,7 @@ public class JsonJMESPathTransformer implements IJsonTransformer {
     @Override
     public Object transformJson(Object incomingJson) {
         var output = expression.search(incomingJson);
-        log.info("output=" + output);
+        log.atInfo().setMessage("output={}").addArgument(output).log();
         return output;
     }
 }

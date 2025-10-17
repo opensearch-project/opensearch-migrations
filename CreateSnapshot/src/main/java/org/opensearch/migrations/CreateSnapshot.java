@@ -1,6 +1,5 @@
 package org.opensearch.migrations;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
@@ -108,28 +107,6 @@ public class CreateSnapshot {
         String otelCollectorEndpoint;
     }
 
-    public static class EnvParameters {
-
-        private EnvParameters() {
-            throw new IllegalStateException("EnvParameters utility class should not instantiated");
-        }
-
-        public static void injectFromEnv(Args args) {
-            List<String> addedEnvParams = new ArrayList<>();
-            if (args.sourceArgs.username == null && System.getenv(ArgNameConstants.SOURCE_USERNAME_ENV_ARG) != null) {
-                args.sourceArgs.username = System.getenv(ArgNameConstants.SOURCE_USERNAME_ENV_ARG);
-                addedEnvParams.add(ArgNameConstants.SOURCE_USERNAME_ENV_ARG);
-            }
-            if (args.sourceArgs.password == null && System.getenv(ArgNameConstants.SOURCE_PASSWORD_ENV_ARG) != null) {
-                args.sourceArgs.password = System.getenv(ArgNameConstants.SOURCE_PASSWORD_ENV_ARG);
-                addedEnvParams.add(ArgNameConstants.SOURCE_PASSWORD_ENV_ARG);
-            }
-            if (!addedEnvParams.isEmpty()) {
-                log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
-            }
-        }
-    }
-
     @Getter
     @AllArgsConstructor
     public static class S3RepoInfo {
@@ -142,7 +119,6 @@ public class CreateSnapshot {
         Args arguments = new Args();
         JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
-        EnvParameters.injectFromEnv(arguments);
 
         if (arguments.help) {
             jCommander.usage();

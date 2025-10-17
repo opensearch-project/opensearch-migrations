@@ -7,97 +7,103 @@ spec:
   serviceAccountName: argo-workflow-executor
 
   templates:
+
     - name: cluster-deploy
       inputs:
         parameters:
-          - name: kafka-name
-          - name: use-kraft
-            value: "true"
+          - name: kafkaName
       outputs:
         parameters:
-          - name: kafka-name
+          - name: kafkaName
             valueFrom:
-              expression: "inputs.parameters['kafka-name']"
-          - name: bootstrap-servers
+              expression: "inputs.parameters.kafkaName"
+          - name: bootstrapServers
             valueFrom:
-              expression: >-
-                (tasks['deploy-kafka-cluster-kraft'].status == "Skipped" ? tasks['deploy-kafka-cluster-zookeeper'] : tasks['deploy-kafka-cluster-kraft']).outputs.parameters['brokers']
+              expression: "tasks['deploy-kafka-cluster'].outputs.parameters.bootstrapServers"
+          - name: captureProxyKafkaClientSecretBundle
+            valueFrom:
+              expression: "tasks['create-capture-proxy-bundle'].outputs.parameters.kafkaClientSecretBundle"
+          - name: replayerKafkaClientSecretBundle
+            valueFrom:
+              expression: "tasks['create-replayer-bundle'].outputs.parameters.kafkaClientSecretBundle"
+          - name: consoleKafkaClientSecretBundle
+            valueFrom:
+              expression: "tasks['create-console-bundle'].outputs.parameters.kafkaClientSecretBundle"
       dag:
         tasks:
-          - name: deploy-kafka-node-pool
-            template: deploy-kafka-node-pool
-            when: "{{inputs.parameters.use-kraft}} == true"
+          - name: deploy-kafka-cluster
+            template: deploy-kafka-cluster
             arguments:
               parameters:
-                - name: kafka-name
-                  value: "{{inputs.parameters.kafka-name}}"
+                - name: kafkaName
+                  value: "{{inputs.parameters.kafkaName}}"
 
-          - name: deploy-kafka-cluster-kraft
-            template: deploy-kafka-cluster-kraft
-            when: "{{inputs.parameters.use-kraft}} == true"
+          - name: create-capture-proxy-bundle
+            dependencies: [deploy-kafka-cluster]
+            template: create-kafka-client-bundle
             arguments:
               parameters:
-                - name: kafka-name
-                  value: "{{inputs.parameters.kafka-name}}"
+                - name: kafkaName
+                  value: "{{inputs.parameters.kafkaName}}"
+                - name: role
+                  value: "capture-proxy"
+                - name: bootstrapServers
+                  value: "{{tasks['deploy-kafka-cluster'].outputs.parameters.bootstrapServers}}"
 
-          - name: deploy-kafka-cluster-zookeeper
-            template: deploy-kafka-cluster-zookeeper
-            when: "{{inputs.parameters.use-kraft}} == false"
+          - name: create-replayer-bundle
+            dependencies: [deploy-kafka-cluster]
+            template: create-kafka-client-bundle
             arguments:
               parameters:
-                - name: kafka-name
-                  value: "{{inputs.parameters.kafka-name}}"
+                - name: kafkaName
+                  value: "{{inputs.parameters.kafkaName}}"
+                - name: role
+                  value: "replayer"
+                - name: bootstrapServers
+                  value: "{{tasks['deploy-kafka-cluster'].outputs.parameters.bootstrapServers}}"
 
+          - name: create-console-bundle
+            dependencies: [deploy-kafka-cluster]
+            template: create-kafka-client-bundle
+            arguments:
+              parameters:
+                - name: kafkaName
+                  value: "{{inputs.parameters.kafkaName}}"
+                - name: role
+                  value: "console"
+                - name: bootstrapServers
+                  value: "{{tasks['deploy-kafka-cluster'].outputs.parameters.bootstrapServers}}"
 
-    - name: deploy-kafka-cluster-zookeeper
+    - name: deploy-kafka-cluster
       inputs:
         parameters:
-          - name: kafka-name
+          - name: kafkaName
       outputs:
         parameters:
-          - name: brokers
-            valueFrom:
-              jsonPath: "{.status.listeners[?(@.name=='plain')].bootstrapServers}"
-      resource:
-        action: create
-        setOwnerReference: true
-        successCondition: status.listeners
-        manifest: |
-          apiVersion: kafka.strimzi.io/v1beta2
-          kind: Kafka
-          metadata:
-            name: {{inputs.parameters.kafka-name}}
-          spec:
-            kafka:
-              version: 3.9.0
-              replicas: 1
-              listeners:
-                - name: tls
-                  port: 9093
-                  type: internal
-                  tls: true
-              config:
-                offsets.topic.replication.factor: 1
-                transaction.state.log.replication.factor: 1
-                transaction.state.log.min.isr: 1
-                default.replication.factor: 1
-                min.insync.replicas: 1
-                inter.broker.protocol.version: "3.9"
-              storage:
-                type: ephemeral
-            zookeeper:
-              replicas: 3
-              storage:
-                type: ephemeral
-            entityOperator:
-              topicOperator: {}
-              userOperator: {}
+        - name: bootstrapServers
+          valueFrom:
+            expression: "tasks['deploy-kafka-cluster-kraft'].outputs.parameters.bootstrapServers"
+      dag:
+        tasks:
+          - name: deploy-kraft-node-pool
+            template: deploy-kafka-node-pool
+            arguments:
+              parameters:
+                - name: kafkaName
+                  value: "{{inputs.parameters.kafkaName}}"
 
+          - name: deploy-kafka-cluster-kraft
+            dependencies: [deploy-kraft-node-pool]
+            template: deploy-kafka-cluster-kraft
+            arguments:
+              parameters:
+                - name: kafkaName
+                  value: "{{inputs.parameters.kafkaName}}"
 
     - name: deploy-kafka-node-pool
       inputs:
         parameters:
-          - name: kafka-name
+          - name: kafkaName
       resource:
         action: apply
         setOwnerReference: true
@@ -107,7 +113,7 @@ spec:
           metadata:
             name: dual-role
             labels:
-              strimzi.io/cluster: {{inputs.parameters.kafka-name}}
+              strimzi.io/cluster: {{inputs.parameters.kafkaName}}
           spec:
             replicas: 1
             roles:
@@ -125,21 +131,16 @@ spec:
     - name: deploy-kafka-cluster-kraft
       inputs:
         parameters:
-          - name: kafka-name
-      outputs:
-        parameters:
-          - name: brokers
-            valueFrom:
-              jsonPath: "{.status.listeners[?(@.name=='plain')].bootstrapServers}"
+          - name: kafkaName
       resource:
         action: apply
         setOwnerReference: true
-        successCondition: status.listeners
+        successCondition: status.listeners != null
         manifest: |
           apiVersion: kafka.strimzi.io/v1beta2
           kind: Kafka
           metadata:
-            name: {{inputs.parameters.kafka-name}}
+            name: {{inputs.parameters.kafkaName}}
             annotations:
               strimzi.io/node-pools: enabled
               strimzi.io/kraft: enabled
@@ -158,14 +159,14 @@ spec:
                 timeoutSeconds: 2
                 failureThreshold: 2
               listeners:
-                - name: plain
-                  port: 9092
-                  type: internal
-                  tls: false
                 - name: tls
                   port: 9093
                   type: internal
                   tls: true
+                  authentication:
+                    type: scram-sha-512
+              authorization:
+                type: simple
               config:
                 auto.create.topics.enable: false
                 offsets.topic.replication.factor: 1
@@ -174,29 +175,111 @@ spec:
                 default.replication.factor: 1
                 min.insync.replicas: 1
             entityOperator:
-                topicOperator: {}
-                userOperator: {}
+              topicOperator: {}
+              userOperator: {}
+      outputs:
+        parameters:
+          - name: bootstrapServers
+            valueFrom:
+              jsonPath: "{.status.listeners[*].bootstrapServers}"
+
+    - name: create-kafka-client-bundle
+      inputs:
+        parameters:
+          - name: kafkaName
+          - name: role
+          - name: bootstrapServers
+          - name: targetNamespace
+            value: "{{workflow.namespace}}"
+          - name: mountPath
+            value: "/opt/kafka-config"
+      outputs:
+        parameters:
+          - name: kafkaClientSecretBundle
+            valueFrom:
+              path: /tmp/secret_name
+      script:
+        image: bitnamisecure/kubectl:latest
+        command: ["/bin/bash","-lc"]
+        source: |
+          set -euo pipefail
+          KAFKA_NAME="{{inputs.parameters.kafkaName}}"
+          ROLE="{{inputs.parameters.role}}"
+          USERNAME="${KAFKA_NAME}-${ROLE}"
+          CA_SECRET="{{inputs.parameters.kafkaName}}-cluster-ca-cert"
+          NS="{{inputs.parameters.targetNamespace}}"
+          MOUNT="{{inputs.parameters.mountPath}}"
+          BOOTSTRAP="{{inputs.parameters.bootstrapServers}}"
+
+          WORK="$(mktemp -d)"
+          trap 'rm -rf "$WORK"' EXIT
+
+          echo "${USERNAME}-kafka-client-config" > /tmp/secret_name
+
+          # 1) Create KafkaUser (SCRAM) - Secret ${USERNAME} will be created by Strimzi
+          cat <<EOF | kubectl apply -f -
+          apiVersion: kafka.strimzi.io/v1beta2
+          kind: KafkaUser
+          metadata:
+            name: "${USERNAME}"
+            labels:
+              strimzi.io/cluster: "${KAFKA_NAME}"
+          spec:
+            authentication:
+              type: scram-sha-512
+            authorization:
+              type: simple
+              acls:
+                - operation: Describe
+                  resource: { type: topic, name: "*", patternType: literal }
+                - operation: Describe
+                  resource: { type: group, name: "*", patternType: literal }
+          EOF
+
+          # 2) Wait for user Secret (contains: password, sasl.jaas.config, mechanism, etc.)
+          for i in {1..120}; do
+            kubectl get secret "${USERNAME}" >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+          kubectl get secret "${USERNAME}" -o jsonpath='{.data.sasl\.jaas\.config}' | base64 -d > "$WORK/sasl.jaas.config"
+
+          # 3) Pull truststore + password from CA secret
+          kubectl get secret "${CA_SECRET}" -o jsonpath='{.data.ca\.p12}' | base64 -d > "$WORK/ca.p12"
+          kubectl get secret "${CA_SECRET}" -o jsonpath='{.data.ca\.password}' | base64 -d > "$WORK/ca.password"
+          TRUSTPASS="$(cat "$WORK/ca.password")"
+
+          # 4) Render kafka.properties (paths are where the app will mount the secret)
+          cat > "$WORK/kafka.properties" <<EOF
+          security.protocol=SASL_SSL
+          sasl.mechanism=SCRAM-SHA-512
+          sasl.jaas.config=$(cat "$WORK/sasl.jaas.config")
+          ssl.truststore.type=PKCS12
+          ssl.truststore.location=${MOUNT}/ca.p12
+          ssl.truststore.password=${TRUSTPASS}
+          bootstrap.servers=${BOOTSTRAP}
+          client.id=${USERNAME}
+          EOF
+
+          # 5) Create a bundle of the secrets for easy mounting by apps
+          kubectl -n "$NS" delete secret "${USERNAME}-kafka-client-config" --ignore-not-found
+          kubectl -n "$NS" create secret generic "${USERNAME}-kafka-client-config" \
+            --from-file=kafka.properties="$WORK/kafka.properties" \
+            --from-file=ca.p12="$WORK/ca.p12" \
+            --from-file=ca.password="$WORK/ca.password"
 
     - name: create-kafka-topic
       inputs:
         parameters:
-          - name: kafka-name
-          - name: topic-name
-          - name: topic-partitions
-            value: ""
-            description: "Number of partitions for the created topic"
-          - name: default-topic-partitions
+          - name: kafkaName
+          - name: topicName
+          - name: topicPartitions
             value: "1"
-            description: "Default number of partitions for the created topic, which will be applied when the topic-partitions is empty or nil."
-          - name: topic-replicas
-            value: ""
-            description: "Number of replicas for the created topic"
-          - name: default-topic-replicas
+          - name: topicReplicas
             value: "1"
-            description: "Default number of replicas for the created topic, which will be applied when the topic-replicas is empty or nil."
       outputs:
         parameters:
-          - name: topic-name
+          - name: topicName
             valueFrom:
               jsonPath: "{.status.topicName}"
       resource:
@@ -207,12 +290,12 @@ spec:
           apiVersion: kafka.strimzi.io/v1beta2
           kind: KafkaTopic
           metadata:
-            name: {{inputs.parameters.topic-name}}
+            name: {{inputs.parameters.topicName}}
             labels:
-              strimzi.io/cluster: {{inputs.parameters.kafka-name}}
+              strimzi.io/cluster: {{inputs.parameters.kafkaName}}
           spec:
-            partitions: {{=let v=inputs.parameters['topic-partitions']; (v==nil || v=='') ? inputs.parameters['default-topic-partitions'] : v}}
-            replicas:   {{=let v=inputs.parameters['topic-replicas'];   (v==nil || v=='') ? inputs.parameters['default-topic-replicas']   : v}}
+            partitions: {{inputs.parameters.topicPartitions}}
+            replicas: {{inputs.parameters.topicReplicas}}
             config:
               retention.ms: 604800000
               segment.bytes: 1073741824
