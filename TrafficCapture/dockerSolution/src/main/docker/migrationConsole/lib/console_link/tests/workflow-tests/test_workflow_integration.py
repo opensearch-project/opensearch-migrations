@@ -553,14 +553,15 @@ class TestArgoWorkflows:
         assert controller_deployment is not None, "workflow-controller deployment not found"
         assert controller_deployment.status.ready_replicas >= 1, "workflow-controller deployment not ready"
         logger.info(
-            f"✓ workflow-controller deployment is ready "
-            f"({controller_deployment.status.ready_replicas} replicas)")
+            "✓ workflow-controller deployment is ready (%s replicas)",
+            controller_deployment.status.ready_replicas
+        )
 
         # Verify argo-server service exists
         services = v1.list_namespaced_service(namespace=argo_namespace)
         service_names = [svc.metadata.name for svc in services.items]
         assert "argo-server" in service_names, "argo-server service not found"
-        logger.info(f"✓ argo-server service exists")
+        logger.info("✓ argo-server service exists")
 
         # Verify pods are running
         pods = v1.list_namespaced_pod(namespace=argo_namespace)

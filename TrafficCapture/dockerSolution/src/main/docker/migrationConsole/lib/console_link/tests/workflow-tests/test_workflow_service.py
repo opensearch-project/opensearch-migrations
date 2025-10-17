@@ -321,7 +321,7 @@ class TestWorkflowServiceSubmission:
 
         workflow_spec = {'metadata': {}, 'spec': {}}
 
-        result = service.submit_workflow_to_argo(
+        service.submit_workflow_to_argo(
             workflow_spec=workflow_spec,
             namespace='argo',
             argo_server='https://localhost:2746',
@@ -371,6 +371,7 @@ class TestWorkflowServiceSubmission:
         # Workflow without namespace in metadata
         workflow_spec = {'metadata': {'name': 'test'}, 'spec': {}}
 
+        # Call submit_workflow_to_argo - we only care about the request being made correctly
         service.submit_workflow_to_argo(
             workflow_spec=workflow_spec,
             namespace='custom-namespace',

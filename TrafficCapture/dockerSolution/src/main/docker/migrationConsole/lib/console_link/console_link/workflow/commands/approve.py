@@ -142,7 +142,7 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
             for idx, step_name in enumerate(suspended_steps):
                 click.echo(f"  [{idx}] Approve and resume: {step_name}")
 
-            click.echo(f"  [c] Cancel")
+            click.echo("  [c] Cancel")
             click.echo("-" * 60)
 
             # Get user selection
@@ -163,7 +163,9 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
                 click.echo(f"\nApproving step: {selected_step}")
             except ValueError:
                 click.echo(
-                    f"Error: Invalid input. Please enter a number (0-{len(suspended_steps) - 1}) or 'c'", err=True)
+                    f"Error: Invalid input. Please enter a number (0-{len(suspended_steps) - 1}) or 'c'",
+                    err=True
+                )
                 ctx.exit(ExitCode.FAILURE.value)
 
         # Resume the workflow

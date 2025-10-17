@@ -9,7 +9,6 @@ import os
 import time
 import copy
 from typing import Dict, Any, Optional, Tuple, TypedDict, List
-from datetime import datetime
 
 import yaml
 import requests
@@ -100,7 +99,6 @@ class WorkflowService:
 
     def __init__(self):
         """Initialize the WorkflowService."""
-        pass
 
     def load_workflow_template(
         self,

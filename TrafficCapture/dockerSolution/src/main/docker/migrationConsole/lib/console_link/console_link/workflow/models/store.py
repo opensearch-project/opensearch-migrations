@@ -202,4 +202,3 @@ class WorkflowConfigStore:
 
     def close(self):
         """Close any connections (no-op for Kubernetes client)"""
-        pass

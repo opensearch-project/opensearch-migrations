@@ -87,7 +87,7 @@ class ScriptRunner:
                 cwd=str(self.script_dir)
             )
 
-            logger.debug(f"Script completed successfully")
+            logger.debug("Script completed successfully")
             return result.stdout.strip()
 
         except subprocess.CalledProcessError as e:
@@ -107,7 +107,7 @@ class ScriptRunner:
 
     def init_workflow(self, config_data: str, prefix: Optional[str] = None) -> str:
         """Initialize workflow state, returns prefix."""
-        logger.info(f"Initializing workflow with prefix: {prefix or 'auto-generated'}")
+        logger.info("Initializing workflow with prefix: %s", prefix or 'auto-generated')
         args = ["-"]
         if prefix:
             args.append(prefix)

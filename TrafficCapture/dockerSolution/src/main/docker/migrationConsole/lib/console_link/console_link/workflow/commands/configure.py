@@ -71,7 +71,6 @@ def _launch_editor_for_config(config: Optional[WorkflowConfig] = None) -> Comman
 @click.pass_context
 def configure_group(ctx):
     """Configure workflow settings"""
-    pass
 
 
 @configure_group.command(name="view")

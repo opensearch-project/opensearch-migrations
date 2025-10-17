@@ -41,7 +41,12 @@ def _load_and_inject_config(service: WorkflowService, workflow_spec: dict, names
         return workflow_spec
 
 
-def _handle_workflow_wait(service: WorkflowService, namespace: str, workflow_name: str, timeout: int, wait_interval: int):
+def _handle_workflow_wait(
+        service: WorkflowService,
+        namespace: str,
+        workflow_name: str,
+        timeout: int,
+        wait_interval: int):
     """Handle waiting for workflow completion.
 
     Args:
