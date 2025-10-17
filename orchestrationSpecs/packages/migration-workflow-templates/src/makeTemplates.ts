@@ -44,7 +44,7 @@ function createDirectoryIfNotExists(dirPath: string): void {
     }
 }
 
-async function applyArgoWorkflowTemplate(workflowConfig: any, workflowName: string) {
+async function outputArgoWorkflowTemplate(workflowConfig: any, workflowName: string) {
 
     // Override namespace in metadata
     if (!workflowConfig.metadata) {
@@ -69,7 +69,7 @@ async function applyArgoWorkflowTemplate(workflowConfig: any, workflowName: stri
 }
 
 async function writeAllWorkflows() {
-    console.log("Deploying Argo WorkflowTemplates to Kubernetes...\n");
+    console.log("Creating Argo WorkflowTemplates...\n");
 
     if (outputDirectory !== null) {
         createDirectoryIfNotExists(outputDirectory);
@@ -80,7 +80,7 @@ async function writeAllWorkflows() {
 
         const wfName = wf.metadata.k8sMetadata.name;
         try {
-            await applyArgoWorkflowTemplate(finalConfig, wfName || finalConfig.metadata?.name || 'unknown');
+            await outputArgoWorkflowTemplate(finalConfig, wfName || finalConfig.metadata?.name || 'unknown');
         } catch (error) {
             console.error(`Failed to deploy WorkflowTemplate ${wfName}:`, error);
             // Uncomment to stop on error

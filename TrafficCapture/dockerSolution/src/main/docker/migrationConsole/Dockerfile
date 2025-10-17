@@ -42,17 +42,12 @@ RUN ARCH=$(cat /arch.env) && \
     mv etcd-${ETCD_VER}-linux-${ARCH}/etcdctl /etcd/bin && \
     rm -rf etcd-${ETCD_VER}-linux-amd64 etcd.tar.gz
 
-# Install Node.js for config processor
-RUN ARCH=$(cat /arch.env) && \
-    NODE_VERSION="20.20.0" && \
-    if [ "$ARCH" = "amd64" ]; then NODE_ARCH="x64"; else NODE_ARCH="arm64"; fi && \
-    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" -o /tmp/node.tar.xz && \
-    mkdir -p /usr/local/lib/nodejs && \
-    tar -xJf /tmp/node.tar.xz -C /usr/local/lib/nodejs --strip-components=1 && \
-    rm -f /tmp/node.tar.xz
-
 
 FROM ${BASE_IMAGE}
+
+# Install Node.js for config processor and workflow template creation
+RUN curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
+RUN dnf install -y nodejs
 
 # Define the virtual environment path
 ENV WORKON_HOME=/
@@ -63,9 +58,6 @@ ENV PIPENV_MAX_DEPTH=1
 COPY --from=migration-console-base /root/kafka-tools /root/kafka-tools
 COPY --from=migration-console-base /k8s/bin/ /usr/local/bin
 COPY --from=migration-console-base /etcd/bin/ /usr/local/bin
-COPY --from=migration-console-base /usr/local/lib/nodejs /usr/local/lib/nodejs
-
-ENV PATH="/usr/local/lib/nodejs/bin:${PATH}"
 
 RUN kubectl completion bash > /etc/bash_completion.d/kubectl && \
     helm completion bash > /etc/bash_completion.d/helm
@@ -121,8 +113,17 @@ RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\t) \[\e[92m\]migration-console \[\e[0m\](\w) -> "' >> ~/.bashrc
 
-# Copy config processor from staging
-COPY staging/config-processor /root/config-processor
+COPY nodeStaging/configProcessor /root/configProcessor
+
+# Once we're ready, we should replace the old workflows with the new ones.
+# Notice that the installWorkflows pulls from /root/workflows/templates -
+# so the target for the new workflows would either need to be /root/workflows/templates,
+# or the installation script would need to be updated.
+
+# Here are the new workflows that are dormant but can be installed by users on the console
+COPY nodeStaging/workflowTemplates /root/newWorkflowTemplates
+# Here are the original workflows that current integ tests are using.
+COPY workflows /root/workflows
 
 # Set ENV to control startup script in /bin/sh mode
 ENV ENV=/root/.bashrc

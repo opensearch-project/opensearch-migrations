@@ -7,146 +7,91 @@ plugins {
 import org.opensearch.migrations.common.CommonUtils
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 
-def orchestrationSpecsDir = project.rootProject.file("orchestrationSpecs")
-def configProcessorSrc = file("${orchestrationSpecsDir}/packages/config-processor")
-def schemasSrc = file("${orchestrationSpecsDir}/packages/schemas")
-def stagingDir = file("build/docker/staging/config-processor")
+// Define paths at the top level
+def orchestrationSpecsDirP = rootProject.layout.projectDirectory.dir("orchestrationSpecs")
 
-task npmInstall {
+tasks.register('npmInstall', Exec) {
     description = 'Install npm dependencies for orchestrationSpecs'
 
-    inputs.file("${orchestrationSpecsDir}/package.json")
-    inputs.file("${orchestrationSpecsDir}/package-lock.json")
-    outputs.dir("${orchestrationSpecsDir}/node_modules")
-    outputs.cacheIf { true }
+    inputs.file(orchestrationSpecsDirP.file("package.json"))
+    inputs.file(orchestrationSpecsDirP.file("package-lock.json"))
+    outputs.dir(orchestrationSpecsDirP.dir("node_modules"))
 
-    doLast {
-        exec {
-            workingDir orchestrationSpecsDir
-            commandLine 'npm', 'ci'
-        }
+    // Configure the Exec task directly (no doLast)
+    workingDir = orchestrationSpecsDirP.asFile
+    commandLine 'npm', 'ci'
+}
+
+def orchestrationP     = orchestrationSpecsDirP
+def configProcessorP   = orchestrationP.dir("packages/config-processor")
+def workflowTemplatesP            = orchestrationP.dir("packages/migration-workflow-templates")
+def configProcessorStagingP =
+        layout.buildDirectory.dir(CommonUtils.getDockerBuildDirName("migration_console", "migrationConsole")+"/nodeStaging/configProcessor")
+def workflowTemplatesStagingP =
+        layout.buildDirectory.dir(CommonUtils.getDockerBuildDirName("migration_console", "migrationConsole")+"/nodeStaging/workflowTemplates")
+
+tasks.register('makeAndStageWorkflowTemplates', Exec) {
+    description = 'Build the workflow templates from their TypeScript definitions'
+    dependsOn 'npmInstall'
+
+    inputs.dir(workflowTemplatesP.dir("src"))
+    inputs.file(workflowTemplatesP.file("package.json"))
+    inputs.file(workflowTemplatesP.file("tsconfig.json"))
+    outputs.dir(workflowTemplatesStagingP)
+
+    workingDir = workflowTemplatesP.asFile
+    commandLine 'npm', 'run', 'make-templates', '--', '--outputDirectory', "${workflowTemplatesStagingP.get()}"
+
+    doFirst {
+        workflowTemplatesStagingP.get().asFile.mkdirs()
     }
 }
 
-task buildSchemas {
-    description = 'Build the schemas TypeScript package'
-    dependsOn npmInstall
-
-    inputs.dir(schemasSrc)
-    inputs.file("${schemasSrc}/package.json")
-    inputs.file("${schemasSrc}/tsconfig.json")
-    outputs.dir("${schemasSrc}/dist")
-    outputs.file("${schemasSrc}/tsconfig.tsbuildinfo")
-    outputs.cacheIf { true }
-
-    doLast {
-        exec {
-            workingDir orchestrationSpecsDir
-            commandLine 'npm', 'run', 'build:schemas'
-        }
-    }
-}
-
-task buildConfigProcessor {
+tasks.register('buildConfigProcessor', Exec) {
     description = 'Build the config-processor TypeScript package'
-    dependsOn buildSchemas  // Depends on schemas since it imports them
+    dependsOn 'npmInstall'
 
-    inputs.dir("${configProcessorSrc}/src")
-    inputs.file("${configProcessorSrc}/package.json")
-    inputs.file("${configProcessorSrc}/tsconfig.json")
-    outputs.dir("${configProcessorSrc}/dist")
-    outputs.cacheIf { true }
+    inputs.dir(configProcessorP.dir("src"))
+    inputs.file(configProcessorP.file("makeBundle.js"))
+    inputs.file(configProcessorP.file("package.json"))
+    inputs.file(configProcessorP.file("tsconfig.json"))
+    outputs.dir(configProcessorP.dir("bundled"))
 
-    doLast {
-        exec {
-            workingDir orchestrationSpecsDir
-            commandLine 'npm', 'run', 'build', '-w', '@opensearch-migrations/config-processor'
-        }
-    }
+    workingDir = configProcessorP.asFile
+    commandLine 'npm', 'run', 'bundle'
 }
 
-task stageConfigProcessor {
-    description = 'Stages the config-processor with production dependencies for Docker'
-    dependsOn buildConfigProcessor
+tasks.register('stageConfigProcessor', Sync) {
+    dependsOn 'buildConfigProcessor'
+    into(configProcessorStagingP)
 
-    // Inputs: built artifacts and package files
-    inputs.dir("${configProcessorSrc}/dist")
-    inputs.dir("${schemasSrc}/dist")
-    inputs.file("${configProcessorSrc}/package.json")
-    inputs.file("${schemasSrc}/package.json")
+    // Copy the bundled JS file
+    from(configProcessorP.file("bundled/index.js"))
 
-    // Output: the staging directory
-    outputs.dir(stagingDir)
-    outputs.cacheIf { true }
+    // Copy the external dependencies from bundled/node_modules
+    from(configProcessorP.dir("bundled/node_modules")) {
+        into "node_modules"
+    }
+
+    // Copy any proto files if they exist
+    from(configProcessorP.dir("bundled/packages")) {
+        into "packages"
+    }
+
+    // Copy shell scripts if they exist
+    from(configProcessorP.dir("bundled")) {
+        include "*.sh"
+    }
 
     doLast {
-        // Clean and create staging directory
-        delete stagingDir
-        stagingDir.mkdirs()
-
-        // Copy built config-processor files
-        copy {
-            from "${configProcessorSrc}/dist"
-            into stagingDir
+        def bundledJs = new File(configProcessorStagingP.get().asFile, "index.js")
+        if (bundledJs.exists()) {
+            bundledJs.setExecutable(true)
         }
 
-        // Copy package.json for config-processor
-        copy {
-            from "${configProcessorSrc}/package.json"
-            into stagingDir
-        }
-
-        // Create node_modules structure for workspace dependency
-        def schemasModuleDir = file("${stagingDir}/node_modules/@opensearch-migrations/schemas")
-        schemasModuleDir.mkdirs()
-
-        // Copy built schemas as a local dependency
-        copy {
-            from "${schemasSrc}/dist"
-            into "${schemasModuleDir}/dist"
-        }
-
-        copy {
-            from "${schemasSrc}/package.json"
-            into schemasModuleDir
-        }
-
-        // Install production dependencies only
-        exec {
-            workingDir stagingDir
-            commandLine 'npm', 'install', '--omit=dev', '--no-package-lock'
-        }
-
-        // Clean up unnecessary files to reduce image size
-        delete fileTree("${stagingDir}/node_modules") {
-            include '**/.package-lock.json'
-            include '**/README.md'
-            include '**/LICENSE*'
-            include '**/*.map'
-            include '**/test/**'
-            include '**/tests/**'
-            include '**/.github/**'
-            include '**/docs/**'
-            include '**/example/**'
-            include '**/examples/**'
-        }
-
-        // Make CLI script executable if it exists
-        def cliScript = file("${stagingDir}/cli.js")
-        if (cliScript.exists()) {
-            cliScript.setExecutable(true)
-        }
-
-        // Copy any shell scripts from config-processor
-        copy {
-            from "${configProcessorSrc}/scripts"
-            into "${stagingDir}/scripts"
-            include '*.sh'
-            fileMode 0755
-        }
-
-        logger.lifecycle("✓ Staged config-processor to: ${stagingDir}")
-        logger.lifecycle("  Size: ${org.apache.commons.io.FileUtils.byteCountToDisplaySize(stagingDir.directorySize())}")
+        logger.lifecycle("Staged bundled config-processor to: ${configProcessorStagingP.get().asFile}")
+        logger.lifecycle("  - Bundle: ${bundledJs.exists() ? 'YES' : 'MISSING'}")
+        logger.lifecycle("  - node_modules: ${new File(configProcessorStagingP.get().asFile, 'node_modules').exists() ? 'YES' : 'MISSING'}")
     }
 }
 
@@ -168,6 +113,9 @@ def dockerFilesForExternalServices = [
 dockerFilesForExternalServices.each { dockerImageName, projectName ->
     task("buildDockerImage_${dockerImageName}", type: DockerBuildImage) {
         if (projectName == "migrationConsole") {
+            dependsOn makeAndStageWorkflowTemplates
+            dependsOn stageConfigProcessor
+
             def libraries = [
                     project(":libraries:kafkaCommandLineFormatter")
             ]
@@ -180,8 +128,6 @@ dockerFilesForExternalServices.each { dockerImageName, projectName ->
             getMigrationConsoleSyncTask(project, dockerImageName, projectName, libraries, applications, false)
             def syncTask = getMigrationConsoleSyncTask(project, dockerImageName, projectName, libraries, applications, true)
 
-            // Add config-processor staging dependency
-            dependsOn stageConfigProcessor
             dependsOn syncTask
             inputDir = syncTask.destinationDir
         } else {
@@ -227,11 +173,6 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
             }
         }
 
-        // Sync config-processor from build directory
-        from (project.file("build/docker/staging/config-processor")) {
-            into "staging/config-processor"
-        }
-
         // Sync VERSION file
         from (project.rootProject.layout.projectDirectory.file("VERSION"))
 
@@ -244,9 +185,6 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
     def assembleTasks = (libraries + applications).collect { it.tasks.named("assemble") }
     // Ensure the sync task depends on the assemble tasks
     syncTask.dependsOn assembleTasks
-
-    // Add dependency on config-processor staging
-    syncTask.dependsOn project.tasks.named("stageConfigProcessor")
 
     if (dependOnBaseImage) {
         // Migration Console base image is the test console

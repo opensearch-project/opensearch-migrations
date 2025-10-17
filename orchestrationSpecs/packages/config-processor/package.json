@@ -16,15 +16,13 @@
     "process-config-client": "./dist/daemon-client.js"
   },
   "scripts": {
-    "build": "npx tsgo && npm run copy-scripts",
+    "build": "npx tsgo",
     "type-check": "NODE_OPTIONS='--conditions=development' npx  tsgo -p ../../tsconfig.typecheck.processor.json --noEmit",
-    "copy-scripts": "cp scripts/*.sh dist/",
-
     "start-initialize": "tsx src/RunMigrationConfigTransformer.ts",
     "start-transform": "tsx src/RunMigrationConfigTransformer.ts",
-
     "dev-initialize": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationInitializer.ts -- --etcd-endpoints http://localhost:2379 --etcd-user root --etcd-password password ",
-    "dev-transform": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationConfigTransformer.ts"
+    "dev-transform": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationConfigTransformer.ts",
+    "bundle": "npm run build && node makeBundle.js && cp scripts/*.sh bundled/"
   },
   "dependencies": {
     "@opensearch-migrations/schemas": "*",

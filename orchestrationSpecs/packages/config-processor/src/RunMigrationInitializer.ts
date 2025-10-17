@@ -90,17 +90,19 @@ async function main() {
     // Verify required etcd configuration values are set
     const missingVars: string[] = [];
 
-    if (!etcdEndpoints) {
-        missingVars.push('ETCD_ENDPOINTS (or --etcd-endpoints)');
-    }
-    if (!etcdUser) {
-        missingVars.push('ETCD_USER (or --etcd-user)');
-    }
-    if (!etcdPassword) {
-        missingVars.push('ETCD_PASSWORD (or --etcd-password)');
-    }
-    if (!prefix) {
-        missingVars.push('PREFIX (or --prefix)');
+    if (!skipInitialize) {
+        if (!etcdEndpoints) {
+            missingVars.push('ETCD_ENDPOINTS (or --etcd-endpoints)');
+        }
+        if (!etcdUser) {
+            missingVars.push('ETCD_USER (or --etcd-user)');
+        }
+        if (!etcdPassword) {
+            missingVars.push('ETCD_PASSWORD (or --etcd-password)');
+        }
+        if (!prefix) {
+            missingVars.push('PREFIX (or --prefix)');
+        }
     }
 
     if (missingVars.length > 0) {
