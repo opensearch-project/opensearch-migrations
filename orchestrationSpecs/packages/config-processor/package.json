@@ -10,13 +10,8 @@
       "default": "./dist/index.js"
     }
   },
-  "bin": {
-    "process-config": "./dist/cli.js",
-    "process-config-daemon": "./dist/daemon.js",
-    "process-config-client": "./dist/daemon-client.js"
-  },
   "scripts": {
-    "build": "npx tsgo",
+    "build": "tsc --build",
     "type-check": "NODE_OPTIONS='--conditions=development' npx  tsgo -p ../../tsconfig.typecheck.processor.json --noEmit",
     "start-initialize": "tsx src/RunMigrationConfigTransformer.ts",
     "start-transform": "tsx src/RunMigrationConfigTransformer.ts",

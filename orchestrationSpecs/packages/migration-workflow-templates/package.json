@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "NODE_OPTIONS='--conditions=development' tsx src/makeTemplates.ts",
-    "build": "npx tsgo",
+    "build": "tsc --build",
     "make-templates": "tsx makeTemplates.cjs",
     "type-check-deps": "npm run -w @opensearch-migrations/argo-workflow-builders type-check && npm run -w @opensearch-migrations/schemas type-check",
     "type-check": "NODE_OPTIONS='--conditions=development' npx  tsgo -p ../../tsconfig.typecheck.templates.json --noEmit",
