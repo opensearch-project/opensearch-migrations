@@ -47,51 +47,21 @@ tasks.register('makeAndStageWorkflowTemplates', Exec) {
     }
 }
 
-tasks.register('buildConfigProcessor', Exec) {
-    description = 'Build the config-processor TypeScript package'
+tasks.register('buildAndStageConfigProcessor', Exec) {
+    description = 'Build and stage the config-processor TypeScript package directly to staging'
     dependsOn 'npmInstall'
 
     inputs.dir(configProcessorP.dir("src"))
     inputs.file(configProcessorP.file("makeBundle.js"))
     inputs.file(configProcessorP.file("package.json"))
     inputs.file(configProcessorP.file("tsconfig.json"))
-    outputs.dir(configProcessorP.dir("bundled"))
+    outputs.dir(configProcessorStagingP)  // Output directly to staging
 
     workingDir = configProcessorP.asFile
-    commandLine 'npm', 'run', 'bundle'
-}
+    commandLine 'npm', 'run', 'bundle', '--', "${configProcessorStagingP.get()}"
 
-tasks.register('stageConfigProcessor', Sync) {
-    dependsOn 'buildConfigProcessor'
-    into(configProcessorStagingP)
-
-    // Copy the bundled JS file
-    from(configProcessorP.file("bundled/index.js"))
-
-    // Copy the external dependencies from bundled/node_modules
-    from(configProcessorP.dir("bundled/node_modules")) {
-        into "node_modules"
-    }
-
-    // Copy any proto files if they exist
-    from(configProcessorP.dir("bundled/packages")) {
-        into "packages"
-    }
-
-    // Copy shell scripts if they exist
-    from(configProcessorP.dir("bundled")) {
-        include "*.sh"
-    }
-
-    doLast {
-        def bundledJs = new File(configProcessorStagingP.get().asFile, "index.js")
-        if (bundledJs.exists()) {
-            bundledJs.setExecutable(true)
-        }
-
-        logger.lifecycle("Staged bundled config-processor to: ${configProcessorStagingP.get().asFile}")
-        logger.lifecycle("  - Bundle: ${bundledJs.exists() ? 'YES' : 'MISSING'}")
-        logger.lifecycle("  - node_modules: ${new File(configProcessorStagingP.get().asFile, 'node_modules').exists() ? 'YES' : 'MISSING'}")
+    doFirst {
+        configProcessorStagingP.get().asFile.mkdirs()
     }
 }
 
@@ -114,7 +84,7 @@ dockerFilesForExternalServices.each { dockerImageName, projectName ->
     task("buildDockerImage_${dockerImageName}", type: DockerBuildImage) {
         if (projectName == "migrationConsole") {
             dependsOn makeAndStageWorkflowTemplates
-            dependsOn stageConfigProcessor
+            dependsOn buildAndStageConfigProcessor
 
             def libraries = [
                     project(":libraries:kafkaCommandLineFormatter")

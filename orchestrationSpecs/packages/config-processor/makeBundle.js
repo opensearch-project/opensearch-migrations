@@ -22,20 +22,25 @@ function getDependencies(packageName, workspaceNodeModules, visited = new Set())
 }
 
 async function bundle() {
-    console.log('Bundling with esbuild...');
+    console.log('Bundling with esbuild:');
 
-    const bundledDir = path.join(__dirname, 'bundled');
-    if (fs.existsSync(bundledDir)) {
-        fs.rmSync(bundledDir, { recursive: true });
+    // Accept output directory as command line argument
+    const outputDir = process.argv[2] || path.join(__dirname, 'bundled');
+    console.log(`Output directory: ${outputDir}`);
+
+    if (fs.existsSync(outputDir)) {
+        fs.rmSync(outputDir, { recursive: true });
     }
-    fs.mkdirSync(bundledDir, { recursive: true });
+    fs.mkdirSync(outputDir, { recursive: true });
+
+    const outputFile = path.join(outputDir, 'index.js');
 
     await esbuild.build({
         entryPoints: ['dist/RunMigrationInitializer.js'],
         bundle: true,
         platform: 'node',
         target: 'node18',
-        outfile: 'bundled/index.js',
+        outfile: outputFile,
         external: [
             '@grpc/grpc-js',
             '@grpc/proto-loader',
@@ -50,7 +55,7 @@ async function bundle() {
 
     // Find all dependencies recursively
     const workspaceNodeModules = path.join(__dirname, '../../node_modules');
-    const bundledNodeModules = path.join(bundledDir, 'node_modules');
+    const bundledNodeModules = path.join(outputDir, 'node_modules');
     fs.mkdirSync(bundledNodeModules, { recursive: true });
 
     const topLevelExternals = ['etcd3', '@grpc/grpc-js', '@grpc/proto-loader'];
@@ -71,11 +76,28 @@ async function bundle() {
         if (fs.existsSync(src)) {
             fs.mkdirSync(path.dirname(dest), { recursive: true });
             execSync(`cp -r "${src}" "${dest}"`);
-            console.log(`Copied ${dep} to ${dest}`);
+            console.log(`Copied ${dep}`);
         }
     }
 
+    // Copy shell scripts
+    const scriptsDir = path.join(__dirname, 'scripts');
+    if (fs.existsSync(scriptsDir)) {
+        const shellScripts = fs.readdirSync(scriptsDir).filter(f => f.endsWith('.sh'));
+        for (const script of shellScripts) {
+            const src = path.join(scriptsDir, script);
+            const dest = path.join(outputDir, script);
+            fs.copyFileSync(src, dest);
+            fs.chmodSync(dest, 0o755);  // Make executable
+            console.log(`Copied ${script}`);
+        }
+    }
+
+    // Make the bundle executable
+    fs.chmodSync(outputFile, 0o755);
+
     console.log('\nBundle complete!');
+    console.log(`Output: ${outputDir}`);
     console.log(`Total dependencies: ${allDeps.size}`);
 }
 

@@ -17,7 +17,7 @@
     "start-transform": "tsx src/RunMigrationConfigTransformer.ts",
     "dev-initialize": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationInitializer.ts -- --etcd-endpoints http://localhost:2379 --etcd-user root --etcd-password password ",
     "dev-transform": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationConfigTransformer.ts",
-    "bundle": "npm run build && node makeBundle.js && cp scripts/*.sh bundled/"
+    "bundle": "npm run build && node makeBundle.js"
   },
   "dependencies": {
     "@opensearch-migrations/schemas": "*",
