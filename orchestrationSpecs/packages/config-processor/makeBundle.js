@@ -21,8 +21,26 @@ function getDependencies(packageName, workspaceNodeModules, visited = new Set())
     return allDeps;
 }
 
+function removeBinDirs(directory) {
+    const items = fs.readdirSync(directory, { withFileTypes: true });
+
+    for (const item of items) {
+        const fullPath = path.join(directory, item.name);
+
+        if (item.isDirectory()) {
+            if (item.name === '.bin') {
+                fs.rmSync(fullPath, { recursive: true });
+                console.log(`Removed .bin directory: ${fullPath}`);
+            } else if (item.name) {
+                // Recursively check nested node_modules
+                removeBinDirs(fullPath);
+            }
+        }
+    }
+}
+
 async function bundle() {
-    console.log('Bundling with esbuild:');
+    console.log('Bundling with esbuild...');
 
     // Accept output directory as command line argument
     const outputDir = process.argv[2] || path.join(__dirname, 'bundled');
@@ -51,7 +69,7 @@ async function bundle() {
         }
     });
 
-    console.log('Bundle created');
+    console.log('Bundle created (excluding external modules)');
 
     // Find all dependencies recursively
     const workspaceNodeModules = path.join(__dirname, '../../node_modules');
@@ -79,6 +97,9 @@ async function bundle() {
             console.log(`Copied ${dep}`);
         }
     }
+
+    console.log('\nRemoving .bin directories...');
+    removeBinDirs(bundledNodeModules);
 
     // Copy shell scripts
     const scriptsDir = path.join(__dirname, 'scripts');
