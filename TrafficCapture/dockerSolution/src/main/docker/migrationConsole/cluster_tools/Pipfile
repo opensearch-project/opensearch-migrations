@@ -9,7 +9,7 @@ cluster_tools = {editable = true, path = "."}
 argparse = "*"
 argcomplete = "*"
 kubernetes = ">=30.1.0"
-pydantic = "*"
+pydantic = "==2.12.2"
 tinydb = "*"
 
 [dev-packages]
