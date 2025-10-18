@@ -61,12 +61,16 @@ class CommonUtils {
         }
     }
 
+    static def getDockerBuildDirName(String dockerImageName, String projectName) {
+        return "docker/${dockerImageName}_${projectName}";
+    }
+
     static def createDockerfile(Project dockerBuildProject, Project sourceArtifactProject,
                                 String baseImageProjectOverride,
                                 Map<String, String> dockerFilesForExternalServices,
                                 String dockerImageName) {
         def projectName = sourceArtifactProject.name;
-        def dockerBuildDir = "build/docker/${dockerImageName}_${projectName}"
+        def dockerBuildDir = "build/"+getDockerBuildDirName(dockerImageName, projectName);
         dockerBuildProject.task("createDockerfile_${dockerImageName}", type: Dockerfile) {
             destFile = dockerBuildProject.file("${dockerBuildDir}/Dockerfile")
             dependsOn "copyArtifact_${dockerImageName}"

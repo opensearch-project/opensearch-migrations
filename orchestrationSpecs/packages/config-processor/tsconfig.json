@@ -6,6 +6,8 @@
     "composite": true,
     "declaration": true,
     "declarationMap": true,
+    "moduleResolution": "bundler",
+    "module": "Preserve",
     "customConditions": ["development"],
     "paths": {
       "@opensearch-migrations/schemas": [
