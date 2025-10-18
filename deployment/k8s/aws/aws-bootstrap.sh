@@ -133,6 +133,53 @@ get_cfn_export() {
   fi
 }
 
+deploy_dashboard() {
+  local dashboard_name="$1"
+  local dashboard_file="$2"
+  local stage="${STAGE}"
+  local region="${AWS_CFN_REGION}"
+  local account="${AWS_ACCOUNT}"
+  local qualifier="${QUALIFIER}"
+
+  echo "Deploying dashboard: ${dashboard_name}"
+  [[ -f "$dashboard_file" ]] || { echo "ERROR: dashboard file not found: $dashboard_file"; exit 1; }
+
+  # Load and validate JSON
+  local processed_json
+  processed_json="$(cat "$dashboard_file")" || { echo "ERROR: failed to read JSON"; exit 1; }
+
+  echo "$processed_json" | jq -e . >/dev/null || {
+      echo "ERROR: Invalid JSON for ${dashboard_name} (${dashboard_file})"
+      exit 1
+  }
+
+  # Check for variables block
+  if ! echo "$processed_json" | jq -e '.variables | length >= 1' >/dev/null; then
+    echo "WARN: No .variables[] found in dashboards JSON"
+  fi
+
+  # Minify and push
+  local tmp_json
+  tmp_json="$(mktemp)"
+  echo "$processed_json" | jq -c . > "$tmp_json"
+
+  # Deterministic dashboard name
+  local full_name="MA-${stage}-${region}-${dashboard_name}"
+  aws cloudwatch put-dashboard \
+    --region "$region" \
+    --dashboard-name "$full_name" \
+    --dashboard-body "file://${tmp_json}" >/dev/null
+
+  # Validate dashboards on CloudWatch
+  if aws cloudwatch get-dashboard --region "$region" --dashboard-name "$full_name" >/dev/null 2>&1; then
+    echo "OK: Dashboard available: ${full_name}"
+  else
+    echo "WARN: Could not read back dashboard: ${full_name}"
+  fi
+
+  rm -f "$tmp_json"
+}
+
 # Check required tools
 missing=0
 for cmd in git jq kubectl; do
@@ -282,6 +329,12 @@ helm install "$namespace" "${ma_chart_dir}" \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 
 kubectl -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s
+
+echo "Deploying CloudWatch dashboards..."
+deploy_dashboard "CaptureReplay" "${base_dir}/deployment/k8s/dashboards/capture-replay-dashboard.json"
+deploy_dashboard "ReindexFromSnapshot" "${base_dir}/deployment/k8s/dashboards/reindex-from-snapshot-dashboard.json"
+echo "All dashboards deployed to CloudWatch"
+
 cmd="kubectl -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
 echo "Accessing migration console with command: $cmd"
 eval "$cmd"
