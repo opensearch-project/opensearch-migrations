@@ -74,8 +74,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
     });
     // Assert CPU configuration
     template.hasResourceProperties('AWS::ECS::TaskDefinition', {
-      Cpu: "2048",
-      Memory: "4096",
+      Cpu: "4096",
+      Memory: "8192",
     });
   });
 
@@ -123,7 +123,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 94489280512 --max-connections 10 --source-version \"ES_7.10\""
+              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --source-version \"ES_7.10\""
             ],
           ],
         }
@@ -181,7 +181,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 94489280512 --max-connections 10 --target-aws-service-signing-name aoss --target-aws-region eu-west-1 --source-version \"ES_7.10\"",
+              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --target-aws-service-signing-name aoss --target-aws-region eu-west-1 --source-version \"ES_7.10\"",
             ],
           ],
         }
@@ -243,7 +243,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 94489280512 --max-connections 10 --source-version \"ES_7.10\""
+              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --source-version \"ES_7.10\""
             ],
           ],
         }
@@ -318,7 +318,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 94489280512 --max-connections 10 --source-version \"ES_7.10\" --custom-arg value --flag --snapshot-name \"custom-snapshot\""
+              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --source-version \"ES_7.10\" --custom-arg value --flag --snapshot-name \"custom-snapshot\""
             ]
           ]
         }
@@ -372,7 +372,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 94489280512 --max-connections 100 --source-version \"ES_7.10\"",
+              " --max-shard-size-bytes 94489280512 --max-connections 100 --initial-lease-duration PT60M --source-version \"ES_7.10\"",
             ],
           ],
         }
@@ -501,7 +501,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 1181117188 --max-connections 10 --target-aws-service-signing-name aoss --target-aws-region eu-west-1 --source-version \"ES_7.10\"",
+              " --max-shard-size-bytes 1181117188 --max-connections 20 --initial-lease-duration PT60M --target-aws-service-signing-name aoss --target-aws-region eu-west-1 --source-version \"ES_7.10\"",
             ],
           ],
         }
@@ -576,7 +576,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 94489280512 --max-connections 10 --source-version \"ES_7.9\""
+              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --source-version \"ES_7.9\""
             ],
           ],
         }
