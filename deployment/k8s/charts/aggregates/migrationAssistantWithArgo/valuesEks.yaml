@@ -12,6 +12,7 @@ defaultBucketConfiguration:
   deleteOnUninstall: true
   emptyBeforeDelete: true
   endpoint: ""
+  snapshotRoleArn: ""
 
 # Useful for updating images while developing
 #images:
