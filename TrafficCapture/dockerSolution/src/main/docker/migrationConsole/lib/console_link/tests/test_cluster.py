@@ -345,7 +345,7 @@ def test_run_benchmark_executes_correctly_no_auth(mocker):
     mock = mocker.patch("subprocess.run", autospec=True)
     workload = "nyctaxis"
     cluster.execute_benchmark_workload(workload=workload)
-    mock.assert_called_once_with("opensearch-benchmark execute-test"
+    mock.assert_called_once_with("opensearch-benchmark run"
                                  " --exclude-tasks=check-cluster-health"
                                  f" --target-host={cluster.endpoint} --workload={workload}"
                                  " --pipeline=benchmark-only"
@@ -369,7 +369,7 @@ def test_run_benchmark_executes_correctly_basic_auth_and_https(mocker):
     mock = mocker.patch("subprocess.run", autospec=True)
     workload = "nyctaxis"
     cluster.execute_benchmark_workload(workload=workload)
-    mock.assert_called_once_with("opensearch-benchmark execute-test"
+    mock.assert_called_once_with("opensearch-benchmark run"
                                  " --exclude-tasks=check-cluster-health"
                                  f" --target-host={cluster.endpoint} --workload={workload}"
                                  " --pipeline=benchmark-only"
