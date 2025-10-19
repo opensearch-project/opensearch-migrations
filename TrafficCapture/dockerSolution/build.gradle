@@ -120,6 +120,10 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
         into destDir
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
+        preserve {
+            include 'nodeStaging/**'
+        }
+
         // Applications and Standalone Libraries both have libraries, sync them
         (libraries + applications).each { lib ->
             def applicationDestDir = "staging/${lib.name}/"
