@@ -35,7 +35,7 @@ Arguments:
             stream = fs.createReadStream(args[0], 'utf-8');
         }
 
-        const result = await processor.process(stream);
+        const result = await processor.processFromStream(stream);
         console.log(JSON.stringify(result, null, 2));
         process.exit(0);
     } catch (error) {

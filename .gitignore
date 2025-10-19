@@ -39,3 +39,5 @@ orchestrationSpecs/packages/**/node_modules/
 orchestrationSpecs/packages/migration-workflow-templates/k8sResources
 orchestrationSpecs/k8s-schemas
 orchestrationSpecs/packages/argo-workflow-builders/src/generated
+orchestrationSpecs/packages/config-processor/bundled
+orchestrationSpecs/packages/migration-workflow-templates/workflowTemplates
