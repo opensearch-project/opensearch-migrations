@@ -5,11 +5,11 @@ metadata:
 spec:
   workflowTemplateRef:
     name: cluster-templates
-  entrypoint: elasticsearch-8-18-single-node
+  entrypoint: elasticsearch-8-19-multi-node
   arguments:
     parameters:
       - name: cluster-name
-        value: "elasticsearch-8-18-single-node"
+        value: "elasticsearch-8-19-multi-node"
       - name: namespace
         value: "ma"
       - name: replicas
