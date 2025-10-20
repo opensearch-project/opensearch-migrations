@@ -84,13 +84,13 @@ spec:
               {{- end }}
           resources:
             requests:
-              memory: "3Gi"
-              cpu: "1000m"
-              ephemeral-storage: "5Gi"
+              memory: "16Gi"
+              cpu: "8192m"
+              ephemeral-storage: "50Gi"
             limits:
-              memory: "6Gi"
-              cpu: "2000m"
-              ephemeral-storage: "10Gi"
+              memory: "16Gi"
+              cpu: "8192m"
+              ephemeral-storage: "50Gi"
           volumeMounts:
             {{- if .Values.localRepoMount }}
             - name: local-mount
