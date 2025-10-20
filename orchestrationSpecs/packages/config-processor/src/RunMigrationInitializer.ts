@@ -138,7 +138,7 @@ async function main() {
         if (!skipInitialize) {
             const initializer = new MigrationInitializer({
                     endpoints: [etcdEndpoints as string],
-                    ...(etcdUser && etcdPassword ? {} : {
+                    ...(!etcdUser || !etcdPassword ? {} : {
                         auth: {
                             username: etcdUser as string,
                             password: etcdPassword as string
