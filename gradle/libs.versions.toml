@@ -1,7 +1,7 @@
 [versions]
-aws-crt = "0.39.2"
+aws-crt = "0.39.3"
 aws-msk-iam-auth = "2.3.4"
-aws-sdk = "2.35.8"
+aws-sdk = "2.35.10"
 bouncycastle = "1.82"
 commons-collections = "4.5.0"
 commons-compress = "1.26.2"
