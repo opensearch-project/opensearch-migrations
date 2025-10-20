@@ -11,8 +11,8 @@
       },
       "snapshotRepo": {
         "aws_region": "us-east-2",
-        "endpoint": "localstack://10.109.241.116:4566",
-        "s3RepoPathUri": "s3://snapshot"
+        "endpoint": "localstack://localstack.ma.svc.cluster.local:4566",
+        "s3RepoPathUri": For localstack testing, replace with `aws --endpoint-url=http://$(kubectl get svc localstack -o jsonpath='{.spec.clusterIP}'):4566 s3 ls`
       },
       "proxy": { }
     }
@@ -44,8 +44,7 @@
               },
               "documentBackfillConfig": {
                 "documentsPerBulkRequest": 1000,
-                "# I think that max connections is the effective concurrency count": "",
-                "// this is ignored too": "",
+                "Max connections is the effective concurrency count": "",
                 "maxConnections": 4
               }
             }
