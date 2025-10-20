@@ -34,6 +34,29 @@ otelConfiguration:
         protocols:
           grpc:
             endpoint: 0.0.0.0:4317
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'cadvisor'
+              scrape_interval: 5s
+              scheme: https
+              authorization:
+                credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              tls_config:
+                ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              kubernetes_sd_configs:
+                - role: node
+              relabel_configs:
+                # Only scrape the local node (important for DaemonSet)
+                - source_labels: [__meta_kubernetes_node_name]
+                  action: keep
+                  regex: ${K8S_NODE_NAME}
+                # Change path from /metrics to /metrics/cadvisor
+                - target_label: __metrics_path__
+                  replacement: /metrics/cadvisor
+                # Keep node name as a label
+                - source_labels: [__meta_kubernetes_node_name]
+                  target_label: node
     processors:
       batch:
         timeout: 10s
@@ -59,6 +82,10 @@ otelConfiguration:
       health_check:
         endpoint: :13133
     exporters:
+      debug:
+        verbosity: detailed
+        sampling_initial: 5
+        sampling_thereafter: 200
       awsemf:
         namespace: 'OpenSearchMigrations'
         dimension_rollup_option: NoDimensionRollup # Reduce number of metrics by only publishing with all dimensions
@@ -73,9 +100,9 @@ otelConfiguration:
       extensions: [health_check]
       pipelines:
         metrics:
-          receivers: [otlp]
+          receivers: [otlp, prometheus]
           processors: [batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta]
-          exporters: [awsemf, prometheus]
+          exporters: [awsemf, prometheus, debug]
 
 charts:
   fluent-bit:

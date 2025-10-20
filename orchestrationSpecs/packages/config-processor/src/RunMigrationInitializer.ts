@@ -94,12 +94,6 @@ async function main() {
         if (!etcdEndpoints) {
             missingVars.push('ETCD_ENDPOINTS (or --etcd-endpoints)');
         }
-        if (!etcdUser) {
-            missingVars.push('ETCD_USER (or --etcd-user)');
-        }
-        if (!etcdPassword) {
-            missingVars.push('ETCD_PASSWORD (or --etcd-password)');
-        }
         if (!prefix) {
             missingVars.push('PREFIX (or --prefix)');
         }
@@ -144,8 +138,12 @@ async function main() {
         if (!skipInitialize) {
             const initializer = new MigrationInitializer({
                     endpoints: [etcdEndpoints as string],
-                    username: etcdUser as string,
-                    password: etcdPassword as string
+                    ...(!etcdUser || !etcdPassword ? {} : {
+                        auth: {
+                            username: etcdUser as string,
+                            password: etcdPassword as string
+                        }
+                    })
                 },
                 prefix as string
             );

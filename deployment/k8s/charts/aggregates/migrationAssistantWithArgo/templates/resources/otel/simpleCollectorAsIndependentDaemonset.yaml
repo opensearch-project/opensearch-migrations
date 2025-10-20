@@ -20,6 +20,10 @@ spec:
         - name: otel-collector
           image: public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3
           env:
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
             - name: OTEL_CONFIG_LOG
               value: "true"
             - name: OTEL_LOG_LEVEL

@@ -11,8 +11,10 @@ import _ from 'lodash';
 /** etcd connection options */
 export interface EtcdOptions {
     endpoints: string[];           // e.g., "http://127.0.0.1:2379" or array
-    username: string;
-    password: string;
+    auth?: {
+        username: string;
+        password: string;
+    }
 }
 
 export class MigrationInitializer {
@@ -22,7 +24,7 @@ export class MigrationInitializer {
         console.log("Initializing with " + JSON.stringify(etcdSettings));
         this.client = new Etcd3({
             hosts: etcdSettings.endpoints,
-            auth: {username: etcdSettings.username, password: etcdSettings.password}
+            auth: etcdSettings.auth
         });
         this.loader = new StreamSchemaParser(deepStrict(PARAMETERIZED_MIGRATION_CONFIG_ARRAYS));
     }
