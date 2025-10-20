@@ -21,7 +21,7 @@ rootProject.ext.imageArch = imageArch
 
 def jibProjects = [
         "TrafficCapture:trafficReplayer": [
-                baseImageName : "amazoncorretto",
+                baseImageName : "mirror.gcr.io/amazoncorretto",
                 baseImageTag  : "17-al2023-headless",
                 imageName     : "traffic_replayer",
                 imageTag      : "latest",
