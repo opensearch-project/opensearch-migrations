@@ -96,7 +96,14 @@ WORKDIR /root
 
 # Console setup bash completion and venv for interactive access
 RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh
-RUN dnf install -y bash-completion --setopt=install_weak_deps=False && \
+RUN dnf install -y  \
+      --setopt=install_weak_deps=False \
+      --setopt=tsflags=nodocs \
+      --setopt=keepcache=False \
+      --setopt=plugins=0 \
+      --setopt=logfilelevel=0 \
+        bash-completion \
+        && \
         dnf clean all && \
         rm -rf /var/cache/dnf
 

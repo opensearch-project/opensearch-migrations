@@ -26,7 +26,7 @@ jobs:
   full-es68-e2e-aws-test:
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Jenkins Job Trigger and Monitor
         uses: lewijacn/jenkins-trigger@1.0.4
@@ -39,7 +39,7 @@ jobs:
   elasticsearch-5x-k8s-local-test:
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Jenkins Job Trigger and Monitor
         uses: lewijacn/jenkins-trigger@1.0.4
