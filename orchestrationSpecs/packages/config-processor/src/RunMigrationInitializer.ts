@@ -59,7 +59,7 @@ async function main() {
     let etcdEndpoints = process.env.ETCD_ENDPOINTS;
     let etcdUser = process.env.ETCD_USER;
     let etcdPassword = process.env.ETCD_PASSWORD;
-    let prefix = process.env.PREFIX;
+    let prefix = process.env.PREFIX || "ma";
     let userConfigFile = process.env.USER_WORKFLOW_CONFIGURATION;
     let workflowConfigFile = process.env.TRANSFORMED_WORKFLOW_CONFIGURATION;
     let skipInitialize = false;

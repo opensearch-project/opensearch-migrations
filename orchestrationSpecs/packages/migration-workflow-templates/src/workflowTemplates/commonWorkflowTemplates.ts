@@ -11,7 +11,7 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 
 export const CommonWorkflowParameters = {
-    etcdEndpoints: defineParam({expression: "http://etcd.ma.svc.cluster.local:2379"}),
+    etcdEndpoints: defineParam({expression: `http://${ETCD_SERVICE_HOST}:${ETCD_SERVICE_PORT_CLIENT}`}),
     etcdUser: defineParam({expression: "root"}),
     etcdPassword: defineParam({expression: "password"}),
     s3SnapshotConfigMap: defineParam({expression: "s3-snapshot-config"}),
