@@ -42,7 +42,6 @@ while [[ $# -gt 0 ]]; do
     --use-public-images) use_public_images="$2"; shift 2 ;;
     --keep-build-images-job-alive) keep_build_images_job_alive=true; shift 1 ;;
     --skip-console-exec) skip_console_exec=true; shift 1 ;;
-    --release-version) RELEASE_VERSION="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo "Options:"
@@ -59,7 +58,6 @@ while [[ $# -gt 0 ]]; do
       echo "  --use-public-images <true|false>          (default: $use_public_images)"
       echo "  --keep-build-images-job-alive             (default: $keep_build_images_job_alive)"
       echo "  --skip-console-exec                       (default: $skip_console_exec)"
-      echo "  --release-version <val>                   (default: $RELEASE_VERSION)"
       exit 0
       ;;
     *)
@@ -86,8 +84,6 @@ HELM_VERSION="3.14.0"
 
 build_images_chart_dir="${base_dir}/deployment/k8s/charts/components/buildImages"
 ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
-RELEASE_VERSION=$(<"$base_dir/VERSION")
-RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
 
 install_helm() {
   echo "Installing Helm ${HELM_VERSION} for ${OS}/${TOOLS_ARCH}..."
@@ -245,6 +241,9 @@ if [[ "$build_images" == "true" ]]; then
     helm uninstall build-images -n "$namespace"
   fi
 fi
+
+RELEASE_VERSION=$(<"$base_dir/VERSION")
+RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
 
 if [[ "$use_public_images" == "false" ]]; then
   IMAGE_FLAGS="\
