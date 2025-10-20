@@ -96,11 +96,10 @@ def submit_command(ctx, namespace, prefix, wait, timeout, wait_interval, session
     The workflow is created using the actual config processor and submission scripts
     located in CONFIG_PROCESSOR_DIR (default: /root/configProcessor).
 
-    Required environment variables:
+    Environment variables:
         - CONFIG_PROCESSOR_DIR: Path to config processor (default: /root/configProcessor)
-        - ETCD_ENDPOINTS: etcd server endpoints (e.g., "http://etcd:2379")
-        - ETCD_USER: etcd authentication username
-        - ETCD_PASSWORD: etcd authentication password
+        - Additional environment variables may be required by the underlying scripts
+          (e.g., ETCD_ENDPOINTS, ETCD_USER, ETCD_PASSWORD for etcd connectivity)
 
     Example:
         workflow submit
@@ -132,10 +131,6 @@ def submit_command(ctx, namespace, prefix, wait, timeout, wait_interval, session
         except ValueError as e:
             # Missing environment variables
             click.echo(f"Error: {str(e)}", err=True)
-            click.echo("\nRequired environment variables:", err=True)
-            click.echo("  - ETCD_ENDPOINTS: etcd server endpoints", err=True)
-            click.echo("  - ETCD_USER: etcd username", err=True)
-            click.echo("  - ETCD_PASSWORD: etcd password", err=True)
             ctx.exit(ExitCode.FAILURE.value)
         except Exception as e:
             click.echo(f"Error initializing workflow: {str(e)}", err=True)

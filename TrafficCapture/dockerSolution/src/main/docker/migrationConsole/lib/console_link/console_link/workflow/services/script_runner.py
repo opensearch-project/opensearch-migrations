@@ -201,11 +201,6 @@ class ScriptRunner:
 
         Calls: node {script_dir}/index.js --user-config - --prefix <prefix> --silent
 
-        Requires environment variables:
-            - ETCD_ENDPOINTS: etcd server endpoints (e.g., "http://etcd:2379")
-            - ETCD_USER: etcd authentication username
-            - ETCD_PASSWORD: etcd authentication password
-
         Args:
             config_data: User configuration YAML as string
             prefix: Optional workflow prefix (auto-generated if not provided)
@@ -214,20 +209,10 @@ class ScriptRunner:
             Generated or provided prefix as string
 
         Raises:
-            ValueError: If required environment variables are missing
             FileNotFoundError: If index.js doesn't exist
             subprocess.CalledProcessError: If node command fails
         """
         logger.info("Initializing workflow with prefix: %s", prefix or 'auto-generated')
-
-        # Validate required environment variables
-        required_env_vars = ['ETCD_ENDPOINTS', 'ETCD_USER', 'ETCD_PASSWORD']
-        missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
-
-        if missing_vars:
-            error_msg = f"Missing required environment variables: {', '.join(missing_vars)}"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
 
         index_js_path = self.script_dir / "index.js"
 
