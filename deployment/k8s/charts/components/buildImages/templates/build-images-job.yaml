@@ -29,7 +29,7 @@ spec:
           image: {{ .Values.buildImagesBaseImage }}
           env:
             - name: GRADLE_OPTS
-              value: "-Xms512m -Xmx4g"
+              value: "-Xms2048m -Xmx8g"
           command:
             - sh
             - -c
@@ -74,7 +74,7 @@ spec:
               # This created builder uses the buildkitd-pod that this chart also deploys to build images
               docker buildx create --name local-remote-builder --driver remote tcp://buildkitd:1234
 
-              GRADLE_CMD="./gradlew buildImagesToRegistry -PregistryEndpoint='{{ .Values.registryEndpoint }}'"
+              GRADLE_CMD="./gradlew buildImagesToRegistry -PregistryEndpoint='{{ .Values.registryEndpoint }}' --no-configuration-cache"
               echo "Running Gradle build with:"
               echo "$GRADLE_CMD"
               eval "$GRADLE_CMD"
