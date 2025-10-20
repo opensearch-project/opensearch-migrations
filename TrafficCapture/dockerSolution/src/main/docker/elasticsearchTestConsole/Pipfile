@@ -6,13 +6,10 @@ name = "pypi"
 [packages]
 awscli = ">=1.32.106"
 awscurl = ">=0.33"
-opensearch-benchmark = ">=1.7.0"
+opensearch-benchmark = ">=2.0.0"
 requests = ">=2.32.3"
 tqdm = ">=4.66.4"
 urllib3 = ">=1.26.19"
-
-# Version lock with Dockerfile build from source
-h5py = "*" # Building c++ from source
 
 [dev-packages]
 
