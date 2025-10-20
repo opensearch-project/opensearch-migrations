@@ -18,7 +18,7 @@ jobs:
   draft-a-release:
     name: Draft a release
     if: github.repository == 'opensearch-project/opensearch-migrations'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     outputs:
       dockerhub-password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
     steps:
