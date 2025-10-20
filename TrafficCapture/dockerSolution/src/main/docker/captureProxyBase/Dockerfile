@@ -1,7 +1,7 @@
 # =======================
 # Stage 1: Certificate Generation
 # =======================
-FROM amazonlinux:2023 AS cert-builder
+FROM mirror.gcr.io/amazonlinux:2023 AS cert-builder
 
 # Install OpenSSL
 RUN yum update -y && \

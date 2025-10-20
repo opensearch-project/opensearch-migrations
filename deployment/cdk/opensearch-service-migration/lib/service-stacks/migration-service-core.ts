@@ -123,7 +123,7 @@ export class MigrationServiceCore extends Stack {
             const startupPeriodSeconds = 30;
             // Add a separate container to monitor and fail healthcheck after a given maxUptime
             const maxUptimeContainer = serviceTaskDef.addContainer("MaxUptimeContainer", {
-                image: ContainerImage.fromRegistry("public.ecr.aws/amazonlinux/amazonlinux:2023-minimal"),
+                image: ContainerImage.fromRegistry("mirror.gcr.io/amazonlinux:2023-minimal"),
                 memoryLimitMiB: 64,
                 entryPoint: [
                     "/bin/sh",

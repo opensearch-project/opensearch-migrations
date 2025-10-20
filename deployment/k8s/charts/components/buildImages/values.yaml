@@ -3,7 +3,7 @@ namespace: "ma"
 registryEndpoint: "docker-registry:5000"
 repositoryUrl: "https://github.com/opensearch-project/opensearch-migrations.git"
 repositoryBranch: "main"
-buildImagesBaseImage: "amazoncorretto:17-al2023"
+buildImagesBaseImage: "mirror.gcr.io/amazoncorretto:17-al2023"
 awsEKSEnabled: false
 keepJobAlive: false
 localRepoMount: false
