@@ -99,7 +99,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static final ContainerVersion ES_V8_3 = Elasticsearch8Version.fromTag("8.3.3");
     public static final ContainerVersion ES_V8_2 = Elasticsearch8Version.fromTag("8.2.3");
     public static final ContainerVersion ES_V8_1 = Elasticsearch8Version.fromTag("8.1.3");
-    public static final ContainerVersion ES_V8_0 = Elasticsearch8Version.fromTag("8.0.0");
+    public static final ContainerVersion ES_V8_0 = Elasticsearch8Version.fromTag("8.0.1");
 
     public static final ContainerVersion ES_V7_17 = Elasticsearch7Version.fromTag("7.17.22");
     public static final ContainerVersion ES_V7_16 = Elasticsearch7Version.fromTag("7.16.3");
