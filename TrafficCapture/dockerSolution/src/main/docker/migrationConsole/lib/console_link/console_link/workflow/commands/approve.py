@@ -74,7 +74,24 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
                 ctx.exit(ExitCode.FAILURE.value)
 
             if list_result['count'] == 0:
-                click.echo(f"Error: No workflows found in namespace {namespace}", err=True)
+                # Check if any workflows exist at all (without phase filter)
+                all_workflows_result = service.list_workflows(
+                    namespace=namespace,
+                    argo_server=argo_server,
+                    token=token,
+                    insecure=insecure
+                )
+                
+                if all_workflows_result['success'] and all_workflows_result['count'] > 0:
+                    # Workflows exist but none need approval
+                    click.echo(
+                        f"No workflows require approval in namespace {namespace}.\n"
+                        f"Use 'workflow status' to see workflow details.",
+                        err=True
+                    )
+                else:
+                    # No workflows exist at all
+                    click.echo(f"Error: No workflows found in namespace {namespace}", err=True)
                 ctx.exit(ExitCode.FAILURE.value)
             elif list_result['count'] > 1:
                 workflows_list = ', '.join(list_result['workflows'])
