@@ -7,6 +7,7 @@ import io.opentelemetry.context.Scope;
 public class NullableExemplarScope implements Scope {
     final Scope underlyingScope;
 
+    @SuppressWarnings("MustBeClosedChecker")
     public NullableExemplarScope(Span span) {
         underlyingScope = span == null ? null : Context.current().with(span).makeCurrent();
     }

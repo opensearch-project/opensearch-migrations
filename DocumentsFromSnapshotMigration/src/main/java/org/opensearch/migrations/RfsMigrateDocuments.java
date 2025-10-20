@@ -46,6 +46,7 @@ import org.opensearch.migrations.bulkload.worker.RegularDocumentReaderEngine;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -59,7 +60,6 @@ import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.IValueValidator;
-import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
@@ -298,28 +298,6 @@ public class RfsMigrateDocuments {
         private String transformerConfigFile;
     }
 
-    public static class EnvParameters {
-
-        private EnvParameters() {
-            throw new IllegalStateException("EnvParameters utility class should not instantiated");
-        }
-
-        public static void injectFromEnv(Args args) {
-            List<String> addedEnvParams = new ArrayList<>();
-            if (args.targetArgs.username == null && System.getenv(ArgNameConstants.TARGET_USERNAME_ENV_ARG) != null) {
-                args.targetArgs.username = System.getenv(ArgNameConstants.TARGET_USERNAME_ENV_ARG);
-                addedEnvParams.add(ArgNameConstants.TARGET_USERNAME_ENV_ARG);
-            }
-            if (args.targetArgs.password == null && System.getenv(ArgNameConstants.TARGET_PASSWORD_ENV_ARG) != null) {
-                args.targetArgs.password = System.getenv(ArgNameConstants.TARGET_PASSWORD_ENV_ARG);
-                addedEnvParams.add(ArgNameConstants.TARGET_PASSWORD_ENV_ARG);
-            }
-            if (!addedEnvParams.isEmpty()) {
-                log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
-            }
-        }
-    }
-
     public static class NoWorkLeftException extends Exception {
         public NoWorkLeftException(String message) {
             super(message);
@@ -377,12 +355,11 @@ public class RfsMigrateDocuments {
         log.info("Starting RfsMigrateDocuments with workerId=" + workerId);
 
         Args arguments = new Args();
-        JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
+        var jCommander = JsonCommandLineParser.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
-        EnvParameters.injectFromEnv(arguments);
 
         if (arguments.help) {
-            jCommander.usage();
+            jCommander.getJCommander().usage();
             return;
         }
 
