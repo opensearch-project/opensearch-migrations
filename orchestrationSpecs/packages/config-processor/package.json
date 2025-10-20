@@ -1,16 +1,23 @@
 {
   "name": "@opensearch-migrations/config-processor",
   "version": "1.0.0",
-  "scripts": {
-    "build": "npx tsgo",
-    "type-check": "NODE_OPTIONS='--conditions=development' npx  tsgo -p ../../tsconfig.typecheck.processor.json --noEmit",
-    "start-transform": "tsx src/RunMigrationConfigTransformer.ts",
-    "start-initialize": "tsx src/RunMigrationConfigTransformer.ts",
-    "dev-transform": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationConfigTransformer.ts",
-    "dev-initialize": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationInitializer.ts -- --etcd-endpoints http://localhost:2379 --etcd-user root --etcd-password password "
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
   },
-  "bin": {
-    "process-config": "./dist/cli.js"
+  "scripts": {
+    "build": "tsc --build",
+    "type-check": "NODE_OPTIONS='--conditions=development' npx  tsgo -p ../../tsconfig.typecheck.processor.json --noEmit",
+    "start-initialize": "tsx src/RunMigrationConfigTransformer.ts",
+    "start-transform": "tsx src/RunMigrationConfigTransformer.ts",
+    "dev-initialize": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationInitializer.ts -- --etcd-endpoints http://localhost:2379 --etcd-user root --etcd-password password ",
+    "dev-transform": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationConfigTransformer.ts",
+    "bundle": "npm run build && node makeBundle.js"
   },
   "dependencies": {
     "@opensearch-migrations/schemas": "*",

@@ -45,6 +45,9 @@ RUN ARCH=$(cat /arch.env) && \
 
 FROM ${BASE_IMAGE}
 
+# Install Node.js for config processor and workflow template creation
+RUN dnf install -y nodejs22
+
 # Define the virtual environment path
 ENV WORKON_HOME=/
 ENV PIPENV_CUSTOM_VENV_NAME=.venv
@@ -116,6 +119,16 @@ RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\t) \[\e[92m\]migration-console \[\e[0m\](\w) -> "' >> ~/.bashrc
 
+COPY nodeStaging/configProcessor /root/configProcessor
+
+# Once we're ready, we should replace the old workflows with the new ones.
+# Notice that the installWorkflows pulls from /root/workflows/templates -
+# so the target for the new workflows would either need to be /root/workflows/templates,
+# or the installation script would need to be updated.
+
+# Here are the new workflows that are dormant but can be installed by users on the console
+COPY nodeStaging/workflowTemplates /root/newWorkflowTemplates
+# Here are the original workflows that current integ tests are using.
 COPY workflows /root/workflows
 
 # Set ENV to control startup script in /bin/sh mode

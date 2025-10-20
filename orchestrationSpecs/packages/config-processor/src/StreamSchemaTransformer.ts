@@ -115,10 +115,13 @@ export class StreamSchemaTransformer<
     /**
      * Main processing pipeline
      */
-    async process(stream: Readable): Promise<z.infer<TOutput>> {
+    async processFromStream(stream: Readable): Promise<z.infer<TOutput>> {
         // 1. Convert stream to object
         const rawData = await this.streamToObject(stream);
+        return this.processFromObject(rawData);
+    }
 
+    async processFromObject(rawData: unknown): Promise<z.infer<TOutput>> {
         // 2. Validate input
         const validatedInput = this.validateInput(rawData);
 
