@@ -57,7 +57,7 @@ async function bundle() {
         entryPoints: ['dist/RunMigrationInitializer.js'],
         bundle: true,
         platform: 'node',
-        target: 'node18',
+        target: 'node22',
         outfile: outputFile,
         external: [
             '@grpc/grpc-js',
