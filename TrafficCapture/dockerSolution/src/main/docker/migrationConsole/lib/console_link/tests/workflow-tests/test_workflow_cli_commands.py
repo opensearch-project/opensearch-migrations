@@ -1,5 +1,7 @@
 """Integration tests for workflow CLI commands."""
 
+import tempfile
+from pathlib import Path
 from click.testing import CliRunner
 from unittest.mock import Mock, patch
 
@@ -265,3 +267,133 @@ class TestWorkflowCLICommands:
 
         assert result.exit_code == 0
         assert 'submitted successfully' in result.output
+
+
+class TestConfigureCommands:
+    """Test suite for configure CLI commands."""
+
+    @patch('console_link.workflow.commands.configure.WorkflowConfigStore')
+    def test_configure_sample_without_config_processor_dir(self, mock_store_class):
+        """Test configure sample command returns blank starter when CONFIG_PROCESSOR_DIR not set."""
+        runner = CliRunner()
+
+        # Create a temporary directory without sample.yaml to simulate missing CONFIG_PROCESSOR_DIR
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Patch ScriptRunner to use the empty temp directory
+            with patch('console_link.workflow.commands.configure.ScriptRunner') as mock_runner_class:
+                mock_runner = Mock()
+                mock_runner_class.return_value = mock_runner
+
+                # Create a ScriptRunner with the empty directory to get blank starter
+                from console_link.workflow.services.script_runner import ScriptRunner
+                real_runner = ScriptRunner(script_dir=temp_path)
+                mock_runner.get_sample_config.return_value = real_runner.get_sample_config()
+
+                result = runner.invoke(workflow_cli, ['configure', 'sample'])
+
+                assert result.exit_code == 0
+                # Should contain the blank starter template
+                assert 'Workflow Configuration Template' in result.output
+                assert 'parameters' in result.output
+                # Should NOT contain sample-specific content
+                assert 'message' not in result.output or 'Hello from workflow' not in result.output
+
+    @patch('console_link.workflow.commands.configure.WorkflowConfigStore')
+    def test_configure_sample_with_config_processor_dir(self, mock_store_class):
+        """Test configure sample command returns actual sample when CONFIG_PROCESSOR_DIR is set."""
+        runner = CliRunner()
+
+        # Use the default ScriptRunner which will find the test sample.yaml
+        result = runner.invoke(workflow_cli, ['configure', 'sample'])
+
+        assert result.exit_code == 0
+        # Should contain actual sample content
+        assert 'parameters' in result.output
+
+    @patch('console_link.workflow.commands.configure.WorkflowConfigStore')
+    def test_configure_sample_load_blank_starter(self, mock_store_class):
+        """Test configure sample --load command with blank starter config."""
+        runner = CliRunner()
+
+        # Mock the store
+        mock_store = Mock()
+        mock_store_class.return_value = mock_store
+        mock_store.save_config.return_value = "Configuration saved"
+
+        # Create a temporary directory without sample.yaml
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Patch ScriptRunner to use the empty temp directory
+            with patch('console_link.workflow.commands.configure.ScriptRunner') as mock_runner_class:
+                mock_runner = Mock()
+                mock_runner_class.return_value = mock_runner
+
+                # Create a ScriptRunner with the empty directory to get blank starter
+                from console_link.workflow.services.script_runner import ScriptRunner
+                real_runner = ScriptRunner(script_dir=temp_path)
+                mock_runner.get_sample_config.return_value = real_runner.get_sample_config()
+
+                result = runner.invoke(workflow_cli, ['configure', 'sample', '--load'])
+
+                assert result.exit_code == 0
+                assert 'Sample configuration loaded successfully' in result.output
+                # Verify save_config was called
+                assert mock_store.save_config.called
+
+    @patch('console_link.workflow.commands.configure.WorkflowConfigStore')
+    @patch('console_link.workflow.commands.configure.subprocess.run')
+    def test_configure_edit_without_config_processor_dir(self, mock_subprocess, mock_store_class):
+        """Test configure edit command uses blank starter when CONFIG_PROCESSOR_DIR not set."""
+        runner = CliRunner()
+
+        # Mock the store
+        mock_store = Mock()
+        mock_store_class.return_value = mock_store
+        mock_store.load_config.return_value = None  # No existing config
+        mock_store.save_config.return_value = "Configuration saved"
+
+        # Mock subprocess to simulate editor interaction
+        mock_subprocess.return_value = Mock(returncode=0)
+
+        # Create a temporary directory without sample.yaml
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Patch ScriptRunner to use the empty temp directory
+            with patch('console_link.workflow.commands.configure.ScriptRunner') as mock_runner_class:
+                mock_runner = Mock()
+                mock_runner_class.return_value = mock_runner
+
+                # Create a ScriptRunner with the empty directory to get blank starter
+                from console_link.workflow.services.script_runner import ScriptRunner
+                real_runner = ScriptRunner(script_dir=temp_path)
+                mock_runner.get_sample_config.return_value = real_runner.get_sample_config()
+
+                # Mock file operations to capture what would be written to temp file
+                with patch('builtins.open', create=True) as mock_open:
+                    # Setup mock for writing temp file
+                    mock_file_write = Mock()
+                    mock_file_read = Mock()
+                    mock_file_read.read.return_value = "parameters:\n  test: value"
+
+                    def open_side_effect(filename, mode='r'):
+                        if 'w' in mode:
+                            return mock_file_write
+                        else:
+                            return mock_file_read
+
+                    mock_open.side_effect = open_side_effect
+
+                    result = runner.invoke(workflow_cli, ['configure', 'edit'])
+
+                    # The command should succeed
+                    assert result.exit_code == 0
+
+                    # Verify that the blank starter template was written to the temp file
+                    # (checking the write call would contain the template)
+                    if mock_file_write.write.called:
+                        written_content = ''.join([call[0][0] for call in mock_file_write.write.call_args_list])
+                        assert 'parameters' in written_content

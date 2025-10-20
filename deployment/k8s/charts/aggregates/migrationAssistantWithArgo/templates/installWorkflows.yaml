@@ -28,7 +28,7 @@ spec:
               set -e
               echo "Installing templates from originalArgoWorkflows."
               echo "switch this to `cd newWorkflowTemplates` to install the new templates that will work with the workflow command when ready"
-              cd workflows/templates
+              cd newWorkflowTemplates
               NAMESPACE="{{ .Release.Name }}"
               APP_NAME="{{ .Release.Name }}"
               OWNER="{{ .Release.Name }}"

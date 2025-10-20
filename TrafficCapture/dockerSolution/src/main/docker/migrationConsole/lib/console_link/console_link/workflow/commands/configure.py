@@ -18,7 +18,11 @@ session_name = 'default'
 
 
 def _get_empty_config_template() -> str:
-    """Return empty configuration template"""
+    """Return empty configuration template.
+    
+    Returns sample configuration from CONFIG_PROCESSOR_DIR if available,
+    otherwise returns a blank starter configuration template.
+    """
     from ..services.script_runner import ScriptRunner
     runner = ScriptRunner()
     return runner.get_sample_config()
@@ -191,7 +195,11 @@ def clear_config(ctx, confirm):
 @click.option('--load', is_flag=True, help='Load sample into current session')
 @click.pass_context
 def sample_config(ctx, format, load):
-    """Show or load sample configuration"""
+    """Show or load sample configuration.
+    
+    Displays sample configuration from CONFIG_PROCESSOR_DIR if available,
+    otherwise displays a blank starter configuration template.
+    """
     try:
         from ..services.script_runner import ScriptRunner
         runner = ScriptRunner()

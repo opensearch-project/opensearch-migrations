@@ -107,23 +107,35 @@ class ScriptRunner:
             logger.error(f"stderr: {e.stderr}")
             raise
 
+    def _get_blank_starter_config(self) -> str:
+        """Get a minimal blank starter configuration template.
+
+        Returns an empty string to allow users to start from scratch.
+
+        Returns:
+            Empty string
+        """
+        return ""
+
     def get_sample_config(self) -> str:
         """Get sample workflow configuration.
 
-        Reads sample.yaml from the configured script directory.
+        Reads sample.yaml from the configured script directory. If sample.yaml
+        doesn't exist (e.g., when CONFIG_PROCESSOR_DIR is not set), returns a
+        blank starter configuration template instead.
 
         Returns:
-            YAML content as string
+            YAML content as string (either from sample.yaml or blank starter)
 
         Raises:
-            FileNotFoundError: If sample.yaml doesn't exist
-            IOError: If file cannot be read
+            IOError: If sample.yaml exists but cannot be read
         """
         logger.info("Getting sample configuration")
         sample_path = self.script_dir / "sample.yaml"
 
         if not sample_path.exists():
-            raise FileNotFoundError(f"Sample configuration not found: {sample_path}")
+            logger.info(f"Sample configuration not found at {sample_path}, using blank starter config")
+            return self._get_blank_starter_config()
 
         try:
             with open(sample_path, 'r') as f:

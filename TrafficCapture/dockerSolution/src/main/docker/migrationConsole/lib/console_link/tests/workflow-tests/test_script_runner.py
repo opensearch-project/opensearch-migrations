@@ -1,8 +1,12 @@
 """Tests for script runner service."""
 
 import pytest
+import tempfile
+from pathlib import Path
+import yaml
 
 from console_link.workflow.services.script_runner import ScriptRunner
+from console_link.workflow.models.config import WorkflowConfig
 
 
 class TestScriptRunner:
@@ -88,3 +92,57 @@ class TestScriptRunner:
 
         with pytest.raises(FileNotFoundError):
             runner.run_script("nonexistent.sh")
+
+    def test_get_blank_starter_config(self):
+        """Test that _get_blank_starter_config returns empty string."""
+        runner = ScriptRunner()
+        blank_config = runner._get_blank_starter_config()
+
+        # Verify it's an empty string
+        assert blank_config == ""
+        assert isinstance(blank_config, str)
+
+    def test_get_blank_starter_config_parseable_by_workflow_config(self):
+        """Test that blank starter config can be parsed by WorkflowConfig."""
+        runner = ScriptRunner()
+        blank_config = runner._get_blank_starter_config()
+
+        # Empty string should parse to empty dict
+        config = WorkflowConfig.from_yaml(blank_config)
+        assert config is not None
+        # Empty YAML parses to None, which becomes empty dict in WorkflowConfig
+        assert config.data == {} or config.data is None
+
+    def test_get_sample_config_with_missing_file(self):
+        """Test get_sample_config returns blank starter when sample.yaml doesn't exist."""
+        # Create a temporary directory without sample.yaml
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            runner = ScriptRunner(script_dir=temp_path)
+
+            # Should return blank starter config (empty string) instead of raising FileNotFoundError
+            sample = runner.get_sample_config()
+
+            # Verify it's an empty string
+            assert sample == ""
+            assert isinstance(sample, str)
+
+    def test_get_sample_config_with_existing_file(self):
+        """Test get_sample_config still works when sample.yaml exists."""
+        # Create a temporary directory with a sample.yaml file
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            sample_file = temp_path / "sample.yaml"
+
+            # Write a custom sample config
+            custom_content = "custom:\n  config: value\nparameters:\n  test: data"
+            sample_file.write_text(custom_content)
+
+            runner = ScriptRunner(script_dir=temp_path)
+
+            # Should return the custom sample, not the blank starter
+            sample = runner.get_sample_config()
+
+            assert sample == custom_content
+            assert "custom" in sample
+            assert "Workflow Configuration Template" not in sample
