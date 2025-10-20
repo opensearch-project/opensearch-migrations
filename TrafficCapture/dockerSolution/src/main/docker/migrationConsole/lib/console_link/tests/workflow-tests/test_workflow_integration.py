@@ -134,7 +134,7 @@ def argo_workflows(k3s_container):
 
     while time.time() - start_time < max_wait_time:
         elapsed = time.time() - start_time
-        
+
         try:
             # Check if argo-server deployment is ready
             server_deployment = apps_v1.read_namespaced_deployment(
@@ -162,22 +162,22 @@ def argo_workflows(k3s_container):
             if elapsed - last_status_log >= 15:
                 logger.info(f"\n[{elapsed:.0f}s] Deployment Status Check:")
                 logger.info(f"  argo-server: {server_deployment.status.ready_replicas or 0}/"
-                           f"{server_deployment.status.replicas or 0} ready, "
-                           f"{server_deployment.status.available_replicas or 0} available, "
-                           f"{server_deployment.status.unavailable_replicas or 0} unavailable")
+                            f"{server_deployment.status.replicas or 0} ready, "
+                            f"{server_deployment.status.available_replicas or 0} available, "
+                            f"{server_deployment.status.unavailable_replicas or 0} unavailable")
                 logger.info(f"  workflow-controller: {controller_deployment.status.ready_replicas or 0}/"
-                           f"{controller_deployment.status.replicas or 0} ready, "
-                           f"{controller_deployment.status.available_replicas or 0} available, "
-                           f"{controller_deployment.status.unavailable_replicas or 0} unavailable")
-                
+                            f"{controller_deployment.status.replicas or 0} ready, "
+                            f"{controller_deployment.status.available_replicas or 0} available, "
+                            f"{controller_deployment.status.unavailable_replicas or 0} unavailable")
+
                 # Get pod status details
                 pods = v1.list_namespaced_pod(namespace=argo_namespace)
                 logger.info(f"  Total pods in namespace: {len(pods.items)}")
-                
+
                 for pod in pods.items:
                     pod_name = pod.metadata.name
                     phase = pod.status.phase
-                    
+
                     # Get container statuses
                     container_statuses = []
                     if pod.status.container_statuses:
@@ -192,11 +192,12 @@ def argo_workflows(k3s_container):
                             elif cs.state.terminated:
                                 state = "Terminated"
                                 reason = cs.state.terminated.reason or ""
-                            
+
                             container_statuses.append(f"{cs.name}:{state}{':'+reason if reason else ''}")
-                    
-                    logger.info(f"    - {pod_name}: {phase} [{', '.join(container_statuses) if container_statuses else 'no containers'}]")
-                
+
+                    logger.info(
+                        f"    - {pod_name}: {phase} [{', '.join(container_statuses) if container_statuses else 'no containers'}]")
+
                 # Get recent events for debugging
                 try:
                     events = v1.list_namespaced_event(
@@ -210,7 +211,7 @@ def argo_workflows(k3s_container):
                             logger.info(f"    - {event.involved_object.name}: {event.reason} - {event.message}")
                 except Exception as e:
                     logger.debug(f"Could not fetch events: {e}")
-                
+
                 last_status_log = elapsed
 
             if server_ready and controller_ready:
@@ -228,18 +229,18 @@ def argo_workflows(k3s_container):
         # Argo failed to start - print logs for debugging
         logger.error("Argo Workflows pods did not become ready in time")
         logger.error("Printing container logs for debugging:")
-        
+
         try:
             # Get all pods in the argo namespace
             pods = v1.list_namespaced_pod(namespace=argo_namespace)
-            
+
             for pod in pods.items:
                 pod_name = pod.metadata.name
                 logger.error(f"\n{'='*80}")
                 logger.error(f"Logs for pod: {pod_name}")
                 logger.error(f"Status: {pod.status.phase}")
                 logger.error(f"{'='*80}")
-                
+
                 # Get logs for each container in the pod
                 if pod.spec.containers:
                     for container in pod.spec.containers:
@@ -256,7 +257,7 @@ def argo_workflows(k3s_container):
                             logger.error(logs)
                         except ApiException as log_error:
                             logger.error(f"Failed to get logs for container {container_name}: {log_error}")
-                
+
                 # Also check init containers if they exist
                 if pod.spec.init_containers:
                     for init_container in pod.spec.init_containers:
@@ -273,12 +274,12 @@ def argo_workflows(k3s_container):
                             logger.error(logs)
                         except ApiException as log_error:
                             logger.error(f"Failed to get logs for init container {container_name}: {log_error}")
-                
+
                 logger.error("")  # Empty line between pods
-                
+
         except Exception as e:
             logger.error(f"Failed to retrieve pod logs: {e}")
-        
+
         raise TimeoutError("Argo Workflows pods did not become ready in time")
 
     yield {

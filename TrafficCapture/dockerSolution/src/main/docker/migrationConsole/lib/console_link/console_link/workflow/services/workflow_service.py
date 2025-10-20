@@ -5,16 +5,12 @@ making it reusable by CLI commands, REST APIs, or other interfaces.
 """
 
 import logging
-import os
 import time
-import copy
 from typing import Dict, Any, Optional, Tuple, TypedDict, List
 
-import yaml
 import requests
 from kubernetes import client
 
-from ..models.config import WorkflowConfig
 
 logger = logging.getLogger(__name__)
 
@@ -98,155 +94,6 @@ class WorkflowService:
 
     def __init__(self):
         """Initialize the WorkflowService."""
-
-    def load_workflow_template(
-        self,
-        template_path: Optional[str] = None
-    ) -> WorkflowTemplateResult:
-        """Load workflow template from file path.
-
-        Args:
-            template_path: Optional file path to workflow YAML
-
-        Returns:
-            WorkflowTemplateResult dict with success status, workflow_spec, source, and error
-        """
-        # Determine the template path
-        path = template_path or os.environ.get('WORKFLOW_TEMPLATE_PATH')
-
-        if not path:
-            # No template path specified - this is an error
-            error_msg = (
-                "No workflow template path specified. "
-                "Please set WORKFLOW_TEMPLATE_PATH environment variable or provide template_path parameter."
-            )
-            logger.error(error_msg)
-            return WorkflowTemplateResult(
-                success=False,
-                workflow_spec={},
-                source='none',
-                error=error_msg
-            )
-
-        # Try to load from file
-        try:
-            logger.info(f"Loading workflow template from: {path}")
-
-            with open(path, 'r') as f:
-                template_data = yaml.safe_load(f)
-
-            if not template_data:
-                raise ValueError("Template file is empty")
-
-            # Basic validation - check for required workflow structure
-            if 'spec' not in template_data:
-                raise ValueError("Template must contain 'spec' section")
-
-            logger.info(f"Successfully loaded workflow template from: {path}")
-            return WorkflowTemplateResult(
-                success=True,
-                workflow_spec=template_data,
-                source=path,
-                error=None
-            )
-
-        except FileNotFoundError:
-            error_msg = f"Template file not found: {path}"
-            logger.error(error_msg)
-            return WorkflowTemplateResult(
-                success=False,
-                workflow_spec={},
-                source='none',
-                error=error_msg
-            )
-
-        except yaml.YAMLError as e:
-            error_msg = f"Invalid YAML in template file {path}: {e}"
-            logger.error(error_msg)
-            return WorkflowTemplateResult(
-                success=False,
-                workflow_spec={},
-                source='none',
-                error=error_msg
-            )
-
-        except Exception as e:
-            error_msg = f"Error loading template from {path}: {e}"
-            logger.error(error_msg)
-            return WorkflowTemplateResult(
-                success=False,
-                workflow_spec={},
-                source='none',
-                error=error_msg
-            )
-
-    def inject_parameters(
-        self,
-        workflow_spec: Dict[str, Any],
-        config: Optional[WorkflowConfig]
-    ) -> Dict[str, Any]:
-        """Inject parameters from WorkflowConfig into workflow specification.
-
-        Args:
-            workflow_spec: The workflow specification dict
-            config: WorkflowConfig containing parameters to inject
-
-        Returns:
-            Modified workflow_spec with parameters injected
-        """
-        # Create deep copy to avoid mutating the input
-        workflow = copy.deepcopy(workflow_spec)
-
-        # If no config or config is empty, return workflow as-is
-        if not config or not config.data:
-            logger.debug("No config provided or config is empty, no parameters to inject")
-            return workflow
-
-        # Get parameters from config
-        config_params = config.data.get('parameters', {})
-
-        if not config_params:
-            logger.debug("No parameters found in config")
-            return workflow
-
-        logger.info(f"Injecting {len(config_params)} parameters from config")
-
-        # Ensure spec.arguments.parameters exists
-        if 'spec' not in workflow:
-            workflow['spec'] = {}
-        if 'arguments' not in workflow['spec']:
-            workflow['spec']['arguments'] = {}
-        if 'parameters' not in workflow['spec']['arguments']:
-            workflow['spec']['arguments']['parameters'] = []
-
-        params_list = workflow['spec']['arguments']['parameters']
-
-        # Inject each parameter from config
-        for param_name, param_value in config_params.items():
-            # Convert boolean values to lowercase strings for Argo Workflows
-            if isinstance(param_value, bool):
-                param_value = str(param_value).lower()
-
-            # Check if parameter already exists in workflow
-            existing_param = None
-            for param in params_list:
-                if param.get('name') == param_name:
-                    existing_param = param
-                    break
-
-            if existing_param:
-                # Update existing parameter
-                existing_param['value'] = param_value
-                logger.debug(f"Updated existing parameter: {param_name} = {param_value}")
-            else:
-                # Add new parameter
-                params_list.append({
-                    'name': param_name,
-                    'value': param_value
-                })
-                logger.debug(f"Added new parameter: {param_name} = {param_value}")
-
-        return workflow
 
     def submit_workflow_to_argo(
         self,
@@ -734,7 +581,7 @@ class WorkflowService:
         # Handle case when items is None (no workflows exist)
         if items is None:
             return workflow_names
-        
+
         for item in items:
             name = item.get("metadata", {}).get("name", "")
             if not name:

@@ -121,6 +121,7 @@ RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo 'PS1="(\t) \[\e[92m\]migration-console \[\e[0m\](\w) -> "' >> ~/.bashrc
 
 COPY nodeStaging/configProcessor /root/configProcessor
+ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
 
 # Once we're ready, we should replace the old workflows with the new ones.
 # Notice that the installWorkflows pulls from /root/workflows/templates -

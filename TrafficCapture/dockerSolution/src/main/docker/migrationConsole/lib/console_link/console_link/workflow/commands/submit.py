@@ -1,44 +1,17 @@
 """Submit command for workflow CLI - submits workflows to Argo Workflows."""
 
 import logging
-import os
 import click
 
 from ..models.utils import ExitCode
 from ..models.store import WorkflowConfigStore
 from ..services.workflow_service import WorkflowService
+from ..services.script_runner import ScriptRunner
 
 logger = logging.getLogger(__name__)
 
 # Terminal workflow phases
 ENDING_PHASES = ["Succeeded", "Failed", "Error", "Stopped", "Terminated"]
-
-
-def _load_and_inject_config(service: WorkflowService, workflow_spec: dict, namespace: str, session: str) -> dict:
-    """Load configuration and inject parameters into workflow spec.
-
-    Args:
-        service: WorkflowService instance
-        workflow_spec: Workflow specification
-        namespace: Kubernetes namespace
-        session: Session name
-
-    Returns:
-        Updated workflow spec with injected parameters
-    """
-    try:
-        store = WorkflowConfigStore(namespace=namespace)
-        config = store.load_config(session_name=session)
-
-        if config:
-            click.echo(f"Injecting parameters from session: {session}")
-            return service.inject_parameters(workflow_spec, config)
-        else:
-            logger.debug(f"No configuration found for session: {session}")
-            return workflow_spec
-    except Exception as e:
-        logger.warning(f"Could not load workflow config: {e}")
-        return workflow_spec
 
 
 def _handle_workflow_wait(
@@ -80,29 +53,13 @@ def _handle_workflow_wait(
 
 @click.command(name="submit")
 @click.option(
-    '--argo-server',
-    default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
-    f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
-    help='Argo Server URL (default: auto-detected from Kubernetes service env vars, or ARGO_SERVER env var)'
-)
-@click.option(
     '--namespace',
     default='ma',
     help='Kubernetes namespace for the workflow (default: ma)'
 )
 @click.option(
-    '--name',
-    help='Workflow name (will use generateName if not provided)'
-)
-@click.option(
-    '--insecure',
-    is_flag=True,
-    default=False,
-    help='Skip TLS certificate verification'
-)
-@click.option(
-    '--token',
-    help='Bearer token for authentication'
+    '--prefix',
+    help='Workflow prefix (auto-generated if not provided)'
 )
 @click.option(
     '--wait',
@@ -128,86 +85,93 @@ def _handle_workflow_wait(
     help='Configuration session name to load parameters from (default: default)'
 )
 @click.pass_context
-def submit_command(ctx, argo_server, namespace, name, insecure, token, wait, timeout, wait_interval, session):
-    """Submit a workflow to Argo Workflows.
+def submit_command(ctx, namespace, prefix, wait, timeout, wait_interval, session):
+    """Submit a migration workflow using the config processor.
 
-    This command submits a workflow to Argo Workflows using the Argo Server REST API.
-    By default, it returns immediately after submission without waiting for completion.
-    Use the --wait flag to wait for the workflow to complete.
+    This command submits a migration workflow by:
+    1. Loading the configuration from the specified session
+    2. Initializing the workflow state in etcd
+    3. Submitting the workflow to Kubernetes via the config processor script
 
-    The default workflow includes a suspend step that requires manual approval via
-    'workflow approve' before completion.
+    The workflow is created using the actual config processor and submission scripts
+    located in CONFIG_PROCESSOR_DIR (default: /root/configProcessor).
 
-    To use a custom workflow template, set the WORKFLOW_TEMPLATE_PATH environment
-    variable to point to a workflow YAML file. Parameters can be injected from a
-    WorkflowConfig stored in a Kubernetes ConfigMap (use 'workflow configure' to set).
+    Required environment variables:
+        - CONFIG_PROCESSOR_DIR: Path to config processor (default: /root/configProcessor)
+        - ETCD_ENDPOINTS: etcd server endpoints (e.g., "http://etcd:2379")
+        - ETCD_USER: etcd authentication username
+        - ETCD_PASSWORD: etcd authentication password
 
     Example:
         workflow submit
         workflow submit --wait
-        workflow submit --wait --timeout 300
-        WORKFLOW_TEMPLATE_PATH=/path/to/workflow.yaml workflow submit
+        workflow submit --prefix my-migration --wait --timeout 300
     """
-    # First check if configuration exists (outside try-except to avoid traceback on exit)
+    # Check if configuration exists
     store = WorkflowConfigStore(namespace=namespace)
     config = store.load_config(session_name=session)
-    
-    if not config:
+
+    if not config or not config.data:
         click.echo(f"Error: No workflow configuration found for session '{session}'", err=True)
-        click.echo("\nPlease configure the workflow first using 'workflow configure'", err=True)
-        click.echo("This will set up the proper migration workflow template and parameters.", err=True)
+        click.echo("\nPlease configure the workflow first using 'workflow configure edit'", err=True)
         ctx.exit(ExitCode.FAILURE.value)
 
     try:
+        # Initialize ScriptRunner
+        runner = ScriptRunner()
 
-        service = WorkflowService()
-        template_result = service.load_workflow_template()
+        # Get config data as YAML
+        config_yaml = config.to_yaml()
 
-        if template_result['error']:
-            click.echo(f"Error: {template_result['error']}", err=True)
-            click.echo("\nPlease configure the workflow first using 'workflow configure'", err=True)
-            click.echo("or set the WORKFLOW_TEMPLATE_PATH environment variable.", err=True)
+        click.echo(f"Initializing workflow from session: {session}")
+
+        # Step 1: Initialize workflow in etcd (returns prefix)
+        try:
+            workflow_prefix = runner.init_workflow(config_yaml, prefix)
+            click.echo(f"Workflow initialized with prefix: {workflow_prefix}")
+        except ValueError as e:
+            # Missing environment variables
+            click.echo(f"Error: {str(e)}", err=True)
+            click.echo("\nRequired environment variables:", err=True)
+            click.echo("  - ETCD_ENDPOINTS: etcd server endpoints", err=True)
+            click.echo("  - ETCD_USER: etcd username", err=True)
+            click.echo("  - ETCD_PASSWORD: etcd password", err=True)
+            ctx.exit(ExitCode.FAILURE.value)
+        except Exception as e:
+            click.echo(f"Error initializing workflow: {str(e)}", err=True)
+            logger.exception("Workflow initialization failed")
             ctx.exit(ExitCode.FAILURE.value)
 
-        click.echo(f"Using workflow template from: {template_result['source']}")
-        workflow_spec = template_result['workflow_spec']
+        # Step 2: Submit workflow to Kubernetes
+        click.echo(f"Submitting workflow to namespace: {namespace}")
+        try:
+            submit_result = runner.submit_workflow(config_yaml, workflow_prefix, namespace)
 
-        # Inject parameters from configuration
-        click.echo(f"Injecting parameters from session: {session}")
-        workflow_spec = service.inject_parameters(workflow_spec, config)
+            workflow_name = submit_result.get('workflow_name', 'unknown')
+            workflow_uid = submit_result.get('workflow_uid', 'unknown')
 
-        # Add name or generateName if provided
-        if name:
-            workflow_spec['metadata']['name'] = name
-        elif 'name' not in workflow_spec['metadata'] and 'generateName' not in workflow_spec['metadata']:
-            workflow_spec['metadata']['generateName'] = 'workflow-'
+            click.echo("\nWorkflow submitted successfully")
+            click.echo(f"  Name: {workflow_name}")
+            click.echo(f"  Prefix: {workflow_prefix}")
+            click.echo(f"  UID: {workflow_uid}")
+            click.echo(f"  Namespace: {namespace}")
 
-        # Submit the workflow
-        submit_result = service.submit_workflow_to_argo(
-            workflow_spec=workflow_spec,
-            namespace=namespace,
-            argo_server=argo_server,
-            token=token,
-            insecure=insecure
-        )
+            logger.info(f"Workflow {workflow_name} submitted successfully with prefix {workflow_prefix}")
 
-        if not submit_result['success']:
-            click.echo(f"Error: {submit_result['error']}", err=True)
+            # Wait for workflow completion if requested
+            if wait:
+                service = WorkflowService()
+                _handle_workflow_wait(service, namespace, workflow_name, timeout, wait_interval)
+
+        except FileNotFoundError as e:
+            click.echo(f"Error: {str(e)}", err=True)
+            click.echo("\nEnsure CONFIG_PROCESSOR_DIR is set correctly and contains:", err=True)
+            click.echo("  - createMigrationWorkflowFromUserConfiguration.sh", err=True)
             ctx.exit(ExitCode.FAILURE.value)
-
-        workflow_name = submit_result['workflow_name']
-        workflow_uid = submit_result['workflow_uid']
-
-        click.echo("Workflow submitted successfully")
-        click.echo(f"  Name: {workflow_name}")
-        click.echo(f"  UID: {workflow_uid}")
-        click.echo(f"  Namespace: {namespace}")
-
-        logger.info(f"Workflow {workflow_name} submitted successfully")
-
-        # Wait for workflow completion if requested
-        if wait:
-            _handle_workflow_wait(service, namespace, workflow_name, timeout, wait_interval)
+        except Exception as e:
+            click.echo(f"Error submitting workflow: {str(e)}", err=True)
+            logger.exception("Workflow submission failed")
+            ctx.exit(ExitCode.FAILURE.value)
 
     except Exception as e:
         logger.exception(f"Unexpected error submitting workflow: {e}")

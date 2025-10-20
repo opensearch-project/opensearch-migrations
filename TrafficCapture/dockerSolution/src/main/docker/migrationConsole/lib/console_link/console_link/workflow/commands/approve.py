@@ -81,7 +81,7 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
                     token=token,
                     insecure=insecure
                 )
-                
+
                 if all_workflows_result['success'] and all_workflows_result['count'] > 0:
                     # Workflows exist but none need approval
                     click.echo(

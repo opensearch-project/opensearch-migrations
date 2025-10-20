@@ -119,7 +119,7 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
                             )
                             if wf_result['success'] and wf_result['finished_at']:
                                 workflow_statuses.append(wf_result)
-                        
+
                         # Sort by finished_at timestamp (most recent first)
                         if workflow_statuses:
                             workflow_statuses.sort(key=lambda x: x['finished_at'], reverse=True)

@@ -20,18 +20,6 @@ class TestWorkflowCLICommands:
         mock_service = Mock()
         mock_service_class.return_value = mock_service
 
-        mock_service.load_workflow_template.return_value = {
-            'success': True,
-            'workflow_spec': {'metadata': {'generateName': 'test-'}, 'spec': {}},
-            'source': 'embedded',
-            'error': None
-        }
-
-        mock_service.inject_parameters.return_value = {
-            'metadata': {'generateName': 'test-'},
-            'spec': {}
-        }
-
         mock_service.submit_workflow_to_argo.return_value = {
             'success': True,
             'workflow_name': 'test-workflow-abc',
@@ -63,18 +51,6 @@ class TestWorkflowCLICommands:
         # Mock the service
         mock_service = Mock()
         mock_service_class.return_value = mock_service
-
-        mock_service.load_workflow_template.return_value = {
-            'success': True,
-            'workflow_spec': {'metadata': {'generateName': 'test-'}, 'spec': {}},
-            'source': 'embedded',
-            'error': None
-        }
-
-        mock_service.inject_parameters.return_value = {
-            'metadata': {'generateName': 'test-'},
-            'spec': {}
-        }
 
         mock_service.submit_workflow_to_argo.return_value = {
             'success': True,
@@ -269,18 +245,6 @@ class TestWorkflowCLICommands:
         mock_service = Mock()
         mock_service_class.return_value = mock_service
 
-        mock_service.load_workflow_template.return_value = {
-            'success': True,
-            'workflow_spec': {'metadata': {'generateName': 'test-'}, 'spec': {}},
-            'source': 'embedded',
-            'error': None
-        }
-
-        mock_service.inject_parameters.return_value = {
-            'metadata': {'generateName': 'test-'},
-            'spec': {'arguments': {'parameters': [{'name': 'param1', 'value': 'value1'}]}}
-        }
-
         mock_service.submit_workflow_to_argo.return_value = {
             'success': True,
             'workflow_name': 'test-workflow-abc',
@@ -300,5 +264,4 @@ class TestWorkflowCLICommands:
         result = runner.invoke(workflow_cli, ['submit'])
 
         assert result.exit_code == 0
-        assert 'Injecting parameters' in result.output
         assert 'submitted successfully' in result.output

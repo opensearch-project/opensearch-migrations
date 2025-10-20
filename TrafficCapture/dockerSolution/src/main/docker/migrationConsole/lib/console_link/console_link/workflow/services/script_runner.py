@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -18,25 +19,36 @@ class ScriptRunner:
         Initialize with script directory path.
 
         Args:
-            script_dir: Optional path to scripts. If None, uses WORKFLOW_SCRIPT_DIR env var or test resources.
+            script_dir: Optional path to scripts. If None, checks environment variables in priority order:
+                1. CONFIG_PROCESSOR_DIR - Production config processor directory
+                2. WORKFLOW_SCRIPT_DIR - Legacy/test script directory override
+                3. Fallback to test resources for backward compatibility
         """
         if script_dir is None:
-            # Check for environment variable first
-            env_script_dir = os.environ.get('WORKFLOW_SCRIPT_DIR')
-            if env_script_dir:
-                self.script_dir = Path(env_script_dir)
+            # Priority 1: Check for CONFIG_PROCESSOR_DIR (production)
+            config_processor_dir = os.environ.get('CONFIG_PROCESSOR_DIR')
+            if config_processor_dir:
+                self.script_dir = Path(config_processor_dir)
+                logger.debug(f"Using CONFIG_PROCESSOR_DIR: {self.script_dir}")
             else:
-                # Fallback to test resources
-                # Navigate from this file to test resources
-                # Path: console_link/workflow/services/script_runner.py
-                # Target: tests/workflow-tests/resources/scripts
-                current_file = Path(__file__)
-                # Go up to console_link package root
-                console_link_pkg = current_file.parent.parent.parent
-                # Go up one more to lib root, then to tests
-                lib_root = console_link_pkg.parent
-                test_resources = lib_root / "tests" / "workflow-tests" / "resources" / "scripts"
-                self.script_dir = test_resources
+                # Priority 2: Check for WORKFLOW_SCRIPT_DIR (legacy/test override)
+                env_script_dir = os.environ.get('WORKFLOW_SCRIPT_DIR')
+                if env_script_dir:
+                    self.script_dir = Path(env_script_dir)
+                    logger.debug(f"Using WORKFLOW_SCRIPT_DIR: {self.script_dir}")
+                else:
+                    # Priority 3: Fallback to test resources
+                    # Navigate from this file to test resources
+                    # Path: console_link/workflow/services/script_runner.py
+                    # Target: tests/workflow-tests/resources/scripts
+                    current_file = Path(__file__)
+                    # Go up to console_link package root
+                    console_link_pkg = current_file.parent.parent.parent
+                    # Go up one more to lib root, then to tests
+                    lib_root = console_link_pkg.parent
+                    test_resources = lib_root / "tests" / "workflow-tests" / "resources" / "scripts"
+                    self.script_dir = test_resources
+                    logger.debug(f"Using test resources fallback: {self.script_dir}")
         else:
             self.script_dir = Path(script_dir)
 
@@ -96,22 +108,153 @@ class ScriptRunner:
             raise
 
     def get_sample_config(self) -> str:
-        """Get sample workflow configuration."""
+        """Get sample workflow configuration.
+
+        Reads sample.yaml from the configured script directory.
+
+        Returns:
+            YAML content as string
+
+        Raises:
+            FileNotFoundError: If sample.yaml doesn't exist
+            IOError: If file cannot be read
+        """
         logger.info("Getting sample configuration")
-        return self.run_script("getSample.sh")
+        sample_path = self.script_dir / "sample.yaml"
+
+        if not sample_path.exists():
+            raise FileNotFoundError(f"Sample configuration not found: {sample_path}")
+
+        try:
+            with open(sample_path, 'r') as f:
+                content = f.read()
+            logger.debug(f"Loaded sample config from {sample_path} ({len(content)} bytes)")
+            return content
+        except IOError as e:
+            logger.error(f"Failed to read sample configuration: {e}")
+            raise
 
     def transform_config(self, config_data: str) -> str:
-        """Transform configuration."""
+        """Transform configuration using config processor.
+
+        Calls: node {script_dir}/index.js --user-config - --skip-initialize --silent
+
+        Args:
+            config_data: User configuration YAML as string
+
+        Returns:
+            Transformed workflow configuration JSON as string
+
+        Raises:
+            FileNotFoundError: If index.js doesn't exist
+            subprocess.CalledProcessError: If node command fails
+        """
         logger.info("Transforming configuration")
-        return self.run_script("transformConfig.sh", config_data, "-")
+        index_js_path = self.script_dir / "index.js"
+
+        if not index_js_path.exists():
+            raise FileNotFoundError(f"Config processor not found: {index_js_path}")
+
+        cmd = [
+            "node",
+            str(index_js_path),
+            "--user-config", "-",
+            "--skip-initialize",
+            "--silent"
+        ]
+
+        logger.debug(f"Running config processor: {' '.join(cmd)}")
+        logger.debug(f"Input config length: {len(config_data)} bytes")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                input=config_data,
+                capture_output=True,
+                text=True,
+                check=True,
+                cwd=str(self.script_dir)
+            )
+
+            logger.debug("Config transformation completed successfully")
+            return result.stdout.strip()
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Config processor failed with exit code {e.returncode}")
+            logger.error(f"stderr: {e.stderr}")
+            raise
 
     def init_workflow(self, config_data: str, prefix: Optional[str] = None) -> str:
-        """Initialize workflow state, returns prefix."""
+        """Initialize workflow state in etcd, returns prefix.
+
+        Calls: node {script_dir}/index.js --user-config - --prefix <prefix> --silent
+
+        Requires environment variables:
+            - ETCD_ENDPOINTS: etcd server endpoints (e.g., "http://etcd:2379")
+            - ETCD_USER: etcd authentication username
+            - ETCD_PASSWORD: etcd authentication password
+
+        Args:
+            config_data: User configuration YAML as string
+            prefix: Optional workflow prefix (auto-generated if not provided)
+
+        Returns:
+            Generated or provided prefix as string
+
+        Raises:
+            ValueError: If required environment variables are missing
+            FileNotFoundError: If index.js doesn't exist
+            subprocess.CalledProcessError: If node command fails
+        """
         logger.info("Initializing workflow with prefix: %s", prefix or 'auto-generated')
-        args = ["-"]
+
+        # Validate required environment variables
+        required_env_vars = ['ETCD_ENDPOINTS', 'ETCD_USER', 'ETCD_PASSWORD']
+        missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
+
+        if missing_vars:
+            error_msg = f"Missing required environment variables: {', '.join(missing_vars)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        index_js_path = self.script_dir / "index.js"
+
+        if not index_js_path.exists():
+            raise FileNotFoundError(f"Config processor not found: {index_js_path}")
+
+        cmd = [
+            "node",
+            str(index_js_path),
+            "--user-config", "-",
+            "--silent"
+        ]
+
+        # Add prefix if provided
         if prefix:
-            args.append(prefix)
-        return self.run_script("initWorkflow.sh", config_data, *args)
+            cmd.extend(["--prefix", prefix])
+
+        logger.debug(f"Running config processor for initialization: {' '.join(cmd)}")
+        logger.debug(f"Input config length: {len(config_data)} bytes")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                input=config_data,
+                capture_output=True,
+                text=True,
+                check=True,
+                cwd=str(self.script_dir)
+            )
+
+            # The output should be the prefix (either provided or auto-generated)
+            output_prefix = result.stdout.strip()
+            logger.info(f"Workflow initialized with prefix: {output_prefix}")
+            return output_prefix
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Workflow initialization failed with exit code {e.returncode}")
+            logger.error(f"stderr: {e.stderr}")
+            raise
 
     def submit_workflow(
         self,
@@ -119,13 +262,112 @@ class ScriptRunner:
         prefix: str,
         namespace: str = "ma"
     ) -> Dict[str, Any]:
-        """Submit workflow, returns workflow info as dict."""
+        """Submit workflow using config processor submission script.
+
+        Calls: {script_dir}/createMigrationWorkflowFromUserConfiguration.sh <temp_file>
+
+        The script creates the workflow in Kubernetes and returns workflow information.
+
+        Args:
+            config_data: User configuration YAML as string
+            prefix: Workflow prefix (from init_workflow)
+            namespace: Kubernetes namespace (default: "ma")
+
+        Returns:
+            Dict with workflow_name, workflow_uid, and namespace
+
+        Raises:
+            FileNotFoundError: If submission script doesn't exist
+            subprocess.CalledProcessError: If script fails
+            ValueError: If script output cannot be parsed
+        """
         logger.info(f"Submitting workflow with prefix: {prefix}, namespace: {namespace}")
-        output = self.run_script(
-            "submitWorkflow.sh",
-            config_data,
-            "-",
-            prefix,
-            namespace
-        )
-        return json.loads(output)
+
+        script_path = self.script_dir / "createMigrationWorkflowFromUserConfiguration.sh"
+
+        if not script_path.exists():
+            raise FileNotFoundError(f"Workflow submission script not found: {script_path}")
+
+        # Create temporary file with config data
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_file:
+            temp_file.write(config_data)
+            temp_file_path = temp_file.name
+
+        try:
+            cmd = [str(script_path), temp_file_path]
+
+            logger.debug(f"Running workflow submission script: {' '.join(cmd)}")
+            logger.debug(f"Config file: {temp_file_path}")
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+                cwd=str(self.script_dir)
+            )
+
+            # Parse kubectl output to extract workflow information
+            # The script should output workflow creation details
+            output = result.stdout.strip()
+            logger.debug(f"Submission script output: {output}")
+
+            # Try to parse as JSON first (if script returns JSON)
+            try:
+                workflow_info = json.loads(output)
+                logger.info(f"Workflow submitted successfully: {workflow_info.get('workflow_name', 'unknown')}")
+                return workflow_info
+            except json.JSONDecodeError:
+                # If not JSON, parse kubectl output format
+                # Expected format: "workflow.argoproj.io/<workflow-name> created"
+                # or similar kubectl output
+                workflow_name = self._parse_kubectl_output(output)
+
+                workflow_info = {
+                    'workflow_name': workflow_name,
+                    'workflow_uid': 'unknown',  # UID not available from kubectl create output
+                    'namespace': namespace
+                }
+
+                logger.info(f"Workflow submitted successfully: {workflow_name}")
+                return workflow_info
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Workflow submission failed with exit code {e.returncode}")
+            logger.error(f"stderr: {e.stderr}")
+            raise
+        finally:
+            # Clean up temporary file
+            try:
+                os.unlink(temp_file_path)
+                logger.debug(f"Cleaned up temporary file: {temp_file_path}")
+            except OSError as e:
+                logger.warning(f"Failed to clean up temporary file {temp_file_path}: {e}")
+
+    def _parse_kubectl_output(self, output: str) -> str:
+        """Parse kubectl output to extract workflow name.
+
+        Args:
+            output: kubectl command output
+
+        Returns:
+            Workflow name extracted from output
+
+        Raises:
+            ValueError: If workflow name cannot be extracted
+        """
+        # Try to extract workflow name from kubectl output
+        # Format: "workflow.argoproj.io/<workflow-name> created"
+        lines = output.strip().split('\n')
+        for line in lines:
+            if 'workflow' in line.lower() and ('created' in line.lower() or 'submitted' in line.lower()):
+                # Extract workflow name from "workflow.argoproj.io/<name> created"
+                parts = line.split()
+                if parts:
+                    resource = parts[0]
+                    if '/' in resource:
+                        workflow_name = resource.split('/')[-1]
+                        return workflow_name
+
+        # If we can't parse it, raise an error
+        raise ValueError(f"Could not extract workflow name from output: {output}")
