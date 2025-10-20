@@ -116,7 +116,7 @@ get_cfn_export() {
 
   if [ ${#names[@]} -eq 0 ]; then
     echo "Error: No exports found starting with '$prefix'" >&2
-    exit 1
+    return 1
   elif [ ${#names[@]} -eq 1 ]; then
     echo "${values[0]}"
   else
@@ -127,7 +127,7 @@ get_cfn_export() {
     read -rp "Select the stack export name to use (0-$((${#names[@]} - 1))): " choice
     if [[ ! "$choice" =~ ^[0-9]+$ || "$choice" -ge ${#names[@]} ]]; then
       echo "Invalid choice." >&2
-      exit 1
+      return 1
     fi
     echo "${values[$choice]}"
   fi
@@ -157,7 +157,11 @@ fi
 # Exit if any tool was missing and not resolved
 [ "$missing" -ne 0 ] && exit 1
 
-output=$(get_cfn_export)
+if ! output=$(get_cfn_export); then
+  echo "Unable to find any CloudFormation stacks in the current region which have an output that starts with '$prefix'. \
+        Has the Migration Assistant CloudFormation template been deployed?" >&2
+  exit 1
+fi
 echo "Setting ENV variables: $output"
 eval "$output"
 
@@ -216,6 +220,8 @@ if [[ "$build_images" == "true" ]]; then
     --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
     --set awsEKSEnabled=true \
     --set keepJobAlive="${keep_build_images_job_alive}" \
+    --set repositoryUrl="https://github.com/${org_name}/${repo_name}.git" \
+    --set repositoryBranch="${branch}" \
     || { echo "Installing buildImages chart failed..."; exit 1; }
 
   if [[ "$keep_build_images_job_alive" == "true" ]]; then
