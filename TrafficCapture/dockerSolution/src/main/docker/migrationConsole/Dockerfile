@@ -46,8 +46,16 @@ RUN ARCH=$(cat /arch.env) && \
 FROM ${BASE_IMAGE}
 
 # Install Node.js for config processor and workflow template creation
-RUN curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
-RUN dnf install -y nodejs
+RUN dnf install -y  \
+      --setopt=install_weak_deps=False \
+      --setopt=tsflags=nodocs \
+      --setopt=keepcache=False \
+      --setopt=plugins=0 \
+      --setopt=logfilelevel=0 \
+        nodejs22 \
+        && \
+        dnf clean all && \
+        rm -rf /var/cache/dnf
 
 # Define the virtual environment path
 ENV WORKON_HOME=/
