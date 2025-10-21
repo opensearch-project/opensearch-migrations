@@ -56,7 +56,11 @@ async function main() {
     }
 
     // Parse command line arguments
+    // Construct ETCD_ENDPOINTS from ETCD_SERVICE_HOST and ETCD_SERVICE_PORT_CLIENT if available
     let etcdEndpoints = process.env.ETCD_ENDPOINTS;
+    if (!etcdEndpoints && process.env.ETCD_SERVICE_HOST && process.env.ETCD_SERVICE_PORT_CLIENT) {
+        etcdEndpoints = `http://${process.env.ETCD_SERVICE_HOST}:${process.env.ETCD_SERVICE_PORT_CLIENT}`;
+    }
     let etcdUser = process.env.ETCD_USER;
     let etcdPassword = process.env.ETCD_PASSWORD;
     let prefix = process.env.PREFIX || "ma";
