@@ -408,6 +408,384 @@ class TestWorkflowServiceStop:
         assert call_args[1]['verify'] is True
 
 
+class TestWorkflowTreeBuilding:
+    """Test suite for workflow tree building and intelligent sorting."""
+
+    def test_build_workflow_tree_simple_linear(self):
+        """Test building tree from simple linear workflow."""
+        service = WorkflowService()
+
+        nodes = {
+            'node-1': {
+                'name': 'step1',
+                'displayName': 'Step 1',
+                'type': 'Pod',
+                'phase': 'Succeeded',
+                'startedAt': '2024-01-01T10:00:00Z',
+                'finishedAt': '2024-01-01T10:01:00Z',
+                'boundaryID': None,
+                'children': []
+            },
+            'node-2': {
+                'name': 'step2',
+                'displayName': 'Step 2',
+                'type': 'Pod',
+                'phase': 'Succeeded',
+                'startedAt': '2024-01-01T10:01:00Z',
+                'finishedAt': '2024-01-01T10:02:00Z',
+                'boundaryID': None,
+                'children': []
+            }
+        }
+
+        tree = service._build_workflow_tree(nodes)
+
+        assert len(tree) == 2
+        assert tree[0]['name'] == 'step1'
+        assert tree[0]['depth'] == 0
+        assert tree[1]['name'] == 'step2'
+        assert tree[1]['depth'] == 0
+
+    def test_build_workflow_tree_with_nesting(self):
+        """Test building tree with parent-child relationships."""
+        service = WorkflowService()
+
+        nodes = {
+            'node-parent': {
+                'name': 'parent',
+                'displayName': 'Parent Step',
+                'type': 'Pod',
+                'phase': 'Succeeded',
+                'startedAt': '2024-01-01T10:00:00Z',
+                'finishedAt': '2024-01-01T10:03:00Z',
+                'boundaryID': None,
+                'children': ['node-child1', 'node-child2']
+            },
+            'node-child1': {
+                'name': 'child1',
+                'displayName': 'Child 1',
+                'type': 'Pod',
+                'phase': 'Succeeded',
+                'startedAt': '2024-01-01T10:01:00Z',
+                'finishedAt': '2024-01-01T10:02:00Z',
+                'boundaryID': 'node-parent',
+                'children': []
+            },
+            'node-child2': {
+                'name': 'child2',
+                'displayName': 'Child 2',
+                'type': 'Pod',
+                'phase': 'Succeeded',
+                'startedAt': '2024-01-01T10:02:00Z',
+                'finishedAt': '2024-01-01T10:03:00Z',
+                'boundaryID': 'node-parent',
+                'children': []
+            }
+        }
+
+        tree = service._build_workflow_tree(nodes)
+
+        assert len(tree) == 3
+        
+        # Find nodes by name
+        parent = next(n for n in tree if n['name'] == 'parent')
+        child1 = next(n for n in tree if n['name'] == 'child1')
+        child2 = next(n for n in tree if n['name'] == 'child2')
+        
+        # Verify hierarchy
+        assert parent['depth'] == 0
+        assert parent['parent'] is None
+        assert child1['depth'] == 1
+        assert child1['parent'] == 'node-parent'
+        assert child2['depth'] == 1
+        assert child2['parent'] == 'node-parent'
+
+    def test_build_workflow_tree_filters_node_types(self):
+        """Test that only Pod, Suspend, and Skipped nodes are included."""
+        service = WorkflowService()
+
+        nodes = {
+            'node-1': {
+                'name': 'step1',
+                'displayName': 'Step 1',
+                'type': 'Pod',
+                'phase': 'Succeeded',
+                'startedAt': '2024-01-01T10:00:00Z',
+                'boundaryID': None,
+                'children': []
+            },
+            'node-2': {
+                'name': 'suspend',
+                'displayName': 'Approval Gate',
+                'type': 'Suspend',
+                'phase': 'Running',
+                'startedAt': '2024-01-01T10:01:00Z',
+                'boundaryID': None,
+                'children': []
+            },
+            'node-3': {
+                'name': 'skipped',
+                'displayName': 'Skipped Step',
+                'type': 'Skipped',
+                'phase': 'Skipped',
+                'startedAt': None,
+                'boundaryID': None,
+                'children': []
+            },
+            'node-4': {
+                'name': 'dag',
+                'displayName': 'DAG',
+                'type': 'DAG',
+                'phase': 'Succeeded',
+                'startedAt': '2024-01-01T10:00:00Z',
+                'boundaryID': None,
+                'children': []
+            }
+        }
+
+        tree = service._build_workflow_tree(nodes)
+
+        # Should only include Pod, Suspend, and Skipped types
+        assert len(tree) == 3
+        types = [node['type'] for node in tree]
+        assert 'Pod' in types
+        assert 'Suspend' in types
+        assert 'Skipped' in types
+        assert 'DAG' not in types
+
+    def test_build_workflow_tree_handles_missing_parent(self):
+        """Test tree building with missing parent reference."""
+        service = WorkflowService()
+
+        nodes = {
+            'node-1': {
+                'name': 'orphan',
+                'displayName': 'Orphan Step',
+                'type': 'Pod',
+                'phase': 'Succeeded',
+                'startedAt': '2024-01-01T10:00:00Z',
+                'boundaryID': 'nonexistent-parent',
+                'children': []
+            }
+        }
+
+        tree = service._build_workflow_tree(nodes)
+
+        assert len(tree) == 1
+        # Should have depth 0 since parent doesn't exist
+        assert tree[0]['depth'] == 0
+        assert tree[0]['parent'] is None
+
+    def test_build_workflow_tree_prevents_circular_references(self):
+        """Test that circular references don't cause infinite loops."""
+        service = WorkflowService()
+
+        # Create a circular reference scenario (though this shouldn't happen in practice)
+        nodes = {
+            'node-1': {
+                'name': 'step1',
+                'displayName': 'Step 1',
+                'type': 'Pod',
+                'phase': 'Succeeded',
+                'startedAt': '2024-01-01T10:00:00Z',
+                'boundaryID': 'node-2',
+                'children': ['node-2']
+            },
+            'node-2': {
+                'name': 'step2',
+                'displayName': 'Step 2',
+                'type': 'Pod',
+                'phase': 'Succeeded',
+                'startedAt': '2024-01-01T10:01:00Z',
+                'boundaryID': 'node-1',
+                'children': ['node-1']
+            }
+        }
+
+        tree = service._build_workflow_tree(nodes)
+
+        # Should handle gracefully without infinite loop
+        assert len(tree) == 2
+        # Depth calculation should stop when detecting cycle
+        for node in tree:
+            assert node['depth'] >= 0
+
+    def test_sort_nodes_intelligently_by_depth(self):
+        """Test intelligent sorting respects depth hierarchy."""
+        service = WorkflowService()
+
+        nodes = [
+            {
+                'id': 'node-1',
+                'name': 'parent',
+                'display_name': 'Parent',
+                'depth': 0,
+                'started_at': '2024-01-01T10:00:00Z',
+                'finished_at': '2024-01-01T10:03:00Z',
+                'phase': 'Succeeded',
+                'type': 'Pod',
+                'boundary_id': None,
+                'children': [],
+                'parent': None
+            },
+            {
+                'id': 'node-2',
+                'name': 'child',
+                'display_name': 'Child',
+                'depth': 1,
+                'started_at': '2024-01-01T10:01:00Z',
+                'finished_at': '2024-01-01T10:02:00Z',
+                'phase': 'Succeeded',
+                'type': 'Pod',
+                'boundary_id': 'node-1',
+                'children': [],
+                'parent': 'node-1'
+            }
+        ]
+
+        sorted_nodes = service._sort_nodes_intelligently(nodes)
+
+        # Parent should come before child despite later start time
+        assert sorted_nodes[0]['depth'] == 0
+        assert sorted_nodes[0]['name'] == 'parent'
+        assert sorted_nodes[1]['depth'] == 1
+        assert sorted_nodes[1]['name'] == 'child'
+
+    def test_sort_nodes_intelligently_by_start_time(self):
+        """Test sorting nodes at same depth by start time."""
+        service = WorkflowService()
+
+        nodes = [
+            {
+                'id': 'node-2',
+                'name': 'step2',
+                'display_name': 'Step 2',
+                'depth': 0,
+                'started_at': '2024-01-01T10:01:00Z',
+                'finished_at': '2024-01-01T10:02:00Z',
+                'phase': 'Succeeded',
+                'type': 'Pod',
+                'boundary_id': None,
+                'children': [],
+                'parent': None
+            },
+            {
+                'id': 'node-1',
+                'name': 'step1',
+                'display_name': 'Step 1',
+                'depth': 0,
+                'started_at': '2024-01-01T10:00:00Z',
+                'finished_at': '2024-01-01T10:01:00Z',
+                'phase': 'Succeeded',
+                'type': 'Pod',
+                'boundary_id': None,
+                'children': [],
+                'parent': None
+            }
+        ]
+
+        sorted_nodes = service._sort_nodes_intelligently(nodes)
+
+        # Earlier start time should come first
+        assert sorted_nodes[0]['name'] == 'step1'
+        assert sorted_nodes[1]['name'] == 'step2'
+
+    def test_sort_nodes_intelligently_handles_null_timestamps(self):
+        """Test sorting handles missing timestamps gracefully."""
+        service = WorkflowService()
+
+        nodes = [
+            {
+                'id': 'node-1',
+                'name': 'step1',
+                'display_name': 'Step 1',
+                'depth': 0,
+                'started_at': '2024-01-01T10:00:00Z',
+                'finished_at': '2024-01-01T10:01:00Z',
+                'phase': 'Succeeded',
+                'type': 'Pod',
+                'boundary_id': None,
+                'children': [],
+                'parent': None
+            },
+            {
+                'id': 'node-2',
+                'name': 'step2',
+                'display_name': 'Step 2',
+                'depth': 0,
+                'started_at': None,
+                'finished_at': None,
+                'phase': 'Pending',
+                'type': 'Pod',
+                'boundary_id': None,
+                'children': [],
+                'parent': None
+            }
+        ]
+
+        sorted_nodes = service._sort_nodes_intelligently(nodes)
+
+        # Nodes with timestamps should come before nodes without
+        assert sorted_nodes[0]['name'] == 'step1'
+        assert sorted_nodes[1]['name'] == 'step2'
+
+    def test_get_workflow_status_includes_step_tree(self):
+        """Test that get_workflow_status includes step_tree field."""
+        service = WorkflowService()
+
+        with patch('console_link.workflow.services.workflow_service.requests.get') as mock_get:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                'status': {
+                    'phase': 'Running',
+                    'progress': '1/2',
+                    'startedAt': '2024-01-01T10:00:00Z',
+                    'finishedAt': None,
+                    'nodes': {
+                        'node-1': {
+                            'type': 'Pod',
+                            'name': 'step1',
+                            'displayName': 'Step 1',
+                            'phase': 'Succeeded',
+                            'startedAt': '2024-01-01T10:00:00Z',
+                            'finishedAt': '2024-01-01T10:01:00Z',
+                            'boundaryID': None,
+                            'children': []
+                        }
+                    }
+                }
+            }
+            mock_get.return_value = mock_response
+
+            result = service.get_workflow_status(
+                workflow_name='test-workflow',
+                namespace='argo',
+                argo_server='https://localhost:2746'
+            )
+
+            assert result['success'] is True
+            assert 'step_tree' in result
+            assert isinstance(result['step_tree'], list)
+            assert len(result['step_tree']) == 1
+            assert result['step_tree'][0]['name'] == 'step1'
+            assert result['step_tree'][0]['depth'] == 0
+
+    def test_error_status_result_includes_empty_step_tree(self):
+        """Test that error status results include empty step_tree."""
+        service = WorkflowService()
+
+        result = service._create_error_status_result(
+            workflow_name='test',
+            namespace='argo',
+            error_msg='Test error'
+        )
+
+        assert result['success'] is False
+        assert 'step_tree' in result
+        assert result['step_tree'] == []
+
+
 class TestWorkflowServiceList:
     """Test suite for workflow list functionality."""
 

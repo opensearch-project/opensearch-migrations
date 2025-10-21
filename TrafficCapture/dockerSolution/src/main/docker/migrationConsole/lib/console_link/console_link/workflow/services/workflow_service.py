@@ -67,6 +67,21 @@ class WorkflowListResult(TypedDict):
     error: Optional[str]
 
 
+class WorkflowNode(TypedDict):
+    """Represents a workflow node with its relationships."""
+    id: str
+    name: str
+    display_name: str
+    phase: str
+    type: str
+    started_at: Optional[str]
+    finished_at: Optional[str]
+    boundary_id: Optional[str]
+    children: List[str]
+    parent: Optional[str]
+    depth: int
+
+
 class WorkflowStatusResult(TypedDict):
     """Result of workflow status operation."""
     success: bool
@@ -76,7 +91,8 @@ class WorkflowStatusResult(TypedDict):
     progress: str
     started_at: Optional[str]
     finished_at: Optional[str]
-    steps: List[Dict[str, str]]
+    steps: List[Dict[str, str]]  # Keep for backward compatibility
+    step_tree: List[WorkflowNode]  # NEW: Hierarchical representation
     error: Optional[str]
 
 
@@ -316,7 +332,12 @@ class WorkflowService:
             started_at = status.get("startedAt")
             finished_at = status.get("finishedAt")
 
-            steps = self._extract_workflow_steps(status.get("nodes", {}))
+            nodes_dict = status.get("nodes", {})
+            steps = self._extract_workflow_steps(nodes_dict)
+            
+            # Build hierarchical tree structure
+            step_tree = self._build_workflow_tree(nodes_dict)
+            step_tree = self._sort_nodes_intelligently(step_tree)
 
             return WorkflowStatusResult(
                 success=True,
@@ -327,6 +348,7 @@ class WorkflowService:
                 started_at=started_at,
                 finished_at=finished_at,
                 steps=steps,
+                step_tree=step_tree,
                 error=None
             )
 
@@ -618,6 +640,98 @@ class WorkflowService:
                 return True
         return False
 
+    def _build_workflow_tree(self, nodes: Dict[str, Any]) -> List[WorkflowNode]:
+        """Build a tree structure from Argo workflow nodes.
+
+        Args:
+            nodes: Dictionary of workflow nodes from Argo API
+
+        Returns:
+            List of WorkflowNode objects representing the tree structure
+        """
+        # First pass: Create WorkflowNode objects for all relevant nodes
+        workflow_nodes: Dict[str, WorkflowNode] = {}
+        
+        for node_id, node in nodes.items():
+            node_type = node.get("type", "")
+            # Include Pod and Suspend steps, plus Skipped steps to show conditional logic
+            if node_type in ["Pod", "Suspend", "Skipped"]:
+                workflow_nodes[node_id] = WorkflowNode(
+                    id=node_id,
+                    name=node.get("name", ""),
+                    display_name=node.get("displayName", ""),
+                    phase=node.get("phase", "Unknown"),
+                    type=node_type,
+                    started_at=node.get("startedAt"),
+                    finished_at=node.get("finishedAt"),
+                    boundary_id=node.get("boundaryID"),
+                    children=node.get("children", []),
+                    parent=None,
+                    depth=0
+                )
+        
+        # Second pass: Establish parent-child relationships
+        for node_id, wf_node in workflow_nodes.items():
+            # Set parent based on boundaryID
+            if wf_node["boundary_id"] and wf_node["boundary_id"] in workflow_nodes:
+                wf_node["parent"] = wf_node["boundary_id"]
+        
+        # Third pass: Calculate depth levels
+        def calculate_depth(node_id: str, visited: set) -> int:
+            """Recursively calculate depth for a node."""
+            if node_id in visited:
+                return 0  # Prevent infinite recursion
+            visited.add(node_id)
+            
+            node = workflow_nodes.get(node_id)
+            if not node:
+                return 0
+            
+            parent_id = node["parent"]
+            if not parent_id or parent_id not in workflow_nodes:
+                return 0
+            
+            return 1 + calculate_depth(parent_id, visited)
+        
+        for node_id in workflow_nodes:
+            workflow_nodes[node_id]["depth"] = calculate_depth(node_id, set())
+        
+        # Return as list (will be sorted by _sort_nodes_intelligently)
+        return list(workflow_nodes.values())
+
+    def _sort_nodes_intelligently(self, nodes: List[WorkflowNode]) -> List[WorkflowNode]:
+        """Sort nodes considering both temporal and structural order.
+
+        Args:
+            nodes: List of WorkflowNode objects
+
+        Returns:
+            Sorted list of WorkflowNode objects
+        """
+        # Group nodes by depth level
+        nodes_by_depth: Dict[int, List[WorkflowNode]] = {}
+        for node in nodes:
+            depth = node["depth"]
+            if depth not in nodes_by_depth:
+                nodes_by_depth[depth] = []
+            nodes_by_depth[depth].append(node)
+        
+        # Sort nodes at each depth level by start time
+        for depth in nodes_by_depth:
+            nodes_by_depth[depth].sort(
+                key=lambda x: (
+                    x.get("started_at") or "9999-99-99",  # Primary: start time
+                    x.get("finished_at") or "9999-99-99"  # Secondary: finish time
+                )
+            )
+        
+        # Build final sorted list respecting depth hierarchy
+        sorted_nodes = []
+        for depth in sorted(nodes_by_depth.keys()):
+            sorted_nodes.extend(nodes_by_depth[depth])
+        
+        return sorted_nodes
+
     def _extract_workflow_steps(self, nodes: Dict[str, Any]) -> List[Dict[str, str]]:
         """Extract step information from workflow nodes.
 
@@ -668,6 +782,7 @@ class WorkflowService:
             started_at=None,
             finished_at=None,
             steps=[],
+            step_tree=[],
             error=error_msg
         )
 

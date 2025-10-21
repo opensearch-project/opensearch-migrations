@@ -1,5 +1,6 @@
 """Tests for script runner service."""
 
+import os
 import pytest
 import tempfile
 from pathlib import Path
@@ -37,8 +38,14 @@ class TestScriptRunner:
         # Mock transformer just passes through
         assert result == test_config
 
-    def test_init_workflow(self):
+    def test_init_workflow(self, monkeypatch):
         """Test workflow initialization."""
+        # Set required environment variables
+        monkeypatch.setenv("ETCD_SERVICE_HOST", "etcd")
+        monkeypatch.setenv("ETCD_SERVICE_PORT_CLIENT", "2379")
+        monkeypatch.setenv("ETCD_USER", "test-user")
+        monkeypatch.setenv("ETCD_PASSWORD", "test-password")
+
         runner = ScriptRunner()
 
         test_config = "test: data"
@@ -46,9 +53,17 @@ class TestScriptRunner:
 
         assert prefix
         assert prefix.startswith("test-")
+        # Verify ETCD_ENDPOINTS was set correctly
+        assert os.environ.get("ETCD_ENDPOINTS") == "http://etcd:2379"
 
-    def test_init_workflow_with_custom_prefix(self):
+    def test_init_workflow_with_custom_prefix(self, monkeypatch):
         """Test workflow initialization with custom prefix."""
+        # Set required environment variables
+        monkeypatch.setenv("ETCD_SERVICE_HOST", "etcd")
+        monkeypatch.setenv("ETCD_SERVICE_PORT_CLIENT", "2379")
+        monkeypatch.setenv("ETCD_USER", "test-user")
+        monkeypatch.setenv("ETCD_PASSWORD", "test-password")
+
         runner = ScriptRunner()
 
         test_config = "test: data"
@@ -56,6 +71,27 @@ class TestScriptRunner:
         prefix = runner.init_workflow(test_config, custom_prefix)
 
         assert prefix == custom_prefix
+        # Verify ETCD_ENDPOINTS was set correctly
+        assert os.environ.get("ETCD_ENDPOINTS") == "http://etcd:2379"
+
+    def test_init_workflow_missing_env_vars(self, monkeypatch):
+        """Test workflow initialization fails when environment variables are missing."""
+        # Clear any existing ETCD environment variables
+        monkeypatch.delenv("ETCD_SERVICE_HOST", raising=False)
+        monkeypatch.delenv("ETCD_SERVICE_PORT_CLIENT", raising=False)
+        monkeypatch.delenv("ETCD_USER", raising=False)
+        monkeypatch.delenv("ETCD_PASSWORD", raising=False)
+        monkeypatch.delenv("ETCD_ENDPOINTS", raising=False)
+
+        runner = ScriptRunner()
+
+        test_config = "test: data"
+
+        # Should raise ValueError for missing environment variables
+        with pytest.raises(ValueError) as exc_info:
+            runner.init_workflow(test_config)
+
+        assert "Missing required environment variables" in str(exc_info.value)
 
     def test_submit_workflow(self):
         """Test workflow submission."""
