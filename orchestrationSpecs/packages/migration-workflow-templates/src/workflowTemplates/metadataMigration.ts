@@ -131,6 +131,7 @@ export const MetadataMigration = WorkflowBuilder.create({
                     expr.literal("/config/credentials/configuration"),
                     expr.literal(""))
             )
+            .addEnvVar("METADATA_CONSOLE_LOGGING", expr.literal("true"))
             .addArgs([
                 b.inputs.commandMode,
                 expr.literal("---INLINE-JSON"),
