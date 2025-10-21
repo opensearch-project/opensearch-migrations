@@ -121,6 +121,7 @@ function getRfsReplicasetManifest
                     },
                 },
                 spec: {
+                    serviceAccountName: "argo-workflow-executor",
                     containers: [finalContainerDefinition.container],
                     volumes: [...finalContainerDefinition.volumes]
                 }
