@@ -65,6 +65,7 @@ RUN dnf install -y \
         tar \
         unzip \
         vim-minimal \
+        which \
         wget \
         zlib \
         && \
