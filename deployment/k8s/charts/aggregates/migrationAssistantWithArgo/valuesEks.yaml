@@ -29,6 +29,12 @@ defaultBucketConfiguration:
 
 # For OTEL Daemonset
 otelConfiguration:
+  env:
+    - name: AWS_REGION
+      valueFrom:
+        configMapKeyRef:
+          name: aws-metadata
+          key: AWS_REGION
   collectorConfig: |
     receivers:
       otlp:

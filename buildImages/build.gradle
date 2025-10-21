@@ -78,7 +78,9 @@ def buildKitProjects = [
                 ],
                 requiredDependencies: [
                         ":TrafficCapture:dockerSolution:syncArtifact_migration_console_migrationConsole_noDockerBuild",
-                        "buildKit_elasticsearchTestConsole"
+                        "buildKit_elasticsearchTestConsole",
+                        ":TrafficCapture:dockerSolution:makeAndStageWorkflowTemplates",
+                        ":TrafficCapture:dockerSolution:buildAndStageConfigProcessor"
                 ]
         ],
         // Not required for main MA operations, but has been helpful for creating test scenarios

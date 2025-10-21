@@ -32,6 +32,9 @@ spec:
               value: {{ .Values.stageName }}
             - name: TRACE_SAMPLING_PERCENTAGE
               value: "1"
+{{- if .Values.otelConfiguration.env }}
+{{ toYaml .Values.otelConfiguration.env | indent 12 }}
+{{- end }}
           args:
             - "--config=/etc/otel/collector.yaml"
           ports:
