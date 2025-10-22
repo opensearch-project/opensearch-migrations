@@ -752,7 +752,7 @@ spec:
               path: /tmp/cluster-config.json
 
     # Elasticsearch 8.19 Multi Node Template
-    - name: elasticsearch-8-19-multi-node
+    - name: elasticsearch-8-19-single-node
       inputs:
         parameters:
           - name: cluster-name
@@ -798,71 +798,111 @@ spec:
                 value: "us-east-2"
               - name: AWS_DEFAULT_REGION
                 value: "us-east-2"
+              - name: AWS_ACCESS_KEY_ID
+                value: "test"
+              - name: AWS_SECRET_ACCESS_KEY
+                value: "test"
+              - name: AWS_EC2_METADATA_DISABLED
+                value: "true"
+              - name: AWS_S3_FORCE_PATH_STYLE
+                value: "true"
             extraVolumes:
             - name: es-s3-credentials
               secret:
                 secretName: es-s3-credentials
                 optional: true  # allows running without S3 if Secret is missing
+            # directory to hold the keystore (not a single-file subPath)
+            - name: elasticsearch-keystore-dir
+              emptyDir: {}
             extraVolumeMounts:
             - name: es-s3-credentials
               mountPath: /mnt/es-s3-credentials
               readOnly: true
+            # mount the dedicated directory; we will create the keystore inside it
+            - name: elasticsearch-keystore-dir
+              mountPath: /usr/share/elasticsearch/config/keystore-mount
             extraInitContainers:
             - name: inject-s3-keystore
               image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
               command: [bash, -lc]
-              # Reads optional files from the Secret and injects into keystore if present.
               args:
                 - |
                   set -euo pipefail
-                  
-                  cd /usr/share/elasticsearch
-                  
+                  ES_BIN=/usr/share/elasticsearch/bin/elasticsearch-keystore
+                  KS_DIR=/usr/share/elasticsearch/config/keystore-mount
+                  KS_FILE="$KS_DIR/elasticsearch.keystore"
+                  DEFAULT_KS=/usr/share/elasticsearch/config/elasticsearch.keystore
+            
+                  echo "[inject-s3-keystore] Using keystore dir: $KS_DIR"
+                  mkdir -p "$KS_DIR"
+            
+                  # Point keystore tool at our mounted directory
+                  export ES_PATH_CONF="$KS_DIR"
+          
                   # Create keystore if needed
-                  if ! bin/elasticsearch-keystore list >/dev/null 2>&1; then
-                    bin/elasticsearch-keystore create
+                  if [ ! -s "$KS_FILE" ]; then
+                    echo "[inject-s3-keystore] Creating keystore..."
+                    $ES_BIN create
                   fi
                   
                   put_secret () {
                     local key="$1" file="$2"
                     if [ -s "$file" ]; then
                       echo "Setting keystore [$key] from $file"
-                      cat "$file" | bin/elasticsearch-keystore add -xf "$key"
+                      cat "$file" | $ES_BIN add -xf "$key"
                     fi
                   }
-                  
+            
                   put_plain () {
                     local key="$1" file="$2"
                     if [ -s "$file" ]; then
                       echo "Setting plaintext setting [$key] from $file"
-                      val=$(cat "$file")
-                      # For non-sensitive settings, ES allows keystore too; keep everything in keystore for consistency.
-                      printf "%s" "$val" | bin/elasticsearch-keystore add -xf "$key"
+                      cat "$file" | $ES_BIN add -xf "$key"
                     fi
                   }
                   
-                  # Sensitive
                   put_secret "s3.client.default.access_key" /mnt/es-s3-credentials/access_key
                   put_secret "s3.client.default.secret_key" /mnt/es-s3-credentials/secret_key
+                  put_plain "s3.client.default.endpoint" mnt/es-s3-credentials/endpoint
+                  put_plain "s3.client.default.path_style_access" /mnt/es-s3-credentials/path_style_access
+                  put_plain "s3.client.default.region" /mnt/es-s3-credentials/region
+            
+            
+                  echo "Keystore contents now:"
+                  $ES_BIN list || true
                   
-                  # LocalStack / custom endpoint (optional)
-                  put_plain  "s3.client.default.endpoint"          /mnt/es-s3-credentials/endpoint
-                  put_plain  "s3.client.default.path_style_access" /mnt/es-s3-credentials/path_style_access
-                  
-                  echo "Keystore contents:"
-                  bin/elasticsearch-keystore list || true
+                  # Ensure ES (uid 1000) can read the file
+                  chown 1000:0 "$KS_FILE" || true
+                  chmod 660 "$KS_FILE" || true
+                  # Make default path resolve to our mounted keystore via symlink
+                  ln -sf "$KS_FILE" "$DEFAULT_KS"
+                  echo "[inject-s3-keystore] Symlinked $DEFAULT_KS -> $KS_FILE"
+                  echo "[inject-s3-keystore] done"
               volumeMounts:
                 - name: es-s3-credentials
                   mountPath: /mnt/es-s3-credentials
                   readOnly: true
-                # The ES container’s config dir is shared by default, no extra mount needed
+                - name: elasticsearch-keystore-dir
+                  mountPath: /usr/share/elasticsearch/config/keystore-mount
               securityContext:
-                runAsUser: 0  # ensure we can write keystore
+                runAsUser: 0
+                runAsGroup: 0
+                runAsNonRoot: false
             # Probes overriden to use HTTPS + basic auth with the chart's password
             readinessProbe: {}
             livenessProbe: {}
             EOF
     
+            # Create AWS credentials secret for S3 repository BEFORE Helm install
+            kubectl create secret generic es-s3-credentials \
+              --from-literal=access_key=test \
+              --from-literal=secret_key=test \
+              --from-literal=endpoint=http://localstack:4566 \
+              --from-literal=path_style_access=true \
+              --from-literal=region=us-east-2 \
+              -n {{inputs.parameters.namespace}} \
+              --dry-run=client -o yaml | kubectl apply -f -
+            
             # Install
             helm install {{inputs.parameters.cluster-name}} elastic/elasticsearch \
             --version 8.5.1 \
@@ -881,9 +921,16 @@ spec:
             EOF
             
             # Create the bucket in LocalStack (path-style)
-            kubectl -n {{inputs.parameters.namespace}} run --rm -i --tty localstack-bucket \
-            --restart=Never --image=curlimages/curl --command -- \
-            sh -lc 'curl -s -X PUT http://localstack:4566/es-snapshots >/dev/null 2>&1 || true'
+            kubectl -n {{inputs.parameters.namespace}} run --rm -i --tty aws \
+              --restart=Never --image=amazon/aws-cli --command -- \
+              sh -lc '
+                export AWS_ACCESS_KEY_ID=test
+                export AWS_SECRET_ACCESS_KEY=test
+                export AWS_DEFAULT_REGION=us-east-2
+                aws --endpoint-url http://localstack:4566 s3api create-bucket \
+                  --bucket es-snapshots \
+                  --create-bucket-configuration LocationConstraint=us-east-2 || true
+              '
             
             PW=$(kubectl -n {{inputs.parameters.namespace}} get secret {{inputs.parameters.cluster-name}}-credentials -o jsonpath='{.data.password}' | base64 -d)
   
