@@ -25,9 +25,19 @@ public class TransformFunctions {
     public static ObjectNode convertFlatSettingsToTree(ObjectNode flatSettings) {
         ObjectNode treeSettings = mapper.createObjectNode();
         
-        // Collect all keys to identify conflicts
+        // Collect all keys and build prefix map upfront for efficient conflict detection
         java.util.Set<String> allKeys = new java.util.HashSet<>();
-        flatSettings.fieldNames().forEachRemaining(allKeys::add);
+        java.util.Set<String> allPrefixes = new java.util.HashSet<>();
+        
+        flatSettings.fieldNames().forEachRemaining(key -> {
+            allKeys.add(key);
+            // Generate all prefixes for this key
+            String[] parts = key.split("\\.");
+            for (int i = 1; i < parts.length; i++) {
+                String prefix = String.join(".", java.util.Arrays.copyOfRange(parts, 0, i));
+                allPrefixes.add(prefix);
+            }
+        });
         
         // Build the tree
         flatSettings.properties().forEach(entry -> {
@@ -45,14 +55,8 @@ public class TransformFunctions {
             }
             
             // Also check if this key is a prefix for other keys (reverse conflict)
-            if (!hasConflict && parts.length > 1) {
-                String keyPrefix = key + ".";
-                for (String otherKey : allKeys) {
-                    if (otherKey.startsWith(keyPrefix)) {
-                        hasConflict = true;
-                        break;
-                    }
-                }
+            if (!hasConflict && allPrefixes.contains(key)) {
+                hasConflict = true;
             }
             
             // If there's a conflict, keep the key flat
