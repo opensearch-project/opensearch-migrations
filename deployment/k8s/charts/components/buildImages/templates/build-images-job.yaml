@@ -29,7 +29,7 @@ spec:
           image: {{ .Values.buildImagesBaseImage }}
           env:
             - name: GRADLE_OPTS
-              value: "-Xms2048m -Xmx16g"
+              value: "-Xms512m -Xmx4g"
           command:
             - sh
             - -c
@@ -84,13 +84,13 @@ spec:
               {{- end }}
           resources:
             requests:
-              memory: "32Gi"
-              cpu: "98304m"
-              ephemeral-storage: "50Gi"
+              memory: "3Gi"
+              cpu: "1000m"
+              ephemeral-storage: "5Gi"
             limits:
-              memory: "32Gi"
-              cpu: "98304m"
-              ephemeral-storage: "50Gi"
+              memory: "6Gi"
+              cpu: "2000m"
+              ephemeral-storage: "10Gi"
           volumeMounts:
             {{- if .Values.localRepoMount }}
             - name: local-mount
