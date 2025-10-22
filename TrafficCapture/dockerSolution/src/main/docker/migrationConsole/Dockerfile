@@ -97,10 +97,6 @@ COPY VERSION /root/VERSION
 WORKDIR /root
 COPY lib /root/lib
 
-# Copy workflow scripts and resources with same structure as tests
-COPY lib/console_link/tests/workflow-tests/resources /opt/workflow-resources
-RUN chmod +x /opt/workflow-resources/scripts/*.sh
-
 WORKDIR /root/lib/console_link
 RUN pipenv install --deploy
 WORKDIR /root/lib/integ_test
@@ -133,8 +129,18 @@ RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\t) \[\e[92m\]migration-console \[\e[0m\](\w) -> "' >> ~/.bashrc
 
+# Install YQ
+RUN arch=$(uname -m); arch=${arch/aarch64/arm64}; arch=${arch/x86_64/amd64}; mkdir -p ~/.local/bin; wget -q "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${arch}" -O ~/.local/bin/yq && chmod +x ~/.local/bin/yq && export PATH="$HOME/.local/bin:$PATH" && yq --version
+
 COPY nodeStaging/configProcessor /root/configProcessor
-ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
+
+# Copy test workflow scripts and resources with same structure as configProcessor
+COPY lib/console_link/tests/workflow-tests/resources/scripts /root/testConfigProcessor
+RUN chmod +x /root/testConfigProcessor/*.sh
+
+# To use test workflows, flip the comments
+#ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
+ENV CONFIG_PROCESSOR_DIR=/root/testConfigProcessor
 
 # Once we're ready, we should replace the old workflows with the new ones.
 # Notice that the installWorkflows pulls from /root/workflows/templates -

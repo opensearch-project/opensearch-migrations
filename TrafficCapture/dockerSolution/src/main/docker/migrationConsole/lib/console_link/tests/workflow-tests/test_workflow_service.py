@@ -486,12 +486,12 @@ class TestWorkflowTreeBuilding:
         tree = service._build_workflow_tree(nodes)
 
         assert len(tree) == 3
-        
+
         # Find nodes by name
         parent = next(n for n in tree if n['name'] == 'parent')
         child1 = next(n for n in tree if n['name'] == 'child1')
         child2 = next(n for n in tree if n['name'] == 'child2')
-        
+
         # Verify hierarchy
         assert parent['depth'] == 0
         assert parent['parent'] is None

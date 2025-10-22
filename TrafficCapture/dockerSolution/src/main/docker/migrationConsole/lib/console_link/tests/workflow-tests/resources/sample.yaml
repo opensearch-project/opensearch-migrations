@@ -1,1 +1,4 @@
-sample-config.yaml
+parameters:
+  message: "Hello World from sample configuration"
+  requiresApproval: true
+  approver: ""

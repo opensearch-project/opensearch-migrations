@@ -7,8 +7,9 @@ This directory contains test resources for the workflow CLI, providing a simple,
 ```
 resources/
 ├── README.md                    # This file
-├── sample-config.yaml           # Generic test workflow configuration
+├── sample.yaml                  # Sample parameters for hello-world-workflow
 ├── hello-world-workflow.yaml    # Simple Argo workflow for testing
+├── hello-world-template.yaml    # Argo workflow template for testing
 ├── approval-workflow.yaml       # Argo workflow with approval step
 └── scripts/                     # Test scripts with standard interface
     ├── getSample.sh            # Returns sample configuration
@@ -17,19 +18,23 @@ resources/
     └── submitWorkflow.sh       # Mock workflow submitter
 ```
 
+## Configuration Files
+
+### sample.json
+Sample configuration parameters for the hello-world-workflow.yaml test workflow:
+
+- **message**: The message to display in the workflow (default: "Hello World from sample configuration")
+- **requiresApproval**: Whether the workflow requires manual approval before proceeding (default: false)
+- **approver**: User who can approve the workflow (only used when requiresApproval is true, default: "")
+
+This file demonstrates the configurable parameters that can be passed to the hello-world-workflow when submitting it to Argo Workflows.
+
 ## Test Scripts
 
 All scripts follow a standard interface:
 - **Input**: Via stdin or file argument
 - **Output**: To stdout
 - **Errors**: To stderr with non-zero exit code
-
-### getSample.sh
-Returns the sample configuration from `sample-config.yaml`.
-
-```bash
-./getSample.sh
-```
 
 ### transformConfig.sh
 Mock transformer that validates and passes through configuration unchanged.

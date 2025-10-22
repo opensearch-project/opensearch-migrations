@@ -240,7 +240,7 @@ def _get_step_rich_label(node: dict) -> str:
     step_name = node['display_name']
     step_phase = node['phase']
     step_type = node['type']
-    
+
     # Color based on phase
     if step_phase == 'Succeeded':
         color = "green"
@@ -260,7 +260,7 @@ def _get_step_rich_label(node: dict) -> str:
     else:
         color = "white"
         symbol = "?"
-    
+
     # Special handling for Suspend steps
     if step_type == 'Suspend':
         if step_phase == 'Running':
@@ -284,10 +284,10 @@ def _display_workflow_tree(step_tree: list):
     """
     if not step_tree:
         return
-    
+
     console = Console()
     tree = Tree("📋 [bold]Workflow Steps[/bold]")
-    
+
     # Group nodes by depth to build the tree structure
     nodes_by_depth = {}
     for node in step_tree:
@@ -295,14 +295,14 @@ def _display_workflow_tree(step_tree: list):
         if depth not in nodes_by_depth:
             nodes_by_depth[depth] = []
         nodes_by_depth[depth].append(node)
-    
+
     # Build tree level by level
     node_to_tree = {}
-    
+
     for depth in sorted(nodes_by_depth.keys()):
         for node in nodes_by_depth[depth]:
             label = _get_step_rich_label(node)
-            
+
             if depth == 0:
                 # Root level nodes
                 node_to_tree[node['id']] = tree.add(label)
@@ -314,7 +314,7 @@ def _display_workflow_tree(step_tree: list):
                 else:
                     # Fallback: add to root if parent not found
                     node_to_tree[node['id']] = tree.add(label)
-    
+
     click.echo("")
     console.print(tree)
 
@@ -330,7 +330,7 @@ def _display_workflow_steps(steps: list, step_tree: list = None):
     if step_tree:
         _display_workflow_tree(step_tree)
         return
-    
+
     # Fallback to flat display
     if not steps:
         return
@@ -370,7 +370,7 @@ def _display_workflow_status(result: dict):
     finished_at = result['finished_at']
 
     _display_workflow_header(name, phase, started_at, finished_at)
-    
+
     # Use tree display if available, otherwise fall back to flat display
     step_tree = result.get('step_tree', [])
     _display_workflow_steps(result['steps'], step_tree)

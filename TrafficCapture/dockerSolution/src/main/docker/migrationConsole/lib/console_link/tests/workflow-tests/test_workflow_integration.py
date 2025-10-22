@@ -713,6 +713,7 @@ class TestArgoWorkflows:
                 }
             },
             "spec": {
+                "serviceAccountName": "argo",  # Use the argo service account
                 "templates": [
                     {
                         "name": "hello-world",
@@ -790,6 +791,48 @@ class TestArgoWorkflows:
             assert workflow is not None, "Workflow not found in Kubernetes"
             assert workflow["metadata"]["name"] == workflow_name
             logger.info("✓ Workflow verified in Kubernetes")
+
+            # If workflow failed or errored, get detailed information
+            if workflow_phase in ["Failed", "Error"]:
+                logger.error(f"Workflow ended in {workflow_phase} phase")
+
+                # Get workflow status message
+                status_message = workflow.get("status", {}).get("message", "No message available")
+                logger.error(f"Status message: {status_message}")
+
+                # Get node details to understand what failed
+                nodes = workflow.get("status", {}).get("nodes", {})
+                logger.error(f"Workflow has {len(nodes)} nodes")
+
+                for node_id, node in nodes.items():
+                    node_name = node.get("displayName", node.get("name", "unknown"))
+                    node_phase = node.get("phase", "unknown")
+                    node_message = node.get("message", "")
+                    node_type = node.get("type", "unknown")
+
+                    logger.error(f"\nNode: {node_name}")
+                    logger.error(f"  ID: {node_id}")
+                    logger.error(f"  Type: {node_type}")
+                    logger.error(f"  Phase: {node_phase}")
+                    if node_message:
+                        logger.error(f"  Message: {node_message}")
+
+                    # Try to get pod logs if this is a pod node
+                    if node_type == "Pod":
+                        try:
+                            v1 = client.CoreV1Api()
+                            pod_name = node.get("id", node_id)
+                            logger.error(f"  Attempting to get logs for pod: {pod_name}")
+
+                            # Get pod logs
+                            logs = v1.read_namespaced_pod_log(
+                                name=pod_name,
+                                namespace=argo_namespace,
+                                tail_lines=50
+                            )
+                            logger.error(f"  Pod logs:\n{logs}")
+                        except Exception as log_error:
+                            logger.error(f"  Could not retrieve pod logs: {log_error}")
 
             # Verify workflow succeeded
             assert workflow_phase == "Succeeded", f"Workflow did not succeed, phase: {workflow_phase}"

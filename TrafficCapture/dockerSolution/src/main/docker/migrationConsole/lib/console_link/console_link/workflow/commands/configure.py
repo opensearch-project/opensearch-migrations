@@ -19,7 +19,7 @@ session_name = 'default'
 
 def _get_empty_config_template() -> str:
     """Return empty configuration template.
-    
+
     Returns sample configuration from CONFIG_PROCESSOR_DIR if available,
     otherwise returns a blank starter configuration template.
     """
@@ -196,7 +196,7 @@ def clear_config(ctx, confirm):
 @click.pass_context
 def sample_config(ctx, format, load):
     """Show or load sample configuration.
-    
+
     Displays sample configuration from CONFIG_PROCESSOR_DIR if available,
     otherwise displays a blank starter configuration template.
     """

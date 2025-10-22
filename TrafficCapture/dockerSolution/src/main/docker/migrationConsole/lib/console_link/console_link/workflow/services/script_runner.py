@@ -132,6 +132,7 @@ class ScriptRunner:
         """Transform configuration using config processor.
 
         Calls: node {script_dir}/index.js --user-config - --skip-initialize --silent
+        Or: {script_dir}/index.sh --user-config - --skip-initialize --silent (for tests)
 
         Args:
             config_data: User configuration YAML as string
@@ -140,22 +141,32 @@ class ScriptRunner:
             Transformed workflow configuration JSON as string
 
         Raises:
-            FileNotFoundError: If index.js doesn't exist
-            subprocess.CalledProcessError: If node command fails
+            FileNotFoundError: If index.js/index.sh doesn't exist
+            subprocess.CalledProcessError: If command fails
         """
         logger.info("Transforming configuration")
+
+        # Check for index.sh first (for tests), then index.js (for production)
+        index_sh_path = self.script_dir / "index.sh"
         index_js_path = self.script_dir / "index.js"
 
-        if not index_js_path.exists():
-            raise FileNotFoundError(f"Config processor not found: {index_js_path}")
-
-        cmd = [
-            "node",
-            str(index_js_path),
-            "--user-config", "-",
-            "--skip-initialize",
-            "--silent"
-        ]
+        if index_sh_path.exists():
+            cmd = [
+                str(index_sh_path),
+                "--user-config", "-",
+                "--skip-initialize",
+                "--silent"
+            ]
+        elif index_js_path.exists():
+            cmd = [
+                "node",
+                str(index_js_path),
+                "--user-config", "-",
+                "--skip-initialize",
+                "--silent"
+            ]
+        else:
+            raise FileNotFoundError(f"Config processor not found: {index_js_path} or {index_sh_path}")
 
         logger.debug(f"Running config processor: {' '.join(cmd)}")
         logger.debug(f"Input config length: {len(config_data)} bytes")
@@ -182,6 +193,7 @@ class ScriptRunner:
         """Initialize workflow state in etcd, returns prefix.
 
         Calls: node {script_dir}/index.js --user-config - --prefix <prefix> --silent
+        Or: {script_dir}/index.sh --user-config - --prefix <prefix> --silent (for tests)
 
         Requires environment variables:
             - ETCD_SERVICE_HOST: etcd service hostname
@@ -196,8 +208,8 @@ class ScriptRunner:
 
         Raises:
             ValueError: If required environment variables are missing
-            FileNotFoundError: If index.js doesn't exist
-            subprocess.CalledProcessError: If node command fails
+            FileNotFoundError: If index.js/index.sh doesn't exist
+            subprocess.CalledProcessError: If command fails
         """
         logger.info("Initializing workflow with prefix: %s", prefix or 'auto-generated')
 
@@ -215,17 +227,25 @@ class ScriptRunner:
         os.environ['ETCD_ENDPOINTS'] = etcd_endpoints
         logger.debug(f"Set ETCD_ENDPOINTS to: {etcd_endpoints}")
 
+        # Check for index.sh first (for tests), then index.js (for production)
+        index_sh_path = self.script_dir / "index.sh"
         index_js_path = self.script_dir / "index.js"
 
-        if not index_js_path.exists():
-            raise FileNotFoundError(f"Config processor not found: {index_js_path}")
-
-        cmd = [
-            "node",
-            str(index_js_path),
-            "--user-config", "-",
-            "--silent"
-        ]
+        if index_sh_path.exists():
+            cmd = [
+                str(index_sh_path),
+                "--user-config", "-",
+                "--silent"
+            ]
+        elif index_js_path.exists():
+            cmd = [
+                "node",
+                str(index_js_path),
+                "--user-config", "-",
+                "--silent"
+            ]
+        else:
+            raise FileNotFoundError(f"Config processor not found: {index_js_path} or {index_sh_path}")
 
         # Add prefix if provided
         if prefix:

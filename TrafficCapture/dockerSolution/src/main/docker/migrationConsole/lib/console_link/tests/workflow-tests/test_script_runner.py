@@ -4,7 +4,9 @@ import os
 import pytest
 import tempfile
 from pathlib import Path
+from unittest.mock import Mock, patch
 import yaml
+import json
 
 from console_link.workflow.services.script_runner import ScriptRunner
 from console_link.workflow.models.config import WorkflowConfig
@@ -37,8 +39,11 @@ class TestScriptRunner:
         test_config = "test: data"
         result = runner.transform_config(test_config)
 
-        # Mock transformer just passes through
-        assert result == test_config
+        # Real script returns JSON workflow spec
+        workflow = json.loads(result)
+        assert workflow["apiVersion"] == "argoproj.io/v1alpha1"
+        assert workflow["kind"] == "Workflow"
+        assert "spec" in workflow
 
     def test_init_workflow(self, monkeypatch):
         """Test workflow initialization."""
@@ -95,34 +100,53 @@ class TestScriptRunner:
 
         assert "Missing required environment variables" in str(exc_info.value)
 
-    def test_submit_workflow(self):
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_submit_workflow(self, mock_run):
         """Test workflow submission."""
+        # Mock the subprocess call to avoid actual Kubernetes submission
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
+        )
+        
         runner = ScriptRunner()
 
-        test_config = "test: data"
+        test_config = """parameters:
+  message: "test message"
+  requiresApproval: false
+  approver: ""
+"""
         prefix = "test-12345"
         result = runner.submit_workflow(test_config, prefix)
 
-        # Verify Workflow structure
-        assert result["kind"] == "Workflow"
-        assert result["metadata"]["namespace"] == "ma"
-        assert result["spec"]["workflowTemplateRef"]["name"] == "hello-world-template"
+        # Real script returns workflow info dict
+        assert "workflow_name" in result
+        assert result["workflow_name"].startswith("test-workflow-")
+        assert "workflow_uid" in result
+        assert result["namespace"] == "ma"
 
-        # Verify metadata
-        assert result["_metadata"]["workflow_name"]
-        assert result["_metadata"]["prefix"] == prefix
-        assert result["_metadata"]["template"] == "hello-world-template"
-
-    def test_submit_workflow_custom_namespace(self):
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_submit_workflow_custom_namespace(self, mock_run):
         """Test workflow submission with custom namespace."""
+        # Mock the subprocess call to avoid actual Kubernetes submission
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='{"workflow_name": "test-workflow-xyz", "workflow_uid": "uid-456", "namespace": "custom-ns"}'
+        )
+        
         runner = ScriptRunner()
 
-        test_config = "test: data"
+        test_config = """parameters:
+  message: "test message"
+  requiresApproval: false
+  approver: ""
+"""
         prefix = "test-12345"
         namespace = "custom-ns"
         result = runner.submit_workflow(test_config, prefix, namespace)
 
-        assert result["metadata"]["namespace"] == namespace
+        assert result["namespace"] == namespace
+        assert "workflow_name" in result
 
     def test_script_not_found(self):
         """Test error handling when script doesn't exist."""

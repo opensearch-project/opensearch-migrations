@@ -1,0 +1,4 @@
+parameters:
+  message: "Test message with approval required"
+  requiresApproval: true
+  approver: "test-user"

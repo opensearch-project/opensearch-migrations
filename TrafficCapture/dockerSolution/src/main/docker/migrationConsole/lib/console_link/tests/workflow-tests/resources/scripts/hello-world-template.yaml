@@ -3,13 +3,12 @@ kind: WorkflowTemplate
 metadata:
   name: hello-world-template
 spec:
+  serviceAccountName: argo-workflow-executor
   entrypoint: main
   arguments:
     parameters:
       - name: message
-        value: "Hello World"  # Default value
       - name: requiresApproval
-        value: "false"
       - name: approver
         value: ""
   

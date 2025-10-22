@@ -146,7 +146,6 @@ def submit_command(ctx, namespace, prefix, wait, timeout, wait_interval, session
             click.echo("\nWorkflow submitted successfully")
             click.echo(f"  Name: {workflow_name}")
             click.echo(f"  Prefix: {workflow_prefix}")
-            click.echo(f"  UID: {workflow_uid}")
             click.echo(f"  Namespace: {namespace}")
 
             logger.info(f"Workflow {workflow_name} submitted successfully with prefix {workflow_prefix}")
