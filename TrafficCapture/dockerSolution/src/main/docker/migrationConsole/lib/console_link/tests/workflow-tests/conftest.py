@@ -1,6 +1,9 @@
 """Pytest configuration for workflow tests."""
 
+import os
 import warnings
+from pathlib import Path
+import pytest
 
 # Suppress deprecation warnings from external libraries
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="kubernetes.client.rest")
@@ -19,3 +22,14 @@ def pytest_configure(config):
         "filterwarnings",
         "ignore::DeprecationWarning:testcontainers"
     )
+
+
+@pytest.fixture(autouse=True)
+def set_config_processor_dir(monkeypatch):
+    """Set CONFIG_PROCESSOR_DIR to test resources for all tests."""
+    # Get the path to test resources/scripts directory
+    test_dir = Path(__file__).parent
+    scripts_dir = test_dir / "resources" / "scripts"
+    
+    # Set CONFIG_PROCESSOR_DIR environment variable
+    monkeypatch.setenv("CONFIG_PROCESSOR_DIR", str(scripts_dir))

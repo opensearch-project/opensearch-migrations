@@ -19,31 +19,20 @@ class ScriptRunner:
         Initialize with script directory path.
 
         Args:
-            script_dir: Optional path to scripts. If None, checks environment variables in priority order:
-                1. CONFIG_PROCESSOR_DIR - Production config processor directory
-                2. Fallback to test resources for backward compatibility
+            script_dir: Optional path to scripts. If None, uses CONFIG_PROCESSOR_DIR environment variable.
+                       Raises ValueError if neither is provided or if the directory doesn't exist.
         """
         if script_dir is None:
-            # Priority 1: Check for CONFIG_PROCESSOR_DIR (production)
             config_processor_dir = os.environ.get('CONFIG_PROCESSOR_DIR')
-            if config_processor_dir:
-                self.script_dir = Path(config_processor_dir)
-                logger.debug(f"Using CONFIG_PROCESSOR_DIR: {self.script_dir}")
-            else:
-                # Priority 2: Fallback to test resources
-                # Navigate from this file to test resources
-                # Path: console_link/workflow/services/script_runner.py
-                # Target: tests/workflow-tests/resources/scripts
-                current_file = Path(__file__)
-                # Go up to console_link package root
-                console_link_pkg = current_file.parent.parent.parent
-                # Go up one more to lib root, then to tests
-                lib_root = console_link_pkg.parent
-                test_resources = lib_root / "tests" / "workflow-tests" / "resources" / "scripts"
-                self.script_dir = test_resources
-                logger.debug(f"Using test resources fallback: {self.script_dir}")
+            if not config_processor_dir:
+                raise ValueError(
+                    "CONFIG_PROCESSOR_DIR environment variable must be set when script_dir is not provided"
+                )
+            self.script_dir = Path(config_processor_dir)
+            logger.debug(f"Using CONFIG_PROCESSOR_DIR: {self.script_dir}")
         else:
             self.script_dir = Path(script_dir)
+            logger.debug(f"Using provided script_dir: {self.script_dir}")
 
         if not self.script_dir.exists():
             raise ValueError(f"Script directory not found: {self.script_dir}")
