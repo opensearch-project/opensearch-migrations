@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
@@ -229,6 +230,16 @@ public class RfsMigrateDocuments {
         @ParametersDelegate
         private VersionStrictness versionStrictness = new VersionStrictness();
 
+        @Parameter(required = false,
+            names = { "--continuous-mode", "--continuousMode" },
+            description = "Run in continuous mode (loop until SIGTERM). Default: true for K8s deployments")
+        public boolean continuousMode = true;
+
+        @Parameter(required = false,
+            names = { "--no-work-retry-delay-seconds", "--noWorkRetryDelaySeconds" },
+            description = "Seconds to wait when no work items available before retrying. Default: 30")
+        public int noWorkRetryDelaySeconds = 30;
+
         @ParametersDelegate
         private ExperimentalArgs experimental = new ExperimentalArgs();
     }
@@ -302,6 +313,18 @@ public class RfsMigrateDocuments {
         public NoWorkLeftException(String message) {
             super(message);
         }
+    }
+
+    /**
+     * Sleep for the specified duration with added jitter to avoid thundering herd problems.
+     * @param baseDurationSeconds Base sleep duration in seconds
+     */
+    private static void sleepWithJitter(int baseDurationSeconds) throws InterruptedException {
+        // Add up to 25% jitter to avoid thundering herd
+        double jitterFactor = 0.75 + (ThreadLocalRandom.current().nextDouble() * 0.5); // 0.75 to 1.25
+        long sleepMillis = Math.round(baseDurationSeconds * 1000 * jitterFactor);
+        log.atInfo().setMessage("No work available, sleeping for {} ms before retrying").addArgument(sleepMillis).log();
+        Thread.sleep(sleepMillis);
     }
 
     public static void validateArgs(Args args) {
@@ -403,6 +426,7 @@ public class RfsMigrateDocuments {
                         arguments.initialLeaseDuration,
                         () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                         cleanShutdownCompleted,
+                        arguments.continuousMode,
                         context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
                 Clock.systemUTC());) {
             // Set up a hook to attempt to shut down cleanly (to mark progress in the worker coordination system) in the
@@ -456,29 +480,72 @@ public class RfsMigrateDocuments {
                 sourceResourceProvider.getBufferSizeInBytes()
             );
 
-            run(
-                new LuceneIndexReader.Factory(sourceResourceProvider),
-                reindexer,
-                progressCursor,
-                workCoordinator,
-                arguments.initialLeaseDuration,
-                processManager,
-                sourceResourceProvider.getIndexMetadata(),
-                arguments.snapshotName,
-                arguments.experimental.previousSnapshotName,
-                arguments.experimental.experimentalDeltaMode,
-                arguments.indexAllowlist,
-                sourceResourceProvider.getShardMetadata(),
-                unpackerFactory,
-                arguments.maxShardSizeBytes,
-                context,
-                cancellationRunnableRef,
-                workItemTimeProvider);
+            // Continuous mode: loop until SIGTERM, even if temporarily no work
+            if (arguments.continuousMode) {
+                log.atInfo().setMessage("Running in continuous mode - will process multiple work items until SIGTERM").log();
+                while (!Thread.currentThread().isInterrupted() && !cleanShutdownCompleted.get()) {
+                    try {
+                        run(
+                            new LuceneIndexReader.Factory(sourceResourceProvider),
+                            reindexer,
+                            progressCursor,
+                            workCoordinator,
+                            arguments.initialLeaseDuration,
+                            processManager,
+                            sourceResourceProvider.getIndexMetadata(),
+                            arguments.snapshotName,
+                            arguments.experimental.previousSnapshotName,
+                            arguments.experimental.experimentalDeltaMode,
+                            arguments.indexAllowlist,
+                            sourceResourceProvider.getShardMetadata(),
+                            unpackerFactory,
+                            arguments.maxShardSizeBytes,
+                            context,
+                            cancellationRunnableRef,
+                            workItemTimeProvider);
+                        // completed a unit of work (or planned successors). Prepare for next claim.
+                        progressCursor.set(null);
+                        workItemRef.set(null);
+                    } catch (NoWorkLeftException e) {
+                        // No work currently available: remain alive and retry after a delay.
+                        sleepWithJitter(arguments.noWorkRetryDelaySeconds);
+                    }
+                }
+            } else {
+                // Legacy single work item mode
+                run(
+                    new LuceneIndexReader.Factory(sourceResourceProvider),
+                    reindexer,
+                    progressCursor,
+                    workCoordinator,
+                    arguments.initialLeaseDuration,
+                    processManager,
+                    sourceResourceProvider.getIndexMetadata(),
+                    arguments.snapshotName,
+                    arguments.experimental.previousSnapshotName,
+                    arguments.experimental.experimentalDeltaMode,
+                    arguments.indexAllowlist,
+                    sourceResourceProvider.getShardMetadata(),
+                    unpackerFactory,
+                    arguments.maxShardSizeBytes,
+                    context,
+                    cancellationRunnableRef,
+                    workItemTimeProvider);
+            }
             cleanShutdownCompleted.set(true);
         } catch (NoWorkLeftException e) {
-            log.atInfo().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
-            cleanShutdownCompleted.set(true);
-            System.exit(NO_WORK_LEFT_EXIT_CODE);
+            if (!arguments.continuousMode) {
+                log.atInfo().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
+                cleanShutdownCompleted.set(true);
+                System.exit(NO_WORK_LEFT_EXIT_CODE);
+            } else {
+                // In continuous mode, just idle & keep running; we should rarely reach here,
+                // since the inner loop already handles this case, but guard for safety.
+                log.atInfo().setMessage("No work left (caught at top-level) in continuous mode; idling.").log();
+                while (!Thread.currentThread().isInterrupted() && !cleanShutdownCompleted.get()) {
+                    sleepWithJitter(arguments.noWorkRetryDelaySeconds);
+                }
+            }
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
@@ -520,6 +587,7 @@ public class RfsMigrateDocuments {
             Duration initialLeaseDuration,
             Runnable cancellationRunnable,
             AtomicBoolean cleanShutdownCompleted,
+            boolean continuousMode,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier) {
         log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
                 .addArgument(workItemId)
@@ -568,10 +636,15 @@ public class RfsMigrateDocuments {
             log.atError().setMessage("Exception during exit on lease timeout, clean shutdown failed")
                     .setCause(e).log();
             cleanShutdownCompleted.set(false);
-            System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
+            if (!continuousMode) {
+                System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
+            }
+            return;
         }
         cleanShutdownCompleted.set(true);
-        System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
+        if (!continuousMode) {
+            System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
+        }
     }
 
     public static int getSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider, Duration initialLeaseDuration,
