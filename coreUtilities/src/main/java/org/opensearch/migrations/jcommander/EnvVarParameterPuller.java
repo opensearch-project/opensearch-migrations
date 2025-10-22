@@ -3,8 +3,13 @@ package org.opensearch.migrations.jcommander;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.opensearch.migrations.arguments.ArgNameConstants;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
@@ -17,7 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class EnvVarParameterPuller {
 
-    public static final String DEFAULT_SUFFIX = "_CMD_LINE_ARG";
+    public static final String DEFAULT_SUFFIX = "";
     private static final Pattern CAMEL_CASE_PATTERN = Pattern.compile("([A-Z])");
 
     /**
@@ -116,24 +121,25 @@ public class EnvVarParameterPuller {
         throws IllegalAccessException
     {
         // Try to find environment variable value
-        String envValue = findEnvValue(annotation, envVarGetter, prefix, suffix);
-        if (envValue != null) {
-            setFieldValue(params, field, envValue);
-            String envVarName = toEnvVarName(field.getName(), prefix, suffix);
-            addedEnvParams.add(envVarName);
+        var nameAndValue = findEnvValue(annotation, envVarGetter, prefix, suffix);
+        if (nameAndValue != null) {
+            setFieldValue(params, field, nameAndValue.getValue());
+            addedEnvParams.add(nameAndValue.getKey());
         }
     }
 
-    private static String findEnvValue(Parameter annotation, EnvVarGetter envVarGetter,
-                                       String prefix, String suffix) {
+    private static Map.Entry<String,String> findEnvValue(Parameter annotation,
+                                                         EnvVarGetter envVarGetter,
+                                                         String prefix,
+                                                         String suffix)
+    {
         // Also try parameter names from annotation (converted to env var format)
-        if (annotation.names().length > 0) {
-            for (String name : annotation.names()) {
-                // Remove leading dashes and convert
-                var envName = toEnvVarName(name, prefix, suffix);
+        for (String name : annotation.names()) {
+            // Remove leading dashes and convert
+            for (var envName : toEnvVarNames(name, prefix, suffix)) {
                 var envValue = envVarGetter.getEnv(envName);
                 if (envValue != null) {
-                    return envValue;
+                    return Map.entry(envName, envValue);
                 }
             }
         }
@@ -141,22 +147,24 @@ public class EnvVarParameterPuller {
         return null;
     }
 
-    public static String toEnvVarName(String fieldName) {
-        return toEnvVarName(fieldName, "", "");
-    }
-
     /**
      * Converts a field name to UPPER_SNAKE_CASE + "_ENV_ARG" environment variable format.
      * Examples:
      *   targetUsername -> TARGET_USERNAME_ENV_ARG
      */
-    public static String toEnvVarName(String fieldName, String prefix, String suffix) {
-        fieldName = fieldName.replaceAll("^-+", "");
-        String normalized = fieldName.replace("-", "_");
+    public static List<String> toEnvVarNames(String argName, String prefix, String suffix) {
+        argName = argName.replaceAll("^-+", "");
+        String normalized = argName.replace("-", "_");
 
         Matcher matcher = CAMEL_CASE_PATTERN.matcher(normalized);
-        String snakeCase = matcher.replaceAll("_$1");
-        return prefix + snakeCase.toUpperCase() + suffix;
+        String envCase = matcher.replaceAll("_$1").toUpperCase();
+        return Stream.concat( // return these w/ the highest precedence first.  We start with the most specific
+            Stream.of(prefix + envCase + suffix),
+            // return alternates without the prefix/suffix for credentials because we have ECS related
+            // tasks setting environment variables without prefixes.
+            (!prefix.isEmpty() || !suffix.isEmpty()) &&
+                ArgNameConstants.POSSIBLE_CREDENTIALS_ARG_FLAG_NAMES.matcher(argName).matches() ?
+                Stream.of(envCase) : Stream.empty()).collect(Collectors.toList());
     }
 
     private static void setFieldValue(Object params, Field field, String value) throws IllegalAccessException {
