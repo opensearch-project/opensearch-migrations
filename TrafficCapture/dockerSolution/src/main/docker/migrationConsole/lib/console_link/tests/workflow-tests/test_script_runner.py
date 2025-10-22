@@ -108,7 +108,7 @@ class TestScriptRunner:
             returncode=0,
             stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
         )
-        
+
         runner = ScriptRunner()
 
         test_config = """parameters:
@@ -133,7 +133,7 @@ class TestScriptRunner:
             returncode=0,
             stdout='{"workflow_name": "test-workflow-xyz", "workflow_uid": "uid-456", "namespace": "custom-ns"}'
         )
-        
+
         runner = ScriptRunner()
 
         test_config = """parameters:

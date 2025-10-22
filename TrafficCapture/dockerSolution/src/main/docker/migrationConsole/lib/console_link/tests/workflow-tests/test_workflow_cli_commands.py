@@ -21,7 +21,7 @@ class TestWorkflowCLICommands:
             returncode=0,
             stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
         )
-        
+
         runner = CliRunner()
 
         # Mock the store with a valid config
@@ -53,7 +53,7 @@ class TestWorkflowCLICommands:
             returncode=0,
             stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
         )
-        
+
         runner = CliRunner()
 
         # Mock the service
@@ -258,7 +258,7 @@ class TestWorkflowCLICommands:
             returncode=0,
             stdout='{"workflow_name": "test-workflow-def", "workflow_uid": "uid-789", "namespace": "ma"}'
         )
-        
+
         runner = CliRunner()
 
         # Mock the store with config
