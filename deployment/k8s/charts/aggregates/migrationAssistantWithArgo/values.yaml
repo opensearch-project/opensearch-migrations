@@ -46,10 +46,6 @@ images:
     repository: migrations/migration_console
     tag: latest
     pullPolicy: IfNotPresent
-  etcdUtils:
-    repository: migrations/migration_console
-    tag: latest
-    pullPolicy: IfNotPresent
 
 # Default AWS values are dummy values for LocalStack usage
 aws:

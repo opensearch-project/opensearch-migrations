@@ -64,7 +64,7 @@ RUN dnf install -y \
         python3.11-pip \
         tar \
         unzip \
-        vim-minimal \
+        vim \
         which \
         wget \
         zlib \
@@ -93,6 +93,6 @@ COPY *.py /root/
 
 RUN chmod ug+x /root/*.sh
 RUN chmod ug+x /root/*.py
-RUN ln -s  `which vim` /usr/local/bin/vi
+RUN ln -s $(command -v vim) /usr/local/bin/vi
 
 CMD tail -f /dev/null

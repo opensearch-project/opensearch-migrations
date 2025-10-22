@@ -678,9 +678,9 @@ exports[`test workflow template renderings create-snapshot 1`] = `
         },
         "retryStrategy": {
           "backoff": {
+            "cap": "300",
             "duration": "5",
             "factor": "2",
-            "maxDuration": "300",
           },
           "limit": "200",
           "retryPolicy": "Always",
@@ -914,9 +914,9 @@ metadata:
         },
         "retryStrategy": {
           "backoff": {
+            "cap": "300",
             "duration": "5",
             "factor": "2",
-            "maxDuration": "300",
           },
           "limit": "200",
           "retryPolicy": "Always",
@@ -941,19 +941,20 @@ metadata:
                   {
                     "name": "command",
                     "value": "
-set -x && 
+set -e && 
 python -c '
 import sys
 from lib.console_link.console_link.environment import Environment
-from lib.console_link.console_link.models.backfill_rfs import get_detailed_status_dict
+from lib.console_link.console_link.models.backfill_rfs import get_detailed_status_obj
 from lib.console_link.console_link.models.backfill_rfs import all_shards_finished_processing
 
-status = get_detailed_status_dict(Environment("/config/migration_services.yaml").target_cluster, 
-                                  "{{inputs.parameters.sessionName}}")
+status = get_detailed_status_obj(Environment(config_file="/config/migration_services.yaml").target_cluster,
+                                 True,
+                                 "{{inputs.parameters.sessionName}}")
 print(status)
-all_finished = all_shards_finished_processing(Environment("/config/migration_services.yaml").target_cluster,
+all_finished = all_shards_finished_processing(Environment(config_file="/config/migration_services.yaml").target_cluster,
                                               "{{inputs.parameters.sessionName}}")
-sys.exit(0 if all_finished else 1)",
+sys.exit(0 if all_finished else 1)'",
                   },
                 ],
               },
@@ -973,81 +974,17 @@ sys.exit(0 if all_finished else 1)",
               "name": "sessionName",
             },
             {
-              "description": "Only used for local testing",
-              "name": "useLocalStack",
-            },
-            {
-              "name": "snapshotName",
-            },
-            {
-              "name": "snapshotRepoPath",
-            },
-            {
-              "name": "s3Endpoint",
-            },
-            {
-              "name": "s3Region",
-            },
-            {
-              "name": "targetAwsRegion",
-            },
-            {
-              "name": "targetAwsSigningName",
-            },
-            {
-              "name": "targetCACert",
-            },
-            {
-              "name": "targetClientSecretName",
-            },
-            {
-              "name": "targetInsecure",
-            },
-            {
-              "name": "targetUsername",
-            },
-            {
-              "name": "targetPassword",
-            },
-            {
-              "name": "indexAllowlist",
-              "value": "[]",
+              "name": "rfsJsonConfig",
             },
             {
               "name": "podReplicas",
-              "value": "1",
             },
             {
               "name": "loggingConfigurationOverrideConfigMap",
-              "value": "",
             },
             {
-              "name": "allowLooseVersionMatching",
-              "value": "true",
-            },
-            {
-              "name": "docTransformerBase64",
-              "value": "",
-            },
-            {
-              "name": "documentsPerBulkRequest",
-              "value": "0",
-            },
-            {
-              "name": "initialLeaseDuration",
-              "value": "",
-            },
-            {
-              "name": "maxConnections",
-              "value": "0",
-            },
-            {
-              "name": "maxShardSizeBytes",
-              "value": "0",
-            },
-            {
-              "name": "otelCollectorEndpoint",
-              "value": "http://otel-collector:4317",
+              "description": "Only used for local testing",
+              "name": "useLocalStack",
             },
             {
               "name": "imageReindexFromSnapshotLocation",
@@ -1080,13 +1017,18 @@ spec:
         app: bulk-loader
         workflows.argoproj.io/workflow: "{{workflow.name}}"
     spec:
+      serviceAccountName: argo-workflow-executor
       containers:
         - name: bulk-loader
           image: "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
           imagePullPolicy: "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+          command:
+            - /rfs-app/runJavaWithClasspath.sh
+          args:
+            - org.opensearch.migrations.RfsMigrateDocuments
+            - ---INLINE-JSON
+            - "{{=toBase64(inputs.parameters.rfsJsonConfig)}}"
           env:
-            - name: JCOMMANDER_OPTS
-              value: "{{=((0 == len(inputs.parameters.sessionName)) ? ('') : (' --sessionName '+inputs.parameters.sessionName))+((0 == len(inputs.parameters.useLocalStack)) ? ('') : (' --useLocalStack '+inputs.parameters.useLocalStack))+((0 == len(inputs.parameters.snapshotName)) ? ('') : (' --snapshotName '+inputs.parameters.snapshotName))+((0 == len(inputs.parameters.snapshotRepoPath)) ? ('') : (' --snapshotRepoPath '+inputs.parameters.snapshotRepoPath))+((0 == len(inputs.parameters.s3Endpoint)) ? ('') : (' --s3Endpoint '+inputs.parameters.s3Endpoint))+((0 == len(inputs.parameters.s3Region)) ? ('') : (' --s3Region '+inputs.parameters.s3Region))+((0 == len(inputs.parameters.targetAwsRegion)) ? ('') : (' --targetAwsRegion '+inputs.parameters.targetAwsRegion))+((0 == len(inputs.parameters.targetAwsSigningName)) ? ('') : (' --targetAwsSigningName '+inputs.parameters.targetAwsSigningName))+((0 == len(inputs.parameters.targetCACert)) ? ('') : (' --targetCACert '+inputs.parameters.targetCACert))+((0 == len(inputs.parameters.targetClientSecretName)) ? ('') : (' --targetClientSecretName '+inputs.parameters.targetClientSecretName))+((0 == len(inputs.parameters.targetInsecure)) ? ('') : (' --targetInsecure '+inputs.parameters.targetInsecure))+((0 == len(inputs.parameters.targetUsername)) ? ('') : (' --targetUsername '+inputs.parameters.targetUsername))+((0 == len(inputs.parameters.targetPassword)) ? ('') : (' --targetPassword '+inputs.parameters.targetPassword))+((0 == len(inputs.parameters.indexAllowlist)) ? ('') : (' --indexAllowlist '+inputs.parameters.indexAllowlist))+((0 == len(inputs.parameters.podReplicas)) ? ('') : (' --podReplicas '+inputs.parameters.podReplicas))+((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('') : (' --loggingConfigurationOverrideConfigMap '+inputs.parameters.loggingConfigurationOverrideConfigMap))+((0 == len(inputs.parameters.allowLooseVersionMatching)) ? ('') : (' --allowLooseVersionMatching '+inputs.parameters.allowLooseVersionMatching))+((0 == len(inputs.parameters.docTransformerBase64)) ? ('') : (' --docTransformerBase64 '+inputs.parameters.docTransformerBase64))+((0 == len(inputs.parameters.documentsPerBulkRequest)) ? ('') : (' --documentsPerBulkRequest '+inputs.parameters.documentsPerBulkRequest))+((0 == len(inputs.parameters.initialLeaseDuration)) ? ('') : (' --initialLeaseDuration '+inputs.parameters.initialLeaseDuration))+((0 == len(inputs.parameters.maxConnections)) ? ('') : (' --maxConnections '+inputs.parameters.maxConnections))+((0 == len(inputs.parameters.maxShardSizeBytes)) ? ('') : (' --maxShardSizeBytes '+inputs.parameters.maxShardSizeBytes))+((0 == len(inputs.parameters.otelCollectorEndpoint)) ? ('') : (' --otelCollectorEndpoint '+inputs.parameters.otelCollectorEndpoint))+((0 == len(inputs.parameters.imageReindexFromSnapshotLocation)) ? ('') : (' --imageReindexFromSnapshotLocation '+inputs.parameters.imageReindexFromSnapshotLocation))+((0 == len(inputs.parameters.imageReindexFromSnapshotPullPolicy)) ? ('') : (' --imageReindexFromSnapshotPullPolicy '+inputs.parameters.imageReindexFromSnapshotPullPolicy))}}"
             - name: LUCENE_DIR
               value: /tmp
             - name: JAVA_OPTS
@@ -1118,6 +1060,9 @@ spec:
           "parameters": [
             {
               "name": "sessionName",
+            },
+            {
+              "name": "sourceVersion",
             },
             {
               "name": "snapshotConfig",
@@ -1158,92 +1103,20 @@ spec:
                     "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
                   },
                   {
-                    "name": "indexAllowlist",
-                    "value": "{{=sprig.dig('indexAllowlist', '', fromJSON(inputs.parameters.documentBackfillConfig))}}",
-                  },
-                  {
                     "name": "podReplicas",
-                    "value": "{{=sprig.dig('podReplicas', '', fromJSON(inputs.parameters.documentBackfillConfig))}}",
+                    "value": "{{=sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.documentBackfillConfig))}}",
                   },
                   {
                     "name": "loggingConfigurationOverrideConfigMap",
                     "value": "{{=sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.documentBackfillConfig))}}",
                   },
                   {
-                    "name": "allowLooseVersionMatching",
-                    "value": "{{=sprig.dig('allowLooseVersionMatching', '', fromJSON(inputs.parameters.documentBackfillConfig))}}",
-                  },
-                  {
-                    "name": "docTransformerBase64",
-                    "value": "{{=sprig.dig('docTransformerBase64', '', fromJSON(inputs.parameters.documentBackfillConfig))}}",
-                  },
-                  {
-                    "name": "documentsPerBulkRequest",
-                    "value": "{{=sprig.dig('documentsPerBulkRequest', '', fromJSON(inputs.parameters.documentBackfillConfig))}}",
-                  },
-                  {
-                    "name": "initialLeaseDuration",
-                    "value": "{{=sprig.dig('initialLeaseDuration', '', fromJSON(inputs.parameters.documentBackfillConfig))}}",
-                  },
-                  {
-                    "name": "maxConnections",
-                    "value": "{{=sprig.dig('maxConnections', '', fromJSON(inputs.parameters.documentBackfillConfig))}}",
-                  },
-                  {
-                    "name": "maxShardSizeBytes",
-                    "value": "{{=sprig.dig('maxShardSizeBytes', '', fromJSON(inputs.parameters.documentBackfillConfig))}}",
-                  },
-                  {
-                    "name": "otelCollectorEndpoint",
-                    "value": "{{=sprig.dig('otelCollectorEndpoint', '', fromJSON(inputs.parameters.documentBackfillConfig))}}",
-                  },
-                  {
-                    "name": "targetAwsRegion",
-                    "value": "{{=sprig.dig('authConfig', 'sigv4', 'region', '', fromJSON(inputs.parameters.targetConfig))}}",
-                  },
-                  {
-                    "name": "targetAwsSigningName",
-                    "value": "{{=sprig.dig('authConfig', 'sigv4', 'service', '', fromJSON(inputs.parameters.targetConfig))}}",
-                  },
-                  {
-                    "name": "targetCACert",
-                    "value": "{{=sprig.dig('authConfig', 'mtls', 'caCert', '', fromJSON(inputs.parameters.targetConfig))}}",
-                  },
-                  {
-                    "name": "targetClientSecretName",
-                    "value": "{{=sprig.dig('authConfig', 'mtls', 'clientSecretName', '', fromJSON(inputs.parameters.targetConfig))}}",
-                  },
-                  {
-                    "name": "targetInsecure",
-                    "value": "{{=sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig))}}",
-                  },
-                  {
-                    "name": "targetUsername",
-                    "value": "{{=sprig.dig('authConfig', 'basic', 'username', '', fromJSON(inputs.parameters.targetConfig))}}",
-                  },
-                  {
-                    "name": "targetPassword",
-                    "value": "{{=sprig.dig('authConfig', 'basic', 'password', '', fromJSON(inputs.parameters.targetConfig))}}",
-                  },
-                  {
-                    "name": "s3Endpoint",
-                    "value": "{{=sprig.dig('repoConfig', 'endpoint', '', fromJSON(inputs.parameters.snapshotConfig))}}",
-                  },
-                  {
-                    "name": "s3Region",
-                    "value": "{{=sprig.dig('repoConfig', 'aws_region', '', fromJSON(inputs.parameters.snapshotConfig))}}",
-                  },
-                  {
-                    "name": "snapshotName",
-                    "value": "{{=sprig.dig('snapshotName', '', fromJSON(inputs.parameters.snapshotConfig))}}",
-                  },
-                  {
-                    "name": "snapshotRepoPath",
-                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig.s3RepoPathUri')}}",
-                  },
-                  {
                     "name": "useLocalStack",
                     "value": "{{=sprig.dig('repoConfig', 'useLocalStack', false, fromJSON(inputs.parameters.snapshotConfig))}}",
+                  },
+                  {
+                    "name": "rfsJsonConfig",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('basic' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetUsername", fromJSON(inputs.parameters.targetConfig)['authConfig']['basic']['username'], "targetPassword", fromJSON(inputs.parameters.targetConfig)['authConfig']['basic']['password'])) : ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))))) : ({})), sprig.dict("targetHost", jsonpath(inputs.parameters.targetConfig, '$.endpoint'), "targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp'), sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'], "s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['aws_region'], "s3LocalDir", '/tmp'))))}}",
                   },
                 ],
               },
@@ -1256,6 +1129,9 @@ spec:
       {
         "inputs": {
           "parameters": [
+            {
+              "name": "sourceVersion",
+            },
             {
               "name": "targetConfig",
             },
@@ -1298,6 +1174,10 @@ spec:
                   {
                     "name": "sessionName",
                     "value": "{{inputs.parameters.sessionName}}",
+                  },
+                  {
+                    "name": "sourceVersion",
+                    "value": "{{inputs.parameters.sourceVersion}}",
                   },
                   {
                     "name": "snapshotConfig",
@@ -1451,8 +1331,8 @@ exports[`test workflow template renderings full-migration 1`] = `
             "-c",
           ],
           "env": [],
-          "image": "{{inputs.parameters.imageEtcdUtilsLocation}}",
-          "pullPolicy": "{{inputs.parameters.imageEtcdUtilsPullPolicy}}",
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "pullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
         },
         "inputs": {
           "parameters": [
@@ -1460,10 +1340,10 @@ exports[`test workflow template renderings full-migration 1`] = `
               "name": "targetConfig",
             },
             {
-              "name": "imageEtcdUtilsLocation",
+              "name": "imageMigrationConsoleLocation",
             },
             {
-              "name": "imageEtcdUtilsPullPolicy",
+              "name": "imageMigrationConsolePullPolicy",
             },
           ],
         },
@@ -1519,12 +1399,6 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
             {
               "name": "imageMigrationConsolePullPolicy",
-            },
-            {
-              "name": "imageEtcdUtilsLocation",
-            },
-            {
-              "name": "imageEtcdUtilsPullPolicy",
             },
           ],
         },
@@ -1616,6 +1490,10 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "name": "sessionName",
                     "value": "{{steps.idGenerator.id}}",
                   },
+                  {
+                    "name": "sourceVersion",
+                    "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.version')}}",
+                  },
                 ],
               },
               "name": "bulkLoadDocuments",
@@ -1624,61 +1502,6 @@ exports[`test workflow template renderings full-migration 1`] = `
                 "template": "runbulkload",
               },
               "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig))}}",
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "imageEtcdUtilsLocation",
-                    "value": "{{inputs.parameters.imageEtcdUtilsLocation}}",
-                  },
-                  {
-                    "name": "imageEtcdUtilsPullPolicy",
-                    "value": "{{inputs.parameters.imageEtcdUtilsPullPolicy}}",
-                  },
-                  {
-                    "name": "prefix",
-                    "value": "{{inputs.parameters.latchCoordinationPrefix}}",
-                  },
-                  {
-                    "name": "targetName",
-                    "value": "{{=jsonpath(inputs.parameters.targetConfig, '$.name')}}",
-                  },
-                  {
-                    "name": "processorId",
-                    "value": "{{steps.idGenerator.id}}",
-                  },
-                ],
-              },
-              "name": "targetBackfillCompleteCheck",
-              "templateRef": {
-                "name": "target-latch-helpers",
-                "template": "decrementlatch",
-              },
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "targetConfig",
-                    "value": "{{inputs.parameters.targetConfig}}",
-                  },
-                  {
-                    "name": "imageEtcdUtilsLocation",
-                    "value": "{{inputs.parameters.imageEtcdUtilsLocation}}",
-                  },
-                  {
-                    "name": "imageEtcdUtilsPullPolicy",
-                    "value": "{{inputs.parameters.imageEtcdUtilsPullPolicy}}",
-                  },
-                ],
-              },
-              "name": "runReplayerForTarget",
-              "template": "runreplayerfortarget",
             },
           ],
         ],
@@ -1732,12 +1555,6 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
             {
               "name": "imageMigrationConsolePullPolicy",
-            },
-            {
-              "name": "imageEtcdUtilsLocation",
-            },
-            {
-              "name": "imageEtcdUtilsPullPolicy",
             },
           ],
         },
@@ -1832,14 +1649,6 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
-                    "name": "imageEtcdUtilsLocation",
-                    "value": "{{inputs.parameters.imageEtcdUtilsLocation}}",
-                  },
-                  {
-                    "name": "imageEtcdUtilsPullPolicy",
-                    "value": "{{inputs.parameters.imageEtcdUtilsPullPolicy}}",
-                  },
-                  {
                     "name": "metadataMigrationConfig",
                     "value": "{{=sprig.dig('metadataMigrationConfig', '', item)}}",
                   },
@@ -1904,12 +1713,6 @@ exports[`test workflow template renderings full-migration 1`] = `
             {
               "name": "imageMigrationConsolePullPolicy",
             },
-            {
-              "name": "imageEtcdUtilsLocation",
-            },
-            {
-              "name": "imageEtcdUtilsPullPolicy",
-            },
           ],
         },
         "name": "foreachmigrationpair",
@@ -1964,14 +1767,6 @@ exports[`test workflow template renderings full-migration 1`] = `
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "imageEtcdUtilsLocation",
-                    "value": "{{inputs.parameters.imageEtcdUtilsLocation}}",
-                  },
-                  {
-                    "name": "imageEtcdUtilsPullPolicy",
-                    "value": "{{inputs.parameters.imageEtcdUtilsPullPolicy}}",
                   },
                   {
                     "name": "indices",
@@ -2085,26 +1880,6 @@ exports[`test workflow template renderings full-migration 1`] = `
                 },
               },
             },
-            {
-              "name": "imageEtcdUtilsLocation",
-              "valueFrom": {
-                "configMapKeyRef": {
-                  "key": "etcdUtilsImage",
-                  "name": "{{workflow.parameters.imageConfigMapName}}",
-                  "optional": undefined,
-                },
-              },
-            },
-            {
-              "name": "imageEtcdUtilsPullPolicy",
-              "valueFrom": {
-                "configMapKeyRef": {
-                  "key": "etcdUtilsPullPolicy",
-                  "name": "{{workflow.parameters.imageConfigMapName}}",
-                  "optional": undefined,
-                },
-              },
-            },
           ],
         },
         "name": "main",
@@ -2153,14 +1928,6 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
-                    "name": "imageEtcdUtilsLocation",
-                    "value": "{{inputs.parameters.imageEtcdUtilsLocation}}",
-                  },
-                  {
-                    "name": "imageEtcdUtilsPullPolicy",
-                    "value": "{{inputs.parameters.imageEtcdUtilsPullPolicy}}",
-                  },
-                  {
                     "name": "sourceConfig",
                     "value": "{{=jsonpath(toJSON(item), '$.sourceConfig')}}",
                   },
@@ -2188,12 +1955,12 @@ exports[`test workflow template renderings full-migration 1`] = `
               "arguments": {
                 "parameters": [
                   {
-                    "name": "imageEtcdUtilsLocation",
-                    "value": "{{inputs.parameters.imageEtcdUtilsLocation}}",
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
                   },
                   {
-                    "name": "imageEtcdUtilsPullPolicy",
-                    "value": "{{inputs.parameters.imageEtcdUtilsPullPolicy}}",
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
                     "name": "prefix",
@@ -3033,6 +2800,7 @@ spec:
         app: replayer
         workflows.argoproj.io/workflow: "{{workflow.name}}"
     spec:
+      serviceAccountName: argo-workflow-executor
       containers:
         - name: replayer
           image: "{{inputs.parameters.imageTrafficReplayerLocation}}"
@@ -3614,12 +3382,12 @@ echo $SHOULD_FINALIZE",
               "value": "{{inputs.parameters.etcdUser}}",
             },
             {
-              "name": "IMAGE_ETCD_UTILS_LOCATION",
-              "value": "{{inputs.parameters.imageEtcdUtilsLocation}}",
+              "name": "IMAGE_MIGRATION_CONSOLE_LOCATION",
+              "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
             },
             {
-              "name": "IMAGE_ETCD_UTILS_PULL_POLICY",
-              "value": "{{inputs.parameters.imageEtcdUtilsPullPolicy}}",
+              "name": "IMAGE_MIGRATION_CONSOLE_PULL_POLICY",
+              "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
             },
             {
               "name": "TARGET_NAME",
@@ -3630,8 +3398,8 @@ echo $SHOULD_FINALIZE",
               "value": "{{inputs.parameters.processorId}}",
             },
           ],
-          "image": "{{inputs.parameters.imageEtcdUtilsLocation}}",
-          "pullPolicy": "{{inputs.parameters.imageEtcdUtilsPullPolicy}}",
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "pullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
         },
         "inputs": {
           "parameters": [
@@ -3651,10 +3419,10 @@ echo $SHOULD_FINALIZE",
               "value": "{{workflow.parameters.etcdUser}}",
             },
             {
-              "name": "imageEtcdUtilsLocation",
+              "name": "imageMigrationConsoleLocation",
             },
             {
-              "name": "imageEtcdUtilsPullPolicy",
+              "name": "imageMigrationConsolePullPolicy",
             },
             {
               "name": "targetName",
@@ -3753,16 +3521,16 @@ echo "Cleanup complete. Workflow stats preserved under /$STATS_KEY/"",
               "value": "{{inputs.parameters.etcdUser}}",
             },
             {
-              "name": "IMAGE_ETCD_UTILS_LOCATION",
-              "value": "{{inputs.parameters.imageEtcdUtilsLocation}}",
+              "name": "IMAGE_MIGRATION_CONSOLE_LOCATION",
+              "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
             },
             {
-              "name": "IMAGE_ETCD_UTILS_PULL_POLICY",
-              "value": "{{inputs.parameters.imageEtcdUtilsPullPolicy}}",
+              "name": "IMAGE_MIGRATION_CONSOLE_PULL_POLICY",
+              "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
             },
           ],
-          "image": "{{inputs.parameters.imageEtcdUtilsLocation}}",
-          "pullPolicy": "{{inputs.parameters.imageEtcdUtilsPullPolicy}}",
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "pullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
         },
         "inputs": {
           "parameters": [
@@ -3782,10 +3550,10 @@ echo "Cleanup complete. Workflow stats preserved under /$STATS_KEY/"",
               "value": "{{workflow.parameters.etcdUser}}",
             },
             {
-              "name": "imageEtcdUtilsLocation",
+              "name": "imageMigrationConsoleLocation",
             },
             {
-              "name": "imageEtcdUtilsPullPolicy",
+              "name": "imageMigrationConsolePullPolicy",
             },
           ],
         },
