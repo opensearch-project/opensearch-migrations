@@ -42,3 +42,5 @@ orchestrationSpecs/k8s-schemas
 orchestrationSpecs/packages/argo-workflow-builders/src/generated
 orchestrationSpecs/packages/config-processor/bundled
 orchestrationSpecs/packages/migration-workflow-templates/workflowTemplates
+
+*.tsbuildinfo

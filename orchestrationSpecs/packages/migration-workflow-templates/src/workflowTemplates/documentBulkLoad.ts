@@ -121,6 +121,7 @@ function getRfsReplicasetManifest
                     },
                 },
                 spec: {
+                    serviceAccountName: "argo-workflow-executor",
                     containers: [finalContainerDefinition.container],
                     volumes: [...finalContainerDefinition.volumes]
                 }
@@ -187,7 +188,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRetryParameters({
             limit: "200",
             retryPolicy: "Always",
-            backoff: {duration: "5", factor: "2", maxDuration: "300"}
+            backoff: {duration: "5", factor: "2", cap: "300"}
         })
     )
 

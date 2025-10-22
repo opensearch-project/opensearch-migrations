@@ -86,9 +86,9 @@ export const FullMigration = WorkflowBuilder.create({
 
     .addTemplate("runReplayerForTarget", t => t
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["EtcdUtils"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addContainer(cb => cb
-            .addImageInfo(cb.inputs.imageEtcdUtilsLocation, cb.inputs.imageEtcdUtilsPullPolicy)
+            .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["sh", "-c"])
             .addArgs(["echo runReplayerForTarget"])))
 
