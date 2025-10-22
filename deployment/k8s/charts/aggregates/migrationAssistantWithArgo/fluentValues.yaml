@@ -20,17 +20,17 @@ extraVolumeMounts:
     mountPath: /fluentbit/scripts
     readOnly: true
 
-  config:
-    inputs: |
-      [INPUT]
-          Name             tail
-          Tag              kube.*
-          Path             /var/log/containers/*.log
-          multiline.parser docker, cri, java_multiline
-          Refresh_Interval 5
-          Mem_Buf_Limit    5MB
-          Skip_Long_Lines  Off
-          Skip_Empty_Lines On
+config:
+  inputs: |
+    [INPUT]
+        Name             tail
+        Tag              kube.*
+        Path             /var/log/containers/*.log
+        multiline.parser docker, cri
+        Refresh_Interval 5
+        Mem_Buf_Limit    5MB
+        Skip_Long_Lines  Off
+        Skip_Empty_Lines On
 
   filters: |
     [FILTER]
