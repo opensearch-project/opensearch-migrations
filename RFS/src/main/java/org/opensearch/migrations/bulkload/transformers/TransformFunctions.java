@@ -16,22 +16,59 @@ public class TransformFunctions {
 
     /* Turn dotted index settings into a tree, will start like:
      * {"index.number_of_replicas":"1","index.number_of_shards":"5","index.version.created":"6082499"}
+     * 
+     * Special handling for conflicting keys: When a scalar value like "knn": "true" exists
+     * alongside nested properties like "knn.space_type": "l2", we keep the settings flat
+     * to preserve both values. This means the output will have both "knn": "true" and
+     * "knn.space_type": "l2" as separate flat keys rather than nesting space_type under knn.
      */
     public static ObjectNode convertFlatSettingsToTree(ObjectNode flatSettings) {
         ObjectNode treeSettings = mapper.createObjectNode();
-
+        
+        // Collect all keys to identify conflicts
+        java.util.Set<String> allKeys = new java.util.HashSet<>();
+        flatSettings.fieldNames().forEachRemaining(allKeys::add);
+        
+        // Build the tree
         flatSettings.properties().forEach(entry -> {
-            String[] parts = entry.getKey().split("\\.");
-            ObjectNode current = treeSettings;
-
-            for (int i = 0; i < parts.length - 1; i++) {
-                if (!current.has(parts[i])) {
-                    current.set(parts[i], mapper.createObjectNode());
+            String key = entry.getKey();
+            String[] parts = key.split("\\.");
+            
+            // Check if any prefix of this key exists as a standalone key (conflict)
+            boolean hasConflict = false;
+            for (int i = 1; i < parts.length; i++) {
+                String prefix = String.join(".", java.util.Arrays.copyOfRange(parts, 0, i));
+                if (allKeys.contains(prefix)) {
+                    hasConflict = true;
+                    break;
                 }
-                current = (ObjectNode) current.get(parts[i]);
             }
-
-            current.set(parts[parts.length - 1], entry.getValue());
+            
+            // Also check if this key is a prefix for other keys (reverse conflict)
+            if (!hasConflict && parts.length > 1) {
+                String keyPrefix = key + ".";
+                for (String otherKey : allKeys) {
+                    if (otherKey.startsWith(keyPrefix)) {
+                        hasConflict = true;
+                        break;
+                    }
+                }
+            }
+            
+            // If there's a conflict, keep the key flat
+            if (hasConflict) {
+                treeSettings.set(key, entry.getValue());
+            } else {
+                // Build nested structure
+                ObjectNode current = treeSettings;
+                for (int i = 0; i < parts.length - 1; i++) {
+                    if (!current.has(parts[i])) {
+                        current.set(parts[i], mapper.createObjectNode());
+                    }
+                    current = (ObjectNode) current.get(parts[i]);
+                }
+                current.set(parts[parts.length - 1], entry.getValue());
+            }
         });
 
         return treeSettings;
