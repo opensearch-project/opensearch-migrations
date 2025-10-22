@@ -204,8 +204,6 @@ class ScriptRunner:
         Requires environment variables:
             - ETCD_SERVICE_HOST: etcd service hostname
             - ETCD_SERVICE_PORT_CLIENT: etcd client port
-            - ETCD_USER: etcd authentication username
-            - ETCD_PASSWORD: etcd authentication password
 
         Args:
             config_data: User configuration YAML as string
@@ -222,7 +220,7 @@ class ScriptRunner:
         logger.info("Initializing workflow with prefix: %s", prefix or 'auto-generated')
 
         # Validate required environment variables
-        required_env_vars = ['ETCD_SERVICE_HOST', 'ETCD_SERVICE_PORT_CLIENT', 'ETCD_USER', 'ETCD_PASSWORD']
+        required_env_vars = ['ETCD_SERVICE_HOST', 'ETCD_SERVICE_PORT_CLIENT']
         missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
 
         if missing_vars:

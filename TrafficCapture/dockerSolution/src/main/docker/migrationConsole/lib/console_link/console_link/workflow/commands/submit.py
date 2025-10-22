@@ -98,8 +98,6 @@ def submit_command(ctx, namespace, prefix, wait, timeout, wait_interval, session
 
     Environment variables:
         - CONFIG_PROCESSOR_DIR: Path to config processor (default: /root/configProcessor)
-        - Additional environment variables may be required by the underlying scripts
-          (e.g., ETCD_SERVICE_HOST, ETCD_SERVICE_PORT_CLIENT, ETCD_USER, ETCD_PASSWORD for etcd connectivity)
 
     Example:
         workflow submit
