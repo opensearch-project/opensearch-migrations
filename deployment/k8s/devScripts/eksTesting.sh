@@ -8,16 +8,37 @@
 # Once that's been deployed, fill in the STACK_NAME and REGION and run the rest of the
 # commands to build images to the private ECR and to deploy the helm chart to reference them.
 
+cd ../../..
+agradle () {
+	local dir=$(pwd)
+	while [[ "$dir" != "/" ]]
+	do
+		if [[ -x "$dir/gradlew" ]]
+		then
+			"$dir/gradlew" "$@"
+			return
+		fi
+		dir=$(dirname "$dir")
+	done
+	echo "No gradlew script found in the ancestor directories"
+}
+
 # build images to a private ecr
 export STACK_NAME=MA-EKS
 export REGION=us-east-2
 
+# deploy the cfn stack, which deploys a new VPC and and EKS cluster with auto-mode
+cd deployment/migration-assistant-solution
+npm install --dev
+npx cdk synth "*"
+
+# set up a number of environment variables from the cfn output
+eval $(aws cloudformation describe-stacks --stack-name $STACK_NAME --region $REGION --output text --query 'Stacks[0].Outputs[?OutputKey==\`MigrationsExportString\`].OutputValue'  )
 export ECR_REPO=$(echo $MIGRATIONS_ECR_REGISTRY | cut -d / -f 1)
 export ACCOUNT_NUMBER=$(echo $MIGRATIONS_ECR_REGISTRY| cut -f 1 -d .)
 
 # setup docker to push to the private ECR reop in the account
 aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $ECR_REPO
-eval $(aws cloudformation describe-stacks --stack-name $STACK_NAME --region $REGION --output text --query 'Stacks[0].Outputs[?OutputKey==\`MigrationsExportString\`].OutputValue'  )
 
 docker buildx create --name local-remote-builder --driver remote tcp://buildkitd:1234
 agradle buildImagesToRegistry -PregistryEndpoint=$MIGRATIONS_ECR_REGISTRY -PimageArch=amd64 -Pbuilder=local-remote-builder
