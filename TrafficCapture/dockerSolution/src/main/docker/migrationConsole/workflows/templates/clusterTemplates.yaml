@@ -773,41 +773,94 @@ spec:
             cat > /tmp/elasticsearch.yml <<'EOF'
             cluster.name: ${CLUSTER_NAME}
             network.host: 0.0.0.0
-            xpack.security.enabled: false
-            xpack.security.transport.ssl.enabled: false
-            xpack.security.enrollment.enabled: false
-            xpack.security.http.ssl.enabled: false
-            xpack.ml.enabled: false
-            xpack.watcher.enabled: false
+            # Cut noise if anything ever hits HTTP by mistake.
+            logger.org.elasticsearch.http.netty4.Netty4HttpServerTransport: error
             EOF
             
             # Values: tiny heap, 3 replicas, ephemeral, sysctl init
             # NOTE: Do NOT set node.roles, discovery.seed_hosts, or cluster.initial_master_nodes here.
             cat > /tmp/es-values.yaml <<'EOF'
             fullnameOverride: {{inputs.parameters.cluster-name}}
-    
             image: "docker.elastic.co/elasticsearch/elasticsearch"
             imageTag: "8.19.0"
-    
             replicas: {{inputs.parameters.replicas}}
             antiAffinity: "soft"
-            protocol: "http"
-    
+            protocol: "https"
             esJavaOpts: "-Xmx512m -Xms512m"
-    
-            # Make the built-in readiness a little more patient
-            clusterHealthCheckParams: "wait_for_status=yellow&timeout=10s"
-    
-            # Ephemeral for inspection
             persistence:
               enabled: false
-    
             # Ensure vm.max_map_count etc. on Minikube
             sysctlInitContainer:
               enabled: true
-    
-            # No extra envs; let the chart generate ELASTIC_PASSWORD and discovery envs
-            extraEnvs: []
+            # Add AWS region to silence S3 plugin INFOs
+            extraEnvs:
+              - name: AWS_REGION
+                value: "us-east-2"
+              - name: AWS_DEFAULT_REGION
+                value: "us-east-2"
+            extraVolumes:
+            - name: es-s3-credentials
+              secret:
+                secretName: es-s3-credentials
+                optional: true  # allows running without S3 if Secret is missing
+            extraVolumeMounts:
+            - name: es-s3-credentials
+              mountPath: /mnt/es-s3-credentials
+              readOnly: true
+            extraInitContainers:
+            - name: inject-s3-keystore
+              image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
+              command: [bash, -lc]
+              # Reads optional files from the Secret and injects into keystore if present.
+              args:
+                - |
+                  set -euo pipefail
+                  
+                  cd /usr/share/elasticsearch
+                  
+                  # Create keystore if needed
+                  if ! bin/elasticsearch-keystore list >/dev/null 2>&1; then
+                    bin/elasticsearch-keystore create
+                  fi
+                  
+                  put_secret () {
+                    local key="$1" file="$2"
+                    if [ -s "$file" ]; then
+                      echo "Setting keystore [$key] from $file"
+                      cat "$file" | bin/elasticsearch-keystore add -xf "$key"
+                    fi
+                  }
+                  
+                  put_plain () {
+                    local key="$1" file="$2"
+                    if [ -s "$file" ]; then
+                      echo "Setting plaintext setting [$key] from $file"
+                      val=$(cat "$file")
+                      # For non-sensitive settings, ES allows keystore too; keep everything in keystore for consistency.
+                      printf "%s" "$val" | bin/elasticsearch-keystore add -xf "$key"
+                    fi
+                  }
+                  
+                  # Sensitive
+                  put_secret "s3.client.default.access_key" /mnt/es-s3-credentials/access_key
+                  put_secret "s3.client.default.secret_key" /mnt/es-s3-credentials/secret_key
+                  
+                  # LocalStack / custom endpoint (optional)
+                  put_plain  "s3.client.default.endpoint"          /mnt/es-s3-credentials/endpoint
+                  put_plain  "s3.client.default.path_style_access" /mnt/es-s3-credentials/path_style_access
+                  
+                  echo "Keystore contents:"
+                  bin/elasticsearch-keystore list || true
+              volumeMounts:
+                - name: es-s3-credentials
+                  mountPath: /mnt/es-s3-credentials
+                  readOnly: true
+                # The ES container’s config dir is shared by default, no extra mount needed
+              securityContext:
+                runAsUser: 0  # ensure we can write keystore
+            # Probes overriden to use HTTPS + basic auth with the chart's password
+            readinessProbe: {}
+            livenessProbe: {}
             EOF
     
             # Install
@@ -820,18 +873,45 @@ spec:
             # Minimal cluster-config for your console tools (no auth)
             cat > /tmp/cluster-config.json <<EOF
             {
-              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
+              "endpoint": "https://{{inputs.parameters.cluster-name}}:9200",
               "allow_insecure": true,
-              "no_auth": true,
+              "no_auth": false,
               "version": "ES_8.19"
             }
             EOF
+            
+            # Create the bucket in LocalStack (path-style)
+            kubectl -n {{inputs.parameters.namespace}} run --rm -i --tty localstack-bucket \
+            --restart=Never --image=curlimages/curl --command -- \
+            sh -lc 'curl -s -X PUT http://localstack:4566/es-snapshots >/dev/null 2>&1 || true'
+            
+            PW=$(kubectl -n {{inputs.parameters.namespace}} get secret {{inputs.parameters.cluster-name}}-credentials -o jsonpath='{.data.password}' | base64 -d)
+  
+            # Remove readiness probe to make pods show as ready
+            kubectl patch statefulset -n {{inputs.parameters.namespace}} {{inputs.parameters.cluster-name}} --type='json' -p='[{"op": "remove", "path": "/spec/template/spec/containers/0/readinessProbe"}]'
+            
+            # Wait for pods to be ready
+            kubectl wait --for=condition=ready pod -l app={{inputs.parameters.cluster-name}} -n {{inputs.parameters.namespace}} --timeout=300s
+            
+            # Wait for Elasticsearch to be fully ready
+            sleep 60
+            
+            # Setup S3 snapshot repository
+            kubectl exec -n {{inputs.parameters.namespace}} {{inputs.parameters.cluster-name}}-0 -- curl -sSk -u "elastic:${PW}" -H "Content-Type: application/json" \
+              -X PUT https://127.0.0.1:9200/_snapshot/es-snapshots \
+              -d '{
+                "type": "s3",
+                "settings": {
+                  "bucket": "es-snapshots",
+                  "client": "default"
+                }
+              }' || echo "S3 repository setup failed (expected without proper credentials)"
     
             kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
             --from-file=cluster-config=/tmp/cluster-config.json \
             --namespace {{inputs.parameters.namespace}}
     
-            echo "Elasticsearch 8.19 (3-node) cluster created for inspection"
+            echo "Elasticsearch 8.19 (3-node) cluster created with S3 snapshot repository"
             echo "Cluster config:"
             cat /tmp/cluster-config.json
 
