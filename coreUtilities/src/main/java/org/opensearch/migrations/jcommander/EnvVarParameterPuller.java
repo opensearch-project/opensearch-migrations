@@ -116,7 +116,7 @@ public class EnvVarParameterPuller {
         throws IllegalAccessException
     {
         // Try to find environment variable value
-        String envValue = findEnvValue(field.getName(), annotation, envVarGetter, prefix, suffix);
+        String envValue = findEnvValue(annotation, envVarGetter, prefix, suffix);
         if (envValue != null) {
             setFieldValue(params, field, envValue);
             String envVarName = toEnvVarName(field.getName(), prefix, suffix);
@@ -124,7 +124,7 @@ public class EnvVarParameterPuller {
         }
     }
 
-    private static String findEnvValue(String fieldName, Parameter annotation, EnvVarGetter envVarGetter,
+    private static String findEnvValue(Parameter annotation, EnvVarGetter envVarGetter,
                                        String prefix, String suffix) {
         // Also try parameter names from annotation (converted to env var format)
         if (annotation.names().length > 0) {
