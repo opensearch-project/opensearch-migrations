@@ -67,7 +67,7 @@ class ScriptRunner:
         Run a script with standard interface.
 
         Args:
-            script_name: Name of script (e.g., 'getSample.sh')
+            script_name: Name of script (e.g., 'createMigrationWorkflowFromUserConfiguration.sh')
             input_data: Optional data to pass via stdin
             *args: Additional command line arguments
 

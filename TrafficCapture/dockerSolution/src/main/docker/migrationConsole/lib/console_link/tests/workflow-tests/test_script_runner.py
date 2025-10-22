@@ -17,7 +17,6 @@ class TestScriptRunner:
         """Test script runner finds test scripts."""
         runner = ScriptRunner()
         assert runner.script_dir.exists()
-        assert (runner.script_dir / "getSample.sh").exists()
 
     def test_get_sample_config(self):
         """Test getting sample configuration."""
@@ -26,7 +25,10 @@ class TestScriptRunner:
 
         assert sample
         assert "parameters" in sample
+        # Verify hello-world specific fields
         assert "message" in sample
+        assert "requiresApproval" in sample
+        assert "approver" in sample
 
     def test_transform_config(self):
         """Test config transformation."""
@@ -170,8 +172,13 @@ class TestScriptRunner:
             temp_path = Path(temp_dir)
             sample_file = temp_path / "sample.yaml"
 
-            # Write a custom sample config
-            custom_content = "custom:\n  config: value\nparameters:\n  test: data"
+            # Write a hello-world style sample config
+            custom_content = """# Sample workflow configuration
+parameters:
+  message: "Test message"
+  requiresApproval: true
+  approver: "test-user"
+"""
             sample_file.write_text(custom_content)
 
             runner = ScriptRunner(script_dir=temp_path)
@@ -180,5 +187,6 @@ class TestScriptRunner:
             sample = runner.get_sample_config()
 
             assert sample == custom_content
-            assert "custom" in sample
-            assert "Workflow Configuration Template" not in sample
+            assert "parameters" in sample
+            assert "message" in sample
+            assert "requiresApproval" in sample
