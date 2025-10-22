@@ -1,4 +1,0 @@
-parameters:
-  message: "Hello World from sample configuration"
-  requiresApproval: true
-  approver: ""
