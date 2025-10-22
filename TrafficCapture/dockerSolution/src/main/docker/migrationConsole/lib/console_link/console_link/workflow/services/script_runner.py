@@ -21,8 +21,7 @@ class ScriptRunner:
         Args:
             script_dir: Optional path to scripts. If None, checks environment variables in priority order:
                 1. CONFIG_PROCESSOR_DIR - Production config processor directory
-                2. WORKFLOW_SCRIPT_DIR - Legacy/test script directory override
-                3. Fallback to test resources for backward compatibility
+                2. Fallback to test resources for backward compatibility
         """
         if script_dir is None:
             # Priority 1: Check for CONFIG_PROCESSOR_DIR (production)
@@ -31,24 +30,18 @@ class ScriptRunner:
                 self.script_dir = Path(config_processor_dir)
                 logger.debug(f"Using CONFIG_PROCESSOR_DIR: {self.script_dir}")
             else:
-                # Priority 2: Check for WORKFLOW_SCRIPT_DIR (legacy/test override)
-                env_script_dir = os.environ.get('WORKFLOW_SCRIPT_DIR')
-                if env_script_dir:
-                    self.script_dir = Path(env_script_dir)
-                    logger.debug(f"Using WORKFLOW_SCRIPT_DIR: {self.script_dir}")
-                else:
-                    # Priority 3: Fallback to test resources
-                    # Navigate from this file to test resources
-                    # Path: console_link/workflow/services/script_runner.py
-                    # Target: tests/workflow-tests/resources/scripts
-                    current_file = Path(__file__)
-                    # Go up to console_link package root
-                    console_link_pkg = current_file.parent.parent.parent
-                    # Go up one more to lib root, then to tests
-                    lib_root = console_link_pkg.parent
-                    test_resources = lib_root / "tests" / "workflow-tests" / "resources" / "scripts"
-                    self.script_dir = test_resources
-                    logger.debug(f"Using test resources fallback: {self.script_dir}")
+                # Priority 2: Fallback to test resources
+                # Navigate from this file to test resources
+                # Path: console_link/workflow/services/script_runner.py
+                # Target: tests/workflow-tests/resources/scripts
+                current_file = Path(__file__)
+                # Go up to console_link package root
+                console_link_pkg = current_file.parent.parent.parent
+                # Go up one more to lib root, then to tests
+                lib_root = console_link_pkg.parent
+                test_resources = lib_root / "tests" / "workflow-tests" / "resources" / "scripts"
+                self.script_dir = test_resources
+                logger.debug(f"Using test resources fallback: {self.script_dir}")
         else:
             self.script_dir = Path(script_dir)
 
