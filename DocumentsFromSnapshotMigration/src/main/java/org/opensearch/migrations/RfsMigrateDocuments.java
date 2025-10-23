@@ -237,8 +237,8 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--no-work-retry-delay-seconds", "--noWorkRetryDelaySeconds" },
-            description = "Seconds to wait when no work items available before retrying. Default: 30")
-        public int noWorkRetryDelaySeconds = 30;
+            description = "Seconds to wait when no work items available before retrying. Use 0 to exit immediately when no work is available. Default: 2")
+        public int noWorkRetryDelaySeconds = 2;
 
         @ParametersDelegate
         private ExperimentalArgs experimental = new ExperimentalArgs();
@@ -320,9 +320,13 @@ public class RfsMigrateDocuments {
      * @param baseDurationSeconds Base sleep duration in seconds
      */
     private static void sleepWithJitter(int baseDurationSeconds) throws InterruptedException {
-        // Add up to 25% jitter to avoid thundering herd
+        if (baseDurationSeconds <= 0) {
+            // Respect 0: return immediately (no idle)
+            return;
+        }
+        // Add up to 25% jitter
         double jitterFactor = 0.75 + (ThreadLocalRandom.current().nextDouble() * 0.5); // 0.75 to 1.25
-        long sleepMillis = Math.round(baseDurationSeconds * 1000 * jitterFactor);
+        long sleepMillis = Math.round(baseDurationSeconds * 1000L * jitterFactor);
         log.atInfo().setMessage("No work available, sleeping for {} ms before retrying").addArgument(sleepMillis).log();
         Thread.sleep(sleepMillis);
     }
