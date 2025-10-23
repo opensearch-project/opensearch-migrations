@@ -1,8 +1,43 @@
 """
-Integration tests for workflow CLI commands using real k3s test containers.
+Integration tests for workflow CLI commands using Kubernetes clusters.
 
-These tests use testcontainers-python with k3s to provide a lightweight
-Kubernetes environment for testing.
+These tests support three execution modes:
+
+1. **GitHub Actions (CI)**: Uses a pre-configured Kind cluster set up by the workflow.
+   The cluster is created before tests run and is automatically detected.
+
+2. **Local with existing cluster**: Auto-detects and uses any accessible Kubernetes
+   cluster (minikube, k3s, kind, etc.) configured in your kubeconfig.
+
+3. **Local without cluster**: Falls back to creating a k3s container using
+   testcontainers-python for a lightweight, isolated test environment.
+
+The test suite automatically detects which mode to use based on cluster availability.
+No manual configuration is required - the tests adapt to the environment.
+
+## Running Tests Locally
+
+### With existing cluster (fastest):
+```bash
+# Start minikube, kind, or k3s first
+minikube start  # or: kind create cluster
+pytest tests/workflow-tests/test_workflow_integration.py
+```
+
+### Without existing cluster (automatic fallback):
+```bash
+# Tests will automatically create k3s container
+pytest tests/workflow-tests/test_workflow_integration.py
+```
+
+## Architecture
+
+The cluster detection logic is implemented in helper functions:
+- `_detect_existing_kubernetes_cluster()`: Checks for accessible cluster
+- `_get_kubernetes_client()`: Returns configured client for existing cluster
+
+The `k3s_container` fixture conditionally creates a k3s container only when
+no existing cluster is detected, ensuring tests work in all environments.
 """
 
 import logging
@@ -228,41 +263,147 @@ class ArgoWorkflowsWaiter:
 
 
 # ============================================================================
+# Cluster Detection Helper Functions
+# ============================================================================
+
+def _detect_existing_kubernetes_cluster():
+    """
+    Detect if a Kubernetes cluster is already available and accessible.
+    
+    This function attempts to load the kubeconfig and connect to a cluster.
+    It's used to determine whether to use an existing cluster (e.g., Kind in CI,
+    minikube locally) or fall back to creating a k3s container.
+    
+    Returns:
+        bool: True if an existing cluster is accessible, False otherwise
+    """
+    try:
+        # Try to load kubeconfig from default location or KUBECONFIG env var
+        config.load_kube_config()
+        
+        # Attempt to connect to the cluster by listing namespaces
+        v1 = client.CoreV1Api()
+        namespaces = v1.list_namespace(timeout_seconds=10)
+        
+        # If we got here, we have a working cluster
+        logger.info("✓ Detected existing Kubernetes cluster")
+        logger.info(f"  Found {len(namespaces.items)} namespaces")
+        
+        # Log cluster context for debugging
+        contexts, active_context = config.list_kube_config_contexts()
+        if active_context:
+            cluster_name = active_context.get('context', {}).get('cluster', 'unknown')
+            logger.info(f"  Active context: {active_context.get('name', 'unknown')}")
+            logger.info(f"  Cluster: {cluster_name}")
+        
+        return True
+        
+    except config.ConfigException as e:
+        logger.info(f"No kubeconfig found: {e}")
+        return False
+    except ApiException as e:
+        logger.info(f"Kubernetes API error: {e}")
+        return False
+    except Exception as e:
+        logger.info(f"Failed to connect to existing cluster: {e}")
+        return False
+
+
+def _get_kubernetes_client():
+    """
+    Get a configured Kubernetes client from an existing cluster.
+    
+    This function loads the kubeconfig and returns a CoreV1Api client.
+    It should only be called after _detect_existing_kubernetes_cluster()
+    has confirmed a cluster is available.
+    
+    Returns:
+        client.CoreV1Api: Configured Kubernetes client, or None if unable to connect
+    """
+    try:
+        # Load kubeconfig (should already be loaded, but ensure it's available)
+        config.load_kube_config()
+        
+        # Create and return the client
+        v1 = client.CoreV1Api()
+        
+        # Verify the client works
+        v1.list_namespace(timeout_seconds=10)
+        
+        return v1
+        
+    except Exception as e:
+        logger.error(f"Failed to create Kubernetes client: {e}")
+        return None
+
+
+# ============================================================================
 # Test Fixtures
 # ============================================================================
 
 @pytest.fixture(scope="session")
 def k3s_container():
-    """Set up k3s container for all workflow tests"""
-    logger.info("\nStarting k3s container for workflow tests...")
+    """
+    Set up Kubernetes cluster for all workflow tests.
+    
+    This fixture supports three modes:
+    1. GitHub Actions: Uses existing Kind cluster set up by the workflow
+    2. Local with existing cluster: Auto-detects minikube/k3s/kind
+    3. Local without cluster: Falls back to creating k3s container
+    
+    The fixture automatically detects which mode to use and configures
+    the Kubernetes client accordingly.
+    """
+    # First, check if an existing Kubernetes cluster is available
+    has_existing_cluster = _detect_existing_kubernetes_cluster()
+    
+    if has_existing_cluster:
+        logger.info("\n=== Using existing Kubernetes cluster ===")
+        logger.info("Skipping k3s container creation")
+        
+        # Verify we can get a working client
+        k8s_client = _get_kubernetes_client()
+        if k8s_client is None:
+            pytest.fail("Detected existing cluster but failed to create client")
+        
+        # Yield a sentinel value to indicate we're using an existing cluster
+        # The actual kubeconfig is already loaded by _detect_existing_kubernetes_cluster()
+        yield {"mode": "existing-cluster", "container": None}
+        
+        # No cleanup needed for existing cluster
+        logger.info("\nUsing existing cluster - no cleanup needed")
+        
+    else:
+        logger.info("\n=== No existing cluster detected ===")
+        logger.info("Starting k3s container for workflow tests...")
 
-    # Start k3s container
-    container = K3SContainer(image="rancher/k3s:latest")
-    container.start()
+        # Start k3s container
+        container = K3SContainer(image="rancher/k3s:latest")
+        container.start()
 
-    # Get kubeconfig from container
-    kubeconfig = container.config_yaml()
+        # Get kubeconfig from container
+        kubeconfig = container.config_yaml()
 
-    # Write kubeconfig to temporary file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(kubeconfig)
-        kubeconfig_path = f.name
+        # Write kubeconfig to temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(kubeconfig)
+            kubeconfig_path = f.name
 
-    # Set KUBECONFIG environment variable
-    os.environ['KUBECONFIG'] = kubeconfig_path
+        # Set KUBECONFIG environment variable
+        os.environ['KUBECONFIG'] = kubeconfig_path
 
-    # Load the kubeconfig
-    config.load_kube_config(config_file=kubeconfig_path)
+        # Load the kubeconfig
+        config.load_kube_config(config_file=kubeconfig_path)
 
-    yield container
+        yield {"mode": "k3s-container", "container": container}
 
-    logger.info("\nCleaning up k3s container...")
-    # Clean up
-    container.stop()
-    if os.path.exists(kubeconfig_path):
-        os.unlink(kubeconfig_path)
-    if 'KUBECONFIG' in os.environ:
-        del os.environ['KUBECONFIG']
+        logger.info("\nCleaning up k3s container...")
+        # Clean up
+        container.stop()
+        if os.path.exists(kubeconfig_path):
+            os.unlink(kubeconfig_path)
+        if 'KUBECONFIG' in os.environ:
+            del os.environ['KUBECONFIG']
 
 
 @pytest.fixture(scope="session")
