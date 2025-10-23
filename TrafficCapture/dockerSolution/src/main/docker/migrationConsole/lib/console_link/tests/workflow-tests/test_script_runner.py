@@ -5,7 +5,6 @@ import pytest
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
-import yaml
 import json
 
 from console_link.workflow.services.script_runner import ScriptRunner

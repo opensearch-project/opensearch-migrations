@@ -141,7 +141,6 @@ def submit_command(ctx, namespace, prefix, wait, timeout, wait_interval, session
             submit_result = runner.submit_workflow(config_yaml, workflow_prefix, namespace)
 
             workflow_name = submit_result.get('workflow_name', 'unknown')
-            workflow_uid = submit_result.get('workflow_uid', 'unknown')
 
             click.echo("\nWorkflow submitted successfully")
             click.echo(f"  Name: {workflow_name}")

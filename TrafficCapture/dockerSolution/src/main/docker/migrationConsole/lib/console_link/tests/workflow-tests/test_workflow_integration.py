@@ -64,7 +64,7 @@ def argo_workflows(k3s_container):
     logger.info("\nInstalling Argo Workflows in k3s...")
 
     # Argo Workflows version to install
-    argo_version = "v3.5.12"
+    argo_version = "v3.7.3"
     argo_namespace = "argo"
 
     v1 = client.CoreV1Api()
@@ -86,7 +86,7 @@ def argo_workflows(k3s_container):
     # Using install.yaml instead of quick-start-minimal.yaml for lighter installation
     manifest_url = (
         f"https://github.com/argoproj/argo-workflows/releases/download/"
-        f"{argo_version}/install.yaml"
+        f"{argo_version}/quick-start-minimal.yaml"
     )
 
     try:
@@ -195,8 +195,10 @@ def argo_workflows(k3s_container):
 
                             container_statuses.append(f"{cs.name}:{state}{':'+reason if reason else ''}")
 
-                    logger.info(
-                        f"    - {pod_name}: {phase} [{', '.join(container_statuses) if container_statuses else 'no containers'}]")
+                    container_status_str = (
+                        ', '.join(container_statuses) if container_statuses else 'no containers'
+                    )
+                    logger.info(f"    - {pod_name}: {phase} [{container_status_str}]")
 
                 # Get recent events for debugging
                 try:
@@ -713,7 +715,8 @@ class TestArgoWorkflows:
                 }
             },
             "spec": {
-                "serviceAccountName": "argo",  # Use the argo service account
+                # Use default service account which has executor role bound in quickstart
+                # The executor role grants permission to create workflowtaskresults
                 "templates": [
                     {
                         "name": "hello-world",
