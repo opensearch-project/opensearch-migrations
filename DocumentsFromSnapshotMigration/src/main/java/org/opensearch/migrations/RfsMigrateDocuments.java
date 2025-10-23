@@ -392,6 +392,12 @@ public class RfsMigrateDocuments {
 
         validateArgs(arguments);
 
+        log.atInfo()
+            .setMessage("Mode: continuous={} noWorkDelaySeconds={}")
+            .addArgument(arguments.continuousMode)
+            .addArgument(arguments.noWorkRetryDelaySeconds)
+            .log();
+
         var context = makeRootContext(arguments, workerId);
         var luceneDirPath = Paths.get(arguments.luceneDir);
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
