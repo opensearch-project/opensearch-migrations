@@ -22,13 +22,11 @@ import org.testcontainers.lifecycle.Startables;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Continuous worker behavior (ReplicaSet-friendly):
- * - runs with --continuous-mode (default true)
- * - processes multiple work items in sequence
- * - idles/sleeps when no work is available (does not exit)
- * - exits cleanly on interruption (simulated SIGTERM)
- *
- * This test extends SourceTestBase to reuse existing cluster management infrastructure.
+ * Validates the continuous-worker behavior for RFS:
+ *  - runs with --continuous-mode (loop)
+ *  - processes all available work items
+ *  - remains alive (idles) when no work is left
+ *  - exits cleanly when interrupted (simulated SIGTERM)
  */
 @Slf4j
 public class ContinuousWorkerTest extends SourceTestBase {
@@ -58,7 +56,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
             final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_16);
             final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_1)
         ) {
-            runContinuousHappyPath(sourceCluster, targetCluster, sampleDocs(), 1);
+            runContinuousHappyPath(sourceCluster, targetCluster, sampleDocs(), 2);
         }
     }
 
@@ -68,7 +66,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
             final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
             final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V1_3_16)
         ) {
-            runContinuousHappyPath(sourceCluster, targetCluster, sampleDocs(), 1);
+            runContinuousHappyPath(sourceCluster, targetCluster, sampleDocs(), 2);
         }
     }
 
@@ -82,29 +80,27 @@ public class ContinuousWorkerTest extends SourceTestBase {
         final var testDocMigrationContext = DocumentMigrationTestContext.factory().noOtelTracking();
 
         try {
-            // 1) Index setup - start clusters and create index
+            // 1) Bring clusters up and define matching index
             Startables.deepStart(sourceCluster, targetCluster).join();
-            
-            var sourceClusterOperations = new ClusterOperations(sourceCluster);
-            var targetClusterOperations = new ClusterOperations(targetCluster);
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
 
-            // Create index on both clusters
             String indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}}";
-            sourceClusterOperations.createIndex(INDEX, indexBody);
-            targetClusterOperations.createIndex(INDEX, indexBody);
+            sourceOps.createIndex(INDEX, indexBody);
+            targetOps.createIndex(INDEX, indexBody);
 
-            // 2) Seed source with documents
+            // 2) Seed source with docs
             for (int i = 0; i < docs.size(); i++) {
-                sourceClusterOperations.createDocument(INDEX, String.valueOf(i), docs.get(i), null, null);
+                sourceOps.createDocument(INDEX, String.valueOf(i), docs.get(i), null, null);
             }
-            sourceClusterOperations.post("/" + INDEX + "/_refresh", null);
+            sourceOps.post("/" + INDEX + "/_refresh", null);
 
-            // 3) Create snapshot
+            // 3) Snapshot + local copy for RFS
             var snapshotName = "cw-snapshot-" + System.currentTimeMillis();
             createSnapshot(sourceCluster, snapshotName, snapshotContext);
             sourceCluster.copySnapshotData(localDirectory.toString());
 
-            // 4) Start RFS in continuous mode (in-process) on a background thread
+            // 4) Kick off RFS worker (invoking main) in continuous mode
             String session = "cw-" + System.currentTimeMillis();
             String[] args = buildArgsForContinuousRun(
                 session,
@@ -116,30 +112,38 @@ public class ContinuousWorkerTest extends SourceTestBase {
             );
 
             CountDownLatch started = new CountDownLatch(1);
+            CountDownLatch finished = new CountDownLatch(1);
+
             workerThread = new Thread(() -> {
                 try {
                     started.countDown();
                     RfsMigrateDocuments.main(args);
                 } catch (Throwable t) {
-                    // Make failures surface in test logs
                     log.error("Worker threw exception", t);
                     fail("Worker threw: " + t);
+                } finally {
+                    finished.countDown();
                 }
             }, "rfs-continuous-worker");
             workerThread.start();
             started.await();
 
-            // 5) Wait for the docs to arrive on target
+            // 5) Wait until target sees all docs
             awaitCount(targetCluster, INDEX, docs.size(), Duration.ofSeconds(30));
 
-            // 6) Ensure the worker is still alive (continuous mode should not exit after success)
-            assertTrue(workerThread.isAlive(), "Continuous worker should remain alive (idling) after finishing current work");
+            // 6) Give worker a brief grace period to enter idle state
+            Thread.sleep(350);
+            
+            // Worker should remain alive (idling) after finishing current work
+            assertTrue(workerThread.isAlive(), "Worker should be idling in continuous mode after finishing work");
 
-            // 7) Simulate orchestrator stop: interrupt the thread (loop condition checks interruption)
+            // 7) Simulate orchestrator stop (ReplicaSet scaled to 0) via interrupt
             workerThread.interrupt();
             workerThread.join(10_000);
             assertFalse(workerThread.isAlive(), "Worker should exit promptly after interruption");
 
+            // Ensure the thread actually left main (clean termination path)
+            assertTrue(finished.getCount() == 0, "Worker did not signal finished latch");
         } finally {
             deleteTree(localDirectory.toPath());
         }
@@ -156,7 +160,8 @@ public class ContinuousWorkerTest extends SourceTestBase {
     }
 
     /**
-     * Build CLI args for continuous mode testing.
+     * Build CLI args for RFS continuous loop.
+     * We explicitly set continuous-mode and a short no-work delay so the test is snappy.
      */
     private String[] buildArgsForContinuousRun(
         String sessionName,
@@ -167,62 +172,46 @@ public class ContinuousWorkerTest extends SourceTestBase {
         int noWorkDelaySeconds
     ) {
         List<String> args = new ArrayList<>(List.of(
-            // target cluster
             "--target-host", targetCluster.getUrl(),
-
-            // snapshot params
             "--snapshot-name", snapshotName,
             "--snapshot-local-dir", localDirectory.toString(),
             "--lucene-dir", localDirectory.toString() + "/lucene",
-
-            // source version
             "--source-version", sourceCluster.getContainerVersion().getVersion().toString(),
-
-            // session
             "--session-name", sessionName,
-
-            // index filtering to keep the test tight
             "--index-allowlist", index,
-
-            // continuous behavior - note: continuous-mode defaults to true, but being explicit
-            "--continuous-mode",
             "--no-work-retry-delay-seconds", String.valueOf(noWorkDelaySeconds)
         ));
-
         return args.toArray(String[]::new);
     }
 
     /**
-     * Helper method to wait for a specific document count on the target cluster.
-     * This method polls the target cluster until the expected count is reached or timeout occurs.
+     * Poll target until the index has expectedCount docs or timeout expires.
      */
-    private void awaitCount(SearchClusterContainer targetCluster, String index, long expectedCount, Duration timeout) throws Exception {
-        var targetClusterOperations = new ClusterOperations(targetCluster);
-        long startTime = System.currentTimeMillis();
-        long timeoutMs = timeout.toMillis();
-        
-        while (System.currentTimeMillis() - startTime < timeoutMs) {
+    private void awaitCount(
+        SearchClusterContainer targetCluster,
+        String index,
+        long expectedCount,
+        Duration timeout
+    ) throws Exception {
+        var ops = new ClusterOperations(targetCluster);
+        long start = System.currentTimeMillis();
+        long limit = timeout.toMillis();
+
+        while (System.currentTimeMillis() - start < limit) {
             try {
-                // Refresh the index to ensure we get the latest count
-                targetClusterOperations.post("/" + index + "/_refresh", null);
-                
-                // Get the document count
-                var response = targetClusterOperations.get("/" + index + "/_count");
-                if (response.getKey() == 200) {
-                    var countResponse = response.getValue();
-                    // Parse the count from the response (simple string parsing for test purposes)
-                    if (countResponse.contains("\"count\":" + expectedCount)) {
-                        return; // Success!
+                ops.post("/" + index + "/_refresh", null);
+                var resp = ops.get("/" + index + "/_count");
+                if (resp.getKey() == 200) {
+                    var body = resp.getValue();
+                    if (body.contains("\"count\":" + expectedCount)) {
+                        return;
                     }
                 }
-                
-                Thread.sleep(500); // Wait 500ms before next check
             } catch (Exception e) {
-                log.debug("Error checking document count, will retry", e);
-                Thread.sleep(500);
+                log.debug("Count check failed; retrying...", e);
             }
+            Thread.sleep(400);
         }
-        
-        fail("Expected " + expectedCount + " documents in index " + index + " within " + timeout + ", but timeout occurred");
+        fail("Timed out waiting for " + expectedCount + " docs in index " + index + " within " + timeout);
     }
 }
