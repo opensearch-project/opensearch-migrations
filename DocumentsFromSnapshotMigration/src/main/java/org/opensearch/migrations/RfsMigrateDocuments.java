@@ -480,58 +480,44 @@ public class RfsMigrateDocuments {
                 sourceResourceProvider.getBufferSizeInBytes()
             );
 
-            // Continuous mode: loop until SIGTERM, even if temporarily no work
+            // Continuous mode loops until SIGTERM, Single-run executes once
             if (arguments.continuousMode) {
                 log.atInfo().setMessage("Running in continuous mode - will process multiple work items until SIGTERM").log();
-                while (!Thread.currentThread().isInterrupted() && !cleanShutdownCompleted.get()) {
-                    try {
-                        run(
-                            new LuceneIndexReader.Factory(sourceResourceProvider),
-                            reindexer,
-                            progressCursor,
-                            workCoordinator,
-                            arguments.initialLeaseDuration,
-                            processManager,
-                            sourceResourceProvider.getIndexMetadata(),
-                            arguments.snapshotName,
-                            arguments.experimental.previousSnapshotName,
-                            arguments.experimental.experimentalDeltaMode,
-                            arguments.indexAllowlist,
-                            sourceResourceProvider.getShardMetadata(),
-                            unpackerFactory,
-                            arguments.maxShardSizeBytes,
-                            context,
-                            cancellationRunnableRef,
-                            workItemTimeProvider);
-                        // completed a unit of work (or planned successors). Prepare for next claim.
-                        progressCursor.set(null);
-                        workItemRef.set(null);
-                    } catch (NoWorkLeftException e) {
+            }
+            
+            do {
+                try {
+                    run(
+                        new LuceneIndexReader.Factory(sourceResourceProvider),
+                        reindexer,
+                        progressCursor,
+                        workCoordinator,
+                        arguments.initialLeaseDuration,
+                        processManager,
+                        sourceResourceProvider.getIndexMetadata(),
+                        arguments.snapshotName,
+                        arguments.experimental.previousSnapshotName,
+                        arguments.experimental.experimentalDeltaMode,
+                        arguments.indexAllowlist,
+                        sourceResourceProvider.getShardMetadata(),
+                        unpackerFactory,
+                        arguments.maxShardSizeBytes,
+                        context,
+                        cancellationRunnableRef,
+                        workItemTimeProvider);
+                    // completed a unit of work (or planned successors). Prepare for next claim.
+                    progressCursor.set(null);
+                    workItemRef.set(null);
+                } catch (NoWorkLeftException e) {
+                    if (arguments.continuousMode) {
                         // No work currently available: remain alive and retry after a delay.
                         sleepWithJitter(arguments.noWorkRetryDelaySeconds);
+                    } else {
+                        // Single-run mode: exit when no work is available
+                        throw e;
                     }
                 }
-            } else {
-                // Legacy single work item mode
-                run(
-                    new LuceneIndexReader.Factory(sourceResourceProvider),
-                    reindexer,
-                    progressCursor,
-                    workCoordinator,
-                    arguments.initialLeaseDuration,
-                    processManager,
-                    sourceResourceProvider.getIndexMetadata(),
-                    arguments.snapshotName,
-                    arguments.experimental.previousSnapshotName,
-                    arguments.experimental.experimentalDeltaMode,
-                    arguments.indexAllowlist,
-                    sourceResourceProvider.getShardMetadata(),
-                    unpackerFactory,
-                    arguments.maxShardSizeBytes,
-                    context,
-                    cancellationRunnableRef,
-                    workItemTimeProvider);
-            }
+            } while (arguments.continuousMode && !Thread.currentThread().isInterrupted() && !cleanShutdownCompleted.get());
             cleanShutdownCompleted.set(true);
         } catch (NoWorkLeftException e) {
             if (!arguments.continuousMode) {
