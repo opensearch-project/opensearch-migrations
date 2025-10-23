@@ -73,6 +73,11 @@ public class IndexRunner {
                 creationResults.add(createInner(indexName, mode, context, transformedMetadata));
             }
         } catch (Exception e) {
+            log.atError()
+                .setMessage("Index Creation failed with error \"{}\":")
+                .addArgument(CreationFailureType.UNABLE_TO_TRANSFORM_FAILURE.getMessage())
+                .setCause(e)
+                .log();
             creationResults.add(CreationResult.builder()
                 .name(indexName)
                 .exception(new IndexTransformationException(indexName, e))
