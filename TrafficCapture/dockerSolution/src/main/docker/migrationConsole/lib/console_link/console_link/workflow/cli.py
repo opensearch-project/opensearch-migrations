@@ -7,6 +7,10 @@ from click.shell_completion import get_completion_class
 
 from .models.utils import ExitCode
 from .commands.configure import configure_group
+from .commands.submit import submit_command
+from .commands.stop import stop_command
+from .commands.approve import approve_command
+from .commands.status import status_command
 
 logger = logging.getLogger(__name__)
 
@@ -48,27 +52,14 @@ def util_group(ctx):
 @click.argument('shell', type=click.Choice(['bash', 'zsh', 'fish']))
 @click.pass_context
 def completion(ctx, shell):
-    """Generate shell completion script and instructions for setup.
+    """Generate shell completion script for bash, zsh, or fish.
 
-    Supported shells: bash, zsh, fish
+    Example setup:
+      Bash: workflow completion bash > /etc/bash_completion.d/workflow
+      Zsh:  workflow completion zsh > "${fpath[1]}/_workflow"
+      Fish: workflow completion fish > ~/.config/fish/completions/workflow.fish
 
-    To enable completion:
-
-    Bash:
-      workflow completion bash > /etc/bash_completion.d/workflow
-      # Then restart your shell
-
-    Zsh:
-      # If shell completion is not already enabled in your environment,
-      # you will need to enable it. You can execute the following once:
-      echo "autoload -U compinit; compinit" >> ~/.zshrc
-
-      workflow completion zsh > "${fpath[1]}/_workflow"
-      # Then restart your shell
-
-    Fish:
-      workflow completion fish > ~/.config/fish/completions/workflow.fish
-      # Then restart your shell
+    Restart your shell after installation.
     """
     completion_class = get_completion_class(shell)
     if completion_class is None:
@@ -88,6 +79,10 @@ def completion(ctx, shell):
 
 # Add command groups
 workflow_cli.add_command(configure_group)
+workflow_cli.add_command(submit_command)
+workflow_cli.add_command(stop_command)
+workflow_cli.add_command(approve_command)
+workflow_cli.add_command(status_command)
 workflow_cli.add_command(util_group)
 
 
