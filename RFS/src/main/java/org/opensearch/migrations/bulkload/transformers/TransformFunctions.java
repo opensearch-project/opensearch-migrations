@@ -17,6 +17,12 @@ public class TransformFunctions {
     /* Turn dotted index settings into a tree, will start like:
      * {"index.number_of_replicas":"1","index.number_of_shards":"5","index.version.created":"6082499"}
      * 
+     * Strategy: First pass collects all keys and extracts their prefixes (e.g., "a.b.c" yields prefixes "a" and "a.b").
+     * Second pass performs bidirectional conflict detection: checks whether each key exists in the prefix set (meaning
+     * other keys would nest under it) and whether any of its own prefixes exist in the key set (meaning it would nest
+     * under another value). Keys with conflicts remain flat; conflict-free keys are nested into tree structure.
+     * Complexity is O(N) where N is the total number of keys and prefixes across all keys.
+     * 
      * Special handling for conflicting keys: When a scalar value like "knn": "true" exists
      * alongside nested properties like "knn.space_type": "l2", we keep the settings flat
      * to preserve both values. This means the output will have both "knn": "true" and

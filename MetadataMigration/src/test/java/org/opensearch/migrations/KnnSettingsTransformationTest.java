@@ -52,11 +52,14 @@ class KnnSettingsTransformationTest extends BaseMigrationTest {
         }
     }
 
+    record IndexConfig(String name, String settingsJson) {}
+
     @SneakyThrows
     private void performKnnSettingsTest() {
         startClusters();
 
-        String flatDottedFormat = "{\n" +
+        var indexConfigs = List.of(
+            new IndexConfig("test-knn-1", "{\n" +
                 "  \"settings\": {\n" +
                 "    \"index\": {\n" +
                 "      \"number_of_shards\": \"1\",\n" +
@@ -65,9 +68,22 @@ class KnnSettingsTransformationTest extends BaseMigrationTest {
                 "      \"number_of_replicas\": \"1\"\n" +
                 "    }\n" +
                 "  }\n" +
-                "}";
-        var indexName = "test-knn";
-        sourceOperations.createIndex(indexName, flatDottedFormat);
+                "}"),
+            new IndexConfig("test-knn-2", "{\n" +
+                "  \"settings\": {\n" +
+                "    \"index\": {\n" +
+                "      \"number_of_shards\": \"1\",\n" +
+                "      \"knn\": \"true\",\n" +
+                "      \"knn.algo_param.ef_search\": 100,\n" +
+                "      \"number_of_replicas\": \"1\"\n" +
+                "    }\n" +
+                "  }\n" +
+                "}")
+        );
+
+        for (var config : indexConfigs) {
+            sourceOperations.createIndex(config.name(), config.settingsJson());
+        }
 
         var snapshotName = "knn_settings_snap";
         var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
@@ -92,21 +108,31 @@ class KnnSettingsTransformationTest extends BaseMigrationTest {
 
         ObjectMapper mapper = new ObjectMapper();
 
-        for (var operations : List.of(sourceOperations, targetOperations)) {
-            log.atInfo()
-                    .setMessage("Executing validation operations against {}")
-                    .addArgument(sourceOperations.equals(operations) ? "source" : "target")
+        for (var config : indexConfigs) {
+            for (var operations : List.of(sourceOperations, targetOperations)) {
+                String clusterType = (operations == sourceOperations) ? "source" : "target";
+                log.atInfo()
+                    .setMessage("Executing validation operations against {} cluster for index {}")
+                    .addArgument(clusterType)
+                    .addArgument(config.name())
                     .log();
-            var response = operations.get("/" + indexName + "/_settings?flat_settings=true");
-            JsonNode json = mapper.readTree(response.getValue());
-            JsonNode settings = json.get(indexName).get("settings");
+                var response = operations.get("/" + config.name() + "/_settings?flat_settings=true");
+                JsonNode json = mapper.readTree(response.getValue());
+                JsonNode settings = json.get(config.name()).get("settings");
 
-            assertTrue(settings.has("index.knn"), "Expected knn");
-            assertTrue(settings.get("index.knn").isTextual(), "Expected knn=true");
-            assertEquals("true", settings.get("index.knn").textValue(), "Expected knn=true");
-            assertTrue(settings.has("index.knn.algo_param.ef_search"), "Expected knn.algo_param.ef_search");
-            assertTrue(settings.get("index.knn.algo_param.ef_search").isTextual(), "Expected knn.algo_param.ef_search=100");
-            assertEquals("100", settings.get("index.knn.algo_param.ef_search").textValue(), "Expected knn.algo_param.ef_search=100");
+                assertTrue(settings.has("index.knn"), 
+                    String.format("Expected index.knn field for index '%s' on %s cluster", config.name(), clusterType));
+                assertTrue(settings.get("index.knn").isTextual(), 
+                    String.format("Expected index.knn to be textual for index '%s' on %s cluster", config.name(), clusterType));
+                assertEquals("true", settings.get("index.knn").textValue(), 
+                    String.format("Expected index.knn=true for index '%s' on %s cluster", config.name(), clusterType));
+                assertTrue(settings.has("index.knn.algo_param.ef_search"), 
+                    String.format("Expected index.knn.algo_param.ef_search field for index '%s' on %s cluster", config.name(), clusterType));
+                assertTrue(settings.get("index.knn.algo_param.ef_search").isTextual(), 
+                    String.format("Expected index.knn.algo_param.ef_search to be textual for index '%s' on %s cluster", config.name(), clusterType));
+                assertEquals("100", settings.get("index.knn.algo_param.ef_search").textValue(), 
+                    String.format("Expected index.knn.algo_param.ef_search=100 for index '%s' on %s cluster", config.name(), clusterType));
+            }
         }
     }
 }
