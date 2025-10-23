@@ -31,6 +31,6 @@ httpx = "*"
 python_version = "3.11"
 
 [scripts]
-test = "coverage run -m pytest tests/workflow-tests"
+test = "coverage run -m pytest"
 coverage = "coverage"
 api-dev = "fastapi dev console_link/api/main.py"
