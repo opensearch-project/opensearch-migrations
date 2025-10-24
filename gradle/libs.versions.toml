@@ -23,8 +23,8 @@ jmeter = "5.6.3"
 jmh-core = "1.37"
 jolt-core = "0.1.8"
 json = "20250517"
-junit-platform = "6.0.0"
-junit-jupiter = "6.0.0"
+junit-platform = "1.14.0"
+junit-jupiter = "5.14.0"
 kafka-clients = "4.1.0"
 log4j = "2.25.2"
 lombok = "1.18.42"
@@ -101,11 +101,10 @@ jolt-core = { module = "com.bazaarvoice.jolt:jolt-core", version.ref = "jolt-cor
 json = { module = "org.json:json", version.ref = "json" }
 
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit-platform" }
-
-junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
-junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "junit-jupiter" }
-junit-jupiter-engine = { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "junit-jupiter" }
-junit-jupiter-params = { module = "org.junit.jupiter:junit-jupiter-params", version.ref = "junit-jupiter" }
+junit-jupiter =          { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
+junit-jupiter-api =      { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "junit-jupiter" }
+junit-jupiter-engine =   { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "junit-jupiter" }
+junit-jupiter-params =   { module = "org.junit.jupiter:junit-jupiter-params", version.ref = "junit-jupiter" }
 
 
 kafka-clients = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka-clients" }

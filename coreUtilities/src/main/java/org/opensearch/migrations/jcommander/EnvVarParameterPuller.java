@@ -152,9 +152,10 @@ public class EnvVarParameterPuller {
      * Examples:
      *   targetUsername -> TARGET_USERNAME_ENV_ARG
      */
-    public static List<String> toEnvVarNames(String argName, String prefix, String suffix) {
-        argName = argName.replaceAll("^-+", "");
-        String normalized = argName.replace("-", "_");
+    public static List<String> toEnvVarNames(final String argName, String prefix, String suffix) {
+        String normalized = argName
+            .replaceAll("^-+", "")
+            .replace("-", "_");
 
         Matcher matcher = CAMEL_CASE_PATTERN.matcher(normalized);
         String envCase = matcher.replaceAll("_$1").toUpperCase();

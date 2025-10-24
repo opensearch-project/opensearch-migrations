@@ -8,6 +8,7 @@ import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.cli.OutputFormat;
 import org.opensearch.migrations.commands.*;
+import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -37,9 +38,9 @@ public class MetadataMigration {
                 args,
                 ArgNameConstants.joinLists(ArgNameConstants.CENSORED_SOURCE_ARGS, ArgNameConstants.CENSORED_TARGET_ARGS)
         )));
-        var metadataArgs = new MetadataArgs();
-        var migrateArgs = new MigrateArgs();
-        var evaluateArgs = new EvaluateArgs();
+        var metadataArgs = EnvVarParameterPuller.injectFromEnv(new MetadataArgs(), "METADATA_MIGRATE_");
+        var migrateArgs = EnvVarParameterPuller.injectFromEnv(new MigrateArgs(), "METADATA_MIGRATE_");
+        var evaluateArgs = EnvVarParameterPuller.injectFromEnv(new EvaluateArgs(), "METADATA_MIGRATE_");
         var argsParser = JsonCommandLineParser.newBuilder()
             .addObject(metadataArgs)
             .addCommand(migrateArgs)

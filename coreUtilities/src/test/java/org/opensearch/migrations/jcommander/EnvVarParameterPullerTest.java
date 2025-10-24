@@ -1,6 +1,7 @@
 package org.opensearch.migrations.jcommander;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import com.beust.jcommander.Parameter;
@@ -273,13 +274,13 @@ class EnvVarParameterPullerTest {
     @Test
     void testToEnvVarNameConversion() {
         // Test the public conversion method
-        Assertions.assertEquals("TARGET_USERNAME_CMD_LINE_ARG", EnvVarParameterPuller.toEnvVarName("targetUsername", "", "_CMD_LINE_ARG"));
-        Assertions.assertEquals("TARGET_USERNAME_CMD_LINE_ARG", EnvVarParameterPuller.toEnvVarName("target-username", "", "_CMD_LINE_ARG"));
-        Assertions.assertEquals("KAFKA_TRAFFIC_BROKERS_CMD_LINE_ARG", EnvVarParameterPuller.toEnvVarName("kafkaTrafficBrokers", "", "_CMD_LINE_ARG"));
-        Assertions.assertEquals("MAX_CONCURRENT_REQUESTS_CMD_LINE_ARG", EnvVarParameterPuller.toEnvVarName("maxConcurrentRequests", "", "_CMD_LINE_ARG"));
-        Assertions.assertEquals("SPEEDUP_FACTOR_CMD_LINE_ARG", EnvVarParameterPuller.toEnvVarName("speedup-factor", "", "_CMD_LINE_ARG"));
-        Assertions.assertEquals("SIMPLE_CMD_LINE_ARG", EnvVarParameterPuller.toEnvVarName("simple", "", "_CMD_LINE_ARG"));
-        Assertions.assertEquals("A_B_C_CMD_LINE_ARG", EnvVarParameterPuller.toEnvVarName("aBC", "", "_CMD_LINE_ARG"));
+        Assertions.assertEquals(List.of("FOO_TARGET_USERNAME_CMD_LINE_ARG", "TARGET_USERNAME"), EnvVarParameterPuller.toEnvVarNames("--targetUsername", "FOO_", "_CMD_LINE_ARG"));
+        Assertions.assertEquals(List.of("SOURCE_PASSWORD_CMD_LINE_ARG", "SOURCE_PASSWORD"), EnvVarParameterPuller.toEnvVarNames("--source-password", "", "_CMD_LINE_ARG"));
+        Assertions.assertEquals(List.of("KAFKA_TRAFFIC_BROKERS_CMD_LINE_ARG"), EnvVarParameterPuller.toEnvVarNames("--kafkaTrafficBrokers", "", "_CMD_LINE_ARG"));
+        Assertions.assertEquals(List.of("MAX_CONCURRENT_REQUESTS_CMD_LINE_ARG"), EnvVarParameterPuller.toEnvVarNames("--maxConcurrentRequests", "", "_CMD_LINE_ARG"));
+        Assertions.assertEquals(List.of("SPEEDUP_FACTOR_CMD_LINE_ARG"), EnvVarParameterPuller.toEnvVarNames("--speedup-factor", "", "_CMD_LINE_ARG"));
+        Assertions.assertEquals(List.of("SIMPLE_CMD_LINE_ARG"), EnvVarParameterPuller.toEnvVarNames("--simple", "", "_CMD_LINE_ARG"));
+        Assertions.assertEquals(List.of("A_B_C_CMD_LINE_ARG"), EnvVarParameterPuller.toEnvVarNames("--aBC", "", "_CMD_LINE_ARG"));
     }
 
     @Test
