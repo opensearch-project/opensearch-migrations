@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Slf4j
 public class TransformFunctionsTest {
@@ -52,6 +54,119 @@ public class TransformFunctionsTest {
 
         TransformFunctions.removeIntermediateMappingsLevels(testNode3);
         assertEquals(new ObjectMapper().createObjectNode().toString(), testNode3.get(TransformFunctions.MAPPINGS_KEY_STR).toString());
+    }
+
+    @Test
+    public void convertFlatSettingsToTree_WithConflictingKeys_OrderIndependent() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        
+        // Test case 1: knn=true processed before knn.space_type=l2
+        ObjectNode flatSettings1 = mapper.createObjectNode();
+        flatSettings1.put("knn", "true");
+        flatSettings1.put("knn.space_type", "l2");
+        flatSettings1.put("index.number_of_replicas", "1");
+        
+        ObjectNode result1 = TransformFunctions.convertFlatSettingsToTree(flatSettings1);
+        
+        // Test case 2: knn.space_type=l2 processed before knn=true (reverse order)
+        ObjectNode flatSettings2 = mapper.createObjectNode();
+        flatSettings2.put("knn.space_type", "l2");
+        flatSettings2.put("knn", "true");
+        flatSettings2.put("index.number_of_replicas", "1");
+        
+        ObjectNode result2 = TransformFunctions.convertFlatSettingsToTree(flatSettings2);
+        
+        // Both results should have the same structure and values regardless of input order
+        // Verify the conflicting keys are kept flat in both results
+        assertEquals("true", result1.get("knn").asText());
+        assertEquals("l2", result1.get("knn.space_type").asText());
+        assertEquals("1", result1.get("index").get("number_of_replicas").asText());
+        
+        assertEquals("true", result2.get("knn").asText());
+        assertEquals("l2", result2.get("knn.space_type").asText());
+        assertEquals("1", result2.get("index").get("number_of_replicas").asText());
+        
+        // Verify both have the same keys
+        assertEquals(result1.size(), result2.size());
+        result1.fieldNames().forEachRemaining(fieldName -> {
+            assertTrue(result2.has(fieldName), "Result2 should have field: " + fieldName);
+        });
+    }
+    
+    @Test
+    public void convertFlatSettingsToTree_ConflictResolutionIntricacies() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        
+        ObjectNode flatSettings = mapper.createObjectNode();
+        // Scenario 1: Direct conflict - "knn" exists as both a scalar and a prefix
+        flatSettings.put("knn", "true");
+        flatSettings.put("knn.space_type", "l2");
+        flatSettings.put("knn.algo_param.ef_search", "100");
+        
+        // Scenario 2: Multi-level nesting without conflicts
+        flatSettings.put("index.number_of_replicas", "1");
+        flatSettings.put("index.number_of_shards", "5");
+        flatSettings.put("index.codec", "best_compression");
+        
+        // Scenario 3: Conflict at deeper level - "analysis.analyzer" exists as both scalar and prefix
+        flatSettings.put("analysis.analyzer", "standard");
+        flatSettings.put("analysis.analyzer.custom.type", "custom");
+        flatSettings.put("analysis.analyzer.custom.tokenizer", "standard");
+        
+        // Scenario 4: No conflict - deeply nested path
+        flatSettings.put("index.routing.allocation.include.zone", "us-east-1a");
+        flatSettings.put("index.routing.allocation.exclude.zone", "us-west-1b");
+        
+        ObjectNode result = TransformFunctions.convertFlatSettingsToTree(flatSettings);
+        
+        // Verify Scenario 1: All knn-related keys should be flat due to conflict
+        assertEquals("true", result.get("knn").asText(), "knn scalar should be kept flat");
+        assertEquals("l2", result.get("knn.space_type").asText(), "knn.space_type should be kept flat");
+        assertEquals("100", result.get("knn.algo_param.ef_search").asText(), "knn.algo_param.ef_search should be kept flat");
+        assertFalse(result.has("knn") && result.get("knn").isObject(), "knn should not be an object");
+        
+        // Verify Scenario 2: index settings should be properly nested (no conflicts)
+        assertTrue(result.has("index"), "index should exist as nested object");
+        assertTrue(result.get("index").isObject(), "index should be an object");
+        assertEquals("1", result.get("index").get("number_of_replicas").asText());
+        assertEquals("5", result.get("index").get("number_of_shards").asText());
+        assertEquals("best_compression", result.get("index").get("codec").asText());
+        
+        // Verify Scenario 3: All analysis.analyzer keys should be flat due to conflict
+        assertEquals("standard", result.get("analysis.analyzer").asText(), "analysis.analyzer scalar should be kept flat");
+        assertEquals("custom", result.get("analysis.analyzer.custom.type").asText(), "analysis.analyzer.custom.type should be kept flat");
+        assertEquals("standard", result.get("analysis.analyzer.custom.tokenizer").asText(), "analysis.analyzer.custom.tokenizer should be kept flat");
+        
+        // Verify Scenario 4: Deep nesting should work when no conflicts
+        assertTrue(result.get("index").get("routing").isObject(), "routing should be nested");
+        assertTrue(result.get("index").get("routing").get("allocation").isObject(), "allocation should be nested");
+        assertEquals("us-east-1a", result.get("index").get("routing").get("allocation").get("include").get("zone").asText());
+        assertEquals("us-west-1b", result.get("index").get("routing").get("allocation").get("exclude").get("zone").asText());
+        
+        // Verify that conflicting keys don't create partial nested structures
+        assertFalse(result.has("analysis") && result.get("analysis").isObject(), "analysis should not be partially nested when analyzer has conflicts");
+    }
+    
+    @Test
+    public void convertFlatSettingsToTree_WithoutConflicts_CreatesNestedStructure() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        
+        ObjectNode flatSettings = mapper.createObjectNode();
+        flatSettings.put("index.number_of_replicas", "1");
+        flatSettings.put("index.number_of_shards", "5");
+        flatSettings.put("index.version.created", "6082499");
+        
+        ObjectNode result = TransformFunctions.convertFlatSettingsToTree(flatSettings);
+        
+        // Verify proper nesting without conflicts
+        assertEquals("1", result.get("index").get("number_of_replicas").asText());
+        assertEquals("5", result.get("index").get("number_of_shards").asText());
+        assertEquals("6082499", result.get("index").get("version").get("created").asText());
+        
+        // Verify no flat keys remain
+        assertEquals(false, result.has("index.number_of_replicas"));
+        assertEquals(false, result.has("index.number_of_shards"));
+        assertEquals(false, result.has("index.version.created"));
     }
 
     @Test
