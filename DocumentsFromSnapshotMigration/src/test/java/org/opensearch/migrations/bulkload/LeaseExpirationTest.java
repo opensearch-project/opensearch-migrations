@@ -217,7 +217,8 @@ public class LeaseExpirationTest extends SourceTestBase {
             "--documents-per-bulk-request", "10",
             "--max-connections", "2",
             "--initial-lease-duration", "PT20s",
-            "--source-version", sourceClusterVersion.getVersion().toString()
+            "--source-version", sourceClusterVersion.getVersion().toString(),
+            "--continuous-mode", "false"
         };
 
         ProcessBuilder processBuilder = setupProcess(
