@@ -5,12 +5,12 @@ export function getZodKeys<T extends z.ZodRawShape>(schema: z.ZodObject<T>): rea
 }
 
 export const KAFKA_SERVICES_CONFIG = z.object({
-    broker_endpoints: z.string().describe("Specify an external kafka broker list if using one other than the one managed by the workflow"),
+    brokerEndpoints: z.string().describe("Specify an external kafka broker list if using one other than the one managed by the workflow"),
     standard: z.string()
 });
 
 export const S3_REPO_CONFIG = z.object({
-    aws_region: z.string().describe("The AWS region that the bucket reside in (us-east-2, etc)"),
+    awsRegion: z.string().describe("The AWS region that the bucket reside in (us-east-2, etc)"),
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)/).default("")
         .describe("Override the default S3 endpoint for clients to connect to.  " +
             "Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"),
@@ -64,8 +64,7 @@ export const RFS_OPTIONS = z.object({
 
 export const HTTP_AUTH_BASIC = z.object({
     basic: z.object({
-        username: z.string(),
-        password: z.string()
+        secretName: z.string()
     })
 });
 

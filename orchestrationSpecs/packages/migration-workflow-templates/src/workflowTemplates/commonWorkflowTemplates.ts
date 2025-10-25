@@ -1,13 +1,14 @@
 import {z} from "zod";
 import {TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {
-    BaseExpression, Container,
+    AllowLiteralOrExpression,
+    BaseExpression, configMapKey, Container,
     defineParam,
     defineRequiredParam,
     expr,
     IMAGE_PULL_POLICY,
     InputParamDef, makeDirectTypeProxy, makeStringTypeProxy,
-    Serialized, Volume
+    Serialized, typeToken, Volume
 } from "@opensearch-migrations/argo-workflow-builders";
 
 export const CommonWorkflowParameters = {
@@ -38,15 +39,13 @@ export function makeRequiredImageParametersForKeys<K extends LogicalOciImagesKey
 
 export const ImageParameters = makeRequiredImageParametersForKeys(LogicalOciImages);
 
-export const TargetClusterParameters = {
-    targetAwsRegion: defineRequiredParam<string>(),
-    targetAwsSigningName: defineRequiredParam<string>(),
-    targetCACert: defineRequiredParam<string>(),
-    targetClientSecretName: defineRequiredParam<string>(), // TODO
-    targetInsecure: defineRequiredParam<boolean>(),
-    targetUsername: defineRequiredParam<string>(),
-    targetPassword: defineRequiredParam<string>()
-}
+export const TargetClusterParameters = z.object({
+    targetAwsRegion: z.string().optional(),
+    targetAwsSigningName: z.string().optional(),
+    targetCACert: z.string().optional(),
+    targetHost: z.string(),
+    targetInsecure: z.boolean(),
+});
 
 export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
     return {
@@ -60,11 +59,14 @@ export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<Se
             expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "mtls", "clientSecretName"], ""),
         targetInsecure:
             expr.dig(expr.deserializeRecord(targetConfig), ["allowInsecure"], false),
-        targetUsername:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "basic", "username"], ""),
-        targetPassword:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "basic", "password"], ""),
     };
+}
+
+export function getTargetHttpAuthCreds(configMapName: AllowLiteralOrExpression<string>) {
+    return {
+        TARGET_USERNAME: {configMapKeyRef: configMapKey(configMapName,"username", true), type: typeToken<string>()},
+        TARGET_PASSWORD: {secretKeyRef: configMapKey(configMapName,"password", true), type: typeToken<string>()}
+    } as const;
 }
 
 export type ContainerVolumePair = {

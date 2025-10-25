@@ -1,6 +1,6 @@
 import {
-    CommonWorkflowParameters,
-    makeRequiredImageParametersForKeys
+    CommonWorkflowParameters, getTargetHttpAuthCreds,
+    makeRequiredImageParametersForKeys, TargetClusterParameters
 } from "./commonWorkflowTemplates";
 import {z} from "zod";
 import {
@@ -12,11 +12,9 @@ import {
 import {
     BaseExpression,
     defineRequiredParam, expr,
-    inputsToEnvVars,
     INTERNAL,
-    selectInputsFieldsAsExpressionRecord,
-    selectInputsForRegister, Serialized,
-    transformZodObjectToParams,
+    selectInputsForRegister,
+    Serialized,
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
@@ -30,16 +28,9 @@ const COMMON_METADATA_PARAMETERS = {
 };
 
 export function makeTargetAuthDict(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
-    // const safeAuthConfig = expr.stripUndefined(expr.get(expr.deserializeRecord(targetConfig), "authConfig"));
     const safeAuthConfig = (expr.getLoose(expr.deserializeRecord(targetConfig), "authConfig"));
     return expr.ternary(
         expr.hasKey(expr.deserializeRecord(targetConfig), "authConfig"),
-        expr.ternary(
-            expr.hasKey(safeAuthConfig, "basic"),
-            expr.makeDict({
-                "targetUsername": expr.getLoose(expr.getLoose(safeAuthConfig, "basic"), "username"),
-                "targetPassword": expr.getLoose(expr.getLoose(safeAuthConfig, "basic"), "password")
-            }),
             expr.ternary(
                 expr.hasKey(safeAuthConfig, "sigv4"),
                 expr.makeDict({
@@ -53,12 +44,17 @@ export function makeTargetAuthDict(targetConfig: BaseExpression<Serialized<z.inf
                     }),
                     expr.literal({})
                 )
-            )
-        ),
-        expr.literal({}))
+            ),
+        expr.literal({}));
 }
 
-export function makeTargetParamDict(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
+export function getHttpAuthSecretName(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
+    return expr.dig(expr.deserializeRecord(targetConfig), ["authConfig","basic","secretName"], "");
+}
+
+export function makeTargetParamDict(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>):
+    BaseExpression<z.infer<typeof TargetClusterParameters>, "complicatedExpression">
+{
     return expr.mergeDicts(
         makeTargetAuthDict(targetConfig),
         expr.makeDict({
@@ -72,7 +68,7 @@ export function makeRepoParamDict(repoConfig: BaseExpression<z.infer<typeof S3_R
     return expr.makeDict({
         "s3Endpoint": expr.get(repoConfig, "endpoint"),
         "s3RepoUri": expr.get(repoConfig, "s3RepoPathUri"),
-        "s3Region": expr.get(repoConfig, "aws_region"),
+        "s3Region": expr.get(repoConfig, "awsRegion"),
         "s3LocalDir": expr.literal("/tmp")
     });
 }
@@ -131,6 +127,8 @@ export const MetadataMigration = WorkflowBuilder.create({
                     expr.literal("/config/credentials/configuration"),
                     expr.literal(""))
             )
+            .addEnvVarsFromRecord(getTargetHttpAuthCreds(
+                expr.dig(expr.deserializeRecord(b.inputs.targetConfig), ["authConfig","basic","secretName"], "")))
             .addArgs([
                 b.inputs.commandMode,
                 expr.literal("---INLINE-JSON"),

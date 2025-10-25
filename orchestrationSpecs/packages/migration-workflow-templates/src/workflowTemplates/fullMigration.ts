@@ -1,20 +1,16 @@
 import {z} from 'zod';
 import {
     COMPLETE_SNAPSHOT_CONFIG,
-    DYNAMIC_SNAPSHOT_CONFIG,
     getZodKeys,
     METADATA_OPTIONS,
     NAMED_SOURCE_CLUSTER_CONFIG,
     NAMED_TARGET_CLUSTER_CONFIG,
-    NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
     PARAMETERIZED_MIGRATION_CONFIG,
     PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     REPLAYER_OPTIONS,
     RFS_OPTIONS,
     SNAPSHOT_MIGRATION_CONFIG,
-    SOURCE_CLUSTERS_MAP,
-    TARGET_CLUSTER_CONFIG,
-    TARGET_CLUSTERS_MAP
+    TARGET_CLUSTER_CONFIG
 } from '@opensearch-migrations/schemas'
 import {
     CommonWorkflowParameters,
@@ -25,7 +21,6 @@ import {
 import {ConfigManagementHelpers} from "./configManagementHelpers";
 import {
     AllowLiteralOrExpression,
-    BaseExpression,
     configMapKey,
     defineParam,
     defineRequiredParam,
@@ -34,10 +29,9 @@ import {
     InputParamDef,
     INTERNAL,
     makeParameterLoop,
-    NonSerializedPlainObject,
     selectInputsFieldsAsExpressionRecord,
     selectInputsForRegister,
-    Serialized, transformZodObjectToParams,
+    transformZodObjectToParams,
     typeToken,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';

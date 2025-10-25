@@ -7,15 +7,14 @@ import {
     Serialized
 } from "./plainObject";
 import {StripUndefined, TaskType, typeToken, TypeToken} from "./sharedTypes";
-import {InputParamDef, OutputParamDef} from "./parameterSchemas";
+import {ConfigMapKeySelector, InputParamDef, OutputParamDef} from "./parameterSchemas";
 
 export type ExpressionType = "govaluate" | "complicatedExpression";
 
 export abstract class BaseExpression<T extends PlainObject, C extends ExpressionType = ExpressionType> {
     readonly _resultType!: T; // phantom only
     readonly _complexity!: C; // phantom only
-    constructor(public readonly kind: string) {
-    }
+    constructor(public readonly kind: string) {}
 }
 
 export type SimpleExpression<T extends PlainObject> = BaseExpression<T, "govaluate">;

@@ -57,7 +57,12 @@ cat /config/migration_services.yaml_ |
 jq 'def normalizeAuthConfig:
   if has("authConfig") then
     if (.authConfig | has("basic")) then
-      .basic_auth = .authConfig.basic
+      .basic_auth = (.authConfig.basic | 
+        if has("secretName") then
+          .user_secret_arn = .secretName | del(.secretName)
+        else
+          .
+        end)
     elif (.authConfig | has("sigv4")) then
       .sigv4_auth = .authConfig.sigv4
     elif (.authConfig | has("mtls")) then
@@ -93,7 +98,13 @@ def normalizeSnapshotName:
 
 def normalizeRepoConfig:
   if has("repoConfig") then
-    .s3 = .repoConfig | del(.repoConfig)
+    .s3 = (.repoConfig | 
+      if has("awsRegion") then
+        .aws_region = .awsRegion | del(.awsRegion)
+      else
+        .
+      end)
+    | del(.repoConfig)
   else
     .
   end;

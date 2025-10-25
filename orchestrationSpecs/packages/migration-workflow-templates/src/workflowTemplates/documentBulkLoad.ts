@@ -1,22 +1,16 @@
 import {
     CommonWorkflowParameters,
-    extractTargetKeysToExpressionMap,
     makeRequiredImageParametersForKeys,
     setupLog4jConfigForContainer,
-    setupTestCredsForContainer,
-    TargetClusterParameters
+    setupTestCredsForContainer
 } from "./commonWorkflowTemplates";
 import {z} from "zod";
 import {
     CLUSTER_VERSION_STRING,
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
-    getZodKeys,
-    METADATA_OPTIONS,
-    NAMED_SOURCE_CLUSTER_CONFIG,
     NAMED_TARGET_CLUSTER_CONFIG,
-    RFS_OPTIONS,
-    TARGET_CLUSTER_CONFIG
+    RFS_OPTIONS
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
 
@@ -25,9 +19,8 @@ import {
     expr,
     IMAGE_PULL_POLICY,
     INTERNAL, makeDirectTypeProxy, makeStringTypeProxy,
-    selectInputsFieldsAsExpressionRecord,
-    selectInputsForRegister, Serialized,
-    transformZodObjectToParams,
+    selectInputsForRegister,
+    Serialized,
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
@@ -78,9 +71,6 @@ function getRfsReplicasetManifest
         name: "bulk-loader",
         image: makeStringTypeProxy(args.rfsImageName),
         imagePullPolicy: makeStringTypeProxy(args.rfsImagePullPolicy),
-        env: [
-            {name: "LUCENE_DIR", value: makeStringTypeProxy(expr.literal("/tmp"))}
-        ],
         command: ["/rfs-app/runJavaWithClasspath.sh"],
         args: [
             "org.opensearch.migrations.RfsMigrateDocuments",

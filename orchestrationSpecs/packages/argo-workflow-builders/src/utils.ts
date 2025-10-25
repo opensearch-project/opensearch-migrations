@@ -1,7 +1,9 @@
 import {AllowLiteralOrExpression, BaseExpression, expr} from "./models/expression";
 import {z} from "zod";
-import {defineParam, defineRequiredParam} from "./models/parameterSchemas";
+import {ConfigMapKeySelector, defineParam, defineRequiredParam} from "./models/parameterSchemas";
 import {PlainObject} from "./models/plainObject";
+import {TypeToken} from "./models/sharedTypes";
+import {ExpressionOrConfigMapValue} from "./models/workflowTypes";
 
 export type TypescriptError<Message extends string> = {
     readonly __error: Message;
@@ -40,58 +42,60 @@ export function remapRecordNames<
     return result;
 }
 
-export function toEnvVarName(str: string, prefix:string, suffix:string): string {
-    if (prefix === undefined || suffix === undefined) {
-        console.log("checkme");
-    }
-    return prefix + str
-        .replace(/([a-z])([A-Z])/g, '$1_$2')
-        .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
-        .toUpperCase() + suffix;
+export function toEnvVarName(str: string, prefix: string, suffix: string): string {
+    // Insert "_" before every uppercase, then strip a possible leading "_", then UPPERCASE
+    const snake = str.replace(/([A-Z])/g, "_$1").replace(/^_/, "").toUpperCase();
+    return `${prefix}${snake}${suffix}`;
 }
 
-export function inputsToPlainEnvVars<T extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
+
+type SnakeAll<S extends string, Start extends boolean = true> =
+    S extends `${infer Ch}${infer Rest}`
+        ? Ch extends Lowercase<Ch>
+            ? `${Lowercase<Ch>}${SnakeAll<Rest, false>}`
+            : Start extends true
+                ? `${Uppercase<Ch>}${SnakeAll<Rest, false>}`
+                : `_${Uppercase<Ch>}${SnakeAll<Rest, false>}`
+        : '';
+
+type ToEnvKey<K extends string, P extends string, S extends string> =
+    `${P}${SnakeAll<K>}${S}`;
+
+export function inputsToPlainEnvVars<T extends Record<string, ExpressionOrConfigMapValue<PlainObject>>>(
     inputs: T,
     prefix: string,
     suffix: string
 ): { [K in keyof T as (string & K)]: T[K] } {
-    const result: Record<string, AllowLiteralOrExpression<PlainObject>> = {};
+    const result: Record<string, ExpressionOrConfigMapValue<PlainObject>> = {};
     Object.entries(inputs).forEach(([key, value]) => {
         result[toEnvVarName(key, prefix, suffix)] = value;
     });
     return result as any;
 }
 
-export function inputsToJCommanderEnvVars<T extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
-    inputs: T
-): { "JCOMMANDER_OPTS": BaseExpression<string> } {
-    const result: BaseExpression<string>[] = [];
-    Object.entries(inputs).forEach(([key, value]) => {
-        result.push(expr.ternary(expr.isEmpty(value), expr.literal(""),
-            expr.concat(expr.literal(" --"+key+" "), expr.cast(value).to<string>())));
-    });
-    return { "JCOMMANDER_OPTS":  expr.concat(...result) };
-}
-
 export function inputsToEnvVars<
-    T extends Record<string, AllowLiteralOrExpression<PlainObject>>,
-    M extends "JCOMMANDER" | {prefix: string, suffix: string}
+    T extends Record<string, ExpressionOrConfigMapValue<PlainObject>>,
+    P extends string,
+    S extends string
 >(
     inputs: T,
-    mode: M
-): M extends "JCOMMANDER"
-    ? { "JCOMMANDER_OPTS": BaseExpression<string> }
-    : { [K in keyof T as (string & K)]: T[K] } {
-    return (mode === "JCOMMANDER"
-        ? inputsToJCommanderEnvVars(inputs)
-        : inputsToPlainEnvVars(inputs, (mode as any).prefix, (mode as any).suffix)) as any;
+    envVarDecorator: { prefix: P; suffix: S } // keep P/S as literals with `as const`
+): {
+    [K in keyof T as K extends string ? ToEnvKey<K, P, S> : never]: T[K]
+} {
+    // runtime stays the same
+    return inputsToPlainEnvVars(
+        inputs,
+        (envVarDecorator as any).prefix,
+        (envVarDecorator as any).suffix
+    ) as any;
 }
 
-export function inputsToEnvVarsList<T extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
+export function inputsToEnvVarsList<T extends Record<string, ExpressionOrConfigMapValue<PlainObject>>>(
     inputs: T,
-    mode: "JCOMMANDER" | {prefix: string, suffix: string}
+    envVarDecorator: {prefix: string, suffix: string}
 ) {
-    return Object.entries(inputsToEnvVars(inputs, mode)).map(([name, value]) => ({name, value}));
+    return Object.entries(inputsToEnvVars(inputs, envVarDecorator)).map(([name, value]) => ({name, value}));
 }
 
 // Helper to check if a Zod type has a default value
