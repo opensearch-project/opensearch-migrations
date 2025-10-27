@@ -419,10 +419,12 @@ public class RfsMigrateDocuments {
                     log.atInfo().setMessage("Clean shutdown completed.").log();
                 } catch (InterruptedException e) {
                     log.atError().setMessage("Clean exit process was interrupted: {}").addArgument(e).log();
+                    // Re-interrupt the thread to maintain interruption state
                     Thread.currentThread().interrupt();
                 } catch (Exception e) {
                     log.atError().setMessage("Could not complete clean exit process: {}").addArgument(e).log();
                 } finally {
+                    // Manually flush logs and shutdown log4j after all logging is done
                     LogManager.shutdown();
                 }
             }));
@@ -466,7 +468,7 @@ public class RfsMigrateDocuments {
             );
 
             if (arguments.continuousMode) {
-                log.atInfo().setMessage("Running in continuous mode - will process multiple work items until SIGTERM").log();
+                log.atInfo().setMessage("Running in continuous mode. RFS will process multiple work items until SIGTERM").log();
             }
             // Unified path: always run at least once; continue if continuousMode=true.
             boolean shouldContinue = true;
