@@ -25,7 +25,7 @@ function addCommonTargetLatchInputs<
         .addOptionalInput("etcdEndpoints", s => s.workflowParameters.etcdEndpoints)
         .addOptionalInput("etcdPassword", s => s.workflowParameters.etcdPassword)
         .addOptionalInput("etcdUser", s => s.workflowParameters.etcdUser)
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["EtcdUtils"]));
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]));
 }
 
 export const ConfigManagementHelpers = WorkflowBuilder.create({
@@ -42,7 +42,7 @@ export const ConfigManagementHelpers = WorkflowBuilder.create({
         .addRequiredInput("targetName", typeToken<string>())
         .addRequiredInput("processorId", typeToken<string>())
         .addContainer(b => b
-            .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)
+            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addInputsAsEnvVars({prefix:"", suffix: ""})
             .addCommand(["sh", "-c"])
             .addArgs([decrementTlhScript])
@@ -55,7 +55,7 @@ export const ConfigManagementHelpers = WorkflowBuilder.create({
     .addTemplate("cleanup", t => t
         .addInputs(addCommonTargetLatchInputs)
         .addContainer(b => b
-            .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)
+            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addInputsAsEnvVars({prefix: "", suffix: ""})
             .addCommand(["sh", "-c"])
             .addArgs([cleanupTlhScript])

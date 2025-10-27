@@ -72,6 +72,7 @@ function getReplayerDeploymentManifest
                     },
                 },
                 spec: {
+                    serviceAccountName: "argo-workflow-executor",
                     containers: [finalContainerDefinition.container],
                     volumes: finalContainerDefinition.volumes
                 },
@@ -137,4 +138,3 @@ export const Replayer = WorkflowBuilder.create({
 
 
     .getFullScope();
-

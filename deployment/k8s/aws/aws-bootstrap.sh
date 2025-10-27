@@ -20,15 +20,11 @@ tag=""
 skip_git_pull=false
 
 base_dir="./opensearch-migrations"
-build_images_chart_dir="${base_dir}/deployment/k8s/charts/components/buildImages"
-ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
 namespace="ma"
 build_images=false
-use_public_images=true
 keep_build_images_job_alive=false
-
-RELEASE_VERSION=$(<"$base_dir/VERSION")
-RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
+use_public_images=true
+skip_console_exec=false
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -37,15 +33,15 @@ while [[ $# -gt 0 ]]; do
     --repo-name) repo_name="$2"; shift 2 ;;
     --branch) branch="$2"; shift 2 ;;
     --tag) tag="$2"; shift 2 ;;
-    --skip-git-pull) skip_git_pull="$2"; shift 2 ;;
+    --skip-git-pull) skip_git_pull=true; shift 1 ;;
     --base-dir) base_dir="$2"; shift 2 ;;
     --build-images-chart-dir) build_images_chart_dir="$2"; shift 2 ;;
     --ma-chart-dir) ma_chart_dir="$2"; shift 2 ;;
     --namespace) namespace="$2"; shift 2 ;;
     --build-images) build_images="$2"; shift 2 ;;
     --use-public-images) use_public_images="$2"; shift 2 ;;
-    --keep-build-images-job-alive) keep_build_images_job_alive="$2"; shift 2 ;;
-    --release-version) RELEASE_VERSION="$2"; shift 2 ;;
+    --keep-build-images-job-alive) keep_build_images_job_alive=true; shift 1 ;;
+    --skip-console-exec) skip_console_exec=true; shift 1 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo "Options:"
@@ -53,15 +49,15 @@ while [[ $# -gt 0 ]]; do
       echo "  --repo-name <val>                         (default: $repo_name)"
       echo "  --branch <val>                            (default: $branch)"
       echo "  --tag <val>                               (default: $tag)"
-      echo "  --skip-git-pull <true|false>              (default: $skip_git_pull)"
+      echo "  --skip-git-pull                           (default: $skip_git_pull)"
       echo "  --base-dir <path>                         (default: $base_dir)"
       echo "  --build-images-chart-dir <path>           (default: $build_images_chart_dir)"
       echo "  --ma-chart-dir <path>                     (default: $ma_chart_dir)"
       echo "  --namespace <val>                         (default: $namespace)"
       echo "  --build-images <true|false>               (default: $build_images)"
       echo "  --use-public-images <true|false>          (default: $use_public_images)"
-      echo "  --keep-build-images-job-alive <true|false>(default: $keep_build_images_job_alive)"
-      echo "  --release-version <val>                   (default: $RELEASE_VERSION)"
+      echo "  --keep-build-images-job-alive             (default: $keep_build_images_job_alive)"
+      echo "  --skip-console-exec                       (default: $skip_console_exec)"
       exit 0
       ;;
     *)
@@ -84,6 +80,9 @@ case "$TOOLS_ARCH" in
 esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 HELM_VERSION="3.14.0"
+
+build_images_chart_dir="${base_dir}/deployment/k8s/charts/components/buildImages"
+ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
 
 install_helm() {
   echo "Installing Helm ${HELM_VERSION} for ${OS}/${TOOLS_ARCH}..."
@@ -116,7 +115,7 @@ get_cfn_export() {
 
   if [ ${#names[@]} -eq 0 ]; then
     echo "Error: No exports found starting with '$prefix'" >&2
-    exit 1
+    return 1
   elif [ ${#names[@]} -eq 1 ]; then
     echo "${values[0]}"
   else
@@ -127,7 +126,7 @@ get_cfn_export() {
     read -rp "Select the stack export name to use (0-$((${#names[@]} - 1))): " choice
     if [[ ! "$choice" =~ ^[0-9]+$ || "$choice" -ge ${#names[@]} ]]; then
       echo "Invalid choice." >&2
-      exit 1
+      return 1
     fi
     echo "${values[$choice]}"
   fi
@@ -204,13 +203,17 @@ fi
 # Exit if any tool was missing and not resolved
 [ "$missing" -ne 0 ] && exit 1
 
-output=$(get_cfn_export)
+if ! output=$(get_cfn_export); then
+  echo "Unable to find any CloudFormation stacks in the current region which have an output that starts with '$prefix'. \
+        Has the Migration Assistant CloudFormation template been deployed?" >&2
+  exit 1
+fi
 echo "Setting ENV variables: $output"
 eval "$output"
 
 aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
 
-kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace ma
+kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace "$namespace"
 kubectl config set-context --current --namespace="$namespace" >/dev/null 2>&1
 
 if ! helm status aws-efs-csi-driver -n kube-system >/dev/null 2>&1; then
@@ -263,6 +266,8 @@ if [[ "$build_images" == "true" ]]; then
     --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
     --set awsEKSEnabled=true \
     --set keepJobAlive="${keep_build_images_job_alive}" \
+    --set repositoryUrl="https://github.com/${org_name}/${repo_name}.git" \
+    --set repositoryBranch="${branch}" \
     || { echo "Installing buildImages chart failed..."; exit 1; }
 
   if [[ "$keep_build_images_job_alive" == "true" ]]; then
@@ -288,6 +293,9 @@ if [[ "$build_images" == "true" ]]; then
     helm uninstall build-images -n "$namespace"
   fi
 fi
+
+RELEASE_VERSION=$(<"$base_dir/VERSION")
+RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
 
 if [[ "$use_public_images" == "false" ]]; then
   IMAGE_FLAGS="\
@@ -325,16 +333,18 @@ helm install "$namespace" "${ma_chart_dir}" \
   --set stageName="${STAGE}" \
   --set aws.region="${AWS_CFN_REGION}" \
   --set aws.account="${AWS_ACCOUNT}" \
+  --set defaultBucketConfiguration.snapshotRoleArn="${SNAPSHOT_ROLE}" \
   $IMAGE_FLAGS \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
-
-kubectl -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s
 
 echo "Deploying CloudWatch dashboards..."
 deploy_dashboard "CaptureReplay" "${base_dir}/deployment/k8s/dashboards/capture-replay-dashboard.json"
 deploy_dashboard "ReindexFromSnapshot" "${base_dir}/deployment/k8s/dashboards/reindex-from-snapshot-dashboard.json"
 echo "All dashboards deployed to CloudWatch"
 
-cmd="kubectl -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
-echo "Accessing migration console with command: $cmd"
-eval "$cmd"
+if [[ "$skip_console_exec" == "false" ]]; then
+  kubectl -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s
+  cmd="kubectl -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
+  echo "Accessing migration console with command: $cmd"
+  eval "$cmd"
+fi
