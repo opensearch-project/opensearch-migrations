@@ -46,6 +46,7 @@ import org.opensearch.migrations.bulkload.worker.RegularDocumentReaderEngine;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -468,64 +469,22 @@ public class RfsMigrateDocuments {
                 log.atInfo().setMessage("Running in continuous mode - will process multiple work items until SIGTERM").log();
             }
             // Unified path: always run at least once; continue if continuousMode=true.
-            do {
-                // Per-iteration lease/timeout manager (fresh for each acquired work item)
-                try (var processManager = new LeaseExpireTrigger(
-                        w -> exitOnLeaseTimeout(
-                            workItemRef,
-                            workCoordinator,
-                            w,
-                            progressCursor,
-                            workItemTimeProvider,
-                            arguments.initialLeaseDuration,
-                            () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
-                            cleanShutdownCompleted,
-                            arguments.continuousMode,
-                            context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
-                        Clock.systemUTC())) {
-                    var completionStatus = run(
-                        new LuceneIndexReader.Factory(sourceResourceProvider), // per-iteration readers created inside run(...)
-                        reindexer,
-                        progressCursor,
-                        workCoordinator,
-                        arguments.initialLeaseDuration,
-                        processManager,
-                        sourceResourceProvider.getIndexMetadata(),
-                        arguments.snapshotName,
-                        arguments.experimental.previousSnapshotName,
-                        arguments.experimental.experimentalDeltaMode,
-                        arguments.indexAllowlist,
-                        sourceResourceProvider.getShardMetadata(),
-                        unpackerFactory,
-                        arguments.maxShardSizeBytes,
-                        context,
-                        cancellationRunnableRef,
-                        workItemTimeProvider);
-
-                    if (completionStatus == CompletionStatus.NOTHING_DONE) {
-                        if (arguments.continuousMode) {
-                            // No work available right now; short backoff before retry.
-                            shortIdle();
-                            continue;
-                        } else {
-                            // For ECS deployments (non-continuous), worker should exit upon NOTHING_DONE
-                            log.atInfo().setMessage("No progress made (non-continuous mode). Exiting with error code (no-work-left) to signal that.").log();
-                            System.exit(NO_WORK_LEFT_EXIT_CODE);
-                        }
-                    }
-                } catch (NoWorkLeftException e) {
-                    log.atInfo().setMessage("No work left to acquire. Exiting with error code (no-work-left) to signal that.").log();
-                    System.exit(NO_WORK_LEFT_EXIT_CODE);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    log.atWarn().setMessage("Worker interrupted; stopping loop.").log();
-                    break;
-                } finally {
-                    // Clear per-iteration state so it cannot leak into next item
-                    progressCursor.set(null);
-                    workItemRef.set(null);
-                }
-            } while (arguments.continuousMode && !Thread.currentThread().isInterrupted() && !cleanShutdownCompleted.get());
+            boolean shouldContinue = true;
+            while (shouldContinue) {
+                shouldContinue = processWorkItem(
+                    arguments,
+                    workItemRef,
+                    progressCursor,
+                    workCoordinator,
+                    workItemTimeProvider,
+                    cleanShutdownCompleted,
+                    context,
+                    cancellationRunnableRef,
+                    sourceResourceProvider,
+                    reindexer,
+                    unpackerFactory
+                );
+            }
             cleanShutdownCompleted.set(true);
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
@@ -617,10 +576,6 @@ public class RfsMigrateDocuments {
             log.atError().setMessage("Exception during exit on lease timeout, clean shutdown failed")
                     .setCause(e).log();
             cleanShutdownCompleted.set(false);
-            if (!continuousMode) {
-                System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
-            }
-            return;
         }
         if (!continuousMode) {
             System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
@@ -808,6 +763,79 @@ public class RfsMigrateDocuments {
                 lockRenegotiationMillis *= 2;
             }
         }
+    }
+
+    private static boolean processWorkItem(
+            Args arguments,
+            AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef,
+            AtomicReference<WorkItemCursor> progressCursor,
+            IWorkCoordinator workCoordinator,
+            WorkItemTimeProvider workItemTimeProvider,
+            AtomicBoolean cleanShutdownCompleted,
+            RootDocumentMigrationContext context,
+            AtomicReference<Runnable> cancellationRunnableRef,
+            ClusterSnapshotReader sourceResourceProvider,
+            DocumentReindexer reindexer,
+            SnapshotShardUnpacker.Factory unpackerFactory
+    ) {
+        try (var processManager = new LeaseExpireTrigger(
+                w -> exitOnLeaseTimeout(
+                    workItemRef,
+                    workCoordinator,
+                    w,
+                    progressCursor,
+                    workItemTimeProvider,
+                    arguments.initialLeaseDuration,
+                    () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
+                    cleanShutdownCompleted,
+                    arguments.continuousMode,
+                    context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
+                Clock.systemUTC())) {
+            var completionStatus = run(
+                new LuceneIndexReader.Factory(sourceResourceProvider),
+                reindexer,
+                progressCursor,
+                workCoordinator,
+                arguments.initialLeaseDuration,
+                processManager,
+                sourceResourceProvider.getIndexMetadata(),
+                arguments.snapshotName,
+                arguments.experimental.previousSnapshotName,
+                arguments.experimental.experimentalDeltaMode,
+                arguments.indexAllowlist,
+                sourceResourceProvider.getShardMetadata(),
+                unpackerFactory,
+                arguments.maxShardSizeBytes,
+                context,
+                cancellationRunnableRef,
+                workItemTimeProvider);
+
+            if (completionStatus == CompletionStatus.NOTHING_DONE) {
+                if (arguments.continuousMode) {
+                    shortIdle();
+                    return true;
+                } else {
+                    log.atInfo().setMessage("No progress made (non-continuous mode). Exiting with error code (no-work-left) to signal that.").log();
+                    System.exit(NO_WORK_LEFT_EXIT_CODE);
+                }
+            }
+        } catch (NoWorkLeftException e) {
+            log.atInfo().setMessage("No work left to acquire. Exiting with error code (no-work-left) to signal that.").log();
+            System.exit(NO_WORK_LEFT_EXIT_CODE);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            log.atWarn().setMessage("Worker interrupted; stopping loop.").log();
+            return false;
+        } catch (Exception e) {
+            log.atError().setCause(e).setMessage("Error processing work item").log();
+            throw new RuntimeException(e);
+        } finally {
+            progressCursor.set(null);
+            workItemRef.set(null);
+            // Ensure nothing stale can be invoked later
+            cancellationRunnableRef.set(null);
+        }
+        return arguments.continuousMode && !Thread.currentThread().isInterrupted() && !cleanShutdownCompleted.get();
     }
 
     private static void shortIdle() throws InterruptedException {
