@@ -34,6 +34,12 @@ updates:
       - dependency-name: "org.apache.lucene:*"
       - dependency-name: "org.gradle.toolchains.foojay-resolver-convention"
       - dependency-name: "org.jcommander:jcommander"
+      - dependency-name: "org.junit.jupiter:*"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "org.junit.platform:*"
+        update-types:
+          - "version-update:semver-major"
       - dependency-name: "org.opensearch:*"
       - dependency-name: "org.opensearch.plugin:*"
         update-types:
