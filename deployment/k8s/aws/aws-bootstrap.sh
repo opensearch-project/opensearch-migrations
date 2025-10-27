@@ -136,9 +136,10 @@ deploy_dashboard() {
   local dashboard_name="$1"
   local dashboard_file="$2"
   local stage="${STAGE}"
-  local region="${AWS_CFN_REGION}"
-  local account="${AWS_ACCOUNT}"
-  local qualifier="${QUALIFIER}"
+  local region
+  region=$(aws configure get region)
+  local account
+  account=$(aws sts get-caller-identity --query Account --output text)
 
   echo "Deploying dashboard: ${dashboard_name}"
   [[ -f "$dashboard_file" ]] || { echo "ERROR: dashboard file not found: $dashboard_file"; exit 1; }
@@ -165,12 +166,11 @@ deploy_dashboard() {
   # Deterministic dashboard name
   local full_name="MA-${stage}-${region}-${dashboard_name}"
   aws cloudwatch put-dashboard \
-    --region "$region" \
     --dashboard-name "$full_name" \
     --dashboard-body "file://${tmp_json}" >/dev/null
 
   # Validate dashboards on CloudWatch
-  if aws cloudwatch get-dashboard --region "$region" --dashboard-name "$full_name" >/dev/null 2>&1; then
+  if aws cloudwatch get-dashboard --dashboard-name "$full_name" >/dev/null 2>&1; then
     echo "OK: Dashboard available: ${full_name}"
   else
     echo "WARN: Could not read back dashboard: ${full_name}"
