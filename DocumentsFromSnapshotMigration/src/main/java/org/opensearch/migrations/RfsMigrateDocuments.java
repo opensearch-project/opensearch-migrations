@@ -9,7 +9,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
@@ -232,8 +231,9 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--continuous-mode", "--continuousMode" },
-            description = "Run in continuous mode (loop until SIGTERM). Default: true for K8s deployments")
-        public boolean continuousMode = true;
+            description = "Run in continuous mode (loop until SIGTERM). Default: false (single-run mode, used by ECS and tests) " +
+                "Set to true for long-running EKS pods")
+        public boolean continuousMode = false;
 
         @ParametersDelegate
         private ExperimentalArgs experimental = new ExperimentalArgs();
