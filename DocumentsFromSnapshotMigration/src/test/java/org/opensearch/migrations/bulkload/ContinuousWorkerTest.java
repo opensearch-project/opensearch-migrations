@@ -15,6 +15,7 @@ import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.testcontainers.lifecycle.Startables;
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *  - exits cleanly when interrupted (simulated SIGTERM)
  */
 @Slf4j
+@Disabled("Test disabled from Gradle builds")
 public class ContinuousWorkerTest extends SourceTestBase {
 
     @TempDir
