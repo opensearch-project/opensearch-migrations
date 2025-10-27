@@ -125,6 +125,7 @@ jobs:
           draft: true
           generate_release_notes: true
           files: |
+            deployment/migration-assistant-solution/build/temp/global-s3-assets/*.template
             artifacts.tar.gz
             traffic-capture-artifacts.tar.gz
             **/*.spdx.json
