@@ -235,11 +235,6 @@ public class RfsMigrateDocuments {
             description = "Run in continuous mode (loop until SIGTERM). Default: true for K8s deployments")
         public boolean continuousMode = true;
 
-        @Parameter(required = false,
-            names = { "--no-work-retry-delay-seconds", "--noWorkRetryDelaySeconds" },
-            description = "Seconds to wait when no work items available before retrying. Use 0 to exit immediately when no work is available. Default: 2")
-        public int noWorkRetryDelaySeconds = 2;
-
         @ParametersDelegate
         private ExperimentalArgs experimental = new ExperimentalArgs();
     }
@@ -315,22 +310,6 @@ public class RfsMigrateDocuments {
         }
     }
 
-    /**
-     * Sleep for the specified duration with added jitter to avoid thundering herd problems.
-     * @param baseDurationSeconds Base sleep duration in seconds
-     */
-    private static void sleepWithJitter(int baseDurationSeconds) throws InterruptedException {
-        if (baseDurationSeconds <= 0) {
-            // Respect 0: return immediately (no idle)
-            return;
-        }
-        // Add up to 25% jitter
-        double jitterFactor = 0.75 + (ThreadLocalRandom.current().nextDouble() * 0.5); // 0.75 to 1.25
-        long sleepMillis = Math.round(baseDurationSeconds * 1000L * jitterFactor);
-        log.atInfo().setMessage("No work available, sleeping for {} ms before retrying").addArgument(sleepMillis).log();
-        Thread.sleep(sleepMillis);
-    }
-
     public static void validateArgs(Args args) {
         boolean isSnapshotLocalDirProvided = args.snapshotLocalDir != null;
         boolean areAllS3ArgsProvided = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
@@ -393,9 +372,8 @@ public class RfsMigrateDocuments {
         validateArgs(arguments);
 
         log.atInfo()
-            .setMessage("Mode: continuous={} noWorkDelaySeconds={}")
+            .setMessage("Mode: continuous={}")
             .addArgument(arguments.continuousMode)
-            .addArgument(arguments.noWorkRetryDelaySeconds)
             .log();
 
         var context = makeRootContext(arguments, workerId);
@@ -524,28 +502,24 @@ public class RfsMigrateDocuments {
                         cancellationRunnableRef,
                         workItemTimeProvider);
 
-                    if (arguments.continuousMode && completionStatus == CompletionStatus.NOTHING_DONE) {
-                        // No work available right now; short backoff before retry.
-                        sleepWithJitter(arguments.noWorkRetryDelaySeconds);
+                    if (completionStatus == CompletionStatus.NOTHING_DONE) {
+                        if (arguments.continuousMode) {
+                            // No work available right now; short backoff before retry.
+                            shortIdle();
+                            continue;
+                        } else {
+                            // For ECS deployments (non-continuous), worker should exit upon NOTHING_DONE
+                            log.atInfo().setMessage("No progress made (non-continuous mode). Exiting with error code (no-work-left) to signal that.").log();
+                            System.exit(NO_WORK_LEFT_EXIT_CODE);
+                        }
                     }
                 } catch (NoWorkLeftException e) {
-                    if (arguments.continuousMode) {
-                        // All shards accounted for; remain alive and let orchestrator delete RS,
-                        // or back off briefly to reduce churn.
-                        if (arguments.noWorkRetryDelaySeconds <= 0) {
-                            log.atInfo().setMessage("No work left; exiting immediately (no-work delay is 0).").log();
-                            break; // allow pod/process to terminate
-                        } else {
-                            log.atInfo().setMessage("No work left; idling until RS deletion or SIGTERM").log();
-                            sleepWithJitter(arguments.noWorkRetryDelaySeconds);
-                            continue; // keep waiting
-                        }
-                    } else {
-                        // Legacy single-run contract: exit with NO_WORK code
-                        log.atInfo().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
-                        cleanShutdownCompleted.set(true);
-                        System.exit(NO_WORK_LEFT_EXIT_CODE);
-                    }
+                    log.atInfo().setMessage("No work left to acquire. Exiting with error code (no-work-left) to signal that.").log();
+                    System.exit(NO_WORK_LEFT_EXIT_CODE);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    log.atWarn().setMessage("Worker interrupted; stopping loop.").log();
+                    break;
                 } finally {
                     // Clear per-iteration state so it cannot leak into next item
                     progressCursor.set(null);
@@ -648,7 +622,6 @@ public class RfsMigrateDocuments {
             }
             return;
         }
-        cleanShutdownCompleted.set(true);
         if (!continuousMode) {
             System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
         }
@@ -835,5 +808,10 @@ public class RfsMigrateDocuments {
                 lockRenegotiationMillis *= 2;
             }
         }
+    }
+
+    private static void shortIdle() throws InterruptedException {
+        // tiny yield before trying to grab a new work item
+        Thread.sleep(50);
     }
 }
