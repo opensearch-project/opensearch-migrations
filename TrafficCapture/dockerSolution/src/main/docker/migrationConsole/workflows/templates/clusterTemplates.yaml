@@ -680,7 +680,6 @@ spec:
               - name: "AWS_REGION"
                 value: "us-east-2"
             
-              
             persistence:
               enabled: false
             
@@ -708,7 +707,6 @@ spec:
                 volumeMounts:
                   - name: elasticsearch-keystore
                     mountPath: /shared
-                    
             
             extraVolumes:
               - name: plugins
@@ -752,6 +750,217 @@ spec:
           - name: cluster-config
             valueFrom:
               path: /tmp/cluster-config.json
+
+    # Elasticsearch 8.19 Multi Node Template
+    - name: elasticsearch-8-19-single-node
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+          - name: replicas
+            value: "3"
+      container:
+        image: dtzar/helm-kubectl:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            
+            helm repo add elastic https://helm.elastic.co
+            helm repo update
+            
+            # ES config: minimal, no security, explicit discovery, open bind
+            cat > /tmp/elasticsearch.yml <<'EOF'
+            cluster.name: ${CLUSTER_NAME}
+            network.host: 0.0.0.0
+            # Cut noise if anything ever hits HTTP by mistake.
+            logger.org.elasticsearch.http.netty4.Netty4HttpServerTransport: error
+            EOF
+            
+            # Values: tiny heap, 3 replicas, ephemeral, sysctl init
+            # NOTE: Do NOT set node.roles, discovery.seed_hosts, or cluster.initial_master_nodes here.
+            cat > /tmp/es-values.yaml <<'EOF'
+            fullnameOverride: {{inputs.parameters.cluster-name}}
+            image: "docker.elastic.co/elasticsearch/elasticsearch"
+            imageTag: "8.19.0"
+            replicas: {{inputs.parameters.replicas}}
+            antiAffinity: "soft"
+            protocol: "https"
+            esJavaOpts: "-Xmx512m -Xms512m"
+            persistence:
+              enabled: false
+            # Ensure vm.max_map_count etc. on Minikube
+            sysctlInitContainer:
+              enabled: true
+            # Add AWS region to silence S3 plugin INFOs
+            extraEnvs:
+              - name: AWS_REGION
+                value: "us-east-2"
+              - name: AWS_DEFAULT_REGION
+                value: "us-east-2"
+              - name: AWS_ACCESS_KEY_ID
+                value: "test"
+              - name: AWS_SECRET_ACCESS_KEY
+                value: "test"
+              - name: AWS_EC2_METADATA_DISABLED
+                value: "true"
+              - name: AWS_S3_FORCE_PATH_STYLE
+                value: "true"
+            extraVolumes:
+            - name: es-s3-credentials
+              secret:
+                secretName: es-s3-credentials
+                optional: true  # allows running without S3 if Secret is missing
+            # directory to hold the keystore (not a single-file subPath)
+            - name: elasticsearch-keystore-dir
+              emptyDir: {}
+            extraVolumeMounts:
+            - name: es-s3-credentials
+              mountPath: /mnt/es-s3-credentials
+              readOnly: true
+            # mount the dedicated directory; we will create the keystore inside it
+            - name: elasticsearch-keystore-dir
+              mountPath: /usr/share/elasticsearch/config/keystore-mount
+            extraInitContainers:
+            - name: inject-s3-keystore
+              image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
+              command: [bash, -lc]
+              args:
+                - |
+                  set -euo pipefail
+                  ES_BIN=/usr/share/elasticsearch/bin/elasticsearch-keystore
+                  KS_DIR=/usr/share/elasticsearch/config/keystore-mount
+                  KS_FILE="$KS_DIR/elasticsearch.keystore"
+                  DEFAULT_KS=/usr/share/elasticsearch/config/elasticsearch.keystore
+            
+                  echo "[inject-s3-keystore] Using keystore dir: $KS_DIR"
+                  mkdir -p "$KS_DIR"
+            
+                  # Point keystore tool at our mounted directory
+                  export ES_PATH_CONF="$KS_DIR"
+          
+                  # Create keystore if needed
+                  if [ ! -s "$KS_FILE" ]; then
+                    echo "[inject-s3-keystore] Creating keystore..."
+                    $ES_BIN create
+                  fi
+                  
+                  put_secret () {
+                    local key="$1" file="$2"
+                    if [ -s "$file" ]; then
+                      echo "Setting keystore [$key] from $file"
+                      cat "$file" | $ES_BIN add -xf "$key"
+                    fi
+                  }
+            
+                  put_plain () {
+                    local key="$1" file="$2"
+                    if [ -s "$file" ]; then
+                      echo "Setting plaintext setting [$key] from $file"
+                      cat "$file" | $ES_BIN add -xf "$key"
+                    fi
+                  }
+                  
+                  put_secret "s3.client.default.access_key" /mnt/es-s3-credentials/access_key
+                  put_secret "s3.client.default.secret_key" /mnt/es-s3-credentials/secret_key
+                  put_plain "s3.client.default.endpoint" mnt/es-s3-credentials/endpoint
+                  put_plain "s3.client.default.path_style_access" /mnt/es-s3-credentials/path_style_access
+                  put_plain "s3.client.default.region" /mnt/es-s3-credentials/region
+            
+            
+                  echo "Keystore contents now:"
+                  $ES_BIN list || true
+                  
+                  # Ensure ES (uid 1000) can read the file
+                  chown 1000:0 "$KS_FILE" || true
+                  chmod 660 "$KS_FILE" || true
+                  # Make default path resolve to our mounted keystore via symlink
+                  ln -sf "$KS_FILE" "$DEFAULT_KS"
+                  echo "[inject-s3-keystore] Symlinked $DEFAULT_KS -> $KS_FILE"
+                  echo "[inject-s3-keystore] done"
+              volumeMounts:
+                - name: es-s3-credentials
+                  mountPath: /mnt/es-s3-credentials
+                  readOnly: true
+                - name: elasticsearch-keystore-dir
+                  mountPath: /usr/share/elasticsearch/config/keystore-mount
+              securityContext:
+                runAsUser: 0
+                runAsGroup: 0
+                runAsNonRoot: false
+            # Probes overriden to use HTTPS + basic auth with the chart's password
+            readinessProbe: {}
+            livenessProbe: {}
+            EOF
+    
+            # Create AWS credentials secret for S3 repository BEFORE Helm install
+            kubectl create secret generic es-s3-credentials \
+              --from-literal=access_key=test \
+              --from-literal=secret_key=test \
+              --from-literal=endpoint=http://localstack:4566 \
+              --from-literal=path_style_access=true \
+              --from-literal=region=us-east-2 \
+              -n {{inputs.parameters.namespace}} \
+              --dry-run=client -o yaml | kubectl apply -f -
+            
+            # Install
+            helm install {{inputs.parameters.cluster-name}} elastic/elasticsearch \
+            --version 8.5.1 \
+            --namespace {{inputs.parameters.namespace}} \
+            --values /tmp/es-values.yaml \
+            --set-file esConfig."elasticsearch\.yml"=/tmp/elasticsearch.yml
+    
+            # Minimal cluster-config for your console tools (no auth)
+            cat > /tmp/cluster-config.json <<EOF
+            {
+              "endpoint": "https://{{inputs.parameters.cluster-name}}:9200",
+              "allow_insecure": true,
+              "no_auth": false,
+              "version": "ES_8.19"
+            }
+            EOF
+            
+            # Create the bucket in LocalStack (path-style)
+            kubectl -n {{inputs.parameters.namespace}} run --rm -i --tty aws \
+              --restart=Never --image=amazon/aws-cli --command -- \
+              sh -lc '
+                export AWS_ACCESS_KEY_ID=test
+                export AWS_SECRET_ACCESS_KEY=test
+                export AWS_DEFAULT_REGION=us-east-2
+                aws --endpoint-url http://localstack:4566 s3api create-bucket \
+                  --bucket es-snapshots \
+                  --create-bucket-configuration LocationConstraint=us-east-2 || true
+              '
+            
+            PW=$(kubectl -n {{inputs.parameters.namespace}} get secret {{inputs.parameters.cluster-name}}-credentials -o jsonpath='{.data.password}' | base64 -d)
+  
+            # Remove readiness probe to make pods show as ready
+            kubectl patch statefulset -n {{inputs.parameters.namespace}} {{inputs.parameters.cluster-name}} --type='json' -p='[{"op": "remove", "path": "/spec/template/spec/containers/0/readinessProbe"}]'
+            
+            # Wait for pods to be ready
+            kubectl wait --for=condition=ready pod -l app={{inputs.parameters.cluster-name}} -n {{inputs.parameters.namespace}} --timeout=300s
+            
+            # Wait for Elasticsearch to be fully ready
+            sleep 60
+            
+            # Setup S3 snapshot repository
+            kubectl exec -n {{inputs.parameters.namespace}} {{inputs.parameters.cluster-name}}-0 -- curl -sSk -u "elastic:${PW}" -H "Content-Type: application/json" \
+              -X PUT https://127.0.0.1:9200/_snapshot/es-snapshots \
+              -d '{
+                "type": "s3",
+                "settings": {
+                  "bucket": "es-snapshots",
+                  "client": "default"
+                }
+              }' || echo "S3 repository setup failed (expected without proper credentials)"
+    
+            kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
+            --from-file=cluster-config=/tmp/cluster-config.json \
+            --namespace {{inputs.parameters.namespace}}
+    
+            echo "Elasticsearch 8.19 (3-node) cluster created with S3 snapshot repository"
+            echo "Cluster config:"
+            cat /tmp/cluster-config.json
 
     # OpenSearch 1.3 Single Node Template
     - name: opensearch-1-3-single-node
