@@ -63,9 +63,9 @@
     "typescript-eslint": "^8.46.2"
   },
   "dependencies": {
-    "@aws-sdk/client-acm": "^3.917.0",
-    "@aws-sdk/client-kafka": "^3.917.0",
-    "@aws-sdk/client-lambda": "^3.917.0",
+    "@aws-sdk/client-acm": "^3.918.0",
+    "@aws-sdk/client-kafka": "^3.918.0",
+    "@aws-sdk/client-lambda": "^3.918.0",
     "@types/aws-lambda": "^8.10.156",
     "aws-lambda": "^1.0.7",
     "esbuild": "^0.25.11",
