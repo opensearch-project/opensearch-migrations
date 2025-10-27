@@ -473,19 +473,24 @@ public class RfsMigrateDocuments {
             // Unified path: always run at least once; continue if continuousMode=true.
             boolean shouldContinue = true;
             while (shouldContinue) {
-                shouldContinue = processWorkItem(
-                    arguments,
-                    workItemRef,
-                    progressCursor,
-                    workCoordinator,
-                    workItemTimeProvider,
-                    cleanShutdownCompleted,
-                    context,
-                    cancellationRunnableRef,
-                    sourceResourceProvider,
-                    reindexer,
-                    unpackerFactory
-                );
+                try {
+                    shouldContinue = processWorkItem(
+                        arguments,
+                        workItemRef,
+                        progressCursor,
+                        workCoordinator,
+                        workItemTimeProvider,
+                        cleanShutdownCompleted,
+                        context,
+                        cancellationRunnableRef,
+                        sourceResourceProvider,
+                        reindexer,
+                        unpackerFactory
+                    );
+                } catch (IOException e) {
+                    log.atError().setCause(e).setMessage("IO error during work item processing").log();
+                    throw e;
+                }
             }
             cleanShutdownCompleted.set(true);
         } catch (Exception e) {
@@ -779,7 +784,7 @@ public class RfsMigrateDocuments {
             ClusterSnapshotReader sourceResourceProvider,
             DocumentReindexer reindexer,
             SnapshotShardUnpacker.Factory unpackerFactory
-    ) {
+    ) throws IOException {
         try (var processManager = new LeaseExpireTrigger(
                 w -> exitOnLeaseTimeout(
                     workItemRef,
@@ -830,7 +835,10 @@ public class RfsMigrateDocuments {
             return false;
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Error processing work item").log();
-            throw new RuntimeException(e);
+            if (e instanceof RuntimeException) {
+                throw (RuntimeException) e;
+            }
+            throw new IOException("Error processing work item", e);
         } finally {
             progressCursor.set(null);
             workItemRef.set(null);
