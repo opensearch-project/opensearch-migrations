@@ -35,7 +35,7 @@ cat <<EOF | kubectl create -f -
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  generateName: full-migration-
+  name: migration-workflow
 spec:
   workflowTemplateRef:
     name: full-migration

@@ -40,7 +40,7 @@ cat <<EOF | kubectl create -f -
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  generateName: hello-world-
+  name: hello-world
 spec:
   workflowTemplateRef:
     name: hello-world-template
