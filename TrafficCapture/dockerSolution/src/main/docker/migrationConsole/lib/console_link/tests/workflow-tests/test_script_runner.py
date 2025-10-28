@@ -1,11 +1,9 @@
 """Tests for script runner service."""
 
-import os
 import pytest
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
-import json
 
 from console_link.workflow.services.script_runner import ScriptRunner
 from console_link.workflow.models.config import WorkflowConfig
