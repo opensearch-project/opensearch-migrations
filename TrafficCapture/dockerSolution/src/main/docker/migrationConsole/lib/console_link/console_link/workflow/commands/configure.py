@@ -78,10 +78,8 @@ def configure_group(ctx):
 
 
 @configure_group.command(name="view")
-@click.option('--format', type=click.Choice(['yaml', 'json']), default='yaml',
-              help='Output format')
 @click.pass_context
-def view_config(ctx, format):
+def view_config(ctx):
     """Show workflow configuration"""
     store = get_store(ctx)
 
@@ -92,28 +90,21 @@ def view_config(ctx, format):
             click.echo("No configuration found.")
             return
 
-        if format == 'json':
-            click.echo(config.to_json())
-        else:
-            click.echo(config.to_yaml())
+        click.echo(config.to_yaml())
     except Exception as e:
         logger.error(f"Failed to load configuration: {e}")
         raise click.ClickException(f"Failed to load configuration: {e}")
 
 
 def _parse_config_from_stdin(stdin_content: str) -> WorkflowConfig:
-    """Parse configuration from stdin content, trying JSON first then YAML"""
+    """Parse configuration from stdin content as YAML (JSON is valid YAML 1.2)"""
     if not stdin_content.strip():
         raise click.ClickException("Configuration was empty, a value is required")
 
-    # Try to parse as JSON first, then YAML
     try:
-        return WorkflowConfig.from_json(stdin_content)
-    except Exception:
-        try:
-            return WorkflowConfig.from_yaml(stdin_content)
-        except Exception as e:
-            raise click.ClickException(f"Failed to parse input as JSON or YAML: {e}")
+        return WorkflowConfig.from_yaml(stdin_content)
+    except Exception as e:
+        raise click.ClickException(f"Failed to parse input as YAML: {e}")
 
 
 def _save_config(store, new_config: WorkflowConfig, session_name: str):
@@ -190,11 +181,9 @@ def clear_config(ctx, confirm):
 
 
 @configure_group.command(name="sample")
-@click.option('--format', type=click.Choice(['yaml', 'json']), default='yaml',
-              help='Output format')
 @click.option('--load', is_flag=True, help='Load sample into current session')
 @click.pass_context
-def sample_config(ctx, format, load):
+def sample_config(ctx, load):
     """Show or load sample configuration.
 
     Displays sample configuration from CONFIG_PROCESSOR_DIR if available,
@@ -215,11 +204,7 @@ def sample_config(ctx, format, load):
             click.echo("Use 'workflow configure edit' to modify it")
         else:
             # Just display the sample
-            if format == 'json':
-                config = WorkflowConfig.from_yaml(sample_content)
-                click.echo(config.to_json())
-            else:
-                click.echo(sample_content)
+            click.echo(sample_content)
 
     except Exception as e:
         logger.exception(f"Failed to get sample configuration: {e}")

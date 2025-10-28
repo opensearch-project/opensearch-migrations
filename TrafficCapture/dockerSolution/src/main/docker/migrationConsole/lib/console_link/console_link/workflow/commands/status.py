@@ -286,7 +286,7 @@ def _display_workflow_tree(step_tree: list):
         return
 
     console = Console()
-    tree = Tree("📋 [bold]Workflow Steps[/bold]")
+    tree = Tree("[bold]Workflow Steps[/bold]")
 
     # Group nodes by depth to build the tree structure
     nodes_by_depth = {}

@@ -46,7 +46,25 @@ class TestWorkflowConfigStore:
         mock_v1 = Mock()
         mock_config_map = Mock()
         mock_config_map.data = {
-            "workflow_config.json": '{"key": "value"}'
+            "workflow_config.yaml": 'key: value\n'
+        }
+        mock_v1.read_namespaced_config_map.return_value = mock_config_map
+
+        store = WorkflowConfigStore(namespace="test-ns", k8s_client=mock_v1)
+
+        config = store.load_config("test-session")
+
+        assert config is not None
+        assert config.get("key") == "value"
+        mock_v1.read_namespaced_config_map.assert_called_once()
+
+    def test_load_config_success_with_json(self):
+        """Test load_config successfully retrieves an existing config."""
+        # Mock Kubernetes API client
+        mock_v1 = Mock()
+        mock_config_map = Mock()
+        mock_config_map.data = {
+            "workflow_config.yaml": '{"key": "value"}'
         }
         mock_v1.read_namespaced_config_map.return_value = mock_config_map
 

@@ -59,9 +59,9 @@ def call(Map config = [:]) {
                         def sourceVersions = params.SOURCE_VERSION
                         def targetVersions = params.TARGET_VERSION == 'all' ? allTargetVersions : [params.TARGET_VERSION]
 
-                        echo "📋 Source versions: ${sourceVersions}"
-                        echo "📋 Target versions: ${targetVersions}"
-                        echo "📋 Total created pipelines: ${targetVersions.size()}"
+                        echo "Source versions: ${sourceVersions}"
+                        echo "Target versions: ${targetVersions}"
+                        echo "Total created pipelines: ${targetVersions.size()}"
 
                         // Create parallel jobs map
                         def jobs = [:]

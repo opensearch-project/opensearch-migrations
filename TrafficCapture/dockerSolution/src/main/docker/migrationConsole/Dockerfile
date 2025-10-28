@@ -142,10 +142,11 @@ COPY nodeStaging/configProcessor /root/configProcessor
 # Copy test workflow scripts and resources with same structure as configProcessor
 COPY lib/console_link/tests/workflow-tests/resources/scripts /root/testConfigProcessor
 RUN chmod +x /root/testConfigProcessor/*.sh
+RUN chmod +x /root/configProcessor/*.sh
 
 # To use test workflows, flip the comments
-#ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
-ENV CONFIG_PROCESSOR_DIR=/root/testConfigProcessor
+ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
+#ENV CONFIG_PROCESSOR_DIR=/root/testConfigProcessor
 
 # Once we're ready, we should replace the old workflows with the new ones.
 # Notice that the installWorkflows pulls from /root/workflows/templates -

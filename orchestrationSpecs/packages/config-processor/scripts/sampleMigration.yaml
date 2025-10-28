@@ -12,7 +12,8 @@
       "snapshotRepo": {
         "aws_region": "us-east-2",
         "endpoint": "localstack://localstack.ma.svc.cluster.local:4566",
-        "s3RepoPathUri": For localstack testing, replace with `aws --endpoint-url=http://$(kubectl get svc localstack -o jsonpath='{.spec.clusterIP}'):4566 s3 ls`      },
+        "s3RepoPathUri": For localstack testing, replace with `aws --endpoint-url=http://$(kubectl get svc localstack -o jsonpath='{.spec.clusterIP}'):4566 s3 ls`
+      },
       "proxy": { }
     }
   },

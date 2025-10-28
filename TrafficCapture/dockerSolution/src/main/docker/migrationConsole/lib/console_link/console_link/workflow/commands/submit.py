@@ -122,32 +122,18 @@ def submit_command(ctx, namespace, prefix, wait, timeout, wait_interval, session
 
         click.echo(f"Initializing workflow from session: {session}")
 
-        # Step 1: Initialize workflow in etcd (returns prefix)
-        try:
-            workflow_prefix = runner.init_workflow(config_yaml, prefix)
-            click.echo(f"Workflow initialized with prefix: {workflow_prefix}")
-        except ValueError as e:
-            # Missing environment variables
-            click.echo(f"Error: {str(e)}", err=True)
-            ctx.exit(ExitCode.FAILURE.value)
-        except Exception as e:
-            click.echo(f"Error initializing workflow: {str(e)}", err=True)
-            logger.exception("Workflow initialization failed")
-            ctx.exit(ExitCode.FAILURE.value)
-
         # Step 2: Submit workflow to Kubernetes
         click.echo(f"Submitting workflow to namespace: {namespace}")
         try:
-            submit_result = runner.submit_workflow(config_yaml, workflow_prefix, namespace)
+            submit_result = runner.submit_workflow(config_yaml, namespace)
 
             workflow_name = submit_result.get('workflow_name', 'unknown')
 
             click.echo("\nWorkflow submitted successfully")
             click.echo(f"  Name: {workflow_name}")
-            click.echo(f"  Prefix: {workflow_prefix}")
             click.echo(f"  Namespace: {namespace}")
 
-            logger.info(f"Workflow {workflow_name} submitted successfully with prefix {workflow_prefix}")
+            logger.info(f"Workflow {workflow_name} submitted successfully with namespace {namespace}")
 
             # Wait for workflow completion if requested
             if wait:

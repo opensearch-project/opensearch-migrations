@@ -269,35 +269,35 @@ class ArgoWorkflowsWaiter:
 def _detect_existing_kubernetes_cluster():
     """
     Detect if a Kubernetes cluster is already available and accessible.
-    
+
     This function attempts to load the kubeconfig and connect to a cluster.
     It's used to determine whether to use an existing cluster (e.g., Kind in CI,
     minikube locally) or fall back to creating a k3s container.
-    
+
     Returns:
         bool: True if an existing cluster is accessible, False otherwise
     """
     try:
         # Try to load kubeconfig from default location or KUBECONFIG env var
         config.load_kube_config()
-        
+
         # Attempt to connect to the cluster by listing namespaces
         v1 = client.CoreV1Api()
         namespaces = v1.list_namespace(timeout_seconds=10)
-        
+
         # If we got here, we have a working cluster
         logger.info("✓ Detected existing Kubernetes cluster")
         logger.info(f"  Found {len(namespaces.items)} namespaces")
-        
+
         # Log cluster context for debugging
         contexts, active_context = config.list_kube_config_contexts()
         if active_context:
             cluster_name = active_context.get('context', {}).get('cluster', 'unknown')
             logger.info(f"  Active context: {active_context.get('name', 'unknown')}")
             logger.info(f"  Cluster: {cluster_name}")
-        
+
         return True
-        
+
     except config.ConfigException as e:
         logger.info(f"No kubeconfig found: {e}")
         return False
@@ -312,26 +312,26 @@ def _detect_existing_kubernetes_cluster():
 def _get_kubernetes_client():
     """
     Get a configured Kubernetes client from an existing cluster.
-    
+
     This function loads the kubeconfig and returns a CoreV1Api client.
     It should only be called after _detect_existing_kubernetes_cluster()
     has confirmed a cluster is available.
-    
+
     Returns:
         client.CoreV1Api: Configured Kubernetes client, or None if unable to connect
     """
     try:
         # Load kubeconfig (should already be loaded, but ensure it's available)
         config.load_kube_config()
-        
+
         # Create and return the client
         v1 = client.CoreV1Api()
-        
+
         # Verify the client works
         v1.list_namespace(timeout_seconds=10)
-        
+
         return v1
-        
+
     except Exception as e:
         logger.error(f"Failed to create Kubernetes client: {e}")
         return None
@@ -345,34 +345,34 @@ def _get_kubernetes_client():
 def k3s_container():
     """
     Set up Kubernetes cluster for all workflow tests.
-    
+
     This fixture supports three modes:
     1. GitHub Actions: Uses existing Kind cluster set up by the workflow
     2. Local with existing cluster: Auto-detects minikube/k3s/kind
     3. Local without cluster: Falls back to creating k3s container
-    
+
     The fixture automatically detects which mode to use and configures
     the Kubernetes client accordingly.
     """
     # First, check if an existing Kubernetes cluster is available
     has_existing_cluster = _detect_existing_kubernetes_cluster()
-    
+
     if has_existing_cluster:
         logger.info("\n=== Using existing Kubernetes cluster ===")
         logger.info("Skipping k3s container creation")
-        
+
         # Verify we can get a working client
         k8s_client = _get_kubernetes_client()
         if k8s_client is None:
             pytest.fail("Detected existing cluster but failed to create client")
-        
+
         # Yield a sentinel value to indicate we're using an existing cluster
         # The actual kubeconfig is already loaded by _detect_existing_kubernetes_cluster()
         yield {"mode": "existing-cluster", "container": None}
-        
+
         # No cleanup needed for existing cluster
         logger.info("\nUsing existing cluster - no cleanup needed")
-        
+
     else:
         logger.info("\n=== No existing cluster detected ===")
         logger.info("Starting k3s container for workflow tests...")
@@ -658,46 +658,6 @@ class TestWorkflowCLICommands:
         config_data = yaml_parser.safe_load(result.output)
         endpoint = config_data['targets']['test']['endpoint']
         assert endpoint == "https://test.com:9200"
-
-        # Cleanup
-        try:
-            k8s_workflow_store.delete_config(session_name)
-        except ApiException:
-            pass
-
-    def test_workflow_configure_view_json_format(self, runner, k8s_workflow_store):
-        """Test workflow configure view with JSON format"""
-        session_name = "default"
-
-        # Clean up any existing test data
-        try:
-            k8s_workflow_store.delete_config(session_name)
-        except ApiException:
-            pass  # Ignore if doesn't exist
-
-        data = {
-            "targets": {
-                "test": {
-                    "endpoint": "https://test.com:9200",
-                    "auth": {
-                        "username": "admin",
-                        "password": "password"
-                    }
-                }
-            }
-        }
-        config = WorkflowConfig(data)
-
-        # Save config to k3s
-        message = k8s_workflow_store.save_config(config, session_name)
-        assert "created" in message or "updated" in message
-
-        result = runner.invoke(workflow_cli, ['configure', 'view', '--format', 'json'],
-                               obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
-
-        assert result.exit_code == 0
-        assert '"targets"' in result.output
-        assert '"test"' in result.output
 
         # Cleanup
         try:

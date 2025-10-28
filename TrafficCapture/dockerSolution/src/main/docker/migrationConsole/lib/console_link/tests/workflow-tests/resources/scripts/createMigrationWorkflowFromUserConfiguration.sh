@@ -35,47 +35,6 @@ echo "Generated unique prefix: $UUID"
 echo "Running configuration conversion..."
 $INITIALIZE_CMD --user-config $CONFIG_FILENAME --prefix $UUID "$@" > "$TEMPORARY_FILE"
 
-# Parse user configuration to extract parameters using yq
-echo "Parsing user configuration..."
-
-# Extract parameters using yq (handles both JSON and YAML)
-# Try nested path first, if null/empty try direct path
-MESSAGE=$(yq eval '.parameters.message' "$CONFIG_FILENAME")
-if [ "$MESSAGE" = "null" ] || [ -z "$MESSAGE" ]; then
-    MESSAGE=$(yq eval '.message' "$CONFIG_FILENAME")
-fi
-
-REQUIRES_APPROVAL=$(yq eval '.parameters.requiresApproval' "$CONFIG_FILENAME")
-if [ "$REQUIRES_APPROVAL" = "null" ] || [ -z "$REQUIRES_APPROVAL" ]; then
-    REQUIRES_APPROVAL=$(yq eval '.requiresApproval' "$CONFIG_FILENAME")
-fi
-
-APPROVER=$(yq eval '.parameters.approver' "$CONFIG_FILENAME")
-if [ "$APPROVER" = "null" ] || [ -z "$APPROVER" ]; then
-    APPROVER=$(yq eval '.approver' "$CONFIG_FILENAME")
-fi
-
-# Validate required parameters
-if [ -z "$MESSAGE" ] || [ "$MESSAGE" = "null" ]; then
-    echo "Error: 'message' parameter is required in configuration file" >&2
-    exit 1
-fi
-
-if [ -z "$REQUIRES_APPROVAL" ] || [ "$REQUIRES_APPROVAL" = "null" ]; then
-    echo "Error: 'requiresApproval' parameter is required in configuration file" >&2
-    exit 1
-fi
-
-# Default approver to empty string if not provided or null
-if [ "$APPROVER" = "null" ]; then
-    APPROVER=""
-fi
-
-echo "Configuration parameters:"
-echo "  message: $MESSAGE"
-echo "  requiresApproval: $REQUIRES_APPROVAL"
-echo "  approver: $APPROVER"
-
 echo "Applying workflow to Kubernetes..."
 cat <<EOF | kubectl create -f -
 apiVersion: argoproj.io/v1alpha1
