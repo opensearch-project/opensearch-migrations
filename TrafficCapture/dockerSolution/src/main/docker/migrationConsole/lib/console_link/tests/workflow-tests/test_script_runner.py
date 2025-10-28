@@ -45,8 +45,7 @@ class TestScriptRunner:
   requiresApproval: false
   approver: ""
 """
-        prefix = "test-12345"
-        result = runner.submit_workflow(test_config, prefix)
+        result = runner.submit_workflow(test_config)
 
         # Real script returns workflow info dict
         assert "workflow_name" in result
@@ -70,9 +69,8 @@ class TestScriptRunner:
   requiresApproval: false
   approver: ""
 """
-        prefix = "test-12345"
         namespace = "custom-ns"
-        result = runner.submit_workflow(test_config, prefix, namespace)
+        result = runner.submit_workflow(test_config, namespace)
 
         assert result["namespace"] == namespace
         assert "workflow_name" in result
