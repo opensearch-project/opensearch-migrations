@@ -29,7 +29,7 @@ import {
     KeyFor,
     OutputsFrom,
     ParamsTuple,
-    TaskBuilder,
+    TaskBuilder, TaskOpts,
     TaskRebinder
 } from "./taskBuilder";
 import {NamedTask} from "./sharedTypes";
@@ -166,7 +166,9 @@ export class StepsBuilder<
         OutputParamsScope
     > {
         return this.addStepGroup(gb => {
-            return gb.addTask<Name, TemplateSource, K, LoopT>(name, source, key, ...args);
+            return gb.addTask<Name, TemplateSource, K, LoopT, TaskOpts<TasksOutputsScope, "steps", LoopT>>(
+                name, source, key, ...args
+            );
         }) as any;
     }
 

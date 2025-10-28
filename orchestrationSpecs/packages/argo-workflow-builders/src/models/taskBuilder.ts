@@ -15,7 +15,6 @@ import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaratio
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {NamedTask, TaskType} from "./sharedTypes";
 import {
-    AllowSerializedAggregateOrPrimitiveExpressionOrLiteral,
     BaseExpression,
     expr,
     FromParameterExpression,
@@ -33,7 +32,11 @@ import {
     NormalizeInputs
 } from "./parameterConversions";
 
-export type TaskOpts<LoopT extends PlainObject> = {
+export type TaskOpts<
+    S extends TasksOutputsScope,
+    Label extends TaskType,
+    LoopT extends NonSerializedPlainObject
+> = {
     loopWith?: LoopWithUnion<LoopT>,
     when?: SimpleExpression<boolean> | {templateExp: TemplateExpression<boolean>}
 };
@@ -149,7 +152,7 @@ export type ParamsTuple<
     S extends TasksOutputsScope,
     Label extends TaskType,
     LoopT extends NonSerializedPlainObject,
-    OptsType extends TaskOpts<LoopT> = TaskOpts<LoopT>
+    OptsType extends TaskOpts<S, Label, LoopT> = TaskOpts<S, Label, LoopT>
 > =
     InputKind<I> extends "empty"
         ? [opts?: OptsType]
@@ -169,13 +172,14 @@ export type ParamsTuple<
 
 export function unpackParams<
     I extends InputParametersRecord,
+    S extends TasksOutputsScope,
     Label extends TaskType,
     LoopT extends NonSerializedPlainObject
 >(
     args: readonly unknown[]
 ): {
     paramsFn: ParamsRegistrationFn<any, I, Label, LoopT>;
-    opts: TaskOpts<LoopT> | undefined;
+    opts: TaskOpts<S, Label, LoopT> | undefined;
 } {
     const [first, second] = args as [any, any];
     const paramsFn =
@@ -282,7 +286,10 @@ export abstract class TaskBuilder<
     ) {}
 
     /** Hook for subclasses/wrappers to customize task creation (e.g. DAG adds `when`). */
-    protected onTaskPushed<LoopT extends PlainObject, OptsType extends TaskOpts<LoopT>>(task: NamedTask, opts?: OptsType): NamedTask {
+    protected onTaskPushed<
+        LoopT extends NonSerializedPlainObject,
+        OptsType extends TaskOpts<TasksOutputsScope, Label, LoopT>
+    >(task: NamedTask, opts?: OptsType): NamedTask {
         return opts?.when !== undefined ? {...task, when: opts?.when} : task;
     }
 
@@ -314,7 +321,7 @@ export abstract class TaskBuilder<
         TemplateSource,                      // typeof INTERNAL | Workflow<...>
         K extends KeyFor<C, TemplateSource>, // tie K to S so key autocompletes
         LoopT extends NonSerializedPlainObject,
-        OptsType extends TaskOpts<LoopT> = TaskOpts<LoopT>
+        OptsType extends TaskOpts<TasksOutputsScope, Label, LoopT>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, S>,
         source: UniqueNameConstraintOutsideDeclaration<Name, S, TemplateSource>,
@@ -329,7 +336,7 @@ export abstract class TaskBuilder<
         const inputs = (source === INTERNAL) ?
             (this.contextualScope.templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K> :
             (((source as Workflow<any, any, any>).templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K>);
-        const {paramsFn, opts} = unpackParams<InputsFrom<C, TemplateSource, K>, Label, LoopT>(args);
+        const {paramsFn, opts} = unpackParams<InputsFrom<C, TemplateSource, K>, TasksOutputsScope, Label, LoopT>(args);
         const params = inputs === undefined ? {} :
             this.getParamsFromCallback<InputsFrom<C, TemplateSource, K>, LoopT>(inputs, paramsFn as any, opts?.loopWith);
 
@@ -350,8 +357,8 @@ export abstract class TaskBuilder<
         TKey extends string,
         IN extends InputParametersRecord,
         OUT extends OutputParametersRecord,
-        LoopT extends PlainObject,
-        OptsType extends TaskOpts<LoopT>
+        LoopT extends NonSerializedPlainObject,
+        OptsType extends TaskOpts<TasksOutputsScope, Label, LoopT>
     >(
         name: UniqueNameConstraintAtDeclaration<TKey, S>,
         templateCall: NamedTask<IN, OUT, LoopT>,

@@ -411,6 +411,12 @@ export class TemplateReplacementExpression extends BaseExpression<string, "compl
     }
 }
 
+type UnwrapSerialized<T> = T extends Serialized<infer U>
+    ? U
+    : T extends PlainObject
+        ? T
+        : never;
+
 type ExtractTemplatePlaceholders<T extends string> =
     T extends `${string}{{${infer Placeholder}}}${infer Rest}`
         ? Placeholder | ExtractTemplatePlaceholders<Rest>
@@ -741,6 +747,13 @@ class ExprBuilder {
         source: BaseExpression<Serialized<T>, any>,
         ...segs: S
     ): BaseExpression<SegmentsValueStrict<T, S>, "complicatedExpression">;
+    jsonPathStrict<
+        T extends Serialized<Record<string, any>>,
+        K extends Extract<KeysOfUnion<UnwrapSerialized<T>>, string>
+    >(
+        source: BaseExpression<T, any>,
+        key: K
+    ): BaseExpression<SegmentsValueStrict<UnwrapSerialized<T>, readonly [K]>, "complicatedExpression">;
     jsonPathStrict(
         source: BaseExpression<Serialized<any>, any>,
         ...segs: readonly unknown[]
@@ -774,9 +787,18 @@ class ExprBuilder {
         >("sprig.omit", args);
     }
 
-    deserializeRecord<R extends PlainObject, CIn extends ExpressionType>(data: BaseExpression<Serialized<R>,CIn>) {
-        return fn<R,CIn,"complicatedExpression">("fromJSON", data);
+    deserializeRecord<R extends PlainObject, CIn extends ExpressionType>(
+        data: BaseExpression<Serialized<R>, CIn>
+    ): BaseExpression<R, "complicatedExpression">;
+    deserializeRecord<T extends Serialized<PlainObject>, CIn extends ExpressionType>(
+        data: BaseExpression<T, CIn>
+    ): BaseExpression<UnwrapSerialized<T>, "complicatedExpression">;
+    deserializeRecord<R extends PlainObject, CIn extends ExpressionType>(
+        data: BaseExpression<Serialized<R>, CIn>
+    ) {
+        return fn<R, CIn, "complicatedExpression">("fromJSON", data);
     }
+
 
     serialize<R extends PlainObject, CIn extends ExpressionType>(data: BaseExpression<R,CIn>) {
         return fn<Serialized<R>,CIn,"complicatedExpression">("toJSON", data);

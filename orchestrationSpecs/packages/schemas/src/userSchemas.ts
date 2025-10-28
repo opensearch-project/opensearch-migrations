@@ -33,6 +33,13 @@ export const REPLAYER_OPTIONS = z.object({
     // otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
 });
 
+export const CREATE_SNAPSHOT_OPTIONS = z.object({
+    indexAllowlist: z.array(z.string()).default([]),
+    maxSnapshotRateMbPerNode: z.number().default(-1),
+    loggingConfigurationOverrideConfigMap: z.string().default(""),
+    s3RoleArn: z.string().default("")
+});
+
 export const METADATA_OPTIONS = z.object({
     componentTemplateAllowlist: z.array(z.string()).default([]),
     indexAllowlist: z.array(z.string()).default([]),
@@ -100,11 +107,23 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     proxy: PROXY_OPTIONS.optional()
 });
 
-export const NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG = z.object({
-    snapshotName: z.string().optional()
+export const EXTERNALLY_MANAGED_SNAPSHOT = z.object({
+    externallyManagedSnapshot: z.string()
 });
 
-export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG.extend({
+export const GENERATED_SNAPSHOT = z.object({
+    snapshotNamePrefix: z.string()
+});
+
+export const SNAPSHOT_NAME_CONFIG = z.union([
+    EXTERNALLY_MANAGED_SNAPSHOT, GENERATED_SNAPSHOT
+]);
+
+export const NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG = z.object({
+    snapshotNameConfig: SNAPSHOT_NAME_CONFIG
+});
+
+export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
     snapshotName: z.string() // override to required
 });
 
@@ -114,7 +133,7 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
 });
 
 export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    indices: z.array(z.string()).default([]),
+    options: CREATE_SNAPSHOT_OPTIONS,
     snapshotConfig: NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
     migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
 });

@@ -33,10 +33,10 @@ import {NonSerializedPlainObject, PlainObject} from "./plainObject";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {NamedTask} from "./sharedTypes";
 
-export type DagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainObject> =
-    TaskOpts<LoopT> & { dependencies?: ReadonlyArray<Extract<keyof TaskScope, string>> };
+export type DagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends NonSerializedPlainObject> =
+    TaskOpts<TasksOutputsScope, "tasks", LoopT> & { dependencies?: ReadonlyArray<Extract<keyof TaskScope, string>> };
 
-function isDagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainObject>(
+function isDagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends NonSerializedPlainObject>(
     v: unknown
 ): v is DagTaskOpts<TasksOutputsScope, LoopT> {
     return !!v
@@ -51,7 +51,10 @@ class DagTaskBuilder<
 > extends TaskBuilder<ContextualScope, TaskScope, "tasks", TaskRebinder<ContextualScope>> {
     protected readonly label = "tasks";
 
-    protected onTaskPushed<LoopT extends PlainObject, OptsType extends TaskOpts<LoopT>>(
+    protected onTaskPushed<
+        LoopT extends NonSerializedPlainObject,
+        OptsType extends TaskOpts<TasksOutputsScope, "tasks", LoopT>
+    >(
         task: NamedTask, opts?: OptsType
     ): NamedTask {
         return {
@@ -162,7 +165,7 @@ export class DagBuilder<
             OutputParamsScope
         >
     > {
-        return this.taskBuilder.addTask<Name, TemplateSource, K, LoopT>(
+        return this.taskBuilder.addTask<Name, TemplateSource, K, LoopT, DagTaskOpts<TasksOutputsScope, LoopT>>(
             name, source, key, ...args
         );
     }

@@ -3,15 +3,46 @@ import {
     makeRequiredImageParametersForKeys
 } from "./commonWorkflowTemplates";
 import {z} from "zod";
-import {CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG, CONSOLE_SERVICES_CONFIG_FILE} from "@opensearch-migrations/schemas";
+import {
+    CLUSTER_CONFIG,
+    COMPLETE_SNAPSHOT_CONFIG,
+    CONSOLE_SERVICES_CONFIG_FILE, CREATE_SNAPSHOT_OPTIONS,
+    METADATA_OPTIONS, NAMED_SOURCE_CLUSTER_CONFIG, NAMED_TARGET_CLUSTER_CONFIG, TARGET_CLUSTER_CONFIG
+} from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
 import {
+    BaseExpression,
+    expr,
     INTERNAL,
-    MISSING_FIELD,
-    selectInputsForRegister,
+    selectInputsForRegister, Serialized,
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
+import {makeClusterParamDict, makeRepoParamDict} from "./metadataMigration";
+
+export function makeSourceParamDict(sourceConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
+    return makeClusterParamDict("source", sourceConfig);
+}
+
+function makeParamsDict(
+    sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
+    snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
+    options: BaseExpression<Serialized<z.infer<typeof CREATE_SNAPSHOT_OPTIONS>>>
+) {
+    return expr.mergeDicts(
+        expr.mergeDicts(
+            makeSourceParamDict(sourceConfig),
+            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap")
+        ),
+        expr.mergeDicts(
+            expr.makeDict({
+                "snapshotName": expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
+            }),
+            makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"))
+        )
+    );
+}
+
 
 export const CreateSnapshot = WorkflowBuilder.create({
     k8sResourceName: "create-snapshot",
@@ -21,6 +52,26 @@ export const CreateSnapshot = WorkflowBuilder.create({
 
     .addParams(CommonWorkflowParameters)
 
+
+    .addTemplate("runCreateSnapshot", t => t
+        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
+        .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof CREATE_SNAPSHOT_OPTIONS>>())
+
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+
+        .addContainer(b=>b
+            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
+            .addCommand(["/root/createSnapshot/bin/CreateSnapshot"])
+            .addArgs([
+                expr.literal("---INLINE-JSON"),
+                expr.asString(expr.serialize(
+                    makeParamsDict(b.inputs.sourceConfig, b.inputs.snapshotConfig, b.inputs.createSnapshotConfig)
+                ))
+            ])
+        )
+
+    )
 
     .addTemplate("checkSnapshotStatus", t => t
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
@@ -40,9 +91,9 @@ export const CreateSnapshot = WorkflowBuilder.create({
 
 
     .addTemplate("snapshotWorkflow", t => t
-        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof CLUSTER_CONFIG>>())
+        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
-        .addRequiredInput("indices", typeToken<string[]>())
+        .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof CREATE_SNAPSHOT_OPTIONS>>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
@@ -51,15 +102,17 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c)
                 }))
 
-            .addStep("createSnapshot", MigrationConsole, "runMigrationCommand", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    configContents: c.steps.getConsoleConfig.outputs.configContents,
-                    command: "" +
-                        "set -e && \n" +
-                        "console --config-file=/config/migration_services.yaml -v snapshot delete --acknowledge-risk ;\n" +
-                        "console --config-file=/config/migration_services.yaml -v snapshot create\n"
-                }))
+            // .addStep("deleteSnapshot", MigrationConsole, "runMigrationCommand", c =>
+            //     c.register({
+            //         ...selectInputsForRegister(b, c),
+            //         configContents: c.steps.getConsoleConfig.outputs.configContents,
+            //         command: "" +
+            //             "set -e && \n" +
+            //             "console --config-file=/config/migration_services.yaml -v snapshot delete --acknowledge-risk"
+            //     }))
+
+            .addStep("createSnapshot", INTERNAL, "runCreateSnapshot", c =>
+                c.register(selectInputsForRegister(b, c)))
 
             .addStep("checkSnapshotStatus", INTERNAL, "checkSnapshotStatus", c =>
                 c.register({
