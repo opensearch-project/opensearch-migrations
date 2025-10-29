@@ -132,39 +132,71 @@ get_cfn_export() {
   fi
 }
 
+render_dashboard_json() {
+  local in_file="$1"
+  jq \
+    --arg region   "${AWS_CFN_REGION}" \
+    --arg account  "${AWS_ACCOUNT}" \
+    --arg stage    "${STAGE}" \
+    --arg qual     "${MA_QUALIFIER}" \
+    '
+    # walk() method to traverse and replace tokens (only in strings)
+    def walk(f):
+      . as $in
+      | if type == "object" then
+          reduce keys[] as $k (.; .[$k] = ( .[$k] | walk(f) ))
+          | f
+        elif type == "array" then
+          map( walk(f) )
+          | f
+        else
+          f
+        end;
+
+    def s:
+      if type=="string" then
+        .
+        | gsub("REGION";        $region)
+        | gsub("ACCOUNT_ID";    $account)
+        | gsub("MA_STAGE";      $stage)
+        | gsub("MA_QUALIFIER";  $qual)
+        | gsub("placeholder-region";     $region)
+        | gsub("placeholder-account-id"; $account)
+        | gsub("placeholder-stage";      $stage)
+        | gsub("placeholder-qualifier";  $qual)
+      else .
+      end;
+    walk(s)
+    ' "$in_file"
+}
+
 deploy_dashboard() {
   local dashboard_name="$1"
   local dashboard_file="$2"
-  local stage="${STAGE}"
-  local region
-  region=$(aws configure get region)
-  local account
-  account=$(aws sts get-caller-identity --query Account --output text)
+
+  : "${AWS_CFN_REGION:?AWS_CFN_REGION required}"
+  : "${AWS_ACCOUNT:?AWS_ACCOUNT required}"
+  : "${STAGE:?STAGE required}"
+  : "${MA_QUALIFIER:?MA_QUALIFIER required}"
 
   echo "Deploying dashboard: ${dashboard_name}"
   [[ -f "$dashboard_file" ]] || { echo "ERROR: dashboard file not found: $dashboard_file"; exit 1; }
 
-  # Load and validate JSON
+  # Render tokens, validate and minify
   local processed_json
-  processed_json="$(cat "$dashboard_file")" || { echo "ERROR: failed to read JSON"; exit 1; }
+  processed_json="$(render_dashboard_json "$dashboard_file")" || { echo "ERROR: failed to render JSON"; exit 1; }
 
   echo "$processed_json" | jq -e . >/dev/null || {
       echo "ERROR: Invalid JSON for ${dashboard_name} (${dashboard_file})"
       exit 1
   }
 
-  # Check for variables block
-  if ! echo "$processed_json" | jq -e '.variables | length >= 1' >/dev/null; then
-    echo "WARN: No .variables[] found in dashboards JSON"
-  fi
-
-  # Minify and push
   local tmp_json
   tmp_json="$(mktemp)"
   echo "$processed_json" | jq -c . > "$tmp_json"
 
   # Deterministic dashboard name
-  local full_name="MA-${stage}-${region}-${dashboard_name}"
+  local full_name="MA-${STAGE}-${AWS_CFN_REGION}-${dashboard_name}"
   aws cloudwatch put-dashboard \
     --dashboard-name "$full_name" \
     --dashboard-body "file://${tmp_json}" >/dev/null
@@ -211,6 +243,11 @@ fi
 echo "Setting ENV variables: $output"
 eval "$output"
 
+AWS_ACCOUNT="${AWS_ACCOUNT:-$(aws sts get-caller-identity --query Account --output text)}"
+AWS_CFN_REGION="${AWS_CFN_REGION:-$(aws configure get region)}"
+STAGE="${STAGE:-${MA_STAGE:-dev}}"
+MA_QUALIFIER="${MA_QUALIFIER:-${MIGRATIONS_QUALIFIER:-default}}"
+
 aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
 
 kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace "$namespace"
@@ -250,6 +287,7 @@ if [[ "$skip_git_pull" == "false" ]]; then
   popd > /dev/null || exit
 fi
 
+# --- validation ---
 if [[ "$build_images" == "true" ]]; then
   if helm status build-images -n "$namespace" >/dev/null 2>&1; then
     read -rp "Helm release 'build-images' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer

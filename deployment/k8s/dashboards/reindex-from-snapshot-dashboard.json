@@ -71,7 +71,7 @@
                 "stacked": false,
                 "metrics": [
                     [ { "expression": "METRICS()/1000/PERIOD(m1)*60", "id": "e1", "region": "REGION" } ],
-                    [ "AWS/ES", "IndexingRate", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "region": "region", "label": "Document Ingested (included replicas) - MIN: ${MIN}, MAX: ${MAX}, AVG: ${AVG}", "id": "m1", "visible": false } ]
+                    [ "AWS/ES", "IndexingRate", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "region": "REGION", "label": "Document Ingested (included replicas) - MIN: ${MIN}, MAX: ${MAX}, AVG: ${AVG}", "id": "m1", "visible": false } ]
                 ],
                 "region": "REGION",
                 "title": "Target Cluster Document Index Rate",
