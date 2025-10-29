@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -167,8 +168,13 @@ public class LeaseExpirationTest extends SourceTestBase {
                 initialExitCodeCount += exitCode == expectedInitialExitCode ? 1 : 0;
                 finalExitCodeCount += exitCode == expectedEventualExitCode ? 1 : 0;
                 log.atInfo().setMessage("Process exited with code: {}").addArgument(exitCode).log();
-                // Clean tree for subsequent run
+                // Clean tree for subsequent run and recreate the work dir
                 deleteTree(tempDirLucene);
+                try {
+                    Files.createDirectories(tempDirLucene);
+                } catch (IOException e) {
+                    throw new RuntimeException("Failed to recreate Lucene temp dir: " + tempDirLucene, e);
+                }
             } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < expectedInitialExitCodeCount + expectedEventualExitCodeCount);
 
             // Assert doc count on the target cluster matches source
@@ -194,7 +200,9 @@ public class LeaseExpirationTest extends SourceTestBase {
                     "The program did not exit with the expected number of " + expectedInitialExitCode +" exit codes"
             );
         } finally {
+            // Safe cleanup for both trees
             deleteTree(tempDirSnapshot);
+            deleteTree(tempDirLucene);
         }
     }
 
