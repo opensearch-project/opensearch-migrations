@@ -19,7 +19,7 @@ import {
     WorkflowAndTemplatesScope,
 } from "./workflowTypes";
 import {
-    AllTasksAsOutputReferenceable,
+    LabelledAllTasksAsOutputReferenceable,
     InputsFrom,
     KeyFor,
     OutputsFrom,
@@ -53,7 +53,7 @@ class DagTaskBuilder<
 
     protected onTaskPushed<
         LoopT extends NonSerializedPlainObject,
-        OptsType extends TaskOpts<TasksOutputsScope, "tasks", LoopT>
+        OptsType extends TaskOpts<TaskScope, "tasks", LoopT>
     >(
         task: NamedTask, opts?: OptsType
     ): NamedTask {
@@ -71,7 +71,7 @@ type DagExpressionContext<
     TaskScope extends TasksOutputsScope
 > = {
     inputs: InputParamsToExpressions<InputParamsScope>;
-} & AllTasksAsOutputReferenceable<TaskScope, "tasks">;
+} & LabelledAllTasksAsOutputReferenceable<TaskScope, "tasks">;
 
 export class DagBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,

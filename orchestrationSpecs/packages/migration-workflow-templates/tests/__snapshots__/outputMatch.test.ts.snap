@@ -663,7 +663,7 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
                 "name": "create-snapshot",
                 "template": "snapshotworkflow",
               },
-              "when": "true",
+              "when": "'{{steps.getSnapshotName.outputs.parameters.autoCreate}}'",
             },
           ],
         ],

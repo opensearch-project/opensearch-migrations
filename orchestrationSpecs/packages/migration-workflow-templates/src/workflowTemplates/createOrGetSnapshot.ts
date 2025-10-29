@@ -80,8 +80,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                         })
                     ),
                 }), {
-                    // TODO: FIX THIS CHECK - I think that the old one was backward though!
-                    when: expr.literal(true)
+                    when: tasks => tasks.getSnapshotName.outputs.autoCreate
                 }
             )
         )

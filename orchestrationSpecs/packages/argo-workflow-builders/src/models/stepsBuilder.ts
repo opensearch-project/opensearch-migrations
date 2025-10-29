@@ -23,7 +23,7 @@ import {TemplateBodyBuilder} from "./templateBodyBuilder";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {NonSerializedPlainObject, PlainObject} from "./plainObject";
 import {
-    AllTasksAsOutputReferenceable,
+    LabelledAllTasksAsOutputReferenceable,
     getTaskOutputsByTaskName,
     InputsFrom,
     KeyFor,
@@ -69,7 +69,7 @@ type StepsExpressionContext<
     StepsScope extends TasksOutputsScope
 > = {
     inputs: InputParamsToExpressions<InputParamsScope>;
-} & AllTasksAsOutputReferenceable<StepsScope, "steps">;
+} & LabelledAllTasksAsOutputReferenceable<StepsScope, "steps">;
 
 export class StepsBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
@@ -155,7 +155,13 @@ export class StepsBuilder<
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         source: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TemplateSource>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, K>,
-        ...args: ParamsTuple<InputsFrom<ContextualScope, TemplateSource, K>, Name, StepsScope, "steps", LoopT>
+        ...args: ParamsTuple<
+            InputsFrom<ContextualScope, TemplateSource, K>,
+            Name,
+            StepsScope,
+            "steps",
+            LoopT,
+            TaskOpts<StepsScope, "steps", LoopT>>
     ): StepsBuilder<
         ContextualScope,
         InputParamsScope,
@@ -166,7 +172,7 @@ export class StepsBuilder<
         OutputParamsScope
     > {
         return this.addStepGroup(gb => {
-            return gb.addTask<Name, TemplateSource, K, LoopT, TaskOpts<TasksOutputsScope, "steps", LoopT>>(
+            return gb.addTask<Name, TemplateSource, K, LoopT, TaskOpts<StepsScope, "steps", LoopT>>(
                 name, source, key, ...args
             );
         }) as any;
