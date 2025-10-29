@@ -129,14 +129,6 @@ RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\t) \[\e[92m\]migration-console \[\e[0m\](\w) -> "' >> ~/.bashrc
 
-# Install YQ
-RUN set -eux; \
-  arch="$(uname -m)"; \
-  case "$arch" in x86_64) yq_arch=amd64 ;; aarch64|arm64) yq_arch=arm64 ;; *) echo "unsupported arch: $arch" >&2; exit 1 ;; esac; \
-  curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yq_arch}" -o /usr/local/bin/yq; \
-  chmod +x /usr/local/bin/yq; \
-  /usr/local/bin/yq --version
-
 COPY nodeStaging/configProcessor /root/configProcessor
 
 # Copy test workflow scripts and resources with same structure as configProcessor
