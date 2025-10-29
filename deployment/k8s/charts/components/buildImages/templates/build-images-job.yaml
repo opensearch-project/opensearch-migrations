@@ -75,7 +75,7 @@ spec:
               docker buildx create --name local-remote-builder --driver remote tcp://buildkitd:1234
 
               # Build without configuration cache since this will be run once on a new container
-              GRADLE_CMD="./gradlew buildImagesToRegistry -PregistryEndpoint='{{ .Values.registryEndpoint }}' -x test --no-configuration-cache"
+              GRADLE_CMD="./gradlew buildImagesToRegistry -PregistryEndpoint='{{ .Values.registryEndpoint }}' -x test --no-configuration-cache --no-build-cache --no-daemon"
               echo "Running Gradle build with:"
               echo "$GRADLE_CMD"
               eval "$GRADLE_CMD"
