@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
     '--argo-server',
     default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
     f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
-    help='Argo Server URL (default: auto-detected from Kubernetes service env vars, or ARGO_SERVER env var)'
+    help='Argo Server URL (default: ARGO_SERVER env var, or ARGO_SERVER_SERVICE_HOST:ARGO_SERVER_SERVICE_PORT)'
 )
 @click.option(
     '--namespace',
@@ -89,6 +89,8 @@ def stop_command(ctx, workflow_name, argo_server, namespace, insecure, token):
 
         if result['success']:
             click.echo(f"Workflow {workflow_name} stopped successfully")
+            click.echo(f"\nBefore starting a new workflow, delete this workflow with:")
+            click.echo(f"  kubectl delete workflow {workflow_name} -n {namespace}")
         else:
             click.echo(f"Error: {result['message']}", err=True)
             ctx.exit(ExitCode.FAILURE.value)

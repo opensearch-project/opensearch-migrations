@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
         f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}:"
         f"{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}"
     ),
-    help='Argo Server URL (default: auto-detected from Kubernetes service env vars, or ARGO_SERVER env var)'
+    help='Argo Server URL (default: ARGO_SERVER env var, or ARGO_SERVER_SERVICE_HOST:ARGO_SERVER_SERVICE_PORT)'
 )
 @click.option(
     '--namespace',

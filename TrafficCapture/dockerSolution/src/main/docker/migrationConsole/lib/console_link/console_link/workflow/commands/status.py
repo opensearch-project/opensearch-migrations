@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
     '--argo-server',
     default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
     f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
-    help='Argo Server URL (default: auto-detected from Kubernetes service env vars, or ARGO_SERVER env var)'
+    help='Argo Server URL (default: ARGO_SERVER env var, or ARGO_SERVER_SERVICE_HOST:ARGO_SERVER_SERVICE_PORT)'
 )
 @click.option(
     '--namespace',
@@ -146,10 +146,9 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
             click.echo(f"Found {list_result['count']} workflow(s) in namespace {namespace}:")
             click.echo("")
 
-            # Sort workflows alphabetically by name
-            sorted_workflows = sorted(list_result['workflows'])
-
-            for wf_name in sorted_workflows:
+            # Get status for all workflows to sort chronologically
+            workflow_statuses = []
+            for wf_name in list_result['workflows']:
                 result = service.get_workflow_status(
                     workflow_name=wf_name,
                     namespace=namespace,
@@ -157,9 +156,14 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
                     token=token,
                     insecure=insecure
                 )
-
                 if result['success']:
-                    _display_workflow_status(result)
+                    workflow_statuses.append(result)
+
+            # Sort workflows chronologically by start time (oldest first)
+            workflow_statuses.sort(key=lambda x: x['started_at'] or '')
+
+            for result in workflow_statuses:
+                _display_workflow_status(result)
 
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
