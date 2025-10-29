@@ -67,6 +67,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# --- validation ---
 if [[ "$build_images" == "true" && "$use_public_images" == "true" ]]; then
   echo "Note: --build-images is enabled, so public images will NOT be used."
   use_public_images=false
@@ -287,7 +288,6 @@ if [[ "$skip_git_pull" == "false" ]]; then
   popd > /dev/null || exit
 fi
 
-# --- validation ---
 if [[ "$build_images" == "true" ]]; then
   if helm status build-images -n "$namespace" >/dev/null 2>&1; then
     read -rp "Helm release 'build-images' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
