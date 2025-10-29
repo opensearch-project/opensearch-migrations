@@ -9,9 +9,16 @@ function main(context) {
   const isMap = (v) => v instanceof Map;
   const isObj = (v) => v && typeof v === "object";
   const asEntries = (v) => isMap(v) ? [...v.entries()] : Object.entries(v ?? {});
-  const hasKey = (v, k) => isMap(v) ? v.has(k) : v != null && Object.prototype.hasOwnProperty.call(v, k);
+  const hasKey = (v, k) => isMap(v) ? v.has(k) : v != null && Object.hasOwn(v, k);
   const getKey = (v, k) => (isMap(v) ? v.get(k) : v?.[k]);
-  const setKey = (v, k, val) => (isMap(v) ? v.set(k, val) : (v[k] = val));
+  const setKey = (v, k, val) => {
+    if (isMap(v)) {
+      return v.set(k, val);
+    } else {
+      v[k] = val;
+      return val;
+    }
+  };
 
   const getPath = (root, path) => {
     let cur = root;
@@ -24,8 +31,7 @@ function main(context) {
 
   const ensurePath = (root, path, preferMapFrom) => {
     let cur = root;
-    for (let i = 0; i < path.length; i++) {
-      const k = path[i];
+    for (const k of path) {
       if (!hasKey(cur, k) || !isObj(getKey(cur, k))) {
         const useMap = isMap(preferMapFrom ?? cur);
         setKey(cur, k, useMap ? new Map() : {});
@@ -105,7 +111,7 @@ function main(context) {
       return false;
     }
     const type = getKey(doc, "type");
-    return (type === "template" || type === "indexTemplate" || type === "componentTemplate");
+    return (type === "template" || type === "index_template" || type === "component_template");
   };
   
   const isIndexCreationRequest = (doc) => {
@@ -122,14 +128,11 @@ function main(context) {
       if (isTemplateCreationRequest(doc) || isIndexCreationRequest(doc)) {
         const body = getKey(doc, "body");
         maybeApplySettingFromSettingsRoot(body);
-        return doc;
       }
-
-      return doc;
     } catch (err) {
       console.error("Error in NGramDiffSettingTransformer:", err);
-      return doc;
     }
+    return doc;
   }
 
   return (document) => {
