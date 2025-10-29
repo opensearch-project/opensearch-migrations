@@ -89,7 +89,7 @@ def stop_command(ctx, workflow_name, argo_server, namespace, insecure, token):
 
         if result['success']:
             click.echo(f"Workflow {workflow_name} stopped successfully")
-            click.echo(f"\nBefore starting a new workflow, delete this workflow with:")
+            click.echo("\nBefore starting a new workflow, delete this workflow with:")
             click.echo(f"  kubectl delete workflow {workflow_name} -n {namespace}")
         else:
             click.echo(f"Error: {result['message']}", err=True)
