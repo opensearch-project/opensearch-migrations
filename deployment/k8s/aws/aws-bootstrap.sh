@@ -157,10 +157,6 @@ render_dashboard_json() {
     def s:
       if type=="string" then
         .
-        | gsub("REGION";        $region)
-        | gsub("ACCOUNT_ID";    $account)
-        | gsub("MA_STAGE";      $stage)
-        | gsub("MA_QUALIFIER";  $qual)
         | gsub("placeholder-region";     $region)
         | gsub("placeholder-account-id"; $account)
         | gsub("placeholder-stage";      $stage)
