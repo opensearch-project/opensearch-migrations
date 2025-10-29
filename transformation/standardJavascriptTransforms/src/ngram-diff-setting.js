@@ -76,9 +76,18 @@ function main(context) {
 
     let settings = getKey(root, "settings");
     if (isObj(settings)) {
+      // Check for analysis at settings.analysis
       const analysis = getKey(settings, "analysis");
       if (containsNGram(analysis)) {
         setIndexMaxNgramDiff(settings);
+        return;
+      }
+      
+      // Check for analysis at settings.index.analysis
+      const indexAnalysis = getPath(settings, ["index", "analysis"]);
+      if (containsNGram(indexAnalysis)) {
+        setIndexMaxNgramDiff(settings);
+        return;
       }
       return;
     }
