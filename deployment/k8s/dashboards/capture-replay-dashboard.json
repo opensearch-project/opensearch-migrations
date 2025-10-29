@@ -118,14 +118,14 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "AWS/ECS", "MemoryUtilization", "ServiceName", "migration-MA_STAGE-traffic-replayer-default", "ClusterName", "migration-MA_STAGE-ecs-cluster", { "stat": "Minimum", "label": "Memory Min", "region": "${REGION}" } ],
-                    [ "...", { "stat": "Maximum", "label": "Memory Max", "region": "${REGION}" } ],
-                    [ "...", { "stat": "Average", "label": "Memory Avg", "region": "${REGION}" } ]
+                    [ "AWS/ECS", "MemoryUtilization", "ServiceName", "migration-MA_STAGE-traffic-replayer-default", "ClusterName", "migration-MA_STAGE-ecs-cluster", { "stat": "Minimum", "label": "Memory Min", "region": "REGION" } ],
+                    [ "...", { "stat": "Maximum", "label": "Memory Max", "region": "REGION" } ],
+                    [ "...", { "stat": "Average", "label": "Memory Avg", "region": "REGION" } ]
                 ],
                 "view": "timeSeries",
                 "stacked": false,
                 "title": "Replayer Memory Utilization",
-                "region": "${REGION}",
+                "region": "REGION",
                 "period": 60,
                 "yAxis": {
                     "left": {
