@@ -165,7 +165,7 @@ jobs:
           fi
       - name: Upload memory dump
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           if-no-files-found: warn
           name: memory-dumps-gradle-tests-stripe-${{ matrix.index }}
@@ -173,7 +173,7 @@ jobs:
 
       - name: Upload test reports for stripe ${{ matrix.index }}
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           if-no-files-found: error
           name: test-reports-gradle-tests-stripe-${{ matrix.index }}
@@ -230,7 +230,7 @@ jobs:
           docker cp $(docker ps --filter "name=migration-console" -q):/shared-logs-output logs/shared_logs_output
       - name: Upload Logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           if-no-files-found: error
           name: e2e-test-logs

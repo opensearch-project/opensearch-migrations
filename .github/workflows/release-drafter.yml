@@ -44,28 +44,31 @@ jobs:
       - name: Build Docker Images
         run: |
           ./deployment/cdk/opensearch-service-migration/buildDockerImages.sh -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }}
+      - name: Generate Solutions Artifact
+        run: |
+          ./deployment/migration-assistant-solution/package-artifacts.sh
       - name: Generate SBOM for migration_console
-        uses: anchore/sbom-action@v0.20.8
+        uses: anchore/sbom-action@v0.20.9
         with:
           image: migrations/migration_console:latest
           output-file: opensearch-migrations-console-sbom.spdx.json
       - name: Generate SBOM for traffic_replayer
-        uses: anchore/sbom-action@v0.20.8
+        uses: anchore/sbom-action@v0.20.9
         with:
           image: migrations/traffic_replayer:latest
           output-file: opensearch-migrations-traffic-replayer-sbom.spdx.json
       - name: Generate SBOM for capture_proxy
-        uses: anchore/sbom-action@v0.20.8
+        uses: anchore/sbom-action@v0.20.9
         with:
           image: migrations/capture_proxy:latest
           output-file: opensearch-migrations-traffic-capture-proxy-sbom.spdx.json
       - name: Generate SBOM for reindex_from_snapshot
-        uses: anchore/sbom-action@v0.20.8
+        uses: anchore/sbom-action@v0.20.9
         with:
           image: migrations/reindex_from_snapshot:latest
           output-file: opensearch-migrations-reindex-from-snapshot-sbom.spdx.json
       - name: Generate SBOM for artifacts
-        uses: anchore/sbom-action@v0.20.8
+        uses: anchore/sbom-action@v0.20.9
         with:
           file: artifacts.tar.gz
           output-file: artifacts-sbom.spdx.json
@@ -108,12 +111,21 @@ jobs:
       - name: Logout to DockerHub
         if: always()
         run: docker logout
+      - name: Configure AWS Credentials for Solutions Upload
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.SOLUTIONS_UPLOAD_ROLE }}
+          aws-region: us-east-1
+      - name: Upload Solutions Artifact to S3
+        run: |
+          aws s3 cp deployment/migration-assistant-solution/build/artifacts.zip s3://cornerstone-amazonaws/SO0290/${{ steps.get_data.outputs.version }}/artifacts.zip
       - name: Draft a release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
           generate_release_notes: true
           files: |
+            deployment/migration-assistant-solution/build/temp/global-s3-assets/*.template
             artifacts.tar.gz
             traffic-capture-artifacts.tar.gz
             **/*.spdx.json
