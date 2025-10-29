@@ -11,7 +11,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
@@ -53,7 +52,6 @@ import org.opensearch.migrations.transform.TransformationLoader;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
-import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.hamcrest.MatcherAssert;
