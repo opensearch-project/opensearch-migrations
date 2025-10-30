@@ -1,6 +1,6 @@
 import {AllowLiteralOrExpression, BaseExpression, expr} from "./models/expression";
 import {z} from "zod";
-import {ConfigMapKeySelector, defineParam, defineRequiredParam} from "./models/parameterSchemas";
+import {ConfigMapKeySelector, defineParam, defineRequiredParam, InputParamDef} from "./models/parameterSchemas";
 import {PlainObject} from "./models/plainObject";
 import {TypeToken} from "./models/sharedTypes";
 import {ExpressionOrConfigMapValue} from "./models/workflowTypes";
@@ -96,79 +96,4 @@ export function inputsToEnvVarsList<T extends Record<string, ExpressionOrConfigM
     envVarDecorator: {prefix: string, suffix: string}
 ) {
     return Object.entries(inputsToEnvVars(inputs, envVarDecorator)).map(([name, value]) => ({name, value}));
-}
-
-// Helper to check if a Zod type has a default value
-function hasDefault(zodType: any): boolean {
-    return zodType && zodType._def && 'defaultValue' in zodType._def;
-}
-
-// Helper to extract the default value from a Zod type
-function getDefaultValue(zodType: any): any {
-    if (!hasDefault(zodType)) return undefined;
-
-    const defaultValue = zodType._def.defaultValue;
-
-    // If it's a function, call it to get the actual default
-    if (typeof defaultValue === 'function') {
-        return defaultValue();
-    }
-
-    return defaultValue;
-}
-
-// Helper to extract description from Zod schema
-function getDescription(zodType: any): string | undefined {
-    return zodType?._def?.description;
-}
-
-// Type to detect if a Zod type has a default at the type level
-type HasDefault<T> = T extends z.ZodDefault<any> ? true : false;
-
-// Type to extract the inner type from wrapped Zod types
-type ExtractInnerType<T> = T extends z.ZodDefault<infer U>
-    ? z.infer<U>
-    : T extends z.ZodOptional<infer U>
-        ? z.infer<U>
-        : z.infer<T>;
-
-type ParamReturnFor<U, HasDef extends boolean> =
-    U extends PlainObject
-        ? HasDef extends true
-            ? ReturnType<typeof defineParam<U>>
-            : ReturnType<typeof defineRequiredParam<U>>
-        : TypescriptError<"Zod field does not infer to PlainObject (required by defineParam).">;
-
-type TransformedParams<T extends z.ZodRawShape> = {
-    [K in keyof T]:
-    ExtractInnerType<T[K]> extends infer U
-        ? ParamReturnFor<U, HasDefault<T[K]> extends true ? true : false>
-        : never;
-};
-
-export function transformZodObjectToParams<T extends z.ZodRawShape>(
-    zodObject: z.ZodObject<T>
-): TransformedParams<T> {
-    const shape = zodObject.shape;
-    const result: any = {};
-
-    for (const [key, zodType] of Object.entries(shape)) {
-        const description = getDescription(zodType);
-
-        if (hasDefault(zodType)) {
-            // Field has a default value
-            const defaultValue = getDefaultValue(zodType);
-            result[key] = defineParam({
-                ...(description && {description}),
-                expression: expr.literal(defaultValue)
-            });
-        } else {
-            // Field is required (no default)
-            result[key] = defineRequiredParam({
-                ...(description && {description})
-            });
-        }
-    }
-
-    return result as TransformedParams<T>;
 }

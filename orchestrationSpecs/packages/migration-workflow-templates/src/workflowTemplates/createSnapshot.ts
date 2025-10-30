@@ -97,19 +97,11 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
+
             .addStep("getConsoleConfig", MigrationConsole, "getConsoleConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c)
                 }))
-
-            // .addStep("deleteSnapshot", MigrationConsole, "runMigrationCommand", c =>
-            //     c.register({
-            //         ...selectInputsForRegister(b, c),
-            //         configContents: c.steps.getConsoleConfig.outputs.configContents,
-            //         command: "" +
-            //             "set -e && \n" +
-            //             "console --config-file=/config/migration_services.yaml -v snapshot delete --acknowledge-risk"
-            //     }))
 
             .addStep("createSnapshot", INTERNAL, "runCreateSnapshot", c =>
                 c.register(selectInputsForRegister(b, c)))

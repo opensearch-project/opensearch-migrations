@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {
-    COMPLETE_SNAPSHOT_CONFIG,
+    COMPLETE_SNAPSHOT_CONFIG, CREATE_SNAPSHOT_OPTIONS, DYNAMIC_SNAPSHOT_CONFIG,
     getZodKeys,
     METADATA_OPTIONS,
     NAMED_SOURCE_CLUSTER_CONFIG,
@@ -31,7 +31,6 @@ import {
     makeParameterLoop,
     selectInputsFieldsAsExpressionRecord,
     selectInputsForRegister,
-    transformZodObjectToParams,
     typeToken,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
@@ -135,7 +134,10 @@ export const FullMigration = WorkflowBuilder.create({
     .addTemplate("foreachSnapshotExtraction", t => t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addInputsFromRecord(transformZodObjectToParams(SNAPSHOT_MIGRATION_CONFIG))
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['snapshotConfig']>())
+        .addRequiredInput("migrations", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['migrations']>())
+        .addOptionalInput("createSnapshotConfig",
+                c=> expr.empty<z.infer<typeof CREATE_SNAPSHOT_OPTIONS>>())
 
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(ImageParameters)
@@ -143,8 +145,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addSteps(b => b
             .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
                 c => c.register({
-                    ...selectInputsForRegister(b, c),
-                    createSnapshotConfig: b.inputs.options
+                    ...selectInputsForRegister(b, c)
                 }))
 
             .addStep("foreachSnapshotMigration", INTERNAL, "foreachSnapshotMigration", c=> {

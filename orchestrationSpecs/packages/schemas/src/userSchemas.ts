@@ -133,7 +133,7 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
 });
 
 export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    options: CREATE_SNAPSHOT_OPTIONS,
+    createSnapshotConfig: CREATE_SNAPSHOT_OPTIONS.optional(),
     snapshotConfig: NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
     migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
 });
@@ -143,13 +143,6 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     toTarget: z.string(),
     snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).optional(),
     replayerConfig: REPLAYER_OPTIONS.optional()
-});
-
-export const CONSOLE_SERVICES_CONFIG_FILE = z.object({
-    kafka: KAFKA_SERVICES_CONFIG.optional(),
-    source_cluster: CLUSTER_CONFIG.optional(),
-    snapshot: NORMALIZED_COMPLETE_SNAPSHOT_CONFIG.optional(),
-    target_cluster: TARGET_CLUSTER_CONFIG.optional()
 });
 
 export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);

@@ -1600,13 +1600,14 @@ exports[`test workflow template renderings full-migration 1`] = `
               "name": "targetConfig",
             },
             {
-              "name": "options",
+              "name": "snapshotConfig",
             },
             {
               "name": "migrations",
             },
             {
-              "name": "snapshotConfig",
+              "name": "createSnapshotConfig",
+              "value": "",
             },
             {
               "name": "uniqueRunNonce",
@@ -1647,6 +1648,10 @@ exports[`test workflow template renderings full-migration 1`] = `
               "arguments": {
                 "parameters": [
                   {
+                    "name": "createSnapshotConfig",
+                    "value": "{{inputs.parameters.createSnapshotConfig}}",
+                  },
+                  {
                     "name": "sourceConfig",
                     "value": "{{inputs.parameters.sourceConfig}}",
                   },
@@ -1665,10 +1670,6 @@ exports[`test workflow template renderings full-migration 1`] = `
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "createSnapshotConfig",
-                    "value": "{{inputs.parameters.options}}",
                   },
                 ],
               },
@@ -1848,8 +1849,8 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
-                    "name": "options",
-                    "value": "{{=jsonpath(toJSON(item), '$.options')}}",
+                    "name": "createSnapshotConfig",
+                    "value": "{{=sprig.dig('createSnapshotConfig', '', item)}}",
                   },
                   {
                     "name": "migrations",
