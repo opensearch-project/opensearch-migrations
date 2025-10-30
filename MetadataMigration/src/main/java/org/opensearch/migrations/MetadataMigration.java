@@ -27,6 +27,8 @@ import org.apache.logging.log4j.core.appender.FileAppender;
 @Slf4j
 public class MetadataMigration {
 
+    public static final String ENV_PREFIX = "METADATA_MIGRATE_";
+
     public static void main(String[] args) {
         new MetadataMigration().run(args);
     }
@@ -38,9 +40,9 @@ public class MetadataMigration {
                 args,
                 ArgNameConstants.joinLists(ArgNameConstants.CENSORED_SOURCE_ARGS, ArgNameConstants.CENSORED_TARGET_ARGS)
         )));
-        var metadataArgs = EnvVarParameterPuller.injectFromEnv(new MetadataArgs(), "METADATA_MIGRATE_");
-        var migrateArgs = EnvVarParameterPuller.injectFromEnv(new MigrateArgs(), "METADATA_MIGRATE_");
-        var evaluateArgs = EnvVarParameterPuller.injectFromEnv(new EvaluateArgs(), "METADATA_MIGRATE_");
+        var metadataArgs = EnvVarParameterPuller.injectFromEnv(new MetadataArgs(), ENV_PREFIX);
+        var migrateArgs  = EnvVarParameterPuller.injectFromEnv(new MigrateArgs(),  ENV_PREFIX);
+        var evaluateArgs = EnvVarParameterPuller.injectFromEnv(new EvaluateArgs(), ENV_PREFIX);
         var argsParser = JsonCommandLineParser.newBuilder()
             .addObject(metadataArgs)
             .addCommand(migrateArgs)
