@@ -133,6 +133,85 @@ get_cfn_export() {
   fi
 }
 
+render_dashboard_json() {
+  local in_file="$1"
+  jq \
+    --arg region   "${AWS_CFN_REGION}" \
+    --arg account  "${AWS_ACCOUNT}" \
+    --arg stage    "${STAGE}" \
+    --arg qual     "${MA_QUALIFIER}" \
+    '
+    # walk() method to traverse and replace tokens (only in strings)
+    def walk(f):
+      . as $in
+      | if type == "object" then
+          reduce keys[] as $k (.; .[$k] = ( .[$k] | walk(f) ))
+          | f
+        elif type == "array" then
+          map( walk(f) )
+          | f
+        else
+          f
+        end;
+
+    def s:
+      if type=="string" then
+        .
+        | gsub("REGION";        $region)
+        | gsub("ACCOUNT_ID";    $account)
+        | gsub("MA_STAGE";      $stage)
+        | gsub("MA_QUALIFIER";  $qual)
+        | gsub("placeholder-region";     $region)
+        | gsub("placeholder-account-id"; $account)
+        | gsub("placeholder-stage";      $stage)
+        | gsub("placeholder-qualifier";  $qual)
+      else .
+      end;
+    walk(s)
+    ' "$in_file"
+}
+
+deploy_dashboard() {
+  local dashboard_name="$1"
+  local dashboard_file="$2"
+
+  : "${AWS_CFN_REGION:?AWS_CFN_REGION required}"
+  : "${AWS_ACCOUNT:?AWS_ACCOUNT required}"
+  : "${STAGE:?STAGE required}"
+  : "${MA_QUALIFIER:?MA_QUALIFIER required}"
+
+  echo "Deploying dashboard: ${dashboard_name}"
+  [[ -f "$dashboard_file" ]] || { echo "ERROR: dashboard file not found: $dashboard_file"; exit 1; }
+
+  # Render tokens, validate and minify
+  local processed_json
+  processed_json="$(render_dashboard_json "$dashboard_file")" || { echo "ERROR: failed to render JSON"; exit 1; }
+
+  echo "$processed_json" | jq -e . >/dev/null || {
+      echo "ERROR: Invalid JSON for ${dashboard_name} (${dashboard_file})"
+      exit 1
+  }
+
+  local tmp_json
+  tmp_json="$(mktemp)"
+  echo "$processed_json" | jq -c . > "$tmp_json"
+
+  # Deterministic dashboard name
+  local full_name="MA-${STAGE}-${AWS_CFN_REGION}-${dashboard_name}"
+  aws cloudwatch put-dashboard \
+    --dashboard-name "$full_name" \
+    --dashboard-body "file://${tmp_json}" >/dev/null
+
+  # Validate dashboards on CloudWatch
+  if aws cloudwatch get-dashboard --dashboard-name "$full_name" >/dev/null 2>&1; then
+    echo "OK: Dashboard available: ${full_name}"
+  else
+    echo "WARN: Could not read back dashboard: ${full_name}"
+  fi
+
+  rm -f "$tmp_json"
+}
+
 # Check required tools
 missing=0
 for cmd in git jq kubectl; do
@@ -164,6 +243,11 @@ if ! output=$(get_cfn_export); then
 fi
 echo "Setting ENV variables: $output"
 eval "$output"
+
+AWS_ACCOUNT="${AWS_ACCOUNT:-$(aws sts get-caller-identity --query Account --output text)}"
+AWS_CFN_REGION="${AWS_CFN_REGION:-$(aws configure get region)}"
+STAGE="${STAGE:-${MA_STAGE:-dev}}"
+MA_QUALIFIER="${MA_QUALIFIER:-${MIGRATIONS_QUALIFIER:-default}}"
 
 aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
 
@@ -290,6 +374,11 @@ helm install "$namespace" "${ma_chart_dir}" \
   --set defaultBucketConfiguration.snapshotRoleArn="${SNAPSHOT_ROLE}" \
   $IMAGE_FLAGS \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
+
+echo "Deploying CloudWatch dashboards..."
+deploy_dashboard "CaptureReplay" "${base_dir}/deployment/k8s/dashboards/capture-replay-dashboard.json"
+deploy_dashboard "ReindexFromSnapshot" "${base_dir}/deployment/k8s/dashboards/reindex-from-snapshot-dashboard.json"
+echo "All dashboards deployed to CloudWatch"
 
 if [[ "$skip_console_exec" == "false" ]]; then
   kubectl -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s

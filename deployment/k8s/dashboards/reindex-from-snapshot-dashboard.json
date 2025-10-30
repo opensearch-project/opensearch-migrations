@@ -1,0 +1,304 @@
+{
+    "variables": [
+        {
+            "type": "property",
+            "property": "region",
+            "inputType": "input",
+            "id": "REGION",
+            "label": "Region",
+            "defaultValue": "placeholder-region",
+            "visible": false
+        },
+        {
+            "type": "property",
+            "property": "DomainName",
+            "inputType": "select",
+            "id": "TC_DOMAIN_NAME",
+            "label": "Target Cluster Domain Name",
+            "search": "{AWS/ES,ClientId,DomainName} MetricName=\"CPUUtilization\"",
+            "populateFrom": "DomainName",
+            "defaultValue": "placeholder-name",
+            "visible": true
+        },
+        {
+            "type": "pattern",
+            "pattern": "MA_STAGE",
+            "inputType": "input",
+            "id": "MA_STAGE",
+            "label": "Migration Stage",
+            "defaultValue": "placeholder-stage",
+            "visible": false
+        },
+        {
+            "type": "pattern",
+            "pattern": "ACCOUNT_ID",
+            "inputType": "input",
+            "id": "ACCOUNT_ID",
+            "label": "Account ID",
+            "defaultValue": "placeholder-account-id",
+            "visible": false
+        },
+        {
+            "type": "pattern",
+            "pattern": "MA_QUALIFIER",
+            "inputType": "input",
+            "id": "MA_QUALIFIER",
+            "label": "Migration Qualifier",
+            "defaultValue": "placeholder-qualifier",
+            "visible": false
+        }
+    ],
+    "widgets": [
+        {
+            "height": 1,
+            "width": 24,
+            "y": 0,
+            "x": 0,
+            "type": "text",
+            "properties": {
+                "markdown": "# Target Cluster\n",
+                "background": "transparent"
+            }
+        },
+        {
+            "height": 8,
+            "width": 12,
+            "y": 1,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "view": "timeSeries",
+                "stacked": false,
+                "metrics": [
+                    [ { "expression": "METRICS()/1000/PERIOD(m1)*60", "id": "e1", "region": "REGION" } ],
+                    [ "AWS/ES", "IndexingRate", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "region": "REGION", "label": "Document Ingested (included replicas) - MIN: ${MIN}, MAX: ${MAX}, AVG: ${AVG}", "id": "m1", "visible": false } ]
+                ],
+                "region": "REGION",
+                "title": "Target Cluster Document Index Rate",
+                "yAxis": {
+                    "left": {
+                        "label": "Thousands",
+                        "showUnits": false
+                    }
+                },
+                "period": 60,
+                "stat": "Sum"
+            }
+        },
+        {
+            "height": 8,
+            "width": 12,
+            "y": 1,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ { "expression": "METRICS()/1000", "id": "e1", "region": "REGION" } ],
+                    [ "AWS/ES", "SearchableDocuments", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "region": "REGION", "label": "SearchableDocuments - MIN: ${MIN}, MAX ${MAX}", "id": "m1", "visible": false } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "title": "Target Cluster SearchableDocuments",
+                "period": 60,
+                "stat": "Average",
+                "yAxis": {
+                    "left": {
+                        "label": "Thousands",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "height": 8,
+            "width": 12,
+            "y": 9,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/ES", "4xx", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "region": "REGION", "label": "4xx - ${SUM}" } ],
+                    [ ".", "3xx", ".", ".", ".", ".", { "region": "REGION", "label": "3xx - ${SUM}" } ],
+                    [ ".", "2xx", ".", ".", ".", ".", { "region": "REGION", "label": "2xx - ${SUM}" } ],
+                    [ ".", "5xx", ".", ".", ".", ".", { "region": "REGION", "label": "5xx - ${SUM}" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "stat": "Sum",
+                "period": 300,
+                "title": "Target Cluster Status Codes (per 5 minutes)"
+            }
+        },
+        {
+            "height": 8,
+            "width": 12,
+            "y": 9,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/ES", "CPUUtilization", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "stat": "Minimum", "label": "Min Data Node CPU Utilization", "color": "#2ca02c", "region": "REGION" } ],
+                    [ "...", { "stat": "Maximum", "label": "Max Data Node CPU Utilization", "color": "#d62728", "region": "REGION" } ],
+                    [ "...", { "stat": "Average", "label": "Avg Data Node CPU Utilization", "color": "#1f77b4", "region": "REGION" } ],
+                    [ "AWS/ES", "MasterCPUUtilization", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "stat": "Minimum", "label": "Min Master Node CPU Utilization", "color": "#98df8a", "region": "REGION" } ],
+                    [ "...", { "stat": "Maximum", "label": "Max Master Node CPU Utilization", "color": "#ff9896", "region": "REGION" } ],
+                    [ "...", { "stat": "Average", "label": "Avg Master Node CPU Utilization", "color": "#ff7f0e", "region": "REGION" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "title": "Target Cluster CPU Utilization by Node",
+                "period": 60,
+                "yAxis": {
+                    "left": {
+                        "label": "CPU Utilization (%)",
+                        "min": 0,
+                        "max": 100,
+                        "showUnits": false
+                    }
+                },
+                "legend": {
+                    "position": "bottom"
+                }
+            }
+        },
+        {
+            "height": 8,
+            "width": 12,
+            "y": 17,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ { "expression": "METRICS()/1000", "label": "", "id": "e1", "region": "REGION" } ],
+                    [ "AWS/ES", "ClusterUsedSpace", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "id": "m1", "visible": false, "period": 60, "region": "REGION" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "title": "Target Cluster Used Space",
+                "period": 60,
+                "stat": "Average",
+                "yAxis": {
+                    "left": {
+                        "label": "GB",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "height": 8,
+            "width": 12,
+            "y": 17,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/ES", "ThroughputThrottle", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "id": "m1", "period": 60, "region": "REGION" } ],
+                    [ ".", "IopsThrottle", ".", ".", ".", ".", { "period": 60, "region": "REGION", "id": "m2" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "title": "Target Cluster EBS Throttling",
+                "period": 60,
+                "stat": "Average"
+            }
+        },
+        {
+            "height": 1,
+            "width": 24,
+            "y": 25,
+            "x": 0,
+            "type": "text",
+            "properties": {
+                "markdown": "# Reindex-From-Snapshot Workers",
+                "background": "transparent"
+            }
+        },
+        {
+            "height": 8,
+            "width": 12,
+            "y": 26,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "OpenSearchMigrations", "bytesSent", "qualifier", "MA_QUALIFIER", "OTelLib", "documentMigration", { "region": "REGION", "label": "Bytes Sent - MIN - ${MIN}, MAX - ${MAX}, AVG - ${AVG}" } ]
+                ],
+                "period": 60,
+                "region": "REGION",
+                "stacked": false,
+                "title": "RFS Reindexing Traffic",
+                "view": "timeSeries",
+                "stat": "Sum",
+                "yAxis": {
+                    "left": {
+                        "label": "Bytes",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "height": 8,
+            "width": 12,
+            "y": 26,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ { "expression": "METRICS()/PERIOD(m1)*60", "id" : "e1", "region": "REGION" } ],
+                    [ "AWS/ECS", "CPUUtilization", "ServiceName", "migration-MA_STAGE-reindex-from-snapshot", "ClusterName", "migration-MA_STAGE-ecs-cluster", { "region": "REGION", "label": "RFS Workers - MIN - ${MIN}, MAX - ${MAX}, AVG - ${AVG}", "id": "m1", "visible": false } ]
+                ],
+                "period": 60,
+                "region": "REGION",
+                "stacked": false,
+                "title": "RFS Workers Reporting In",
+                "view": "timeSeries",
+                "stat": "SampleCount"
+            }
+        },
+        {
+            "height": 8,
+            "width": 12,
+            "y": 34,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/ECS", "CPUUtilization", "ServiceName", "migration-MA_STAGE-reindex-from-snapshot", "ClusterName", "migration-MA_STAGE-ecs-cluster", { "stat": "Minimum", "region": "REGION", "color": "#2ca02c" } ],
+                    [ "...", { "stat": "Average", "region": "REGION", "color": "#1f77b4" } ],
+                    [ "...", { "stat": "Maximum", "region": "REGION", "color": "#d62728" } ]
+                ],
+                "period": 60,
+                "region": "REGION",
+                "stacked": false,
+                "title": "RFS CPU utilization",
+                "view": "timeSeries"
+            }
+        },
+        {
+            "height": 8,
+            "width": 12,
+            "y": 34,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/ECS", "MemoryUtilization", "ServiceName", "migration-MA_STAGE-reindex-from-snapshot", "ClusterName", "migration-MA_STAGE-ecs-cluster", { "stat": "Minimum", "region": "REGION", "color": "#2ca02c" } ],
+                    [ "...", { "stat": "Average", "region": "REGION", "color": "#1f77b4" } ],
+                    [ "...", { "stat": "Maximum", "region": "REGION", "color": "#d62728" } ]
+                ],
+                "period": 60,
+                "region": "REGION",
+                "stacked": false,
+                "title": "RFS Memory utilization",
+                "view": "timeSeries"
+            }
+        }
+    ]
+}
