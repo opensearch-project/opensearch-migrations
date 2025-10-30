@@ -24,7 +24,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: helm-installer
-          image: {{ .Values.images.installer.repository}}:{{ .Values.images.installer.tag }}
+          image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
           command:
             - /bin/sh
