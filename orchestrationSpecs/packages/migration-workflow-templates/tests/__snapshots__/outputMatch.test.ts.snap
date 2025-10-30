@@ -849,27 +849,6 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                     "name": "snapshotConfig",
                     "value": "{{inputs.parameters.snapshotConfig}}",
                   },
-                ],
-              },
-              "name": "getConsoleConfig",
-              "templateRef": {
-                "name": "migration-console",
-                "template": "getconsoleconfig",
-              },
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "sourceConfig",
-                    "value": "{{inputs.parameters.sourceConfig}}",
-                  },
-                  {
-                    "name": "snapshotConfig",
-                    "value": "{{inputs.parameters.snapshotConfig}}",
-                  },
                   {
                     "name": "createSnapshotConfig",
                     "value": "{{inputs.parameters.createSnapshotConfig}}",
@@ -886,6 +865,27 @@ exports[`test workflow template renderings create-snapshot 1`] = `
               },
               "name": "createSnapshot",
               "template": "runcreatesnapshot",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}",
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}",
+                  },
+                ],
+              },
+              "name": "getConsoleConfig",
+              "templateRef": {
+                "name": "migration-console",
+                "template": "getconsoleconfig",
+              },
             },
           ],
           [

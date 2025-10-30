@@ -98,13 +98,13 @@ export const CreateSnapshot = WorkflowBuilder.create({
 
         .addSteps(b => b
 
+            .addStep("createSnapshot", INTERNAL, "runCreateSnapshot", c =>
+                c.register(selectInputsForRegister(b, c)))
+
             .addStep("getConsoleConfig", MigrationConsole, "getConsoleConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c)
                 }))
-
-            .addStep("createSnapshot", INTERNAL, "runCreateSnapshot", c =>
-                c.register(selectInputsForRegister(b, c)))
 
             .addStep("checkSnapshotStatus", INTERNAL, "checkSnapshotStatus", c =>
                 c.register({
