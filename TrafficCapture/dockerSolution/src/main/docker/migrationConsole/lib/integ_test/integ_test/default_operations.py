@@ -1,6 +1,5 @@
 import datetime
 import logging
-import os
 import random
 import string
 import json
@@ -167,13 +166,6 @@ class DefaultOperationsLibrary:
             "timestamp": datetime.datetime.now().isoformat(),
             "large_field": large_string
         }
-
-    def create_transformation_json_file(self, transform_config_data, file_path_to_create: str):
-        directory = os.path.dirname(file_path_to_create)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        with open(file_path_to_create, "w") as file:
-            json.dump(transform_config_data, file, indent=4)
 
     def convert_transformations_to_str(self, transform_list: List[Dict]) -> str:
         return json.dumps(transform_list)

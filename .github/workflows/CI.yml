@@ -77,6 +77,22 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-env
+
+      # Set up Kind cluster for workflow integration tests (only for console_link project)
+      - name: Set up Kind cluster
+        if: matrix.py-project == 'migrationConsole/lib/console_link'
+        uses: helm/kind-action@v1.12.0
+        with:
+          cluster_name: kind-test-cluster
+
+      # Verify Kind cluster is ready (only for console_link project)
+      - name: Verify Kind cluster
+        if: matrix.py-project == 'migrationConsole/lib/console_link'
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+          kubectl get namespaces
+
       - run: |
           python3 -m pip install --upgrade pipenv
           pipenv install --deploy --dev
