@@ -405,7 +405,7 @@ public class RfsMigrateDocuments {
                 workerId,
                 Clock.systemUTC(),
                 workItemRef::set)) {
-            // Shutdown hook: attempt to mark progress & cleanly finish current item.
+            // Shutdown hook unchanged
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 Thread.currentThread().setName("Cleanup-Hook-Thread");
                 log.atWarn().setMessage("Received shutdown signal. Trying to mark progress and shutdown cleanly.").log();
@@ -431,7 +431,6 @@ public class RfsMigrateDocuments {
 
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
 
-            // Target reindexer is safe to reuse across iterations
             DocumentReindexer reindexer = new DocumentReindexer(
                 targetClient,
                 arguments.numDocsPerBulkRequest,
@@ -467,9 +466,6 @@ public class RfsMigrateDocuments {
                 sourceResourceProvider.getBufferSizeInBytes()
             );
 
-            if (arguments.continuousMode) {
-                log.atInfo().setMessage("Running in continuous mode. RFS will process multiple work items until SIGTERM").log();
-            }
             // Unified path: always run at least once; continue if continuousMode=true.
             boolean shouldContinue = true;
             while (shouldContinue) {
@@ -583,10 +579,19 @@ public class RfsMigrateDocuments {
             log.atError().setMessage("Exception during exit on lease timeout, clean shutdown failed")
                     .setCause(e).log();
             cleanShutdownCompleted.set(false);
+            if (!continuousMode) {
+                System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
+            }
+            return; // continuous mode: keep going
         }
+
+        // On success
         if (!continuousMode) {
+            cleanShutdownCompleted.set(true); // this mirrors the prior behavior where we exit right after
             System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
         }
+        // continuous mode: do NOT set cleanShutdownCompleted here, so the shutdown hook
+        // can still checkpoint the *next* active item if SIGTERM arrives.
     }
 
     public static int getSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider, Duration initialLeaseDuration,
@@ -819,8 +824,7 @@ public class RfsMigrateDocuments {
 
             if (completionStatus == CompletionStatus.NOTHING_DONE) {
                 if (arguments.continuousMode) {
-                    shortIdle();
-                    return true;
+                    return true; // if continuous=true, returns true immediately (no sleep)
                 } else {
                     log.atInfo().setMessage("No progress made (non-continuous mode). Exiting with error code (no-work-left) to signal that.").log();
                     System.exit(NO_WORK_LEFT_EXIT_CODE);
@@ -828,11 +832,11 @@ public class RfsMigrateDocuments {
             }
         } catch (NoWorkLeftException e) {
             log.atInfo().setMessage("No work left to acquire. Exiting with error code (no-work-left) to signal that.").log();
-            System.exit(NO_WORK_LEFT_EXIT_CODE);
+            System.exit(NO_WORK_LEFT_EXIT_CODE); // thrown before run(...) starts, and exits
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             log.atWarn().setMessage("Worker interrupted; stopping loop.").log();
-            return false;
+            return false; // stop the loop
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Error processing work item").log();
             if (e instanceof RuntimeException) {
@@ -845,11 +849,7 @@ public class RfsMigrateDocuments {
             // Ensure nothing stale can be invoked later
             cancellationRunnableRef.set(null);
         }
+        // loop continuation logic for continuous mode
         return arguments.continuousMode && !Thread.currentThread().isInterrupted() && !cleanShutdownCompleted.get();
-    }
-
-    private static void shortIdle() throws InterruptedException {
-        // tiny yield before trying to grab a new work item
-        Thread.sleep(50);
     }
 }
