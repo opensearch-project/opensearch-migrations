@@ -5,12 +5,14 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
@@ -52,6 +54,7 @@ import org.opensearch.migrations.transform.TransformationLoader;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.hamcrest.MatcherAssert;
@@ -352,38 +355,15 @@ public class SourceTestBase {
     }
 
     public static void deleteTree(Path path) throws IOException {
-        if (path == null) return;
-        if (!Files.exists(path)) return;
-
-        Files.walkFileTree(path, new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
-               try {
-                   Files.deleteIfExists(file);
-               } catch (NoSuchFileException ignored) {
-                   // already removed by the shutdown hook
-                }
-               return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+        try (var walk = Files.walk(path)) {
+            walk.sorted(Comparator.reverseOrder()).forEach(p -> {
                 try {
-                    Files.deleteIfExists(dir);
-                } catch (NoSuchFileException ignored) {
-                    // directory disappeared between walk and delete should be considered okay
-                } catch (DirectoryNotEmptyException dne) {
-                    // rare race condition: retry once after a tiny pause
-                    try {
-                        Thread.sleep(10);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                    }
-                    Files.deleteIfExists(dir);
+                    Files.delete(p);
+                } catch (IOException e) {
+                    throw Lombok.sneakyThrow(e);
                 }
-                return FileVisitResult.CONTINUE;
-            }
-        });
+            });
+        }
     }
 
     @AllArgsConstructor
