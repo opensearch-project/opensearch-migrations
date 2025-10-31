@@ -13,6 +13,7 @@ import org.opensearch.migrations.arguments.ArgNameConstants;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -67,7 +68,7 @@ public class EnvVarParameterPuller {
      * @param prefix
      * @param suffix
      */
-    public static<T> T injectFromEnv(T params, EnvVarGetter envVarGetter, String prefix, String suffix) {
+    public static<T> T injectFromEnv(@NonNull T params, EnvVarGetter envVarGetter, String prefix, String suffix) {
         List<String> addedEnvParams = new ArrayList<>();
         injectFromEnvRecursive(params, envVarGetter, addedEnvParams, prefix, suffix);
 
@@ -86,10 +87,6 @@ public class EnvVarParameterPuller {
                                                String prefix,
                                                String suffix)
     {
-        if (params == null) {
-            return;
-        }
-
         Class<?> clazz = params.getClass();
 
         // Process all fields including those from superclasses
