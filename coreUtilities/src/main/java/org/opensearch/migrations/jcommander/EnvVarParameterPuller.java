@@ -92,22 +92,28 @@ public class EnvVarParameterPuller {
 
         Class<?> clazz = params.getClass();
 
-        for (Field field : clazz.getDeclaredFields()) {
-            field.setAccessible(true);
+        // Process all fields including those from superclasses
+        while (clazz != null && clazz != Object.class) {
+            for (Field field : clazz.getDeclaredFields()) {
+                field.setAccessible(true);
 
-            try {
-                if (field.isAnnotationPresent(ParametersDelegate.class)) {
-                    var delegatedObject = field.get(params);
-                    if (delegatedObject != null) {
-                        injectFromEnvRecursive(delegatedObject, envVarGetter, addedEnvParams, prefix, suffix);
+                try {
+                    if (field.isAnnotationPresent(ParametersDelegate.class)) {
+                        var delegatedObject = field.get(params);
+                        if (delegatedObject != null) {
+                            injectFromEnvRecursive(delegatedObject, envVarGetter, addedEnvParams, prefix, suffix);
+                        }
+                    } else if (field.isAnnotationPresent(Parameter.class)) {
+                        var annotation = field.getAnnotation(Parameter.class);
+                        processParameterField(params, field, annotation, envVarGetter, addedEnvParams, prefix, suffix);
                     }
-                } else if (field.isAnnotationPresent(Parameter.class)) {
-                    var annotation = field.getAnnotation(Parameter.class);
-                    processParameterField(params, field, annotation, envVarGetter, addedEnvParams, prefix, suffix);
+                } catch (IllegalAccessException e) {
+                    log.warn("Could not access field: {}", field.getName(), e);
                 }
-            } catch (IllegalAccessException e) {
-                log.warn("Could not access field: {}", field.getName(), e);
             }
+
+            // Move to superclass
+            clazz = clazz.getSuperclass();
         }
     }
 
