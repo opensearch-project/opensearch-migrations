@@ -8,6 +8,7 @@ import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.cli.OutputFormat;
 import org.opensearch.migrations.commands.*;
+import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -26,6 +27,8 @@ import org.apache.logging.log4j.core.appender.FileAppender;
 @Slf4j
 public class MetadataMigration {
 
+    public static final String ENV_PREFIX = "METADATA_MIGRATE_";
+
     public static void main(String[] args) {
         new MetadataMigration().run(args);
     }
@@ -37,9 +40,9 @@ public class MetadataMigration {
                 args,
                 ArgNameConstants.joinLists(ArgNameConstants.CENSORED_SOURCE_ARGS, ArgNameConstants.CENSORED_TARGET_ARGS)
         )));
-        var metadataArgs = new MetadataArgs();
-        var migrateArgs = new MigrateArgs();
-        var evaluateArgs = new EvaluateArgs();
+        var metadataArgs = EnvVarParameterPuller.injectFromEnv(new MetadataArgs(), ENV_PREFIX);
+        var migrateArgs  = EnvVarParameterPuller.injectFromEnv(new MigrateArgs(),  ENV_PREFIX);
+        var evaluateArgs = EnvVarParameterPuller.injectFromEnv(new EvaluateArgs(), ENV_PREFIX);
         var argsParser = JsonCommandLineParser.newBuilder()
             .addObject(metadataArgs)
             .addCommand(migrateArgs)

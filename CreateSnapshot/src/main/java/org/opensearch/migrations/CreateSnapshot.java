@@ -11,6 +11,8 @@ import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICreateSnapshotContext;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
+import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
+import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.snapshot.creation.tracing.RootSnapshotContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -116,12 +118,12 @@ public class CreateSnapshot {
 
     public static void main(String[] args) throws Exception {
         System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_SOURCE_ARGS)));
-        Args arguments = new Args();
-        JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
-        jCommander.parse(args);
+        Args arguments = EnvVarParameterPuller.injectFromEnv(new Args(), "CREATE_SNAPSHOT_");
+        var argParser = JsonCommandLineParser.newBuilder().addObject(arguments).build();
+        argParser.parse(args);
 
         if (arguments.help) {
-            jCommander.usage();
+            argParser.getJCommander().usage();
             return;
         }
 
@@ -183,7 +185,7 @@ public class CreateSnapshot {
                 SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             }
         } catch (Exception e) {
-            log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
+            log.atError().setCause(e).setMessage("Unexpected error running CreateSnapshot").log();
             throw e;
         }
     }

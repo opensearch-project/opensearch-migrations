@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.opensearch.common.settings.Settings;
+import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.NoSplitter;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -182,7 +183,7 @@ public class CaptureProxy {
     }
 
     static Parameters parseArgs(String[] args) {
-        Parameters p = new Parameters();
+        Parameters p = EnvVarParameterPuller.injectFromEnv(new Parameters(), "CAPTURE_PROXY_");
         JCommander jCommander = new JCommander(p);
         try {
             jCommander.parse(args);
