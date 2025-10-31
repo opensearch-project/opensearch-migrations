@@ -96,6 +96,7 @@ COPY VERSION /root/VERSION
 
 WORKDIR /root
 COPY lib /root/lib
+
 WORKDIR /root/lib/console_link
 RUN pipenv install --deploy
 WORKDIR /root/lib/integ_test
@@ -129,6 +130,15 @@ RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo 'PS1="(\t) \[\e[92m\]migration-console \[\e[0m\](\w) -> "' >> ~/.bashrc
 
 COPY nodeStaging/configProcessor /root/configProcessor
+
+# Copy test workflow scripts and resources with same structure as configProcessor
+COPY lib/console_link/tests/workflow-tests/resources/scripts /root/testConfigProcessor
+RUN chmod +x /root/testConfigProcessor/*.sh
+RUN chmod +x /root/configProcessor/*.sh
+
+# To use test workflows, flip the comments
+ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
+#ENV CONFIG_PROCESSOR_DIR=/root/testConfigProcessor
 
 # Once we're ready, we should replace the old workflows with the new ones.
 # Notice that the installWorkflows pulls from /root/workflows/templates -

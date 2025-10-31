@@ -11,7 +11,7 @@ metadata:
 spec:
   mode: daemonset
   serviceAccount: otel-collector
-  image: public.ecr.aws/aws-observability/aws-otel-collector:v0.43.2
+  image: public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3
   env:
     - name: OTEL_CONFIG_LOG
       value: "true"

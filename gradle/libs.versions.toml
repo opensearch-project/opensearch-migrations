@@ -1,7 +1,7 @@
 [versions]
-aws-crt = "0.39.2"
+aws-crt = "0.39.4"
 aws-msk-iam-auth = "2.3.4"
-aws-sdk = "2.35.8"
+aws-sdk = "2.36.2"
 bouncycastle = "1.82"
 commons-collections = "4.5.0"
 commons-compress = "1.26.2"
@@ -9,7 +9,7 @@ disruptor = "4.0.0"
 dockerapi = "3.6.0"
 errorprone = "2.42.0"
 errorprone-slf4j = "0.1.29"
-graalvm = "25.0.0"
+graalvm = "25.0.1"
 groovy = "3.0.25"
 guava = "33.5.0-jre"
 hamcrest = "3.0"
@@ -44,7 +44,7 @@ semver4j = "6.0.0"
 slf4j = "2.0.17"
 testcontainers = "1.21.3"
 toxiproxy = "2.1.11"
-zstd-jni = "1.5.7-5"
+zstd-jni = "1.5.7-6"
 
 [libraries]
 aws-arns = { module = "software.amazon.awssdk:arns", version.ref = "aws-sdk" }

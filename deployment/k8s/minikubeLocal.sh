@@ -38,6 +38,16 @@ start() {
   echo "✅  Minikube started successfully!"
 
   minikube mount .:/opensearch-migrations > /dev/null 2>&1 &
+  
+  # Mount AWS credentials for local development (host ~/.aws → VM /aws-credentials)
+  # Kyverno will then mount this into containers at /root/.aws
+  if [ -d "$HOME/.aws" ]; then
+    minikube mount "$HOME/.aws":/aws-credentials > /dev/null 2>&1 &
+    echo "🔑  AWS credentials mounted for local development"
+  else
+    echo "⚠️  Warning: No ~/.aws directory found. AWS credentials will not be available in containers."
+  fi
+  
   if ! docker network inspect minikube --format '{{range .Containers}}{{.Name}} {{end}}' | grep -qw docker-registry; then
     docker network connect minikube docker-registry 2>/dev/null || echo "⚠️  Warning: Could not connect docker-registry to minikube network"
   else
@@ -88,4 +98,3 @@ case "$1" in
         usage
         ;;
 esac
-

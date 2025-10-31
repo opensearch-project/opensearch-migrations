@@ -14,7 +14,7 @@ rules:
     resources: ["secrets"]
     verbs: ["list"]
   - apiGroups: [ "" ]
-    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log"]
+    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log", "services"]
     verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
   - apiGroups: [""]
     resources: ["pods/attach"]
@@ -79,12 +79,18 @@ spec:
     {{- if $developerModeEnabled }}
             - name: local-console-libs
               mountPath: /root/lib
+            - name: local-test-config-processor
+              mountPath: /root/testConfigProcessor
     {{- end }}
       volumes:
     {{- if $developerModeEnabled  }}
         - name: local-console-libs
           hostPath:
             path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib
+            type: Directory
+        - name: local-test-config-processor
+          hostPath:
+            path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/tests/workflow-tests/resources/scripts
             type: Directory
     {{- end }}
     {{- if $sharedLogsVolumeEnabled  }}

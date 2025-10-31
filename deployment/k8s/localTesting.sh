@@ -1,9 +1,11 @@
+#./minikubeLocal.sh --start # New code...  Not sure if this breaks some prometheus cAdvisor scraping.  Just want to know first.
 minikube start \
   --extra-config=kubelet.authentication-token-webhook=true \
   --extra-config=kubelet.authorization-mode=Webhook \
   --extra-config=scheduler.bind-address=0.0.0.0 \
   --extra-config=controller-manager.bind-address=0.0.0.0
 eval $(minikube docker-env)
+minikube dashboard &
 kubectl config set-context --current --namespace=ma
 
 #nice to haves
@@ -11,10 +13,12 @@ minikube addons enable metrics-server
 minikube dashboard &
 
 helm dependency build charts/aggregates/testClusters
-helm install--create-namespace -n ma tc charts/aggregates/testClusters
+helm install --create-namespace -n ma tc charts/aggregates/testClusters
 
 helm dependency build charts/aggregates/migrationAssistantWithArgo
-helm install --create-namespace -n ma ma charts/aggregates/migrationAssistan
+# Use valuesDev.yaml for local development to enable AWS credentials injection
+helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
+  -f charts/aggregates/migrationAssistantWithArgo/valuesDev.yaml
 
 # Notice that this doesn't include the capture proxy yet
 kubectl port-forward services/elasticsearch-master 19200:9200 &

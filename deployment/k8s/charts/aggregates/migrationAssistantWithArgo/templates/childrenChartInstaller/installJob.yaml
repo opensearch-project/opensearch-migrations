@@ -24,7 +24,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: helm-installer
-          image: {{ .Values.images.installer.repository}}:{{ .Values.images.installer.tag }}
+          image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
           command:
             - /bin/sh
@@ -122,6 +122,7 @@ spec:
           {{- end }}
           {{- if $chart.namespace }}
                   --namespace {{ $chart.namespace }} \
+                  --create-namespace \
           {{- end }}
                   --timeout {{ default "300" $chart.timeout }}s \
                   --set global.managedBy="{{ $.Release.Name }}" \
