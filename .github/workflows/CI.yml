@@ -94,7 +94,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           fail_ci_if_error: true
-          flags: python,python-${{ env.SANITIZED_PY_PROJECT }}
+          flags: python
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
@@ -170,7 +170,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           fail_ci_if_error: true
-          flags: gradle,gradle-tests-${{ matrix.index }}
+          flags: gradle
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
@@ -253,7 +253,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           fail_ci_if_error: true
-          flags: node,node-tests
+          flags: node
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 

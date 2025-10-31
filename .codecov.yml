@@ -4,8 +4,8 @@ coverage:
   status:
     project:
       default:
-        target: auto
-        threshold: 3%
+        # Only fail if the coverage decreases by more than 1%
+        threshold: 1%
     patch:
       default:
         target: 80%
@@ -16,74 +16,6 @@ flags:
   gradle:
     carryforward: true
   node:
-    carryforward: true
-  python-migrationConsole-lib-console_link:
-    carryforward: true
-  python-migrationConsole-cluster_tools:
-    carryforward: true
-  python-k8sConfigMapUtilScripts:
-    carryforward: true
-  gradle-tests-0:
-    carryforward: true
-  gradle-tests-1:
-    carryforward: true
-  gradle-tests-2:
-    carryforward: true
-  gradle-tests-3:
-    carryforward: true
-  gradle-tests-4:
-    carryforward: true
-  gradle-tests-5:
-    carryforward: true
-  gradle-tests-6:
-    carryforward: true
-  gradle-tests-7:
-    carryforward: true
-  gradle-tests-8:
-    carryforward: true
-  gradle-tests-9:
-    carryforward: true
-  gradle-tests-10:
-    carryforward: true
-  gradle-tests-11:
-    carryforward: true
-  gradle-tests-12:
-    carryforward: true
-  gradle-tests-13:
-    carryforward: true
-  gradle-tests-14:
-    carryforward: true
-  gradle-tests-15:
-    carryforward: true
-  gradle-tests-16:
-    carryforward: true
-  gradle-tests-17:
-    carryforward: true
-  gradle-tests-18:
-    carryforward: true
-  gradle-tests-19:
-    carryforward: true
-  gradle-tests-20:
-    carryforward: true
-  gradle-tests-21:
-    carryforward: true
-  gradle-tests-22:
-    carryforward: true
-  gradle-tests-23:
-    carryforward: true
-  gradle-tests-24:
-    carryforward: true
-  gradle-tests-25:
-    carryforward: true
-  gradle-tests-26:
-    carryforward: true
-  gradle-tests-27:
-    carryforward: true
-  gradle-tests-28:
-    carryforward: true
-  gradle-tests-29:
-    carryforward: true
-  node-tests:
     carryforward: true
 
 ignore:
