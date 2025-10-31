@@ -393,6 +393,8 @@ public class RfsMigrateDocuments {
         var workItemTimeProvider = new WorkItemTimeProvider();
         var coordinatorFactory = new WorkCoordinatorFactory(targetVersion, arguments.indexNameSuffix);
         var cleanShutdownCompleted = new AtomicBoolean(false);
+        // Prevents duplicate checkpointing when lease timeout and shutdown hook both try to finalize the same work item
+        var lastWorkItemFinalized = new AtomicReference<String>();
 
         try (var workCoordinator = coordinatorFactory.get(
                 new CoordinateWorkHttpClient(connectionContext),
@@ -410,6 +412,7 @@ public class RfsMigrateDocuments {
                         progressCursor,
                         workCoordinator,
                         cleanShutdownCompleted,
+                        lastWorkItemFinalized,
                         context.getWorkCoordinationContext()::createSuccessorWorkItemsContext);
                     log.atInfo().setMessage("Clean shutdown completed.").log();
                 } catch (InterruptedException e) {
@@ -469,6 +472,7 @@ public class RfsMigrateDocuments {
                 workCoordinator,
                 workItemTimeProvider,
                 cleanShutdownCompleted,
+                lastWorkItemFinalized,
                 context,
                 cancellationRunnableRef,
                 sourceResourceProvider,
@@ -489,6 +493,7 @@ public class RfsMigrateDocuments {
             IWorkCoordinator workCoordinator,
             WorkItemTimeProvider workItemTimeProvider,
             AtomicBoolean cleanShutdownCompleted,
+            AtomicReference<String> lastWorkItemFinalized,
             RootDocumentMigrationContext context,
             AtomicReference<Runnable> cancellationRunnableRef,
             ClusterSnapshotReader sourceResourceProvider,
@@ -505,6 +510,7 @@ public class RfsMigrateDocuments {
                     workCoordinator,
                     workItemTimeProvider,
                     cleanShutdownCompleted,
+                    lastWorkItemFinalized,
                     context,
                     cancellationRunnableRef,
                     sourceResourceProvider,
@@ -523,6 +529,7 @@ public class RfsMigrateDocuments {
             AtomicReference<WorkItemCursor> progressCursor,
             IWorkCoordinator coordinator,
             AtomicBoolean cleanShutdownCompleted,
+            AtomicReference<String> lastWorkItemFinalized,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException {
         if (cleanShutdownCompleted.get())  {
@@ -534,11 +541,22 @@ public class RfsMigrateDocuments {
             return;
         }
         var workItemAndDuration = workItemRef.get();
-        log.atInfo().setMessage("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
+        var currentWorkItemId = workItemAndDuration.getWorkItem().toString();
+        
+        // Check if this work item was already finalized by exitOnLeaseTimeout
+        if (currentWorkItemId.equals(lastWorkItemFinalized.get())) {
+            log.atInfo().setMessage("Work item {} already finalized by lease timeout handler").addArgument(currentWorkItemId).log();
+            return;
+        }
+        
+        log.atInfo().setMessage("Marking progress: {}, at doc {}")
+            .addArgument(currentWorkItemId)
+            .addArgument(progressCursor.get().getProgressCheckpointNum())
+            .log();
         var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, progressCursor.get());
 
         coordinator.createSuccessorWorkItemsAndMarkComplete(
-                workItemAndDuration.getWorkItem().toString(), successorWorkItem, 1, contextSupplier
+                currentWorkItemId, successorWorkItem, 1, contextSupplier
         );
         cleanShutdownCompleted.set(true);
     }
@@ -554,6 +572,7 @@ public class RfsMigrateDocuments {
             Runnable cancellationRunnable,
             AtomicBoolean cleanShutdownCompleted,
             boolean continuousMode,
+            AtomicReference<String> lastWorkItemFinalized,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier) {
         log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
                 .addArgument(workItemId)
@@ -588,6 +607,7 @@ public class RfsMigrateDocuments {
                             successorNextAcquisitionLeaseExponent,
                             contextSupplier
                     );
+                    lastWorkItemFinalized.set(workItemId);
                 }
             } else {
                 log.atWarn().setMessage("No progress cursor to create successor work items from. This can happen when" +
@@ -807,6 +827,7 @@ public class RfsMigrateDocuments {
             IWorkCoordinator workCoordinator,
             WorkItemTimeProvider workItemTimeProvider,
             AtomicBoolean cleanShutdownCompleted,
+            AtomicReference<String> lastWorkItemFinalized,
             RootDocumentMigrationContext context,
             AtomicReference<Runnable> cancellationRunnableRef,
             ClusterSnapshotReader sourceResourceProvider,
@@ -824,6 +845,7 @@ public class RfsMigrateDocuments {
                     () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                     cleanShutdownCompleted,
                     arguments.continuousMode,
+                    lastWorkItemFinalized,
                     context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
                 Clock.systemUTC())) {
             var completionStatus = run(
@@ -871,6 +893,7 @@ public class RfsMigrateDocuments {
             workItemRef.set(null);
             // Ensure nothing stale can be invoked later
             cancellationRunnableRef.set(null);
+            lastWorkItemFinalized.set(null);
         }
         // loop continuation logic for continuous mode
         return arguments.continuousMode && !cleanShutdownCompleted.get();
