@@ -49,11 +49,11 @@ export function extractConnectionKeysToExpressionMap(
             expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "sigv4", "region"], ""),
         [`${clusterType}AwsSigningName`]:
             expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "sigv4", "service"], ""),
-        [`${clusterType}targetCACert`]:
+        [`${clusterType}CACert`]:
             expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "mtls", "caCert"], ""),
-        [`${clusterType}targetClientSecretName`]:
+        [`${clusterType}ClientSecretName`]:
             expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "mtls", "clientSecretName"], ""),
-        [`${clusterType}targetInsecure`]:
+        [`${clusterType}Insecure`]:
             expr.dig(expr.deserializeRecord(targetConfig), ["allowInsecure"], false),
     };
 }

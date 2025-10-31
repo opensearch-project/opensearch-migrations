@@ -905,6 +905,6 @@ export function makeDirectTypeProxy<T extends (boolean|number)>(value: BaseExpre
 }
 
 // This function and the next tie into the renderer
-export function makeStringTypeProxy<T extends string>(value: BaseExpression<T>): T {
+export function makeStringTypeProxy<T extends string>(value: AllowLiteralOrExpression<T>): T {
     return value as any as T;
 }

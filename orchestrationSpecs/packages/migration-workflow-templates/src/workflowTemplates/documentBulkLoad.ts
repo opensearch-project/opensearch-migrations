@@ -1,5 +1,5 @@
 import {
-    CommonWorkflowParameters,
+    CommonWorkflowParameters, getTargetHttpAuthCreds,
     makeRequiredImageParametersForKeys,
     setupLog4jConfigForContainer,
     setupTestCredsForContainer
@@ -15,6 +15,7 @@ import {
 import {MigrationConsole} from "./migrationConsole";
 
 import {
+    AllowLiteralOrExpression,
     BaseExpression,
     expr,
     IMAGE_PULL_POLICY,
@@ -59,6 +60,7 @@ function getRfsReplicasetManifest
     jsonConfig: BaseExpression<string>
     sessionName: BaseExpression<string>,
     podReplicas: BaseExpression<number>,
+    basicCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
 
     useLocalstackAwsCreds: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
@@ -67,11 +69,30 @@ function getRfsReplicasetManifest
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>
 }): ReplicaSet {
     const useCustomLogging = expr.not(expr.isEmpty(args.loggingConfigMap));
+    const targetBasicCreds = getTargetHttpAuthCreds(args.basicCredsSecretNameOrEmpty);
     const baseContainerDefinition = {
         name: "bulk-loader",
         image: makeStringTypeProxy(args.rfsImageName),
         imagePullPolicy: makeStringTypeProxy(args.rfsImagePullPolicy),
         command: ["/rfs-app/runJavaWithClasspath.sh"],
+        env: [
+            {
+                name: "TARGET_USERNAME",
+                valueFrom: {
+                    name: makeStringTypeProxy(args.basicCredsSecretNameOrEmpty),
+                    key: "username",
+                    optional: true
+                }
+            },
+            {
+                name: "TARGET_PASSWORD",
+                valueFrom: {
+                    name: makeStringTypeProxy(args.basicCredsSecretNameOrEmpty),
+                    key: "password",
+                    optional: true
+                }
+            }
+        ],
         args: [
             "org.opensearch.migrations.RfsMigrateDocuments",
             "---INLINE-JSON",
@@ -186,6 +207,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     .addTemplate("createReplicaset", t => t
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("rfsJsonConfig", typeToken<string>())
+        .addRequiredInput("basicCredsSecretNameOrEmpty", typeToken<string>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
@@ -201,6 +223,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     useLocalstackAwsCreds: expr.deserializeRecord(b.inputs.useLocalStack),
                     sessionName: b.inputs.sessionName,
+                    basicCredsSecretNameOrEmpty: b.inputs.basicCredsSecretNameOrEmpty,
                     rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
                     rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
                     workflowName: expr.getWorkflowValue("name"),
@@ -224,6 +247,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b,c),
                     podReplicas: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["podReplicas"], 1),
+                    basicCredsSecretNameOrEmpty: expr.dig(expr.deserializeRecord(b.inputs.targetConfig), ["authConfig","basic","secretName"], ""),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
                     useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
                     rfsJsonConfig: expr.asString(expr.serialize(
