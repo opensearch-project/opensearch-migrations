@@ -1,5 +1,5 @@
 import {
-    CommonWorkflowParameters,
+    CommonWorkflowParameters, extractSourceKeysToExpressionMap, getSourceHttpAuthCreds, getTargetHttpAuthCreds,
     makeRequiredImageParametersForKeys
 } from "./commonWorkflowTemplates";
 import {z} from "zod";
@@ -7,7 +7,7 @@ import {
     CLUSTER_CONFIG,
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE, CREATE_SNAPSHOT_OPTIONS,
-    METADATA_OPTIONS, NAMED_SOURCE_CLUSTER_CONFIG, NAMED_TARGET_CLUSTER_CONFIG, TARGET_CLUSTER_CONFIG
+    METADATA_OPTIONS, NAMED_SOURCE_CLUSTER_CONFIG, NAMED_TARGET_CLUSTER_CONFIG, S3_REPO_CONFIG, TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
 import {
@@ -37,8 +37,10 @@ function makeParamsDict(
         expr.mergeDicts(
             expr.makeDict({
                 "snapshotName": expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
+                "snapshotRepoName": expr.dig(expr.deserializeRecord(snapshotConfig), ["repoConfig", "repoName"],
+                    S3_REPO_CONFIG.shape.repoName.def.defaultValue)
             }),
-            makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"))
+            makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), false)
         )
     );
 }
@@ -63,6 +65,8 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addContainer(b=>b
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/root/createSnapshot/bin/CreateSnapshot"])
+            .addEnvVarsFromRecord(getSourceHttpAuthCreds(
+                expr.dig(expr.deserializeRecord(b.inputs.sourceConfig), ["authConfig","basic","secretName"], "")))
             .addArgs([
                 expr.literal("---INLINE-JSON"),
                 expr.asString(expr.serialize(

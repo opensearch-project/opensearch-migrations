@@ -1,6 +1,6 @@
 import {
     CommonWorkflowParameters, getTargetHttpAuthCreds,
-    makeRequiredImageParametersForKeys, TargetClusterParameters
+    makeRequiredImageParametersForKeys
 } from "./commonWorkflowTemplates";
 import {z} from "zod";
 import {
@@ -66,12 +66,14 @@ export function makeTargetParamDict(targetConfig: BaseExpression<Serialized<z.in
     return makeClusterParamDict("target", targetConfig);
 }
 
-export function makeRepoParamDict(repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>) {
+export function makeRepoParamDict(
+    repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>,
+    includes3LocalDir: boolean) {
     return expr.makeDict({
         "s3Endpoint": expr.get(repoConfig, "endpoint"),
         "s3RepoUri": expr.get(repoConfig, "s3RepoPathUri"),
         "s3Region": expr.get(repoConfig, "awsRegion"),
-        "s3LocalDir": expr.literal("/tmp")
+        ...(includes3LocalDir ? { "s3LocalDir": expr.literal("/tmp") } : {})
     });
 }
 
@@ -92,7 +94,7 @@ function makeParamsDict(
                 "snapshotName": expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
                 "sourceVersion": expr.get(expr.deserializeRecord(sourceConfig), "version")
             }),
-            makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"))
+            makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), true)
         )
     );
 }

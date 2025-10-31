@@ -14,9 +14,9 @@ export const S3_REPO_CONFIG = z.object({
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)/).default("")
         .describe("Override the default S3 endpoint for clients to connect to.  " +
             "Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"),
-    s3RepoPathUri: z.string().describe("s3:///BUCKETNAME/PATH")
+    s3RepoPathUri: z.string().describe("s3:///BUCKETNAME/PATH"),
+    repoName: z.string().default("migration_assistant_repo")
 });
-
 
 export const PROXY_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default(""),
@@ -35,7 +35,7 @@ export const REPLAYER_OPTIONS = z.object({
 
 export const CREATE_SNAPSHOT_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]),
-    maxSnapshotRateMbPerNode: z.number().default(-1),
+    maxSnapshotRateMbPerNode: z.number().default(0),
     loggingConfigurationOverrideConfigMap: z.string().default(""),
     s3RoleArn: z.string().default("")
 });
@@ -71,7 +71,9 @@ export const RFS_OPTIONS = z.object({
 
 export const HTTP_AUTH_BASIC = z.object({
     basic: z.object({
-        secretName: z.string()
+        secretName: z.string().regex(/^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/),
+        username: z.string(),
+        password: z.string()
     })
 });
 

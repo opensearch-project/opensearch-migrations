@@ -3,13 +3,15 @@ minikube start \
   --extra-config=kubelet.authorization-mode=Webhook \
   --extra-config=scheduler.bind-address=0.0.0.0 \
   --extra-config=controller-manager.bind-address=0.0.0.0
-minikube addons enable metrics-server
 eval $(minikube docker-env)
-minikube dashboard &
 kubectl config set-context --current --namespace=ma
 
+#nice to haves
+minikube addons enable metrics-server
+minikube dashboard &
+
 helm dependency build charts/aggregates/testClusters
-helm install--create-namespace -n ma ma charts/aggregates/testClusters
+helm install--create-namespace -n ma tc charts/aggregates/testClusters
 
 helm dependency build charts/aggregates/migrationAssistantWithArgo
 helm install --create-namespace -n ma ma charts/aggregates/migrationAssistan

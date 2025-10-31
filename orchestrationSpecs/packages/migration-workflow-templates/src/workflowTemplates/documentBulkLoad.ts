@@ -48,7 +48,7 @@ function makeParamsDict(
                 sessionName: sessionName,
                 luceneDir: "/tmp"
             }),
-            makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"))
+            makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), true)
         )
     );
 }

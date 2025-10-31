@@ -5,7 +5,9 @@
       "allowInsecure": true,
       "authConfig": {
         "basic": {
-          "secretName": "sourceCreds"
+          "secretName": "source1-creds",
+          "username": "admin",
+          "password": "admin"
         }
       },
       "snapshotRepo": {
@@ -22,7 +24,9 @@
       "allowInsecure": true,
       "authConfig": {
         "basic": {
-          "secretName": "targetCreds"
+          "secretName": "target1-creds",
+          "username": "admin",
+          "password": "admin"
         }
       }
     }
@@ -34,8 +38,14 @@
 
       "snapshotExtractAndLoadConfigs": [
         {
-          "indices": [ "index_3", "index_4" ],
-          "snapshotConfig": {},
+          "snapshotConfig": {
+            "snapshotNameConfig": {
+              "snapshotNamePrefix": "source1snapshot1"
+            },
+          },
+          "createSnapshotConfig": {
+            "indexAllowlist": [ "index_3", "index_4" ]
+          },
           "migrations": [
             {
               "metadataMigrationConfig": {

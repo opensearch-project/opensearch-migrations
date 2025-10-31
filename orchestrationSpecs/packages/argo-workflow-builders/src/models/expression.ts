@@ -497,14 +497,14 @@ class ExprBuilder {
 
     // Logical
     ternary<
-        B extends BaseExpression<boolean, any>,
-        L extends BaseExpression<any, any>,
-        R extends BaseExpression<ResultOf<L>, any>
+        B extends AllowLiteralOrExpression<boolean, any>,
+        L extends AllowLiteralOrExpression<any, any>,
+        R extends AllowLiteralOrExpression<ResultOf<L>, any>
     >(cond: B, whenTrue: L, whenFalse: R): BaseExpression<ResultOf<L>, WidenComplexity3<ExprC<B>, ExprC<L>, ExprC<R>>>;
     ternary<
-        B extends BaseExpression<boolean, any>,
-        R extends BaseExpression<any, any>,
-        L extends BaseExpression<ResultOf<R>, any>
+        B extends AllowLiteralOrExpression<boolean, any>,
+        R extends AllowLiteralOrExpression<any, any>,
+        L extends AllowLiteralOrExpression<ResultOf<R>, any>
     >(cond: B, whenTrue: L, whenFalse: R): BaseExpression<ResultOf<R>, WidenComplexity3<ExprC<B>, ExprC<L>, ExprC<R>>>;
     ternary(cond: any, whenTrue: any, whenFalse: any): BaseExpression<any, any> {
         return new TernaryExpression(cond, whenTrue, whenFalse);

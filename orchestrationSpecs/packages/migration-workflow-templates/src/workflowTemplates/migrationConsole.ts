@@ -1,5 +1,5 @@
 import {
-    CommonWorkflowParameters,
+    CommonWorkflowParameters, getSourceHttpAuthCreds, getTargetHttpAuthCreds,
     makeRequiredImageParametersForKeys
 } from "./commonWorkflowTemplates";
 import {z} from "zod";
@@ -41,6 +41,8 @@ const configComponentParameters = {
         description: "Snapshot configuration information (JSON)"})
 };
 
+// TODO - once the migration console can load secrets from env variables,
+//  we'll want to just drop everything about the secrets for http auth
 const SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE = `
 set -e -x
 
@@ -59,7 +61,7 @@ jq 'def normalizeAuthConfig:
     if (.authConfig | has("basic")) then
       .basic_auth = (.authConfig.basic | 
         if has("secretName") then
-          .user_secret_arn = .secretName | del(.secretName)
+          del(.secretName)
         else
           .
         end)
@@ -236,6 +238,10 @@ export const MigrationConsole = WorkflowBuilder.create({
         .addContainer(c => c
             .addImageInfo(c.inputs.imageMigrationConsoleLocation, c.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/sh", "-c"])
+            .addEnvVarsFromRecord(getSourceHttpAuthCreds(
+                expr.dig(expr.deserializeRecord(c.inputs.configContents), ["source_cluster","authConfig","basic","secretName"], "")))
+            .addEnvVarsFromRecord(getTargetHttpAuthCreds(
+                expr.dig(expr.deserializeRecord(c.inputs.configContents), ["target_cluster","authConfig","basic","secretName"], "")))
             .addArgs([
                 expr.fillTemplate(SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE, {
                     "FILE_CONTENTS": expr.toBase64(expr.asString(c.inputs.configContents)),

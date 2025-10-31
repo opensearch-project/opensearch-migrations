@@ -14,7 +14,7 @@ import {
     BaseExpression,
     expr,
     getAcceptedRegisterKeys,
-    INTERNAL,
+    INTERNAL, makeDirectTypeProxy,
     selectInputsForKeys,
     selectInputsForRegister,
     typeToken,
@@ -34,7 +34,8 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         .addRequiredInput("snapshotNameConfig", typeToken<z.infer<typeof SNAPSHOT_NAME_CONFIG>>())
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
 
-        .addSteps(b => b)
+        .addSteps(b => b
+            .addStepGroup(c => c))
         .addExpressionOutput("snapshotName", b=>
             expr.concatWith("_",
                 b.inputs.sourceName,
@@ -66,7 +67,6 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                     sourceName: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "name"),
                     snapshotNameConfig: expr.serialize(
                         expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "snapshotNameConfig")) as any,
-                    uniqueRunNonce: ""
                 })
             )
             .addStep("createSnapshot", CreateSnapshot, "snapshotWorkflow",

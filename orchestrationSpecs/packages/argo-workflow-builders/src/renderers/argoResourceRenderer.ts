@@ -8,7 +8,7 @@ import {StepGroup} from "../models/stepsBuilder";
 import {MISSING_FIELD, PlainObject} from "../models/plainObject";
 import {GenericScope, LoopWithUnion} from "../models/workflowTypes";
 import {WorkflowBuilder} from "../models/workflowBuilder";
-import {BaseExpression} from "../models/expression";
+import {BaseExpression, makeDirectTypeProxy, UnquotedTypeWrapper} from "../models/expression";
 import {NamedTask} from "../models/sharedTypes";
 import { stringify as toYaml } from 'yaml';
 import { omit } from 'lodash';
@@ -117,7 +117,7 @@ function formatStepOrTask<T extends NamedTask & { withLoop?: unknown }>(step: T)
             when:
                 (when && typeof when === "object" && "templateExp" in when) ?
                 `${toArgoExpressionString(when.templateExp, "Outer")}` :
-                    `${toArgoExpressionString(when, "IdentifierOnly")}`
+                    `${toArgoExpressionString(when, "IdentifierOnly").replace(/^'|'$/g, '')}`
         }),
         ...{"arguments": {parameters: (formatArguments(args) as object)}},
         ...rest
