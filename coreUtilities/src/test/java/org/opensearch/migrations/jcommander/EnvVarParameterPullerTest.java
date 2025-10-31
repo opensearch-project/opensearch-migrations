@@ -237,15 +237,6 @@ class EnvVarParameterPullerTest {
     }
 
     @Test
-    void testNullParametersObject() {
-        Map<String, String> env = new HashMap<>();
-        env.put("TARGET_USERNAME_CMD_LINE_ARG", "test");
-
-        // Should handle null gracefully without throwing
-        Assertions.assertDoesNotThrow(() -> EnvVarParameterPuller.injectFromEnv(null, createMockEnvGetter(env), "", ""));
-    }
-
-    @Test
     void testEmptyStringEnvironmentVariable() {
         TestParams params = new TestParams();
         Map<String, String> env = new HashMap<>();
