@@ -232,8 +232,8 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--continuous-mode", "--continuousMode" },
-            description = "Run in continuous mode (loop until SIGTERM). Default: false (single-run mode, used by ECS and tests) " +
-                "Set to true for long-running EKS pods")
+            description = "Keep the worker alive to process subsequent work items. (Default: false = single-run mode, used by ECS and tests) " +
+                "Set true for long-running EKS pods")
         public boolean continuousMode = false;
 
         @ParametersDelegate
@@ -372,11 +372,6 @@ public class RfsMigrateDocuments {
 
         validateArgs(arguments);
 
-        log.atInfo()
-            .setMessage("Mode: continuous={}")
-            .addArgument(arguments.continuousMode)
-            .log();
-
         var context = makeRootContext(arguments, workerId);
         var luceneDirPath = Paths.get(arguments.luceneDir);
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
@@ -467,31 +462,59 @@ public class RfsMigrateDocuments {
             );
 
             // Unified path: always run at least once; continue if continuousMode=true.
-            boolean shouldContinue = true;
-            while (shouldContinue) {
-                try {
-                    shouldContinue = processWorkItem(
-                        arguments,
-                        workItemRef,
-                        progressCursor,
-                        workCoordinator,
-                        workItemTimeProvider,
-                        cleanShutdownCompleted,
-                        context,
-                        cancellationRunnableRef,
-                        sourceResourceProvider,
-                        reindexer,
-                        unpackerFactory
-                    );
-                } catch (IOException e) {
-                    log.atError().setCause(e).setMessage("IO error during work item processing").log();
-                    throw e;
-                }
-            }
+            runWorkItemLoop(
+                arguments,
+                workItemRef,
+                progressCursor,
+                workCoordinator,
+                workItemTimeProvider,
+                cleanShutdownCompleted,
+                context,
+                cancellationRunnableRef,
+                sourceResourceProvider,
+                reindexer,
+                unpackerFactory
+            );
             cleanShutdownCompleted.set(true);
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
+        }
+    }
+
+    private static void runWorkItemLoop(
+            Args arguments,
+            AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef,
+            AtomicReference<WorkItemCursor> progressCursor,
+            IWorkCoordinator workCoordinator,
+            WorkItemTimeProvider workItemTimeProvider,
+            AtomicBoolean cleanShutdownCompleted,
+            RootDocumentMigrationContext context,
+            AtomicReference<Runnable> cancellationRunnableRef,
+            ClusterSnapshotReader sourceResourceProvider,
+            DocumentReindexer reindexer,
+            SnapshotShardUnpacker.Factory unpackerFactory
+    ) throws IOException {
+        boolean shouldContinue = true;
+        while (shouldContinue) {
+            try {
+                shouldContinue = processWorkItem(
+                    arguments,
+                    workItemRef,
+                    progressCursor,
+                    workCoordinator,
+                    workItemTimeProvider,
+                    cleanShutdownCompleted,
+                    context,
+                    cancellationRunnableRef,
+                    sourceResourceProvider,
+                    reindexer,
+                    unpackerFactory
+                );
+            } catch (IOException e) {
+                log.atError().setCause(e).setMessage("IO error during work item processing").log();
+                throw e;
+            }
         }
     }
 
@@ -850,6 +873,6 @@ public class RfsMigrateDocuments {
             cancellationRunnableRef.set(null);
         }
         // loop continuation logic for continuous mode
-        return arguments.continuousMode && !Thread.currentThread().isInterrupted() && !cleanShutdownCompleted.get();
+        return arguments.continuousMode && !cleanShutdownCompleted.get();
     }
 }
