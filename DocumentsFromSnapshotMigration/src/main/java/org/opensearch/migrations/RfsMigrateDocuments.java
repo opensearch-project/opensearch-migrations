@@ -46,6 +46,7 @@ import org.opensearch.migrations.bulkload.worker.RegularDocumentReaderEngine;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -229,6 +230,12 @@ public class RfsMigrateDocuments {
         @ParametersDelegate
         private VersionStrictness versionStrictness = new VersionStrictness();
 
+        @Parameter(required = false,
+            names = { "--continuous-mode", "--continuousMode" },
+            description = "Keep the worker alive to process subsequent work items. (Default: false = single-run mode, used by ECS and tests) " +
+                "Set true for long-running EKS pods")
+        public boolean continuousMode = false;
+
         @ParametersDelegate
         private ExperimentalArgs experimental = new ExperimentalArgs();
     }
@@ -386,33 +393,26 @@ public class RfsMigrateDocuments {
         var workItemTimeProvider = new WorkItemTimeProvider();
         var coordinatorFactory = new WorkCoordinatorFactory(targetVersion, arguments.indexNameSuffix);
         var cleanShutdownCompleted = new AtomicBoolean(false);
+        // Prevents duplicate checkpointing when lease timeout and shutdown hook both try to finalize the same work item
+        var lastWorkItemFinalized = new AtomicReference<String>();
 
         try (var workCoordinator = coordinatorFactory.get(
-                 new CoordinateWorkHttpClient(connectionContext),
-                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                 workerId,
+                new CoordinateWorkHttpClient(connectionContext),
+                TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                workerId,
                 Clock.systemUTC(),
-                workItemRef::set);
-             var processManager = new LeaseExpireTrigger(
-                w -> exitOnLeaseTimeout(
-                        workItemRef,
-                        workCoordinator,
-                        w,
-                        progressCursor,
-                        workItemTimeProvider,
-                        arguments.initialLeaseDuration,
-                        () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
-                        cleanShutdownCompleted,
-                        context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
-                Clock.systemUTC());) {
-            // Set up a hook to attempt to shut down cleanly (to mark progress in the worker coordination system) in the
-            // event of a SIGTERM signal.
+                workItemRef::set)) {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 Thread.currentThread().setName("Cleanup-Hook-Thread");
                 log.atWarn().setMessage("Received shutdown signal. Trying to mark progress and shutdown cleanly.").log();
                 try {
-                    executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
-                            context.getWorkCoordinationContext()::createSuccessorWorkItemsContext);
+                    executeCleanShutdownProcess(
+                        workItemRef,
+                        progressCursor,
+                        workCoordinator,
+                        cleanShutdownCompleted,
+                        lastWorkItemFinalized,
+                        context.getWorkCoordinationContext()::createSuccessorWorkItemsContext);
                     log.atInfo().setMessage("Clean shutdown completed.").log();
                 } catch (InterruptedException e) {
                     log.atError().setMessage("Clean exit process was interrupted: {}").addArgument(e).log();
@@ -427,11 +427,14 @@ public class RfsMigrateDocuments {
             }));
 
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
-            DocumentReindexer reindexer = new DocumentReindexer(targetClient,
+
+            DocumentReindexer reindexer = new DocumentReindexer(
+                targetClient,
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,
                 arguments.maxConnections,
-                docTransformerSupplier);
+                docTransformerSupplier
+            );
 
             var finder = ClusterProviderRegistry.getSnapshotFileFinder(
                     arguments.sourceVersion,
@@ -448,7 +451,11 @@ public class RfsMigrateDocuments {
 
             var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
 
-            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo, arguments.versionStrictness.allowLooseVersionMatches);
+            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(
+                    arguments.sourceVersion,
+                    sourceRepo,
+                    arguments.versionStrictness.allowLooseVersionMatches
+            );
 
             var unpackerFactory = new SnapshotShardUnpacker.Factory(
                 repoAccessor,
@@ -456,33 +463,76 @@ public class RfsMigrateDocuments {
                 sourceResourceProvider.getBufferSizeInBytes()
             );
 
-            run(
-                new LuceneIndexReader.Factory(sourceResourceProvider),
-                reindexer,
-                progressCursor,
-                workCoordinator,
+            runWorkItemLoop(
                 arguments.initialLeaseDuration,
-                processManager,
-                sourceResourceProvider.getIndexMetadata(),
+                arguments.continuousMode,
                 arguments.snapshotName,
                 arguments.experimental.previousSnapshotName,
                 arguments.experimental.experimentalDeltaMode,
                 arguments.indexAllowlist,
-                sourceResourceProvider.getShardMetadata(),
-                unpackerFactory,
                 arguments.maxShardSizeBytes,
+                workItemRef,
+                progressCursor,
+                workCoordinator,
+                workItemTimeProvider,
+                cleanShutdownCompleted,
+                lastWorkItemFinalized,
                 context,
                 cancellationRunnableRef,
-                workItemTimeProvider);
+                sourceResourceProvider,
+                reindexer,
+                unpackerFactory
+            );
             cleanShutdownCompleted.set(true);
-        } catch (NoWorkLeftException e) {
-            log.atInfo().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
-            cleanShutdownCompleted.set(true);
-            System.exit(NO_WORK_LEFT_EXIT_CODE);
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
         }
+    }
+
+    private static void runWorkItemLoop(
+            Duration initialLeaseDuration,
+            boolean continuousMode,
+            String snapshotName,
+            String previousSnapshotName,
+            DeltaMode experimentalDeltaMode,
+            List<String> indexAllowlist,
+            long maxShardSizeBytes,
+            AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef,
+            AtomicReference<WorkItemCursor> progressCursor,
+            IWorkCoordinator workCoordinator,
+            WorkItemTimeProvider workItemTimeProvider,
+            AtomicBoolean cleanShutdownCompleted,
+            AtomicReference<String> lastWorkItemFinalized,
+            RootDocumentMigrationContext context,
+            AtomicReference<Runnable> cancellationRunnableRef,
+            ClusterSnapshotReader sourceResourceProvider,
+            DocumentReindexer reindexer,
+            SnapshotShardUnpacker.Factory unpackerFactory
+    ) throws IOException {
+        boolean shouldContinue;
+        do {
+            shouldContinue = processWorkItem(
+                initialLeaseDuration,
+                continuousMode,
+                snapshotName,
+                previousSnapshotName,
+                experimentalDeltaMode,
+                indexAllowlist,
+                maxShardSizeBytes,
+                workItemRef,
+                progressCursor,
+                workCoordinator,
+                workItemTimeProvider,
+                cleanShutdownCompleted,
+                lastWorkItemFinalized,
+                context,
+                cancellationRunnableRef,
+                sourceResourceProvider,
+                reindexer,
+                unpackerFactory
+            );
+        } while (shouldContinue);
     }
 
     private static void executeCleanShutdownProcess(
@@ -490,6 +540,7 @@ public class RfsMigrateDocuments {
             AtomicReference<WorkItemCursor> progressCursor,
             IWorkCoordinator coordinator,
             AtomicBoolean cleanShutdownCompleted,
+            AtomicReference<String> lastWorkItemFinalized,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException {
         if (cleanShutdownCompleted.get())  {
@@ -501,11 +552,22 @@ public class RfsMigrateDocuments {
             return;
         }
         var workItemAndDuration = workItemRef.get();
-        log.atInfo().setMessage("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
+        var currentWorkItemId = workItemAndDuration.getWorkItem().toString();
+        
+        // Check if this work item was already finalized by exitOnLeaseTimeout
+        if (currentWorkItemId.equals(lastWorkItemFinalized.get())) {
+            log.atInfo().setMessage("Work item {} already finalized by lease timeout handler").addArgument(currentWorkItemId).log();
+            return;
+        }
+        
+        log.atInfo().setMessage("Marking progress: {}, at doc {}")
+            .addArgument(currentWorkItemId)
+            .addArgument(progressCursor.get().getProgressCheckpointNum())
+            .log();
         var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, progressCursor.get());
 
         coordinator.createSuccessorWorkItemsAndMarkComplete(
-                workItemAndDuration.getWorkItem().toString(), successorWorkItem, 1, contextSupplier
+                currentWorkItemId, successorWorkItem, 1, contextSupplier
         );
         cleanShutdownCompleted.set(true);
     }
@@ -520,6 +582,8 @@ public class RfsMigrateDocuments {
             Duration initialLeaseDuration,
             Runnable cancellationRunnable,
             AtomicBoolean cleanShutdownCompleted,
+            boolean continuousMode,
+            AtomicReference<String> lastWorkItemFinalized,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier) {
         log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
                 .addArgument(workItemId)
@@ -554,6 +618,7 @@ public class RfsMigrateDocuments {
                             successorNextAcquisitionLeaseExponent,
                             contextSupplier
                     );
+                    lastWorkItemFinalized.set(workItemId);
                 }
             } else {
                 log.atWarn().setMessage("No progress cursor to create successor work items from. This can happen when" +
@@ -568,10 +633,19 @@ public class RfsMigrateDocuments {
             log.atError().setMessage("Exception during exit on lease timeout, clean shutdown failed")
                     .setCause(e).log();
             cleanShutdownCompleted.set(false);
+            if (!continuousMode) {
+                System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
+            }
+            return; // continuous mode: keep going
+        }
+
+        // On success
+        if (!continuousMode) {
+            cleanShutdownCompleted.set(true); // this mirrors the prior behavior where we exit right after
             System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
         }
-        cleanShutdownCompleted.set(true);
-        System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
+        // continuous mode: do NOT set cleanShutdownCompleted here, so the shutdown hook
+        // can still checkpoint the *next* active item if SIGTERM arrives.
     }
 
     public static int getSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider, Duration initialLeaseDuration,
@@ -755,5 +829,90 @@ public class RfsMigrateDocuments {
                 lockRenegotiationMillis *= 2;
             }
         }
+    }
+
+    private static boolean processWorkItem(
+            Duration initialLeaseDuration,
+            boolean continuousMode,
+            String snapshotName,
+            String previousSnapshotName,
+            DeltaMode experimentalDeltaMode,
+            List<String> indexAllowlist,
+            long maxShardSizeBytes,
+            AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef,
+            AtomicReference<WorkItemCursor> progressCursor,
+            IWorkCoordinator workCoordinator,
+            WorkItemTimeProvider workItemTimeProvider,
+            AtomicBoolean cleanShutdownCompleted,
+            AtomicReference<String> lastWorkItemFinalized,
+            RootDocumentMigrationContext context,
+            AtomicReference<Runnable> cancellationRunnableRef,
+            ClusterSnapshotReader sourceResourceProvider,
+            DocumentReindexer reindexer,
+            SnapshotShardUnpacker.Factory unpackerFactory
+    ) throws IOException {
+        try (var processManager = new LeaseExpireTrigger(
+                w -> exitOnLeaseTimeout(
+                    workItemRef,
+                    workCoordinator,
+                    w,
+                    progressCursor,
+                    workItemTimeProvider,
+                    initialLeaseDuration,
+                    () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
+                    cleanShutdownCompleted,
+                    continuousMode,
+                    lastWorkItemFinalized,
+                    context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
+                Clock.systemUTC())) {
+            var completionStatus = run(
+                new LuceneIndexReader.Factory(sourceResourceProvider),
+                reindexer,
+                progressCursor,
+                workCoordinator,
+                initialLeaseDuration,
+                processManager,
+                sourceResourceProvider.getIndexMetadata(),
+                snapshotName,
+                previousSnapshotName,
+                experimentalDeltaMode,
+                indexAllowlist,
+                sourceResourceProvider.getShardMetadata(),
+                unpackerFactory,
+                maxShardSizeBytes,
+                context,
+                cancellationRunnableRef,
+                workItemTimeProvider);
+
+            if (completionStatus == CompletionStatus.NOTHING_DONE) {
+                if (continuousMode) {
+                    return true; // if continuous=true, returns true immediately (no sleep)
+                } else {
+                    log.atInfo().setMessage("No progress made (non-continuous mode). Exiting with error code (no-work-left) to signal that.").log();
+                    System.exit(NO_WORK_LEFT_EXIT_CODE);
+                }
+            }
+        } catch (NoWorkLeftException e) {
+            log.atInfo().setMessage("No work left to acquire. Exiting with error code (no-work-left) to signal that.").log();
+            System.exit(NO_WORK_LEFT_EXIT_CODE); // thrown before run(...) starts, and exits
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            log.atWarn().setMessage("Worker interrupted; stopping loop.").log();
+            return false; // stop the loop
+        } catch (Exception e) {
+            log.atError().setCause(e).setMessage("Error processing work item").log();
+            if (e instanceof RuntimeException) {
+                throw (RuntimeException) e;
+            }
+            throw new IOException("Error processing work item", e);
+        } finally {
+            progressCursor.set(null);
+            workItemRef.set(null);
+            // Ensure nothing stale can be invoked later
+            cancellationRunnableRef.set(null);
+            lastWorkItemFinalized.set(null);
+        }
+        // loop continuation logic for continuous mode
+        return continuousMode && !cleanShutdownCompleted.get();
     }
 }
