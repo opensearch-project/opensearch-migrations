@@ -402,7 +402,6 @@ public class RfsMigrateDocuments {
                 workerId,
                 Clock.systemUTC(),
                 workItemRef::set)) {
-            // Shutdown hook unchanged
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 Thread.currentThread().setName("Cleanup-Hook-Thread");
                 log.atWarn().setMessage("Received shutdown signal. Trying to mark progress and shutdown cleanly.").log();
@@ -464,9 +463,14 @@ public class RfsMigrateDocuments {
                 sourceResourceProvider.getBufferSizeInBytes()
             );
 
-            // Unified path: always run at least once; continue if continuousMode=true.
             runWorkItemLoop(
-                arguments,
+                arguments.initialLeaseDuration,
+                arguments.continuousMode,
+                arguments.snapshotName,
+                arguments.experimental.previousSnapshotName,
+                arguments.experimental.experimentalDeltaMode,
+                arguments.indexAllowlist,
+                arguments.maxShardSizeBytes,
                 workItemRef,
                 progressCursor,
                 workCoordinator,
@@ -487,7 +491,13 @@ public class RfsMigrateDocuments {
     }
 
     private static void runWorkItemLoop(
-            Args arguments,
+            Duration initialLeaseDuration,
+            boolean continuousMode,
+            String snapshotName,
+            String previousSnapshotName,
+            DeltaMode experimentalDeltaMode,
+            List<String> indexAllowlist,
+            long maxShardSizeBytes,
             AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef,
             AtomicReference<WorkItemCursor> progressCursor,
             IWorkCoordinator workCoordinator,
@@ -500,28 +510,29 @@ public class RfsMigrateDocuments {
             DocumentReindexer reindexer,
             SnapshotShardUnpacker.Factory unpackerFactory
     ) throws IOException {
-        boolean shouldContinue = true;
-        while (shouldContinue) {
-            try {
-                shouldContinue = processWorkItem(
-                    arguments,
-                    workItemRef,
-                    progressCursor,
-                    workCoordinator,
-                    workItemTimeProvider,
-                    cleanShutdownCompleted,
-                    lastWorkItemFinalized,
-                    context,
-                    cancellationRunnableRef,
-                    sourceResourceProvider,
-                    reindexer,
-                    unpackerFactory
-                );
-            } catch (IOException e) {
-                log.atError().setCause(e).setMessage("IO error during work item processing").log();
-                throw e;
-            }
-        }
+        boolean shouldContinue;
+        do {
+            shouldContinue = processWorkItem(
+                initialLeaseDuration,
+                continuousMode,
+                snapshotName,
+                previousSnapshotName,
+                experimentalDeltaMode,
+                indexAllowlist,
+                maxShardSizeBytes,
+                workItemRef,
+                progressCursor,
+                workCoordinator,
+                workItemTimeProvider,
+                cleanShutdownCompleted,
+                lastWorkItemFinalized,
+                context,
+                cancellationRunnableRef,
+                sourceResourceProvider,
+                reindexer,
+                unpackerFactory
+            );
+        } while (shouldContinue);
     }
 
     private static void executeCleanShutdownProcess(
@@ -821,7 +832,13 @@ public class RfsMigrateDocuments {
     }
 
     private static boolean processWorkItem(
-            Args arguments,
+            Duration initialLeaseDuration,
+            boolean continuousMode,
+            String snapshotName,
+            String previousSnapshotName,
+            DeltaMode experimentalDeltaMode,
+            List<String> indexAllowlist,
+            long maxShardSizeBytes,
             AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef,
             AtomicReference<WorkItemCursor> progressCursor,
             IWorkCoordinator workCoordinator,
@@ -841,10 +858,10 @@ public class RfsMigrateDocuments {
                     w,
                     progressCursor,
                     workItemTimeProvider,
-                    arguments.initialLeaseDuration,
+                    initialLeaseDuration,
                     () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                     cleanShutdownCompleted,
-                    arguments.continuousMode,
+                    continuousMode,
                     lastWorkItemFinalized,
                     context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
                 Clock.systemUTC())) {
@@ -853,22 +870,22 @@ public class RfsMigrateDocuments {
                 reindexer,
                 progressCursor,
                 workCoordinator,
-                arguments.initialLeaseDuration,
+                initialLeaseDuration,
                 processManager,
                 sourceResourceProvider.getIndexMetadata(),
-                arguments.snapshotName,
-                arguments.experimental.previousSnapshotName,
-                arguments.experimental.experimentalDeltaMode,
-                arguments.indexAllowlist,
+                snapshotName,
+                previousSnapshotName,
+                experimentalDeltaMode,
+                indexAllowlist,
                 sourceResourceProvider.getShardMetadata(),
                 unpackerFactory,
-                arguments.maxShardSizeBytes,
+                maxShardSizeBytes,
                 context,
                 cancellationRunnableRef,
                 workItemTimeProvider);
 
             if (completionStatus == CompletionStatus.NOTHING_DONE) {
-                if (arguments.continuousMode) {
+                if (continuousMode) {
                     return true; // if continuous=true, returns true immediately (no sleep)
                 } else {
                     log.atInfo().setMessage("No progress made (non-continuous mode). Exiting with error code (no-work-left) to signal that.").log();
@@ -896,6 +913,6 @@ public class RfsMigrateDocuments {
             lastWorkItemFinalized.set(null);
         }
         // loop continuation logic for continuous mode
-        return arguments.continuousMode && !cleanShutdownCompleted.get();
+        return continuousMode && !cleanShutdownCompleted.get();
     }
 }
