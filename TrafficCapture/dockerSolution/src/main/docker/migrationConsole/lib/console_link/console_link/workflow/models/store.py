@@ -10,7 +10,7 @@ from kubernetes.client.rest import ApiException
 logger = logging.getLogger(__name__)
 
 # Constants
-CONFIG_JSON_KEY = "workflow_config.json"
+CONFIG_YAML_KEY = "workflow_config.yaml"
 
 
 class WorkflowConfigStore:
@@ -70,7 +70,7 @@ class WorkflowConfigStore:
             ApiException: If Kubernetes API call fails
             Exception: For other errors during save operation
         """
-        config_json = config.to_json()
+        config_yaml = config.to_yaml()
 
         # Create ConfigMap body
         config_map_body = client.V1ConfigMap(
@@ -83,7 +83,7 @@ class WorkflowConfigStore:
                 }
             ),
             data={
-                CONFIG_JSON_KEY: config_json,
+                CONFIG_YAML_KEY: config_yaml,
                 "session_name": session_name
             }
         )
@@ -136,12 +136,12 @@ class WorkflowConfigStore:
                 logger.error(f"Kubernetes API error loading config for session {session_name}: {e}")
                 raise
 
-        if not config_map.data or CONFIG_JSON_KEY not in config_map.data:
-            logger.info(f"ConfigMap {session_name} exists but has no {CONFIG_JSON_KEY} data")
+        if not config_map.data or CONFIG_YAML_KEY not in config_map.data:
+            logger.info(f"ConfigMap {session_name} exists but has no {CONFIG_YAML_KEY} data")
             return None
 
-        config_json = config_map.data[CONFIG_JSON_KEY]
-        config = WorkflowConfig.from_json(config_json)
+        config_yaml = config_map.data[CONFIG_YAML_KEY]
+        config = WorkflowConfig.from_yaml(config_yaml)
 
         logger.info(f"Loaded workflow config for session: {session_name}")
         return config
@@ -202,4 +202,3 @@ class WorkflowConfigStore:
 
     def close(self):
         """Close any connections (no-op for Kubernetes client)"""
-        pass
