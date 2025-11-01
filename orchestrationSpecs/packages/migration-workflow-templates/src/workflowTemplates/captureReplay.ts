@@ -12,15 +12,14 @@ import {
     REPLAYER_OPTIONS,
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
-import {
-    CommonWorkflowParameters,
-    makeRequiredImageParametersForKeys
-} from "./commonWorkflowTemplates";
 import {z} from "zod";
 import {SetupKafka} from "./setupKafka";
 import {Replayer} from "./replayer";
 import {MigrationConsole} from "./migrationConsole";
 import {CaptureProxy} from "./captureProxy";
+
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 
 
 export const CaptureReplay = WorkflowBuilder.create({

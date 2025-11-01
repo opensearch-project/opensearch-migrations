@@ -1,9 +1,4 @@
-import {
-    CommonWorkflowParameters,
-    extractTargetKeysToExpressionMap,
-    makeRequiredImageParametersForKeys,
-    setupLog4jConfigForContainer
-} from "./commonWorkflowTemplates";
+
 import {z} from "zod";
 import {
     getZodKeys,
@@ -21,7 +16,11 @@ import {
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
-import {makeRepoParamDict, makeTargetParamDict} from "./metadataMigration";
+import {makeRepoParamDict} from "./metadataMigration";
+import {setupLog4jConfigForContainer} from "./commonUtils/containerFragments";
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {extractTargetKeysToExpressionMap, makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
 
 function makeParamsDict(
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,

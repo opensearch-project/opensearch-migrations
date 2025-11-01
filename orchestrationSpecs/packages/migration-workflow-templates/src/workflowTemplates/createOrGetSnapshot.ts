@@ -1,7 +1,3 @@
-import {
-    CommonWorkflowParameters,
-    makeRequiredImageParametersForKeys
-} from "./commonWorkflowTemplates";
 import {z} from "zod";
 import {CreateSnapshot} from "./createSnapshot";
 import {SNAPSHOT_NAME_CONFIG} from "@opensearch-migrations/schemas";
@@ -20,6 +16,9 @@ import {
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
+
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 
 export const CreateOrGetSnapshot = WorkflowBuilder.create({
     k8sResourceName: "create-or-get-snapshot",

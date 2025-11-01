@@ -1,7 +1,4 @@
-import {
-    CommonWorkflowParameters, getSourceHttpAuthCreds, getTargetHttpAuthCreds,
-    makeRequiredImageParametersForKeys
-} from "./commonWorkflowTemplates";
+
 import {z} from "zod";
 import {
     AllowLiteralOrExpression,
@@ -24,6 +21,10 @@ import {
     KAFKA_SERVICES_CONFIG,
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
+
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 
 const KafkaServicesConfig = z.object({
     broker_endpoints: z.string(),

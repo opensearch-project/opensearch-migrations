@@ -12,12 +12,6 @@ import {
     SNAPSHOT_MIGRATION_CONFIG,
     TARGET_CLUSTER_CONFIG
 } from '@opensearch-migrations/schemas'
-import {
-    CommonWorkflowParameters,
-    ImageParameters,
-    LogicalOciImages,
-    makeRequiredImageParametersForKeys
-} from "./commonWorkflowTemplates";
 import {ConfigManagementHelpers} from "./configManagementHelpers";
 import {
     AllowLiteralOrExpression,
@@ -37,6 +31,9 @@ import {
 import {DocumentBulkLoad} from "./documentBulkLoad";
 import {MetadataMigration} from "./metadataMigration";
 import {CreateOrGetSnapshot} from "./createOrGetSnapshot";
+
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 
 const uniqueRunNonceParam = {
     uniqueRunNonce: defineRequiredParam<string>({description: "Workflow session nonce"})

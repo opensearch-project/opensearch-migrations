@@ -1,9 +1,3 @@
-import {
-    CommonWorkflowParameters, getTargetHttpAuthCreds,
-    makeRequiredImageParametersForKeys,
-    setupLog4jConfigForContainer,
-    setupTestCredsForContainer
-} from "./commonWorkflowTemplates";
 import {z} from "zod";
 import {
     CLUSTER_VERSION_STRING,
@@ -28,7 +22,16 @@ import {
 import {
     ReplicaSet
 } from "@opensearch-migrations/argo-workflow-builders";
-import {makeRepoParamDict, makeTargetParamDict} from "./metadataMigration";
+import {makeRepoParamDict} from "./metadataMigration";
+import {
+    setupLog4jConfigForContainer,
+    setupTestCredsForContainer
+} from "./commonUtils/containerFragments";
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
+import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
+import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 
 function makeParamsDict(
     sourceVersion: BaseExpression<z.infer<typeof CLUSTER_VERSION_STRING>>,
@@ -251,7 +254,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b,c),
                     podReplicas: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["podReplicas"], 1),
-                    basicCredsSecretNameOrEmpty: expr.dig(expr.deserializeRecord(b.inputs.targetConfig), ["authConfig","basic","secretName"], ""),
+                    basicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
                     useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
                     rfsJsonConfig: expr.asString(expr.serialize(

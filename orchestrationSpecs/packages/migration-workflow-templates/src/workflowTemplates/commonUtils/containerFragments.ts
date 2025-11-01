@@ -1,91 +1,11 @@
-import {z} from "zod";
-import {CLUSTER_CONFIG, SOURCE_CLUSTER_CONFIG, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {
-    AllowLiteralOrExpression,
-    BaseExpression, configMapKey, Container,
-    defineParam,
-    defineRequiredParam,
+    BaseExpression,
+    Container,
     expr,
-    IMAGE_PULL_POLICY,
-    InputParamDef, makeDirectTypeProxy, makeStringTypeProxy,
-    Serialized, typeToken, Volume
+    makeDirectTypeProxy,
+    makeStringTypeProxy,
+    Volume
 } from "@opensearch-migrations/argo-workflow-builders";
-
-export const CommonWorkflowParameters = {
-    etcdEndpoints: defineParam({expression: "http://etcd.ma.svc.cluster.local:2379"}),
-    etcdUser: defineParam({expression: "root"}),
-    etcdPassword: defineParam({expression: "password"}),
-    s3SnapshotConfigMap: defineParam({expression: "s3-snapshot-config"}),
-    imageConfigMapName: defineParam({expression: "migration-image-config"})
-} as const;
-
-export const LogicalOciImages = [
-    "CaptureProxy",
-    "TrafficReplayer",
-    "ReindexFromSnapshot",
-    "MigrationConsole"
-] as const;
-export type LogicalOciImagesKeys = typeof LogicalOciImages[number];
-
-export function makeRequiredImageParametersForKeys<K extends LogicalOciImagesKeys, T extends readonly K[]>(keys: T) {
-    return Object.fromEntries(
-        keys.flatMap(k => [
-            [`image${k}Location`, defineRequiredParam<string>()],
-            [`image${k}PullPolicy`, defineRequiredParam<IMAGE_PULL_POLICY>()]
-        ])
-    ) as Record<`image${typeof keys[number]}Location`, InputParamDef<string, true>> &
-        Record<`image${typeof keys[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY, true>>;
-}
-
-export const ImageParameters = makeRequiredImageParametersForKeys(LogicalOciImages);
-
-
-export function extractConnectionKeysToExpressionMap(
-    clusterType: string,
-    targetConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>
-) {
-    return {
-        [`${clusterType}AwsRegion`]:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "sigv4", "region"], ""),
-        [`${clusterType}AwsSigningName`]:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "sigv4", "service"], ""),
-        [`${clusterType}CACert`]:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "mtls", "caCert"], ""),
-        [`${clusterType}ClientSecretName`]:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "mtls", "clientSecretName"], ""),
-        [`${clusterType}Insecure`]:
-            expr.dig(expr.deserializeRecord(targetConfig), ["allowInsecure"], false),
-    };
-}
-
-export function extractSourceKeysToExpressionMap(sourceConfig: BaseExpression<Serialized<z.infer<typeof SOURCE_CLUSTER_CONFIG>>>) {
-    return extractConnectionKeysToExpressionMap("source", sourceConfig);
-}
-
-export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
-    return extractConnectionKeysToExpressionMap("target", targetConfig);
-}
-
-// see the helm chart for where this gets installed
-export const emptySecretName = expr.literal("empty");
-
-export function getSourceHttpAuthCreds(configMapNameOrEmpty: AllowLiteralOrExpression<string>) {
-    const configMapName =
-       expr.ternary(expr.isEmpty(configMapNameOrEmpty), emptySecretName, configMapNameOrEmpty);
-    return {
-        SOURCE_USERNAME: {secretKeyRef: configMapKey(configMapName,"username", true), type: typeToken<string>()},
-        SOURCE_PASSWORD: {secretKeyRef: configMapKey(configMapName,"password", true), type: typeToken<string>()}
-    } as const;
-}
-
-export function getTargetHttpAuthCreds(configMapNameOrEmpty: AllowLiteralOrExpression<string>) {
-    const configMapName =
-        expr.ternary(expr.isEmpty(configMapNameOrEmpty), emptySecretName, configMapNameOrEmpty);
-    return {
-        TARGET_USERNAME: {secretKeyRef: configMapKey(configMapName,"username", true), type: typeToken<string>()},
-        TARGET_PASSWORD: {secretKeyRef: configMapKey(configMapName,"password", true), type: typeToken<string>()}
-    } as const;
-}
 
 export type ContainerVolumePair = {
     readonly container: Container,
@@ -94,8 +14,7 @@ export type ContainerVolumePair = {
 
 export function setupTestCredsForContainer(
     useLocalStack: BaseExpression<boolean>,
-    def: ContainerVolumePair): ContainerVolumePair
-{
+    def: ContainerVolumePair): ContainerVolumePair {
     const TEST_CREDS_VOLUME_NAME = "localstack-test-creds";
     const {volumeMounts, env, ...restOfContainer} = def.container;
     return {
@@ -164,8 +83,7 @@ export function setupLog4jConfigForContainer(
     customLoggingEnabled: BaseExpression<boolean>,
     loggingConfigMapName: BaseExpression<string>,
     def: ContainerVolumePair,
-    existingJavaOpts: BaseExpression<string>=expr.literal(" ")): ContainerVolumePair
-{
+    existingJavaOpts: BaseExpression<string> = expr.literal(" ")): ContainerVolumePair {
     const {volumeMounts, env, ...restOfContainer} = def.container;
     const LOG4J_CONFIG_VOLUME_NAME = "log4j-configuration";
     return {
@@ -190,11 +108,11 @@ export function setupLog4jConfigForContainer(
                     name: "JAVA_OPTS",
                     value:
                         makeStringTypeProxy(expr.concatWith(" ",
-                            existingJavaOpts,
-                            expr.ternary(
-                                customLoggingEnabled,
-                                expr.literal("-Dlog4j2.configurationFile=/config/logConfiguration"),
-                                expr.literal("")),
+                                existingJavaOpts,
+                                expr.ternary(
+                                    customLoggingEnabled,
+                                    expr.literal("-Dlog4j2.configurationFile=/config/logConfiguration"),
+                                    expr.literal("")),
                             )
                         )
                 }
@@ -210,3 +128,4 @@ export function setupLog4jConfigForContainer(
         }
     } as const;
 }
+

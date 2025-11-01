@@ -1,7 +1,4 @@
-import {
-    CommonWorkflowParameters, extractSourceKeysToExpressionMap, getSourceHttpAuthCreds, getTargetHttpAuthCreds,
-    makeRequiredImageParametersForKeys
-} from "./commonWorkflowTemplates";
+
 import {z} from "zod";
 import {
     CLUSTER_CONFIG,
@@ -18,7 +15,13 @@ import {
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
-import {makeClusterParamDict, makeRepoParamDict} from "./metadataMigration";
+import {makeRepoParamDict} from "./metadataMigration";
+
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {extractSourceKeysToExpressionMap, makeClusterParamDict} from "./commonUtils/clusterSettingManipulators";
+import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
+import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 
 export function makeSourceParamDict(sourceConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
     return makeClusterParamDict("source", sourceConfig);
@@ -65,8 +68,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addContainer(b=>b
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/root/createSnapshot/bin/CreateSnapshot"])
-            .addEnvVarsFromRecord(getSourceHttpAuthCreds(
-                expr.dig(expr.deserializeRecord(b.inputs.sourceConfig), ["authConfig","basic","secretName"], "")))
+            .addEnvVarsFromRecord(getSourceHttpAuthCreds(getHttpAuthSecretName(b.inputs.sourceConfig)))
             .addArgs([
                 expr.literal("---INLINE-JSON"),
                 expr.asString(expr.serialize(

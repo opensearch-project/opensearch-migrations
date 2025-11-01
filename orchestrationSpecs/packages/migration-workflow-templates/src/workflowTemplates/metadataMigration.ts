@@ -1,23 +1,27 @@
-import {
-    CommonWorkflowParameters, getTargetHttpAuthCreds,
-    makeRequiredImageParametersForKeys
-} from "./commonWorkflowTemplates";
 import {z} from "zod";
 import {
-    CLUSTER_CONFIG,
     COMPLETE_SNAPSHOT_CONFIG,
-    METADATA_OPTIONS, NAMED_SOURCE_CLUSTER_CONFIG, NAMED_TARGET_CLUSTER_CONFIG, S3_REPO_CONFIG,
-    TARGET_CLUSTER_CONFIG
+    METADATA_OPTIONS,
+    NAMED_SOURCE_CLUSTER_CONFIG,
+    NAMED_TARGET_CLUSTER_CONFIG,
+    S3_REPO_CONFIG
 } from "@opensearch-migrations/schemas";
 import {
     BaseExpression,
-    defineRequiredParam, expr,
+    defineRequiredParam,
+    expr,
     INTERNAL,
     selectInputsForRegister,
     Serialized,
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
+
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
+import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
+import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 
 const COMMON_METADATA_PARAMETERS = {
     snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({ description:
@@ -26,45 +30,6 @@ const COMMON_METADATA_PARAMETERS = {
     targetConfig: defineRequiredParam<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
     ...makeRequiredImageParametersForKeys(["MigrationConsole"])
 };
-
-function makeAuthDict(clusterType: string, targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
-    const safeAuthConfig = (expr.getLoose(expr.deserializeRecord(targetConfig), "authConfig"));
-    return expr.ternary(
-        expr.hasKey(expr.deserializeRecord(targetConfig), "authConfig"),
-            expr.ternary(
-                expr.hasKey(safeAuthConfig, "sigv4"),
-                expr.makeDict({
-                    [`${clusterType}targetAwsServiceSigningName`]: expr.getLoose(expr.getLoose(safeAuthConfig, "sigv4"), "service"),
-                    [`${clusterType}AwsRegion`]: expr.getLoose(expr.getLoose(safeAuthConfig, "sigv4"), "region")
-                }),
-                expr.ternary(
-                    expr.hasKey(safeAuthConfig, "mtls"),
-                    expr.makeDict({
-                        [`${clusterType}CaCert`]: expr.getLoose(expr.getLoose(safeAuthConfig, "mtls"), "caCert"),
-                    }),
-                    expr.literal({})
-                )
-            ),
-        expr.literal({}));
-}
-
-export function getHttpAuthSecretName(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
-    return expr.dig(expr.deserializeRecord(targetConfig), ["authConfig","basic","secretName"], "");
-}
-
-export function makeClusterParamDict(clusterType: string, clusterConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
-    return expr.mergeDicts(
-        makeAuthDict(clusterType, clusterConfig),
-        expr.makeDict({
-            [`${clusterType}Host`]: expr.jsonPathStrict(clusterConfig, "endpoint"),
-            [`${clusterType}Insecure`]: expr.dig(expr.deserializeRecord(clusterConfig), ["allowInsecure"], false)
-        })
-    );
-}
-
-export function makeTargetParamDict(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
-    return makeClusterParamDict("target", targetConfig);
-}
 
 export function makeRepoParamDict(
     repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>,
@@ -131,8 +96,7 @@ export const MetadataMigration = WorkflowBuilder.create({
                     expr.literal("/config/credentials/configuration"),
                     expr.literal(""))
             )
-            .addEnvVarsFromRecord(getTargetHttpAuthCreds(
-                expr.dig(expr.deserializeRecord(b.inputs.targetConfig), ["authConfig","basic","secretName"], "")))
+            .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(b.inputs.targetConfig)))
             .addArgs([
                 b.inputs.commandMode,
                 expr.literal("---INLINE-JSON"),
