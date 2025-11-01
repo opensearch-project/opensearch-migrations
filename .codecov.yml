@@ -6,6 +6,17 @@ coverage:
       default:
         # Only fail if the coverage decreases by more than 1%
         threshold: 1%
+    patch:
+      default:
+        target: 80%
+
+flags:
+  python:
+    carryforward: true
+  gradle:
+    carryforward: true
+  node:
+    carryforward: true
 
 ignore:
   - "**/build/**"
