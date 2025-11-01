@@ -86,7 +86,7 @@ def normalizeAllowInsecure:
 
 def normalizeRepoPath:
   if has("s3RepoPathUri") then
-    .repo_uri = .s3RepoPathUri | del(.s3RepoPathUri)
+    .repo_uri = .s3RepoPathUri | del(.s3RepoPathUri) | del(.repoName)
   else
     .
   end;

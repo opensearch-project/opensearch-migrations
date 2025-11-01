@@ -30,12 +30,19 @@ echo "Generated unique uniqueRunNonce: $UUID"
 echo "Running configuration conversion..."
 $INITIALIZE_CMD --user-config $CONFIG_FILENAME --unique-run-nonce $UUID "$@" > "$TEMPORARY_FILE"
 
+# Set the name field based on environment variable
+if [ -n "$USE_GENERATE_NAME" ]; then
+  NAME_FIELD="generateName: full-migration-"
+else
+  NAME_FIELD="name: migration-workflow"
+fi
+
 echo "Applying workflow to Kubernetes..."
 cat <<EOF | kubectl create -f -
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: migration-workflow
+  $NAME_FIELD
 spec:
   workflowTemplateRef:
     name: full-migration

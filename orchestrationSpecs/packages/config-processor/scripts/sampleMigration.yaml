@@ -40,6 +40,7 @@
         {
           "snapshotConfig": {
             "snapshotNameConfig": {
+#              "externallyManagedSnapshot": "source1_source1snapshot1_88a9f10c-207e-4c04-b6c6-fbc058501131",
               "snapshotNamePrefix": "source1snapshot1"
             },
           },

@@ -79,17 +79,21 @@ function getRfsReplicasetManifest
             {
                 name: "TARGET_USERNAME",
                 valueFrom: {
-                    name: makeStringTypeProxy(args.basicCredsSecretNameOrEmpty),
-                    key: "username",
-                    optional: true
+                    secretKeyRef: {
+                        name: makeStringTypeProxy(args.basicCredsSecretNameOrEmpty),
+                        key: "username",
+                        optional: true
+                    }
                 }
             },
             {
                 name: "TARGET_PASSWORD",
                 valueFrom: {
-                    name: makeStringTypeProxy(args.basicCredsSecretNameOrEmpty),
-                    key: "password",
-                    optional: true
+                    secretKeyRef: {
+                        name: makeStringTypeProxy(args.basicCredsSecretNameOrEmpty),
+                        key: "password",
+                        optional: true
+                    }
                 }
             }
         ],
