@@ -1,13 +1,14 @@
 import {z} from "zod";
-import {TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
+import {CLUSTER_CONFIG, SOURCE_CLUSTER_CONFIG, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {
-    BaseExpression, Container,
+    AllowLiteralOrExpression,
+    BaseExpression, configMapKey, Container,
     defineParam,
     defineRequiredParam,
     expr,
     IMAGE_PULL_POLICY,
     InputParamDef, makeDirectTypeProxy, makeStringTypeProxy,
-    Serialized, Volume
+    Serialized, typeToken, Volume
 } from "@opensearch-migrations/argo-workflow-builders";
 
 export const CommonWorkflowParameters = {
@@ -38,33 +39,52 @@ export function makeRequiredImageParametersForKeys<K extends LogicalOciImagesKey
 
 export const ImageParameters = makeRequiredImageParametersForKeys(LogicalOciImages);
 
-export const TargetClusterParameters = {
-    targetAwsRegion: defineRequiredParam<string>(),
-    targetAwsSigningName: defineRequiredParam<string>(),
-    targetCACert: defineRequiredParam<string>(),
-    targetClientSecretName: defineRequiredParam<string>(), // TODO
-    targetInsecure: defineRequiredParam<boolean>(),
-    targetUsername: defineRequiredParam<string>(),
-    targetPassword: defineRequiredParam<string>()
+
+export function extractConnectionKeysToExpressionMap(
+    clusterType: string,
+    targetConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>
+) {
+    return {
+        [`${clusterType}AwsRegion`]:
+            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "sigv4", "region"], ""),
+        [`${clusterType}AwsSigningName`]:
+            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "sigv4", "service"], ""),
+        [`${clusterType}CACert`]:
+            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "mtls", "caCert"], ""),
+        [`${clusterType}ClientSecretName`]:
+            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "mtls", "clientSecretName"], ""),
+        [`${clusterType}Insecure`]:
+            expr.dig(expr.deserializeRecord(targetConfig), ["allowInsecure"], false),
+    };
+}
+
+export function extractSourceKeysToExpressionMap(sourceConfig: BaseExpression<Serialized<z.infer<typeof SOURCE_CLUSTER_CONFIG>>>) {
+    return extractConnectionKeysToExpressionMap("source", sourceConfig);
 }
 
 export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
+    return extractConnectionKeysToExpressionMap("target", targetConfig);
+}
+
+// see the helm chart for where this gets installed
+export const emptySecretName = expr.literal("empty");
+
+export function getSourceHttpAuthCreds(configMapNameOrEmpty: AllowLiteralOrExpression<string>) {
+    const configMapName =
+       expr.ternary(expr.isEmpty(configMapNameOrEmpty), emptySecretName, configMapNameOrEmpty);
     return {
-        targetAwsRegion:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "sigv4", "region"], ""),
-        targetAwsSigningName:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "sigv4", "service"], ""),
-        targetCACert:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "mtls", "caCert"], ""),
-        targetClientSecretName:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "mtls", "clientSecretName"], ""),
-        targetInsecure:
-            expr.dig(expr.deserializeRecord(targetConfig), ["allowInsecure"], false),
-        targetUsername:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "basic", "username"], ""),
-        targetPassword:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "basic", "password"], ""),
-    };
+        SOURCE_USERNAME: {secretKeyRef: configMapKey(configMapName,"username", true), type: typeToken<string>()},
+        SOURCE_PASSWORD: {secretKeyRef: configMapKey(configMapName,"password", true), type: typeToken<string>()}
+    } as const;
+}
+
+export function getTargetHttpAuthCreds(configMapNameOrEmpty: AllowLiteralOrExpression<string>) {
+    const configMapName =
+        expr.ternary(expr.isEmpty(configMapNameOrEmpty), emptySecretName, configMapNameOrEmpty);
+    return {
+        TARGET_USERNAME: {secretKeyRef: configMapKey(configMapName,"username", true), type: typeToken<string>()},
+        TARGET_PASSWORD: {secretKeyRef: configMapKey(configMapName,"password", true), type: typeToken<string>()}
+    } as const;
 }
 
 export type ContainerVolumePair = {
@@ -110,7 +130,7 @@ export function setupTestCredsForContainer(
     } as const;
 }
 
-const DEFAULT_LOGGING_CONFIGURATION_CONFIGMAP_NAME = "default-logging-configuration";
+const DEFAULT_LOGGING_CONFIGURATION_CONFIGMAP_NAME = "default-log4j-config";
 
 /**
  * The log4j2 library interprets an empty file not as a missing configuration, but a no-logging configuration.
@@ -133,7 +153,7 @@ const DEFAULT_LOGGING_CONFIGURATION_CONFIGMAP_NAME = "default-logging-configurat
  * That brings us to the somewhat awkward requirement that this function takes in TWO different flags instead
  * of just one.  One flag sets (customLoggingEnabled) up the property to use what should be a non-empty
  * configuration file and the other (loggingConfigMapName) specifies the name of that configmap.  If the former
- * evaluates to true and the latter is empty, "default-logging-configuration" is used.  Notice that the
+ * evaluates to true and the latter is empty, "default-log4j-config" is used.  Notice that the
  * migration-assistant helm chart doesn't create that configmap, and it's fine if it doesn't exist.
  *
  * Because of the specificity mentioned above, many callers/resources may be wired up to not even enable the

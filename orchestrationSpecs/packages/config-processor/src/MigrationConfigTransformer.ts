@@ -84,15 +84,15 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             }
             const newSnapshotConfig = snapshotExtractAndLoadConfigs === undefined ? undefined :
                 await Promise.all(snapshotExtractAndLoadConfigs.map(async sc => {
-                    const {snapshotConfig, indices, migrations} = sc;
+                    const {snapshotConfig, createSnapshotConfig, migrations} = sc;
                     if (snapshotConfig !== undefined && sourceCluster.snapshotRepo === undefined) {
                         throw Error(`Configured a snapshot repo with ${snapshotConfig}, for ${fromSource}. but the source cluster definition does not define a repo.`);
                     }
                     return {
-                        indices,
+                        createSnapshotConfig,
                         migrations,
                         snapshotConfig: {
-                            snapshotName: snapshotConfig.snapshotName,
+                            snapshotNameConfig: snapshotConfig.snapshotNameConfig,
                             repoConfig: (sourceCluster.snapshotRepo === undefined ? {} :
                                 await rewriteEndpointIfLocalStack(sourceCluster.snapshotRepo))
                         }

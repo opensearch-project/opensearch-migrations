@@ -140,7 +140,7 @@ async function generateTypes(
 
 async function main() {
     await generateTypes(
-        './k8s-schemas',
+        './k8sSchemas',
         './src/kubernetesResourceTypes/kubernetesTypes.ts',
         [
             { apiVersion: 'v1', kind: 'Pod' },

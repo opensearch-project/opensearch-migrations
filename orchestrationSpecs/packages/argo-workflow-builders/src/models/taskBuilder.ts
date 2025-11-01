@@ -15,7 +15,6 @@ import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaratio
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {NamedTask, TaskType} from "./sharedTypes";
 import {
-    AllowSerializedAggregateOrPrimitiveExpressionOrLiteral,
     BaseExpression,
     expr,
     FromParameterExpression,
@@ -33,10 +32,43 @@ import {
     NormalizeInputs
 } from "./parameterConversions";
 
-export type TaskOpts<LoopT extends PlainObject> = {
-    loopWith?: LoopWithUnion<LoopT>,
-    when?: SimpleExpression<boolean> | {templateExp: TemplateExpression<boolean>}
+export type WhenCondition = (SimpleExpression<boolean> | {templateExp: TemplateExpression<boolean>});
+
+export type TaskOpts<
+    S extends TasksOutputsScope,
+    Label extends TaskType,
+    LoopT extends NonSerializedPlainObject
+> = {
+    loopWith?: LoopWithUnion<LoopT> | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => LoopWithUnion<LoopT>),
+    when?: WhenCondition | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => WhenCondition)
 };
+
+function reduceWhen<
+    S extends TasksOutputsScope,
+    Label extends TaskType
+>(
+    when: WhenCondition | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => WhenCondition) | undefined,
+    tasks: AllTasksAsOutputReferenceableInner<S, Label>
+): WhenCondition | undefined {
+    if (when === undefined) {
+        return undefined;
+    }
+    return typeof when === 'function' ? when(tasks) : when;
+}
+
+function reduceLoopWith<
+    S extends TasksOutputsScope,
+    Label extends TaskType,
+    LoopT extends NonSerializedPlainObject
+>(
+    loopWith: LoopWithUnion<LoopT> | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => LoopWithUnion<LoopT>) | undefined,
+    tasks: AllTasksAsOutputReferenceableInner<S, Label>
+): LoopWithUnion<LoopT> | undefined {
+    if (loopWith === undefined) {
+        return undefined;
+    }
+    return typeof loopWith === 'function' ? loopWith(tasks) : loopWith;
+}
 
 // Sentinel to guarantee that the parameters have been pushed back to the callback
 const PARAMS_PUSHED = Symbol("params_pushed");
@@ -72,22 +104,27 @@ export type OutputParamsToExpressions<
     [K in keyof Outputs]: ReturnType<typeof taskOutput<ExtractOutputParamType<Outputs[K]>, Label>>
 };
 
-export type AllTasksAsOutputReferenceable<
+export type AllTasksAsOutputReferenceableInner<
     TasksScope extends Record<string, TasksWithOutputs<any, any>>,
     Label extends TaskType
 > = {
-    [K in Label]: {
-        [StepName in keyof TasksScope]:
-        TasksScope[StepName] extends TasksWithOutputs<infer _Name, infer Outputs>
-            ? {
-                id: BaseExpression<string>;
-                status: BaseExpression<string>;
-                outputs: Outputs extends OutputParametersRecord
-                    ? OutputParamsToExpressions<Outputs, Label>
-                    : {};
-            }
-            : { id: BaseExpression<string>; status: BaseExpression<string>; outputs: {} };
-    }
+    [StepName in keyof TasksScope]:
+    TasksScope[StepName] extends TasksWithOutputs<infer _Name, infer Outputs>
+        ? {
+            id: BaseExpression<string>;
+            status: BaseExpression<string>;
+            outputs: Outputs extends OutputParametersRecord
+                ? OutputParamsToExpressions<Outputs, Label>
+                : {};
+        }
+        : { id: BaseExpression<string>; status: BaseExpression<string>; outputs: {} };
+}
+
+export type LabelledAllTasksAsOutputReferenceable<
+    TasksScope extends Record<string, TasksWithOutputs<any, any>>,
+    Label extends TaskType
+> = {
+    [K in Label]: AllTasksAsOutputReferenceableInner<TasksScope, Label>
 };
 
 /**
@@ -108,7 +145,7 @@ export type ParamProviderCallbackObject<
         parameterKeys?: readonly (Extract<keyof Inputs, string>)[];
         defaults: DefaultsOfInputs<Inputs>;
         defaultKeys?: readonly (Extract<keyof DefaultsOfInputs<Inputs>, string>)[];
-    } & AllTasksAsOutputReferenceable<TasksScope, Label>
+    } & LabelledAllTasksAsOutputReferenceable<TasksScope, Label>
     & IfNever<LoopItemsType, {}, { item: BaseExpression<LoopItemsType> }>;
 
 /**
@@ -149,7 +186,7 @@ export type ParamsTuple<
     S extends TasksOutputsScope,
     Label extends TaskType,
     LoopT extends NonSerializedPlainObject,
-    OptsType extends TaskOpts<LoopT> = TaskOpts<LoopT>
+    OptsType extends TaskOpts<S, Label, LoopT>
 > =
     InputKind<I> extends "empty"
         ? [opts?: OptsType]
@@ -169,13 +206,14 @@ export type ParamsTuple<
 
 export function unpackParams<
     I extends InputParametersRecord,
+    S extends TasksOutputsScope,
     Label extends TaskType,
     LoopT extends NonSerializedPlainObject
 >(
     args: readonly unknown[]
 ): {
     paramsFn: ParamsRegistrationFn<any, I, Label, LoopT>;
-    opts: TaskOpts<LoopT> | undefined;
+    opts: TaskOpts<S, Label, LoopT> | undefined;
 } {
     const [first, second] = args as [any, any];
     const paramsFn =
@@ -220,10 +258,11 @@ export type OutputsFrom<C extends WorkflowAndTemplatesScope, Src, K> =
             : never;
 
 export function getTaskOutputsByTaskName<
-    TaskScope extends TasksOutputsScope
+    TaskScope extends TasksOutputsScope,
+    Label extends TaskType
 >(
     tasksScope: TaskScope,
-    taskType: TaskType
+    taskType: Label
 ) {
     const tasksByName: Record<string, any> = {};
 
@@ -240,11 +279,7 @@ export function getTaskOutputsByTaskName<
             outputs
         };
     });
-    return tasksByName as Record<TaskType, {
-        id: BaseExpression<string>;
-        status: BaseExpression<string>;
-        outputs: Record<string, any>
-    }>;
+    return tasksByName as AllTasksAsOutputReferenceableInner<TaskScope, Label>;
 }
 
 export type TaskRebinder<C extends WorkflowAndTemplatesScope> =
@@ -282,8 +317,15 @@ export abstract class TaskBuilder<
     ) {}
 
     /** Hook for subclasses/wrappers to customize task creation (e.g. DAG adds `when`). */
-    protected onTaskPushed<LoopT extends PlainObject, OptsType extends TaskOpts<LoopT>>(task: NamedTask, opts?: OptsType): NamedTask {
-        return opts?.when !== undefined ? {...task, when: opts?.when} : task;
+    protected onTaskPushed<
+        LoopT extends NonSerializedPlainObject,
+        OptsType extends TaskOpts<S, Label, LoopT>
+    >(task: NamedTask, opts?: OptsType): NamedTask {
+        const reducedWhen = reduceWhen(opts?.when, this.getTaskOutputsByTaskName());
+        return {
+            ...task,
+            ...(reducedWhen === undefined ? {} : {when: reducedWhen})
+        };
     }
 
     protected getParamsFromCallback<
@@ -314,7 +356,7 @@ export abstract class TaskBuilder<
         TemplateSource,                      // typeof INTERNAL | Workflow<...>
         K extends KeyFor<C, TemplateSource>, // tie K to S so key autocompletes
         LoopT extends NonSerializedPlainObject,
-        OptsType extends TaskOpts<LoopT> = TaskOpts<LoopT>
+        OptsType extends TaskOpts<S, Label, LoopT>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, S>,
         source: UniqueNameConstraintOutsideDeclaration<Name, S, TemplateSource>,
@@ -323,19 +365,20 @@ export abstract class TaskBuilder<
     ): ApplyRebinder<
         RB,
         C,
-        ExtendScope<S, { [P in Name]: TasksWithOutputs<Name, OutputsFrom<C, TemplateSource, K>> }>
+        ExtendScope<S, { [P in Name]: TasksWithOutputs<Name, OutputsFrom<C, S, K>> }>
     > {
         const keyStr = key as unknown as string;
         const inputs = (source === INTERNAL) ?
             (this.contextualScope.templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K> :
             (((source as Workflow<any, any, any>).templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K>);
-        const {paramsFn, opts} = unpackParams<InputsFrom<C, TemplateSource, K>, Label, LoopT>(args);
+        const {paramsFn, opts} = unpackParams<InputsFrom<C, TemplateSource, K>, S, Label, LoopT>(args);
+        const loopWith = reduceLoopWith(opts?.loopWith, this.getTaskOutputsByTaskName());
         const params = inputs === undefined ? {} :
-            this.getParamsFromCallback<InputsFrom<C, TemplateSource, K>, LoopT>(inputs, paramsFn as any, opts?.loopWith);
+            this.getParamsFromCallback<InputsFrom<C, TemplateSource, K>, LoopT>(inputs, paramsFn as any, loopWith);
 
         if (source === INTERNAL) {
             const outputs = (this.contextualScope.templates as any)?.[keyStr]?.outputs as OutputsFrom<C, TemplateSource, K>;
-            const templateCall = this.callTemplate(name as string, keyStr, params, opts?.loopWith);
+            const templateCall = this.callTemplate(name as string, keyStr, params, loopWith);
             return this.addTaskHelper(name, templateCall as any, outputs, opts);
         } else {
             const wf = source as unknown as Workflow<any, any, any>;
@@ -350,8 +393,8 @@ export abstract class TaskBuilder<
         TKey extends string,
         IN extends InputParametersRecord,
         OUT extends OutputParametersRecord,
-        LoopT extends PlainObject,
-        OptsType extends TaskOpts<LoopT>
+        LoopT extends NonSerializedPlainObject,
+        OptsType extends TaskOpts<S, Label, LoopT>
     >(
         name: UniqueNameConstraintAtDeclaration<TKey, S>,
         templateCall: NamedTask<IN, OUT, LoopT>,
@@ -393,7 +436,7 @@ export abstract class TaskBuilder<
         const defaultKeys = Object.keys(defaultsRecord) as Extract<keyof DefaultsOfInputs<Inputs>, string>[];
 
         return {
-            register,
+            register, // register is the main thing.  The rest is metadata that some utilities use to lock things down more
             parameterKeys: Object.keys(inputs) as Extract<keyof Inputs, string>[],
             defaults: defaultsRecord as DefaultsOfInputs<Inputs>,
             defaultKeys,

@@ -1,5 +1,10 @@
 import { z } from 'zod';
 import {OVERALL_MIGRATION_CONFIG} from "./userSchemas";
+import {
+    ARGO_WORKFLOW_SCHEMA,
+    PARAMETERIZED_MIGRATION_CONFIG,
+    PARAMETERIZED_MIGRATION_CONFIG_ARRAYS
+} from "./argoSchemas";
 
 // Helper to unwrap Zod schema modifiers
 function unwrapSchema(schema: z.ZodTypeAny): z.ZodTypeAny {
@@ -224,6 +229,7 @@ function schemaToYamlWithComments(schema: z.ZodTypeAny, indent = 0, commentDepth
 
 async function main() {
     console.info(schemaToYamlWithComments(OVERALL_MIGRATION_CONFIG));
+    // console.info(schemaToYamlWithComments(PARAMETERIZED_MIGRATION_CONFIG));
 }
 
 main();

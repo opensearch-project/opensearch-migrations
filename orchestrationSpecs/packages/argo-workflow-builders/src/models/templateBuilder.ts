@@ -128,10 +128,14 @@ export class TemplateBuilder<
         return this.extendWithParam(name as any, param) as any;
     }
 
+    /**
+     * Add multiple incomingRecord using a function that operates on this TemplateBuilder
+     * The function can only modify the input scope of the builder - other scopes must remain unchanged
+     */
     addInputsFromRecord<
         R extends InputParametersRecord
     >(
-        inputs: ScopeIsEmptyConstraint<BodyScope, FieldGroupConstraint<InputParamsScope, R>>
+        incomingRecord: ScopeIsEmptyConstraint<BodyScope, FieldGroupConstraint<InputParamsScope, R>>
     ): ScopeIsEmptyConstraint<
         BodyScope,
         TemplateBuilder<
@@ -144,7 +148,7 @@ export class TemplateBuilder<
         return new TemplateBuilder(
             this.contextualScope,
             this.bodyScope,
-            extendScope(this.inputScope, () => inputs as R),
+            extendScope(this.inputScope, () => incomingRecord as R),
             this.outputScope
         ) as any;
     }

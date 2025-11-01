@@ -10,7 +10,13 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
+import {
+    ConfigMapKeySelector,
+    InputParamDef,
+    InputParametersRecord,
+    OutputParamDef,
+    OutputParametersRecord
+} from "./parameterSchemas";
 import {
     AllowLiteralOrExpression,
     AllowSerializedAggregateOrPrimitiveExpressionOrLiteral,
@@ -21,6 +27,17 @@ import {
     WorkflowParameterSource
 } from "./expression";
 import {NonSerializedPlainObject, PlainObject} from "./plainObject";
+import {TypeToken} from "./sharedTypes";
+
+export type ExpressionOrConfigMapValue<T extends PlainObject> =
+    | AllowLiteralOrExpression<T> & {
+    type?: never;
+    from?: never
+}
+    | {
+    from: ConfigMapKeySelector;
+    type: TypeToken<T>;
+};
 
 export type LowercaseOnly<S extends string> =
     S extends Lowercase<S> ? S : never;
@@ -34,6 +51,7 @@ export type WorkflowAndTemplatesScope<
         templates?: TemplateSignatures
     };
 export type DataScope = Record<string, AllowLiteralOrExpression<PlainObject>>;
+export type DataOrConfigMapScope = Record<string, ExpressionOrConfigMapValue<PlainObject>>;
 export type GenericScope = Record<string, any>;
 export type TasksOutputsScope = Record<string, TasksWithOutputs<any, any>>;
 export type TemplateSignaturesScopeTyped<Sigs extends Record<string, { inputs: any; outputs?: any }>> = {

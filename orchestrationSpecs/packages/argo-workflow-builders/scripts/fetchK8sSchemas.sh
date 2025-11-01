@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-OUTPUT_DIR="${1:-./k8s-schemas}"
+OUTPUT_DIR="${1:-./k8sSchemas}"
 mkdir -p "$OUTPUT_DIR"
 
 echo "Fetching schemas from cluster..."
