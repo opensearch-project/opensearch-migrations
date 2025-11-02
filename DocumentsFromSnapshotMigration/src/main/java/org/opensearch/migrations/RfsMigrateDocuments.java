@@ -46,6 +46,7 @@ import org.opensearch.migrations.bulkload.worker.RegularDocumentReaderEngine;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -354,7 +355,7 @@ public class RfsMigrateDocuments {
         System.setProperty("log4j2.shutdownHookEnabled", "false");
         log.info("Starting RfsMigrateDocuments with workerId=" + workerId);
 
-        Args arguments = new Args();
+        Args arguments = EnvVarParameterPuller.injectFromEnv(new Args(), "RFS_");
         var jCommander = JsonCommandLineParser.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
 
