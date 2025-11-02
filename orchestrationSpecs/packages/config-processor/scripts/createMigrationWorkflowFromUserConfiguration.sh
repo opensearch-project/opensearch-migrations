@@ -24,7 +24,7 @@ TEMPORARY_FILE=$(mktemp)
 # Ensure cleanup on exit
 trap "rm -f $TEMPORARY_FILE" EXIT
 
-UUID=$(uuidgen)
+UUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 echo "Generated unique uniqueRunNonce: $UUID"
 
 echo "Running configuration conversion..."

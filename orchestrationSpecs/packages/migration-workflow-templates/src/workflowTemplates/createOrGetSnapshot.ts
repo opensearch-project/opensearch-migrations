@@ -36,16 +36,14 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         .addSteps(b => b
             .addStepGroup(c => c))
         .addExpressionOutput("snapshotName", b=>
-            expr.concatWith("_",
-                b.inputs.sourceName,
-                expr.ternary(
-                    expr.hasKey(expr.deserializeRecord(b.inputs.snapshotNameConfig), "snapshotNamePrefix"),
-                    expr.concatWith("_",
-                        expr.getLoose(expr.deserializeRecord(b.inputs.snapshotNameConfig), "snapshotNamePrefix"),
-                        b.inputs.uniqueRunNonce
-                    ),
-                    expr.getLoose(expr.deserializeRecord(b.inputs.snapshotNameConfig), "externallyManagedSnapshot"))
-            )
+            expr.ternary(
+                expr.hasKey(expr.deserializeRecord(b.inputs.snapshotNameConfig), "snapshotNamePrefix"),
+                expr.concatWith("_",
+                    b.inputs.sourceName,
+                    expr.getLoose(expr.deserializeRecord(b.inputs.snapshotNameConfig), "snapshotNamePrefix"),
+                    b.inputs.uniqueRunNonce
+                ),
+                expr.getLoose(expr.deserializeRecord(b.inputs.snapshotNameConfig), "externallyManagedSnapshot"))
         )
         .addExpressionOutput("autoCreate", b=>
             expr.hasKey(expr.deserializeRecord(b.inputs.snapshotNameConfig), "snapshotNamePrefix")
@@ -84,10 +82,10 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
             )
         )
         .addExpressionOutput("snapshotConfig", c =>
-            expr.ternary(
-                expr.equals(c.steps.createSnapshot.status, "Skipped"),
-                expr.cast(c.inputs.snapshotConfig).to<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
-                expr.cast(c.steps.createSnapshot.outputs.snapshotConfig).to<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>()))
+            expr.serialize(expr.makeDict({
+                snapshotName: c.steps.getSnapshotName.outputs.snapshotName,
+                repoConfig: expr.get(expr.deserializeRecord(c.inputs.snapshotConfig), "repoConfig")
+            })))
     )
 
     .getFullScope();

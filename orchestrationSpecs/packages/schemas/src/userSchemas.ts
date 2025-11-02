@@ -68,10 +68,11 @@ export const RFS_OPTIONS = z.object({
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
 });
 
+export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 
 export const HTTP_AUTH_BASIC = z.object({
     basic: z.object({
-        secretName: z.string().regex(/^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/),
+        secretName: z.string().regex(K8S_NAMING_PATTERN),
         username: z.string(),
         password: z.string()
     })

@@ -156,7 +156,7 @@ export const FullMigration = WorkflowBuilder.create({
                         })(),
                         ...selectInputsFieldsAsExpressionRecord(c.item, c,
                             getZodKeys(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)),
-                        snapshotConfig: expr.serialize(c.steps.createOrGetSnapshot.outputs.snapshotConfig)
+                        snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig
                     });
                 },
                 {loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.migrations))}

@@ -1,6 +1,6 @@
 import {deepStrict, StreamSchemaParser} from "./StreamSchemaTransformer";
 import {
-    ARGO_WORKFLOW_SCHEMA,
+    ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN,
     PARAMETERIZED_MIGRATION_CONFIG,
     PARAMETERIZED_MIGRATION_CONFIG_ARRAYS
 } from "@opensearch-migrations/schemas";
@@ -21,6 +21,9 @@ export class MigrationInitializer {
     readonly client: Etcd3;
     readonly loader: StreamSchemaParser<typeof PARAMETERIZED_MIGRATION_CONFIG_ARRAYS>;
     constructor(etcdSettings: EtcdOptions, public readonly uniqueRunNonce: string) {
+        if (!K8S_NAMING_PATTERN.test(uniqueRunNonce)) {
+            throw new Error(`Illegal uniqueRunNonce argument.  Must match regex pattern ${K8S_NAMING_PATTERN}.`);
+        }
         console.log("Initializing with " + JSON.stringify(etcdSettings));
         this.client = new Etcd3({
             hosts: etcdSettings.endpoints,

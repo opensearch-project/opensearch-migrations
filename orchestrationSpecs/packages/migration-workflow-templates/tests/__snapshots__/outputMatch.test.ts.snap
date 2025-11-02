@@ -562,7 +562,7 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
             {
               "name": "snapshotName",
               "valueFrom": {
-                "expression": "inputs.parameters.sourceName + '_' + (('snapshotNamePrefix' in fromJSON(inputs.parameters.snapshotNameConfig)) ? (fromJSON(inputs.parameters.snapshotNameConfig)['snapshotNamePrefix'] + '_' + inputs.parameters.uniqueRunNonce) : (fromJSON(inputs.parameters.snapshotNameConfig)['externallyManagedSnapshot']))",
+                "expression": "(('snapshotNamePrefix' in fromJSON(inputs.parameters.snapshotNameConfig)) ? (inputs.parameters.sourceName + '_' + fromJSON(inputs.parameters.snapshotNameConfig)['snapshotNamePrefix'] + '_' + inputs.parameters.uniqueRunNonce) : (fromJSON(inputs.parameters.snapshotNameConfig)['externallyManagedSnapshot']))",
               },
             },
             {
@@ -606,7 +606,7 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
             {
               "name": "snapshotConfig",
               "valueFrom": {
-                "expression": "((steps.createSnapshot.status == 'Skipped') ? (inputs.parameters.snapshotConfig) : (steps.createSnapshot.outputs.parameters.snapshotConfig))",
+                "expression": "toJSON(sprig.dict("snapshotName", steps.getSnapshotName.outputs.parameters.snapshotName, "repoConfig", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))",
               },
             },
           ],
