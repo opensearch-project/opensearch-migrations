@@ -10,9 +10,10 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
+import {ConfigMapKeySelector, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {
-    DataScope,
+    DataOrConfigMapScope,
+    DataScope, ExpressionOrConfigMapValue,
     ExtendScope,
     GenericScope,
     InputParamsToExpressions, LowercaseOnly,
@@ -32,7 +33,7 @@ export class ContainerBuilder<
     InputParamsScope extends InputParametersRecord,
     ContainerScope extends GenericScope,
     VolumeScope extends GenericScope,
-    EnvScope extends DataScope,
+    EnvScope extends DataOrConfigMapScope,
     OutputParamsScope extends OutputParametersRecord
 > extends TemplateBodyBuilder<
     ContextualScope,
@@ -100,7 +101,7 @@ export class ContainerBuilder<
             ...(volumes.length > 0 && { volumes }),
             container: {
                 ...this.bodyScope,
-                env: this.envScope as Record<string, BaseExpression<any>>,
+                env: this.envScope as Record<string, ExpressionOrConfigMapValue<any>>,
                 ...(volumeMounts.length > 0 && { volumeMounts })
             }
         };
@@ -238,20 +239,20 @@ export class ContainerBuilder<
             : Name extends keyof EnvScope
                 ? TypescriptError<`Environment variable '${Name}' already exists`>
                 : Name,
-        value: AllowLiteralOrExpression<string>
+        value: ExpressionOrConfigMapValue<string>
     ): ContainerBuilder<
         ContextualScope,
         InputParamsScope,
         ContainerScope,
         VolumeScope,
-        ExtendScope<EnvScope, { [K in Name]: AllowLiteralOrExpression<string> }>,
+        ExtendScope<EnvScope, { [K in Name]: ExpressionOrConfigMapValue<string> }>,
         OutputParamsScope
     > {
         return this.addEnvVarUnchecked(name as string, value) as any;
     }
 
     addEnvVarsFromRecord<
-        R extends EnvScope
+        R extends { [K in keyof R & string]: EnvScope[K] }
     >(
         envVars: FieldGroupConstraint<EnvScope, R>
     ): ContainerBuilder<
@@ -272,7 +273,7 @@ export class ContainerBuilder<
             this.retryParameters);
     }
 
-    addEnvVars<NewEnvScope extends DataScope>(
+    addEnvVars<NewEnvScope extends DataOrConfigMapScope>(
         builderFn: (
             cb: ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, {}, {}, OutputParamsScope>
         ) => ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, {}, NewEnvScope, OutputParamsScope>
@@ -296,20 +297,20 @@ export class ContainerBuilder<
      */
     private addEnvVarUnchecked<Name extends string>(
         name: Name,
-        value: AllowLiteralOrExpression<string>
+        value: ExpressionOrConfigMapValue<string>
     ): ContainerBuilder<
         ContextualScope,
         InputParamsScope,
         ContainerScope,
         VolumeScope,
-        ExtendScope<EnvScope, { [K in Name]: AllowLiteralOrExpression<string> }>,
+        ExtendScope<EnvScope, { [K in Name]: ExpressionOrConfigMapValue<string> }>,
         OutputParamsScope
     > {
         const currentEnv = (this.bodyScope as any).env || {};
         const newEnvScope = {
             ...this.envScope,
             [name as string]: value
-        } as ExtendScope<EnvScope, { [K in Name]: AllowLiteralOrExpression<string> }>;
+        } as ExtendScope<EnvScope, { [K in Name]: ExpressionOrConfigMapValue<string> }>;
 
         return new ContainerBuilder(
             this.contextualScope,
@@ -329,7 +330,7 @@ export class ContainerBuilder<
         ModifiedInputs extends Record<string, AllowLiteralOrExpression<string>> =
             { [K in keyof InputParamsScope as Uppercase<string & K>]: AllowLiteralOrExpression<string> }
     >(
-        mode: "JCOMMANDER" | {
+        mode: {
             prefix: string,
             suffix: string
         },

@@ -1,31 +1,20 @@
 import {z} from 'zod';
 import {
-    COMPLETE_SNAPSHOT_CONFIG,
-    DYNAMIC_SNAPSHOT_CONFIG,
+    COMPLETE_SNAPSHOT_CONFIG, CREATE_SNAPSHOT_OPTIONS, DYNAMIC_SNAPSHOT_CONFIG,
     getZodKeys,
     METADATA_OPTIONS,
     NAMED_SOURCE_CLUSTER_CONFIG,
     NAMED_TARGET_CLUSTER_CONFIG,
-    NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
     PARAMETERIZED_MIGRATION_CONFIG,
     PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     REPLAYER_OPTIONS,
     RFS_OPTIONS,
     SNAPSHOT_MIGRATION_CONFIG,
-    SOURCE_CLUSTERS_MAP,
-    TARGET_CLUSTER_CONFIG,
-    TARGET_CLUSTERS_MAP
+    TARGET_CLUSTER_CONFIG
 } from '@opensearch-migrations/schemas'
-import {
-    CommonWorkflowParameters,
-    ImageParameters,
-    LogicalOciImages,
-    makeRequiredImageParametersForKeys
-} from "./commonWorkflowTemplates";
 import {ConfigManagementHelpers} from "./configManagementHelpers";
 import {
     AllowLiteralOrExpression,
-    BaseExpression,
     configMapKey,
     defineParam,
     defineRequiredParam,
@@ -34,10 +23,8 @@ import {
     InputParamDef,
     INTERNAL,
     makeParameterLoop,
-    NonSerializedPlainObject,
     selectInputsFieldsAsExpressionRecord,
     selectInputsForRegister,
-    Serialized, transformZodObjectToParams,
     typeToken,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
@@ -45,8 +32,11 @@ import {DocumentBulkLoad} from "./documentBulkLoad";
 import {MetadataMigration} from "./metadataMigration";
 import {CreateOrGetSnapshot} from "./createOrGetSnapshot";
 
-const latchCoordinationPrefixParam = {
-    latchCoordinationPrefix: defineRequiredParam<string>({description: "Workflow session nonce"})
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+
+const uniqueRunNonceParam = {
+    uniqueRunNonce: defineRequiredParam<string>({description: "Workflow session nonce"})
 };
 
 function lowercaseFirst(str: string): string {
@@ -102,7 +92,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addOptionalInput("documentBackfillConfig",  c=>
             expr.empty<z.infer<typeof RFS_OPTIONS>>())
 
-        .addInputsFromRecord(latchCoordinationPrefixParam)
+        .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b => b
@@ -125,7 +115,7 @@ export const FullMigration = WorkflowBuilder.create({
             // .addStep("targetBackfillCompleteCheck", ConfigManagementHelpers, "decrementLatch", c =>
             //     c.register({
             //         ...(selectInputsForRegister(b, c)),
-            //         prefix: b.inputs.latchCoordinationPrefix,
+            //         prefix: b.inputs.uniqueRunNonce,
             //         targetName: expr.jsonPathStrict(b.inputs.targetConfig, "name"),
             //         processorId: c.steps.idGenerator.id
             //     }))
@@ -141,24 +131,18 @@ export const FullMigration = WorkflowBuilder.create({
     .addTemplate("foreachSnapshotExtraction", t => t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addInputsFromRecord(transformZodObjectToParams(SNAPSHOT_MIGRATION_CONFIG))
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['snapshotConfig']>())
+        .addRequiredInput("migrations", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['migrations']>())
+        .addOptionalInput("createSnapshotConfig",
+                c=> expr.empty<z.infer<typeof CREATE_SNAPSHOT_OPTIONS>>())
 
-        .addOptionalInput("sourcePipelineName", c=>
-            expr.concatWith("_",
-                expr.get(expr.deserializeRecord(c.inputParameters.sourceConfig), "name"),
-                expr.join(expr.deserializeRecord(c.inputParameters.indices))
-            )
-        )
-        .addRequiredInput("latchCoordinationPrefix", typeToken<string>())
+        .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b => b
             .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
                 c => c.register({
-                    ...selectInputsForRegister(b, c),
-                    // ...selectInputsFieldsAsExpressionRecord(b.inputs.snapshotConfigAlias, c),
-                    indices: b.inputs.indices,
-                    autocreateSnapshotName: b.inputs.sourcePipelineName,
+                    ...selectInputsForRegister(b, c)
                 }))
 
             .addStep("foreachSnapshotMigration", INTERNAL, "foreachSnapshotMigration", c=> {
@@ -172,7 +156,7 @@ export const FullMigration = WorkflowBuilder.create({
                         })(),
                         ...selectInputsFieldsAsExpressionRecord(c.item, c,
                             getZodKeys(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)),
-                        snapshotConfig: expr.serialize(c.steps.createOrGetSnapshot.outputs.snapshotConfig)
+                        snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig
                     });
                 },
                 {loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.migrations))}
@@ -190,7 +174,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addOptionalInput("replayerConfig",
             c => expr.empty<z.infer<typeof REPLAYER_OPTIONS>>())
 
-        .addRequiredInput("latchCoordinationPrefix", typeToken<string>())
+        .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b=>b
@@ -214,7 +198,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("migrationConfigs", typeToken<z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG>[]>(),
             "List of server configurations to direct migrated traffic toward") // expand
 
-        .addRequiredInput("latchCoordinationPrefix", typeToken<string>())
+        .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
 
         .addSteps(b => b
@@ -230,7 +214,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("cleanup", ConfigManagementHelpers, "cleanup",
                 c => c.register({
                     ...selectInputsForRegister(b, c),
-                    prefix: b.inputs.latchCoordinationPrefix
+                    prefix: b.inputs.uniqueRunNonce
                 }))
         )
     )

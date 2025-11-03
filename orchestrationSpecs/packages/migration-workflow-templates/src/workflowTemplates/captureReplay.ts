@@ -6,16 +6,20 @@ import {
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
-import {CLUSTER_CONFIG, REPLAYER_OPTIONS, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {
-    CommonWorkflowParameters,
-    makeRequiredImageParametersForKeys
-} from "./commonWorkflowTemplates";
+    CLUSTER_CONFIG,
+    NAMED_TARGET_CLUSTER_CONFIG,
+    REPLAYER_OPTIONS,
+    TARGET_CLUSTER_CONFIG
+} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 import {SetupKafka} from "./setupKafka";
 import {Replayer} from "./replayer";
 import {MigrationConsole} from "./migrationConsole";
 import {CaptureProxy} from "./captureProxy";
+
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 
 
 export const CaptureReplay = WorkflowBuilder.create({
@@ -65,7 +69,7 @@ export const CaptureReplay = WorkflowBuilder.create({
         .addRequiredInput("proxyDestination", typeToken<string>())
         .addRequiredInput("proxyListenPort", typeToken<number>())
 
-        .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("replayerConfig", typeToken<z.infer<typeof REPLAYER_OPTIONS>>())
 
         .addOptionalInput("providedKafkaBootstrapServers", c => "")
@@ -140,7 +144,7 @@ export const CaptureReplay = WorkflowBuilder.create({
                 {dependencies: ["deployCaptureProxy"]}
             )
 
-            .addTask("Replayer", Replayer, "deployReplayerFromConfig", c =>
+            .addTask("Replayer", Replayer, "createDeploymentFromConfig", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
                         kafkaTrafficBrokers: c.tasks.getBrokersList.outputs.bootstrapServers,

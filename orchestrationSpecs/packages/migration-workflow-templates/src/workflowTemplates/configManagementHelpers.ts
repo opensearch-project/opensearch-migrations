@@ -5,15 +5,14 @@ import {
     SOURCE_CLUSTERS_MAP,
     TARGET_CLUSTERS_MAP
 } from '@opensearch-migrations/schemas'
-import {
-    CommonWorkflowParameters,
-    makeRequiredImageParametersForKeys
-} from "./commonWorkflowTemplates";
 import {TemplateBuilder, typeToken, WorkflowBuilder} from "@opensearch-migrations/argo-workflow-builders";
 
 import {initTlhScript} from "../resourceLoader";
 import {decrementTlhScript} from "../resourceLoader";
 import {cleanupTlhScript} from "../resourceLoader";
+
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 
 function addCommonTargetLatchInputs<
     C extends { workflowParameters: typeof CommonWorkflowParameters }

@@ -1,7 +1,4 @@
-import {
-    CommonWorkflowParameters,
-    makeRequiredImageParametersForKeys
-} from "./commonWorkflowTemplates";
+
 import {z} from "zod";
 import {
     AllowLiteralOrExpression,
@@ -25,6 +22,10 @@ import {
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
 
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
+
 const KafkaServicesConfig = z.object({
     broker_endpoints: z.string(),
     standard: z.string()
@@ -41,6 +42,8 @@ const configComponentParameters = {
         description: "Snapshot configuration information (JSON)"})
 };
 
+// TODO - once the migration console can load secrets from env variables,
+//  we'll want to just drop everything about the secrets for http auth
 const SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE = `
 set -e -x
 
@@ -57,7 +60,12 @@ cat /config/migration_services.yaml_ |
 jq 'def normalizeAuthConfig:
   if has("authConfig") then
     if (.authConfig | has("basic")) then
-      .basic_auth = .authConfig.basic
+      .basic_auth = (.authConfig.basic | 
+        if has("secretName") then
+          del(.secretName)
+        else
+          .
+        end)
     elif (.authConfig | has("sigv4")) then
       .sigv4_auth = .authConfig.sigv4
     elif (.authConfig | has("mtls")) then
@@ -79,7 +87,7 @@ def normalizeAllowInsecure:
 
 def normalizeRepoPath:
   if has("s3RepoPathUri") then
-    .repo_uri = .s3RepoPathUri | del(.s3RepoPathUri)
+    .repo_uri = .s3RepoPathUri | del(.s3RepoPathUri) | del(.repoName)
   else
     .
   end;
@@ -93,7 +101,13 @@ def normalizeSnapshotName:
 
 def normalizeRepoConfig:
   if has("repoConfig") then
-    .s3 = .repoConfig | del(.repoConfig)
+    .s3 = (.repoConfig | 
+      if has("awsRegion") then
+        .aws_region = .awsRegion | del(.awsRegion)
+      else
+        .
+      end)
+    | del(.repoConfig)
   else
     .
   end;
@@ -225,6 +239,10 @@ export const MigrationConsole = WorkflowBuilder.create({
         .addContainer(c => c
             .addImageInfo(c.inputs.imageMigrationConsoleLocation, c.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/sh", "-c"])
+            .addEnvVarsFromRecord(getSourceHttpAuthCreds(
+                expr.dig(expr.deserializeRecord(c.inputs.configContents), ["source_cluster","authConfig","basic","secretName"], "")))
+            .addEnvVarsFromRecord(getTargetHttpAuthCreds(
+                expr.dig(expr.deserializeRecord(c.inputs.configContents), ["target_cluster","authConfig","basic","secretName"], "")))
             .addArgs([
                 expr.fillTemplate(SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE, {
                     "FILE_CONTENTS": expr.toBase64(expr.asString(c.inputs.configContents)),

@@ -1,71 +1,11 @@
-import {z} from "zod";
-import {TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {
-    BaseExpression, Container,
-    defineParam,
-    defineRequiredParam,
+    BaseExpression,
+    Container,
     expr,
-    IMAGE_PULL_POLICY,
-    InputParamDef, makeDirectTypeProxy, makeStringTypeProxy,
-    Serialized, Volume
+    makeDirectTypeProxy,
+    makeStringTypeProxy,
+    Volume
 } from "@opensearch-migrations/argo-workflow-builders";
-
-export const CommonWorkflowParameters = {
-    etcdEndpoints: defineParam({expression: "http://etcd.ma.svc.cluster.local:2379"}),
-    etcdUser: defineParam({expression: "root"}),
-    etcdPassword: defineParam({expression: "password"}),
-    s3SnapshotConfigMap: defineParam({expression: "s3-snapshot-config"}),
-    imageConfigMapName: defineParam({expression: "migration-image-config"})
-} as const;
-
-export const LogicalOciImages = [
-    "CaptureProxy",
-    "TrafficReplayer",
-    "ReindexFromSnapshot",
-    "MigrationConsole"
-] as const;
-export type LogicalOciImagesKeys = typeof LogicalOciImages[number];
-
-export function makeRequiredImageParametersForKeys<K extends LogicalOciImagesKeys, T extends readonly K[]>(keys: T) {
-    return Object.fromEntries(
-        keys.flatMap(k => [
-            [`image${k}Location`, defineRequiredParam<string>()],
-            [`image${k}PullPolicy`, defineRequiredParam<IMAGE_PULL_POLICY>()]
-        ])
-    ) as Record<`image${typeof keys[number]}Location`, InputParamDef<string, true>> &
-        Record<`image${typeof keys[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY, true>>;
-}
-
-export const ImageParameters = makeRequiredImageParametersForKeys(LogicalOciImages);
-
-export const TargetClusterParameters = {
-    targetAwsRegion: defineRequiredParam<string>(),
-    targetAwsSigningName: defineRequiredParam<string>(),
-    targetCACert: defineRequiredParam<string>(),
-    targetClientSecretName: defineRequiredParam<string>(), // TODO
-    targetInsecure: defineRequiredParam<boolean>(),
-    targetUsername: defineRequiredParam<string>(),
-    targetPassword: defineRequiredParam<string>()
-}
-
-export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
-    return {
-        targetAwsRegion:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "sigv4", "region"], ""),
-        targetAwsSigningName:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "sigv4", "service"], ""),
-        targetCACert:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "mtls", "caCert"], ""),
-        targetClientSecretName:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "mtls", "clientSecretName"], ""),
-        targetInsecure:
-            expr.dig(expr.deserializeRecord(targetConfig), ["allowInsecure"], false),
-        targetUsername:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "basic", "username"], ""),
-        targetPassword:
-            expr.dig(expr.deserializeRecord(targetConfig), ["authConfig", "basic", "password"], ""),
-    };
-}
 
 export type ContainerVolumePair = {
     readonly container: Container,
@@ -74,8 +14,7 @@ export type ContainerVolumePair = {
 
 export function setupTestCredsForContainer(
     useLocalStack: BaseExpression<boolean>,
-    def: ContainerVolumePair): ContainerVolumePair
-{
+    def: ContainerVolumePair): ContainerVolumePair {
     const TEST_CREDS_VOLUME_NAME = "localstack-test-creds";
     const {volumeMounts, env, ...restOfContainer} = def.container;
     return {
@@ -110,7 +49,7 @@ export function setupTestCredsForContainer(
     } as const;
 }
 
-const DEFAULT_LOGGING_CONFIGURATION_CONFIGMAP_NAME = "default-logging-configuration";
+const DEFAULT_LOGGING_CONFIGURATION_CONFIGMAP_NAME = "default-log4j-config";
 
 /**
  * The log4j2 library interprets an empty file not as a missing configuration, but a no-logging configuration.
@@ -133,7 +72,7 @@ const DEFAULT_LOGGING_CONFIGURATION_CONFIGMAP_NAME = "default-logging-configurat
  * That brings us to the somewhat awkward requirement that this function takes in TWO different flags instead
  * of just one.  One flag sets (customLoggingEnabled) up the property to use what should be a non-empty
  * configuration file and the other (loggingConfigMapName) specifies the name of that configmap.  If the former
- * evaluates to true and the latter is empty, "default-logging-configuration" is used.  Notice that the
+ * evaluates to true and the latter is empty, "default-log4j-config" is used.  Notice that the
  * migration-assistant helm chart doesn't create that configmap, and it's fine if it doesn't exist.
  *
  * Because of the specificity mentioned above, many callers/resources may be wired up to not even enable the
@@ -144,8 +83,7 @@ export function setupLog4jConfigForContainer(
     customLoggingEnabled: BaseExpression<boolean>,
     loggingConfigMapName: BaseExpression<string>,
     def: ContainerVolumePair,
-    existingJavaOpts: BaseExpression<string>=expr.literal(" ")): ContainerVolumePair
-{
+    existingJavaOpts: BaseExpression<string> = expr.literal(" ")): ContainerVolumePair {
     const {volumeMounts, env, ...restOfContainer} = def.container;
     const LOG4J_CONFIG_VOLUME_NAME = "log4j-configuration";
     return {
@@ -170,11 +108,11 @@ export function setupLog4jConfigForContainer(
                     name: "JAVA_OPTS",
                     value:
                         makeStringTypeProxy(expr.concatWith(" ",
-                            existingJavaOpts,
-                            expr.ternary(
-                                customLoggingEnabled,
-                                expr.literal("-Dlog4j2.configurationFile=/config/logConfiguration"),
-                                expr.literal("")),
+                                existingJavaOpts,
+                                expr.ternary(
+                                    customLoggingEnabled,
+                                    expr.literal("-Dlog4j2.configurationFile=/config/logConfiguration"),
+                                    expr.literal("")),
                             )
                         )
                 }
@@ -190,3 +128,4 @@ export function setupLog4jConfigForContainer(
         }
     } as const;
 }
+

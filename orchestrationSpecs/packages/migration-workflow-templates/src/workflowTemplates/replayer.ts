@@ -1,29 +1,49 @@
-import {
-    CommonWorkflowParameters,
-    extractTargetKeysToExpressionMap,
-    makeRequiredImageParametersForKeys,
-    setupLog4jConfigForContainer,
-    TargetClusterParameters
-} from "./commonWorkflowTemplates";
+
 import {z} from "zod";
-import {getZodKeys, REPLAYER_OPTIONS, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {
-    BaseExpression,
+    getZodKeys,
+    NAMED_TARGET_CLUSTER_CONFIG,
+    REPLAYER_OPTIONS,
+    TARGET_CLUSTER_CONFIG
+} from "@opensearch-migrations/schemas";
+import {
+    BaseExpression, defineRequiredParam,
     expr,
     IMAGE_PULL_POLICY,
-    inputsToEnvVarsList,
     INTERNAL, makeStringTypeProxy,
-    remapRecordNames,
     selectInputsFieldsAsExpressionRecord,
-    selectInputsForRegister,
-    transformZodObjectToParams,
+    selectInputsForRegister, Serialized,
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
+import {makeRepoParamDict} from "./metadataMigration";
+import {setupLog4jConfigForContainer} from "./commonUtils/containerFragments";
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {extractTargetKeysToExpressionMap, makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
+
+function makeParamsDict(
+    targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
+    options: BaseExpression<Serialized<z.infer<typeof REPLAYER_OPTIONS>>>,
+    // kafka stuff will need to come in here too
+) {
+    return expr.mergeDicts(
+        expr.mergeDicts(
+            makeTargetParamDict(targetConfig),
+            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas")
+        ),
+        expr.mergeDicts(
+            expr.makeDict({}),
+            expr.makeDict({})
+        )
+    );
+}
+
 
 function getReplayerDeploymentManifest
 (args: {
     workflowName: BaseExpression<string>,
+    jsonConfig: BaseExpression<string>,
     sessionName: BaseExpression<string>,
 
     useCustomLogging: BaseExpression<boolean>,
@@ -32,16 +52,16 @@ function getReplayerDeploymentManifest
     podReplicas: BaseExpression<number>,
     replayerImageName: BaseExpression<string>,
     replayerImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
-
-    inputsAsEnvList: {name: string, value: string}[]
 }) {
     const baseContainerDefinition = {
         name: "replayer",
         image: makeStringTypeProxy(args.replayerImageName),
         imagePullPolicy: makeStringTypeProxy(args.replayerImagePullPolicy),
-        env: [
-            ...args.inputsAsEnvList,
-            {name: "LUCENE_DIR", value: makeStringTypeProxy(expr.literal("/tmp"))}
+        command: ["/runJavaWithClasspath.sh"],
+        args: [
+            "org.opensearch.migrations.replay.TrafficReplayer",
+            "---INLINE-JSON",
+            makeStringTypeProxy(args.jsonConfig)
         ]
     };
     const finalContainerDefinition =
@@ -90,9 +110,11 @@ export const Replayer = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
 
 
-    .addTemplate("deployReplayer", t => t // TODO: rename to createDeployment to be consistent w/ createReplicaset
-        .addInputsFromRecord(TargetClusterParameters)
-        .addInputsFromRecord(transformZodObjectToParams(REPLAYER_OPTIONS))
+    .addTemplate("createDeployment", t => t
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addRequiredInput("jsonConfig", typeToken<string>())
+        .addRequiredInput("podReplicas", typeToken<number>())
+        .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
 
         .addResourceTask(b => b
@@ -100,26 +122,25 @@ export const Replayer = WorkflowBuilder.create({
                 action: "create",
                 setOwnerReference: true,
                 manifest: getReplayerDeploymentManifest({
-                    podReplicas: expr.literal(0),//b.inputs.podReplicas,
+                    podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
                     useCustomLogging: expr.equals(expr.literal(""), b.inputs.loggingConfigurationOverrideConfigMap),
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
-                    sessionName: expr.literal(""),//b.inputs.sessionName,
+                    sessionName: b.inputs.sessionName,
                     replayerImageName: b.inputs.imageTrafficReplayerLocation,
                     replayerImagePullPolicy: b.inputs.imageTrafficReplayerPullPolicy,
-                    inputsAsEnvList: inputsToEnvVarsList(remapRecordNames(b.inputs, {"targetInsecure": "insecure"}),
-                            "JCOMMANDER"),
-                    workflowName: expr.getWorkflowValue("name")
+                    workflowName: expr.getWorkflowValue("name"),
+                    jsonConfig: expr.toBase64(b.inputs.jsonConfig)
                 })
             }))
     )
 
 
-    .addTemplate("deployReplayerFromConfig", t => t // TODO: rename to createDeploymentFromConfig to be consistent w/ createReplicaset
+    .addTemplate("createDeploymentFromConfig", t => t
         .addRequiredInput("kafkaTrafficBrokers", typeToken<string>())
         .addRequiredInput("kafkaTrafficTopic", typeToken<string>())
         .addRequiredInput("kafkaGroupId", typeToken<string>())
 
-        .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("replayerConfig", typeToken<z.infer<typeof REPLAYER_OPTIONS>>())
 
         .addOptionalInput("podReplicas", c => 1)
@@ -127,12 +148,16 @@ export const Replayer = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
 
         .addSteps(b => b
-            .addStep("deployReplayer", INTERNAL, "deployReplayer", c =>
+            .addStep("deployReplayer", INTERNAL, "createDeployment", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     ...extractTargetKeysToExpressionMap(b.inputs.targetConfig),
                     ...selectInputsFieldsAsExpressionRecord(expr.deserializeRecord(b.inputs.replayerConfig), c,
-                        getZodKeys(REPLAYER_OPTIONS))
+                        getZodKeys(REPLAYER_OPTIONS)),
+                    sessionName: "",
+                    jsonConfig: expr.asString(expr.serialize(
+                        makeParamsDict(b.inputs.targetConfig, b.inputs.replayerConfig)
+                    )),
                 })))
     )
 

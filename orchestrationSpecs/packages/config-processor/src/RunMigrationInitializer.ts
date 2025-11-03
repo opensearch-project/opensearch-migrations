@@ -21,7 +21,7 @@ Arguments:
   --user-config <file>         (stdin: '-') User-specified YAML/JSON configuration file ('-' for stdin)
   --transformed-config <file>  (stdin: '-') Workflow-ready YAML/JSON configuration file (output of MigrationConfigTransformer)
   --etcd-endpoints <urls>      Comma-separated etcd endpoints (env: ETCD_ENDPOINTS)
-  --prefix <prefix>            Workflow prefix for etcd keys (env: PREFIX)
+  --unique-run-nonce <string>  Value to disambiguate workflow instances for snapshot names, keys, etc (env: UNIQUE_RUN_NONCE)
   --etcd-user <user>           Username for etcd authentication (env: ETCD_USER)
   --etcd-password <pass>       Password for etcd authentication (env: ETCD_PASSWORD)
 
@@ -59,7 +59,7 @@ async function main() {
     let etcdEndpoints = process.env.ETCD_ENDPOINTS;
     let etcdUser = process.env.ETCD_USER;
     let etcdPassword = process.env.ETCD_PASSWORD;
-    let prefix = process.env.PREFIX;
+    let uniqueRunNonce = process.env.UNIQUE_RUN_NONCE;
     let userConfigFile = process.env.USER_WORKFLOW_CONFIGURATION;
     let workflowConfigFile = process.env.TRANSFORMED_WORKFLOW_CONFIGURATION;
     let skipInitialize = false;
@@ -74,8 +74,8 @@ async function main() {
             etcdUser = args[++i];
         } else if (arg === '--etcd-password' && i + 1 < args.length) {
             etcdPassword = args[++i];
-        } else if (arg === '--prefix' && i + 1 < args.length) {
-            prefix = args[++i];
+        } else if (arg === '--unique-run-nonce' && i + 1 < args.length) {
+            uniqueRunNonce = args[++i];
         } else if (arg === '--user-config' && i + 1 < args.length) {
             userConfigFile = args[++i];
         } else if (arg === '--transformed-config' && i + 1 < args.length) {
@@ -94,8 +94,8 @@ async function main() {
         if (!etcdEndpoints) {
             missingVars.push('ETCD_ENDPOINTS (or --etcd-endpoints)');
         }
-        if (!prefix) {
-            missingVars.push('PREFIX (or --prefix)');
+        if (!uniqueRunNonce) {
+            missingVars.push('UNIQUE_RUN_NONCE (or --unique-run-nonce)');
         }
     }
 
@@ -145,7 +145,7 @@ async function main() {
                         }
                     })
                 },
-                prefix as string
+                uniqueRunNonce as string
             );
 
             try {

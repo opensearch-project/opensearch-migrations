@@ -46,6 +46,7 @@ import org.opensearch.migrations.bulkload.worker.RegularDocumentReaderEngine;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
@@ -361,7 +362,7 @@ public class RfsMigrateDocuments {
         System.setProperty("log4j2.shutdownHookEnabled", "false");
         log.info("Starting RfsMigrateDocuments with workerId=" + workerId);
 
-        Args arguments = new Args();
+        Args arguments = EnvVarParameterPuller.injectFromEnv(new Args(), "RFS_");
         var jCommander = JsonCommandLineParser.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
 
@@ -553,13 +554,13 @@ public class RfsMigrateDocuments {
         }
         var workItemAndDuration = workItemRef.get();
         var currentWorkItemId = workItemAndDuration.getWorkItem().toString();
-        
+
         // Check if this work item was already finalized by exitOnLeaseTimeout
         if (currentWorkItemId.equals(lastWorkItemFinalized.get())) {
             log.atInfo().setMessage("Work item {} already finalized by lease timeout handler").addArgument(currentWorkItemId).log();
             return;
         }
-        
+
         log.atInfo().setMessage("Marking progress: {}, at doc {}")
             .addArgument(currentWorkItemId)
             .addArgument(progressCursor.get().getProgressCheckpointNum())
