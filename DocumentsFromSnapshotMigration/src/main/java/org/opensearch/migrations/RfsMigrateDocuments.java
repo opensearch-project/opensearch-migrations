@@ -196,9 +196,9 @@ public class RfsMigrateDocuments {
         String otelCollectorEndpoint;
 
         @Parameter(required = false,
-        names =  {"--documents-per-bulk-request", "--documentsPerBulkRequest"},
-        description = "Optional.  The number of documents to be included within each bulk request sent. " +
-            "Default no max (controlled by documents size)")
+            names = {"--documents-per-bulk-request", "--documentsPerBulkRequest"},
+            description = "Optional.  The number of documents to be included within each bulk request sent. " +
+                "Default no max (controlled by documents size)")
         int numDocsPerBulkRequest = Integer.MAX_VALUE;
 
         @Parameter(required = false,
@@ -259,13 +259,12 @@ public class RfsMigrateDocuments {
         public DeltaMode experimentalDeltaMode = null;
     }
 
-
     public static class IndexNameValidator implements IValueValidator<String> {
         @Override
         public void validate(String name, String value) throws ParameterException {
             final String REGEX_PATTERN = "[A-Za-z0-9-]*";
             if (!Pattern.compile(REGEX_PATTERN).matcher(value).matches()) {
-                throw new ParameterException("Incoming value '" + value + "'did not match regex pattern " + REGEX_PATTERN);
+                throw new ParameterException("Incoming value '" + value + "' did not match regex pattern " + REGEX_PATTERN);
             }
         }
     }
@@ -395,7 +394,6 @@ public class RfsMigrateDocuments {
         var workItemTimeProvider = new WorkItemTimeProvider();
         var coordinatorFactory = new WorkCoordinatorFactory(targetVersion, arguments.indexNameSuffix);
         var cleanShutdownCompleted = new AtomicBoolean(false);
-        // Prevents duplicate checkpointing when lease timeout and shutdown hook both try to finalize the same work item
         var lastWorkItemFinalized = new AtomicReference<String>();
 
         try (var workCoordinator = coordinatorFactory.get(
@@ -493,7 +491,7 @@ public class RfsMigrateDocuments {
                 System.exit(NO_WORK_LEFT_EXIT_CODE);
             } else {
                 log.atInfo().setMessage("Exiting due to path=single-run-success, continuousMode={}, exitCode={}")
-                    .addArgument(false).addArgument(0).log();
+                    .addArgument(false).addArgument(SUCCESS_EXIT_CODE).log();
                 System.exit(SUCCESS_EXIT_CODE);
             }
         } catch (Exception e) {
@@ -657,8 +655,7 @@ public class RfsMigrateDocuments {
             log.info("Exiting due to lease-timeout in non-continuous mode with code {}", PROCESS_TIMED_OUT_EXIT_CODE);
             System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
         }
-        // continuous mode: do NOT set cleanShutdownCompleted here, so the shutdown hook
-        // can still checkpoint the *next* active item if SIGTERM arrives.
+        // continuous mode: keep shutdown hook active for next item checkpointing
     }
 
     public static int getSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider, Duration initialLeaseDuration,
@@ -745,7 +742,6 @@ public class RfsMigrateDocuments {
         );
         return new RootDocumentMigrationContext(otelSdk, compositeContextTracker);
     }
-
 
     public static CompletionStatus run(LuceneIndexReader.Factory readerFactory,
                                        DocumentReindexer reindexer,
@@ -899,7 +895,7 @@ public class RfsMigrateDocuments {
 
             if (completionStatus == CompletionStatus.NOTHING_DONE) {
                 if (continuousMode) {
-                    return true; // if continuous=true, returns true immediately (no sleep)
+                    return true;
                 } else {
                     log.atInfo().setMessage("No progress made (non-continuous mode). Exiting with error code (no-work-left) to signal that.").log();
                     System.exit(NO_WORK_LEFT_EXIT_CODE);
@@ -908,7 +904,7 @@ public class RfsMigrateDocuments {
         } catch (NoWorkLeftException e) {
             log.atInfo().setMessage("No work left to acquire.").log();
             if (continuousMode) {
-                return false; // Stop the loop with final exit code
+                return false; // Stop the loop
             } else {
                 log.atInfo().setMessage("Exiting due to path=no-work-left, continuousMode={}, exitCode={}")
                     .addArgument(continuousMode).addArgument(NO_WORK_LEFT_EXIT_CODE).log();
@@ -917,7 +913,7 @@ public class RfsMigrateDocuments {
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             log.atWarn().setMessage("Worker interrupted; stopping loop.").log();
-            return false; // stop the loop
+            return false; // Stop the loop
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Error processing work item").log();
             if (e instanceof RuntimeException) {
@@ -930,7 +926,6 @@ public class RfsMigrateDocuments {
             // Ensure nothing stale can be invoked later
             cancellationRunnableRef.set(null);
         }
-        // loop continuation logic for continuous mode
         return continuousMode && !cleanShutdownCompleted.get();
     }
 }
