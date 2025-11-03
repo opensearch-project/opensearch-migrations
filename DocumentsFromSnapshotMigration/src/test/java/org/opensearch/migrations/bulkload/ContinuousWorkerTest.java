@@ -25,6 +25,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
@@ -66,6 +67,7 @@ import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNA
 public class ContinuousWorkerTest extends SourceTestBase {
 
     private static final Duration DEFAULT_TEST_TIMEOUT = Duration.ofMinutes(6);
+    private static final String TARGET_DOCKER_HOSTNAME = "target";
 
     private static Stream<Arguments> scenarios() {
         return Stream.of(
@@ -74,6 +76,25 @@ public class ContinuousWorkerTest extends SourceTestBase {
         );
     }
 
+    private static String[] args(boolean continuous, String sourceVersion, String... more) {
+        var baseArgs = continuous 
+                ? new String[] { "--continuous-mode", "--source-version", sourceVersion }
+                : new String[] { "--source-version", sourceVersion };
+        var result = new String[baseArgs.length + more.length];
+        System.arraycopy(baseArgs, 0, result, 0, baseArgs.length);
+        System.arraycopy(more, 0, result, baseArgs.length, more.length);
+        return result;
+    }
+
+    @SneakyThrows
+    private static void waitUntilAcquiredOrTimeout(Process p, long ms) {
+        var br = new BufferedReader(new InputStreamReader(p.getInputStream()));
+        long deadline = System.currentTimeMillis() + ms;
+        String line;
+        while (System.currentTimeMillis() < deadline && (line = br.readLine()) != null) {
+            if (line.contains("Acquired") || line.contains("Processing shard")) break;
+        }
+    }
 
     @ParameterizedTest(name = "[no-work-left] continuous={0} {1}->{2}")
     @MethodSource("scenarios")
@@ -100,10 +121,8 @@ public class ContinuousWorkerTest extends SourceTestBase {
 
             createSnapshot(esSource, SNAPSHOT_NAME, testSnapshotContext);
             esSource.copySnapshotData(tempDirSnapshot.toString());
-            String[] additionalArgs = continuousMode
-                    ? new String[] { "--continuous-mode", "--source-version", sourceClusterVersion.getVersion().toString() }
-                    : new String[] { "--source-version", sourceClusterVersion.getVersion().toString() };
-
+            
+            var additionalArgs = args(continuousMode, sourceClusterVersion.getVersion().toString());
             var pb = setupProcess(tempDirSnapshot, tempDirLucene, osTarget.getUrl(), additionalArgs);
             var process = runAndMonitorProcess(pb);
 
@@ -141,14 +160,13 @@ public class ContinuousWorkerTest extends SourceTestBase {
                     CompletableFuture.runAsync(osTarget::start)
             ).join();
 
-
             var client = new OpenSearchClientFactory(
                     ConnectionContextTestParams.builder().host(esSource.getUrl()).build().toConnectionContext()
             ).determineVersionAndCreate();
 
             var generator = new WorkloadGenerator(client);
             var opts = new WorkloadOptions();
-            opts.setTotalDocs(30);
+            opts.setTotalDocs(100);
             opts.setWorkloads(List.of(Workloads.GEONAMES));
             opts.getIndex().indexSettings.put(IndexOptions.PROP_NUMBER_OF_SHARDS, 1);
             generator.generate(opts);
@@ -156,35 +174,21 @@ public class ContinuousWorkerTest extends SourceTestBase {
             createSnapshot(esSource, SNAPSHOT_NAME, testSnapshotContext);
             esSource.copySnapshotData(tempDirSnapshot.toString());
 
-            String[] additionalArgs = continuousMode
-                    ? new String[] { "--continuous-mode", "--source-version", sourceClusterVersion.getVersion().toString(),
-                    "--initial-lease-duration", "PT30s" }
-                    : new String[] { "--source-version", sourceClusterVersion.getVersion().toString(),
-                    "--initial-lease-duration", "PT30s" };
-
+            var additionalArgs = args(continuousMode, sourceClusterVersion.getVersion().toString(),
+                    "--initial-lease-duration", "PT30s");
             var pb = setupProcess(tempDirSnapshot, tempDirLucene, osTarget.getUrl(), additionalArgs);
-
 
             pb.redirectErrorStream(true);
             pb.redirectOutput(ProcessBuilder.Redirect.PIPE);
 
             var process = pb.start();
 
-            Thread.sleep(2000);
+            waitUntilAcquiredOrTimeout(process, 8000);
             process.destroy();
 
             assertTrue(process.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS),
                     "worker did not terminate after SIGTERM");
 
-
-            try (var br = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String all = br.lines().reduce(new StringBuilder(), StringBuilder::append, StringBuilder::append).toString();
-                // Soft assertion (don’t fail on absence, environments differ):
-                if (!all.isEmpty()) {
-                    boolean saw = all.contains("Clean shutdown completed");
-                    log.info("Observed clean shutdown log: {}", saw);
-                }
-            }
         } finally {
             deleteTree(tempDirSnapshot);
             deleteTree(tempDirLucene);
@@ -207,7 +211,10 @@ public class ContinuousWorkerTest extends SourceTestBase {
         try (
                 var esSource = new SearchClusterContainer(sourceClusterVersion).withAccessToHost(true);
                 var network  = Network.newNetwork();
-                var osTarget = new SearchClusterContainer(targetClusterVersion).withAccessToHost(true).withNetwork(network);
+                var osTarget = new SearchClusterContainer(targetClusterVersion)
+                        .withAccessToHost(true)
+                        .withNetwork(network)
+                        .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
                 var proxy    = new ToxiProxyWrapper(network)
         ) {
             CompletableFuture.allOf(
@@ -215,8 +222,13 @@ public class ContinuousWorkerTest extends SourceTestBase {
                     CompletableFuture.runAsync(osTarget::start)
             ).join();
 
-            proxy.start("target", 9200);
+            proxy.start(TARGET_DOCKER_HOSTNAME, 9200);
 
+            var targetOps = new ClusterOperations(osTarget);
+            targetOps.get("/_cluster/health?wait_for_status=yellow&timeout=30s", null);
+
+            var sourceClusterOperations = new ClusterOperations(esSource);
+            sourceClusterOperations.createIndex("geonames", "{\"settings\":{\"number_of_shards\":2}}");
 
             var client = new OpenSearchClientFactory(
                     ConnectionContextTestParams.builder().host(esSource.getUrl()).build().toConnectionContext()
@@ -224,44 +236,36 @@ public class ContinuousWorkerTest extends SourceTestBase {
 
             var generator = new WorkloadGenerator(client);
             var opts = new WorkloadOptions();
-            opts.setTotalDocs(2000);
+            opts.setTotalDocs(400);
             opts.setWorkloads(List.of(Workloads.GEONAMES));
-            opts.getIndex().indexSettings.put(IndexOptions.PROP_NUMBER_OF_SHARDS, 2);
             generator.generate(opts);
 
             createSnapshot(esSource, SNAPSHOT_NAME, testSnapshotContext);
             esSource.copySnapshotData(tempDirSnapshot.toString());
 
-
             var tp = proxy.getProxy();
             var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 500);
 
-            String[] args = {
-                    "--continuous-mode",
-                    "--source-version", sourceClusterVersion.getVersion().toString(),
-                    "--documents-per-bulk-request", "10",
-                    "--max-connections", "2",
-                    "--initial-lease-duration", "PT10s"
-            };
+            try {
+                var additionalArgs = args(true, sourceClusterVersion.getVersion().toString(),
+                        "--documents-per-bulk-request", "10",
+                        "--max-connections", "2",
+                        "--initial-lease-duration", "PT10s");
 
-            var pb = setupProcess(tempDirSnapshot, tempDirLucene, proxy.getProxyUriAsString(), args);
-            pb.redirectErrorStream(true);
-            pb.redirectOutput(ProcessBuilder.Redirect.PIPE);
+                var pb = setupProcess(tempDirSnapshot, tempDirLucene, proxy.getProxyUriAsString(), additionalArgs);
+                var process = runAndMonitorProcess(pb);
 
-            var process = pb.start();
-            assertTrue(process.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS), "worker timed out");
-            int exitCode = process.exitValue();
+                assertTrue(process.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS), "worker timed out");
+                int exitCode = process.exitValue();
 
-            latency.remove();
+                assertTrue(exitCode == 0 || exitCode == 1,
+                        "Expected 0 (clean) or 1 (no-work-left) after completion in continuous mode");
 
-            assertTrue(exitCode >= 0, "Expected a clean exit after lease-timeout cycles");
+                checkClusterMigrationOnFinished(esSource, osTarget,
+                        DocumentMigrationTestContext.factory().noOtelTracking());
 
-            try (var br = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String all = br.lines().reduce(new StringBuilder(), StringBuilder::append, StringBuilder::append).toString();
-                if (!all.isEmpty()) {
-                    boolean sawGuard = all.contains("already finalized by lease timeout handler");
-                    log.info("Observed duplicate-checkpoint guard log: {}", sawGuard);
-                }
+            } finally {
+                latency.remove();
             }
         } finally {
             deleteTree(tempDirSnapshot);
@@ -275,7 +279,6 @@ public class ContinuousWorkerTest extends SourceTestBase {
         ));
     }
 
-    /** ========== 4) Lease timer cancellation (A finishes < lease; B runs past A’s expiry) ========== */
     @ParameterizedTest(name = "[timer-cancel] {0}->{1}")
     @MethodSource("fixedPathOnly")
     @Timeout(value = 6, unit = TimeUnit.MINUTES)
