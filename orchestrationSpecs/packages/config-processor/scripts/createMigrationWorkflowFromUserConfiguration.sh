@@ -32,7 +32,9 @@ $INITIALIZE_CMD --user-config $CONFIG_FILENAME --unique-run-nonce $UUID "$@" > "
 
 # Set the name field based on environment variable
 if [ -n "$USE_GENERATE_NAME" ]; then
-  NAME_FIELD="generateName: full-migration-"
+  # Keeping this as 'full-migration' so that it's intentionally different than the
+  # one-single default migration that we will normally be using
+  NAME_FIELD="generateName: full-migration-${UUID}-"
 else
   NAME_FIELD="name: migration-workflow"
 fi

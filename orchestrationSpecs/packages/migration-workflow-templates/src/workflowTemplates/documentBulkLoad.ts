@@ -72,13 +72,25 @@ function getRfsReplicasetManifest
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>
 }): ReplicaSet {
     const useCustomLogging = expr.not(expr.isEmpty(args.loggingConfigMap));
-    const targetBasicCreds = getTargetHttpAuthCreds(args.basicCredsSecretNameOrEmpty);
     const baseContainerDefinition = {
         name: "bulk-loader",
         image: makeStringTypeProxy(args.rfsImageName),
         imagePullPolicy: makeStringTypeProxy(args.rfsImagePullPolicy),
         command: ["/rfs-app/runJavaWithClasspath.sh"],
         env: [
+            // see getTargetHttpAuthCreds() - it's very similar, but for a raw K8s container, we pass
+            // environment variables as a list, as K8s expects them.  The getTargetHttpAuthCreds()
+            // returns them in a key-value format that the ContainerBuilder uses, which is converted
+            // by the argoResourceRenderer.  It would be a nice idea to unify this format with the
+            // container builder's, but it's probably a much bigger lift than it seems since we're
+            // type checking this object against the k8s schema below.
+            //
+            // I could also use getTargetHttpAuthCreds to create the partial values, then substitute
+            // those into here by splicing.  Writing a generic splicer isn't that straightforward since
+            // there are a few other inconsistencies between the manifest and argo-container definitions.
+            // As of now, we only have this block (though a couple others will come about too) and it
+            // doesn't seem like it's worth the complexity.  There's some readability value to having
+            // less normalization here as it benefits readability.
             {
                 name: "TARGET_USERNAME",
                 valueFrom: {

@@ -5,7 +5,6 @@ minikube start \
   --extra-config=scheduler.bind-address=0.0.0.0 \
   --extra-config=controller-manager.bind-address=0.0.0.0
 eval $(minikube docker-env)
-minikube dashboard &
 kubectl config set-context --current --namespace=ma
 
 #nice to haves
