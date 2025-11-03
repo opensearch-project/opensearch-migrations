@@ -38,6 +38,23 @@ export type ScopeIsEmptyConstraint<S, T> =
         ? T
         : TypescriptError<`Scope must be empty but contains: ${keyof S & string}`>
 
+/**
+ * Constraint that requires resources to be present in ContainerScope.
+ * Checks if 'resources' key exists in the scope type.
+ */
+export type ResourcesRequiredConstraint<
+    ContainerScope extends GenericScope,
+    T
+> = 'resources' extends keyof ContainerScope
+    ? T
+    : TypescriptError<'Container resources must be specified using addResources() before finalizing the template'>;
+
+/**
+ * Helper type to extract ContainerScope from a ContainerBuilder type.
+ * This allows us to check for resources in the container scope.
+ */
+export type ExtractContainerScope<T> = T extends { bodyScope: infer CS } ? CS : never;
+
 export function extendScope<OS extends GenericScope, NS extends GenericScope>(orig: OS, fn: ScopeFn<OS, NS>): ExtendScope<OS, NS> {
     return {
         ...orig,

@@ -744,6 +744,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
           "pullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": "{{=sprig.merge({}, {"limits":{"cpu":"1000m","memory":"2000Mi"},"requests":{"cpu":"500m","memory":"2000Mi"}})}}",
         },
         "inputs": {
           "parameters": [
@@ -1140,6 +1141,7 @@ spec:
             - org.opensearch.migrations.RfsMigrateDocuments
             - ---INLINE-JSON
             - "{{=toBase64(inputs.parameters.rfsJsonConfig)}}"
+          resources: '{{=toJSON({"limits":{"cpu":"2000m","memory":"4000Mi","ephemeral-storage":"200Gi"},"requests":{"cpu":"1000m","memory":"4000Mi","ephemeral-storage":"200Gi"}})}}'
           env:
             - name: TARGET_USERNAME
               valueFrom:
@@ -1459,6 +1461,7 @@ exports[`test workflow template renderings full-migration 1`] = `
           "env": [],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
           "pullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": "{{=sprig.merge({}, {"limits":{"cpu":"1000m","memory":"2000Mi"},"requests":{"cpu":"500m","memory":"2000Mi"}})}}",
         },
         "inputs": {
           "parameters": [
@@ -2178,6 +2181,7 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
           "pullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": "{{=sprig.merge({}, {"limits":{"cpu":"1000m","memory":"2000Mi"},"requests":{"cpu":"500m","memory":"2000Mi"}})}}",
           "volumeMounts": [
             {
               "mountPath": "/config/credentials",
@@ -2588,6 +2592,7 @@ echo ---
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
           "pullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": "{{=sprig.merge({}, {"limits":{"cpu":"1000m","memory":"2000Mi"},"requests":{"cpu":"500m","memory":"2000Mi"}})}}",
         },
         "inputs": {
           "parameters": [
@@ -2661,6 +2666,13 @@ spec:
         - name: main
           image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
           imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 2000Mi
+            requests:
+              cpu: 500m
+              memory: 2000Mi
           command:
             - /bin/sh
             - -c
@@ -3078,6 +3090,10 @@ spec:
                   {
                     "name": "loggingConfigurationOverrideConfigMap",
                     "value": "{{=jsonpath(toJSON(fromJSON(inputs.parameters.replayerConfig)), '$.loggingConfigurationOverrideConfigMap')}}",
+                  },
+                  {
+                    "name": "resources",
+                    "value": "{{=jsonpath(toJSON(fromJSON(inputs.parameters.replayerConfig)), '$.resources')}}",
                   },
                   {
                     "name": "sessionName",
@@ -3571,6 +3587,7 @@ echo $SHOULD_FINALIZE",
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
           "pullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": "{{=sprig.merge({}, {"limits":{"cpu":"1000m","memory":"2000Mi"},"requests":{"cpu":"500m","memory":"2000Mi"}})}}",
         },
         "inputs": {
           "parameters": [
@@ -3702,6 +3719,7 @@ echo "Cleanup complete. Workflow stats preserved under /$STATS_KEY/"",
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
           "pullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": "{{=sprig.merge({}, {"limits":{"cpu":"1000m","memory":"2000Mi"},"requests":{"cpu":"500m","memory":"2000Mi"}})}}",
         },
         "inputs": {
           "parameters": [

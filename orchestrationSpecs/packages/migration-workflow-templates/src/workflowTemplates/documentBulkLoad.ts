@@ -3,6 +3,7 @@ import {
     CLUSTER_VERSION_STRING,
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
+    DEFAULT_RESOURCES,
     NAMED_TARGET_CLUSTER_CONFIG,
     RFS_OPTIONS
 } from "@opensearch-migrations/schemas";
@@ -69,7 +70,8 @@ function getRfsReplicasetManifest
     loggingConfigMap: BaseExpression<string>,
 
     rfsImageName: BaseExpression<string>,
-    rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>
+    rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
+    resources: BaseExpression<any>
 }): ReplicaSet {
     const useCustomLogging = expr.not(expr.isEmpty(args.loggingConfigMap));
     const baseContainerDefinition = {
@@ -116,7 +118,8 @@ function getRfsReplicasetManifest
             "org.opensearch.migrations.RfsMigrateDocuments",
             "---INLINE-JSON",
             makeStringTypeProxy(args.jsonConfig)
-        ]
+        ],
+        resources: expr.deserializeRecord(args.resources)
     };
 
     const finalContainerDefinition= setupTestCredsForContainer(
@@ -246,7 +249,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
                     rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
                     workflowName: expr.getWorkflowValue("name"),
-                    jsonConfig: expr.toBase64(b.inputs.rfsJsonConfig)
+                    jsonConfig: expr.toBase64(b.inputs.rfsJsonConfig),
+                    resources: expr.serialize(expr.literal(DEFAULT_RESOURCES.RFS))
                 })
             }))
     )

@@ -248,6 +248,7 @@ export const MigrationConsole = WorkflowBuilder.create({
                 expr.dig(expr.deserializeRecord(c.inputs.configContents), ["source_cluster","authConfig","basic","secretName"], "")))
             .addEnvVarsFromRecord(getTargetHttpAuthCreds(
                 expr.dig(expr.deserializeRecord(c.inputs.configContents), ["target_cluster","authConfig","basic","secretName"], "")))
+            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
             .addArgs([
                 expr.fillTemplate(SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE, {
                     "FILE_CONTENTS": expr.toBase64(expr.asString(c.inputs.configContents)),
@@ -274,7 +275,7 @@ export const MigrationConsole = WorkflowBuilder.create({
                     b.inputs.imageMigrationConsolePullPolicy,
                     expr.toBase64(expr.asString(b.inputs.configContents)),
                     b.inputs.command,
-                    resources: DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI,
+                    DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI
                 )
             }))
 

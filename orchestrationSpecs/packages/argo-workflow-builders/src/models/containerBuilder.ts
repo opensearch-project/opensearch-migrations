@@ -23,7 +23,7 @@ import {inputsToEnvVars, TypescriptError} from "../utils";
 import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "./templateBodyBuilder"; // <-- import TemplateRebinder
 import {extendScope, FieldGroupConstraint, ScopeIsEmptyConstraint} from "./scopeConstraints";
 import {PlainObject} from "./plainObject";
-import {AllowLiteralOrExpression, BaseExpression, toExpression} from "./expression";
+import {AllowLiteralOrExpression, BaseExpression, expr, toExpression} from "./expression";
 import {TypeToken} from "./sharedTypes";
 
 export type IMAGE_PULL_POLICY = "Always" | "Never" | "IfNotPresent";
@@ -359,5 +359,36 @@ export class ContainerBuilder<
             this.outputsScope,
             this.retryParameters
         ) as any;
+    }
+
+    /**
+     * Add resource requirements (CPU, memory limits and requests) to the container.
+     * This method allows chaining resource specifications like other container properties.
+     * 
+     * @param resources - Resource requirements (limits and requests for CPU, memory, ephemeral-storage)
+     * @returns New ContainerBuilder with resources applied
+     */
+    addResources(
+        resources: AllowLiteralOrExpression<Record<string, any>>
+    ): ContainerBuilder<
+        ContextualScope,
+        InputParamsScope,
+        ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
+        VolumeScope,
+        EnvScope,
+        OutputParamsScope
+    > {
+        const mergedResources = expr.mergeDicts(
+            expr.literal(this.bodyScope?.resources || {}),
+            toExpression(resources));
+        return new ContainerBuilder(
+            this.contextualScope,
+            this.inputsScope,
+            {...this.bodyScope, resources: mergedResources},
+            this.volumeScope,
+            this.envScope,
+            this.outputsScope,
+            this.retryParameters
+        );
     }
 }
