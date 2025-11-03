@@ -1,6 +1,6 @@
 import {deepStrict, StreamSchemaParser} from "./StreamSchemaTransformer";
 import {
-    ARGO_WORKFLOW_SCHEMA,
+    ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN,
     PARAMETERIZED_MIGRATION_CONFIG,
     PARAMETERIZED_MIGRATION_CONFIG_ARRAYS
 } from "@opensearch-migrations/schemas";
@@ -20,7 +20,10 @@ export interface EtcdOptions {
 export class MigrationInitializer {
     readonly client: Etcd3;
     readonly loader: StreamSchemaParser<typeof PARAMETERIZED_MIGRATION_CONFIG_ARRAYS>;
-    constructor(etcdSettings: EtcdOptions, public readonly prefix: string) {
+    constructor(etcdSettings: EtcdOptions, public readonly uniqueRunNonce: string) {
+        if (!K8S_NAMING_PATTERN.test(uniqueRunNonce)) {
+            throw new Error(`Illegal uniqueRunNonce argument.  Must match regex pattern ${K8S_NAMING_PATTERN}.`);
+        }
         console.log("Initializing with " + JSON.stringify(etcdSettings));
         this.client = new Etcd3({
             hosts: etcdSettings.endpoints,
@@ -50,8 +53,8 @@ export class MigrationInitializer {
     async initializeWorkflow(workflows: ARGO_WORKFLOW_SCHEMA): Promise<void> {
         try {
             // Store workflow metadata
-            await this.client.put(`/${this.prefix}/workflow/info/prefix`).value(this.prefix);
-            await this.client.put(`/${this.prefix}/workflow/info/started`).value(
+            await this.client.put(`/${this.uniqueRunNonce}/workflow/info/prefix`).value(this.uniqueRunNonce);
+            await this.client.put(`/${this.uniqueRunNonce}/workflow/info/started`).value(
                 Math.floor(Date.now() / 1000).toString()
             );
 
@@ -62,13 +65,13 @@ export class MigrationInitializer {
                 const processorCount = this.calculateProcessorCount(list);
                 console.log(`Total processor count: ${processorCount}`);
 
-                await this.client.put(`/${this.prefix}/workflow/targets/${targetName}/latch`)
+                await this.client.put(`/${this.uniqueRunNonce}/workflow/targets/${targetName}/latch`)
                     .value(processorCount.toString());
 
                 console.log(`Target ${targetName} (${targetName}) latch initialized with count ${processorCount}`);
             }
 
-            console.log(`Etcd keys initialized with prefix: ${this.prefix}`);
+            console.log(`Etcd keys initialized with prefix: ${this.uniqueRunNonce}`);
         } catch (error) {
             console.error('Error initializing workflow:', error);
             throw error;

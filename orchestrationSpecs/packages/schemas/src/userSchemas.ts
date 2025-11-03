@@ -5,18 +5,18 @@ export function getZodKeys<T extends z.ZodRawShape>(schema: z.ZodObject<T>): rea
 }
 
 export const KAFKA_SERVICES_CONFIG = z.object({
-    broker_endpoints: z.string().describe("Specify an external kafka broker list if using one other than the one managed by the workflow"),
+    brokerEndpoints: z.string().describe("Specify an external kafka broker list if using one other than the one managed by the workflow"),
     standard: z.string()
 });
 
 export const S3_REPO_CONFIG = z.object({
-    aws_region: z.string().describe("The AWS region that the bucket reside in (us-east-2, etc)"),
+    awsRegion: z.string().describe("The AWS region that the bucket reside in (us-east-2, etc)"),
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)/).default("")
         .describe("Override the default S3 endpoint for clients to connect to.  " +
             "Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"),
-    s3RepoPathUri: z.string().describe("s3:///BUCKETNAME/PATH")
+    s3RepoPathUri: z.string().describe("s3:///BUCKETNAME/PATH"),
+    repoName: z.string().default("migration_assistant_repo")
 });
-
 
 export const PROXY_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default(""),
@@ -31,6 +31,13 @@ export const REPLAYER_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default(""),
     // docTransformerBase64: z.string().default(""),
     // otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
+});
+
+export const CREATE_SNAPSHOT_OPTIONS = z.object({
+    indexAllowlist: z.array(z.string()).default([]),
+    maxSnapshotRateMbPerNode: z.number().default(0),
+    loggingConfigurationOverrideConfigMap: z.string().default(""),
+    s3RoleArn: z.string().default("")
 });
 
 export const METADATA_OPTIONS = z.object({
@@ -61,9 +68,11 @@ export const RFS_OPTIONS = z.object({
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
 });
 
+export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 
 export const HTTP_AUTH_BASIC = z.object({
     basic: z.object({
+        secretName: z.string().regex(K8S_NAMING_PATTERN),
         username: z.string(),
         password: z.string()
     })
@@ -101,11 +110,23 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     proxy: PROXY_OPTIONS.optional()
 });
 
-export const NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG = z.object({
-    snapshotName: z.string().optional()
+export const EXTERNALLY_MANAGED_SNAPSHOT = z.object({
+    externallyManagedSnapshot: z.string()
 });
 
-export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG.extend({
+export const GENERATED_SNAPSHOT = z.object({
+    snapshotNamePrefix: z.string()
+});
+
+export const SNAPSHOT_NAME_CONFIG = z.union([
+    EXTERNALLY_MANAGED_SNAPSHOT, GENERATED_SNAPSHOT
+]);
+
+export const NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG = z.object({
+    snapshotNameConfig: SNAPSHOT_NAME_CONFIG
+});
+
+export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
     snapshotName: z.string() // override to required
 });
 
@@ -115,7 +136,7 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
 });
 
 export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    indices: z.array(z.string()).default([]),
+    createSnapshotConfig: CREATE_SNAPSHOT_OPTIONS.optional(),
     snapshotConfig: NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
     migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
 });
@@ -125,13 +146,6 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     toTarget: z.string(),
     snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).optional(),
     replayerConfig: REPLAYER_OPTIONS.optional()
-});
-
-export const CONSOLE_SERVICES_CONFIG_FILE = z.object({
-    kafka: KAFKA_SERVICES_CONFIG.optional(),
-    source_cluster: CLUSTER_CONFIG.optional(),
-    snapshot: NORMALIZED_COMPLETE_SNAPSHOT_CONFIG.optional(),
-    target_cluster: TARGET_CLUSTER_CONFIG.optional()
 });
 
 export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);

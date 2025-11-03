@@ -24,25 +24,34 @@ TEMPORARY_FILE=$(mktemp)
 # Ensure cleanup on exit
 trap "rm -f $TEMPORARY_FILE" EXIT
 
-UUID=$(uuidgen)
-echo "Generated unique prefix: $UUID"
+UUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+echo "Generated unique uniqueRunNonce: $UUID"
 
 echo "Running configuration conversion..."
-$INITIALIZE_CMD --user-config $CONFIG_FILENAME --prefix $UUID "$@" > "$TEMPORARY_FILE"
+$INITIALIZE_CMD --user-config $CONFIG_FILENAME --unique-run-nonce $UUID "$@" > "$TEMPORARY_FILE"
+
+# Set the name field based on environment variable
+if [ -n "$USE_GENERATE_NAME" ]; then
+  # Keeping this as 'full-migration' so that it's intentionally different than the
+  # one-single default migration that we will normally be using
+  NAME_FIELD="generateName: full-migration-${UUID}-"
+else
+  NAME_FIELD="name: migration-workflow"
+fi
 
 echo "Applying workflow to Kubernetes..."
 cat <<EOF | kubectl create -f -
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: migration-workflow
+  $NAME_FIELD
 spec:
   workflowTemplateRef:
     name: full-migration
   entrypoint: main
   arguments:
     parameters:
-      - name: latchCoordinationPrefix
+      - name: uniqueRunNonce
         value: "$UUID"
       - name: migrationConfigs
         value: |

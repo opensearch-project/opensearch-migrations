@@ -7,15 +7,14 @@ import {
     Serialized
 } from "./plainObject";
 import {StripUndefined, TaskType, typeToken, TypeToken} from "./sharedTypes";
-import {InputParamDef, OutputParamDef} from "./parameterSchemas";
+import {ConfigMapKeySelector, InputParamDef, OutputParamDef} from "./parameterSchemas";
 
 export type ExpressionType = "govaluate" | "complicatedExpression";
 
 export abstract class BaseExpression<T extends PlainObject, C extends ExpressionType = ExpressionType> {
     readonly _resultType!: T; // phantom only
     readonly _complexity!: C; // phantom only
-    constructor(public readonly kind: string) {
-    }
+    constructor(public readonly kind: string) {}
 }
 
 export type SimpleExpression<T extends PlainObject> = BaseExpression<T, "govaluate">;
@@ -412,6 +411,12 @@ export class TemplateReplacementExpression extends BaseExpression<string, "compl
     }
 }
 
+type UnwrapSerialized<T> = T extends Serialized<infer U>
+    ? U
+    : T extends PlainObject
+        ? T
+        : never;
+
 type ExtractTemplatePlaceholders<T extends string> =
     T extends `${string}{{${infer Placeholder}}}${infer Rest}`
         ? Placeholder | ExtractTemplatePlaceholders<Rest>
@@ -492,14 +497,14 @@ class ExprBuilder {
 
     // Logical
     ternary<
-        B extends BaseExpression<boolean, any>,
-        L extends BaseExpression<any, any>,
-        R extends BaseExpression<ResultOf<L>, any>
+        B extends AllowLiteralOrExpression<boolean, any>,
+        L extends AllowLiteralOrExpression<any, any>,
+        R extends AllowLiteralOrExpression<ResultOf<L>, any>
     >(cond: B, whenTrue: L, whenFalse: R): BaseExpression<ResultOf<L>, WidenComplexity3<ExprC<B>, ExprC<L>, ExprC<R>>>;
     ternary<
-        B extends BaseExpression<boolean, any>,
-        R extends BaseExpression<any, any>,
-        L extends BaseExpression<ResultOf<R>, any>
+        B extends AllowLiteralOrExpression<boolean, any>,
+        R extends AllowLiteralOrExpression<any, any>,
+        L extends AllowLiteralOrExpression<ResultOf<R>, any>
     >(cond: B, whenTrue: L, whenFalse: R): BaseExpression<ResultOf<R>, WidenComplexity3<ExprC<B>, ExprC<L>, ExprC<R>>>;
     ternary(cond: any, whenTrue: any, whenFalse: any): BaseExpression<any, any> {
         return new TernaryExpression(cond, whenTrue, whenFalse);
@@ -742,6 +747,13 @@ class ExprBuilder {
         source: BaseExpression<Serialized<T>, any>,
         ...segs: S
     ): BaseExpression<SegmentsValueStrict<T, S>, "complicatedExpression">;
+    jsonPathStrict<
+        T extends Serialized<Record<string, any>>,
+        K extends Extract<KeysOfUnion<UnwrapSerialized<T>>, string>
+    >(
+        source: BaseExpression<T, any>,
+        key: K
+    ): BaseExpression<SegmentsValueStrict<UnwrapSerialized<T>, readonly [K]>, "complicatedExpression">;
     jsonPathStrict(
         source: BaseExpression<Serialized<any>, any>,
         ...segs: readonly unknown[]
@@ -775,9 +787,18 @@ class ExprBuilder {
         >("sprig.omit", args);
     }
 
-    deserializeRecord<R extends PlainObject, CIn extends ExpressionType>(data: BaseExpression<Serialized<R>,CIn>) {
-        return fn<R,CIn,"complicatedExpression">("fromJSON", data);
+    deserializeRecord<R extends PlainObject, CIn extends ExpressionType>(
+        data: BaseExpression<Serialized<R>, CIn>
+    ): BaseExpression<R, "complicatedExpression">;
+    deserializeRecord<T extends Serialized<PlainObject>, CIn extends ExpressionType>(
+        data: BaseExpression<T, CIn>
+    ): BaseExpression<UnwrapSerialized<T>, "complicatedExpression">;
+    deserializeRecord<R extends PlainObject, CIn extends ExpressionType>(
+        data: BaseExpression<Serialized<R>, CIn>
+    ) {
+        return fn<R, CIn, "complicatedExpression">("fromJSON", data);
     }
+
 
     serialize<R extends PlainObject, CIn extends ExpressionType>(data: BaseExpression<R,CIn>) {
         return fn<Serialized<R>,CIn,"complicatedExpression">("toJSON", data);
@@ -884,6 +905,6 @@ export function makeDirectTypeProxy<T extends (boolean|number)>(value: BaseExpre
 }
 
 // This function and the next tie into the renderer
-export function makeStringTypeProxy<T extends string>(value: BaseExpression<T>): T {
+export function makeStringTypeProxy<T extends string>(value: AllowLiteralOrExpression<T>): T {
     return value as any as T;
 }

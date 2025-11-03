@@ -12,8 +12,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "generate-types": "ts-node scripts/generateK8sTypes.ts",
-    "prebuild": "npm run generate-types",
+    "rebuildK8sSchemas": "./scripts/fetchK8sSchemas.sh && ts-node scripts/generateK8sTypes.ts",
     "build": "tsc",
     "type-check": "tsc --noEmit",
     "make-templates": "tsx makeTemplates.cjs",

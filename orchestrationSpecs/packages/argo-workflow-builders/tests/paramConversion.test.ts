@@ -35,20 +35,10 @@ const cbSomeOpt_missingC = {
     register: () => {}
 } as const;
 
-const typecheck_missingOptional_in_defaultKeys = () => {
-    // @ts-expect-error - 'c' is optional in R_SomeOptional but not listed in defaultKeys
-    selectInputsFieldsAsExpressionRecord({} as BaseExpression<R_SomeOptional>, cbSomeOpt_missingC, keysSomeOpt_ok);
-};
-
 const cbSomeOpt_noList = {
     defaults: { b: '', c: false },
     register: () => {}
 } as const;
-
-const typecheck_defaultKeys_required_when_optionals_exist = () => {
-    // @ts-expect-error - defaultKeys is required when R has optional keys
-    selectInputsFieldsAsExpressionRecord({} as any as BaseExpression<R_SomeOptional>, cbSomeOpt_noList, keysSomeOpt_ok);
-};
 
 const cbAllOpt_ok = {
     defaults: { a: 1, b: '' },

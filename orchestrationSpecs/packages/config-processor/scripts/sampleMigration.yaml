@@ -5,14 +5,15 @@
       "allowInsecure": true,
       "authConfig": {
         "basic": {
+          "secretName": "source1-creds",
           "username": "admin",
           "password": "admin"
         }
       },
       "snapshotRepo": {
-        "aws_region": "us-east-2",
+        "awsRegion": "us-east-2",
         "endpoint": "localstack://localstack.ma.svc.cluster.local:4566",
-        "s3RepoPathUri": For localstack testing, replace with `aws --endpoint-url=http://$(kubectl get svc localstack -o jsonpath='{.spec.clusterIP}'):4566 s3 ls`
+        "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2"
       },
       "proxy": { }
     }
@@ -23,6 +24,7 @@
       "allowInsecure": true,
       "authConfig": {
         "basic": {
+          "secretName": "target1-creds",
           "username": "admin",
           "password": "admin"
         }
@@ -36,15 +38,22 @@
 
       "snapshotExtractAndLoadConfigs": [
         {
-          "indices": [ "index_3", "index_4" ],
-          "snapshotConfig": {},
+          "snapshotConfig": {
+            "snapshotNameConfig": {
+#              "externallyManagedSnapshot": "source1_source1snapshot1_88a9f10c-207e-4c04-b6c6-fbc058501131",
+              "snapshotNamePrefix": "source1snapshot1"
+            },
+          },
+          "createSnapshotConfig": {
+            "indexAllowlist": [ "index_3", "index_4" ]
+          },
           "migrations": [
             {
               "metadataMigrationConfig": {
               },
               "documentBackfillConfig": {
                 "documentsPerBulkRequest": 1000,
-                "Max connections is the effective concurrency count": "",
+                "//Max connections is the effective concurrency count": "",
                 "maxConnections": 4
               }
             }

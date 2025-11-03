@@ -1,40 +1,37 @@
-import {
-    CommonWorkflowParameters,
-    extractTargetKeysToExpressionMap,
-    makeRequiredImageParametersForKeys,
-    setupLog4jConfigForContainer,
-    setupTestCredsForContainer,
-    TargetClusterParameters
-} from "./commonWorkflowTemplates";
 import {z} from "zod";
 import {
     CLUSTER_VERSION_STRING,
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
-    getZodKeys,
-    METADATA_OPTIONS,
-    NAMED_SOURCE_CLUSTER_CONFIG,
     NAMED_TARGET_CLUSTER_CONFIG,
-    RFS_OPTIONS,
-    TARGET_CLUSTER_CONFIG
+    RFS_OPTIONS
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
 
 import {
+    AllowLiteralOrExpression,
     BaseExpression,
     expr,
     IMAGE_PULL_POLICY,
     INTERNAL, makeDirectTypeProxy, makeStringTypeProxy,
-    selectInputsFieldsAsExpressionRecord,
-    selectInputsForRegister, Serialized,
-    transformZodObjectToParams,
+    selectInputsForRegister,
+    Serialized,
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {
     ReplicaSet
 } from "@opensearch-migrations/argo-workflow-builders";
-import {makeRepoParamDict, makeTargetParamDict} from "./metadataMigration";
+import {makeRepoParamDict} from "./metadataMigration";
+import {
+    setupLog4jConfigForContainer,
+    setupTestCredsForContainer
+} from "./commonUtils/containerFragments";
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
+import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
+import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 
 function makeParamsDict(
     sourceVersion: BaseExpression<z.infer<typeof CLUSTER_VERSION_STRING>>,
@@ -55,7 +52,7 @@ function makeParamsDict(
                 sessionName: sessionName,
                 luceneDir: "/tmp"
             }),
-            makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"))
+            makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), true)
         )
     );
 }
@@ -66,6 +63,7 @@ function getRfsReplicasetManifest
     jsonConfig: BaseExpression<string>
     sessionName: BaseExpression<string>,
     podReplicas: BaseExpression<number>,
+    basicCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
 
     useLocalstackAwsCreds: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
@@ -78,10 +76,42 @@ function getRfsReplicasetManifest
         name: "bulk-loader",
         image: makeStringTypeProxy(args.rfsImageName),
         imagePullPolicy: makeStringTypeProxy(args.rfsImagePullPolicy),
-        env: [
-            {name: "LUCENE_DIR", value: makeStringTypeProxy(expr.literal("/tmp"))}
-        ],
         command: ["/rfs-app/runJavaWithClasspath.sh"],
+        env: [
+            // see getTargetHttpAuthCreds() - it's very similar, but for a raw K8s container, we pass
+            // environment variables as a list, as K8s expects them.  The getTargetHttpAuthCreds()
+            // returns them in a key-value format that the ContainerBuilder uses, which is converted
+            // by the argoResourceRenderer.  It would be a nice idea to unify this format with the
+            // container builder's, but it's probably a much bigger lift than it seems since we're
+            // type checking this object against the k8s schema below.
+            //
+            // I could also use getTargetHttpAuthCreds to create the partial values, then substitute
+            // those into here by splicing.  Writing a generic splicer isn't that straightforward since
+            // there are a few other inconsistencies between the manifest and argo-container definitions.
+            // As of now, we only have this block (though a couple others will come about too) and it
+            // doesn't seem like it's worth the complexity.  There's some readability value to having
+            // less normalization here as it benefits readability.
+            {
+                name: "TARGET_USERNAME",
+                valueFrom: {
+                    secretKeyRef: {
+                        name: makeStringTypeProxy(args.basicCredsSecretNameOrEmpty),
+                        key: "username",
+                        optional: true
+                    }
+                }
+            },
+            {
+                name: "TARGET_PASSWORD",
+                valueFrom: {
+                    secretKeyRef: {
+                        name: makeStringTypeProxy(args.basicCredsSecretNameOrEmpty),
+                        key: "password",
+                        optional: true
+                    }
+                }
+            }
+        ],
         args: [
             "org.opensearch.migrations.RfsMigrateDocuments",
             "---INLINE-JSON",
@@ -196,6 +226,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     .addTemplate("createReplicaset", t => t
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("rfsJsonConfig", typeToken<string>())
+        .addRequiredInput("basicCredsSecretNameOrEmpty", typeToken<string>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
@@ -211,6 +242,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     useLocalstackAwsCreds: expr.deserializeRecord(b.inputs.useLocalStack),
                     sessionName: b.inputs.sessionName,
+                    basicCredsSecretNameOrEmpty: b.inputs.basicCredsSecretNameOrEmpty,
                     rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
                     rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
                     workflowName: expr.getWorkflowValue("name"),
@@ -234,6 +266,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b,c),
                     podReplicas: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["podReplicas"], 1),
+                    basicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
                     useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
                     rfsJsonConfig: expr.asString(expr.serialize(
