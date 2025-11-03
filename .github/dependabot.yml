@@ -40,6 +40,8 @@ updates:
           - "version-update:semver-major"
           - "version-update:semver-minor"
       - dependency-name: "errorprone"
+      - dependency-name: "org.junit.platform:*"
+      - dependency-name: "org.junit.jupiter:*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
