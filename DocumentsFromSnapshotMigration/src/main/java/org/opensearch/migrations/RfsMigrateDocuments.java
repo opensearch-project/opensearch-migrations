@@ -46,8 +46,8 @@ import org.opensearch.migrations.bulkload.worker.RegularDocumentReaderEngine;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
-import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
+import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -73,8 +73,9 @@ import org.slf4j.MDC;
 
 @Slf4j
 public class RfsMigrateDocuments {
+    public static final int SUCCESS_EXIT_CODE = 0;
+    public static final int NO_WORK_LEFT_EXIT_CODE = 1;
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
-    public static final int NO_WORK_LEFT_EXIT_CODE = 3;
 
     // Arbitrary value, increasing from 5 to 15 seconds due to prevalence of clock skew exceptions
     // observed on production clusters during migrations
@@ -485,6 +486,16 @@ public class RfsMigrateDocuments {
                 unpackerFactory
             );
             cleanShutdownCompleted.set(true);
+
+            if (arguments.continuousMode) {
+                log.atInfo().setMessage("Exiting due to path=continuous-no-work-left, continuousMode={}, exitCode={}")
+                    .addArgument(true).addArgument(NO_WORK_LEFT_EXIT_CODE).log();
+                System.exit(NO_WORK_LEFT_EXIT_CODE);
+            } else {
+                log.atInfo().setMessage("Exiting due to path=single-run-success, continuousMode={}, exitCode={}")
+                    .addArgument(false).addArgument(0).log();
+                System.exit(SUCCESS_EXIT_CODE);
+            }
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
@@ -642,7 +653,8 @@ public class RfsMigrateDocuments {
 
         // On success
         if (!continuousMode) {
-            cleanShutdownCompleted.set(true); // this mirrors the prior behavior where we exit right after
+            cleanShutdownCompleted.set(true);
+            log.info("Exiting due to lease-timeout in non-continuous mode with code {}", PROCESS_TIMED_OUT_EXIT_CODE);
             System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
         }
         // continuous mode: do NOT set cleanShutdownCompleted here, so the shutdown hook
@@ -894,8 +906,14 @@ public class RfsMigrateDocuments {
                 }
             }
         } catch (NoWorkLeftException e) {
-            log.atInfo().setMessage("No work left to acquire. Exiting with error code (no-work-left) to signal that.").log();
-            System.exit(NO_WORK_LEFT_EXIT_CODE); // thrown before run(...) starts, and exits
+            log.atInfo().setMessage("No work left to acquire.").log();
+            if (continuousMode) {
+                return false; // Stop the loop with final exit code
+            } else {
+                log.atInfo().setMessage("Exiting due to path=no-work-left, continuousMode={}, exitCode={}")
+                    .addArgument(continuousMode).addArgument(NO_WORK_LEFT_EXIT_CODE).log();
+                System.exit(NO_WORK_LEFT_EXIT_CODE);
+            }
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             log.atWarn().setMessage("Worker interrupted; stopping loop.").log();
@@ -911,7 +929,6 @@ public class RfsMigrateDocuments {
             workItemRef.set(null);
             // Ensure nothing stale can be invoked later
             cancellationRunnableRef.set(null);
-            lastWorkItemFinalized.set(null);
         }
         // loop continuation logic for continuous mode
         return continuousMode && !cleanShutdownCompleted.get();

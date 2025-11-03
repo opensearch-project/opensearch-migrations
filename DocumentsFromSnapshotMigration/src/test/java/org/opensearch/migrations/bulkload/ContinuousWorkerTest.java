@@ -225,7 +225,8 @@ public class ContinuousWorkerTest extends SourceTestBase {
             proxy.start(TARGET_DOCKER_HOSTNAME, 9200);
 
             var targetOps = new ClusterOperations(osTarget);
-            targetOps.get("/_cluster/health?wait_for_status=yellow&timeout=30s", null);
+            var healthResponse = targetOps.get("/_cluster/health?wait_for_status=yellow&timeout=30s");
+            assertTrue(healthResponse.getValue().contains("yellow") || healthResponse.getValue().contains("green"), "Target cluster not ready");
 
             var sourceClusterOperations = new ClusterOperations(esSource);
             sourceClusterOperations.createIndex("geonames", "{\"settings\":{\"number_of_shards\":2}}");
@@ -259,7 +260,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
                 int exitCode = process.exitValue();
 
                 assertTrue(exitCode == 0 || exitCode == 1,
-                        "Expected 0 (clean) or 1 (no-work-left) after completion in continuous mode");
+                        "Expected 0 (success) or 1 (no-work-left) after completion in continuous mode, got: " + exitCode);
 
                 checkClusterMigrationOnFinished(esSource, osTarget,
                         DocumentMigrationTestContext.factory().noOtelTracking());
