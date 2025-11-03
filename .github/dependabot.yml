@@ -40,6 +40,7 @@ updates:
           - "version-update:semver-major"
           - "version-update:semver-minor"
       - dependency-name: "errorprone"
+      - dependency-name: "org.junit:junit-bom"
       - dependency-name: "org.junit.platform:*"
       - dependency-name: "org.junit.jupiter:*"
 
