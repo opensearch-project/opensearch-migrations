@@ -385,7 +385,7 @@ exports[`test workflow template renderings capture-replay 1`] = `
               "name": "Replayer",
               "templateRef": {
                 "name": "replayer",
-                "template": "deployreplayerfromconfig",
+                "template": "createdeploymentfromconfig",
               },
             },
             {
@@ -546,10 +546,42 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
         "inputs": {
           "parameters": [
             {
-              "name": "autocreateSnapshotName",
+              "name": "sourceName",
             },
             {
-              "name": "indices",
+              "name": "snapshotNameConfig",
+            },
+            {
+              "name": "uniqueRunNonce",
+            },
+          ],
+        },
+        "name": "getsnapshotname",
+        "outputs": {
+          "parameters": [
+            {
+              "name": "snapshotName",
+              "valueFrom": {
+                "expression": "(('snapshotNamePrefix' in fromJSON(inputs.parameters.snapshotNameConfig)) ? (inputs.parameters.sourceName + '_' + fromJSON(inputs.parameters.snapshotNameConfig)['snapshotNamePrefix'] + '_' + inputs.parameters.uniqueRunNonce) : (fromJSON(inputs.parameters.snapshotNameConfig)['externallyManagedSnapshot']))",
+              },
+            },
+            {
+              "name": "autoCreate",
+              "valueFrom": {
+                "expression": "'snapshotNamePrefix' in fromJSON(inputs.parameters.snapshotNameConfig)",
+              },
+            },
+          ],
+        },
+        "steps": [
+          [],
+        ],
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "createSnapshotConfig",
             },
             {
               "name": "sourceConfig",
@@ -558,8 +590,7 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
               "name": "snapshotConfig",
             },
             {
-              "name": "alreadyDefinedName",
-              "value": "{{=sprig.dig('snapshotName', '', fromJSON(inputs.parameters.snapshotConfig))}}",
+              "name": "uniqueRunNonce",
             },
             {
               "name": "imageMigrationConsoleLocation",
@@ -575,7 +606,7 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
             {
               "name": "snapshotConfig",
               "valueFrom": {
-                "expression": "((steps.createSnapshot.status == 'Skipped') ? (inputs.parameters.snapshotConfig) : (steps.createSnapshot.outputs.parameters.snapshotConfig))",
+                "expression": "toJSON(sprig.dict("snapshotName", steps.getSnapshotName.outputs.parameters.snapshotName, "repoConfig", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))",
               },
             },
           ],
@@ -586,16 +617,38 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
               "arguments": {
                 "parameters": [
                   {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}",
+                  },
+                  {
+                    "name": "sourceName",
+                    "value": "{{=fromJSON(inputs.parameters.sourceConfig)['name']}}",
+                  },
+                  {
+                    "name": "snapshotNameConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.snapshotConfig)['snapshotNameConfig'])}}",
+                  },
+                ],
+              },
+              "name": "getSnapshotName",
+              "template": "getsnapshotname",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
                     "name": "sourceConfig",
                     "value": "{{inputs.parameters.sourceConfig}}",
                   },
                   {
                     "name": "snapshotConfig",
-                    "value": "{{=toJSON(sprig.dict("repoConfig", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig'), "snapshotName", lower(inputs.parameters.autocreateSnapshotName)))}}",
+                    "value": "{{=toJSON(sprig.dict("repoConfig", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig'), "snapshotName", lower(steps.getSnapshotName.outputs.parameters.snapshotName)))}}",
                   },
                   {
-                    "name": "indices",
-                    "value": "{{inputs.parameters.indices}}",
+                    "name": "createSnapshotConfig",
+                    "value": "{{inputs.parameters.createSnapshotConfig}}",
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -612,7 +665,7 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
                 "name": "create-snapshot",
                 "template": "snapshotworkflow",
               },
-              "when": "'{{inputs.parameters.alreadyDefinedName}}' == ''",
+              "when": "{{steps.getSnapshotName.outputs.parameters.autoCreate}}",
             },
           ],
         ],
@@ -658,6 +711,64 @@ exports[`test workflow template renderings create-snapshot 1`] = `
     "parallelism": 100,
     "serviceAccountName": "argo-workflow-executor",
     "templates": [
+      {
+        "container": {
+          "args": [
+            "---INLINE-JSON",
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourcetargetAwsServiceSigningName", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], "sourceAwsRegion", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceCaCert", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), sprig.dict("sourceHost", jsonpath(inputs.parameters.sourceConfig, '$.endpoint'), "sourceInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.omit(fromJSON(inputs.parameters.createSnapshotConfig), 'loggingConfigurationOverrideConfigMap')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "snapshotRepoName", sprig.dig('repoConfig', 'repoName', 'migration_assistant_repo', fromJSON(inputs.parameters.snapshotConfig))), sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'], "s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion']))))}}",
+          ],
+          "command": [
+            "/root/createSnapshot/bin/CreateSnapshot",
+          ],
+          "env": [
+            {
+              "name": "SOURCE_USERNAME",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "key": "username",
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig))))}}",
+                  "optional": true,
+                },
+              },
+            },
+            {
+              "name": "SOURCE_PASSWORD",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "key": "password",
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig))))}}",
+                  "optional": true,
+                },
+              },
+            },
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "pullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceConfig",
+            },
+            {
+              "name": "snapshotConfig",
+            },
+            {
+              "name": "createSnapshotConfig",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "runcreatesnapshot",
+        "outputs": {
+          "parameters": [],
+        },
+      },
       {
         "inputs": {
           "parameters": [
@@ -727,7 +838,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
               "name": "snapshotConfig",
             },
             {
-              "name": "indices",
+              "name": "createSnapshotConfig",
             },
             {
               "name": "imageMigrationConsoleLocation",
@@ -761,19 +872,10 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                     "name": "snapshotConfig",
                     "value": "{{inputs.parameters.snapshotConfig}}",
                   },
-                ],
-              },
-              "name": "getConsoleConfig",
-              "templateRef": {
-                "name": "migration-console",
-                "template": "getconsoleconfig",
-              },
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
+                  {
+                    "name": "createSnapshotConfig",
+                    "value": "{{inputs.parameters.createSnapshotConfig}}",
+                  },
                   {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -782,23 +884,30 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
-                  {
-                    "name": "configContents",
-                    "value": "{{steps.getConsoleConfig.outputs.parameters.configContents}}",
-                  },
-                  {
-                    "name": "command",
-                    "value": "set -e && 
-console --config-file=/config/migration_services.yaml -v snapshot delete --acknowledge-risk ;
-console --config-file=/config/migration_services.yaml -v snapshot create
-",
-                  },
                 ],
               },
               "name": "createSnapshot",
+              "template": "runcreatesnapshot",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}",
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}",
+                  },
+                ],
+              },
+              "name": "getConsoleConfig",
               "templateRef": {
                 "name": "migration-console",
-                "template": "runmigrationcommand",
+                "template": "getconsoleconfig",
               },
             },
           ],
@@ -977,6 +1086,9 @@ sys.exit(0 if all_finished else 1)'",
               "name": "rfsJsonConfig",
             },
             {
+              "name": "basicCredsSecretNameOrEmpty",
+            },
+            {
               "name": "podReplicas",
             },
             {
@@ -1029,8 +1141,18 @@ spec:
             - ---INLINE-JSON
             - "{{=toBase64(inputs.parameters.rfsJsonConfig)}}"
           env:
-            - name: LUCENE_DIR
-              value: /tmp
+            - name: TARGET_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: "{{inputs.parameters.basicCredsSecretNameOrEmpty}}"
+                  key: username
+                  optional: true
+            - name: TARGET_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "{{inputs.parameters.basicCredsSecretNameOrEmpty}}"
+                  key: password
+                  optional: true
             - name: JAVA_OPTS
               value: "{{=' ' + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}"
             - name: AWS_SHARED_CREDENTIALS_FILE
@@ -1045,7 +1167,7 @@ spec:
       volumes:
         - name: log4j-configuration
           configMap:
-            name: "{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-logging-configuration') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}"
+            name: "{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}"
             optional: {{=!(!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)))}}
         - name: localstack-test-creds
           configMap:
@@ -1107,6 +1229,10 @@ spec:
                     "value": "{{=sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.documentBackfillConfig))}}",
                   },
                   {
+                    "name": "basicCredsSecretNameOrEmpty",
+                    "value": "{{=sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig))}}",
+                  },
+                  {
                     "name": "loggingConfigurationOverrideConfigMap",
                     "value": "{{=sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.documentBackfillConfig))}}",
                   },
@@ -1116,7 +1242,7 @@ spec:
                   },
                   {
                     "name": "rfsJsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('basic' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetUsername", fromJSON(inputs.parameters.targetConfig)['authConfig']['basic']['username'], "targetPassword", fromJSON(inputs.parameters.targetConfig)['authConfig']['basic']['password'])) : ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))))) : ({})), sprig.dict("targetHost", jsonpath(inputs.parameters.targetConfig, '$.endpoint'), "targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp'), sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'], "s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['aws_region'], "s3LocalDir", '/tmp'))))}}",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targettargetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), sprig.dict("targetHost", jsonpath(inputs.parameters.targetConfig, '$.endpoint'), "targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp'), sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'], "s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp'))))}}",
                   },
                 ],
               },
@@ -1374,7 +1500,7 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
             {
               "description": "Workflow session nonce",
-              "name": "latchCoordinationPrefix",
+              "name": "uniqueRunNonce",
             },
             {
               "name": "imageCaptureProxyLocation",
@@ -1516,21 +1642,17 @@ exports[`test workflow template renderings full-migration 1`] = `
               "name": "targetConfig",
             },
             {
-              "name": "indices",
-              "value": "[]",
+              "name": "snapshotConfig",
             },
             {
               "name": "migrations",
             },
             {
-              "name": "snapshotConfig",
+              "name": "createSnapshotConfig",
+              "value": "",
             },
             {
-              "name": "sourcePipelineName",
-              "value": "{{=fromJSON(inputs.parameters.sourceConfig)['name'] + '_' + join(fromJSON(inputs.parameters.indices))}}",
-            },
-            {
-              "name": "latchCoordinationPrefix",
+              "name": "uniqueRunNonce",
             },
             {
               "name": "imageCaptureProxyLocation",
@@ -1568,8 +1690,8 @@ exports[`test workflow template renderings full-migration 1`] = `
               "arguments": {
                 "parameters": [
                   {
-                    "name": "indices",
-                    "value": "{{inputs.parameters.indices}}",
+                    "name": "createSnapshotConfig",
+                    "value": "{{inputs.parameters.createSnapshotConfig}}",
                   },
                   {
                     "name": "sourceConfig",
@@ -1580,16 +1702,16 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.snapshotConfig}}",
                   },
                   {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}",
+                  },
+                  {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
                   },
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "autocreateSnapshotName",
-                    "value": "{{inputs.parameters.sourcePipelineName}}",
                   },
                 ],
               },
@@ -1613,8 +1735,8 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.targetConfig}}",
                   },
                   {
-                    "name": "latchCoordinationPrefix",
-                    "value": "{{inputs.parameters.latchCoordinationPrefix}}",
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}",
                   },
                   {
                     "name": "imageCaptureProxyLocation",
@@ -1687,7 +1809,7 @@ exports[`test workflow template renderings full-migration 1`] = `
               "value": "",
             },
             {
-              "name": "latchCoordinationPrefix",
+              "name": "uniqueRunNonce",
             },
             {
               "name": "imageCaptureProxyLocation",
@@ -1733,8 +1855,8 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.targetConfig}}",
                   },
                   {
-                    "name": "latchCoordinationPrefix",
-                    "value": "{{inputs.parameters.latchCoordinationPrefix}}",
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}",
                   },
                   {
                     "name": "imageCaptureProxyLocation",
@@ -1769,8 +1891,8 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
-                    "name": "indices",
-                    "value": "{{=sprig.dig('indices', '', item)}}",
+                    "name": "createSnapshotConfig",
+                    "value": "{{=sprig.dig('createSnapshotConfig', '', item)}}",
                   },
                   {
                     "name": "migrations",
@@ -1798,7 +1920,7 @@ exports[`test workflow template renderings full-migration 1`] = `
               "name": "migrationConfigs",
             },
             {
-              "name": "latchCoordinationPrefix",
+              "name": "uniqueRunNonce",
             },
             {
               "name": "imageCaptureProxyLocation",
@@ -1892,8 +2014,8 @@ exports[`test workflow template renderings full-migration 1`] = `
               "arguments": {
                 "parameters": [
                   {
-                    "name": "latchCoordinationPrefix",
-                    "value": "{{inputs.parameters.latchCoordinationPrefix}}",
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}",
                   },
                   {
                     "name": "imageCaptureProxyLocation",
@@ -1964,7 +2086,7 @@ exports[`test workflow template renderings full-migration 1`] = `
                   },
                   {
                     "name": "prefix",
-                    "value": "{{inputs.parameters.latchCoordinationPrefix}}",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}",
                   },
                 ],
               },
@@ -2023,7 +2145,7 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           "args": [
             "{{inputs.parameters.commandMode}}",
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('basic' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetUsername", fromJSON(inputs.parameters.targetConfig)['authConfig']['basic']['username'], "targetPassword", fromJSON(inputs.parameters.targetConfig)['authConfig']['basic']['password'])) : ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))))) : ({})), sprig.dict("targetHost", jsonpath(inputs.parameters.targetConfig, '$.endpoint'), "targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'loggingConfigurationOverrideConfigMap')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", fromJSON(inputs.parameters.sourceConfig)['version']), sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'], "s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['aws_region'], "s3LocalDir", '/tmp'))))}}",
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targettargetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), sprig.dict("targetHost", jsonpath(inputs.parameters.targetConfig, '$.endpoint'), "targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'loggingConfigurationOverrideConfigMap')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", fromJSON(inputs.parameters.sourceConfig)['version']), sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'], "s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp'))))}}",
           ],
           "command": [
             "/root/metadataMigration/bin/MetadataMigration",
@@ -2032,6 +2154,26 @@ exports[`test workflow template renderings metadata-migration 1`] = `
             {
               "name": "AWS_SHARED_CREDENTIALS_FILE",
               "value": "{{=((sprig.dig('repoConfig', 'useLocalStack', false, fromJSON(inputs.parameters.snapshotConfig))) ? ('/config/credentials/configuration') : (''))}}",
+            },
+            {
+              "name": "TARGET_USERNAME",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "key": "username",
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig))))}}",
+                  "optional": true,
+                },
+              },
+            },
+            {
+              "name": "TARGET_PASSWORD",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "key": "password",
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig))))}}",
+                  "optional": true,
+                },
+              },
             },
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -2319,7 +2461,12 @@ cat /config/migration_services.yaml_ |
 jq 'def normalizeAuthConfig:
   if has("authConfig") then
     if (.authConfig | has("basic")) then
-      .basic_auth = .authConfig.basic
+      .basic_auth = (.authConfig.basic | 
+        if has("secretName") then
+          del(.secretName)
+        else
+          .
+        end)
     elif (.authConfig | has("sigv4")) then
       .sigv4_auth = .authConfig.sigv4
     elif (.authConfig | has("mtls")) then
@@ -2341,7 +2488,7 @@ def normalizeAllowInsecure:
 
 def normalizeRepoPath:
   if has("s3RepoPathUri") then
-    .repo_uri = .s3RepoPathUri | del(.s3RepoPathUri)
+    .repo_uri = .s3RepoPathUri | del(.s3RepoPathUri) | del(.repoName)
   else
     .
   end;
@@ -2355,7 +2502,13 @@ def normalizeSnapshotName:
 
 def normalizeRepoConfig:
   if has("repoConfig") then
-    .s3 = .repoConfig | del(.repoConfig)
+    .s3 = (.repoConfig | 
+      if has("awsRegion") then
+        .aws_region = .awsRegion | del(.awsRegion)
+      else
+        .
+      end)
+    | del(.repoConfig)
   else
     .
   end;
@@ -2391,7 +2544,48 @@ echo ---
             "/bin/sh",
             "-c",
           ],
-          "env": [],
+          "env": [
+            {
+              "name": "SOURCE_USERNAME",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "key": "username",
+                  "name": "{{=((0 == len(sprig.dig('source_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents)))) ? ('empty') : (sprig.dig('source_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents))))}}",
+                  "optional": true,
+                },
+              },
+            },
+            {
+              "name": "SOURCE_PASSWORD",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "key": "password",
+                  "name": "{{=((0 == len(sprig.dig('source_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents)))) ? ('empty') : (sprig.dig('source_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents))))}}",
+                  "optional": true,
+                },
+              },
+            },
+            {
+              "name": "TARGET_USERNAME",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "key": "username",
+                  "name": "{{=((0 == len(sprig.dig('target_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents)))) ? ('empty') : (sprig.dig('target_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents))))}}",
+                  "optional": true,
+                },
+              },
+            },
+            {
+              "name": "TARGET_PASSWORD",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "key": "password",
+                  "name": "{{=((0 == len(sprig.dig('target_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents)))) ? ('empty') : (sprig.dig('target_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents))))}}",
+                  "optional": true,
+                },
+              },
+            },
+          ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
           "pullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
         },
@@ -2732,41 +2926,16 @@ exports[`test workflow template renderings replayer 1`] = `
         "inputs": {
           "parameters": [
             {
-              "name": "targetAwsRegion",
+              "name": "sessionName",
             },
             {
-              "name": "targetAwsSigningName",
-            },
-            {
-              "name": "targetCACert",
-            },
-            {
-              "name": "targetClientSecretName",
-            },
-            {
-              "name": "targetInsecure",
-            },
-            {
-              "name": "targetUsername",
-            },
-            {
-              "name": "targetPassword",
-            },
-            {
-              "name": "speedupFactor",
-              "value": "1.1",
+              "name": "jsonConfig",
             },
             {
               "name": "podReplicas",
-              "value": "1",
-            },
-            {
-              "name": "authHeaderOverride",
-              "value": "",
             },
             {
               "name": "loggingConfigurationOverrideConfigMap",
-              "value": "",
             },
             {
               "name": "imageTrafficReplayerLocation",
@@ -2776,7 +2945,7 @@ exports[`test workflow template renderings replayer 1`] = `
             },
           ],
         },
-        "name": "deployreplayer",
+        "name": "createdeployment",
         "outputs": {
           "parameters": [],
         },
@@ -2785,12 +2954,12 @@ exports[`test workflow template renderings replayer 1`] = `
           "manifest": "apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: "{{=''+'-replayer'}}"
+  name: "{{=inputs.parameters.sessionName+'-replayer'}}"
   labels:
     app: replayer
     workflows.argoproj.io/workflow: "{{workflow.name}}"
 spec:
-  replicas: "0"
+  replicas: "{{inputs.parameters.podReplicas}}"
   selector:
     matchLabels:
       app: replayer
@@ -2805,11 +2974,13 @@ spec:
         - name: replayer
           image: "{{inputs.parameters.imageTrafficReplayerLocation}}"
           imagePullPolicy: "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+          command:
+            - /runJavaWithClasspath.sh
+          args:
+            - org.opensearch.migrations.replay.TrafficReplayer
+            - ---INLINE-JSON
+            - "{{=toBase64(inputs.parameters.jsonConfig)}}"
           env:
-            - name: JCOMMANDER_OPTS
-              value: "{{=((0 == len(inputs.parameters.targetAwsRegion)) ? ('') : (' --targetAwsRegion '+inputs.parameters.targetAwsRegion))+((0 == len(inputs.parameters.targetAwsSigningName)) ? ('') : (' --targetAwsSigningName '+inputs.parameters.targetAwsSigningName))+((0 == len(inputs.parameters.targetCACert)) ? ('') : (' --targetCACert '+inputs.parameters.targetCACert))+((0 == len(inputs.parameters.targetClientSecretName)) ? ('') : (' --targetClientSecretName '+inputs.parameters.targetClientSecretName))+((0 == len(inputs.parameters.targetInsecure)) ? ('') : (' --insecure '+inputs.parameters.targetInsecure))+((0 == len(inputs.parameters.targetUsername)) ? ('') : (' --targetUsername '+inputs.parameters.targetUsername))+((0 == len(inputs.parameters.targetPassword)) ? ('') : (' --targetPassword '+inputs.parameters.targetPassword))+((0 == len(inputs.parameters.speedupFactor)) ? ('') : (' --speedupFactor '+inputs.parameters.speedupFactor))+((0 == len(inputs.parameters.podReplicas)) ? ('') : (' --podReplicas '+inputs.parameters.podReplicas))+((0 == len(inputs.parameters.authHeaderOverride)) ? ('') : (' --authHeaderOverride '+inputs.parameters.authHeaderOverride))+((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('') : (' --loggingConfigurationOverrideConfigMap '+inputs.parameters.loggingConfigurationOverrideConfigMap))+((0 == len(inputs.parameters.imageTrafficReplayerLocation)) ? ('') : (' --imageTrafficReplayerLocation '+inputs.parameters.imageTrafficReplayerLocation))+((0 == len(inputs.parameters.imageTrafficReplayerPullPolicy)) ? ('') : (' --imageTrafficReplayerPullPolicy '+inputs.parameters.imageTrafficReplayerPullPolicy))}}"
-            - name: LUCENE_DIR
-              value: /tmp
             - name: JAVA_OPTS
               value: "{{=' ' + ' ' + (('' == inputs.parameters.loggingConfigurationOverrideConfigMap) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}"
           volumeMounts:
@@ -2819,7 +2990,7 @@ spec:
       volumes:
         - name: log4j-configuration
           configMap:
-            name: "{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-logging-configuration') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}"
+            name: "{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}"
             optional: {{=!('' == inputs.parameters.loggingConfigurationOverrideConfigMap)}}
 ",
           "setOwnerReference": true,
@@ -2855,7 +3026,7 @@ spec:
             },
           ],
         },
-        "name": "deployreplayerfromconfig",
+        "name": "createdeploymentfromconfig",
         "outputs": {
           "parameters": [],
         },
@@ -2866,7 +3037,7 @@ spec:
                 "parameters": [
                   {
                     "name": "podReplicas",
-                    "value": "{{=sprig.dig('podReplicas', '', fromJSON(inputs.parameters.replayerConfig))}}",
+                    "value": "{{=jsonpath(toJSON(fromJSON(inputs.parameters.replayerConfig)), '$.podReplicas')}}",
                   },
                   {
                     "name": "imageTrafficReplayerLocation",
@@ -2897,29 +3068,29 @@ spec:
                     "value": "{{=sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig))}}",
                   },
                   {
-                    "name": "targetUsername",
-                    "value": "{{=sprig.dig('authConfig', 'basic', 'username', '', fromJSON(inputs.parameters.targetConfig))}}",
-                  },
-                  {
-                    "name": "targetPassword",
-                    "value": "{{=sprig.dig('authConfig', 'basic', 'password', '', fromJSON(inputs.parameters.targetConfig))}}",
-                  },
-                  {
                     "name": "speedupFactor",
-                    "value": "{{=sprig.dig('speedupFactor', '', fromJSON(inputs.parameters.replayerConfig))}}",
+                    "value": "{{=jsonpath(toJSON(fromJSON(inputs.parameters.replayerConfig)), '$.speedupFactor')}}",
                   },
                   {
                     "name": "authHeaderOverride",
-                    "value": "{{=sprig.dig('authHeaderOverride', '', fromJSON(inputs.parameters.replayerConfig))}}",
+                    "value": "{{=jsonpath(toJSON(fromJSON(inputs.parameters.replayerConfig)), '$.authHeaderOverride')}}",
                   },
                   {
                     "name": "loggingConfigurationOverrideConfigMap",
-                    "value": "{{=sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.replayerConfig))}}",
+                    "value": "{{=jsonpath(toJSON(fromJSON(inputs.parameters.replayerConfig)), '$.loggingConfigurationOverrideConfigMap')}}",
+                  },
+                  {
+                    "name": "sessionName",
+                    "value": "",
+                  },
+                  {
+                    "name": "jsonConfig",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targettargetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), sprig.dict("targetHost", jsonpath(inputs.parameters.targetConfig, '$.endpoint'), "targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.replayerConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas')), sprig.merge(sprig.dict(), sprig.dict())))}}",
                   },
                 ],
               },
               "name": "deployReplayer",
-              "template": "deployreplayer",
+              "template": "createdeployment",
             },
           ],
         ],
@@ -3137,7 +3308,7 @@ spec:
               },
               "name": "deployPool",
               "template": "deploykafkanodepool",
-              "when": "'{{inputs.parameters.useKraft}}'",
+              "when": "{{inputs.parameters.useKraft}}",
             },
             {
               "arguments": {
@@ -3150,7 +3321,7 @@ spec:
               },
               "name": "deployKafkaClusterKraft",
               "template": "deploykafkaclusterkraft",
-              "when": "'{{inputs.parameters.useKraft}}'",
+              "when": "{{inputs.parameters.useKraft}}",
             },
             {
               "arguments": {

@@ -1,8 +1,15 @@
-./minikubeLocal.sh --start
-minikube addons enable metrics-server
+#./minikubeLocal.sh --start # New code...  Not sure if this breaks some prometheus cAdvisor scraping.  Just want to know first.
+minikube start \
+  --extra-config=kubelet.authentication-token-webhook=true \
+  --extra-config=kubelet.authorization-mode=Webhook \
+  --extra-config=scheduler.bind-address=0.0.0.0 \
+  --extra-config=controller-manager.bind-address=0.0.0.0
 eval $(minikube docker-env)
-minikube dashboard &
 kubectl config set-context --current --namespace=ma
+
+#nice to haves
+minikube addons enable metrics-server
+minikube dashboard &
 
 helm dependency build charts/aggregates/testClusters
 helm install --create-namespace -n ma tc charts/aggregates/testClusters

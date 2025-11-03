@@ -81,7 +81,7 @@ jobs:
       # Set up Kind cluster for workflow integration tests (only for console_link project)
       - name: Set up Kind cluster
         if: matrix.py-project == 'migrationConsole/lib/console_link'
-        uses: helm/kind-action@v1.12.0
+        uses: helm/kind-action@v1.13.0
         with:
           cluster_name: kind-test-cluster
 
@@ -106,10 +106,11 @@ jobs:
           PY_PROJECT: ${{ matrix.py-project }}
         run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT//\//-}" >> $GITHUB_ENV
       - name: Upload coverage to Codecov
+        if: always()
         uses: codecov/codecov-action@v5
         with:
           fail_ci_if_error: true
-          flags: unittests
+          flags: python
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
@@ -181,10 +182,11 @@ jobs:
             **/build/reports/tests/
 
       - name: Upload coverage to Codecov
+        if: always()
         uses: codecov/codecov-action@v5
         with:
           fail_ci_if_error: true
-          flags: unittests
+          flags: gradle
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
@@ -263,10 +265,11 @@ jobs:
       - name: Run CDK Jest Tests (using mocked images)
         run: npm run test
       - name: Upload coverage to Codecov
+        if: always()
         uses: codecov/codecov-action@v5
         with:
           fail_ci_if_error: true
-          flags: unittests
+          flags: node
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
