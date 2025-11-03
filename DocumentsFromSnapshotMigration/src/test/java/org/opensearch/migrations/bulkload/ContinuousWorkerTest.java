@@ -96,6 +96,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
         }
     }
 
+    // Test: Worker exits with non-zero code when no migration work remains
     @ParameterizedTest(name = "[no-work-left] continuous={0} {1}->{2}")
     @MethodSource("scenarios")
     @Timeout(value = 6, unit = TimeUnit.MINUTES)
@@ -114,6 +115,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
                 var network  = Network.newNetwork();
                 var osTarget = new SearchClusterContainer(targetClusterVersion).withAccessToHost(true).withNetwork(network)
         ) {
+            // Start source and target clusters in parallel
             CompletableFuture.allOf(
                     CompletableFuture.runAsync(esSource::start),
                     CompletableFuture.runAsync(osTarget::start)
@@ -137,6 +139,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
     }
 
 
+    // Test: Worker handles SIGTERM gracefully during active migration work
     @ParameterizedTest(name = "[sigterm] continuous={0} {1}->{2}")
     @MethodSource("scenarios")
     @Timeout(value = 6, unit = TimeUnit.MINUTES)
@@ -164,6 +167,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
                     ConnectionContextTestParams.builder().host(esSource.getUrl()).build().toConnectionContext()
             ).determineVersionAndCreate();
 
+            // Generate test data for migration
             var generator = new WorkloadGenerator(client);
             var opts = new WorkloadOptions();
             opts.setTotalDocs(100);
@@ -184,6 +188,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
             var process = pb.start();
 
             waitUntilAcquiredOrTimeout(process, 8000);
+            // Send SIGTERM to test graceful shutdown
             process.destroy();
 
             assertTrue(process.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS),
@@ -196,6 +201,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
     }
 
 
+    // Test: Worker handles lease timeout gracefully with network latency in continuous mode
     @ParameterizedTest(name = "[lease-timeout-continuous] {0}->{1}")
     @MethodSource("fixedPathOnly")
     @Timeout(value = 6, unit = TimeUnit.MINUTES)
@@ -222,9 +228,11 @@ public class ContinuousWorkerTest extends SourceTestBase {
                     CompletableFuture.runAsync(osTarget::start)
             ).join();
 
+            // Start proxy to simulate network latency
             proxy.start(TARGET_DOCKER_HOSTNAME, 9200);
 
             var targetOps = new ClusterOperations(osTarget);
+            // Ensure target cluster is ready before starting migration
             var healthResponse = targetOps.get("/_cluster/health?wait_for_status=yellow&timeout=30s");
             assertTrue(healthResponse.getValue().contains("yellow") || healthResponse.getValue().contains("green"), "Target cluster not ready");
 
@@ -280,6 +288,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
         ));
     }
 
+    // Test: Previous work item lease timer is properly canceled when processing next item
     @ParameterizedTest(name = "[timer-cancel] {0}->{1}")
     @MethodSource("fixedPathOnly")
     @Timeout(value = 6, unit = TimeUnit.MINUTES)
