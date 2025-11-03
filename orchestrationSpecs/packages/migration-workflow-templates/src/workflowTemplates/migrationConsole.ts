@@ -13,6 +13,7 @@ import {
     MissingField,
     PlainObject,
     selectInputsForRegister,
+    Serialized,
     TypeToken,
     typeToken,
     WorkflowBuilder
@@ -21,7 +22,9 @@ import {
     CLUSTER_CONFIG,
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
+    DEFAULT_RESOURCES,
     KAFKA_SERVICES_CONFIG,
+    ResourceRequirementsType,
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
 
@@ -131,6 +134,7 @@ function getConsoleDeploymentResource(
     migrationConsolePullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>,
     base64ConfigContents: AllowLiteralOrExpression<string>,
     command: AllowLiteralOrExpression<string>,
+    resources: AllowLiteralOrExpression<ResourceRequirementsType>
 ) {
     return {
         "apiVersion": "apps/v1",
@@ -157,6 +161,7 @@ function getConsoleDeploymentResource(
                             "name": "main",
                             "image": migrationConsoleImage,
                             "imagePullPolicy": migrationConsolePullPolicy,
+                            resources,
                             "command": [
                                 "/bin/sh",
                                 "-c",
@@ -250,7 +255,9 @@ export const MigrationConsole = WorkflowBuilder.create({
                     b.inputs.imageMigrationConsoleLocation,
                     b.inputs.imageMigrationConsolePullPolicy,
                     expr.toBase64(expr.asString(b.inputs.configContents)),
-                    b.inputs.command)
+                    b.inputs.command,
+                    resources: DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI,
+                )
             }))
 
         .addJsonPathOutput("deploymentName", "{.metadata.name}", typeToken<string>())

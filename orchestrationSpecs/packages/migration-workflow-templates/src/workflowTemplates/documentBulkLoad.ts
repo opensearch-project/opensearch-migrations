@@ -1,5 +1,7 @@
 import {
+    applyResourcesToContainer,
     CommonWorkflowParameters,
+    extractResourcesFromOptions,
     extractTargetKeysToExpressionMap,
     makeRequiredImageParametersForKeys,
     setupLog4jConfigForContainer,
@@ -15,6 +17,7 @@ import {
     METADATA_OPTIONS,
     NAMED_SOURCE_CLUSTER_CONFIG,
     NAMED_TARGET_CLUSTER_CONFIG,
+    ResourceRequirementsType,
     RFS_OPTIONS,
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
@@ -71,7 +74,9 @@ function getRfsReplicasetManifest
     loggingConfigMap: BaseExpression<string>,
 
     rfsImageName: BaseExpression<string>,
-    rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>
+    rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
+
+    resources: BaseExpression<Serialized<ResourceRequirementsType>>
 }): ReplicaSet {
     const useCustomLogging = expr.not(expr.isEmpty(args.loggingConfigMap));
     const baseContainerDefinition = {
@@ -89,12 +94,15 @@ function getRfsReplicasetManifest
         ]
     };
 
-    const finalContainerDefinition= setupTestCredsForContainer(
-        args.useLocalstackAwsCreds,
-        setupLog4jConfigForContainer(
-            useCustomLogging,
-            args.loggingConfigMap,
-            { container: baseContainerDefinition, volumes: []}
+    const finalContainerDefinition= applyResourcesToContainer(
+        args.resources,
+        setupTestCredsForContainer(
+            args.useLocalstackAwsCreds,
+            setupLog4jConfigForContainer(
+                useCustomLogging,
+                args.loggingConfigMap,
+                { container: baseContainerDefinition, volumes: []}
+            )
         )
     );
     return {
@@ -199,6 +207,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
+        .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
@@ -214,7 +223,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
                     rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
                     workflowName: expr.getWorkflowValue("name"),
-                    jsonConfig: expr.toBase64(b.inputs.rfsJsonConfig)
+                    jsonConfig: expr.toBase64(b.inputs.rfsJsonConfig),
+                    resources: b.inputs.resources
                 })
             }))
     )
@@ -236,6 +246,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     podReplicas: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["podReplicas"], 1),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
                     useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
+                    resources: extractResourcesFromOptions(b.inputs.documentBackfillConfig),
                     rfsJsonConfig: expr.asString(expr.serialize(
                         makeParamsDict(b.inputs.sourceVersion,
                             b.inputs.targetConfig,

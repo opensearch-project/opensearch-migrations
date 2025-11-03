@@ -1,4 +1,5 @@
 import {
+    applyResourcesToContainer,
     CommonWorkflowParameters,
     extractTargetKeysToExpressionMap,
     makeRequiredImageParametersForKeys,
@@ -6,7 +7,7 @@ import {
     TargetClusterParameters
 } from "./commonWorkflowTemplates";
 import {z} from "zod";
-import {getZodKeys, REPLAYER_OPTIONS, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
+import {getZodKeys, REPLAYER_OPTIONS, ResourceRequirementsType, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {
     BaseExpression,
     expr,
@@ -16,6 +17,7 @@ import {
     remapRecordNames,
     selectInputsFieldsAsExpressionRecord,
     selectInputsForRegister,
+    Serialized,
     transformZodObjectToParams,
     typeToken,
     WorkflowBuilder
@@ -33,6 +35,8 @@ function getReplayerDeploymentManifest
     replayerImageName: BaseExpression<string>,
     replayerImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
 
+    resources: BaseExpression<Serialized<ResourceRequirementsType>>,
+
     inputsAsEnvList: {name: string, value: string}[]
 }) {
     const baseContainerDefinition = {
@@ -45,8 +49,11 @@ function getReplayerDeploymentManifest
         ]
     };
     const finalContainerDefinition =
-        setupLog4jConfigForContainer(args.useCustomLogging, args.loggingConfigMap,
-            {container: baseContainerDefinition, volumes: []});
+        applyResourcesToContainer(
+            args.resources,
+            setupLog4jConfigForContainer(args.useCustomLogging, args.loggingConfigMap,
+                {container: baseContainerDefinition, volumes: []})
+            );
     return {
         apiVersion: "apps/v1",
         kind: "Deployment",
@@ -94,7 +101,6 @@ export const Replayer = WorkflowBuilder.create({
         .addInputsFromRecord(TargetClusterParameters)
         .addInputsFromRecord(transformZodObjectToParams(REPLAYER_OPTIONS))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
-
         .addResourceTask(b => b
             .setDefinition({
                 action: "create",
@@ -108,7 +114,8 @@ export const Replayer = WorkflowBuilder.create({
                     replayerImagePullPolicy: b.inputs.imageTrafficReplayerPullPolicy,
                     inputsAsEnvList: inputsToEnvVarsList(remapRecordNames(b.inputs, {"targetInsecure": "insecure"}),
                             "JCOMMANDER"),
-                    workflowName: expr.getWorkflowValue("name")
+                    workflowName: expr.getWorkflowValue("name"),
+                    resources: b.inputs.resources,
                 })
             }))
     )
@@ -125,6 +132,7 @@ export const Replayer = WorkflowBuilder.create({
         .addOptionalInput("podReplicas", c => 1)
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
+        .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
 
         .addSteps(b => b
             .addStep("deployReplayer", INTERNAL, "deployReplayer", c =>
@@ -132,7 +140,8 @@ export const Replayer = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c),
                     ...extractTargetKeysToExpressionMap(b.inputs.targetConfig),
                     ...selectInputsFieldsAsExpressionRecord(expr.deserializeRecord(b.inputs.replayerConfig), c,
-                        getZodKeys(REPLAYER_OPTIONS))
+                        getZodKeys(REPLAYER_OPTIONS)),
+                    resources: b.inputs.resources,
                 })))
     )
 

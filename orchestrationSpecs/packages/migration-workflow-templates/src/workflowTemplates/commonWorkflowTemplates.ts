@@ -1,5 +1,5 @@
 import {z} from "zod";
-import {TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
+import {ResourceRequirementsType, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {
     BaseExpression, Container,
     defineParam,
@@ -189,4 +189,57 @@ export function setupLog4jConfigForContainer(
             ]
         }
     } as const;
+}
+
+/**
+ * Extracts resource requirements from a serialized options config.
+ * Uses expr.dig to safely extract the resources field with an empty object as default.
+ * 
+ * @param optionsConfig - Serialized configuration object containing optional resources field
+ * @returns Expression for resource requirements (empty object if not specified)
+ * 
+ */
+export function extractResourcesFromOptions<T extends Serialized<{ resources?: ResourceRequirementsType }>>(
+    optionsConfig: BaseExpression<T>
+): BaseExpression<Serialized<ResourceRequirementsType>> {
+    return expr.serialize(expr.dig(expr.deserializeRecord(optionsConfig), ["resources"], {}));
+}
+
+/**
+ * Applies resource limits and requests to a container definition.
+ * This function adds the resources field to a container, following the pattern
+ * of other container transformation functions like setupLog4jConfigForContainer.
+ * 
+ * Resources are embedded directly as an expression object into the container manifest.
+ * 
+ * @param resources - Expression containing serialized resource requirements
+ * @param def - Container and volume pair to apply resources to
+ * @returns New ContainerVolumePair with resources applied to container
+ */
+export function applyResourcesToContainer(
+    resources: BaseExpression<Serialized<ResourceRequirementsType>>,
+    def: ContainerVolumePair
+): ContainerVolumePair {
+    const deserialized = expr.deserializeRecord(resources);
+    return {
+        ...def,
+        container: {
+            ...def.container,
+            resources: {
+                ...def.container?.resources,
+                requests: {
+                    ...def.container?.resources?.requests,
+                    cpu: makeStringTypeProxy(expr.dig(deserialized, ["requests", "cpu"], "")),
+                    memory: makeStringTypeProxy(expr.dig(deserialized, ["requests", "memory"], "")),
+                    "ephemeral-storage": makeStringTypeProxy(expr.dig(deserialized, ["requests", "ephemeral-storage"], "")),
+                },
+                limits: {
+                    ...def.container?.resources?.limits,
+                    cpu: makeStringTypeProxy(expr.dig(deserialized, ["limits", "cpu"], "")),
+                    memory: makeStringTypeProxy(expr.dig(deserialized, ["limits", "memory"], "")),
+                    "ephemeral-storage": makeStringTypeProxy(expr.dig(deserialized, ["limits", "ephemeral-storage"], "")),
+                },
+            }
+        }
+    };
 }

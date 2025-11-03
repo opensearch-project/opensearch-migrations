@@ -1,4 +1,5 @@
 import {z} from "zod";
+import { DEFAULT_RESOURCES } from "./resourceDefaults";
 
 export function getZodKeys<T extends z.ZodRawShape>(schema: z.ZodObject<T>): readonly (keyof T)[] {
     return Object.keys(schema.shape) as (keyof T)[];
@@ -18,10 +19,38 @@ export const S3_REPO_CONFIG = z.object({
 });
 
 
+export const CPU_QUANTITY = z.string()
+    .regex(/^[0-9]+m$/)
+    .describe("CPU quantity in millicores (e.g., '100m', '500m')");
+
+export const MEMORY_QUANTITY = z.string()
+    .regex(/^[0-9]+(E|P|T|G|M|K)i?$/)
+    .describe("Memory quantity with unit (e.g., '512Mi', '2G')");
+
+export const STORAGE_QUANTITY = z.string()
+    .regex(/^[0-9]+(E|P|T|G|M|K)i?$/)
+    .describe("Storage quantity with unit (e.g., '10Gi', '5G')");
+
+export const CONTAINER_RESOURCES = {
+    cpu: CPU_QUANTITY.optional(),
+    memory: MEMORY_QUANTITY.optional(),
+    "ephemeral-storage": STORAGE_QUANTITY.optional()
+}
+
+export const RESOURCE_REQUIREMENTS = z.object({
+    limits: z.object(CONTAINER_RESOURCES).describe("Resource upper bound for a container"),
+    requests: z.object(CONTAINER_RESOURCES).describe("Resource lower bound for a container")
+}).describe("Compute resource requirements for a container");
+
+export type ResourceRequirementsType = z.infer<typeof RESOURCE_REQUIREMENTS>;
+
 export const PROXY_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default(""),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
     setHeaders: z.array(z.string()).optional(),
+    resources: RESOURCE_REQUIREMENTS.optional()
+        .describe("Resource limits and requests for proxy container.")
+        .default(DEFAULT_RESOURCES.CAPTURE_PROXY),
 });
 
 export const REPLAYER_OPTIONS = z.object({
@@ -29,6 +58,9 @@ export const REPLAYER_OPTIONS = z.object({
     podReplicas: z.number().default(1),
     authHeaderOverride: z.string().default(""),
     loggingConfigurationOverrideConfigMap: z.string().default(""),
+    resources: RESOURCE_REQUIREMENTS.optional()
+        .describe("Resource limits and requests for replayer container.")
+        .default(DEFAULT_RESOURCES.REPLAYER),
     // docTransformerBase64: z.string().default(""),
     // otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
 });
@@ -45,6 +77,9 @@ export const METADATA_OPTIONS = z.object({
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
     output: z.union(["HUMAN_READABLE", "JSON"].map(s=>z.literal(s))).default("HUMAN_READABLE"),
     transformerConfigBase64: z.string().default(""),
+    resources: RESOURCE_REQUIREMENTS.optional()
+        .describe("Resource limits and requests for metadata migration container")
+        .default(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI),
 });
 
 export const RFS_OPTIONS = z.object({
@@ -59,6 +94,9 @@ export const RFS_OPTIONS = z.object({
     maxConnections: z.number().default(10),
     maxShardSizeBytes: z.number().default(80*1024*1024*1024),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
+    resources: RESOURCE_REQUIREMENTS.optional()
+        .describe("Resource limits and requests for RFS container")
+        .default(DEFAULT_RESOURCES.RFS),
 });
 
 
