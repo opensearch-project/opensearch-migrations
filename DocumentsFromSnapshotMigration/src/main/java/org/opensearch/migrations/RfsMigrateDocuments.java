@@ -2,6 +2,7 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
@@ -57,6 +58,7 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
+import org.opensearch.migrations.utils.FileSystemUtils;
 import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.IStringConverter;
@@ -224,6 +226,13 @@ public class RfsMigrateDocuments {
             validateValueWith = IndexNameValidator.class)
         public String indexNameSuffix = "";
 
+        @Parameter(required = false,
+            names = { "--continuous-mode", "--continuousMode"},
+            description = "Process work items as long as they're available and there have been no errors.  " +
+                "This mode still processes one at a time and will exit if a lease expires for a work item or " +
+                "if another error is encountered.")
+        public boolean continuousMode = false;
+
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
 
@@ -381,21 +390,24 @@ public class RfsMigrateDocuments {
         var transformationLoader = new TransformationLoader();
         Supplier<IJsonTransformer> docTransformerSupplier = () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
 
-        var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
-        var progressCursor = new AtomicReference<WorkItemCursor>();
-        var cancellationRunnableRef = new AtomicReference<Runnable>();
-        var workItemTimeProvider = new WorkItemTimeProvider();
         var coordinatorFactory = new WorkCoordinatorFactory(targetVersion, arguments.indexNameSuffix);
+        var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
         var cleanShutdownCompleted = new AtomicBoolean(false);
 
-        try (var workCoordinator = coordinatorFactory.get(
-                 new CoordinateWorkHttpClient(connectionContext),
-                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                 workerId,
-                Clock.systemUTC(),
-                workItemRef::set);
-             var processManager = new LeaseExpireTrigger(
-                w -> exitOnLeaseTimeout(
+        do { // continuousMode
+            try (var workCoordinator = coordinatorFactory.get(
+                     new CoordinateWorkHttpClient(connectionContext),
+                     TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                     workerId,
+                    Clock.systemUTC(),
+                    workItemRef::set)
+            ) {
+                var progressCursor = new AtomicReference<WorkItemCursor>();
+                var cancellationRunnableRef = new AtomicReference<Runnable>();
+                var workItemTimeProvider = new WorkItemTimeProvider();
+
+                try (var processManager = new LeaseExpireTrigger(
+                    w -> exitOnLeaseTimeout(
                         workItemRef,
                         workCoordinator,
                         w,
@@ -405,84 +417,101 @@ public class RfsMigrateDocuments {
                         () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                         cleanShutdownCompleted,
                         context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
-                Clock.systemUTC());) {
-            // Set up a hook to attempt to shut down cleanly (to mark progress in the worker coordination system) in the
-            // event of a SIGTERM signal.
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                Thread.currentThread().setName("Cleanup-Hook-Thread");
-                log.atWarn().setMessage("Received shutdown signal. Trying to mark progress and shutdown cleanly.").log();
-                try {
-                    executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
-                            context.getWorkCoordinationContext()::createSuccessorWorkItemsContext);
-                    log.atInfo().setMessage("Clean shutdown completed.").log();
-                } catch (InterruptedException e) {
-                    log.atError().setMessage("Clean exit process was interrupted: {}").addArgument(e).log();
-                    // Re-interrupt the thread to maintain interruption state
-                    Thread.currentThread().interrupt();
-                } catch (Exception e) {
-                    log.atError().setMessage("Could not complete clean exit process: {}").addArgument(e).log();
-                } finally {
-                    // Manually flush logs and shutdown log4j after all logging is done
-                    LogManager.shutdown();
+                    Clock.systemUTC()))
+                {
+                    // Set up a hook to attempt to shut down cleanly (to mark progress in the worker coordination system) in the
+                    // event of a SIGTERM signal.
+                    final var shutdownHookThread = new Thread(() -> {
+                        Thread.currentThread().setName("Cleanup-Hook-Thread");
+                        log.atWarn().setMessage("Received shutdown signal. Trying to mark progress and shutdown cleanly.").log();
+                        try {
+                            executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
+                                context.getWorkCoordinationContext()::createSuccessorWorkItemsContext);
+                            cleanupTemporaryDirectories(luceneDirPath, arguments.s3LocalDir);
+                            log.atInfo().setMessage("Clean shutdown completed.").log();
+                        } catch (InterruptedException e) {
+                            log.atError().setMessage("Clean exit process was interrupted: {}").addArgument(e).log();
+                            // Re-interrupt the thread to maintain interruption state
+                            Thread.currentThread().interrupt();
+                        } catch (Exception e) {
+                            log.atError().setMessage("Could not complete clean exit process: {}").addArgument(e).log();
+                        } finally {
+                            // Manually flush logs and shutdown log4j after all logging is done
+                            LogManager.shutdown();
+                        }
+                    });
+                    Runtime.getRuntime().addShutdownHook(shutdownHookThread);
+
+                    MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
+                    DocumentReindexer reindexer = new DocumentReindexer(targetClient,
+                        arguments.numDocsPerBulkRequest,
+                        arguments.numBytesPerBulkRequest,
+                        arguments.maxConnections,
+                        docTransformerSupplier);
+
+                    var finder = ClusterProviderRegistry.getSnapshotFileFinder(
+                        arguments.sourceVersion,
+                        arguments.versionStrictness.allowLooseVersionMatches);
+
+                    SourceRepo sourceRepo = (snapshotLocalDirPath == null)
+                        ? S3Repo.create(
+                        Paths.get(arguments.s3LocalDir),
+                        new S3Uri(arguments.s3RepoUri),
+                        arguments.s3Region,
+                        Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null),
+                        finder)
+                        : new FileSystemRepo(snapshotLocalDirPath, finder);
+
+                    var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
+
+                    var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo, arguments.versionStrictness.allowLooseVersionMatches);
+
+                    var unpackerFactory = new SnapshotShardUnpacker.Factory(
+                        repoAccessor,
+                        luceneDirPath,
+                        sourceResourceProvider.getBufferSizeInBytes()
+                    );
+
+                    run(
+                        new LuceneIndexReader.Factory(sourceResourceProvider),
+                        reindexer,
+                        progressCursor,
+                        workCoordinator,
+                        arguments.initialLeaseDuration,
+                        processManager,
+                        sourceResourceProvider.getIndexMetadata(),
+                        arguments.snapshotName,
+                        arguments.experimental.previousSnapshotName,
+                        arguments.experimental.experimentalDeltaMode,
+                        arguments.indexAllowlist,
+                        sourceResourceProvider.getShardMetadata(),
+                        unpackerFactory,
+                        arguments.maxShardSizeBytes,
+                        context,
+                        cancellationRunnableRef,
+                        workItemTimeProvider);
+
+                    cleanupTemporaryDirectories(luceneDirPath, arguments.s3LocalDir);
+                    Runtime.getRuntime().removeShutdownHook(shutdownHookThread);
                 }
-            }));
+            } catch (NoWorkLeftException e) {
+                log.atInfo().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
+                cleanShutdownCompleted.set(true);
+                System.exit(NO_WORK_LEFT_EXIT_CODE);
+            } catch (Exception e) {
+                log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
+                throw e;
+            } finally {
+                cleanupTemporaryDirectories(luceneDirPath, arguments.s3LocalDir);
+            }
+        } while (arguments.continuousMode);
+        cleanShutdownCompleted.set(true);
+    }
 
-            MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
-            DocumentReindexer reindexer = new DocumentReindexer(targetClient,
-                arguments.numDocsPerBulkRequest,
-                arguments.numBytesPerBulkRequest,
-                arguments.maxConnections,
-                docTransformerSupplier);
-
-            var finder = ClusterProviderRegistry.getSnapshotFileFinder(
-                    arguments.sourceVersion,
-                    arguments.versionStrictness.allowLooseVersionMatches);
-
-            SourceRepo sourceRepo = (snapshotLocalDirPath == null)
-                ? S3Repo.create(
-                    Paths.get(arguments.s3LocalDir),
-                    new S3Uri(arguments.s3RepoUri),
-                    arguments.s3Region,
-                    Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null),
-                    finder)
-                : new FileSystemRepo(snapshotLocalDirPath, finder);
-
-            var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
-
-            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo, arguments.versionStrictness.allowLooseVersionMatches);
-
-            var unpackerFactory = new SnapshotShardUnpacker.Factory(
-                repoAccessor,
-                luceneDirPath,
-                sourceResourceProvider.getBufferSizeInBytes()
-            );
-
-            run(
-                new LuceneIndexReader.Factory(sourceResourceProvider),
-                reindexer,
-                progressCursor,
-                workCoordinator,
-                arguments.initialLeaseDuration,
-                processManager,
-                sourceResourceProvider.getIndexMetadata(),
-                arguments.snapshotName,
-                arguments.experimental.previousSnapshotName,
-                arguments.experimental.experimentalDeltaMode,
-                arguments.indexAllowlist,
-                sourceResourceProvider.getShardMetadata(),
-                unpackerFactory,
-                arguments.maxShardSizeBytes,
-                context,
-                cancellationRunnableRef,
-                workItemTimeProvider);
-            cleanShutdownCompleted.set(true);
-        } catch (NoWorkLeftException e) {
-            log.atInfo().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
-            cleanShutdownCompleted.set(true);
-            System.exit(NO_WORK_LEFT_EXIT_CODE);
-        } catch (Exception e) {
-            log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
-            throw e;
+    private static void cleanupTemporaryDirectories(Path luceneDirPath, String s3LocalDir) throws IOException {
+        FileSystemUtils.deleteTree(luceneDirPath, false);
+        if (s3LocalDir != null) {
+            FileSystemUtils.deleteTree(Path.of(s3LocalDir), false);
         }
     }
 
