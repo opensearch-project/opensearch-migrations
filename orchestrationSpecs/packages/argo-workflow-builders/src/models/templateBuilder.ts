@@ -21,7 +21,6 @@ import {
 import {
     extendScope,
     FieldGroupConstraint,
-    ResourcesRequiredConstraint,
     ScopeIsEmptyConstraint,
     UniqueNameConstraintAtDeclaration,
     UniqueNameConstraintOutsideDeclaration
@@ -218,23 +217,21 @@ export class TemplateBuilder<
 
     addContainer<
         FirstBuilder extends ContainerBuilder<ContextualScope, InputParamsScope, any, any, any, any>,
-        FinalBuilder extends ContainerBuilder<ContextualScope, InputParamsScope, any, any, any, any>
+        FinalBuilder extends ContainerBuilder<ContextualScope, InputParamsScope,
+        // TODO, figure out how to type check against Container in k8s types
+         GenericScope & { image: any; resources: any; },
+          any, any, any>,
     >(
         builderFn: ScopeIsEmptyConstraint<BodyScope,
-            (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}, OutputParamsScope>) => FinalBuilder>,
+            (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}, OutputParamsScope>) => 
+            FinalBuilder>,
         factory?: (context: ContextualScope, inputs: InputParamsScope) => FirstBuilder
-    ): FinalBuilder
+    ): FinalBuilder    
     {
-        const fn = builderFn as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}, {}>) => FinalBuilder;
+        const fn = builderFn as unknown as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}, {}>) => FinalBuilder;
         const result = fn((factory ??
             ((c, i) => new ContainerBuilder(c, i, {}, {}, {}, {}, {})))
         (this.contextualScope, this.inputScope));
-        
-        // Runtime validation: check if resources were added
-        if (!(result as any).bodyScope?.resources) {
-            throw new Error('Container resources must be specified using addResources() before finalizing the template');
-        }
-        
         return result;
     }
 

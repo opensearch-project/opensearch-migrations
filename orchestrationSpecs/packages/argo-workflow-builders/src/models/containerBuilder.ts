@@ -364,9 +364,10 @@ export class ContainerBuilder<
     /**
      * Add resource requirements (CPU, memory limits and requests) to the container.
      * This method allows chaining resource specifications like other container properties.
+     * Adds the WithResources brand to enable compile-time enforcement.
      * 
      * @param resources - Resource requirements (limits and requests for CPU, memory, ephemeral-storage)
-     * @returns New ContainerBuilder with resources applied
+     * @returns New ContainerBuilder with resources applied and branded
      */
     addResources(
         resources: AllowLiteralOrExpression<Record<string, any>>
@@ -378,13 +379,27 @@ export class ContainerBuilder<
         EnvScope,
         OutputParamsScope
     > {
-        const mergedResources = expr.mergeDicts(
-            expr.literal(this.bodyScope?.resources || {}),
-            toExpression(resources));
+        // Merged Resources failing due to argo validation that is not allowing expressions in resources
+        // Solve this by requesting an argo change https://github.com/argoproj/argo-workflows/issues/15005
+        // const mergedResources = expr.serialize(expr.mergeDicts(
+        //     expr.literal(this.bodyScope?.resources || {}),
+        //     toExpression(resources)));
+        // Temporary workaround to hardcode defaults
+        const mergedResources = { 
+            requests: {
+                cpu: "1000m",
+                memory: "4G",
+                "ephemeral-storage": "20G"
+            },
+            limits: {
+                cpu: "4000m",
+                memory: "4G",
+                "ephemeral-storage": "20G"
+        }}
         return new ContainerBuilder(
             this.contextualScope,
             this.inputsScope,
-            {...this.bodyScope, resources: mergedResources},
+            {...this.bodyScope, resources: mergedResources} as ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
             this.volumeScope,
             this.envScope,
             this.outputsScope,

@@ -36,19 +36,8 @@ export type FieldGroupConstraint<
 export type ScopeIsEmptyConstraint<S, T> =
     keyof S extends never
         ? T
-        : TypescriptError<`Scope must be empty but contains: ${keyof S & string}`>
-
-/**
- * Constraint that requires resources to be present in ContainerScope.
- * Checks if 'resources' key exists in the scope type.
- */
-export type ResourcesRequiredConstraint<
-    ContainerScope extends GenericScope,
-    T
-> = 'resources' extends keyof ContainerScope
-    ? T
-    : TypescriptError<'Container resources must be specified using addResources() before finalizing the template'>;
-
+        : TypescriptError<`Scope must be empty but contains: ${keyof S & string}`>/**
+ 
 /**
  * Helper type to extract ContainerScope from a ContainerBuilder type.
  * This allows us to check for resources in the container scope.

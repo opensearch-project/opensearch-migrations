@@ -3,8 +3,8 @@ import {
     CLUSTER_VERSION_STRING,
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
-    DEFAULT_RESOURCES,
     NAMED_TARGET_CLUSTER_CONFIG,
+    ResourceRequirementsType,
     RFS_OPTIONS
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
@@ -71,7 +71,7 @@ function getRfsReplicasetManifest
 
     rfsImageName: BaseExpression<string>,
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
-    resources: BaseExpression<any>
+    resources: BaseExpression<ResourceRequirementsType>
 }): ReplicaSet {
     const useCustomLogging = expr.not(expr.isEmpty(args.loggingConfigMap));
     const baseContainerDefinition = {
@@ -119,7 +119,7 @@ function getRfsReplicasetManifest
             "---INLINE-JSON",
             makeStringTypeProxy(args.jsonConfig)
         ],
-        resources: expr.deserializeRecord(args.resources)
+        resources: args.resources
     };
 
     const finalContainerDefinition= setupTestCredsForContainer(
@@ -233,7 +233,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
-
+        .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addResourceTask(b => b
@@ -250,7 +250,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
                     workflowName: expr.getWorkflowValue("name"),
                     jsonConfig: expr.toBase64(b.inputs.rfsJsonConfig),
-                    resources: expr.serialize(expr.literal(DEFAULT_RESOURCES.RFS))
+                    resources: expr.deserializeRecord(b.inputs.resources),
                 })
             }))
     )
@@ -279,7 +279,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             b.inputs.snapshotConfig,
                             b.inputs.documentBackfillConfig,
                             b.inputs.sessionName)
-                    ))
+                    )),
+                     resources:  expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources"))
                 })
             )
         )

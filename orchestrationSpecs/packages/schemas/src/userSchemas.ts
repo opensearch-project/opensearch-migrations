@@ -32,8 +32,8 @@ export const STORAGE_QUANTITY = z.string()
     .describe("Storage quantity with unit (e.g., '10Gi', '5G')");
 
 export const CONTAINER_RESOURCES = {
-    cpu: CPU_QUANTITY.optional(),
-    memory: MEMORY_QUANTITY.optional(),
+    cpu: CPU_QUANTITY,
+    memory: MEMORY_QUANTITY,
     "ephemeral-storage": STORAGE_QUANTITY.optional()
 }
 
