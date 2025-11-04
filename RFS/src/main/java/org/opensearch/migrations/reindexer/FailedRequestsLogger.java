@@ -31,7 +31,9 @@ public class FailedRequestsLogger {
         String message,
         String requestBody,
         String responseBody
-    ) {}
+    ) {
+        // Empty body - record uses auto-generated canonical constructor, accessors, equals, hashCode, and toString
+    }
 
     /**
      * Exception thrown when bulk failure record cannot be serialized to JSON.
