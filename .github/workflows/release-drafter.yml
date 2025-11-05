@@ -116,11 +116,12 @@ jobs:
         with:
           role-to-assume: ${{ secrets.SOLUTIONS_CREDENTIALS_ROLE }}
           aws-region: us-east-1
-      - name: Configure AWS Credentials for Solutions Upload
-        uses: aws-actions/configure-aws-credentials@v5
-        with:
-          role-to-assume: ${{ secrets.SOLUTIONS_UPLOAD_ROLE }}
-          aws-region: us-east-1
+      - name: Assume second role for Solutions Upload
+        run: |
+          CREDS=$(aws sts assume-role --role-arn ${{ secrets.SOLUTIONS_UPLOAD_ROLE }} --role-session-name github-actions)
+          echo "AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(echo $CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
       - name: Upload Solutions Artifact to S3
         run: |
           aws s3 cp deployment/migration-assistant-solution/build/artifact.zip s3://cornerstone-amazonaws/SO0290/${{ steps.get_data.outputs.version }}/artifact.zip \
