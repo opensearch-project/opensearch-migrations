@@ -287,7 +287,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
                     "worker (completion phase) did not terminate in allotted time");
 
             int exitCodeComplete = processComplete.exitValue();
-            assertTrue(exitCodeComplete == 0 || exitCodeComplete == 1,
+            assertTrue(exitCodeComplete == 0 || exitCodeComplete == 3,
                     "Expected 0 (success) or 1 (no-work-left) on completion phase, got: " + exitCodeComplete);
 
             // Now the target should have all docs

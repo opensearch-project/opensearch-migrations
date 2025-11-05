@@ -60,10 +60,10 @@ public class ProcessLifecycleTest extends SourceTestBase {
     }
 
     // The following test expects to get an exit code of 0 (TBD_GOES_HERE) at least two times, and then an
-    // exit code of 1 (NO_WORK_LEFT) within a maximum of 21 iterations.
+    // exit code of 3 (NO_WORK_LEFT) within a maximum of 21 iterations.
     @Test
     public void testExitsZeroThenThreeForSimpleSetup() throws Exception {
-        testProcess(1,
+        testProcess(3,
             d -> {
                 var firstExitCode =
                     runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER);

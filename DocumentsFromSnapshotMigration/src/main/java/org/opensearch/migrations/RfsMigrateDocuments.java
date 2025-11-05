@@ -74,8 +74,8 @@ import org.slf4j.MDC;
 @Slf4j
 public class RfsMigrateDocuments {
     public static final int SUCCESS_EXIT_CODE = 0;
-    public static final int NO_WORK_LEFT_EXIT_CODE = 1;
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
+    public static final int NO_WORK_LEFT_EXIT_CODE = 3;
 
     // Arbitrary value, increasing from 5 to 15 seconds due to prevalence of clock skew exceptions
     // observed on production clusters during migrations
