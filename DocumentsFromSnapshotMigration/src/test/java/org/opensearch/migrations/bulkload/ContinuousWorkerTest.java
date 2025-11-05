@@ -3,9 +3,9 @@ package org.opensearch.migrations.bulkload;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -50,6 +50,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -66,8 +67,15 @@ import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNA
 @Slf4j
 public class ContinuousWorkerTest extends SourceTestBase {
 
-    private static final Duration DEFAULT_TEST_TIMEOUT = Duration.ofMinutes(6);
+    private static final long DEFAULT_TIMEOUT_MINUTES = 6;
+    private static final Duration DEFAULT_TEST_TIMEOUT = Duration.ofMinutes(DEFAULT_TIMEOUT_MINUTES);
     private static final String TARGET_DOCKER_HOSTNAME = "target";
+
+    @TempDir
+    Path tempDirSnapshot;
+
+    @TempDir
+    Path tempDirLucene;
 
     private static Stream<Arguments> scenarios() {
         return Stream.of(
@@ -88,6 +96,8 @@ public class ContinuousWorkerTest extends SourceTestBase {
 
     @SneakyThrows
     private static void waitUntilAcquiredOrTimeout(Process p, long ms) {
+        // Note: This helper reads from stdout only. If relevant output appears on stderr,
+        // ensure ProcessBuilder.redirectErrorStream(true) is called before starting the process.
         var br = new BufferedReader(new InputStreamReader(p.getInputStream()));
         long deadline = System.currentTimeMillis() + ms;
         String line;
@@ -97,9 +107,9 @@ public class ContinuousWorkerTest extends SourceTestBase {
     }
 
     // Test: Worker exits with non-zero code when no migration work remains
-    @ParameterizedTest(name = "[no-work-left] continuous={0} {1}->{2}")
+    @ParameterizedTest(name = "[no-work-left → exit=3] continuous={0} {1}->{2}")
     @MethodSource("scenarios")
-    @Timeout(value = 6, unit = TimeUnit.MINUTES)
+    @Timeout(value = DEFAULT_TIMEOUT_MINUTES, unit = TimeUnit.MINUTES)
     @SneakyThrows
     public void exitsOnNoWorkLeft_inBothModes(
             boolean continuousMode,
@@ -107,8 +117,6 @@ public class ContinuousWorkerTest extends SourceTestBase {
             SearchClusterContainer.ContainerVersion targetClusterVersion
     ) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        var tempDirSnapshot = Files.createTempDirectory("rfs_no_work_left_snap");
-        var tempDirLucene   = Files.createTempDirectory("rfs_no_work_left_lucene");
 
         try (
                 var esSource = new SearchClusterContainer(sourceClusterVersion).withAccessToHost(true);
@@ -130,11 +138,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
 
             assertTrue(process.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS), "worker timed out");
             int exitCode = process.exitValue();
-
-            assertNotEquals(0, exitCode, "Expected non-zero exit code for 'no work left' in both modes");
-        } finally {
-            deleteTree(tempDirSnapshot);
-            deleteTree(tempDirLucene);
+            assertEquals(3, exitCode, "Expected NO_WORK_LEFT (3) when no migration work remains");
         }
     }
 
@@ -142,7 +146,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
     // Test: Worker handles SIGTERM gracefully during active migration work
     @ParameterizedTest(name = "[sigterm] continuous={0} {1}->{2}")
     @MethodSource("scenarios")
-    @Timeout(value = 6, unit = TimeUnit.MINUTES)
+    @Timeout(value = DEFAULT_TIMEOUT_MINUTES, unit = TimeUnit.MINUTES)
     @SneakyThrows
     public void sigtermLeadsToCleanShutdownDuringActiveWork(
             boolean continuousMode,
@@ -150,8 +154,6 @@ public class ContinuousWorkerTest extends SourceTestBase {
             SearchClusterContainer.ContainerVersion targetClusterVersion
     ) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        var tempDirSnapshot = Files.createTempDirectory("rfs_sigterm_snap");
-        var tempDirLucene   = Files.createTempDirectory("rfs_sigterm_lucene");
 
         try (
                 var esSource = new SearchClusterContainer(sourceClusterVersion).withAccessToHost(true);
@@ -193,10 +195,9 @@ public class ContinuousWorkerTest extends SourceTestBase {
 
             assertTrue(process.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS),
                     "worker did not terminate after SIGTERM");
+            // Optional sanity check: make sure we didn't take the lease-timeout path
+            assertNotEquals(2, process.exitValue(), "Process should not exit via lease-timeout on SIGTERM");
 
-        } finally {
-            deleteTree(tempDirSnapshot);
-            deleteTree(tempDirLucene);
         }
     }
 
@@ -204,15 +205,13 @@ public class ContinuousWorkerTest extends SourceTestBase {
     // Test: Worker handles lease timeout gracefully with network latency in continuous mode
     @ParameterizedTest(name = "[lease-timeout-continuous] {0}->{1}")
     @MethodSource("fixedPathOnly")
-    @Timeout(value = 6, unit = TimeUnit.MINUTES)
+    @Timeout(value = DEFAULT_TIMEOUT_MINUTES, unit = TimeUnit.MINUTES)
     @SneakyThrows
     public void leaseTimeoutUnderContinuousMode_thenSuccessorRunCompletes(
             SearchClusterContainer.ContainerVersion sourceClusterVersion,
             SearchClusterContainer.ContainerVersion targetClusterVersion
     ) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        var tempDirSnapshot = Files.createTempDirectory("rfs_cont_lease_snap");
-        var tempDirLucene   = Files.createTempDirectory("rfs_cont_lease_lucene");
 
         try (
             var esSource = new SearchClusterContainer(sourceClusterVersion).withAccessToHost(true);
@@ -288,14 +287,11 @@ public class ContinuousWorkerTest extends SourceTestBase {
 
             int exitCodeComplete = processComplete.exitValue();
             assertTrue(exitCodeComplete == 0 || exitCodeComplete == 3,
-                    "Expected 0 (success) or 1 (no-work-left) on completion phase, got: " + exitCodeComplete);
+                    "Expected 0 (success) or 3 (no-work-left) on completion phase, got: " + exitCodeComplete);
 
             // Now the target should have all docs
             checkClusterMigrationOnFinished(esSource, osTarget,
                     DocumentMigrationTestContext.factory().noOtelTracking());
-        } finally {
-            deleteTree(tempDirSnapshot);
-            deleteTree(tempDirLucene);
         }
     }
 
@@ -308,15 +304,13 @@ public class ContinuousWorkerTest extends SourceTestBase {
     // Test: Previous work item lease timer is properly canceled when processing next item
     @ParameterizedTest(name = "[timer-cancel] {0}->{1}")
     @MethodSource("fixedPathOnly")
-    @Timeout(value = 6, unit = TimeUnit.MINUTES)
+    @Timeout(value = DEFAULT_TIMEOUT_MINUTES, unit = TimeUnit.MINUTES)
     @SneakyThrows
     public void previousLeaseTimerDoesNotFireDuringNextItem(
             SearchClusterContainer.ContainerVersion sourceClusterVersion,
             SearchClusterContainer.ContainerVersion targetClusterVersion
     ) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        var tempDirSnapshot = Files.createTempDirectory("rfs_timer_cancel_snap");
-        var tempDirLucene   = Files.createTempDirectory("rfs_timer_cancel_lucene");
 
         try (
                 var sourceCluster = new SearchClusterContainer(sourceClusterVersion).withAccessToHost(true);
@@ -382,18 +376,17 @@ public class ContinuousWorkerTest extends SourceTestBase {
 
             var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
             var progressCursor = new AtomicReference<WorkItemCursor>();
-            var coordinatorFactory = new WorkCoordinatorFactory(targetClusterVersion.getVersion());
+            var coordinatorFactory = new WorkCoordinatorFactory(targetClusterVersion.getVersion(), "");
 
             try (var coordinator = coordinatorFactory.get(
                     new CoordinateWorkHttpClient(connectionContext),
-                    TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                    RfsMigrateDocuments.TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                     UUID.randomUUID().toString(),
                     java.time.Clock.systemUTC(),
                     workItemRef::set)) {
 
-                var docTransformer = new TransformationLoader().getTransformerFactoryLoader(
-                        Optional.ofNullable(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG)
-                                .orElse(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG));
+                var docTransformer = new TransformationLoader()
+                    .getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
 
                 var reindexer = new DocumentReindexer(
                         new OpenSearchClientFactory(connectionContext).determineVersionAndCreate(),
@@ -439,9 +432,6 @@ public class ContinuousWorkerTest extends SourceTestBase {
                     ConnectionContextTestParams.builder().host(targetCluster.getUrl()).build().toConnectionContext()));
             assertTrue(targetMap.containsKey("geonames"));
             assertTrue(targetMap.get("geonames") > 0);
-        } finally {
-            deleteTree(tempDirSnapshot);
-            deleteTree(tempDirLucene);
         }
     }
 }
