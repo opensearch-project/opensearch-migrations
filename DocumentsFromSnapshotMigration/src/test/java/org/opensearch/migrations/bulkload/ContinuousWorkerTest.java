@@ -206,7 +206,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
     @MethodSource("fixedPathOnly")
     @Timeout(value = 6, unit = TimeUnit.MINUTES)
     @SneakyThrows
-    public void leaseTimeoutUnderContinuousMode_proceedsHealthy(
+    public void leaseTimeoutUnderContinuousMode_thenSuccessorRunCompletes(
             SearchClusterContainer.ContainerVersion sourceClusterVersion,
             SearchClusterContainer.ContainerVersion targetClusterVersion
     ) {
@@ -215,13 +215,13 @@ public class ContinuousWorkerTest extends SourceTestBase {
         var tempDirLucene   = Files.createTempDirectory("rfs_cont_lease_lucene");
 
         try (
-                var esSource = new SearchClusterContainer(sourceClusterVersion).withAccessToHost(true);
-                var network  = Network.newNetwork();
-                var osTarget = new SearchClusterContainer(targetClusterVersion)
-                        .withAccessToHost(true)
-                        .withNetwork(network)
-                        .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
-                var proxy    = new ToxiProxyWrapper(network)
+            var esSource = new SearchClusterContainer(sourceClusterVersion).withAccessToHost(true);
+            var network  = Network.newNetwork();
+            var osTarget = new SearchClusterContainer(targetClusterVersion)
+                    .withAccessToHost(true)
+                    .withNetwork(network)
+                    .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
+            var proxy    = new ToxiProxyWrapper(network)
         ) {
             CompletableFuture.allOf(
                     CompletableFuture.runAsync(esSource::start),
@@ -232,7 +232,6 @@ public class ContinuousWorkerTest extends SourceTestBase {
             proxy.start(TARGET_DOCKER_HOSTNAME, 9200);
 
             var targetOps = new ClusterOperations(osTarget);
-            // Ensure target cluster is ready before starting migration
             var healthResponse = targetOps.get("/_cluster/health?wait_for_status=yellow&timeout=30s");
             assertTrue(healthResponse.getValue().contains("yellow") || healthResponse.getValue().contains("green"), "Target cluster not ready");
 
@@ -245,7 +244,7 @@ public class ContinuousWorkerTest extends SourceTestBase {
 
             var generator = new WorkloadGenerator(client);
             var opts = new WorkloadOptions();
-            opts.setTotalDocs(400);
+            opts.setTotalDocs(3000);
             opts.setWorkloads(List.of(Workloads.GEONAMES));
             generator.generate(opts);
 
@@ -253,29 +252,47 @@ public class ContinuousWorkerTest extends SourceTestBase {
             esSource.copySnapshotData(tempDirSnapshot.toString());
 
             var tp = proxy.getProxy();
-            var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 500);
+            var upLatency   = tp.toxics().latency("latency-up",   ToxicDirection.UPSTREAM,   2000);
+            var downLatency = tp.toxics().latency("latency-down", ToxicDirection.DOWNSTREAM, 2000);
 
             try {
-                var additionalArgs = args(true, sourceClusterVersion.getVersion().toString(),
-                        "--documents-per-bulk-request", "10",
-                        "--max-connections", "2",
-                        "--initial-lease-duration", "PT10s");
+                // Phase 1: force a timeout (expect exit code 2)
+                var timeoutArgs = args(true, sourceClusterVersion.getVersion().toString(),
+                        "--documents-per-bulk-request", "1000",
+                        "--max-connections", "1",
+                        "--initial-lease-duration", "PT3s");
 
-                var pb = setupProcess(tempDirSnapshot, tempDirLucene, proxy.getProxyUriAsString(), additionalArgs);
-                var process = runAndMonitorProcess(pb);
+                var pbTimeout = setupProcess(tempDirSnapshot, tempDirLucene, proxy.getProxyUriAsString(), timeoutArgs);
+                var processTimeout = runAndMonitorProcess(pbTimeout);
 
-                assertTrue(process.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS), "worker timed out");
-                int exitCode = process.exitValue();
-
-                assertTrue(exitCode == 0 || exitCode == 1,
-                        "Expected 0 (success) or 1 (no-work-left) after completion in continuous mode, got: " + exitCode);
-
-                checkClusterMigrationOnFinished(esSource, osTarget,
-                        DocumentMigrationTestContext.factory().noOtelTracking());
-
+                assertTrue(processTimeout.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS),
+                        "worker (timeout phase) did not terminate in allotted time");
+                assertEquals(2, processTimeout.exitValue(),
+                        "Expected lease-timeout exit (2) in continuous mode under harsh latency");
             } finally {
-                latency.remove();
+                upLatency.remove();
+                downLatency.remove();
             }
+
+            // Phase 2: normal run which completes migration
+            var completeArgs = args(true, sourceClusterVersion.getVersion().toString(),
+                    "--documents-per-bulk-request", "200",
+                    "--max-connections", "2",
+                    "--initial-lease-duration", "PT30S");
+
+            var pbComplete = setupProcess(tempDirSnapshot, tempDirLucene, osTarget.getUrl(), completeArgs);
+            var processComplete = runAndMonitorProcess(pbComplete);
+
+            assertTrue(processComplete.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS),
+                    "worker (completion phase) did not terminate in allotted time");
+
+            int exitCodeComplete = processComplete.exitValue();
+            assertTrue(exitCodeComplete == 0 || exitCodeComplete == 1,
+                    "Expected 0 (success) or 1 (no-work-left) on completion phase, got: " + exitCodeComplete);
+
+            // Now the target should have all docs
+            checkClusterMigrationOnFinished(esSource, osTarget,
+                    DocumentMigrationTestContext.factory().noOtelTracking());
         } finally {
             deleteTree(tempDirSnapshot);
             deleteTree(tempDirLucene);
