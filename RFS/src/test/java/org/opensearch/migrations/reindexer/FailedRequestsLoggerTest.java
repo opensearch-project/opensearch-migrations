@@ -1,182 +1,128 @@
 package org.opensearch.migrations.reindexer;
 
+import java.util.Map;
+
 import org.opensearch.migrations.bulkload.common.OpenSearchClient.OperationFailed;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
 
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.CoreMatchers.hasItem;
-import static org.hamcrest.CoreMatchers.not;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+@Slf4j
 class FailedRequestsLoggerTest {
-    @Test
-    void testLogBulkFailure_withNoBody() {
-        try (var logs = new CloseableLogSetup(FailedRequestsLogger.FAILED_REQUESTS_LOGGER)) {
-            var logger = new FailedRequestsLogger();
-
-            var indexName = "myIndexName";
-            var size = 22;
-            var body = "<BULK_REQUEST_BODY>";
-            var cause = "<CAUSE!>";
-            logger.logBulkFailure(indexName, () -> size, () -> body, new RuntimeException(cause));
-
-            assertThat(
-                logs.getLogEvents(),
-                hasItem(
-                    allOf(
-                        containsString(indexName),
-                        containsString(size + ""),
-                        containsString(body),
-                        containsString(cause)
-                    )
-                )
-            );
-        }
-    }
 
     @Test
-    void testLogBulkFailure_withResponseBody() {
+    void testLogBulkFailure_withMdcAssertions() {
         try (var logs = new CloseableLogSetup(FailedRequestsLogger.FAILED_REQUESTS_LOGGER)) {
-            var logger = new FailedRequestsLogger();
+            var logger = new FailedRequestsLogger(logs.getTestLogger());
 
-            var indexName = "yourIndexName";
-            var size = 33;
-            var requestBody = "<BULK_REQUEST_BODY>";
-            var responseBody = "<BULK_RESPONSE_BODY>";
+            var indexName = "orders";
+            var failedItemCount = 1;
+            
+            var requestBody = """
+                {"index":{"_index":"orders","_id":"order-001"}}
+                {"customer_id":"cust123","total":150.00,"items":["item1","item2"]}
+                """;
+            
+            var responseBody = """
+                {
+                  "errors": true,
+                  "items": [{
+                    "index": {
+                      "status": 429,
+                      "error": {"type": "es_rejected_execution_exception", "reason": "rejected execution"}
+                    }
+                  }]
+                }
+                """;
 
-            var topLevelMessage = "Retries limit reached";
-            var operationFailureMessage = "Bulk request failed.";
             var wrappedCause = new RuntimeException(
-                topLevelMessage,
-                new OperationFailed(operationFailureMessage, new HttpResponse(0, null, null, responseBody))
+                "Rate limit exceeded",
+                new OperationFailed("Too many requests", new HttpResponse(429, null, null, responseBody))
             );
-            logger.logBulkFailure(indexName, () -> size, () -> requestBody, wrappedCause);
+            
+            logger.logBulkFailure(indexName, () -> failedItemCount, () -> requestBody, wrappedCause);
 
-            assertThat(
-                logs.getLogEvents(),
-                hasItem(
-                    allOf(
-                        containsString(indexName),
-                        containsString(size + ""),
-                        containsString(requestBody),
-                        containsString(responseBody),
-                        not(containsString(topLevelMessage)),
-                        containsString(operationFailureMessage)
-                    )
-                )
-            );
+            // Verify the log event was captured
+            assertEquals(1, logs.getCapturedLogEvents().size());
+            var capturedEvent = logs.getCapturedLogEvents().get(0);
+            
+            // Verify the log message
+            assertThat(capturedEvent.getMessage(), containsString("Bulk failure logged to DLQ"));
+            
+            // Verify MDC context data contains all expected keys and values
+            Map<String, String> mdc = capturedEvent.getContextData();
+            assertNotNull(mdc, "MDC context data should be present");
+            
+            assertEquals(indexName, mdc.get(FailedRequestsLogger.FailedRequestsLoggerKeys.INDEX_NAME));
+            assertEquals("1", mdc.get(FailedRequestsLogger.FailedRequestsLoggerKeys.FAILED_ITEM_COUNT));
+            assertEquals("Rate limit exceeded", mdc.get(FailedRequestsLogger.FailedRequestsLoggerKeys.EXCEPTION_MESSAGE));
+            
+            String rootCause = mdc.get(FailedRequestsLogger.FailedRequestsLoggerKeys.ROOT_CAUSE);
+            assertNotNull(rootCause, "rootCause should be present in MDC");
+            assertThat(rootCause, containsString("OperationFailed"));
+            assertThat(rootCause, containsString("Too many requests"));
+
+            String capturedRequestBody = mdc.get(FailedRequestsLogger.FailedRequestsLoggerKeys.REQUEST_BODY);
+            assertNotNull(capturedRequestBody, "requestBody should be present in MDC");
+            assertThat(capturedRequestBody, containsString("order-001"));
+            assertThat(capturedRequestBody, containsString("cust123"));
+
+            assertEquals(responseBody.trim(), mdc.get(FailedRequestsLogger.FailedRequestsLoggerKeys.RESPONSE_BODY).trim());
         }
     }
 
     @Test
-    void testLoggerNameResolution() {
-        // Verify that the logger constant matches the expected name
-        assertThat(FailedRequestsLogger.FAILED_REQUESTS_LOGGER, equalTo("FailedRequestsLogger"));
-        
-        // Verify that a logger created with this name can be resolved
-        Logger logger = LoggerFactory.getLogger(FailedRequestsLogger.FAILED_REQUESTS_LOGGER);
-        assertThat(logger.getName(), equalTo("FailedRequestsLogger"));
-    }
-
-    @Test
-    void testCustomLoggerInjection() {
-        // Create a custom logger for testing
-        try (var logs = new CloseableLogSetup("CustomTestLogger")) {
-            Logger customLogger = logs.getTestLogger();
-            var logger = new FailedRequestsLogger(customLogger);
-
-            var indexName = "customIndexName";
-            var size = 44;
-            var body = "<CUSTOM_BULK_REQUEST_BODY>";
-            var cause = "<CUSTOM_CAUSE!>";
-            logger.logBulkFailure(indexName, () -> size, () -> body, new RuntimeException(cause));
-
-            // Verify the log was captured by the custom logger
-            assertThat(
-                logs.getLogEvents(),
-                hasItem(
-                    allOf(
-                        containsString(indexName),
-                        containsString(size + ""),
-                        containsString(body),
-                        containsString(cause)
-                    )
-                )
-            );
-        }
-    }
-
-    @Test
-    void testBulkFailureLogsToCorrectLogger() {
-        // Verify that bulk failures log detailed info to the named logger (DLQ) and error summary to class-based logger
+    void testBulkFailureLogsToCorrectLoggers() {
         try (var namedLogs = new CloseableLogSetup(FailedRequestsLogger.FAILED_REQUESTS_LOGGER);
              var classLogs = new CloseableLogSetup(FailedRequestsLogger.class.getName())) {
             
-            var logger = new FailedRequestsLogger();
+            var logger = new FailedRequestsLogger(namedLogs.getTestLogger());
 
-            var indexName = "testIndex";
-            var size = 55;
-            var body = "<TEST_BULK_REQUEST_BODY>";
-            var cause = "<TEST_CAUSE!>";
-            logger.logBulkFailure(indexName, () -> size, () -> body, new RuntimeException(cause));
+            var indexName = "products";
+            var failedItemCount = 1;
+            var requestBody = """
+                {"index":{"_index":"products","_id":"prod-001"}}
+                {"name":"Widget","price":19.99}
+                """;
+            
+            logger.logBulkFailure(indexName, () -> failedItemCount, () -> requestBody, 
+                new RuntimeException("Connection timeout"));
 
-            // Verify the detailed log appears in the named logger (DLQ)
-            assertThat(
-                namedLogs.getLogEvents(),
-                hasItem(
-                    allOf(
-                        containsString(indexName),
-                        containsString(size + ""),
-                        containsString(body),
-                        containsString(cause)
-                    )
-                )
-            );
+            // Verify detailed log in named logger (DLQ) with MDC data
+            assertEquals(1, namedLogs.getCapturedLogEvents().size());
+            var capturedEvent = namedLogs.getCapturedLogEvents().get(0);
+            assertThat(capturedEvent.getMessage(), containsString("Bulk failure logged to DLQ"));
+            
+            Map<String, String> mdc = capturedEvent.getContextData();
+            assertEquals(indexName, mdc.get(FailedRequestsLogger.FailedRequestsLoggerKeys.INDEX_NAME));
+            assertEquals("1", mdc.get(FailedRequestsLogger.FailedRequestsLoggerKeys.FAILED_ITEM_COUNT));
 
-            // Verify the error summary appears in the class-based logger
+            // Verify error summary in class-based logger
             assertEquals(1, classLogs.getLogEvents().size());
+            String classLogMessage = classLogs.getLogEvents().get(0);
             assertThat(
-                classLogs.getLogEvents(),
-                hasItem(
-                    allOf(
-                        containsString(indexName),
-                        containsString(size + ""),
-                        containsString("DLQ"),
-                        containsString("manual investigation and retry")
-                    )
+                classLogMessage,
+                allOf(
+                    containsString(indexName),
+                    containsString("1"),
+                    containsString("DLQ"),
+                    containsString("manual investigation and retry")
                 )
             );
-        }
-    }
-
-    @Test
-    void testMultipleInstances() {
-        // Verify that multiple instances of FailedRequestsLogger work correctly
-        try (var logs = new CloseableLogSetup(FailedRequestsLogger.FAILED_REQUESTS_LOGGER)) {
-            var logger1 = new FailedRequestsLogger();
-            var logger2 = new FailedRequestsLogger();
-
-            var indexName1 = "index1";
-            var indexName2 = "index2";
-            var size = 66;
-            var body = "<BODY>";
-            var cause = "<CAUSE>";
-
-            logger1.logBulkFailure(indexName1, () -> size, () -> body, new RuntimeException(cause));
-            logger2.logBulkFailure(indexName2, () -> size, () -> body, new RuntimeException(cause));
-
-            // Verify both logs appear
-            assertThat(logs.getLogEvents(), hasItem(containsString(indexName1)));
-            assertThat(logs.getLogEvents(), hasItem(containsString(indexName2)));
-            assertEquals(2, logs.getLogEvents().size());
+            
+            // Verify class-based logger does NOT contain customer data from the bulk request
+            assertThat(classLogMessage, not(containsString("prod-001")));
+            assertThat(classLogMessage, not(containsString("Widget")));
+            assertThat(classLogMessage, not(containsString("19.99")));
         }
     }
 }

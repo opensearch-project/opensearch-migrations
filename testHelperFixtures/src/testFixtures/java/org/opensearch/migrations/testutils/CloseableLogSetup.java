@@ -2,7 +2,9 @@ package org.opensearch.migrations.testutils;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.google.errorprone.annotations.MustBeClosed;
 import lombok.Getter;
@@ -19,10 +21,31 @@ import org.slf4j.LoggerFactory;
 public class CloseableLogSetup implements AutoCloseable {
 
     /**
+     * Represents a captured log event with its message and MDC context.
+     */
+    public static class CapturedLogEvent {
+        @Getter
+        private final String message;
+        @Getter
+        private final Map<String, String> contextData;
+
+        public CapturedLogEvent(String message, Map<String, String> contextData) {
+            this.message = message;
+            this.contextData = contextData != null ? new HashMap<>(contextData) : new HashMap<>();
+        }
+    }
+
+    /**
      * A thread-safe list to store captured log events.
      */
     @Getter
-    List <String> logEvents = Collections.synchronizedList(new ArrayList<>());
+    List<String> logEvents = Collections.synchronizedList(new ArrayList<>());
+
+    /**
+     * A thread-safe list to store captured log events with MDC data.
+     */
+    @Getter
+    List<CapturedLogEvent> capturedLogEvents = Collections.synchronizedList(new ArrayList<>());
 
     AbstractAppender testAppender;
 
@@ -49,7 +72,14 @@ public class CloseableLogSetup implements AutoCloseable {
         testAppender = new AbstractAppender(loggerName, null, null, false, null) {
             @Override
             public void append(LogEvent event) {
-                logEvents.add(event.getMessage().getFormattedMessage());
+                String message = event.getMessage().getFormattedMessage();
+                logEvents.add(message);
+                
+                // Capture MDC data
+                Map<String, String> contextData = event.getContextData() != null 
+                    ? event.getContextData().toMap() 
+                    : new HashMap<>();
+                capturedLogEvents.add(new CapturedLogEvent(message, contextData));
             }
         };
 

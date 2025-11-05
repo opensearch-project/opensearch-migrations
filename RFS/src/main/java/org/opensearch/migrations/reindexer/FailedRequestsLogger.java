@@ -7,9 +7,8 @@ import java.util.function.Supplier;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient.OperationFailed;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,35 +16,7 @@ import org.slf4j.LoggerFactory;
 @Slf4j
 public class FailedRequestsLogger {
     public static final String FAILED_REQUESTS_LOGGER = "FailedRequestsLogger";
-    private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
     private final Logger failedRequestLogger;
-
-    /**
-     * Record representing a failed bulk request for DLQ logging.
-     * This structure is serialized to JSON for parsing with tools like jq.
-     */
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record BulkFailureRecord(
-        String indexName,
-        int failedItemCount,
-        String message,
-        String requestBody,
-        String responseBody
-    ) {
-        // Empty body - record uses auto-generated canonical constructor, accessors, equals, hashCode, and toString
-    }
-
-    /**
-     * Exception thrown when bulk failure record cannot be serialized to JSON.
-     * This exception is sanitized and does not include the request body or the cause
-     * (which may contain document content) to avoid propagating sensitive data.
-     */
-    public static class BulkFailureSerializationException extends RuntimeException {
-        public BulkFailureSerializationException(String indexName, int failedItemCount) {
-            super(String.format("Failed to serialize bulk failure record to JSON for index '%s' with %d failed items", 
-                indexName, failedItemCount));
-        }
-    }
 
     public FailedRequestsLogger() {
         this(null);
@@ -63,7 +34,6 @@ public class FailedRequestsLogger {
     ) {
         var rootCause = getRootCause(error);
         var failedItemCount = failedItemCounter.getAsInt();
-        var requestBody = bulkRequestBodySupplier.get();
 
         var responseBody = Optional.ofNullable(rootCause)
             .filter(OperationFailed.class::isInstance)
@@ -72,37 +42,36 @@ public class FailedRequestsLogger {
             .map(response -> response.body)
             .orElse(null);
 
-        // Log error summary for visibility in main logs (before JSON processing so it always happens)
+        // Do not include failedItems in log to prevent customer data leakage
         log.atError()
             .setCause(error)
-            .setMessage("Bulk request failed for {} index on {} items. Response body: {}. Request body logged to DLQ (FailedRequests logger) for manual investigation and retry.")
+            .setMessage("Bulk request failed for {} index on {} items. Response body: {}." +
+                    "Request body logged to DLQ (FailedRequests logger) for manual investigation and retry." +
+                    "With root cause {}")
             .addArgument(indexName)
             .addArgument(failedItemCount)
-            .addArgument(responseBody)  // null is fine here, will be displayed as "null"
+            .addArgument(responseBody)
+            .addArgument(rootCause)
             .log();
 
-        // Create structured record for DLQ logging
-        var failureRecord = new BulkFailureRecord(
-            indexName,
-            failedItemCount,
-            Optional.ofNullable(rootCause).map(Throwable::getMessage).orElse("[NULL]"),
-            requestBody,
-            responseBody
-        );
+        failedRequestLogger.atInfo()
+            .addKeyValue(FailedRequestsLoggerKeys.INDEX_NAME, indexName)
+            .addKeyValue(FailedRequestsLoggerKeys.FAILED_ITEM_COUNT, failedItemCount)
+            .addKeyValue(FailedRequestsLoggerKeys.EXCEPTION_MESSAGE, error != null ? error.getMessage() : null)
+            .addKeyValue(FailedRequestsLoggerKeys.ROOT_CAUSE, rootCause)
+            .addKeyValue(FailedRequestsLoggerKeys.REQUEST_BODY, bulkRequestBodySupplier)
+            .addKeyValue(FailedRequestsLoggerKeys.RESPONSE_BODY, responseBody)
+            .log("Bulk failure logged to DLQ");
+    }
 
-        // Log to the dedicated failed requests logger (DLQ) as JSON for JQ parsing
-        try {
-            String jsonRecord = OBJECT_MAPPER.writeValueAsString(failureRecord);
-            failedRequestLogger.atInfo().setMessage("{}").addArgument(jsonRecord).log();
-        } catch (JsonProcessingException e) {
-            log.atError()
-                .setCause(e)
-                .setMessage("Failed to serialize bulk failure record to JSON for index {}")
-                .addArgument(indexName)
-                .log();
-            // Throw sanitized exception without request body or cause (which may contain document content)
-            throw new BulkFailureSerializationException(indexName, failedItemCount);
-        }
+    @UtilityClass
+    public static final class FailedRequestsLoggerKeys {
+        public static final String INDEX_NAME = "indexName";
+        public static final String FAILED_ITEM_COUNT = "failedItemCount";
+        public static final String EXCEPTION_MESSAGE = "exceptionMessage";
+        public static final String ROOT_CAUSE = "rootCause";
+        public static final String REQUEST_BODY = "requestBody";
+        public static final String RESPONSE_BODY = "responseBody";
     }
 
     private Throwable getRootCause(Throwable error) {
