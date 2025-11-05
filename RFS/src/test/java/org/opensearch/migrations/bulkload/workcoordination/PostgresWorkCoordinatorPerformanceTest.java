@@ -3,12 +3,10 @@ package org.opensearch.migrations.bulkload.workcoordination;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Disabled;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -31,7 +29,7 @@ class PostgresWorkCoordinatorPerformanceTest extends PostgresWorkCoordinatorTest
             setupCoordinator.createUnassignedWorkItem(new WorkItem("item", i, 0), () -> null);
         }
         long setupTime = System.currentTimeMillis() - startSetup;
-        System.err.println("Setup time for " + totalItems + " items: " + setupTime + "ms");
+        System.out.println("Setup time for " + totalItems + " items: " + setupTime + "ms");
         
         var executor = Executors.newFixedThreadPool(workerCount);
         var completedCount = new AtomicInteger(0);
@@ -86,12 +84,12 @@ class PostgresWorkCoordinatorPerformanceTest extends PostgresWorkCoordinatorTest
         assertThat(completedCount.get(), is(totalItems));
         assertThat(setupCoordinator.numWorkItemsNotYetComplete(() -> null), is(0));
         
-        System.err.println("Performance Results:");
-        System.err.println("  Workers: " + workerCount);
-        System.err.println("  Total Items: " + totalItems);
-        System.err.println("  Total Time: " + totalTime + "ms");
-        System.err.println("  Throughput: " + (totalItems * 1000.0 / totalTime) + " items/sec");
-        System.err.println("  Avg Time per Item: " + (totalTime / (double)totalItems) + "ms");
+        System.out.println("Performance Results:");
+        System.out.println("  Workers: " + workerCount);
+        System.out.println("  Total Items: " + totalItems);
+        System.out.println("  Total Time: " + totalTime + "ms");
+        System.out.println("  Throughput: " + (totalItems * 1000.0 / totalTime) + " items/sec");
+        System.out.println("  Avg Time per Item: " + (totalTime / (double)totalItems) + "ms");
     }
 
     @Test
@@ -186,11 +184,11 @@ class PostgresWorkCoordinatorPerformanceTest extends PostgresWorkCoordinatorTest
         var expectedSuccessors = parentCount * successorsPerParent;
         assertThat(coordinator.numWorkItemsNotYetComplete(() -> null), is(expectedSuccessors));
         
-        System.err.println("Successor Creation Performance:");
-        System.err.println("  Parents: " + parentCount);
-        System.err.println("  Successors per Parent: " + successorsPerParent);
-        System.err.println("  Total Successors: " + expectedSuccessors);
-        System.err.println("  Creation Time: " + creationTime + "ms");
-        System.err.println("  Avg Time per Parent: " + (creationTime / (double)parentCount) + "ms");
+        System.out.println("Successor Creation Performance:");
+        System.out.println("  Parents: " + parentCount);
+        System.out.println("  Successors per Parent: " + successorsPerParent);
+        System.out.println("  Total Successors: " + expectedSuccessors);
+        System.out.println("  Creation Time: " + creationTime + "ms");
+        System.out.println("  Avg Time per Parent: " + (creationTime / (double)parentCount) + "ms");
     }
 }

@@ -1,37 +1,58 @@
 package org.opensearch.migrations.bulkload;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
+import org.opensearch.migrations.bulkload.SourceTestBase.ExpectedMigrationWorkTerminationException;
+import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
+import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
+import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
+import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
+import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
+import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
+import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
+import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
+import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
+import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.lifecycle.Startables;
 
 @Tag("isolatedTest")
@@ -70,6 +91,20 @@ public class EndToEndTest extends SourceTestBase {
                 final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_1)
         ) {
             migrationDocumentsWithClusters(sourceCluster, targetCluster);
+        }
+    }
+
+    @Test
+    public void migrationDocumentsWithPostgres() {
+        try (
+            final var postgres = new PostgreSQLContainer<>("postgres:15-alpine")
+                .withDatabaseName("test")
+                .withUsername("test")
+                .withPassword("test");
+            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
+            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_1)
+        ) {
+            migrationDocumentsWithClustersAndPostgres(sourceCluster, targetCluster, postgres);
         }
     }
 
@@ -268,6 +303,171 @@ public class EndToEndTest extends SourceTestBase {
                 String routing = hit.path("_routing").asText();
                 Assertions.assertEquals("1", routing);
             }
+        }
+    }
+
+    @SneakyThrows
+    private void migrationDocumentsWithClustersAndPostgres(
+        final SearchClusterContainer sourceCluster,
+        final SearchClusterContainer targetCluster,
+        final PostgreSQLContainer<?> postgres
+    ) {
+        final var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        final var testDocMigrationContext = DocumentMigrationTestContext.factory().noOtelTracking();
+
+        try {
+            Startables.deepStart(sourceCluster, targetCluster, postgres).join();
+
+            var indexName = "blog_2023";
+            var sourceClusterOperations = new ClusterOperations(sourceCluster);
+            var targetClusterOperations = new ClusterOperations(targetCluster);
+
+            sourceClusterOperations.createIndex(indexName, "{\"settings\":{\"number_of_shards\":1}}");
+            targetClusterOperations.createIndex(indexName, "{\"settings\":{\"number_of_shards\":1}}");
+
+            sourceClusterOperations.createDocument(indexName, "1", "{\"field\":\"value\"}");
+            sourceClusterOperations.post("/" + indexName + "/_refresh", null);
+
+            var snapshotName = "test_snap";
+            var sourceClientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                    .host(sourceCluster.getUrl())
+                    .insecure(true)
+                    .build()
+                    .toConnectionContext());
+            var sourceClient = sourceClientFactory.determineVersionAndCreate();
+            var snapshotCreator = new FileSystemSnapshotCreator(
+                snapshotName,
+                "test_repo",
+                sourceClient,
+                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                List.of(),
+                snapshotContext.createSnapshotCreateContext()
+            );
+            SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+                    sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+
+            var runCounter = new AtomicInteger();
+            var expectedTerminationException = waitForRfsCompletion(() -> 
+                migrateWithPostgresCoordinator(
+                    sourceRepo,
+                    snapshotName,
+                    targetCluster,
+                    postgres,
+                    runCounter,
+                    testDocMigrationContext,
+                    sourceCluster.getContainerVersion().getVersion(),
+                    targetCluster.getContainerVersion().getVersion()
+            ));
+
+            Assertions.assertTrue(expectedTerminationException.numRuns > 0);
+            checkClusterMigrationOnFinished(sourceCluster, targetCluster, testDocMigrationContext);
+        } finally {
+            deleteTree(localDirectory.toPath());
+        }
+    }
+
+    private int migrateWithPostgresCoordinator(
+        FileSystemRepo sourceRepo,
+        String snapshotName,
+        SearchClusterContainer target,
+        PostgreSQLContainer<?> postgres,
+        AtomicInteger runCounter,
+        DocumentMigrationTestContext testContext,
+        Version sourceVersion,
+        Version targetVersion
+    ) {
+        for (int runNumber = 1; ; ++runNumber) {
+            try {
+                var workResult = migrateWithPostgresWorker(
+                    sourceRepo,
+                    snapshotName,
+                    target,
+                    postgres,
+                    testContext,
+                    sourceVersion,
+                    targetVersion
+                );
+                if (workResult == CompletionStatus.NOTHING_DONE) {
+                    return runNumber;
+                } else {
+                    runCounter.incrementAndGet();
+                }
+            } catch (RfsMigrateDocuments.NoWorkLeftException e) {
+                throw new ExpectedMigrationWorkTerminationException(e, runNumber);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    @SneakyThrows
+    private CompletionStatus migrateWithPostgresWorker(
+        SourceRepo sourceRepo,
+        String snapshotName,
+        SearchClusterContainer target,
+        PostgreSQLContainer<?> postgres,
+        DocumentMigrationTestContext context,
+        Version sourceVersion,
+        Version targetVersion
+    ) throws RfsMigrateDocuments.NoWorkLeftException {
+        var tempDir = Files.createTempDirectory("test_lucene");
+        try (var processManager = new LeaseExpireTrigger(workItemId -> {})) {
+            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(sourceVersion, sourceRepo, false);
+            var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
+            var unpackerFactory = new SnapshotShardUnpacker.Factory(
+                repoAccessor,
+                tempDir,
+                sourceResourceProvider.getBufferSizeInBytes()
+            );
+
+            var readerFactory = new LuceneIndexReader.Factory(sourceResourceProvider);
+            var docTransformer = new TransformationLoader().getTransformerFactoryLoader(
+                    RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
+
+            var progressCursor = new AtomicReference<WorkItemCursor>();
+            var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
+            var postgresConfig = new org.opensearch.migrations.bulkload.workcoordination.PostgresConfig(
+                postgres.getJdbcUrl(),
+                postgres.getUsername(),
+                postgres.getPassword()
+            );
+            var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+
+            try (var workCoordinator = coordinatorFactory.getPostgres(
+                    postgresConfig,
+                    UUID.randomUUID().toString(),
+                    Clock.systemUTC(),
+                    workItemRef::set
+            )) {
+                var connectionContext = ConnectionContextTestParams.builder()
+                        .host(target.getUrl())
+                        .build()
+                        .toConnectionContext();
+                var clientFactory = new OpenSearchClientFactory(connectionContext);
+                return RfsMigrateDocuments.run(
+                    readerFactory,
+                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> docTransformer, false),
+                    progressCursor,
+                    workCoordinator,
+                    Duration.ofMinutes(10),
+                    processManager,
+                    sourceResourceProvider.getIndexMetadata(),
+                    snapshotName,
+                    null,
+                    null,
+                    List.of(),
+                    sourceResourceProvider.getShardMetadata(),
+                    unpackerFactory,
+                    MAX_SHARD_SIZE_BYTES,
+                    context,
+                    new AtomicReference<>(),
+                    new WorkItemTimeProvider());
+            }
+        } finally {
+            deleteTree(tempDir);
         }
     }
 }

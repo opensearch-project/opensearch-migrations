@@ -2,11 +2,15 @@ package org.opensearch.migrations.bulkload.workcoordination;
 
 import java.time.Duration;
 
+import lombok.experimental.UtilityClass;
+
 /**
  * Calculates lease durations with exponential backoff.
  * Prevents overflow by capping the maximum lease duration.
  */
+@UtilityClass
 class LeaseCalculator {
+
     private static final int MAX_EXPONENT = 10; // Caps at ~1024x base duration
     private static final long MAX_LEASE_SECONDS = Duration.ofDays(7).toSeconds();
 

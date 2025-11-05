@@ -5,8 +5,9 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 
+@SuppressWarnings("java:S1192") // Ignore duplicate literals in this file such as "UPDATE " or "INSERT INTO "
 class SqlQueryBuilder {
-    private static final String TABLE_NAME_PATTERN = "^[a-zA-Z_][a-zA-Z0-9_]*$";
+    private static final String TABLE_NAME_PATTERN = "^[a-zA-Z_][\\w]*$";
     private final String tableName;
 
     SqlQueryBuilder(String tableName) {
@@ -135,10 +136,10 @@ class SqlQueryBuilder {
             " (work_item_id, expiration, creator_id, next_acquisition_lease_exponent) " +
             "VALUES (?, 0, ?, ?) ON CONFLICT (work_item_id) DO NOTHING");
         try (var stmt = conn.prepareStatement(sql.sql())) {
+            stmt.setString(2, creatorId);
+            stmt.setInt(3, leaseExponent);
             for (String successorId : successorIds) {
                 stmt.setString(1, successorId);
-                stmt.setString(2, creatorId);
-                stmt.setInt(3, leaseExponent);
                 stmt.addBatch();
             }
             stmt.executeBatch();

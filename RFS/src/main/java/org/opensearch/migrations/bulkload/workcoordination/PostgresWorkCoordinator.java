@@ -81,7 +81,7 @@ public class PostgresWorkCoordinator implements IWorkCoordinator {
         try (var ctx = contextSupplier.get()) {
             log.debug("Worker {} creating unassigned work item {}", workerId, workItemId);
             
-            var created = dbClient.executeInTransaction(conn -> 
+            boolean created = dbClient.executeInTransaction(conn -> 
                 sqlBuilder.insertUnassignedWorkItem(conn, workItemId, workerId)
             );
             
@@ -153,7 +153,10 @@ public class PostgresWorkCoordinator implements IWorkCoordinator {
                 if (hasSuccessors(availableWork)) {
                     try {
                         return handleSuccessors(availableWork, leaseDuration, contextSupplier, ctx);
-                    } catch (IOException | InterruptedException e) {
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new SQLException("Failed to handle successor items", e);
+                    } catch (IOException e) {
                         throw new SQLException("Failed to handle successor items", e);
                     }
                 }
@@ -243,7 +246,7 @@ public class PostgresWorkCoordinator implements IWorkCoordinator {
             log.debug("Worker {} completing work item {}", workerId, workItemId);
             
             var nowSeconds = clock.instant().getEpochSecond();
-            var success = dbClient.executeInTransaction(conn -> 
+            boolean success = dbClient.executeInTransaction(conn -> 
                 sqlBuilder.completeWorkItem(conn, nowSeconds, workItemId, workerId)
             );
             
@@ -297,7 +300,7 @@ public class PostgresWorkCoordinator implements IWorkCoordinator {
     public int numWorkItemsNotYetComplete(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
         throws IOException {
         try (var ctx = contextSupplier.get()) {
-            var count = dbClient.executeInTransaction(conn -> sqlBuilder.countIncomplete(conn));
+            var count = dbClient.executeInTransaction(sqlBuilder::countIncomplete);
             log.debug("Worker {} found {} incomplete work items", workerId, count);
             return count;
         } catch (SQLException e) {
