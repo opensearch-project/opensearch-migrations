@@ -4,10 +4,8 @@ import java.util.Optional;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
-import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient.OperationFailed;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
