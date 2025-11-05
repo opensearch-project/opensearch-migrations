@@ -111,6 +111,11 @@ jobs:
       - name: Logout to DockerHub
         if: always()
         run: docker logout
+      - name: Configure AWS Credentials for Solutions Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.SOLUTIONS_CREDENTIALS_ROLE }}
+          aws-region: us-east-1
       - name: Configure AWS Credentials for Solutions Upload
         uses: aws-actions/configure-aws-credentials@v5
         with:
@@ -118,7 +123,9 @@ jobs:
           aws-region: us-east-1
       - name: Upload Solutions Artifact to S3
         run: |
-          aws s3 cp deployment/migration-assistant-solution/build/artifacts.zip s3://cornerstone-amazonaws/SO0290/${{ steps.get_data.outputs.version }}/artifacts.zip
+          aws s3 cp deployment/migration-assistant-solution/build/artifact.zip s3://cornerstone-amazonaws/SO0290/${{ steps.get_data.outputs.version }}/artifact.zip \
+            --content-type application/zip \
+            --metadata branch=${{ github.ref_name }},commitauthor="$(git log -1 --format='%an')",commitid=${{ github.sha }},commitmessage="$(git log -1 --format='%s')",committimestamp=$(git log -1 --format='%cI'),enablequicksight=No,package=https://github.com/${{ github.repository }},publishpublicecrimage=true,solutionid=SO0290,solutionname="Migration Assistant for Amazon OpenSearch Service",solutionversion=${{ steps.get_data.outputs.version }}
       - name: Draft a release
         uses: softprops/action-gh-release@v2
         with:

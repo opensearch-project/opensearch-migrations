@@ -35,8 +35,8 @@ npx cdk synth "Migration-Assistant-Infra-Import-VPC" --asset-metadata false --pa
 
 touch "${TEMP_DIR}/regional-s3-assets/test.txt"
 
-echo "Creating artifacts.zip..."
+echo "Creating artifact.zip..."
 cd "${TEMP_DIR}"
-zip -r "${BUILD_DIR}/artifacts.zip" .
+zip -r "${BUILD_DIR}/artifact.zip" .
 
-echo "Packaging complete. Artifacts in: ${BUILD_DIR}/artifacts.zip"
+echo "Packaging complete. Artifacts in: ${BUILD_DIR}/artifact.zip"
