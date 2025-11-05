@@ -235,7 +235,8 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--continuous-mode", "--continuousMode" },
             description = "Keep the worker alive to process subsequent work items. (Default: false = single-run mode, used by ECS and tests) " +
-                "Set true for long-running EKS pods")
+                "Note: if a lease expires mid-item, the worker exits even in continuous mode. " +
+                "Set flag to true for long-running EKS pods")
         public boolean continuousMode = false;
 
         @ParametersDelegate
@@ -592,44 +593,71 @@ public class RfsMigrateDocuments {
             Duration initialLeaseDuration,
             Runnable cancellationRunnable,
             AtomicBoolean cleanShutdownCompleted,
-            boolean continuousMode,
             AtomicReference<String> lastWorkItemFinalized,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier) {
-        log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
-                .addArgument(workItemId)
-                .log();
+
+        log.atWarn()
+            .setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
+            .addArgument(workItemId)
+            .log();
+
+        boolean finalized = false;
+
         try {
-            if (progressCursorRef.get() != null) {
-                log.atWarn().setMessage("Progress cursor set, cancelling active doc migration").log();
-                cancellationRunnable.run();
-                // Get a new progressCursor after cancellation for most up-to-date checkpoint
-                var progressCursor = progressCursorRef.get();
-                log.atWarn().setMessage("Progress cursor: {}")
-                        .addArgument(progressCursor).log();
-                var workItemAndDuration = workItemRef.get();
-                if (workItemAndDuration == null) {
-                    throw new IllegalStateException("Unexpected state with progressCursor set without a" +
-                            "work item");
+            // cancel any in-flight work
+            try {
+                if (cancellationRunnable != null) {
+                    log.atWarn()
+                        .setMessage("Cancelling active document migration for {}")
+                        .addArgument(workItemId)
+                        .log();
+                    cancellationRunnable.run();
                 }
-                log.atWarn().setMessage("Work Item and Duration: {}").addArgument(workItemAndDuration)
-                        .log();
-                log.atWarn().setMessage("Work Item: {}").addArgument(workItemAndDuration.getWorkItem())
-                        .log();
+            } catch (Exception cancelEx) {
+                log.atWarn()
+                    .setMessage("Cancellation runnable threw during lease-timeout for {}: {}")
+                    .addArgument(workItemId)
+                    .addArgument(cancelEx.getMessage())
+                    .log();
+            }
+
+            var progressCursor = progressCursorRef.get();
+            var workItemAndDuration = workItemRef.get();
+
+            if (progressCursor != null && workItemAndDuration != null) {
+                log.atWarn()
+                    .setMessage("Checkpoint for {} is {}")
+                    .addArgument(workItemId)
+                    .addArgument(progressCursor.getProgressCheckpointNum())
+                    .log();
                 var successorWorkItemIds = getSuccessorWorkItemIds(workItemAndDuration, progressCursor);
+
                 if (successorWorkItemIds.size() == 1 && workItemId.equals(successorWorkItemIds.get(0))) {
-                    log.atWarn().setMessage("No real progress was made for work item: {}. Will retry with larger timeout").addArgument(workItemId).log();
+                    log.atWarn()
+                        .setMessage("No real progress was made for work item: {}. Will retry with larger timeout")
+                        .addArgument(workItemId)
+                        .log();
                 } else {
-                    log.atWarn().setMessage("Successor Work Ids: {}").addArgument(String.join(", ", successorWorkItemIds))
-                            .log();
-                    var successorNextAcquisitionLeaseExponent = getSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration, workItemAndDuration.getLeaseExpirationTime());
-                    coordinator.createSuccessorWorkItemsAndMarkComplete(
-                            workItemId,
-                            successorWorkItemIds,
-                            successorNextAcquisitionLeaseExponent,
-                            contextSupplier
-                    );
-                    lastWorkItemFinalized.set(workItemId);
+                    log.atWarn()
+                        .setMessage("Successor work items for {} -> {}")
+                        .addArgument(workItemId)
+                        .addArgument(String.join(", ", successorWorkItemIds))
+                        .log();
                 }
+
+                int successorNextAcquisitionLeaseExponent =
+                    getSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration,
+                        workItemAndDuration.getLeaseExpirationTime());
+
+                coordinator.createSuccessorWorkItemsAndMarkComplete(
+                    workItemId,
+                    successorWorkItemIds,
+                    successorNextAcquisitionLeaseExponent,
+                    contextSupplier
+                );
+
+                lastWorkItemFinalized.set(workItemId);
+                finalized = true;
             } else {
                 log.atWarn().setMessage("No progress cursor to create successor work items from. This can happen when" +
                         "downloading and unpacking shard takes longer than the lease").log();
@@ -640,22 +668,17 @@ public class RfsMigrateDocuments {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            log.atError().setMessage("Exception during exit on lease timeout, clean shutdown failed")
-                    .setCause(e).log();
-            cleanShutdownCompleted.set(false);
-            if (!continuousMode) {
-                System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
-            }
-            return; // continuous mode: keep going
+            log.atError()
+                .setMessage("Exception during exit on lease timeout, clean shutdown failed")
+                .setCause(e)
+                .log();
+            cleanShutdownCompleted.set(false); // Fall through to exit with PROCESS_TIMED_OUT_EXIT_CODE
         }
 
-        // On success
-        if (!continuousMode) {
-            cleanShutdownCompleted.set(true);
-            log.info("Exiting due to lease-timeout in non-continuous mode with code {}", PROCESS_TIMED_OUT_EXIT_CODE);
-            System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
-        }
-        // continuous mode: keep shutdown hook active for next item checkpointing
+        // Always exit on lease-timeout (even in continuous mode)
+        cleanShutdownCompleted.set(finalized);
+        log.info("Exiting due to lease-timeout (treating as worker unhealth) with code {}", PROCESS_TIMED_OUT_EXIT_CODE);
+        System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
     }
 
     public static int getSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider, Duration initialLeaseDuration,
@@ -829,7 +852,8 @@ public class RfsMigrateDocuments {
                 );
                 return;
             } catch (IWorkCoordinator.LeaseLockHeldElsewhereException e) {
-                log.atInfo().setMessage("After {} another process holds the lock for setting up the shard work items." +
+                log.atInfo()
+                    .setMessage("After {} another process holds the lock for setting up the shard work items." +
                         "  Waiting {} ms before trying again.")
                     .addArgument(shardSetupAttemptNumber)
                     .addArgument(lockRenegotiationMillis)
@@ -870,7 +894,6 @@ public class RfsMigrateDocuments {
                     initialLeaseDuration,
                     () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                     cleanShutdownCompleted,
-                    continuousMode,
                     lastWorkItemFinalized,
                     context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
                 Clock.systemUTC())) {
@@ -897,25 +920,37 @@ public class RfsMigrateDocuments {
                 if (continuousMode) {
                     return true;
                 } else {
-                    log.atInfo().setMessage("No progress made (non-continuous mode). Exiting with error code (no-work-left) to signal that.").log();
+                    log.atInfo()
+                        .setMessage("No progress made (non-continuous mode). Exiting with error code (no-work-left) to signal that.")
+                        .log();
                     System.exit(NO_WORK_LEFT_EXIT_CODE);
                 }
             }
         } catch (NoWorkLeftException e) {
-            log.atInfo().setMessage("No work left to acquire.").log();
+            log.atInfo()
+                .setMessage("No work left to acquire.")
+                .log();
             if (continuousMode) {
                 return false; // Stop the loop
             } else {
-                log.atInfo().setMessage("Exiting due to path=no-work-left, continuousMode={}, exitCode={}")
-                    .addArgument(continuousMode).addArgument(NO_WORK_LEFT_EXIT_CODE).log();
+                log.atInfo()
+                    .setMessage("Exiting due to path=no-work-left, continuousMode={}, exitCode={}")
+                    .addArgument(continuousMode)
+                    .addArgument(NO_WORK_LEFT_EXIT_CODE)
+                    .log();
                 System.exit(NO_WORK_LEFT_EXIT_CODE);
             }
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
-            log.atWarn().setMessage("Worker interrupted; stopping loop.").log();
+            log.atWarn()
+                .setMessage("Worker interrupted; stopping loop.")
+                .log();
             return false; // Stop the loop
         } catch (Exception e) {
-            log.atError().setCause(e).setMessage("Error processing work item").log();
+            log.atError()
+                .setCause(e)
+                .setMessage("Error processing work item")
+                .log();
             if (e instanceof RuntimeException) {
                 throw (RuntimeException) e;
             }
