@@ -417,7 +417,7 @@ public abstract class OpenSearchClient {
     private BulkOperationSpec stripDocumentId(BulkOperationSpec original) {
         if (original instanceof IndexOp indexOp) {
             var metadata = indexOp.getOperation();
-            var newMetadata = IndexOperationMeta.builder()
+            var newMetadata = BaseMetadata.<IndexOperationMeta>builder()
                 .index(metadata.getIndex())
                 .type(metadata.getType())
                 .routing(metadata.getRouting())
