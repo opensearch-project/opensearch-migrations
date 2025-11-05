@@ -55,15 +55,15 @@ public class AddCompressionEncodingTest extends InstrumentationTest {
         final var payloadPartSize = 511;
         final var numParts = 1025;
 
-        String sourceHeaders = "GET / HTTP/1.1\r\n"
-            + "host: localhost\r\n"
+        String sourceHeaders = "GET / HTTP/1.1\n"
+            + "host: localhost\n"
             + "content-length: "
             + (numParts * payloadPartSize)
-            + "\r\n";
+            + "\n";
 
         var tail = compressingTransformer.consumeBytes(sourceHeaders.getBytes(StandardCharsets.UTF_8))
             .thenCompose(
-                v -> compressingTransformer.consumeBytes("\r\n".getBytes(StandardCharsets.UTF_8)),
+                v -> compressingTransformer.consumeBytes("\n".getBytes(StandardCharsets.UTF_8)),
                 () -> "AddCompressionEncodingTest.compressingTransformer"
             );
         final byte[] payloadPart = new byte[payloadPartSize];
