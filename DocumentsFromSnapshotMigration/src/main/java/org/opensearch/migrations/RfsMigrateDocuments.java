@@ -73,6 +73,21 @@ import org.slf4j.MDC;
 
 @Slf4j
 public class RfsMigrateDocuments {
+
+    /**
+     * Represents the outcome of a single work cycle iteration from the main loop's perspective.
+     * This enum is used to control the continuous/single-run loop logic and exit decisions.
+     * 
+     * Note: This is distinct from CompletionStatus which represents the worker's view of 
+     * document processing results.
+     */
+    private enum WorkCycleResult {
+        DID_WORK,       // Successfully processed a work item (continue if continuous mode)
+        NO_PROGRESS,    // Work item acquired but no progress made (exit if single-run mode)
+        NO_WORK_LEFT,   // No work items available from coordinator (exit loop)
+        INTERRUPTED     // Thread interrupted (exit loop)
+    }
+
     public static final int SUCCESS_EXIT_CODE = 0;
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
@@ -326,7 +341,7 @@ public class RfsMigrateDocuments {
 
         if (areAnyS3ArgsProvided && !areAllS3ArgsProvided) {
             throw new ParameterException(
-                "If provide the S3 Snapshot args, you must provide all of them (--s3-local-dir, --s3-repo-uri and --s3-region)."
+                "If you provide the S3 Snapshot args, you must provide all of them (--s3-local-dir, --s3-repo-uri and --s3-region)."
             );
         }
 
@@ -389,13 +404,15 @@ public class RfsMigrateDocuments {
         var transformationLoader = new TransformationLoader();
         Supplier<IJsonTransformer> docTransformerSupplier = () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
 
-        var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
-        var progressCursor = new AtomicReference<WorkItemCursor>();
-        var cancellationRunnableRef = new AtomicReference<Runnable>();
         var workItemTimeProvider = new WorkItemTimeProvider();
         var coordinatorFactory = new WorkCoordinatorFactory(targetVersion, arguments.indexNameSuffix);
+        
+        // Method-scoped refs (shared across iterations and visible to shutdown hook)
         var cleanShutdownCompleted = new AtomicBoolean(false);
         var lastWorkItemFinalized = new AtomicReference<String>();
+        var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+        var progressCursorRef = new AtomicReference<WorkItemCursor>();
+        var cancellationRunnableRef = new AtomicReference<Runnable>();
 
         try (var workCoordinator = coordinatorFactory.get(
                 new CoordinateWorkHttpClient(connectionContext),
@@ -409,7 +426,7 @@ public class RfsMigrateDocuments {
                 try {
                     executeCleanShutdownProcess(
                         workItemRef,
-                        progressCursor,
+                        progressCursorRef,
                         workCoordinator,
                         cleanShutdownCompleted,
                         lastWorkItemFinalized,
@@ -464,86 +481,89 @@ public class RfsMigrateDocuments {
                 sourceResourceProvider.getBufferSizeInBytes()
             );
 
-            runWorkItemLoop(
-                arguments.initialLeaseDuration,
-                arguments.continuousMode,
-                arguments.snapshotName,
-                arguments.experimental.previousSnapshotName,
-                arguments.experimental.experimentalDeltaMode,
-                arguments.indexAllowlist,
-                arguments.maxShardSizeBytes,
-                workItemRef,
-                progressCursor,
-                workCoordinator,
-                workItemTimeProvider,
-                cleanShutdownCompleted,
-                lastWorkItemFinalized,
-                context,
-                cancellationRunnableRef,
-                sourceResourceProvider,
-                reindexer,
-                unpackerFactory
-            );
+            boolean didAnyWork = false;
+            boolean keepGoing = true;
+            WorkCycleResult lastResult = null;
+
+            while (keepGoing) {
+                // Clear refs at START of each iteration
+                workItemRef.set(null);
+                progressCursorRef.set(null);
+                cancellationRunnableRef.set(null);
+
+                WorkCycleResult result = processWorkItem(
+                    arguments.initialLeaseDuration,
+                    arguments.snapshotName,
+                    arguments.experimental.previousSnapshotName,
+                    arguments.experimental.experimentalDeltaMode,
+                    arguments.indexAllowlist,
+                    arguments.maxShardSizeBytes,
+                    workItemRef,
+                    progressCursorRef,
+                    workCoordinator,
+                    workItemTimeProvider,
+                    cleanShutdownCompleted,
+                    lastWorkItemFinalized,
+                    context,
+                    cancellationRunnableRef,
+                    sourceResourceProvider,
+                    reindexer,
+                    unpackerFactory
+                );
+
+                lastResult = result;
+
+                switch (result) {
+                    case DID_WORK -> {
+                        didAnyWork = true;
+                        keepGoing = arguments.continuousMode;
+                    }
+                    case NO_PROGRESS -> {
+                        if (arguments.continuousMode) {
+                            keepGoing = true;  // Keep trying
+                        } else {
+                            // Single-run: exit immediately with code 3
+                            log.atInfo()
+                                .setMessage("No progress made (single-run). Exiting with NO_WORK_LEFT.")
+                                .log();
+                            System.exit(NO_WORK_LEFT_EXIT_CODE);
+                        }
+                    }
+                    case NO_WORK_LEFT -> keepGoing = false;
+                    case INTERRUPTED -> keepGoing = false;
+                }
+            }
+
             cleanShutdownCompleted.set(true);
 
+            // Top-level exit logic (single source of truth)
             if (arguments.continuousMode) {
-                log.atInfo().setMessage("Exiting due to path=continuous-no-work-left, continuousMode={}, exitCode={}")
-                    .addArgument(true).addArgument(NO_WORK_LEFT_EXIT_CODE).log();
+                log.atInfo()
+                   .setMessage("Exiting continuous worker with exitCode={}, didAnyWork={}, lastResult={}")
+                   .addArgument(NO_WORK_LEFT_EXIT_CODE)
+                   .addArgument(didAnyWork)
+                   .addArgument(lastResult)
+                   .log();
                 System.exit(NO_WORK_LEFT_EXIT_CODE);
             } else {
-                log.atInfo().setMessage("Exiting due to path=single-run-success, continuousMode={}, exitCode={}")
-                    .addArgument(false).addArgument(SUCCESS_EXIT_CODE).log();
-                System.exit(SUCCESS_EXIT_CODE);
+                if (didAnyWork) {
+                    log.atInfo()
+                        .setMessage("Exiting single-run worker with exitCode={} after successful processing")
+                        .addArgument(SUCCESS_EXIT_CODE)
+                        .log();
+                    System.exit(SUCCESS_EXIT_CODE);
+                } else {
+                    log.atInfo()
+                        .setMessage("Exiting single-run worker with exitCode={} (no work available)")
+                        .addArgument(NO_WORK_LEFT_EXIT_CODE)
+                        .log();
+                    System.exit(NO_WORK_LEFT_EXIT_CODE);
+                }
             }
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
         }
-    }
-
-    private static void runWorkItemLoop(
-            Duration initialLeaseDuration,
-            boolean continuousMode,
-            String snapshotName,
-            String previousSnapshotName,
-            DeltaMode experimentalDeltaMode,
-            List<String> indexAllowlist,
-            long maxShardSizeBytes,
-            AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef,
-            AtomicReference<WorkItemCursor> progressCursor,
-            IWorkCoordinator workCoordinator,
-            WorkItemTimeProvider workItemTimeProvider,
-            AtomicBoolean cleanShutdownCompleted,
-            AtomicReference<String> lastWorkItemFinalized,
-            RootDocumentMigrationContext context,
-            AtomicReference<Runnable> cancellationRunnableRef,
-            ClusterSnapshotReader sourceResourceProvider,
-            DocumentReindexer reindexer,
-            SnapshotShardUnpacker.Factory unpackerFactory
-    ) throws IOException {
-        boolean shouldContinue;
-        do {
-            shouldContinue = processWorkItem(
-                initialLeaseDuration,
-                continuousMode,
-                snapshotName,
-                previousSnapshotName,
-                experimentalDeltaMode,
-                indexAllowlist,
-                maxShardSizeBytes,
-                workItemRef,
-                progressCursor,
-                workCoordinator,
-                workItemTimeProvider,
-                cleanShutdownCompleted,
-                lastWorkItemFinalized,
-                context,
-                cancellationRunnableRef,
-                sourceResourceProvider,
-                reindexer,
-                unpackerFactory
-            );
-        } while (shouldContinue);
     }
 
     private static void executeCleanShutdownProcess(
@@ -559,7 +579,10 @@ public class RfsMigrateDocuments {
             return;
         }
         if (workItemRef.get() == null || progressCursor.get() == null) {
-            log.atInfo().setMessage("No work item or progress cursor found. This may indicate that the task is exiting too early to have progress to mark.").log();
+            log.atInfo()
+                .setMessage("No work item or progress cursor found. lastWorkItemFinalized={}, exiting early")
+                .addArgument(lastWorkItemFinalized.get())
+                .log();
             return;
         }
         var workItemAndDuration = workItemRef.get();
@@ -672,7 +695,6 @@ public class RfsMigrateDocuments {
                 .setMessage("Exception during exit on lease timeout, clean shutdown failed")
                 .setCause(e)
                 .log();
-            cleanShutdownCompleted.set(false); // Fall through to exit with PROCESS_TIMED_OUT_EXIT_CODE
         }
 
         // Always exit on lease-timeout (even in continuous mode)
@@ -684,12 +706,12 @@ public class RfsMigrateDocuments {
     public static int getSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider, Duration initialLeaseDuration,
                                        Instant leaseExpirationTime) {
         if (workItemTimeProvider.getLeaseAcquisitionTimeRef().get() == null ||
-            workItemTimeProvider.getDocumentMigraionStartTimeRef().get() == null) {
+            workItemTimeProvider.getDocumentMigrationStartTimeRef().get() == null) {
             throw new IllegalStateException("Unexpected state with either leaseAquisitionTime or" +
                     "documentMigrationStartTime as null while creating successor work item");
         }
         var leaseAcquisitionTime = workItemTimeProvider.getLeaseAcquisitionTimeRef().get();
-        var documentMigrationStartTime = workItemTimeProvider.getDocumentMigraionStartTimeRef().get();
+        var documentMigrationStartTime = workItemTimeProvider.getDocumentMigrationStartTimeRef().get();
         var leaseDuration = Duration.between(leaseAcquisitionTime, leaseExpirationTime);
         var leaseDurationFactor = (double) leaseDuration.toMillis() / initialLeaseDuration.toMillis();
         // 2 ^ n = leaseDurationFactor <==> log2(leaseDurationFactor) = n, n >= 0
@@ -830,6 +852,21 @@ public class RfsMigrateDocuments {
         return runner.migrateNextShard(rootDocumentContext::createReindexContext);
     }
 
+    /**
+     * Maps worker-level CompletionStatus to main loop WorkCycleResult.
+     * 
+     * CompletionStatus represents the DocumentsRunner's view of what happened during 
+     * document processing (WORK_COMPLETED vs NOTHING_DONE).
+     * 
+     * WorkCycleResult represents the main loop's decision about what to do next based on the worker result.
+     */
+    private static WorkCycleResult mapWorkerToLoop(CompletionStatus status) {
+        return switch (status) {
+            case WORK_COMPLETED -> WorkCycleResult.DID_WORK;
+            case NOTHING_DONE -> WorkCycleResult.NO_PROGRESS;
+        };
+    }
+
     private static void confirmShardPrepIsComplete(
         IndexMetadata.Factory indexMetadataFactory,
         String snapshotName,
@@ -864,9 +901,8 @@ public class RfsMigrateDocuments {
         }
     }
 
-    private static boolean processWorkItem(
+    private static WorkCycleResult processWorkItem(
             Duration initialLeaseDuration,
-            boolean continuousMode,
             String snapshotName,
             String previousSnapshotName,
             DeltaMode experimentalDeltaMode,
@@ -884,11 +920,11 @@ public class RfsMigrateDocuments {
             DocumentReindexer reindexer,
             SnapshotShardUnpacker.Factory unpackerFactory
     ) throws IOException {
-        try (var processManager = new LeaseExpireTrigger(
-                w -> exitOnLeaseTimeout(
+        try (var leaseExpireTrigger = new LeaseExpireTrigger(
+                workItemId -> exitOnLeaseTimeout(
                     workItemRef,
                     workCoordinator,
-                    w,
+                    workItemId,
                     progressCursor,
                     workItemTimeProvider,
                     initialLeaseDuration,
@@ -897,13 +933,14 @@ public class RfsMigrateDocuments {
                     lastWorkItemFinalized,
                     context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
                 Clock.systemUTC())) {
+            
             var completionStatus = run(
                 new LuceneIndexReader.Factory(sourceResourceProvider),
                 reindexer,
                 progressCursor,
                 workCoordinator,
                 initialLeaseDuration,
-                processManager,
+                leaseExpireTrigger,
                 sourceResourceProvider.getIndexMetadata(),
                 snapshotName,
                 previousSnapshotName,
@@ -916,51 +953,28 @@ public class RfsMigrateDocuments {
                 cancellationRunnableRef,
                 workItemTimeProvider);
 
-            if (completionStatus == CompletionStatus.NOTHING_DONE) {
-                if (continuousMode) {
-                    return true;
-                } else {
-                    log.atInfo()
-                        .setMessage("No progress made (non-continuous mode). Exiting with error code (no-work-left) to signal that.")
-                        .log();
-                    System.exit(NO_WORK_LEFT_EXIT_CODE);
-                }
-            }
+            // Map worker result to loop decision
+            return mapWorkerToLoop(completionStatus);
         } catch (NoWorkLeftException e) {
             log.atInfo()
                 .setMessage("No work left to acquire.")
                 .log();
-            if (continuousMode) {
-                return false; // Stop the loop
-            } else {
-                log.atInfo()
-                    .setMessage("Exiting due to path=no-work-left, continuousMode={}, exitCode={}")
-                    .addArgument(continuousMode)
-                    .addArgument(NO_WORK_LEFT_EXIT_CODE)
-                    .log();
-                System.exit(NO_WORK_LEFT_EXIT_CODE);
-            }
+            return WorkCycleResult.NO_WORK_LEFT;
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             log.atWarn()
                 .setMessage("Worker interrupted; stopping loop.")
                 .log();
-            return false; // Stop the loop
+            return WorkCycleResult.INTERRUPTED;
         } catch (Exception e) {
             log.atError()
                 .setCause(e)
                 .setMessage("Error processing work item")
                 .log();
-            if (e instanceof RuntimeException) {
-                throw (RuntimeException) e;
+            if (e instanceof RuntimeException re) {
+                throw re;
             }
             throw new IOException("Error processing work item", e);
-        } finally {
-            progressCursor.set(null);
-            workItemRef.set(null);
-            // Ensure nothing stale can be invoked later
-            cancellationRunnableRef.set(null);
         }
-        return continuousMode && !cleanShutdownCompleted.get();
     }
 }
