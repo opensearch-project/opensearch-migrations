@@ -59,7 +59,7 @@ public class FailedRequestsLogger {
             .addKeyValue(FailedRequestsLoggerKeys.FAILED_ITEM_COUNT, failedItemCount)
             .addKeyValue(FailedRequestsLoggerKeys.EXCEPTION_MESSAGE, error != null ? error.getMessage() : null)
             .addKeyValue(FailedRequestsLoggerKeys.ROOT_CAUSE, rootCause)
-            .addKeyValue(FailedRequestsLoggerKeys.REQUEST_BODY, bulkRequestBodySupplier)
+            .addKeyValue(FailedRequestsLoggerKeys.REQUEST_BODY, bulkRequestBodySupplier.get())
             .addKeyValue(FailedRequestsLoggerKeys.RESPONSE_BODY, responseBody)
             .log("Bulk failure logged to DLQ");
     }
