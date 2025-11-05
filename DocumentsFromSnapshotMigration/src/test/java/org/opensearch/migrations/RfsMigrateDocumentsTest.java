@@ -27,7 +27,7 @@ class RfsMigrateDocumentsTest {
         Duration shardPrepTime = Duration.ofNanos((long)(leaseDuration.toNanos() * shardPrepFraction));
 
         workItemTimeProvider.getLeaseAcquisitionTimeRef().set(Instant.EPOCH);
-        workItemTimeProvider.getDocumentMigraionStartTimeRef().set(Instant.EPOCH.plus(shardPrepTime));
+        workItemTimeProvider.getDocumentMigrationStartTimeRef().set(Instant.EPOCH.plus(shardPrepTime));
         Instant leaseExpirationTime = Instant.EPOCH.plus(leaseDuration);
 
         int successorNextAcquisitionLeaseExponent = RfsMigrateDocuments.getSuccessorNextAcquisitionLeaseExponent(

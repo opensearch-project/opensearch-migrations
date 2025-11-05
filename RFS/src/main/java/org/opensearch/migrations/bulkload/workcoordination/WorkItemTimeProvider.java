@@ -10,5 +10,5 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class WorkItemTimeProvider {
     private final AtomicReference<Instant> leaseAcquisitionTimeRef = new AtomicReference<>();
-    private final AtomicReference<Instant> documentMigraionStartTimeRef =  new AtomicReference<>();
+    private final AtomicReference<Instant> documentMigrationStartTimeRef =  new AtomicReference<>();
 }

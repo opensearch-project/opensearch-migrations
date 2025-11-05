@@ -145,7 +145,7 @@ public class DocumentsRunner {
             workItem.getShardNumber()
         );
         var reader = readerFactory.getReader(unpacker.unpack());
-        timeProvider.getDocumentMigraionStartTimeRef().set(Instant.now());
+        timeProvider.getDocumentMigrationStartTimeRef().set(Instant.now());
         
         log.info("Setting up doc migration for index={}, shard={}",
              workItem.getIndexName(), workItem.getShardNumber());
