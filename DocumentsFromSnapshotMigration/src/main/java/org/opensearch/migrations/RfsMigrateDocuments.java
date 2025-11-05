@@ -39,6 +39,7 @@ import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
+import org.opensearch.migrations.bulkload.workcoordination.WorkItem;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
@@ -211,6 +212,13 @@ public class RfsMigrateDocuments {
                 "used to communicate to the target, default 10")
         int maxConnections = 10;
 
+        @Parameter(required = false,
+            names = { "--allow-server-generated-ids", "--allowServerGeneratedIds" },
+            description = "Optional. Allow the target cluster to generate document IDs instead of preserving source IDs. " +
+                "Required for OpenSearch Serverless collections that don't support custom document IDs. " +
+                "WARNING: This will result in different document IDs on the target cluster.")
+        public boolean allowServerGeneratedIds = false;
+
         @Parameter(required = true,
             names = { "--source-version", "--sourceVersion" },
             converter = VersionConverter.class,
@@ -223,6 +231,22 @@ public class RfsMigrateDocuments {
                 "This will be appended to the name of the index that is used for work coordination.",
             validateValueWith = IndexNameValidator.class)
         public String indexNameSuffix = "";
+
+        @Parameter(required = false,
+            names = { "--work-coordination-postgres-url" },
+            description = "PostgreSQL JDBC URL for work coordination (e.g., jdbc:postgresql://host:5432/dbname). " +
+                "If provided, PostgreSQL will be used instead of OpenSearch for work coordination.")
+        public String workCoordinationPostgresUrl = null;
+
+        @Parameter(required = false,
+            names = { "--work-coordination-postgres-username" },
+            description = "PostgreSQL username for work coordination")
+        public String workCoordinationPostgresUsername = null;
+
+        @Parameter(required = false,
+            names = { "--work-coordination-postgres-password" },
+            description = "PostgreSQL password for work coordination")
+        public String workCoordinationPostgresPassword = null;
 
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
@@ -388,12 +412,32 @@ public class RfsMigrateDocuments {
         var coordinatorFactory = new WorkCoordinatorFactory(targetVersion, arguments.indexNameSuffix);
         var cleanShutdownCompleted = new AtomicBoolean(false);
 
-        try (var workCoordinator = coordinatorFactory.get(
-                 new CoordinateWorkHttpClient(connectionContext),
-                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                 workerId,
+        IWorkCoordinator workCoordinator;
+        if (arguments.workCoordinationPostgresUrl != null) {
+            log.info("Using PostgreSQL for work coordination: {}", arguments.workCoordinationPostgresUrl);
+            var postgresConfig = new org.opensearch.migrations.bulkload.workcoordination.PostgresConfig(
+                arguments.workCoordinationPostgresUrl,
+                arguments.workCoordinationPostgresUsername,
+                arguments.workCoordinationPostgresPassword
+            );
+            workCoordinator = coordinatorFactory.getPostgres(
+                postgresConfig,
+                workerId,
                 Clock.systemUTC(),
-                workItemRef::set);
+                workItemRef::set
+            );
+        } else {
+            log.info("Using OpenSearch for work coordination");
+            workCoordinator = coordinatorFactory.get(
+                new CoordinateWorkHttpClient(connectionContext),
+                TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                workerId,
+                Clock.systemUTC(),
+                workItemRef::set
+            );
+        }
+
+        try (workCoordinator;
              var processManager = new LeaseExpireTrigger(
                 w -> exitOnLeaseTimeout(
                         workItemRef,
@@ -432,7 +476,8 @@ public class RfsMigrateDocuments {
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,
                 arguments.maxConnections,
-                docTransformerSupplier);
+                docTransformerSupplier,
+                arguments.allowServerGeneratedIds);
 
             var finder = ClusterProviderRegistry.getSnapshotFileFinder(
                     arguments.sourceVersion,
@@ -503,10 +548,10 @@ public class RfsMigrateDocuments {
         }
         var workItemAndDuration = workItemRef.get();
         log.atInfo().setMessage("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
-        var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, progressCursor.get());
+        var successorWorkItem = getSuccessorWorkItems(workItemAndDuration, progressCursor.get());
 
         coordinator.createSuccessorWorkItemsAndMarkComplete(
-                workItemAndDuration.getWorkItem().toString(), successorWorkItem, 1, contextSupplier
+                workItemAndDuration.getWorkItem(), successorWorkItem, 1, contextSupplier
         );
         cleanShutdownCompleted.set(true);
     }
@@ -542,16 +587,16 @@ public class RfsMigrateDocuments {
                         .log();
                 log.atWarn().setMessage("Work Item: {}").addArgument(workItemAndDuration.getWorkItem())
                         .log();
-                var successorWorkItemIds = getSuccessorWorkItemIds(workItemAndDuration, progressCursor);
-                if (successorWorkItemIds.size() == 1 && workItemId.equals(successorWorkItemIds.get(0))) {
+                var successorWorkItems = getSuccessorWorkItems(workItemAndDuration, progressCursor);
+                if (successorWorkItems.size() == 1 && workItemId.equals(successorWorkItems.get(0).toString())) {
                     log.atWarn().setMessage("No real progress was made for work item: {}. Will retry with larger timeout").addArgument(workItemId).log();
                 } else {
-                    log.atWarn().setMessage("Successor Work Ids: {}").addArgument(String.join(", ", successorWorkItemIds))
+                    log.atWarn().setMessage("Successor Work Ids: {}").addArgument(successorWorkItems.stream().map(WorkItem::toString).reduce((a, b) -> a + ", " + b).orElse(""))
                             .log();
                     var successorNextAcquisitionLeaseExponent = getSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration, workItemAndDuration.getLeaseExpirationTime());
                     coordinator.createSuccessorWorkItemsAndMarkComplete(
-                            workItemId,
-                            successorWorkItemIds,
+                            workItemAndDuration.getWorkItem(),
+                            successorWorkItems,
                             successorNextAcquisitionLeaseExponent,
                             contextSupplier
                     );
@@ -632,19 +677,18 @@ public class RfsMigrateDocuments {
         return successorShardNextAcquisitionLeaseExponent;
     }
 
-    private static List<String> getSuccessorWorkItemIds(IWorkCoordinator.WorkItemAndDuration workItemAndDuration, WorkItemCursor progressCursor) {
+    private static List<WorkItem> getSuccessorWorkItems(IWorkCoordinator.WorkItemAndDuration workItemAndDuration, WorkItemCursor progressCursor) {
         if (workItemAndDuration == null) {
             throw new IllegalStateException("Unexpected worker coordination state. Expected workItem set when progressCursor not null.");
         }
         var workItem = workItemAndDuration.getWorkItem();
         // Set successor as same last checkpoint Num, this will ensure we process every document fully in cases where there is a 1:many doc split
         var successorStartingCheckpointNum = progressCursor.getProgressCheckpointNum();
-        var successorWorkItem = new IWorkCoordinator.WorkItemAndDuration
-                .WorkItem(workItem.getIndexName(), workItem.getShardNumber(),
+        var successorWorkItem = new WorkItem(workItem.getIndexName(), workItem.getShardNumber(),
                 successorStartingCheckpointNum);
-        ArrayList<String> successorWorkItemIds = new ArrayList<>();
-        successorWorkItemIds.add(successorWorkItem.toString());
-        return successorWorkItemIds;
+        ArrayList<WorkItem> successorWorkItems = new ArrayList<>();
+        successorWorkItems.add(successorWorkItem);
+        return successorWorkItems;
     }
 
     private static RootDocumentMigrationContext makeRootContext(Args arguments, String workerId) {

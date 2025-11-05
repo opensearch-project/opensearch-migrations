@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.common;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.time.Duration;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,7 +17,9 @@ import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
+import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.common.bulk.metadata.BaseMetadata;
+import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
@@ -411,6 +414,27 @@ public abstract class OpenSearchClient {
         return BULK_RETRY_STRATEGY;
     }
 
+    private BulkOperationSpec stripDocumentId(BulkOperationSpec original) {
+        if (original instanceof IndexOp indexOp) {
+            var metadata = indexOp.getOperation();
+            var newMetadata = IndexOperationMeta.builder()
+                .index(metadata.getIndex())
+                .type(metadata.getType())
+                .routing(metadata.getRouting())
+                .write(metadata.getWrite())
+                .versioning(metadata.getVersioning())
+                .opType(metadata.getOpType())
+                .build();
+            
+            return IndexOp.builder()
+                .operation(newMetadata)
+                .document(original.getDocument())
+                .includeDocument(original.isIncludeDocument())
+                .build();
+        }
+        return original;
+    }
+
     private static String truncateMessageIfNeeded(String input, int maxCharacters) {
         if (input == null || input.length() <= maxCharacters) {
             return input;
@@ -422,7 +446,7 @@ public abstract class OpenSearchClient {
     }
 
     public Mono<BulkResponse> sendBulkRequest(String indexName, List<? extends BulkOperationSpec> docs,
-                                              IRfsContexts.IRequestContext context)
+                                              IRfsContexts.IRequestContext context, boolean allowServerGeneratedIds)
     {
         final AtomicInteger attemptCounter = new AtomicInteger(0);
         final var docsMap = docs.stream().collect(Collectors.toMap(o ->
@@ -430,7 +454,15 @@ public abstract class OpenSearchClient {
         return Mono.defer(() -> {
             final String targetPath = getBulkRequestPath(indexName);
             log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap::keySet).log();
-            var body = BulkNdjson.toBulkNdjson(docsMap.values(), OBJECT_MAPPER);
+            
+            Collection<? extends BulkOperationSpec> operationsToSend = docsMap.values();
+            if (allowServerGeneratedIds) {
+                operationsToSend = docsMap.values().stream()
+                    .map(this::stripDocumentId)
+                    .collect(Collectors.toList());
+            }
+            
+            var body = BulkNdjson.toBulkNdjson(operationsToSend, OBJECT_MAPPER);
             var additionalHeaders = new HashMap<String, List<String>>();
             if (CompressionMode.GZIP_BODY_COMPRESSION.equals(compressionMode)) {
                 RestClient.addGzipRequestHeaders(additionalHeaders);
@@ -440,6 +472,16 @@ public abstract class OpenSearchClient {
                 .flatMap(response -> {
                     var resp =
                         new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
+                    
+                    if (resp.hasServerlessDocIdError() && !allowServerGeneratedIds) {
+                        String errorMsg = "Target cluster does not support custom document IDs. " +
+                            "This is common with OpenSearch Serverless. " +
+                            "Use --allow-server-generated-ids flag to allow server-generated IDs. " +
+                            "WARNING: This will result in different document IDs on the target cluster.";
+                        log.atError().setMessage(errorMsg).log();
+                        return Mono.error(new ServerlessDocIdNotSupportedException(errorMsg, resp));
+                    }
+                    
                     if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {
                         return Mono.just(resp);
                     }
@@ -503,6 +545,10 @@ public abstract class OpenSearchClient {
             return matcher.find();
         }
 
+        public boolean hasServerlessDocIdError() {
+            return body != null && body.contains("Document ID is not supported in create/index operation request");
+        }
+
         public List<String> getSuccessfulDocs() {
             try {
                 return BulkResponseParser.findSuccessDocs(body);
@@ -537,6 +583,12 @@ public abstract class OpenSearchClient {
     public static class UnexpectedStatusCode extends OperationFailed {
         public UnexpectedStatusCode(HttpResponse response) {
             super("Unexpected status code " + response.statusCode, response);
+        }
+    }
+
+    public static class ServerlessDocIdNotSupportedException extends OperationFailed {
+        public ServerlessDocIdNotSupportedException(String message, HttpResponse response) {
+            super(message, response);
         }
     }
 }

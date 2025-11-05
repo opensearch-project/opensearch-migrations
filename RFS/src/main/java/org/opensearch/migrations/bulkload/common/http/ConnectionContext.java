@@ -17,6 +17,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
+import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
 /**
@@ -25,6 +26,7 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 @Getter
 @EqualsAndHashCode(exclude={"requestTransformer"})
 @ToString(exclude={"requestTransformer"})
+@Slf4j
 public class ConnectionContext {
     public enum Protocol {
         HTTP,
@@ -87,8 +89,10 @@ public class ConnectionContext {
             requestTransformer = new BasicAuthTransformer(params.getUsername(), params.getPassword());
         }
         else if (sigv4Enabled) {
+            var credProvider = DefaultCredentialsProvider.builder().build();
+            log.info("Sigv4 enabled with {}, aws service: {}, region: {}", credProvider.resolveCredentials().toString(), params.getAwsServiceSigningName(), params.getAwsRegion());
             requestTransformer = new SigV4AuthTransformer(
-                DefaultCredentialsProvider.builder().build(),
+                credProvider,
                 params.getAwsServiceSigningName(),
                 params.getAwsRegion(),
                 protocol.name(),

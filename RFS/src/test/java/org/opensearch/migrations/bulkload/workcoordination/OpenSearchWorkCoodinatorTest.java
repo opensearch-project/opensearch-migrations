@@ -1,10 +1,12 @@
 package org.opensearch.migrations.bulkload.workcoordination;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.AbstractMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
@@ -88,7 +90,8 @@ class OpenSearchWorkCoodinatorTest {
     public void testWhenGetResult(Version version, DocumentModificationResult expectedResult, String responsePayload) throws Exception {
         var factory = new WorkCoordinatorFactory(version);
         var response = new TestResponse(200, "ok", responsePayload);
-        try (var workCoordinator = factory.get(new MockHttpClient(response), 2, "testWorker")) {
+        var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+        try (var workCoordinator = factory.get(new MockHttpClient(response), 2, "testWorker", Clock.systemUTC(), workItemRef::set)) {
             var result = workCoordinator.getResult(response);
             Assertions.assertEquals(expectedResult, result);
         }
@@ -99,7 +102,8 @@ class OpenSearchWorkCoodinatorTest {
     public void testWhenGetResultAndConflictThenIgnored(Version version) throws Exception {
         var factory = new WorkCoordinatorFactory(version);
         var response = new TestResponse(409, "conflict", "");
-        try (var workCoordinator = factory.get(new MockHttpClient(response), 2, "testWorker")) {
+        var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+        try (var workCoordinator = factory.get(new MockHttpClient(response), 2, "testWorker", Clock.systemUTC(), workItemRef::set)) {
             var result = workCoordinator.getResult(response);
             Assertions.assertEquals(DocumentModificationResult.IGNORED, result);
         }
@@ -117,7 +121,8 @@ class OpenSearchWorkCoodinatorTest {
         var response = getThrottleResponse();
         MockHttpClient client = new MockHttpClient(response);
 
-        try (var workCoordinator = factory.get(client, 2, "testWorker");
+        var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+        try (var workCoordinator = factory.get(client, 2, "testWorker", Clock.systemUTC(), workItemRef::set);
              var closeableLogSetup = new CloseableLogSetup(workCoordinator.getLoggerName()))
         {
             log.atInfo().log(workCoordinator.getClass().getName());
@@ -128,7 +133,7 @@ class OpenSearchWorkCoodinatorTest {
     }
 
     static Stream<Arguments> makeConsumers() {
-        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", 0, 0).toString();
+        var workItem = new WorkItem("item", 0, 0);
 
 
         var functions = List.<Function<IWorkCoordinator, Exception>>of(
@@ -147,7 +152,8 @@ class OpenSearchWorkCoodinatorTest {
     @MethodSource("makeConsumers")
     public void testWhenInvokedWithHttpErrorThenLogged(Version version, Function<IWorkCoordinator, Exception> worker) throws Exception {
         var factory = new WorkCoordinatorFactory(version);
-        try (var workCoordinator = factory.get(new MockHttpClient(getThrottleResponse()), 2, "t");
+        var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+        try (var workCoordinator = factory.get(new MockHttpClient(getThrottleResponse()), 2, "t", Clock.systemUTC(), workItemRef::set);
              var closeableLogSetup = new CloseableLogSetup(workCoordinator.getLoggerName()))
         {
             worker.apply(workCoordinator);

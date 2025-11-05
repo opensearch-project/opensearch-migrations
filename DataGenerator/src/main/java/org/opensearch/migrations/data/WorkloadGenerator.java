@@ -75,7 +75,7 @@ public class WorkloadGenerator {
         return Flux.fromIterable(allDocs)
             .buffer(options.getMaxBulkBatchSize())
             .map(docs -> {
-                var sendFuture = client.sendBulkRequest(indexName, docs, null).toFuture();
+                var sendFuture = client.sendBulkRequest(indexName, docs, null, false).toFuture();
                 if (options.isRefreshAfterEachWrite()) {
                     sendFuture.thenRun(() -> client.refresh(null));
                     // Requests will be sent in parallel unless we wait for completion

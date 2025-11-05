@@ -1,8 +1,10 @@
 package org.opensearch.migrations.bulkload.workcoordination;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
@@ -124,7 +126,8 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
                 .toConnectionContext());
             var startingLeaseDuration = Duration.ofSeconds(1);
             var rootContext = WorkCoordinationTestContext.factory().withAllTracking();
-            try (var workCoordinator = factory.get(client, 2, TEST_WORKER_ID)) {
+            var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+            try (var workCoordinator = factory.get(client, 2, TEST_WORKER_ID, Clock.systemUTC(), workItemRef::set)) {
                 var e = Assertions.assertThrows(OpenSearchWorkCoordinator.RetriesExceededException.class,
                     () -> workCoordinator.acquireNextWorkItem(startingLeaseDuration, rootContext::createAcquireNextItemContext));
                 validate(pathToCounts, exceptionClassToTest, e);
@@ -159,7 +162,8 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
                 .toConnectionContext());
             var startingLeaseDuration = Duration.ofSeconds(1);
             var rootContext = WorkCoordinationTestContext.factory().withAllTracking();
-            try (var wc = factory.get(client, 2, TEST_WORKER_ID)) {
+            var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+            try (var wc = factory.get(client, 2, TEST_WORKER_ID, Clock.systemUTC(), workItemRef::set)) {
                 var e1 = Assertions.assertThrows(OpenSearchWorkCoordinator.RetriesExceededException.class,
                     () -> wc.acquireNextWorkItem(startingLeaseDuration, rootContext::createAcquireNextItemContext));
                 validate(pathToCounts, OpenSearchWorkCoordinator.MalformedAssignedWorkDocumentException.class, e1);

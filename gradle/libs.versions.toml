@@ -13,6 +13,7 @@ graalvm = "25.0.1"
 groovy = "3.0.25"
 guava = "33.5.0-jre"
 hamcrest = "3.0"
+hikaricp = "5.1.0"
 httpclient5 = "5.5.1"
 jackson = "2.20.1"
 jackson-annotations = "2.20"
@@ -37,6 +38,7 @@ netty = "4.1.124.Final"
 opensearch-testcontainers = "2.0.1"
 opentelemetry = "1.55.0"
 opentelemetry-semconv = "1.23.1-alpha"
+postgresql = "42.7.1"
 protobuf = "4.33.0"
 reactor-netty = "1.2.11"
 reactor-test = "3.7.12"
@@ -75,6 +77,8 @@ groovy = { module = "org.codehaus.groovy:groovy-all", version.ref = "groovy" }
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
 
 hamcrest = { module = "org.hamcrest:hamcrest", version.ref = "hamcrest" }
+
+hikaricp = { module = "com.zaxxer:HikariCP", version.ref = "hikaricp" }
 
 httpclient5 = { module = "org.apache.httpcomponents.client5:httpclient5", version.ref = "httpclient5" }
 
@@ -147,6 +151,8 @@ opentelemetry-semconv = { module = "io.opentelemetry.semconv:opentelemetry-semco
 polyglot = { module = "org.graalvm.polyglot:polyglot", version.ref = "graalvm" }
 polyglot-js-community = { module = "org.graalvm.polyglot:js-community", version.ref = "graalvm" }
 
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+
 protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
 protobuf-protoc = { module = "com.google.protobuf:protoc", version.ref = "protobuf" }
 
@@ -163,6 +169,7 @@ testcontainers = {module = "org.testcontainers:testcontainers", version.ref = "t
 testcontainers-junit-jupiter = {module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
 testcontainers-kafka = {module = "org.testcontainers:kafka", version.ref = "testcontainers" }
 testcontainers-opensearch = {module = "org.opensearch:opensearch-testcontainers", version.ref = "opensearch-testcontainers" }
+testcontainers-postgresql = {module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
 testcontainers-toxiproxy = {module = "org.testcontainers:toxiproxy", version.ref = "testcontainers" }
 
 toxiproxy = {module = "eu.rekawek.toxiproxy:toxiproxy-java", version.ref = "toxiproxy" }

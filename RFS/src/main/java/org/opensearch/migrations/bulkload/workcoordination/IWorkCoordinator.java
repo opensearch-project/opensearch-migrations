@@ -1,7 +1,6 @@
 package org.opensearch.migrations.bulkload.workcoordination;
 
 import java.io.IOException;
-import java.io.Serializable;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -11,7 +10,6 @@ import java.util.function.Supplier;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 
 import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.ToString;
@@ -45,18 +43,18 @@ public interface IWorkCoordinator extends AutoCloseable {
         throws IOException, InterruptedException;
 
     /**
-     * @param workItemId - the name of the document/resource to create.
+     * @param workItem - the work item to create.
      *                   This value will be used as a key to other methods that update leases and to close work out.
      * @return true if the document was created and false if it was already present
      * @throws IOException if the document was not successfully create for any other reason
      */
     boolean createUnassignedWorkItem(
-        String workItemId,
+        WorkItem workItem,
         Supplier<IWorkCoordinationContexts.ICreateUnassignedWorkItemContext> contextSupplier
     ) throws IOException;
 
     /**
-     * @param workItemId the item that the caller is trying to take ownership of
+     * @param workItem the item that the caller is trying to take ownership of
      * @param leaseDuration the initial amount of time that the caller would like to own the lease for.
      *                      Notice if other attempts have been made on this workItem, the lease will be
      *                      greater than the requested amount.
@@ -67,7 +65,7 @@ public interface IWorkCoordinator extends AutoCloseable {
      */
     @NonNull
     WorkAcquisitionOutcome createOrUpdateLeaseForWorkItem(
-        String workItemId,
+        WorkItem workItem,
         Duration leaseDuration,
         Supplier<IWorkCoordinationContexts.IAcquireSpecificWorkContext> contextSupplier
     ) throws IOException, InterruptedException;
@@ -93,25 +91,25 @@ public interface IWorkCoordinator extends AutoCloseable {
     /**
      * Mark the work item as completed.  After this succeeds, the work item will never be leased out
      * to any callers.
-     * @param workItemId
+     * @param workItem
      * @throws IOException
      */
     void completeWorkItem(
-        String workItemId,
+        WorkItem workItem,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
     ) throws IOException, InterruptedException;
 
     /**
      * Add the list of successor items to the work item, create new work items for each of the successors, and mark the
      * original work item as completed.
-     * @param workItemId the work item that is being completed
-     * @param successorWorkItemIds the list of successor work items that will be created
+     * @param workItem the work item that is being completed
+     * @param successorWorkItems the list of successor work items that will be created
      * @throws IOException
      * @throws InterruptedException
      */
     void createSuccessorWorkItemsAndMarkComplete(
-        String workItemId,
-        List<String> successorWorkItemIds,
+        WorkItem workItem,
+        List<WorkItem> successorWorkItems,
         int initialNextAcquisitionLeaseExponent,
         Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException;
@@ -192,49 +190,6 @@ public interface IWorkCoordinator extends AutoCloseable {
         @Override
         public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException, InterruptedException {
             return v.onAcquiredWork(this);
-        }
-
-        @EqualsAndHashCode
-        @Getter
-        public static class WorkItem implements Serializable {
-            private static final String SEPARATOR = "__";
-            String indexName;
-            Integer shardNumber;
-            Integer startingDocId;
-
-            public WorkItem(String indexName, Integer shardNumber, Integer startingDocId) {
-                if (indexName.contains(SEPARATOR)) {
-                    throw new IllegalArgumentException(
-                            "Illegal work item name: '" + indexName + "'.  " + "Work item names cannot contain '" + SEPARATOR + "'"
-                    );
-                }
-                this.indexName = indexName;
-                this.shardNumber = shardNumber;
-                this.startingDocId = startingDocId;
-            }
-
-            @Override
-            public String toString() {
-                var name = indexName;
-                if (shardNumber != null) {
-                    name += SEPARATOR + shardNumber;
-                }
-                if (startingDocId != null) {
-                    name += SEPARATOR + startingDocId;
-                }
-                return name;
-            }
-
-            public static WorkItem valueFromWorkItemString(String input) {
-                if ("shard_setup".equals(input)) {
-                    return new WorkItem(input, null, null);
-                }
-                var components = input.split(SEPARATOR + "+");
-                if (components.length != 3) {
-                    throw new IllegalArgumentException("Illegal work item: '" + input + "'");
-                }
-                return new WorkItem(components[0], Integer.parseInt(components[1]), Integer.parseInt(components[2]));
-            }
         }
     }
 

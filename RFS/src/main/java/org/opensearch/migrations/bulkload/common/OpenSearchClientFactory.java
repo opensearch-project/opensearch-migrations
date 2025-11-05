@@ -93,8 +93,24 @@ public class OpenSearchClientFactory {
                 .setMessage("Check cluster compression failed")
                 .setCause(e)
                 .log())
-            .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
-            .onErrorReturn(false)
+            .retryWhen(reactor.util.retry.Retry.backoff(3, java.time.Duration.ofSeconds(1))
+                .maxBackoff(java.time.Duration.ofSeconds(10))
+                .filter(throwable -> {
+                    if (throwable instanceof OpenSearchClient.UnexpectedStatusCode) {
+                        var statusCode = ((OpenSearchClient.UnexpectedStatusCode) throwable).response.statusCode;
+                        return statusCode != 403;
+                    }
+                    return true;
+                }))
+            .onErrorResume(throwable -> {
+                if (throwable instanceof OpenSearchClient.UnexpectedStatusCode) {
+                    var statusCode = ((OpenSearchClient.UnexpectedStatusCode) throwable).response.statusCode;
+                    if (statusCode == 403) {
+                        return Mono.error(throwable);
+                    }
+                }
+                return Mono.just(false);
+            })
             .doOnNext(hasCompressionEnabled -> log.atInfo()
                 .setMessage("After querying target, compression={}")
                 .addArgument(hasCompressionEnabled).log())

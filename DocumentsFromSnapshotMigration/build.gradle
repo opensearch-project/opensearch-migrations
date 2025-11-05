@@ -50,7 +50,9 @@ dependencies {
     testImplementation libs.junit.jupiter.params
     testImplementation libs.testcontainers.opensearch
     testImplementation libs.testcontainers
+    testImplementation libs.testcontainers.junit.jupiter
     testImplementation libs.testcontainers.toxiproxy
+    testImplementation libs.testcontainers.postgresql
     testImplementation libs.mockito.core
     testImplementation libs.mockito.junit.jupiter
     testImplementation libs.json

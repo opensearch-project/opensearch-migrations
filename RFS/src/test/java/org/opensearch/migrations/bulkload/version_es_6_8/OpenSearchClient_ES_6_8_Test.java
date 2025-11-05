@@ -100,7 +100,7 @@ class OpenSearchClient_ES_6_8_Test {
         var bulkDocs = List.of(createBulkDoc(docId1), createBulkDoc(docId2));
         when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(successResponse));
 
-        var result = openSearchClient.sendBulkRequest("indexName", bulkDocs, mock(IRfsContexts.IRequestContext.class)).block();
+        var result = openSearchClient.sendBulkRequest("indexName", bulkDocs, mock(IRfsContexts.IRequestContext.class), false).block();
 
         Mockito.verify(restClient).postAsync(eq("indexName/_doc/_bulk"), any(), any(), any());
 

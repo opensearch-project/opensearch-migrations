@@ -33,18 +33,21 @@ public class DocumentReindexer {
     private final int maxConcurrentWorkItems;
     private final ThreadSafeTransformerWrapper threadSafeTransformer;
     private final boolean isNoopTransformer;
+    private final boolean allowServerGeneratedIds;
 
     public DocumentReindexer(OpenSearchClient client,
                int maxDocsPerBulkRequest,
                long maxBytesPerBulkRequest,
                int maxConcurrentWorkItems,
-               Supplier<IJsonTransformer> transformerSupplier) {
+               Supplier<IJsonTransformer> transformerSupplier,
+               boolean allowServerGeneratedIds) {
         this.client = client;
         this.maxDocsPerBulkRequest = maxDocsPerBulkRequest;
         this.maxBytesPerBulkRequest = maxBytesPerBulkRequest;
         this.maxConcurrentWorkItems = maxConcurrentWorkItems;
         this.isNoopTransformer = transformerSupplier == null;
         this.threadSafeTransformer = new ThreadSafeTransformerWrapper((this.isNoopTransformer) ? NOOP_TRANSFORMER_SUPPLIER : transformerSupplier);
+        this.allowServerGeneratedIds = allowServerGeneratedIds;
     }
 
     public Flux<WorkItemCursor> reindex(String indexName, Flux<RfsLuceneDocument> documentStream, IDocumentReindexContext context) {
@@ -110,7 +113,7 @@ public class DocumentReindexer {
                 .map(rfsDocument -> rfsDocument.document)
                 .collect(Collectors.toList());
 
-        return client.sendBulkRequest(indexName, bulkOperations, context.createBulkRequest()) // Send the request
+        return client.sendBulkRequest(indexName, bulkOperations, context.createBulkRequest(), allowServerGeneratedIds) // Send the request
             .doFirst(() -> log.atInfo().setMessage("Batch Id:{}, {} documents in current bulk request.")
                 .addArgument(batchId)
                 .addArgument(docsBatch::size)
@@ -121,8 +124,13 @@ public class DocumentReindexer {
                 .addArgument(error::getMessage)
                 .log())
             // Prevent the error from stopping the entire stream, retries occurring within sendBulkRequest
-            .onErrorResume(e -> Mono.empty())
-            .then(Mono.just(new WorkItemCursor(lastDoc.progressCheckpointNum))
+            .onErrorResume(e -> {
+                if (e instanceof OpenSearchClient.ServerlessDocIdNotSupportedException) {
+                    return Mono.error(e);
+                }
+                return Mono.empty();
+            })
+            .flatMap(unused -> Mono.just(new WorkItemCursor(lastDoc.progressCheckpointNum))
             .subscribeOn(scheduler));
     }
 

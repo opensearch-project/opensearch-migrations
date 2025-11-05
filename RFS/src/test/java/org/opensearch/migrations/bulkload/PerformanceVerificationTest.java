@@ -81,7 +81,7 @@ public class PerformanceVerificationTest {
         AtomicInteger sentDocuments = new AtomicInteger(0);
         CountDownLatch pauseLatch = new CountDownLatch(1);
         OpenSearchClient mockClient = mock(OpenSearchClient.class);
-        when(mockClient.sendBulkRequest(anyString(), anyList(), any())).thenAnswer(invocation -> {
+        when(mockClient.sendBulkRequest(anyString(), anyList(), any(), any())).thenAnswer(invocation -> {
             List<BulkOperationSpec> docs = invocation.getArgument(1);
             sentDocuments.addAndGet(docs.size());
             var response = new BulkResponse(200, "OK", null, null);
@@ -99,7 +99,7 @@ public class PerformanceVerificationTest {
         int maxDocsPerBulkRequest = 1000;
         long maxBytesPerBulkRequest = Long.MAX_VALUE; // No Limit on Size
         int maxConcurrentWorkItems = 10;
-        DocumentReindexer reindexer = new DocumentReindexer(mockClient, maxDocsPerBulkRequest, maxBytesPerBulkRequest, maxConcurrentWorkItems, () -> null);
+        DocumentReindexer reindexer = new DocumentReindexer(mockClient, maxDocsPerBulkRequest, maxBytesPerBulkRequest, maxConcurrentWorkItems, () -> null, false);
 
         // Create a mock IDocumentReindexContext
         IDocumentMigrationContexts.IDocumentReindexContext mockContext = mock(IDocumentMigrationContexts.IDocumentReindexContext.class);

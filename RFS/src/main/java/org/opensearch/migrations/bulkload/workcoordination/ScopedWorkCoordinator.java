@@ -54,7 +54,7 @@ public class ScopedWorkCoordinator {
                     T result = visitor.onAcquiredWork(workItem);
                     long duration = System.currentTimeMillis() - startTime;
                     log.info("Finished onAcquiredWork for work item: {} in {} ms", workItemId, duration);
-                    workCoordinator.completeWorkItem(workItemId, contextSupplier);
+                    workCoordinator.completeWorkItem(workItem.getWorkItem(), contextSupplier);
                     log.info("Marked work item {} as completed and released lease", workItemId);
                     leaseExpireTrigger.markWorkAsCompleted(workItemId);
                     return result;
