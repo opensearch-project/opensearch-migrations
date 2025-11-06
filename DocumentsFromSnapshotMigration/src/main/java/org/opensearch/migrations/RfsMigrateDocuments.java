@@ -409,7 +409,6 @@ public class RfsMigrateDocuments {
         
         // Method-scoped refs (shared across iterations and visible to shutdown hook)
         var cleanShutdownCompleted = new AtomicBoolean(false);
-        var lastWorkItemFinalized = new AtomicReference<String>();
         var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
         var progressCursorRef = new AtomicReference<WorkItemCursor>();
         var cancellationRunnableRef = new AtomicReference<Runnable>();
@@ -429,7 +428,6 @@ public class RfsMigrateDocuments {
                         progressCursorRef,
                         workCoordinator,
                         cleanShutdownCompleted,
-                        lastWorkItemFinalized,
                         context.getWorkCoordinationContext()::createSuccessorWorkItemsContext);
                     log.atInfo().setMessage("Clean shutdown completed.").log();
                 } catch (InterruptedException e) {
@@ -503,7 +501,6 @@ public class RfsMigrateDocuments {
                     workCoordinator,
                     workItemTimeProvider,
                     cleanShutdownCompleted,
-                    lastWorkItemFinalized,
                     context,
                     cancellationRunnableRef,
                     sourceResourceProvider,
@@ -571,38 +568,38 @@ public class RfsMigrateDocuments {
             AtomicReference<WorkItemCursor> progressCursor,
             IWorkCoordinator coordinator,
             AtomicBoolean cleanShutdownCompleted,
-            AtomicReference<String> lastWorkItemFinalized,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException {
         if (cleanShutdownCompleted.get())  {
-            log.atInfo().setMessage("Clean shutdown already completed").log();
-            return;
-        }
-        if (workItemRef.get() == null || progressCursor.get() == null) {
             log.atInfo()
-                .setMessage("No work item or progress cursor found. lastWorkItemFinalized={}, exiting early")
-                .addArgument(lastWorkItemFinalized.get())
+                .setMessage("Clean shutdown already completed")
                 .log();
             return;
         }
-        var workItemAndDuration = workItemRef.get();
-        var currentWorkItemId = workItemAndDuration.getWorkItem().toString();
 
-        // Check if this work item was already finalized by exitOnLeaseTimeout
-        if (currentWorkItemId.equals(lastWorkItemFinalized.get())) {
-            log.atInfo().setMessage("Work item {} already finalized by lease timeout handler").addArgument(currentWorkItemId).log();
+        var item = workItemRef.get();
+        var cursor = progressCursor.get();
+        if (item == null || cursor == null) {
+            // Common during early exit or lease timeout path where we already signaled completion,
+            // or during shard setup/teardown where no cursor is available.
+            log.atInfo()
+                .setMessage("No work item or progress cursor found during shutdown; skipping finalize.")
+                .log();
             return;
         }
 
-        log.atInfo().setMessage("Marking progress: {}, at doc {}")
+        var currentWorkItemId = item.getWorkItem().toString();
+        log.atInfo()
+            .setMessage("Clean shutdown: marking progress for {} at checkpoint {}")
             .addArgument(currentWorkItemId)
-            .addArgument(progressCursor.get().getProgressCheckpointNum())
+            .addArgument(cursor.getProgressCheckpointNum())
             .log();
-        var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, progressCursor.get());
 
+        var successorIds = getSuccessorWorkItemIds(item, cursor);
         coordinator.createSuccessorWorkItemsAndMarkComplete(
-                currentWorkItemId, successorWorkItem, 1, contextSupplier
+            currentWorkItemId, successorIds, 1, contextSupplier
         );
+
         cleanShutdownCompleted.set(true);
     }
 
@@ -616,7 +613,6 @@ public class RfsMigrateDocuments {
             Duration initialLeaseDuration,
             Runnable cancellationRunnable,
             AtomicBoolean cleanShutdownCompleted,
-            AtomicReference<String> lastWorkItemFinalized,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier) {
 
         log.atWarn()
@@ -679,13 +675,15 @@ public class RfsMigrateDocuments {
                     contextSupplier
                 );
 
-                lastWorkItemFinalized.set(workItemId);
                 finalized = true;
             } else {
-                log.atWarn().setMessage("No progress cursor to create successor work items from. This can happen when" +
-                        "downloading and unpacking shard takes longer than the lease").log();
-                log.atWarn().setMessage("Skipping creation of successor work item to retry the existing one with more time")
-                        .log();
+                log.atWarn()
+                    .setMessage("No progress cursor to create successor work items from. This can happen when" +
+                        "downloading and unpacking shard takes longer than the lease")
+                    .log();
+                log.atWarn()
+                    .setMessage("Skipping creation of successor work item to retry the existing one with more time")
+                    .log();
             }
         } catch (Exception e) {
             if (e instanceof InterruptedException) {
@@ -697,9 +695,12 @@ public class RfsMigrateDocuments {
                 .log();
         }
 
-        // Always exit on lease-timeout (even in continuous mode)
+        // Always exit on lease-timeout (even in continuous mode). Mark the boolean so the shutdown hook skips.
         cleanShutdownCompleted.set(finalized);
-        log.info("Exiting due to lease-timeout (treating as worker unhealth) with code {}", PROCESS_TIMED_OUT_EXIT_CODE);
+        log.atInfo()
+            .setMessage("Exiting due to lease-timeout (treating as worker unhealth) with code {}")
+            .addArgument(PROCESS_TIMED_OUT_EXIT_CODE)
+            .log();
         System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
     }
 
@@ -913,7 +914,6 @@ public class RfsMigrateDocuments {
             IWorkCoordinator workCoordinator,
             WorkItemTimeProvider workItemTimeProvider,
             AtomicBoolean cleanShutdownCompleted,
-            AtomicReference<String> lastWorkItemFinalized,
             RootDocumentMigrationContext context,
             AtomicReference<Runnable> cancellationRunnableRef,
             ClusterSnapshotReader sourceResourceProvider,
@@ -930,7 +930,6 @@ public class RfsMigrateDocuments {
                     initialLeaseDuration,
                     () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                     cleanShutdownCompleted,
-                    lastWorkItemFinalized,
                     context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
                 Clock.systemUTC())) {
             
