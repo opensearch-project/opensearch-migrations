@@ -44,7 +44,7 @@ function makeParamsDict(
     return expr.mergeDicts(
         expr.mergeDicts(
             makeTargetParamDict(targetConfig),
-            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas")
+            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas", "resources")
         ),
         expr.mergeDicts(
             expr.makeDict({
@@ -119,7 +119,7 @@ function getRfsReplicasetManifest
             "---INLINE-JSON",
             makeStringTypeProxy(args.jsonConfig)
         ],
-        resources: args.resources
+        resources: makeDirectTypeProxy(args.resources)
     };
 
     const finalContainerDefinition= setupTestCredsForContainer(
@@ -280,7 +280,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             b.inputs.documentBackfillConfig,
                             b.inputs.sessionName)
                     )),
-                     resources:  expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources"))
+                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources"))
                 })
             )
         )

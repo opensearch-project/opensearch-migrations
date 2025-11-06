@@ -1,3 +1,3 @@
 export * from "./userSchemas";
 export * from "./argoSchemas";
-export * from "./resourceDefaults";
+export * from "./schemaUtilities";

@@ -25,6 +25,7 @@ import {extendScope, FieldGroupConstraint, ScopeIsEmptyConstraint} from "./scope
 import {PlainObject} from "./plainObject";
 import {AllowLiteralOrExpression, BaseExpression, expr, toExpression} from "./expression";
 import {TypeToken} from "./sharedTypes";
+import { DEFAULT_RESOURCES } from "@opensearch-migrations/schemas";
 
 export type IMAGE_PULL_POLICY = "Always" | "Never" | "IfNotPresent";
 
@@ -110,13 +111,13 @@ export class ContainerBuilder<
     // Update existing methods to preserve EnvScope type parameter
 
     addImageInfo(image: AllowLiteralOrExpression<string>,
-                 pullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>):
+                 imagePullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>):
         ContainerBuilder<
             ContextualScope,
             InputParamsScope,
             ExtendScope<ContainerScope, {
                 image: AllowLiteralOrExpression<string>,
-                pullPolicy: AllowLiteralOrExpression<string>
+                imagePullPolicy: AllowLiteralOrExpression<string>
             }>,
             VolumeScope,
             EnvScope,
@@ -125,7 +126,7 @@ export class ContainerBuilder<
         return new ContainerBuilder(
             this.contextualScope,
             this.inputsScope,
-            {...this.bodyScope, image, pullPolicy},
+            {...this.bodyScope, image, imagePullPolicy},
             this.volumeScope,
             this.envScope,
             this.outputsScope,
@@ -363,14 +364,20 @@ export class ContainerBuilder<
 
     /**
      * Add resource requirements (CPU, memory limits and requests) to the container.
-     * This method allows chaining resource specifications like other container properties.
-     * Adds the WithResources brand to enable compile-time enforcement.
      * 
      * @param resources - Resource requirements (limits and requests for CPU, memory, ephemeral-storage)
      * @returns New ContainerBuilder with resources applied and branded
      */
     addResources(
-        resources: AllowLiteralOrExpression<Record<string, any>>
+        // Merged Resources failing due to argo validation that is not allowing expressions in resources
+        // Solve this by requesting an argo change https://github.com/argoproj/argo-workflows/issues/15005
+        // When we have this we will be able to use
+        // resources: AllowLiteralOrExpression<Record<string, any>> 
+        // and
+        // const mergedResources = expr.serialize(expr.mergeDicts(
+        //     expr.literal(this.bodyScope?.resources || {}),
+        //     toExpression(resources)));
+        resources: Record<string, any>
     ): ContainerBuilder<
         ContextualScope,
         InputParamsScope,
@@ -379,25 +386,9 @@ export class ContainerBuilder<
         EnvScope,
         OutputParamsScope
     > {
-        // Merged Resources failing due to argo validation that is not allowing expressions in resources
-        // Solve this by requesting an argo change https://github.com/argoproj/argo-workflows/issues/15005
-        // const mergedResources = expr.serialize(expr.mergeDicts(
-        //     expr.literal(this.bodyScope?.resources || {}),
-        //     toExpression(resources)));
-        // Temporary workaround to hardcode defaults
-        const mergedResources = { 
-            requests: {
-                cpu: "1000m",
-                memory: "4G",
-                "ephemeral-storage": "20G"
-            },
-            limits: {
-                cpu: "4000m",
-                memory: "4G",
-                "ephemeral-storage": "20G"
-        }}
+        const mergedResources = resources;
         return new ContainerBuilder(
-            this.contextualScope,
+            {...this.contextualScope},
             this.inputsScope,
             {...this.bodyScope, resources: mergedResources} as ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
             this.volumeScope,

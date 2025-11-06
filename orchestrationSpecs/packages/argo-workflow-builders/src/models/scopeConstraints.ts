@@ -36,7 +36,7 @@ export type FieldGroupConstraint<
 export type ScopeIsEmptyConstraint<S, T> =
     keyof S extends never
         ? T
-        : TypescriptError<`Scope must be empty but contains: ${keyof S & string}`>/**
+        : TypescriptError<`Scope must be empty but contains: ${keyof S & string}`>
  
 /**
  * Helper type to extract ContainerScope from a ContainerBuilder type.

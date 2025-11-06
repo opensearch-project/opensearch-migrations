@@ -1976,7 +1976,7 @@ export interface IoK8SApiCoreV156 {
   requests?: {
     [k: string]: IoK8SApimachineryPkgApiResourceQuantity;
   };
-  [k: string]: any;
+  [k: string]: unknown;
 }
 /**
  * ResourceClaim references one entry in PodSpec.ResourceClaims.

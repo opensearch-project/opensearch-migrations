@@ -1,5 +1,6 @@
 import {z} from "zod";
-import { DEFAULT_RESOURCES } from "./resourceDefaults";
+import { DEFAULT_RESOURCES, parseK8sQuantity } from "./schemaUtilities";
+import deepmerge from "deepmerge";
 
 export function getZodKeys<T extends z.ZodRawShape>(schema: z.ZodObject<T>): readonly (keyof T)[] {
     return Object.keys(schema.shape) as (keyof T)[];
@@ -24,11 +25,11 @@ export const CPU_QUANTITY = z.string()
     .describe("CPU quantity in millicores (e.g., '100m', '500m')");
 
 export const MEMORY_QUANTITY = z.string()
-    .regex(/^[0-9]+(E|P|T|G|M|K)i?$/)
+    .regex(/^[0-9]+((E|P|T|G|M)i?|Ki|k)$/)
     .describe("Memory quantity with unit (e.g., '512Mi', '2G')");
 
 export const STORAGE_QUANTITY = z.string()
-    .regex(/^[0-9]+(E|P|T|G|M|K)i?$/)
+    .regex(/^[0-9]+((E|P|T|G|M)i?|Ki|k)$/)
     .describe("Storage quantity with unit (e.g., '10Gi', '5G')");
 
 export const CONTAINER_RESOURCES = {
@@ -48,9 +49,10 @@ export const PROXY_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default(""),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
     setHeaders: z.array(z.string()).optional(),
-    resources: RESOURCE_REQUIREMENTS.optional()
-        .describe("Resource limits and requests for proxy container.")
-        .default(DEFAULT_RESOURCES.CAPTURE_PROXY),
+    // TODO: Capture proxy resources non-functional currently
+    // resources: RESOURCE_REQUIREMENTS.optional()
+    //     .describe("Resource limits and requests for proxy container.")
+    //     .default(DEFAULT_RESOURCES.CAPTURE_PROXY),
 });
 
 export const REPLAYER_OPTIONS = z.object({
@@ -84,9 +86,6 @@ export const METADATA_OPTIONS = z.object({
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
     output: z.union(["HUMAN_READABLE", "JSON"].map(s=>z.literal(s))).default("HUMAN_READABLE"),
     transformerConfigBase64: z.string().default(""),
-    resources: RESOURCE_REQUIREMENTS.optional()
-        .describe("Resource limits and requests for metadata migration container")
-        .default(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI),
 });
 
 export const RFS_OPTIONS = z.object({
@@ -101,9 +100,46 @@ export const RFS_OPTIONS = z.object({
     maxConnections: z.number().default(10),
     maxShardSizeBytes: z.number().default(80*1024*1024*1024),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
-    resources: RESOURCE_REQUIREMENTS.optional()
-        .describe("Resource limits and requests for RFS container")
-        .default(DEFAULT_RESOURCES.RFS),
+
+    resources: z.preprocess((v) => 
+        deepmerge(DEFAULT_RESOURCES.RFS, (v ?? {})),
+        RESOURCE_REQUIREMENTS
+    )
+    .pipe(RESOURCE_REQUIREMENTS.extend({
+        requests: RESOURCE_REQUIREMENTS.shape.requests.extend({
+            "ephemeral-storage":
+            RESOURCE_REQUIREMENTS.shape.requests.shape["ephemeral-storage"].describe(
+                "If omitted, automatically computed during transform as ceil(2.5 * maxShardSizeBytes)."
+            ),
+        }),
+    }))
+    .describe("Resource limits and requests for RFS container"),
+})
+.transform((data) => {
+    const requestEphemeral = data.resources?.requests?.["ephemeral-storage"];
+    const userRequestEphemeralStorageBytes = requestEphemeral
+        ? parseK8sQuantity(requestEphemeral)
+        : undefined;
+    const limitsEphemeral = data.resources?.limits?.["ephemeral-storage"];
+    const userLimitsEphemeralStorageBytes = limitsEphemeral
+        ? parseK8sQuantity(limitsEphemeral)
+        : undefined;
+    const minimumEphemeralBytes = Math.ceil(2.5 * data.maxShardSizeBytes)
+
+    // pick the larger of (user, minimum); if neither present fall back to minimum
+    const reqBytes = Math.max(userRequestEphemeralStorageBytes ?? 0, minimumEphemeralBytes);
+    // ensure limits >= requests; if user set a higher limit, keep it
+    const limBytes = Math.max(userLimitsEphemeralStorageBytes ?? 0, reqBytes);
+
+    return deepmerge(
+        data,
+        {
+            resources: {
+                requests: { "ephemeral-storage": Math.ceil(reqBytes / 1024) + "Ki" },
+                limits: { "ephemeral-storage": Math.ceil(limBytes / 1024) + "Ki" },
+            },
+        },
+    );
 });
 
 export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
