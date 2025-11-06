@@ -76,42 +76,40 @@ public class ContinuousWorkerTest extends SourceTestBase {
     @TempDir
     Path tempDirLucene;
 
-    private static Stream<Arguments> scenarios() {
-        return Stream.of(
-                org.junit.jupiter.params.provider.Arguments.of(true,  SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_1),
-                org.junit.jupiter.params.provider.Arguments.of(false, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_1)
-        );
-    }
-
-    private static String[] args(boolean continuous, String sourceVersion, String... more) {
-        var baseArgs = continuous 
-                ? new String[] { "--continuous-mode", "--source-version", sourceVersion }
-                : new String[] { "--source-version", sourceVersion };
+    // Always run in continuous mode
+    private static String[] contArgs(String sourceVersion, String... more) {
+        var baseArgs = new String[] { "--continuous-mode", "--source-version", sourceVersion };
         var result = new String[baseArgs.length + more.length];
         System.arraycopy(baseArgs, 0, result, 0, baseArgs.length);
         System.arraycopy(more, 0, result, baseArgs.length, more.length);
         return result;
     }
 
+    private static Stream<Arguments> fixedPathOnly() {
+        return Stream.of(Arguments.of(
+                SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_1
+        ));
+    }
+
     @SneakyThrows
     private static void waitUntilAcquiredOrTimeout(Process p, long ms) {
         // Note: This helper reads from stdout only. If relevant output appears on stderr,
         // ensure ProcessBuilder.redirectErrorStream(true) is called before starting the process.
-        var br = new BufferedReader(new InputStreamReader(p.getInputStream()));
-        long deadline = System.currentTimeMillis() + ms;
-        String line;
-        while (System.currentTimeMillis() < deadline && (line = br.readLine()) != null) {
-            if (line.contains("Acquired") || line.contains("Processing shard")) break;
+        try (var br = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+            long deadline = System.currentTimeMillis() + ms;
+            String line;
+            while (System.currentTimeMillis() < deadline && (line = br.readLine()) != null) {
+                if (line.contains("Acquired") || line.contains("Processing shard")) break;
+            }
         }
     }
 
-    // Test: Worker exits with non-zero code when no migration work remains
-    @ParameterizedTest(name = "[no-work-left → exit=3] continuous={0} {1}->{2}")
-    @MethodSource("scenarios")
+    // Test: Continuous worker exits with code 3 when no migration work remains
+    @ParameterizedTest(name = "[no-work-left → exit=3] {0}->{1}")
+    @MethodSource("fixedPathOnly")
     @Timeout(value = DEFAULT_TIMEOUT_MINUTES, unit = TimeUnit.MINUTES)
     @SneakyThrows
-    public void exitsOnNoWorkLeft_inBothModes(
-            boolean continuousMode,
+    public void exitsOnNoWorkLeft_continuousOnly(
             SearchClusterContainer.ContainerVersion sourceClusterVersion,
             SearchClusterContainer.ContainerVersion targetClusterVersion
     ) {
@@ -128,27 +126,37 @@ public class ContinuousWorkerTest extends SourceTestBase {
                     CompletableFuture.runAsync(osTarget::start)
             ).join();
 
+            var targetOps = new ClusterOperations(osTarget);
+            var healthResponse = targetOps.get("/_cluster/health?wait_for_status=yellow&timeout=30s");
+            assertTrue(healthResponse.getValue().contains("yellow") || healthResponse.getValue().contains("green"),
+                    "Target cluster not ready");
+
             createSnapshot(esSource, SNAPSHOT_NAME, testSnapshotContext);
             esSource.copySnapshotData(tempDirSnapshot.toString());
-            
-            var additionalArgs = args(continuousMode, sourceClusterVersion.getVersion().toString());
+
+            var additionalArgs = contArgs(
+                    sourceClusterVersion.getVersion().toString(),
+                    "--index-allowlist", "geonames"
+            );
             var pb = setupProcess(tempDirSnapshot, tempDirLucene, osTarget.getUrl(), additionalArgs);
             var process = runAndMonitorProcess(pb);
 
-            assertTrue(process.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS), "worker timed out");
-            int exitCode = process.exitValue();
-            assertEquals(3, exitCode, "Expected NO_WORK_LEFT (3) when no migration work remains");
+            try {
+                assertTrue(process.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS), "worker timed out");
+                assertEquals(3, process.exitValue(), "Expected NO_WORK_LEFT (3) when no migration work remains");
+            } finally {
+                process.destroyForcibly();
+            }
         }
     }
 
 
-    // Test: Worker handles SIGTERM gracefully during active migration work
-    @ParameterizedTest(name = "[sigterm] continuous={0} {1}->{2}")
-    @MethodSource("scenarios")
+    // Test: Continuous worker handles SIGTERM gracefully during active migration work
+    @ParameterizedTest(name = "[sigterm] {0}->{1}")
+    @MethodSource("fixedPathOnly")
     @Timeout(value = DEFAULT_TIMEOUT_MINUTES, unit = TimeUnit.MINUTES)
     @SneakyThrows
-    public void sigtermLeadsToCleanShutdownDuringActiveWork(
-            boolean continuousMode,
+    public void sigtermLeadsToCleanShutdownDuringActiveWork_continuousOnly(
             SearchClusterContainer.ContainerVersion sourceClusterVersion,
             SearchClusterContainer.ContainerVersion targetClusterVersion
     ) {
@@ -168,7 +176,6 @@ public class ContinuousWorkerTest extends SourceTestBase {
                     ConnectionContextTestParams.builder().host(esSource.getUrl()).build().toConnectionContext()
             ).determineVersionAndCreate();
 
-            // Generate test data for migration
             var generator = new WorkloadGenerator(client);
             var opts = new WorkloadOptions();
             opts.setTotalDocs(100);
@@ -176,11 +183,19 @@ public class ContinuousWorkerTest extends SourceTestBase {
             opts.getIndex().indexSettings.put(IndexOptions.PROP_NUMBER_OF_SHARDS, 1);
             generator.generate(opts);
 
+            var targetOps = new ClusterOperations(osTarget);
+            var healthResponse = targetOps.get("/_cluster/health?wait_for_status=yellow&timeout=30s");
+            assertTrue(healthResponse.getValue().contains("yellow") || healthResponse.getValue().contains("green"),
+                    "Target cluster not ready");
+
             createSnapshot(esSource, SNAPSHOT_NAME, testSnapshotContext);
             esSource.copySnapshotData(tempDirSnapshot.toString());
 
-            var additionalArgs = args(continuousMode, sourceClusterVersion.getVersion().toString(),
-                    "--initial-lease-duration", "PT30s");
+            var additionalArgs = contArgs(
+                    sourceClusterVersion.getVersion().toString(),
+                    "--index-allowlist", "geonames",
+                    "--initial-lease-duration", "PT30s"
+            );
             var pb = setupProcess(tempDirSnapshot, tempDirLucene, osTarget.getUrl(), additionalArgs);
 
             pb.redirectErrorStream(true);
@@ -188,21 +203,24 @@ public class ContinuousWorkerTest extends SourceTestBase {
 
             var process = pb.start();
 
-            waitUntilAcquiredOrTimeout(process, 8000);
-            // Send SIGTERM to test graceful shutdown
-            process.destroy();
+            try {
+                waitUntilAcquiredOrTimeout(process, 8000);
+                // Send SIGTERM to test graceful shutdown
+                process.destroy();
 
-            assertTrue(process.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS),
-                    "worker did not terminate after SIGTERM");
-            // Optional sanity check: make sure we didn't take the lease-timeout path
-            assertNotEquals(2, process.exitValue(), "Process should not exit via lease-timeout on SIGTERM");
+                assertTrue(process.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS),
+                        "worker did not terminate after SIGTERM");
+                assertNotEquals(2, process.exitValue(), "Process should not exit via lease-timeout on SIGTERM");
+            } finally {
+                process.destroyForcibly();
+            }
 
         }
     }
 
 
     // Test: Worker handles lease timeout gracefully with network latency in continuous mode
-    @ParameterizedTest(name = "[lease-timeout-continuous] {0}->{1}")
+    @ParameterizedTest(name = "[lease-timeout-continuous: phase1=exit=2, phase2=exit=0|3] {0}->{1}")
     @MethodSource("fixedPathOnly")
     @Timeout(value = DEFAULT_TIMEOUT_MINUTES, unit = TimeUnit.MINUTES)
     @SneakyThrows
@@ -255,7 +273,8 @@ public class ContinuousWorkerTest extends SourceTestBase {
 
             try {
                 // Phase 1: force a timeout (expect exit code 2)
-                var timeoutArgs = args(true, sourceClusterVersion.getVersion().toString(),
+                var timeoutArgs = contArgs(sourceClusterVersion.getVersion().toString(),
+                        "--index-allowlist", "geonames",
                         "--documents-per-bulk-request", "1000",
                         "--max-connections", "1",
                         "--initial-lease-duration", "PT3s");
@@ -263,17 +282,22 @@ public class ContinuousWorkerTest extends SourceTestBase {
                 var pbTimeout = setupProcess(tempDirSnapshot, tempDirLucene, proxy.getProxyUriAsString(), timeoutArgs);
                 var processTimeout = runAndMonitorProcess(pbTimeout);
 
-                assertTrue(processTimeout.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS),
-                        "worker (timeout phase) did not terminate in allotted time");
-                assertEquals(2, processTimeout.exitValue(),
-                        "Expected lease-timeout exit (2) in continuous mode under harsh latency");
+                try {
+                    assertTrue(processTimeout.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS),
+                            "worker (timeout phase) did not terminate in allotted time");
+                    assertEquals(2, processTimeout.exitValue(),
+                            "Expected lease-timeout exit (2) in continuous mode under harsh latency");
+                } finally {
+                    processTimeout.destroyForcibly();
+                }
             } finally {
                 upLatency.remove();
                 downLatency.remove();
             }
 
             // Phase 2: normal run which completes migration
-            var completeArgs = args(true, sourceClusterVersion.getVersion().toString(),
+            var completeArgs = contArgs(sourceClusterVersion.getVersion().toString(),
+                    "--index-allowlist", "geonames",
                     "--documents-per-bulk-request", "200",
                     "--max-connections", "2",
                     "--initial-lease-duration", "PT30S");
@@ -281,23 +305,21 @@ public class ContinuousWorkerTest extends SourceTestBase {
             var pbComplete = setupProcess(tempDirSnapshot, tempDirLucene, osTarget.getUrl(), completeArgs);
             var processComplete = runAndMonitorProcess(pbComplete);
 
-            assertTrue(processComplete.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS),
-                    "worker (completion phase) did not terminate in allotted time");
+            try {
+                assertTrue(processComplete.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS),
+                        "worker (completion phase) did not terminate in allotted time");
 
-            int exitCodeComplete = processComplete.exitValue();
-            assertTrue(exitCodeComplete == 0 || exitCodeComplete == 3,
-                    "Expected 0 (success) or 3 (no-work-left) on completion phase, got: " + exitCodeComplete);
+                int exitCodeComplete = processComplete.exitValue();
+                assertTrue(exitCodeComplete == 0 || exitCodeComplete == 3,
+                        "Expected 0 (success) or 3 (no-work-left) on completion phase, got: " + exitCodeComplete);
+            } finally {
+                processComplete.destroyForcibly();
+            }
 
             // Now the target should have all docs
             checkClusterMigrationOnFinished(esSource, osTarget,
                     DocumentMigrationTestContext.factory().noOtelTracking());
         }
-    }
-
-    private static Stream<org.junit.jupiter.params.provider.Arguments> fixedPathOnly() {
-        return Stream.of(org.junit.jupiter.params.provider.Arguments.of(
-                SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_1
-        ));
     }
 
     // Test: Previous work item lease timer is properly canceled when processing next item
@@ -391,6 +413,8 @@ public class ContinuousWorkerTest extends SourceTestBase {
                         new OpenSearchClientFactory(connectionContext).determineVersionAndCreate(),
                         1000, Long.MAX_VALUE, 1, () -> docTransformer);
 
+                // Note: not try-with-resources on purpose. We want the trigger alive for the duration of run(...) only.
+                // run(...) handles cancel/reset between items.
                 var processManager = new LeaseExpireTrigger(
                         wid -> {
                             log.info("Lease expired callback for {}", wid);
@@ -431,6 +455,166 @@ public class ContinuousWorkerTest extends SourceTestBase {
                     ConnectionContextTestParams.builder().host(targetCluster.getUrl()).build().toConnectionContext()));
             assertTrue(targetMap.containsKey("geonames"));
             assertTrue(targetMap.get("geonames") > 0);
+        }
+    }
+
+    @ParameterizedTest(name = "[cont-multi-iter → exit=3] {0}->{1}")
+    @MethodSource("fixedPathOnly")
+    @Timeout(value = DEFAULT_TIMEOUT_MINUTES, unit = TimeUnit.MINUTES)
+    @SneakyThrows
+    public void continuousWorkerProcessesMultipleShards_thenExitsNoWorkLeft(
+            SearchClusterContainer.ContainerVersion sourceClusterVersion,
+            SearchClusterContainer.ContainerVersion targetClusterVersion
+    ) {
+        final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
+
+        try (
+                var esSource = new SearchClusterContainer(sourceClusterVersion).withAccessToHost(true);
+                var network  = Network.newNetwork();
+                var osTarget = new SearchClusterContainer(targetClusterVersion).withAccessToHost(true).withNetwork(network)
+        ) {
+            CompletableFuture.allOf(
+                    CompletableFuture.runAsync(esSource::start),
+                    CompletableFuture.runAsync(osTarget::start)
+            ).join();
+
+            // Create multi-shard data set (2 shards) with a modest doc count
+            var client = new OpenSearchClientFactory(
+                    ConnectionContextTestParams.builder().host(esSource.getUrl()).build().toConnectionContext()
+            ).determineVersionAndCreate();
+
+            var generator = new WorkloadGenerator(client);
+            var opts = new WorkloadOptions();
+            opts.setTotalDocs(1200);
+            opts.setWorkloads(List.of(Workloads.GEONAMES));
+            opts.getIndex().indexSettings.put(IndexOptions.PROP_NUMBER_OF_SHARDS, 2);
+            generator.generate(opts);
+
+            var snapshotArgs = new CreateSnapshot.Args();
+            snapshotArgs.snapshotName = SNAPSHOT_NAME;
+            snapshotArgs.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
+            snapshotArgs.sourceArgs.host = esSource.getUrl();
+            new CreateSnapshot(snapshotArgs, testSnapshotContext.createSnapshotCreateContext()).run();
+
+            esSource.copySnapshotData(tempDirSnapshot.toString());
+
+            // Run CLI in continuous mode, it should iterate through all shards and then exit(3)
+            var cliArgs = contArgs(sourceClusterVersion.getVersion().toString(),
+                    "--index-allowlist", "geonames",
+                    "--initial-lease-duration", "PT30S");
+            var pb = setupProcess(tempDirSnapshot, tempDirLucene, osTarget.getUrl(), cliArgs);
+            var process = runAndMonitorProcess(pb);
+
+            try {
+                assertTrue(process.waitFor(DEFAULT_TEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS), "worker timed out");
+                assertEquals(3, process.exitValue(), "Continuous worker should exit with NO_WORK_LEFT (3)");
+            } finally {
+                process.destroyForcibly();
+            }
+
+            // Validate data landed
+            checkClusterMigrationOnFinished(esSource, osTarget,
+                    DocumentMigrationTestContext.factory().noOtelTracking());
+        }
+    }
+
+    @ParameterizedTest(name = "[run() no indices → NoWorkLeftException] {0}->{1}")
+    @MethodSource("fixedPathOnly")
+    @Timeout(value = DEFAULT_TIMEOUT_MINUTES, unit = TimeUnit.MINUTES)
+    @SneakyThrows
+    public void runReturnsNothingDone_whenShardYieldsNoDocuments(
+            SearchClusterContainer.ContainerVersion sourceClusterVersion,
+            SearchClusterContainer.ContainerVersion targetClusterVersion
+    ) {
+        final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
+
+        try (
+                var sourceCluster = new SearchClusterContainer(sourceClusterVersion).withAccessToHost(true);
+                var network       = Network.newNetwork();
+                var targetCluster = new SearchClusterContainer(targetClusterVersion).withAccessToHost(true).withNetwork(network)
+        ) {
+            CompletableFuture.allOf(
+                    CompletableFuture.runAsync(sourceCluster::start),
+                    CompletableFuture.runAsync(targetCluster::start)
+            ).join();
+
+            // Create some data (content doesn't matter, we'll exclude it via allowlist)
+            var client = new OpenSearchClientFactory(
+                    ConnectionContextTestParams.builder().host(sourceCluster.getUrl()).build().toConnectionContext()
+            ).determineVersionAndCreate();
+            var opts = new WorkloadOptions();
+            opts.setTotalDocs(100);
+            opts.setWorkloads(List.of(Workloads.GEONAMES));
+            opts.getIndex().indexSettings.put(IndexOptions.PROP_NUMBER_OF_SHARDS, 1);
+            new WorkloadGenerator(client).generate(opts);
+
+            var snapshotArgs = new CreateSnapshot.Args();
+            snapshotArgs.snapshotName = SNAPSHOT_NAME;
+            snapshotArgs.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
+            snapshotArgs.sourceArgs.host = sourceCluster.getUrl();
+            new CreateSnapshot(snapshotArgs, testSnapshotContext.createSnapshotCreateContext()).run();
+
+            sourceCluster.copySnapshotData(tempDirSnapshot.toString());
+
+            SourceRepo sourceRepo = new FileSystemRepo(
+                    tempDirSnapshot,
+                    ClusterProviderRegistry.getSnapshotFileFinder(sourceClusterVersion.getVersion(), false)
+            );
+            var provider = ClusterProviderRegistry.getSnapshotReader(
+                    sourceClusterVersion.getVersion(), sourceRepo, false);
+
+            DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
+            SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(
+                    repoAccessor, tempDirLucene, provider.getBufferSizeInBytes());
+
+            var readerFactory = new LuceneIndexReader.Factory(provider);
+            var connectionContext = ConnectionContextTestParams.builder()
+                    .host(targetCluster.getUrl()).build().toConnectionContext();
+            var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+            var progressCursor = new AtomicReference<WorkItemCursor>();
+            var coordinatorFactory = new WorkCoordinatorFactory(targetClusterVersion.getVersion(), "");
+
+            try (var coordinator = coordinatorFactory.get(
+                    new CoordinateWorkHttpClient(connectionContext),
+                    RfsMigrateDocuments.TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                    UUID.randomUUID().toString(),
+                    java.time.Clock.systemUTC(),
+                    workItemRef::set)) {
+
+                var reindexer = new DocumentReindexer(
+                        new OpenSearchClientFactory(connectionContext).determineVersionAndCreate(),
+                        1000, Long.MAX_VALUE, 1,
+                        () -> new TransformationLoader()
+                                .getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG));
+
+                // Short lease for symmetry, not relevant to the assertion
+                Duration initialLease = Duration.ofSeconds(10);
+                var leaseTrigger = new LeaseExpireTrigger(wid -> {
+                });
+
+                // Use an allowlist that matches nothing -> no eligible work items -> NoWorkLeftException
+                assertThrows(RfsMigrateDocuments.NoWorkLeftException.class, () -> {
+                    RfsMigrateDocuments.run(
+                            readerFactory,
+                            reindexer,
+                            progressCursor,
+                            coordinator,
+                            initialLease,
+                            leaseTrigger,
+                            provider.getIndexMetadata(),
+                            SNAPSHOT_NAME,
+                            null,                  // previousSnapshotName
+                            null,                  // deltaMode
+                            List.of("__no_such_index__"),
+                            provider.getShardMetadata(),
+                            unpackerFactory,
+                            MAX_SHARD_SIZE_BYTES,
+                            DocumentMigrationTestContext.factory().noOtelTracking(),
+                            new AtomicReference<>(),
+                            new WorkItemTimeProvider()
+                    );
+                }, "Expected NoWorkLeftException when no indices match the allowlist");
+            }
         }
     }
 }
