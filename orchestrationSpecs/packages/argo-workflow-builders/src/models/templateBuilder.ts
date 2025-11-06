@@ -34,6 +34,7 @@ import {AllowLiteralOrExpression, expr, isExpression} from "./expression";
 import {TypeToken} from "./sharedTypes";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
 import { Container } from "../kubernetesResourceTypes/kubernetesTypes";
+import { SetRequired } from "../utils";
 
 /**
  * Maintains a scope of all previous public parameters (workflow and previous templates' inputs/outputs)
@@ -222,7 +223,7 @@ export class TemplateBuilder<
 
          GenericScope &
          // Excluding name from container as it is realized during containerBuilder::getBody()
-         Omit<Container, "name">,
+         SetRequired<Omit<Container, "name">, "resources">,
           any, any, any>,
     >(
         builderFn: ScopeIsEmptyConstraint<BodyScope,
