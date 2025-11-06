@@ -7,20 +7,18 @@ import java.nio.file.Path;
 import java.util.Comparator;
 
 import lombok.Lombok;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class FileSystemUtils {
     private FileSystemUtils() {}
 
-    public static void deleteTree(Path path) throws IOException {
+    public static void deleteTree(@NonNull Path path) throws IOException {
         deleteTree(path, true);
     }
-    public static void deleteTree(Path path, boolean deleteRootToo) throws IOException {
-        if (path == null) {
-            log.atDebug().setMessage("not deleting tree because path=null").log();
-            return;
-        }
+
+    public static void deleteTree(@NonNull Path path, boolean deleteRootToo) throws IOException {
         log.atDebug().setMessage("Deleting tree at {}").addArgument(path).log();
         try (var walk = Files.walk(path)) {
             walk.sorted(Comparator.reverseOrder()).forEach(p -> {

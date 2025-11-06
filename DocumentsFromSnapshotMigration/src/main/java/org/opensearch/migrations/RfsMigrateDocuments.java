@@ -391,10 +391,11 @@ public class RfsMigrateDocuments {
         Supplier<IJsonTransformer> docTransformerSupplier = () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
 
         var coordinatorFactory = new WorkCoordinatorFactory(targetVersion, arguments.indexNameSuffix);
-        var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
         var cleanShutdownCompleted = new AtomicBoolean(false);
+        CompletionStatus runResult = CompletionStatus.NOTHING_DONE;
 
         do { // continuousMode
+            var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
             try (var workCoordinator = coordinatorFactory.get(
                      new CoordinateWorkHttpClient(connectionContext),
                      TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
@@ -472,7 +473,7 @@ public class RfsMigrateDocuments {
                         sourceResourceProvider.getBufferSizeInBytes()
                     );
 
-                    run(
+                    runResult = run(
                         new LuceneIndexReader.Factory(sourceResourceProvider),
                         reindexer,
                         progressCursor,
@@ -504,7 +505,7 @@ public class RfsMigrateDocuments {
             } finally {
                 cleanupTemporaryDirectories(luceneDirPath, arguments.s3LocalDir);
             }
-        } while (arguments.continuousMode);
+        } while (arguments.continuousMode && runResult == CompletionStatus.WORK_COMPLETED);
         cleanShutdownCompleted.set(true);
     }
 
