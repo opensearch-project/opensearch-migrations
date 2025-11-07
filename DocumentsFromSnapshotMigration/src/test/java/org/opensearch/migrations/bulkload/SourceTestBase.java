@@ -12,7 +12,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
@@ -51,10 +50,10 @@ import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.migrations.transform.TransformationLoader;
+import org.opensearch.migrations.utils.FileSystemUtils;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
-import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.hamcrest.MatcherAssert;
@@ -350,19 +349,7 @@ public class SourceTestBase {
                     new WorkItemTimeProvider());
             }
         } finally {
-            deleteTree(tempDir);
-        }
-    }
-
-    public static void deleteTree(Path path) throws IOException {
-        try (var walk = Files.walk(path)) {
-            walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                try {
-                    Files.delete(p);
-                } catch (IOException e) {
-                    throw Lombok.sneakyThrow(e);
-                }
-            });
+            FileSystemUtils.deleteDirectories(tempDir.toString());
         }
     }
 
