@@ -36,8 +36,19 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
             .orElse(null);
 
         if (targetSnapshot != null) {
+            String targetId = targetSnapshot.getId();
+            String targetName = targetSnapshot.getName();
+
             getRepoData().getIndices().forEach((indexName, rawIndex) -> {
-                if (rawIndex.getSnapshots().contains(targetSnapshot.getId())) {
+                List<String> tokens = rawIndex.getSnapshots();
+                if (tokens == null || tokens.isEmpty()) {
+                    return;
+                }
+
+                // Accept either:
+                // - ES 6.8+ style: snapshots list contains snapshot UUID
+                // - ES 5.0-5.4 style: snapshots list contains snapshot NAME
+                if (tokens.contains(targetId) || tokens.contains(targetName)) {
                     matchedIndices.add(SnapshotRepoData_ES_6_8.Index.fromRawIndex(indexName, rawIndex));
                 }
             });

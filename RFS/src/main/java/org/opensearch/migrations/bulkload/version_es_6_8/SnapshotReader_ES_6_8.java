@@ -21,7 +21,7 @@ public class SnapshotReader_ES_6_8 implements ClusterSnapshotReader {
 
     @Override
     public boolean compatibleWith(Version version) {
-        return VersionMatchers.equalOrGreaterThanES_5_5
+        return VersionMatchers.isES_5_X
             .or(VersionMatchers.isES_6_X)
             .or(VersionMatchers.equalOrBetween_ES_7_0_and_7_8)
             .test(version);
@@ -29,7 +29,7 @@ public class SnapshotReader_ES_6_8 implements ClusterSnapshotReader {
 
     @Override
     public boolean looseCompatibleWith(Version version) {
-        return VersionMatchers.equalOrGreaterThanES_5_5
+        return VersionMatchers.isES_5_X
             .or(VersionMatchers.isES_6_X)
             .or(VersionMatchers.equalOrBetween_ES_7_0_and_7_8)
             .test(version);
@@ -63,11 +63,17 @@ public class SnapshotReader_ES_6_8 implements ClusterSnapshotReader {
 
     @Override
     public boolean getSoftDeletesPossible() {
+        if (version != null && VersionMatchers.isES_5_X.test(version)) {
+            return false;
+        }
         return ElasticsearchConstants_ES_6_8.SOFT_DELETES_POSSIBLE;
     }
 
     @Override
     public String getSoftDeletesFieldData() {
+        if (version != null && VersionMatchers.isES_5_X.test(version)) {
+            return null;
+        }
         return ElasticsearchConstants_ES_6_8.SOFT_DELETES_FIELD;
     }
 
