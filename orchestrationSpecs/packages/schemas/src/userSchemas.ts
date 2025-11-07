@@ -57,7 +57,7 @@ export const METADATA_OPTIONS = z.object({
 export const RFS_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]),
     podReplicas: z.number().default(1),
-
+    cleanLocalDirs: z.boolean().default(true),
     loggingConfigurationOverrideConfigMap: z.string().default(""),
     allowLooseVersionMatching: z.boolean().default(true).describe(""),
     docTransformerConfigBase64: z.string().default(""),

@@ -76,7 +76,7 @@ function getRfsReplicasetManifest
         name: "bulk-loader",
         image: makeStringTypeProxy(args.rfsImageName),
         imagePullPolicy: makeStringTypeProxy(args.rfsImagePullPolicy),
-        command: ["/rfs-app/runJavaWithClasspath.sh"],
+        command: ["/rfs-app/runJavaWithClasspathWithRepeat.sh"],
         env: [
             // see getTargetHttpAuthCreds() - it's very similar, but for a raw K8s container, we pass
             // environment variables as a list, as K8s expects them.  The getTargetHttpAuthCreds()

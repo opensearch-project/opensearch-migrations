@@ -2,11 +2,14 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -161,6 +164,11 @@ public class RfsMigrateDocuments {
             names = { "--lucene-dir", "--luceneDir" },
             description = "The absolute path to the directory where we'll put the Lucene docs")
         public String luceneDir;
+
+        @Parameter(required = false,
+            names = { "--clean-local-dirs", "--cleanLocalDirs" },
+            description = "Optional. If enabled, deletes s3LocalDir and luceneDir before running. Default: false")
+        public boolean cleanLocalDirs = false;
 
         @ParametersDelegate
         public ConnectionContext.TargetArgs targetArgs = new ConnectionContext.TargetArgs();
@@ -365,6 +373,10 @@ public class RfsMigrateDocuments {
         }
 
         validateArgs(arguments);
+
+        if (arguments.cleanLocalDirs) {
+            deleteDirectories(arguments.s3LocalDir, arguments.luceneDir);
+        }
 
         var context = makeRootContext(arguments, workerId);
         var luceneDirPath = Paths.get(arguments.luceneDir);
@@ -645,6 +657,28 @@ public class RfsMigrateDocuments {
         ArrayList<String> successorWorkItemIds = new ArrayList<>();
         successorWorkItemIds.add(successorWorkItem.toString());
         return successorWorkItemIds;
+    }
+
+    private static void deleteDirectories(String... directoryPaths) throws IOException {
+        for (String dirPath : directoryPaths) {
+            Path path = Paths.get(dirPath);
+            if (Files.exists(path)) {
+                log.atInfo().setMessage("Deleting directory: {}").addArgument(path).log();
+                deleteDirectory(path);
+            }
+        }
+    }
+
+    private static void deleteDirectory(Path path) throws IOException {
+        try (var walk = Files.walk(path)) {
+            walk.sorted(Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.delete(p);
+                } catch (IOException e) {
+                    throw new RuntimeException("Failed to delete: " + p, e);
+                }
+            });
+        }
     }
 
     private static RootDocumentMigrationContext makeRootContext(Args arguments, String workerId) {
