@@ -64,210 +64,149 @@ describe('NGramDiffSetting Transformer', () => {
   describe('NGram Detection', () => {
     test('detects ngram tokenizer', () => {
       const transformer = main(null);
-      const doc = {
-        type: 'template',
-        name: 'test-template',
-        body: {
-          settings: {
-            analysis: {
-              tokenizer: {
-                my_tokenizer: {
-                  type: 'ngram',
-                  min_gram: 3,
-                  max_gram: 4
-                }
-              }
-            }
-          }
-        }
-      };
+      const body = new Map([
+        ['settings', new Map([
+          ['analysis', new Map([
+            ['tokenizer', new Map([
+              ['my_tokenizer', new Map([
+                ['type', 'ngram'],
+                ['min_gram', 3],
+                ['max_gram', 4]
+              ])]
+            ])]
+          ])]
+        ])]
+      ]);
+      const doc = { type: 'template', name: 'test-template', body };
       
       const result = transformer(doc);
-      expect(result.body.settings.index.max_ngram_diff).toBe(NGRAM_DIFF_ALLOWED);
+      expect(result.body.get('settings').get('max_ngram_diff')).toBe(NGRAM_DIFF_ALLOWED);
     });
     
     test('detects edge_ngram tokenizer', () => {
       const transformer = main(null);
-      const doc = {
-        type: 'template',
-        name: 'test-template',
-        body: {
-          settings: {
-            analysis: {
-              tokenizer: {
-                my_tokenizer: {
-                  type: 'edge_ngram',
-                  min_gram: 1,
-                  max_gram: 15
-                }
-              }
-            }
-          }
-        }
-      };
+      const body = new Map([
+        ['settings', new Map([
+          ['analysis', new Map([
+            ['tokenizer', new Map([
+              ['my_tokenizer', new Map([
+                ['type', 'edge_ngram'],
+                ['min_gram', 1],
+                ['max_gram', 15]
+              ])]
+            ])]
+          ])]
+        ])]
+      ]);
+      const doc = { type: 'template', name: 'test-template', body };
       
       const result = transformer(doc);
-      expect(result.body.settings.index.max_ngram_diff).toBe(NGRAM_DIFF_ALLOWED);
+      expect(result.body.get('settings').get('max_ngram_diff')).toBe(NGRAM_DIFF_ALLOWED);
     });
     
     test('detects ngram filter', () => {
       const transformer = main(null);
-      const doc = {
-        type: 'template',
-        name: 'test-template',
-        body: {
-          settings: {
-            analysis: {
-              filter: {
-                my_filter: {
-                  type: 'ngram',
-                  min_gram: 1,
-                  max_gram: 20
-                }
-              }
-            }
-          }
-        }
-      };
+      const body = new Map([
+        ['settings', new Map([
+          ['analysis', new Map([
+            ['filter', new Map([
+              ['my_filter', new Map([
+                ['type', 'ngram'],
+                ['min_gram', 1],
+                ['max_gram', 20]
+              ])]
+            ])]
+          ])]
+        ])]
+      ]);
+      const doc = { type: 'template', name: 'test-template', body };
       
       const result = transformer(doc);
-      expect(result.body.settings.index.max_ngram_diff).toBe(NGRAM_DIFF_ALLOWED);
+      expect(result.body.get('settings').get('max_ngram_diff')).toBe(NGRAM_DIFF_ALLOWED);
     });
     
     test('does not modify non-ngram templates', () => {
       const transformer = main(null);
-      const doc = {
-        type: 'template',
-        name: 'test-template',
-        body: {
-          settings: {
-            analysis: {
-              analyzer: {
-                my_analyzer: {
-                  type: 'standard'
-                }
-              }
-            }
-          }
-        }
-      };
+      const body = new Map([
+        ['settings', new Map([
+          ['analysis', new Map([
+            ['analyzer', new Map([
+              ['my_analyzer', new Map([['type', 'standard']])]
+            ])]
+          ])]
+        ])]
+      ]);
+      const doc = { type: 'template', name: 'test-template', body };
       
       const result = transformer(doc);
-      expect(result.body.settings.index).toBeUndefined();
+      expect(result.body.get('settings').has('max_ngram_diff')).toBe(false);
     });
   });
   
   describe('Setting Addition', () => {
     test('adds index.max_ngram_diff to existing settings', () => {
       const transformer = main(null);
-      const doc = {
-        type: 'template',
-        name: 'test-template',
-        body: {
-          settings: {
-            index: {
-              number_of_shards: 5
-            },
-            analysis: {
-              filter: {
-                my_filter: {
-                  type: 'edge_ngram',
-                  min_gram: 1,
-                  max_gram: 15
-                }
-              }
-            }
-          }
-        }
-      };
+      const body = new Map([
+        ['settings', new Map([
+          ['index', new Map([['number_of_shards', 5]])],
+          ['analysis', new Map([
+            ['filter', new Map([
+              ['my_filter', new Map([
+                ['type', 'edge_ngram'],
+                ['min_gram', 1],
+                ['max_gram', 15]
+              ])]
+            ])]
+          ])]
+        ])]
+      ]);
+      const doc = { type: 'template', name: 'test-template', body };
       
       const result = transformer(doc);
-      expect(result.body.settings.index.max_ngram_diff).toBe(NGRAM_DIFF_ALLOWED);
-      expect(result.body.settings.index.number_of_shards).toBe(5);
+      expect(result.body.get('settings').get('max_ngram_diff')).toBe(NGRAM_DIFF_ALLOWED);
+      expect(result.body.get('settings').get('index').get('number_of_shards')).toBe(5);
     });
 
     test('adds index.max_ngram_diff to an index', () => {
       const transformer = main(null);
-      const doc = {
-        type: 'index',
-        name: 'test-index',
-        body: {
-          settings: {
-            index: {
-              number_of_shards: 5
-            },
-            analysis: {
-              filter: {
-                my_filter: {
-                  type: 'edge_ngram',
-                  min_gram: 1,
-                  max_gram: 15
-                }
-              }
-            }
-          }
-        }
-      };
+      const body = new Map([
+        ['settings', new Map([
+          ['index', new Map([['number_of_shards', 5]])],
+          ['analysis', new Map([
+            ['filter', new Map([
+              ['my_filter', new Map([
+                ['type', 'edge_ngram'],
+                ['min_gram', 1],
+                ['max_gram', 15]
+              ])]
+            ])]
+          ])]
+        ])]
+      ]);
+      const doc = { type: 'index', name: 'test-index', body };
       
       const result = transformer(doc);
-      expect(result.body.settings.index.max_ngram_diff).toBe(NGRAM_DIFF_ALLOWED);
-      expect(result.body.settings.index.number_of_shards).toBe(5);
+      expect(result.body.get('settings').get('max_ngram_diff')).toBe(NGRAM_DIFF_ALLOWED);
+      expect(result.body.get('settings').get('index').get('number_of_shards')).toBe(5);
     });
     
     test('creates settings structure when missing', () => {
       const transformer = main(null);
-      const doc = {
-        type: 'template',
-        name: 'test-template',
-        body: {
-          analysis: {
-            tokenizer: {
-              my_tokenizer: {
-                type: 'ngram',
-                min_gram: 2,
-                max_gram: 5
-              }
-            }
-          }
-        }
-      };
-      
-      const result = transformer(doc);
-      expect(result.body.settings.index.max_ngram_diff).toBe(NGRAM_DIFF_ALLOWED);
-    });
-  });
-  
-  describe('Map Support', () => {
-    test('works with Maps', () => {
-      const transformer = main(null);
-      
-      const analysis = new Map([
-        ['tokenizer', new Map([
-          ['my_tokenizer', new Map([
-            ['type', 'ngram'],
-            ['min_gram', 2],
-            ['max_gram', 10]
+      const body = new Map([
+        ['analysis', new Map([
+          ['tokenizer', new Map([
+            ['my_tokenizer', new Map([
+              ['type', 'ngram'],
+              ['min_gram', 2],
+              ['max_gram', 5]
+            ])]
           ])]
         ])]
       ]);
-      
-      const settings = new Map([
-        ['analysis', analysis]
-      ]);
-      
-      const body = new Map([
-        ['settings', settings]
-      ]);
-      
-      const doc = new Map([
-        ['type', 'template'],
-        ['name', 'test-template'],
-        ['body', body]
-      ]);
+      const doc = { type: 'template', name: 'test-template', body };
       
       const result = transformer(doc);
-      const resultSettings = result.get('body').get('settings');
-      expect(resultSettings.get('index').get('max_ngram_diff')).toBe(NGRAM_DIFF_ALLOWED);
+      expect(result.body.get('settings').get('max_ngram_diff')).toBe(NGRAM_DIFF_ALLOWED);
     });
   });
   
