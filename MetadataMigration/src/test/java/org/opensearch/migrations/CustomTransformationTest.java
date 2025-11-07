@@ -240,6 +240,34 @@ class CustomTransformationTest extends BaseMigrationTest {
         var indexWithNgramSettings = "{}";
         sourceOperations.put("/" + indexWithNgramName, indexWithNgramSettings);
 
+        var standaloneNgramIndexName = "custom_ngram_index";
+        var standaloneNgramSettings = "{\n" +
+            "  \"settings\": {\n" +
+            "    \"analysis\": {\n" +
+            "      \"filter\": {\n" +
+            "        \"custom_ngram\": {\n" +
+            "          \"type\": \"ngram\",\n" +
+            "          \"min_gram\": 3,\n" +
+            "          \"max_gram\": 15\n" +
+            "        }\n" +
+            "      }\n" +
+            "    }\n" +
+            "  },\n" +
+            "  \"mappings\": {\n" +
+            "    \"my_doc\": {\n" +
+            "      \"properties\": {\n" +
+            "        \"content\": {\n" +
+            "          \"type\": \"text\"\n" +
+            "        }\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+        sourceOperations.put("/" + standaloneNgramIndexName, standaloneNgramSettings);
+
+        var std = sourceOperations.get("/" + standaloneNgramIndexName);
+        System.out.println("*** Creation response: " + std.getValue());
+
         var regularIndexName = "regular_index";
         var regularIndexSettings = "{\n" +
             "  \"settings\": {\n" +
@@ -282,7 +310,7 @@ class CustomTransformationTest extends BaseMigrationTest {
         var arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
         
         var dataFilterArgs = new DataFilterArgs();
-        dataFilterArgs.indexAllowlist = List.of(indexWithNgramName, regularIndexName);
+        dataFilterArgs.indexAllowlist = List.of(indexWithNgramName, standaloneNgramIndexName, regularIndexName);
         dataFilterArgs.indexTemplateAllowlist = List.of(templateWithNgramName);
         arguments.dataFilterArgs = dataFilterArgs;
         
@@ -303,6 +331,11 @@ class CustomTransformationTest extends BaseMigrationTest {
         
         // Verify that the template with ngram filter has max_ngram_diff setting
         res = targetOperations.get("/_template/" + templateWithNgramName);
+        assertThat(res.getKey(), equalTo(200));
+        assertThat(res.getValue(), containsString("\"max_ngram_diff\":\"30\""));
+        
+        // Verify standalone ngram index has max_ngram_diff setting
+        res = targetOperations.get("/" + standaloneNgramIndexName + "/_settings");
         assertThat(res.getKey(), equalTo(200));
         assertThat(res.getValue(), containsString("\"max_ngram_diff\":\"30\""));
         
