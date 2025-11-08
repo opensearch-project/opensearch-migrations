@@ -14,12 +14,13 @@ configurations {
 }
 
 dependencies {
-    def openSearch = '2.19.4.0'
-    implementation "org.opensearch.plugin:opensearch-security:${openSearch}.0"
+    def openSearch = '2.19.4'
+    def openSearchSecurity = '2.19.4.0'
+    implementation "org.opensearch.plugin:opensearch-security:${openSearchSecurity}"
     implementation "org.opensearch:opensearch-common:${openSearch}"
     implementation "org.opensearch:opensearch-core:${openSearch}"
     implementation "org.opensearch:opensearch:${openSearch}"
-    opensearchSecurityPlugin "org.opensearch.plugin:opensearch-security:${openSearch}.0"
+    opensearchSecurityPlugin "org.opensearch.plugin:opensearch-security:${openSearchSecurity}"
     implementation files(zipTree("$configurations.opensearchSecurityPlugin.singleFile").matching {
         include "*.jar"
         exclude "slf*.jar"
