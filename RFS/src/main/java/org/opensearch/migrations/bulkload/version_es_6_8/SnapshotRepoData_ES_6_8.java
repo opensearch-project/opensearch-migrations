@@ -121,7 +121,12 @@ public class SnapshotRepoData_ES_6_8 {
 
         private final String name;
         private final String id;
-        private final List<SnapshotReference> snapshots;
+        private final List<SnapshotReference> snapshotReferences;
+        
+        @Override
+        public List<String> getSnapshots() {
+            return snapshotReferences.stream().map(SnapshotReference::getValue).toList();
+        }
     }
 
     public static SnapshotRepoData_ES_6_8 fromRepo(SourceRepo repo) {
