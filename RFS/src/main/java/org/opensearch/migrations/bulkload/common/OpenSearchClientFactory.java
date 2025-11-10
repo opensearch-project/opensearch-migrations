@@ -22,6 +22,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
+@SuppressWarnings("java:S1450")
 @Getter
 @Slf4j
 public class OpenSearchClientFactory {
@@ -29,6 +30,7 @@ public class OpenSearchClientFactory {
 
     private final ConnectionContext connectionContext;
     private Version version;
+    private CompressionMode compressionMode;
     RestClient client;
 
     public OpenSearchClientFactory(ConnectionContext connectionContext) {
@@ -48,7 +50,6 @@ public class OpenSearchClientFactory {
             version = getClusterVersion();
         }
 
-        final CompressionMode compressionMode;
         if (!connectionContext.isDisableCompression() && Boolean.TRUE.equals(getCompressionEnabled())) {
             compressionMode = CompressionMode.GZIP_BODY_COMPRESSION;
         } else {
