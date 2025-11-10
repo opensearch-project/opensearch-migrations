@@ -158,13 +158,17 @@ class K8sRFSBackfill(RFSBackfill):
         logger.info(f"Scaling RFS backfill by setting desired count to {units} instances")
         return self.kubectl_runner.perform_scale_command(replicas=units)
 
-    def archive(self, *args, force_delete_working_state: bool = False, archive_dir_path: str = None, archive_file_name: str = None, **kwargs) -> CommandResult:
+    def archive(self, *args, force_delete_working_state: bool = False,
+                archive_dir_path: str = None,
+                archive_file_name: str = None,
+                **kwargs) -> CommandResult:
         deployment_status = self.kubectl_runner.retrieve_deployment_status()
-        return perform_archive(target_cluster=self.target_cluster,
-                               deployment_status=deployment_status,
-                               force_delete_working_state=force_delete_working_state,
-                               archive_dir_path=archive_dir_path,
-                               archive_file_name=archive_file_name)
+        return perform_archive(
+            target_cluster=self.target_cluster,
+            deployment_status=deployment_status,
+            force_delete_working_state=force_delete_working_state,
+            archive_dir_path=archive_dir_path,
+            archive_file_name=archive_file_name)
 
     def get_status(self, deep_check=False, *args, **kwargs) -> CommandResult:
         logger.info("Getting status of RFS backfill")
@@ -238,13 +242,16 @@ class ECSRFSBackfill(RFSBackfill):
         logger.info(f"Scaling RFS backfill by setting desired count to {units} instances")
         return self.ecs_client.set_desired_count(units)
     
-    def archive(self, *args, force_delete_working_state: bool = False, archive_dir_path: str = None, archive_file_name: str = None, **kwargs) -> CommandResult:
+    def archive(self, *args, force_delete_working_state: bool = False,
+                archive_dir_path: str = None, archive_file_name: str = None,
+                **kwargs) -> CommandResult:
         status = self.ecs_client.get_instance_statuses()
-        return perform_archive(target_cluster=self.target_cluster,
-                               deployment_status=status,
-                               force_delete_working_state=force_delete_working_state,
-                               archive_dir_path=archive_dir_path,
-                               archive_file_name=archive_file_name)
+        return perform_archive(
+            target_cluster=self.target_cluster,
+            deployment_status=status,
+            force_delete_working_state=force_delete_working_state,
+            archive_dir_path=archive_dir_path,
+            archive_file_name=archive_file_name)
 
     def get_status(self, deep_check=False, *args, **kwargs) -> CommandResult:
         logger.info(f"Getting status of RFS backfill, with {deep_check=}")
