@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.version_es_6_8;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
@@ -45,8 +46,8 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
                 }
 
                 boolean matches = rawIndex.getSnapshots().stream().anyMatch(ref -> 
-                    (ref.isUuid() && targetId.equals(ref.getValue())) ||
-                    (!ref.isUuid() && targetName.equals(ref.getValue()))
+                    (ref.isUuid() && Objects.equals(targetId, ref.getValue())) ||
+                    (!ref.isUuid() && Objects.equals(targetName, ref.getValue()))
                 );
                 
                 if (matches) {
