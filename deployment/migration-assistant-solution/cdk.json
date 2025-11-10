@@ -36,7 +36,8 @@
     "@aws-cdk/core:enablePartitionLiterals": true,
     "@aws-cdk/core:target-partitions": [
       "aws",
-      "aws-cn"
+      "aws-cn",
+      "aws-us-gov"
     ],
     "@aws-cdk/aws-signer:signingProfileNamePassedToCfn": false,
     "@aws-cdk/core:newStyleStackSynthesis": true,
