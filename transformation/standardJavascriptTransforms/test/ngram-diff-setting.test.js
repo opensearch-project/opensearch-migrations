@@ -224,4 +224,54 @@ describe('NGramDiffSetting Transformer', () => {
       expect(result).toBe(doc);
     });
   });
+
+  describe('Plain Object Support', () => {
+    test('adds max_ngram_diff to plain object body', () => {
+      const transformer = main(null);
+      const doc = {
+        type: 'template',
+        name: 'test-template',
+        body: {
+          settings: {
+            analysis: {
+              tokenizer: {
+                my_tokenizer: {
+                  type: 'ngram',
+                  min_gram: 2,
+                  max_gram: 5
+                }
+              }
+            }
+          }
+        }
+      };
+      
+      const result = transformer(doc);
+      expect(result.body.settings.index.max_ngram_diff).toBe(NGRAM_DIFF_ALLOWED);
+    });
+  });
+
+  describe('Map Document Support', () => {
+    test('processes Map document with ngram settings', () => {
+      const transformer = main(null);
+      const doc = new Map([
+        ['test-index', new Map([
+          ['settings', new Map([
+            ['analysis', new Map([
+              ['tokenizer', new Map([
+                ['my_tokenizer', new Map([
+                  ['type', 'ngram'],
+                  ['min_gram', 2],
+                  ['max_gram', 5]
+                ])]
+              ])]
+            ])]
+          ])]
+        ])]
+      ]);
+      
+      const result = transformer(doc);
+      expect(result.get('test-index').get('settings').get('max_ngram_diff')).toBe(NGRAM_DIFF_ALLOWED);
+    });
+  });
 });
