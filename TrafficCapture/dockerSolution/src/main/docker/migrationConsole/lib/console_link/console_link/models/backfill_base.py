@@ -67,9 +67,13 @@ class Backfill(ABC):
         pass
 
     @abstractmethod
-    def archive(self, *args, **kwargs) -> CommandResult[str]:
+    def archive(self, force_delete_working_state: bool = False, *args, **kwargs) -> CommandResult[str]:
         """Archive the backfill operation.  Should return the information required to resume the backfill operations.
-        Should fail if there are currently running operations."""
+        Should fail if there are currently running operations.
+        
+        Args:
+            force_delete_working_state: If True, forcefully delete the working state index even if backup fails
+        """
         pass
 
     @abstractmethod

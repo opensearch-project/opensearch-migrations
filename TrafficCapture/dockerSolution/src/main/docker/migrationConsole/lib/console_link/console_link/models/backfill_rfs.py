@@ -158,10 +158,11 @@ class K8sRFSBackfill(RFSBackfill):
         logger.info(f"Scaling RFS backfill by setting desired count to {units} instances")
         return self.kubectl_runner.perform_scale_command(replicas=units)
 
-    def archive(self, *args, archive_dir_path: str = None, archive_file_name: str = None, **kwargs) -> CommandResult:
+    def archive(self, *args, force_delete_working_state: bool = False, archive_dir_path: str = None, archive_file_name: str = None, **kwargs) -> CommandResult:
         deployment_status = self.kubectl_runner.retrieve_deployment_status()
         return perform_archive(target_cluster=self.target_cluster,
                                deployment_status=deployment_status,
+                               force_delete_working_state=force_delete_working_state,
                                archive_dir_path=archive_dir_path,
                                archive_file_name=archive_file_name)
 
@@ -237,10 +238,11 @@ class ECSRFSBackfill(RFSBackfill):
         logger.info(f"Scaling RFS backfill by setting desired count to {units} instances")
         return self.ecs_client.set_desired_count(units)
     
-    def archive(self, *args, archive_dir_path: str = None, archive_file_name: str = None, **kwargs) -> CommandResult:
+    def archive(self, *args, force_delete_working_state: bool = False, archive_dir_path: str = None, archive_file_name: str = None, **kwargs) -> CommandResult:
         status = self.ecs_client.get_instance_statuses()
         return perform_archive(target_cluster=self.target_cluster,
                                deployment_status=status,
+                               force_delete_working_state=force_delete_working_state,
                                archive_dir_path=archive_dir_path,
                                archive_file_name=archive_file_name)
 
@@ -529,6 +531,7 @@ def has_working_state(target_cluster: Cluster, session_name: str = "") -> bool:
 
 def perform_archive(target_cluster: Cluster,
                     deployment_status: DeploymentStatus,
+                    force_delete_working_state: bool = False,
                     archive_dir_path: str = None,
                     archive_file_name: str = None) -> CommandResult:
     logger.info("Confirming there are no currently in-progress workers")
@@ -536,10 +539,14 @@ def perform_archive(target_cluster: Cluster,
         return CommandResult(False, RfsWorkersInProgress())
 
     try:
-        backup_path = get_working_state_index_backup_path(archive_dir_path, archive_file_name)
-        logger.info(f"Backing up working state index to {backup_path}")
-        backup_working_state_index(target_cluster, WORKING_STATE_INDEX, backup_path)
-        logger.info("Working state index backed up successful")
+        backup_path = None
+        if not force_delete_working_state:
+            backup_path = get_working_state_index_backup_path(archive_dir_path, archive_file_name)
+            logger.info(f"Backing up working state index to {backup_path}")
+            backup_working_state_index(target_cluster, WORKING_STATE_INDEX, backup_path)
+            logger.info("Working state index backed up successfully")
+        else:
+            logger.info("Force delete enabled, skipping backup of working state index")
 
         logger.info("Cleaning up working state index on target cluster")
         target_cluster.call_api(
@@ -547,8 +554,12 @@ def perform_archive(target_cluster: Cluster,
             method=HttpMethod.DELETE,
             params={"ignore_unavailable": "true"}
         )
-        logger.info("Working state index cleaned up successful")
-        return CommandResult(True, backup_path)
+        logger.info("Working state index cleaned up successfully")
+        
+        if force_delete_working_state:
+            return CommandResult(True, "Working state index forcefully deleted")
+        else:
+            return CommandResult(True, backup_path)
     except requests.HTTPError as e:
         if e.response.status_code == 404:
             return CommandResult(False, WorkingIndexDoesntExist(WORKING_STATE_INDEX))

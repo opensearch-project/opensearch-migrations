@@ -356,15 +356,21 @@ def pause_backfill_cmd(ctx, pipeline_name):
 
 @backfill_group.command(name="stop")
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
+@click.option('--force-delete-working-state', '--force', is_flag=True,
+              help='Force delete working state index without archiving')
 @click.pass_obj
-def stop_backfill_cmd(ctx, pipeline_name):
+def stop_backfill_cmd(ctx, pipeline_name, force_delete_working_state):
     exitcode, message = backfill_.stop(ctx.env.backfill, pipeline_name=pipeline_name)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
 
-    click.echo("Archiving the working state of the backfill operation...")
-    exitcode, message = backfill_.archive(ctx.env.backfill)
+    if force_delete_working_state:
+        click.echo("Force deleting the working state of the backfill operation...")
+    else:
+        click.echo("Archiving the working state of the backfill operation...")
+    
+    exitcode, message = backfill_.archive(ctx.env.backfill, force_delete_working_state=force_delete_working_state)
 
     if isinstance(message, WorkingIndexDoesntExist):
         click.echo("Working state index doesn't exist, skipping archive operation.")
@@ -373,11 +379,15 @@ def stop_backfill_cmd(ctx, pipeline_name):
     while isinstance(message, RfsWorkersInProgress):
         click.echo("RFS Workers are still running, waiting for them to complete...")
         time.sleep(5)
-        exitcode, message = backfill_.archive(ctx.env.backfill)
+        exitcode, message = backfill_.archive(ctx.env.backfill, force_delete_working_state=force_delete_working_state)
 
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
-    click.echo(f"Backfill working state archived to: {message}")
+    
+    if force_delete_working_state:
+        click.echo(f"Backfill working state forcefully deleted: {message}")
+    else:
+        click.echo(f"Backfill working state archived to: {message}")
 
 
 @backfill_group.command(name="scale")
