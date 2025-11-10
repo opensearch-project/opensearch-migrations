@@ -19,6 +19,7 @@ echo "Version: ${CODE_VERSION}"
 rm -rf "${BUILD_DIR}"
 mkdir -p "${TEMP_DIR}/deployment/global-s3-assets"
 mkdir -p "${TEMP_DIR}/deployment/regional-s3-assets"
+mkdir -p "${TEMP_DIR}/deployment/open-source"
 
 export CODE_BUCKET SOLUTION_NAME CODE_VERSION
 
@@ -36,6 +37,15 @@ cp "${SCRIPT_DIR}/solution-manifest.yaml" "${TEMP_DIR}/solution-manifest.yaml"
 sed -i "s/version: .*/version: ${CODE_VERSION}/" "${TEMP_DIR}/solution-manifest.yaml"
 
 touch "${TEMP_DIR}/deployment/regional-s3-assets/test.txt"
+touch "${TEMP_DIR}/deployment/open-source/test.txt"
+
+cat > "${TEMP_DIR}/CHANGELOG.md" << EOF
+# Changelog
+## [${CODE_VERSION}] - $(date +%Y-%m-%d)
+### Added
+- For detailed changes, please refer to the [GitHub releases page](https://github.com/opensearch-project/opensearch-migrations/releases).
+EOF
+
 
 echo "Creating artifact.zip..."
 cd "${TEMP_DIR}"
