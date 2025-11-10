@@ -53,45 +53,61 @@ public class SnapshotRepoData_ES_6_8 {
     @Getter
     @AllArgsConstructor
     @NoArgsConstructor
+    public static class SnapshotReference {
+        private String value;
+        private boolean isUuid;
+        
+        public static SnapshotReference fromName(String name) {
+            return new SnapshotReference(name, false);
+        }
+        
+        public static SnapshotReference fromUuid(String uuid) {
+            return new SnapshotReference(uuid, true);
+        }
+    }
+
+    @Getter
+    @AllArgsConstructor
+    @NoArgsConstructor
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class RawIndex {
         private String id;
         @JsonDeserialize(using = SnapshotListDeserializer.class)
-        private List<String> snapshots;
+        private List<SnapshotReference> snapshots;
     }
 
     /**
-     * Normalizes index->snapshots entries to a list of "snapshot keys".
-     * Depending on source version, these keys may be:
-     * - Snapshot UUIDs (ES 5.3+ AWS managed, ES 5.5+, ES 6.x+)
-     * - Snapshot names (ES 5.0-5.4 standard layouts)
-     * Consumers must accept either when resolving membership.
+     * Normalizes index->snapshots entries to a list of snapshot references.
      * 
      * Supported formats:
-     * - ES 5.0-5.4 standard: [{"name":"snap1"}, {"name":"snap2"}] → ["snap1", "snap2"]
-     * - ES 5.3+ AWS managed: ["uuid1", "uuid2"] → ["uuid1", "uuid2"] 
-     * - ES 5.5+: ["snap-name-1", "snap-name-2"] → ["snap-name-1", "snap-name-2"]
+     * - ES 5.0-5.4: [{"name":"snap1"}, {"name":"snap2"}] → [SnapshotReference(snap1, false), ...]
+     * - ES 5.5, 6.x: ["snap-name-1", "snap-name-2"] → [SnapshotReference(snap-name-1, false), ...]
      */
-    public static class SnapshotListDeserializer extends JsonDeserializer<List<String>> {
+    public static class SnapshotListDeserializer extends JsonDeserializer<List<SnapshotReference>> {
         @Override
-        public List<String> deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
+        public List<SnapshotReference> deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
             JsonNode node = p.getCodec().readTree(p);
             if (node == null || !node.isArray()) {
                 return List.of();
             }
-            List<String> result = new ArrayList<>(node.size());
+            
+            List<SnapshotReference> result = new ArrayList<>();
+            
             for (JsonNode n : node) {
                 if (n.isTextual()) {
-                    // ES 5.5+ format OR AWS managed ES 5.3: ["uuid1", "uuid2"]
-                    result.add(n.asText());
+                    // ES 5.5, 6.x: ["snap-name-1", "snap-name-2"] or ["uuid1", "uuid2"]
+                    String value = n.asText();
+                    boolean isUuid = value.length() == 22 && value.matches("[A-Za-z0-9_-]+");
+                    result.add(new SnapshotReference(value, isUuid));
                 } else if (n.isObject()) {
-                    // ES 5.0-5.4 standard format: [{"name":"snap1"}, {"name":"snap2"}]
+                    // ES 5.0-5.4: [{"name":"snap1"}, {"name":"snap2"}]
                     JsonNode name = n.get("name");
                     if (name != null && !name.isNull() && !name.asText().isEmpty()) {
-                        result.add(name.asText());
+                        result.add(SnapshotReference.fromName(name.asText()));
                     }
                 }
             }
+            
             return result;
         }
     }
@@ -105,7 +121,7 @@ public class SnapshotRepoData_ES_6_8 {
 
         private final String name;
         private final String id;
-        private final List<String> snapshots;
+        private final List<SnapshotReference> snapshots;
     }
 
     public static SnapshotRepoData_ES_6_8 fromRepo(SourceRepo repo) {
