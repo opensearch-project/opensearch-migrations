@@ -20,7 +20,6 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
-import org.opensearch.migrations.bulkload.workcoordination.WorkItem;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 
