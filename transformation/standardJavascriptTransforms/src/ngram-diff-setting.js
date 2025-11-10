@@ -6,69 +6,60 @@
 function main(context) {
   const NGRAM_DIFF_ALLOWED = 30;
 
+  const containsNgram = (value) => String(value).toLowerCase().includes('ngram');
+
   const hasNgram = (obj) => {
-    if (!obj) return false;
+    if (!obj || typeof obj !== 'object') return false;
     
-    if (obj instanceof Map) {
-      for (const [key, value] of obj) {
-        if (String(value).toLowerCase().includes('ngram')) return true;
-        if (hasNgram(value)) return true;
-      }
-      return false;
-    }
-    
-    if (typeof obj === 'object') {
-      for (const [key, value] of Object.entries(obj)) {
-        if (String(value).toLowerCase().includes('ngram')) return true;
-        if (hasNgram(value)) return true;
-      }
-    }
-    
-    return false;
+    const values = obj instanceof Map ? Array.from(obj.values()) : Object.values(obj);
+    return values.some(value => containsNgram(value) || hasNgram(value));
   };
 
-  const processDocument = (doc) => {
-    if (doc?.body) {
-      if (hasNgram(doc.body)) {
-        const body = doc.body;
-        
-        if (body instanceof Map) {
-          if (!body.has('settings')) {
-            body.set('settings', new Map());
-          }
-          const settings = body.get('settings');
-          settings.set('max_ngram_diff', NGRAM_DIFF_ALLOWED);
-        } else if (typeof body === 'object') {
-          if (!body.settings) {
-            body.settings = {};
-          }
-          if (!body.settings.index) {
-            body.settings.index = {};
-          }
-          body.settings.index.max_ngram_diff = NGRAM_DIFF_ALLOWED;
-        }
-      }
-      return doc;
+  const setNgramDiffForMap = (body) => {
+    if (!body.has('settings')) {
+      body.set('settings', new Map());
     }
- 
-    if (doc instanceof Map) {
-      for (const [indexName, index] of doc) {
-        if (index?.has('settings')) {
-          if (hasNgram(index)) {
-            const settings = index.get('settings');
-            settings.set('max_ngram_diff', NGRAM_DIFF_ALLOWED);
-          }
-        }
+    body.get('settings').set('max_ngram_diff', NGRAM_DIFF_ALLOWED);
+  };
+
+  const setNgramDiffForObject = (body) => {
+    body.settings = body.settings || {};
+    body.settings.index = body.settings.index || {};
+    body.settings.index.max_ngram_diff = NGRAM_DIFF_ALLOWED;
+  };
+
+  const processBodyDocument = (doc) => {
+    if (!hasNgram(doc.body)) return doc;
+
+    if (doc.body instanceof Map) {
+      setNgramDiffForMap(doc.body);
+    } else {
+      setNgramDiffForObject(doc.body);
+    }
+    return doc;
+  };
+
+  const processMapDocument = (doc) => {
+    for (const index of doc.values()) {
+      if (index?.has('settings') && hasNgram(index)) {
+        index.get('settings').set('max_ngram_diff', NGRAM_DIFF_ALLOWED);
       }
     }
     return doc;
   };
 
-  return (document) => {
-    if (Array.isArray(document)) {
-      return document.map(processDocument);
+  const processDocument = (doc) => {
+    if (doc?.body) {
+      return processBodyDocument(doc);
     }
-    return processDocument(document);
+    if (doc instanceof Map) {
+      return processMapDocument(doc);
+    }
+    return doc;
+  };
+
+  return (document) => {
+    return Array.isArray(document) ? document.map(processDocument) : processDocument(document);
   };
 }
 
