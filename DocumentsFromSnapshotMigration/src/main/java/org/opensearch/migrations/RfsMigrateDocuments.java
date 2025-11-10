@@ -212,13 +212,6 @@ public class RfsMigrateDocuments {
                 "used to communicate to the target, default 10")
         int maxConnections = 10;
 
-        @Parameter(required = false,
-            names = { "--allow-server-generated-ids", "--allowServerGeneratedIds" },
-            description = "Optional. Allow the target cluster to generate document IDs instead of preserving source IDs. " +
-                "Required for OpenSearch Serverless collections that don't support custom document IDs. " +
-                "WARNING: This will result in different document IDs on the target cluster.")
-        public boolean allowServerGeneratedIds = false;
-
         @Parameter(required = true,
             names = { "--source-version", "--sourceVersion" },
             converter = VersionConverter.class,
@@ -412,32 +405,12 @@ public class RfsMigrateDocuments {
         var coordinatorFactory = new WorkCoordinatorFactory(targetVersion, arguments.indexNameSuffix);
         var cleanShutdownCompleted = new AtomicBoolean(false);
 
-        IWorkCoordinator workCoordinator;
-        if (arguments.workCoordinationPostgresUrl != null) {
-            log.info("Using PostgreSQL for work coordination: {}", arguments.workCoordinationPostgresUrl);
-            var postgresConfig = new org.opensearch.migrations.bulkload.workcoordination.PostgresConfig(
-                arguments.workCoordinationPostgresUrl,
-                arguments.workCoordinationPostgresUsername,
-                arguments.workCoordinationPostgresPassword
-            );
-            workCoordinator = coordinatorFactory.getPostgres(
-                postgresConfig,
-                workerId,
+        try (var workCoordinator = coordinatorFactory.get(
+                 new CoordinateWorkHttpClient(connectionContext),
+                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                 workerId,
                 Clock.systemUTC(),
-                workItemRef::set
-            );
-        } else {
-            log.info("Using OpenSearch for work coordination");
-            workCoordinator = coordinatorFactory.get(
-                new CoordinateWorkHttpClient(connectionContext),
-                TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                workerId,
-                Clock.systemUTC(),
-                workItemRef::set
-            );
-        }
-
-        try (workCoordinator;
+                workItemRef::set);
              var processManager = new LeaseExpireTrigger(
                 w -> exitOnLeaseTimeout(
                         workItemRef,
@@ -476,8 +449,7 @@ public class RfsMigrateDocuments {
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,
                 arguments.maxConnections,
-                docTransformerSupplier,
-                arguments.allowServerGeneratedIds);
+                docTransformerSupplier);
 
             var finder = ClusterProviderRegistry.getSnapshotFileFinder(
                     arguments.sourceVersion,
