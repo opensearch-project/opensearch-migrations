@@ -8,6 +8,7 @@ import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
+@SuppressWarnings("java:S1854")
 @Slf4j
 public class ScopedWorkCoordinator {
 

@@ -29,7 +29,6 @@ public class OpenSearchClientFactory {
 
     private final ConnectionContext connectionContext;
     private Version version;
-    private CompressionMode compressionMode;
     RestClient client;
 
     public OpenSearchClientFactory(ConnectionContext connectionContext) {
@@ -49,6 +48,7 @@ public class OpenSearchClientFactory {
             version = getClusterVersion();
         }
 
+        final CompressionMode compressionMode;
         if (!connectionContext.isDisableCompression() && Boolean.TRUE.equals(getCompressionEnabled())) {
             compressionMode = CompressionMode.GZIP_BODY_COMPRESSION;
         } else {

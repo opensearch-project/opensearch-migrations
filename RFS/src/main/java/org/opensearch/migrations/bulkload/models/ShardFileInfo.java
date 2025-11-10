@@ -34,6 +34,7 @@ public interface ShardFileInfo {
         return new ShardFileKey(getName(), getPhysicalName(), getChecksum());
     }
 
+    @SuppressWarnings("java:S1210")
     @Value
     class ShardFileKey implements Comparable<ShardFileKey> {
         String name;

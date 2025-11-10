@@ -23,6 +23,7 @@ import lombok.extern.slf4j.Slf4j;
  * the paylaod (unzip, parse, etc).  If a transform DOES require the payload to be present, get()
  *
  */
+@SuppressWarnings({"java:S1068", "java:S2160"})
 @EqualsAndHashCode(callSuper = false)
 @Slf4j
 public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {

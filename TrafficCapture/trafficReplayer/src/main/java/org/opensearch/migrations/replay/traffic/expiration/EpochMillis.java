@@ -5,6 +5,7 @@ import java.util.function.BiPredicate;
 
 import lombok.EqualsAndHashCode;
 
+@SuppressWarnings("java:S1210")
 @EqualsAndHashCode
 class EpochMillis implements Comparable<EpochMillis> {
     final long millis;
