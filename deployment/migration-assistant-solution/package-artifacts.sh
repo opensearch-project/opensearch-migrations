@@ -17,8 +17,8 @@ echo "Solution: ${SOLUTION_NAME}"
 echo "Version: ${CODE_VERSION}"
 
 rm -rf "${BUILD_DIR}"
-mkdir -p "${TEMP_DIR}/global-s3-assets"
-mkdir -p "${TEMP_DIR}/regional-s3-assets"
+mkdir -p "${TEMP_DIR}/deployment/global-s3-assets"
+mkdir -p "${TEMP_DIR}/deployment/regional-s3-assets"
 
 export CODE_BUCKET SOLUTION_NAME CODE_VERSION
 
@@ -26,18 +26,16 @@ cd "${SCRIPT_DIR}"
 npm install
 
 echo "Synthesizing CloudFormation templates..."
-npx cdk synth "Migration-Assistant-Infra-Create-VPC" --asset-metadata false --path-metadata false > "${TEMP_DIR}/global-s3-assets/${SOLUTION_NAME}-create-vpc.template"
-npx cdk synth "Migration-Assistant-Infra-Import-VPC" --asset-metadata false --path-metadata false > "${TEMP_DIR}/global-s3-assets/${SOLUTION_NAME}-import-vpc.template"
+npx cdk synth --asset-metadata false --path-metadata false --quiet
 
-echo "Copying solutions-manifest.yml..."
-cp "${SCRIPT_DIR}/solutions-manifest.yml" "${TEMP_DIR}/global-s3-assets/solutions-manifest.yml"
-sed -i "s/version: .*/version: ${CODE_VERSION}/" "${TEMP_DIR}/global-s3-assets/solutions-manifest.yml"
+cp "cdk.out/Migration-Assistant-Infra-Create-VPC.template.json" "${TEMP_DIR}/deployment/global-s3-assets/${SOLUTION_NAME}-create-vpc.template"
+cp "cdk.out/Migration-Assistant-Infra-Import-VPC.template.json" "${TEMP_DIR}/deployment/global-s3-assets/${SOLUTION_NAME}-import-vpc.template"
 
-# Waiting for v3.0 release
-# npx cdk synth "Migration-Assistant-Infra-Create-VPC-v3" --asset-metadata false --path-metadata false > "${TEMP_DIR}/global-s3-assets/${SOLUTION_NAME}-create-vpc-v3.template"
-# npx cdk synth "Migration-Assistant-Infra-Import-VPC-v3" --asset-metadata false --path-metadata false > "${TEMP_DIR}/global-s3-assets/${SOLUTION_NAME}-import-vpc-v3.template"
+echo "Copying solution-manifest.yaml..."
+cp "${SCRIPT_DIR}/solution-manifest.yaml" "${TEMP_DIR}/solution-manifest.yaml"
+sed -i "s/version: .*/version: ${CODE_VERSION}/" "${TEMP_DIR}/solution-manifest.yaml"
 
-touch "${TEMP_DIR}/regional-s3-assets/test.txt"
+touch "${TEMP_DIR}/deployment/regional-s3-assets/test.txt"
 
 echo "Creating artifact.zip..."
 cd "${TEMP_DIR}"
