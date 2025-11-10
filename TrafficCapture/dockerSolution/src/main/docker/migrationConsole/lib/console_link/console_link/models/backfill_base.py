@@ -22,7 +22,7 @@ SCHEMA = {
 }
 
 
-BackfillStatus = Enum("BackfillStatus", ["NOT_STARTED", "STARTING", "RUNNING", "TERMINATING", "STOPPED", "FAILED"])
+BackfillStatus = Enum("BackfillStatus", ["NOT_STARTED", "STARTING", "RUNNING", "TERMINATING", "RESUMABLE", "STOPPED", "FAILED"])
 
 
 class Backfill(ABC):

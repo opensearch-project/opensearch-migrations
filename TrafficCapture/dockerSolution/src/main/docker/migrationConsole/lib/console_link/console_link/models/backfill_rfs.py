@@ -136,6 +136,13 @@ class K8sRFSBackfill(RFSBackfill):
         self.kubectl_runner = KubectlRunner(namespace=self.namespace, deployment_name=self.deployment_name)
 
     def start(self, *args, **kwargs) -> CommandResult:
+        # Check for existing working state
+        session_name = self.config["reindex_from_snapshot"].get("session_name", "")
+        if has_working_state(self.target_cluster, session_name):
+            logger.info("Existing working state detected; resuming previous backfill. "
+                       "If you intended to start over, run 'console backfill stop' "
+                       "and then 'console backfill start' again.")
+        
         logger.info(f"Starting RFS backfill by setting desired count to {self.default_scale} instances")
         return self.kubectl_runner.perform_scale_command(replicas=self.default_scale)
 
@@ -178,6 +185,13 @@ class K8sRFSBackfill(RFSBackfill):
             return CommandResult(True, (BackfillStatus.RUNNING, status_str))
         if deployment_status.pending > 0:
             return CommandResult(True, (BackfillStatus.STARTING, status_str))
+        
+        # Check for working state when no workers are running
+        if has_working_state(self.target_cluster):
+            status_str += "\n\nWorking state present; 'console backfill start' will resume from existing state."
+            status_str += "\nRun 'console backfill stop' to clean up if you want a fresh start."
+            return CommandResult(True, (BackfillStatus.RESUMABLE, status_str))
+        
         return CommandResult(True, (BackfillStatus.STOPPED, status_str))
     
     def build_backfill_status(self) -> BackfillOverallStatus:
@@ -202,6 +216,12 @@ class ECSRFSBackfill(RFSBackfill):
                                      client_options=self.client_options)
 
     def start(self, *args, **kwargs) -> CommandResult:
+        session_name = self.config["reindex_from_snapshot"].get("session_name", "")
+        if has_working_state(self.target_cluster, session_name):
+            logger.info("Existing working state detected; resuming previous backfill. "
+                       "If you intended to start over, run 'console backfill stop' "
+                       "and then 'console backfill start' again.")
+        
         logger.info(f"Starting RFS backfill by setting desired count to {self.default_scale} instances")
         return self.ecs_client.set_desired_count(self.default_scale)
     
@@ -244,6 +264,13 @@ class ECSRFSBackfill(RFSBackfill):
             return CommandResult(True, (BackfillStatus.RUNNING, status_string))
         elif instance_statuses.pending > 0:
             return CommandResult(True, (BackfillStatus.STARTING, status_string))
+        
+        # Check for working state when no workers are running
+        if has_working_state(self.target_cluster):
+            status_string += "\n\nWorking state present; 'console backfill start' will resume from existing state."
+            status_string += "\nRun 'console backfill stop' to clean up if you want a fresh start."
+            return CommandResult(True, (BackfillStatus.RESUMABLE, status_string))
+            
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
     
     def build_backfill_status(self) -> BackfillOverallStatus:
@@ -467,6 +494,37 @@ def generate_status_queries():
 def all_shards_finished_processing(target_cluster: Cluster, session_name: str = "") -> bool:
     d = get_detailed_status_obj(target_cluster, session_name=session_name)
     return d.shard_total == d.shard_complete and d.shard_in_progress == 0 and d.shard_waiting == 0
+
+
+def has_working_state(target_cluster: Cluster, session_name: str = "") -> bool:
+    """Check if the working state index exists and has content"""
+    index_name = WORKING_STATE_INDEX + ("_" + session_name if session_name else "")
+    try:
+        # First check if index exists
+        response = target_cluster.call_api(f"/{index_name}")
+        if response.status_code != 200:
+            return False
+        
+        # Check if there are any documents other than shard_setup
+        query = {
+            "size": 0,
+            "query": {"bool": {"must_not": [{"match": {"_id": "shard_setup"}}]}}
+        }
+        response = target_cluster.call_api(
+            f"/{index_name}/_search",
+            method=HttpMethod.POST,
+            data=json.dumps(query),
+            headers={'Content-Type': 'application/json'}
+        )
+        body = response.json()
+        doc_count = body.get('hits', {}).get('total', {})
+        if isinstance(doc_count, dict):
+            return doc_count.get('value', 0) > 0
+        return doc_count > 0
+        
+    except Exception as e:
+        logger.debug(f"Failed to check working state: {e}")
+        return False
 
 
 def perform_archive(target_cluster: Cluster,
