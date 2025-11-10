@@ -63,17 +63,11 @@ public class SnapshotReader_ES_6_8 implements ClusterSnapshotReader {
 
     @Override
     public boolean getSoftDeletesPossible() {
-        if (version != null && VersionMatchers.isES_5_X.test(version)) {
-            return false;
-        }
         return ElasticsearchConstants_ES_6_8.SOFT_DELETES_POSSIBLE;
     }
 
     @Override
     public String getSoftDeletesFieldData() {
-        if (version != null && VersionMatchers.isES_5_X.test(version)) {
-            return null;
-        }
         return ElasticsearchConstants_ES_6_8.SOFT_DELETES_FIELD;
     }
 
