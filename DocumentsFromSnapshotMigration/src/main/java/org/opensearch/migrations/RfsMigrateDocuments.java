@@ -405,12 +405,32 @@ public class RfsMigrateDocuments {
         var coordinatorFactory = new WorkCoordinatorFactory(targetVersion, arguments.indexNameSuffix);
         var cleanShutdownCompleted = new AtomicBoolean(false);
 
-        try (var workCoordinator = coordinatorFactory.get(
-                 new CoordinateWorkHttpClient(connectionContext),
-                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                 workerId,
+        IWorkCoordinator workCoordinator;
+        if (arguments.workCoordinationPostgresUrl != null) {
+            log.info("Using PostgreSQL for work coordination: {}", arguments.workCoordinationPostgresUrl);
+            var postgresConfig = new org.opensearch.migrations.bulkload.workcoordination.PostgresConfig(
+                arguments.workCoordinationPostgresUrl,
+                arguments.workCoordinationPostgresUsername,
+                arguments.workCoordinationPostgresPassword
+            );
+            workCoordinator = coordinatorFactory.getPostgres(
+                postgresConfig,
+                workerId,
                 Clock.systemUTC(),
-                workItemRef::set);
+                workItemRef::set
+            );
+        } else {
+            log.info("Using OpenSearch for work coordination");
+            workCoordinator = coordinatorFactory.get(
+                new CoordinateWorkHttpClient(connectionContext),
+                TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                workerId,
+                Clock.systemUTC(),
+                workItemRef::set
+            );
+        }
+
+        try (workCoordinator;
              var processManager = new LeaseExpireTrigger(
                 w -> exitOnLeaseTimeout(
                         workItemRef,
