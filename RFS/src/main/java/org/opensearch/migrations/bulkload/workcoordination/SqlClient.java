@@ -8,15 +8,15 @@ import com.zaxxer.hikari.HikariDataSource;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class PostgresClient implements DatabaseClient {
+public class SqlClient implements DatabaseClient {
     private final HikariDataSource dataSource;
     
-    public PostgresClient(String jdbcUrl, String username, String password) {
+    public SqlClient(String jdbcUrl, String username, String password) {
         this(jdbcUrl, username, password, false);
     }
     
-    public PostgresClient(String jdbcUrl, String username, String password, boolean enableSsl) {
-        log.debug("Initializing PostgresClient with jdbcUrl={}, username={}, ssl={}", jdbcUrl, username, enableSsl);
+    public SqlClient(String jdbcUrl, String username, String password, boolean enableSsl) {
+        log.debug("Initializing SqlClient with jdbcUrl={}, username={}, ssl={}", jdbcUrl, username, enableSsl);
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(jdbcUrl);
         config.setUsername(username);
@@ -33,7 +33,7 @@ public class PostgresClient implements DatabaseClient {
         }
         
         this.dataSource = new HikariDataSource(config);
-        log.debug("PostgresClient initialized successfully");
+        log.debug("SqlClient initialized successfully");
     }
     
     @Override
@@ -115,7 +115,7 @@ public class PostgresClient implements DatabaseClient {
     @Override
     public void close() {
         if (dataSource != null) {
-            log.debug("Closing PostgresClient connection pool");
+            log.debug("Closing SqlClient connection pool");
             dataSource.close();
         }
     }

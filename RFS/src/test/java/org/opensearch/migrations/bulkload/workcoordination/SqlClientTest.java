@@ -15,7 +15,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import static org.junit.jupiter.api.Assertions.*;
 
 @Testcontainers
-class PostgresClientTest {
+class SqlClientTest {
 
     @Container
     private static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15-alpine")
@@ -23,11 +23,11 @@ class PostgresClientTest {
         .withUsername("test")
         .withPassword("test");
 
-    private PostgresClient client;
+    private SqlClient client;
 
     @BeforeEach
     void setUp() {
-        client = new PostgresClient(
+        client = new SqlClient(
             postgres.getJdbcUrl(),
             postgres.getUsername(),
             postgres.getPassword()

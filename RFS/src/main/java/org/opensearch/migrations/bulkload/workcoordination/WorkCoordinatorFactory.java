@@ -48,15 +48,15 @@ public class WorkCoordinatorFactory {
         return OpenSearchWorkCoordinator.getFinalIndexName(indexNameSuffix);
     }
 
-    public IWorkCoordinator getPostgres(
-        PostgresConfig config,
+    public IWorkCoordinator getSql(
+        SqlConfig config,
         String workerId,
         Clock clock,
         Consumer<WorkItemAndDuration> workItemConsumer
     ) {
-        return new PostgresWorkCoordinator(
-            new PostgresClient(config.getJdbcUrl(), config.getUsername(), config.getPassword()),
-            config.getTableName(),
+        return new SqlWorkCoordinator(
+            new SqlClient(config.getJdbcUrl(), config.getUsername(), config.getPassword()),
+            config.getTableName() + indexNameSuffix,
             workerId,
             clock,
             workItemConsumer

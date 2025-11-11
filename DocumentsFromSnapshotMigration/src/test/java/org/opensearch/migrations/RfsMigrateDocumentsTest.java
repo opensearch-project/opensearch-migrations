@@ -30,7 +30,7 @@ class RfsMigrateDocumentsTest {
         workItemTimeProvider.getDocumentMigraionStartTimeRef().set(Instant.EPOCH.plus(shardPrepTime));
         Instant leaseExpirationTime = Instant.EPOCH.plus(leaseDuration);
 
-        int successorNextAcquisitionLeaseExponent = RfsMigrateDocuments.getSuccessorNextAcquisitionLeaseExponent(
+        int successorNextAcquisitionLeaseExponent = ExperimentalArgs.getSuccessorNextAcquisitionLeaseExponent(
             workItemTimeProvider, TEST_INITIAL_LEASE_DURATION, leaseExpirationTime);
 
         Assertions.assertEquals(expectedSuccessorExponent, successorNextAcquisitionLeaseExponent, message);

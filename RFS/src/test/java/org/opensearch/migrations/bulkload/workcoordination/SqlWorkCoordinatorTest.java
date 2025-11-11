@@ -12,9 +12,9 @@ import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
-class PostgresWorkCoordinatorTest extends PostgresWorkCoordinatorTestBase {
+class SqlWorkCoordinatorTest extends SqlWorkCoordinatorTestBase {
 
-    private PostgresWorkCoordinator coordinator;
+    private SqlWorkCoordinator coordinator;
 
     @BeforeEach
     @Override

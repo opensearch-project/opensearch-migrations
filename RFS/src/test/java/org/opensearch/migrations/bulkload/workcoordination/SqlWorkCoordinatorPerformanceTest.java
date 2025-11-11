@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.*;
 
 @Disabled("Performance tests disabled")
-class PostgresWorkCoordinatorPerformanceTest extends PostgresWorkCoordinatorTestBase {
+class SqlWorkCoordinatorPerformanceTest extends SqlWorkCoordinatorTestBase {
 
     @Test
     void testPerformanceWith100Workers() throws Exception {

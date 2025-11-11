@@ -12,7 +12,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
-public abstract class PostgresWorkCoordinatorTestBase {
+public abstract class SqlWorkCoordinatorTestBase {
 
     @Container
     protected static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15-alpine")
@@ -21,13 +21,13 @@ public abstract class PostgresWorkCoordinatorTestBase {
         .withPassword("test");
 
     protected static final String TABLE_NAME = "work_items";
-    protected List<PostgresWorkCoordinator> coordinators;
+    protected List<SqlWorkCoordinator> coordinators;
     protected DatabaseClient dbClient;
     protected TestClock testClock;
 
     @BeforeEach
     void setUp() throws Exception {
-        dbClient = new PostgresClient(
+        dbClient = new SqlClient(
             postgres.getJdbcUrl(),
             postgres.getUsername(),
             postgres.getPassword()
@@ -49,17 +49,17 @@ public abstract class PostgresWorkCoordinatorTestBase {
         resetDatabase();
     }
 
-    protected PostgresWorkCoordinator createCoordinator(String workerId) {
+    protected SqlWorkCoordinator createCoordinator(String workerId) {
         return createCoordinator(workerId, testClock);
     }
 
-    protected PostgresWorkCoordinator createCoordinator(String workerId, Clock clock) {
-        var client = new PostgresClient(
+    protected SqlWorkCoordinator createCoordinator(String workerId, Clock clock) {
+        var client = new SqlClient(
             postgres.getJdbcUrl(),
             postgres.getUsername(),
             postgres.getPassword()
         );
-        var coordinator = new PostgresWorkCoordinator(
+        var coordinator = new SqlWorkCoordinator(
             client,
             TABLE_NAME,
             workerId,
@@ -71,9 +71,9 @@ public abstract class PostgresWorkCoordinatorTestBase {
     }
 
     private void resetDatabase() throws Exception {
-        if (dbClient != null && dbClient instanceof PostgresClient) {
+        if (dbClient != null && dbClient instanceof SqlClient) {
             try {
-                ((PostgresClient) dbClient).executeUpdate("DROP TABLE IF EXISTS " + TABLE_NAME + " CASCADE");
+                ((SqlClient) dbClient).executeUpdate("DROP TABLE IF EXISTS " + TABLE_NAME + " CASCADE");
             } catch (Exception e) {
                 // Ignore cleanup errors
             }

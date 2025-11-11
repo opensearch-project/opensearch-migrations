@@ -72,7 +72,7 @@ import org.apache.logging.log4j.LogManager;
 import org.slf4j.MDC;
 
 @Slf4j
-public class RfsMigrateDocuments {
+public class ExperimentalArgs {
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
 
@@ -226,20 +226,20 @@ public class RfsMigrateDocuments {
         public String indexNameSuffix = "";
 
         @Parameter(required = false,
-            names = { "--work-coordination-postgres-url" },
-            description = "PostgreSQL JDBC URL for work coordination (e.g., jdbc:postgresql://host:5432/dbname). " +
-                "If provided, PostgreSQL will be used instead of OpenSearch for work coordination.")
-        public String workCoordinationPostgresUrl = null;
+            names = { "--sql-db", "--sqlDb"},
+            description = "JDBC URL for work coordination (e.g., jdbc:postgresql://host:5432/dbname). " +
+                "If provided, SQL will be used for work coordination.")
+        public String sqlDbUrl = null;
 
         @Parameter(required = false,
-            names = { "--work-coordination-postgres-username" },
-            description = "PostgreSQL username for work coordination")
-        public String workCoordinationPostgresUsername = null;
+            names = { "--sql-username", "--sqlUsername" },
+            description = "SQL username for work coordination")
+        public String sqlDbUsername = null;
 
         @Parameter(required = false,
-            names = { "--work-coordination-postgres-password" },
-            description = "PostgreSQL password for work coordination")
-        public String workCoordinationPostgresPassword = null;
+            names = { "--sql-password", "--sqlPassword" },
+            description = "SQL password for work coordination")
+        public String sqlDbPassword = null;
 
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
@@ -406,21 +406,21 @@ public class RfsMigrateDocuments {
         var cleanShutdownCompleted = new AtomicBoolean(false);
 
         IWorkCoordinator workCoordinator;
-        if (arguments.workCoordinationPostgresUrl != null) {
-            log.info("Using PostgreSQL for work coordination: {}", arguments.workCoordinationPostgresUrl);
-            var postgresConfig = new org.opensearch.migrations.bulkload.workcoordination.PostgresConfig(
-                arguments.workCoordinationPostgresUrl,
-                arguments.workCoordinationPostgresUsername,
-                arguments.workCoordinationPostgresPassword
+        if (arguments.sqlDbUrl != null) {
+            log.info("Using PostgreSQL for work coordination: {}", arguments.sqlDbUrl);
+            var postgresConfig = new org.opensearch.migrations.bulkload.workcoordination.SqlConfig(
+                arguments.sqlDbUrl,
+                arguments.sqlDbUsername,
+                arguments.sqlDbPassword
             );
-            workCoordinator = coordinatorFactory.getPostgres(
+            workCoordinator = coordinatorFactory.getSql(
                 postgresConfig,
                 workerId,
                 Clock.systemUTC(),
                 workItemRef::set
             );
         } else {
-            log.info("Using OpenSearch for work coordination");
+            log.info("Using target for work coordination");
             workCoordinator = coordinatorFactory.get(
                 new CoordinateWorkHttpClient(connectionContext),
                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,

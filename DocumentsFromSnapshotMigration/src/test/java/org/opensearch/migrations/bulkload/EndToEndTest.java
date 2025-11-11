@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.RfsMigrateDocuments;
+import org.opensearch.migrations.ExperimentalArgs;
 import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
@@ -95,7 +95,7 @@ public class EndToEndTest extends SourceTestBase {
     }
 
     @Test
-    public void migrationDocumentsWithPostgres() {
+    public void migrationDocumentsWithSql() {
         try (
             final var postgres = new PostgreSQLContainer<>("postgres:15-alpine")
                 .withDatabaseName("test")
@@ -104,7 +104,7 @@ public class EndToEndTest extends SourceTestBase {
             final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
             final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_1)
         ) {
-            migrationDocumentsWithClustersAndPostgres(sourceCluster, targetCluster, postgres);
+            migrationDocumentsWithClustersAndSql(sourceCluster, targetCluster, postgres);
         }
     }
 
@@ -307,7 +307,7 @@ public class EndToEndTest extends SourceTestBase {
     }
 
     @SneakyThrows
-    private void migrationDocumentsWithClustersAndPostgres(
+    private void migrationDocumentsWithClustersAndSql(
         final SearchClusterContainer sourceCluster,
         final SearchClusterContainer targetCluster,
         final PostgreSQLContainer<?> postgres
@@ -351,7 +351,7 @@ public class EndToEndTest extends SourceTestBase {
 
             var runCounter = new AtomicInteger();
             var expectedTerminationException = waitForRfsCompletion(() -> 
-                migrateWithPostgresCoordinator(
+                migrateWithSqlCoordinator(
                     sourceRepo,
                     snapshotName,
                     targetCluster,
@@ -369,7 +369,7 @@ public class EndToEndTest extends SourceTestBase {
         }
     }
 
-    private int migrateWithPostgresCoordinator(
+    private int migrateWithSqlCoordinator(
         FileSystemRepo sourceRepo,
         String snapshotName,
         SearchClusterContainer target,
@@ -381,7 +381,7 @@ public class EndToEndTest extends SourceTestBase {
     ) {
         for (int runNumber = 1; ; ++runNumber) {
             try {
-                var workResult = migrateWithPostgresWorker(
+                var workResult = migrateWithSqlWorker(
                     sourceRepo,
                     snapshotName,
                     target,
@@ -395,7 +395,7 @@ public class EndToEndTest extends SourceTestBase {
                 } else {
                     runCounter.incrementAndGet();
                 }
-            } catch (RfsMigrateDocuments.NoWorkLeftException e) {
+            } catch (ExperimentalArgs.NoWorkLeftException e) {
                 throw new ExpectedMigrationWorkTerminationException(e, runNumber);
             } catch (Exception e) {
                 throw new RuntimeException(e);
@@ -404,7 +404,7 @@ public class EndToEndTest extends SourceTestBase {
     }
 
     @SneakyThrows
-    private CompletionStatus migrateWithPostgresWorker(
+    private CompletionStatus migrateWithSqlWorker(
         SourceRepo sourceRepo,
         String snapshotName,
         SearchClusterContainer target,
@@ -412,7 +412,7 @@ public class EndToEndTest extends SourceTestBase {
         DocumentMigrationTestContext context,
         Version sourceVersion,
         Version targetVersion
-    ) throws RfsMigrateDocuments.NoWorkLeftException {
+    ) throws ExperimentalArgs.NoWorkLeftException {
         var tempDir = Files.createTempDirectory("test_lucene");
         try (var processManager = new LeaseExpireTrigger(workItemId -> {})) {
             var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(sourceVersion, sourceRepo, false);
@@ -425,18 +425,18 @@ public class EndToEndTest extends SourceTestBase {
 
             var readerFactory = new LuceneIndexReader.Factory(sourceResourceProvider);
             var docTransformer = new TransformationLoader().getTransformerFactoryLoader(
-                    RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
+                    ExperimentalArgs.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
 
             var progressCursor = new AtomicReference<WorkItemCursor>();
             var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
-            var postgresConfig = new org.opensearch.migrations.bulkload.workcoordination.PostgresConfig(
+            var postgresConfig = new org.opensearch.migrations.bulkload.workcoordination.SqlConfig(
                 postgres.getJdbcUrl(),
                 postgres.getUsername(),
                 postgres.getPassword()
             );
             var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
 
-            try (var workCoordinator = coordinatorFactory.getPostgres(
+            try (var workCoordinator = coordinatorFactory.getSql(
                     postgresConfig,
                     UUID.randomUUID().toString(),
                     Clock.systemUTC(),
@@ -447,7 +447,7 @@ public class EndToEndTest extends SourceTestBase {
                         .build()
                         .toConnectionContext();
                 var clientFactory = new OpenSearchClientFactory(connectionContext);
-                return RfsMigrateDocuments.run(
+                return ExperimentalArgs.run(
                     readerFactory,
                     new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> docTransformer),
                     progressCursor,

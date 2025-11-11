@@ -19,7 +19,7 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class PostgresWorkCoordinator implements IWorkCoordinator {
+public class SqlWorkCoordinator implements IWorkCoordinator {
     private final DatabaseClient dbClient;
     private final String tableName;
     private final String workerId;
@@ -27,7 +27,7 @@ public class PostgresWorkCoordinator implements IWorkCoordinator {
     private final Consumer<WorkItemAndDuration> workItemConsumer;
     private final SqlQueryBuilder sqlBuilder;
 
-    public PostgresWorkCoordinator(
+    public SqlWorkCoordinator(
         DatabaseClient dbClient,
         String tableName,
         String workerId,

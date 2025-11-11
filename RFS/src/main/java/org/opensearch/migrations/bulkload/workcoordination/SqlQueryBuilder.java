@@ -18,7 +18,7 @@ class SqlQueryBuilder {
     }
 
     boolean insertUnassignedWorkItem(Connection conn, String workItemId, String creatorId) throws SQLException {
-        var sql = new SQLString("INSERT INTO " + tableName + 
+        var sql = new SqlString("INSERT INTO " + tableName + 
             " (work_item_id, expiration, creator_id) VALUES (?, 0, ?) ON CONFLICT (work_item_id) DO NOTHING");
         try (var stmt = conn.prepareStatement(sql.sql())) {
             stmt.setString(1, workItemId);
@@ -29,7 +29,7 @@ class SqlQueryBuilder {
 
     LeaseResult upsertLease(Connection conn, String workItemId, long expirationSeconds, String leaseHolderId, 
                             String creatorId, long nowSeconds) throws SQLException {
-        var sql = new SQLString("INSERT INTO " + tableName + 
+        var sql = new SqlString("INSERT INTO " + tableName + 
             " (work_item_id, expiration, lease_holder_id, creator_id, next_acquisition_lease_exponent) " +
             "VALUES (?, ?, ?, ?, 0) " +
             "ON CONFLICT (work_item_id) DO UPDATE SET " +
@@ -74,7 +74,7 @@ class SqlQueryBuilder {
     }
 
     Optional<AvailableWorkItem> selectAvailableWorkItem(Connection conn, long nowSeconds) throws SQLException {
-        var sql = new SQLString("SELECT work_item_id, next_acquisition_lease_exponent, successor_items " +
+        var sql = new SqlString("SELECT work_item_id, next_acquisition_lease_exponent, successor_items " +
             "FROM " + tableName + " " +
             "WHERE completed_at IS NULL AND expiration < ? " +
             "ORDER BY RANDOM() LIMIT 1 FOR UPDATE SKIP LOCKED");
@@ -94,7 +94,7 @@ class SqlQueryBuilder {
     }
 
     boolean updateLease(Connection conn, long newExpiration, String leaseHolderId, String workItemId) throws SQLException {
-        var sql = new SQLString("UPDATE " + tableName + " " +
+        var sql = new SqlString("UPDATE " + tableName + " " +
             "SET expiration = ?, lease_holder_id = ?, " +
             "    next_acquisition_lease_exponent = next_acquisition_lease_exponent + 1, " +
             "    updated_at = CURRENT_TIMESTAMP " +
@@ -108,7 +108,7 @@ class SqlQueryBuilder {
     }
 
     boolean completeWorkItem(Connection conn, long completedAt, String workItemId, String leaseHolderId) throws SQLException {
-        var sql = new SQLString("UPDATE " + tableName + " " +
+        var sql = new SqlString("UPDATE " + tableName + " " +
             "SET completed_at = ?, updated_at = CURRENT_TIMESTAMP " +
             "WHERE work_item_id = ? AND lease_holder_id = ? AND completed_at IS NULL");
         try (var stmt = conn.prepareStatement(sql.sql())) {
@@ -120,7 +120,7 @@ class SqlQueryBuilder {
     }
 
     void updateSuccessors(Connection conn, List<String> successorWorkItemIds, String workItemId, String leaseHolderId) throws SQLException {
-        var sql = new SQLString("UPDATE " + tableName + " " +
+        var sql = new SqlString("UPDATE " + tableName + " " +
             "SET successor_items = ?, updated_at = CURRENT_TIMESTAMP " +
             "WHERE work_item_id = ? AND lease_holder_id = ?");
         try (var stmt = conn.prepareStatement(sql.sql())) {
@@ -132,7 +132,7 @@ class SqlQueryBuilder {
     }
 
     void insertSuccessors(Connection conn, List<String> successorIds, String creatorId, int leaseExponent) throws SQLException {
-        var sql = new SQLString("INSERT INTO " + tableName + 
+        var sql = new SqlString("INSERT INTO " + tableName + 
             " (work_item_id, expiration, creator_id, next_acquisition_lease_exponent) " +
             "VALUES (?, 0, ?, ?) ON CONFLICT (work_item_id) DO NOTHING");
         try (var stmt = conn.prepareStatement(sql.sql())) {
@@ -147,7 +147,7 @@ class SqlQueryBuilder {
     }
 
     int countIncomplete(Connection conn) throws SQLException {
-        var sql = new SQLString("SELECT COUNT(*) FROM " + tableName + " WHERE completed_at IS NULL");
+        var sql = new SqlString("SELECT COUNT(*) FROM " + tableName + " WHERE completed_at IS NULL");
         try (var stmt = conn.prepareStatement(sql.sql())) {
             try (var rs = stmt.executeQuery()) {
                 return rs.next() ? rs.getInt(1) : 0;

@@ -12,7 +12,7 @@ import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.*;
 
-class PostgresWorkCoordinatorMultiWorkerTest extends PostgresWorkCoordinatorTestBase {
+class SqlWorkCoordinatorMultiWorkerTest extends SqlWorkCoordinatorTestBase {
 
     @Test
     void testMultipleWorkersAcquireDifferentWorkItems() throws Exception {
