@@ -8,6 +8,7 @@ import lombok.Data;
 import lombok.Getter;
 import lombok.ToString;
 
+@SuppressWarnings("java:S1210")
 @Builder
 @Data
 @ToString
