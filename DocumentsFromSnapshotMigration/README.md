@@ -90,6 +90,7 @@ To see the default shard size, use the `--help` CLI option:
 | --target-aws-region               | The AWS region for the target cluster. Required if using SigV4 authentication                                                                            |
 | --target-aws-service-signing-name | The AWS service signing name (e.g. 'es' for Amazon OpenSearch Service, 'aoss' for Amazon OpenSearch Serverless). Required if using SigV4 authentication  |
 | --documents-size-per-bulk-request | Optional. The maximum aggregate document size to be used in bulk requests in bytes. Default: 10 MiB                                                      |
+| --allowed-doc-exception-types     | Optional. Comma-separated list of document-level exception types to treat as successful operations. Enables idempotent migrations by allowing specific errors (e.g., 'version_conflict_engine_exception') to be treated as success. Default: none |
 
 ## Advanced Arguments
 
@@ -101,3 +102,30 @@ These arguments should be carefully considered before setting, can include exper
 | --documents-per-bulk-request | The number of documents to be included within each bulk request sent. Default: no max (controlled by documents size) |
 | --max-connections           | The maximum number of connections to simultaneously used to communicate to the target. Default: 10                   |
 | --target-insecure           | Flag to allow untrusted SSL certificates for target cluster. Default: false                                          |
+
+## Idempotent Migrations
+
+When running migrations multiple times (e.g., for testing or recovery scenarios), you may encounter version conflict errors when documents already exist on the target cluster. The `--allowed-doc-exception-types` parameter enables idempotent migrations by treating specific document-level exceptions as successful operations.
+
+### Example: Handling Version Conflicts
+
+If you're re-running a migration and documents already exist on the target, you can allow version conflicts to be treated as success:
+
+```shell
+./gradlew DocumentsFromSnapshotMigration:run --args="\
+  --snapshot-name reindex-from-snapshot \
+  --snapshot-local-dir /snapshot \
+  --lucene-dir /tmp/lucene_files \
+  --target-host http://hostname:9200 \
+  --allowed-doc-exception-types version_conflict_engine_exception"
+```
+
+This will prevent the migration from retrying indefinitely when encountering documents that already exist on the target cluster. The migration will treat these conflicts as successful operations and proceed with the remaining documents.
+
+### Supported Exception Types
+
+Common exception types that can be allowlisted:
+- `version_conflict_engine_exception` - Document already exists with a different version
+- Other OpenSearch/Elasticsearch document-level exception types as needed
+
+**Note:** Use this feature carefully. Allowlisting exceptions means those errors will be silently treated as success, which may mask legitimate issues if used incorrectly.
