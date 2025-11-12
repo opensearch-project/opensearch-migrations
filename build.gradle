@@ -347,14 +347,6 @@ subprojects {
                 xml.required = true
             }
         }
-
-        // Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
-        tasks.register('copyDependencies', Sync) {
-            duplicatesStrategy = DuplicatesStrategy.WARN
-
-            from configurations.runtimeClasspath
-            into "${buildDir}/dependencies"
-        }
     }
 }
 

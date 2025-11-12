@@ -22,6 +22,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
+@SuppressWarnings("java:S1450")
 @Getter
 @Slf4j
 public class OpenSearchClientFactory {
