@@ -13,6 +13,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotRepo.CannotParseRepoFil
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonDeserializer;
@@ -20,50 +21,33 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.RequiredArgsConstructor;
 
+@NoArgsConstructor // for Jackson
 public class SnapshotRepoData_ES_6_8 {
     
     @Getter
     private Path filePath;
     
     @Getter
+    @JsonProperty("snapshots")
     private List<Snapshot> snapshots;
 
     @Getter
+    @JsonProperty("indices")
     private Map<String, RawIndex> indices;
 
     @Getter
     @AllArgsConstructor
     @NoArgsConstructor
     @JsonIgnoreProperties(ignoreUnknown = true)
+    @Builder
     public static class Snapshot implements SnapshotRepo.Snapshot {
         private String name;
-        private String uuid;
+        private String id;
         private int state;
-
-        @Override
-        public String getId() {
-            return uuid;
-        }
-    }
-
-    @Getter
-    @AllArgsConstructor
-    @NoArgsConstructor
-    public static class SnapshotReference {
-        private String value;
-        private boolean isUuid;
-        
-        public static SnapshotReference fromName(String name) {
-            return new SnapshotReference(name, false);
-        }
-        
-        public static SnapshotReference fromUuid(String uuid) {
-            return new SnapshotReference(uuid, true);
-        }
     }
 
     @Getter
@@ -73,38 +57,34 @@ public class SnapshotRepoData_ES_6_8 {
     public static class RawIndex {
         private String id;
         @JsonDeserialize(using = SnapshotListDeserializer.class)
-        private List<SnapshotReference> snapshots;
+        private List<Snapshot> snapshots;
     }
 
     /**
      * Normalizes index->snapshots entries to a list of snapshot references.
-     * 
      * Supported formats:
      * - ES 5.0-5.4: [{"name":"snap1"}, {"name":"snap2"}] → [SnapshotReference(snap1, false), ...]
-     * - ES 5.5, 6.x: ["snap-name-1", "snap-name-2"] → [SnapshotReference(snap-name-1, false), ...]
+     * - ES 5.5, 6.x: ["uuid1", "uuid1"] → [SnapshotReference(snap-name-1, false), ...]
      */
-    public static class SnapshotListDeserializer extends JsonDeserializer<List<SnapshotReference>> {
+    public static class SnapshotListDeserializer extends JsonDeserializer<List<Snapshot>> {
         @Override
-        public List<SnapshotReference> deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
+        public List<Snapshot> deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
             JsonNode node = p.getCodec().readTree(p);
             if (node == null || !node.isArray()) {
                 return List.of();
             }
             
-            List<SnapshotReference> result = new ArrayList<>();
+            List<Snapshot> result = new ArrayList<>();
             
             for (JsonNode n : node) {
                 if (n.isTextual()) {
-                    // ES 5.5, 6.x: ["snap-name-1", "snap-name-2"] or ["uuid1", "uuid2"]
-                    String value = n.asText();
-                    boolean isUuid = value.length() == 22 && value.matches("[A-Za-z0-9_-]+");
-                    result.add(new SnapshotReference(value, isUuid));
+                    // ES 5.5, 6.x: ["uuid1", "uuid2"]
+                    var id = n.asText();
+                    result.add(Snapshot.builder().id(id).build());
                 } else if (n.isObject()) {
                     // ES 5.0-5.4: [{"name":"snap1"}, {"name":"snap2"}]
-                    JsonNode name = n.get("name");
-                    if (name != null && !name.isNull() && !name.asText().isEmpty()) {
-                        result.add(SnapshotReference.fromName(name.asText()));
-                    }
+                    var name = n.get("name").asText();
+                    result.add(Snapshot.builder().name(name).build());
                 }
             }
             
@@ -113,20 +93,10 @@ public class SnapshotRepoData_ES_6_8 {
     }
 
     @Getter
-    @RequiredArgsConstructor
+    @AllArgsConstructor
     public static class Index implements SnapshotRepo.Index {
-        public static Index fromRawIndex(String name, RawIndex rawIndex) {
-            return new Index(name, rawIndex.id, rawIndex.snapshots);
-        }
-
         private final String name;
         private final String id;
-        private final List<SnapshotReference> snapshotReferences;
-        
-        @Override
-        public List<String> getSnapshots() {
-            return snapshotReferences.stream().map(SnapshotReference::getValue).toList();
-        }
     }
 
     public static SnapshotRepoData_ES_6_8 fromRepo(SourceRepo repo) {

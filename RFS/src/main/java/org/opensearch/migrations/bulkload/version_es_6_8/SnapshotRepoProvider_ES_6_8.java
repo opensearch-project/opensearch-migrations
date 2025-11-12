@@ -2,8 +2,7 @@ package org.opensearch.migrations.bulkload.version_es_6_8;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
-import java.util.stream.Collectors;
+import java.util.Optional;
 
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
@@ -28,34 +27,37 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
         return new ArrayList<>(getRepoData().getSnapshots());
     }
 
+    @SuppressWarnings("java:S100") // SonarQube does not support record classes at the moment
+    private record Index(
+       String name,
+       String id,
+       List<? extends SnapshotRepo.Snapshot> snapshots) {};
+
     @Override
-    public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
-        List<SnapshotRepo.Index> matchedIndices = new ArrayList<>();
-        SnapshotRepoData_ES_6_8.Snapshot targetSnapshot = getRepoData().getSnapshots().stream()
-            .filter(snapshot -> snapshotName.equals(snapshot.getName()))
-            .findFirst()
-            .orElse(null);
+    public List<? extends SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
+        return getSnapshotForName(snapshotName)
+            .map(matchedSnapshot ->
+                    getRepoData().getIndices()
+                    .entrySet()
+                    .stream().map(keyVal -> new Index(
+                                    keyVal.getKey(),
+                                    keyVal.getValue().getId(),
+                                    keyVal.getValue().getSnapshots())
+                    )
+                    .filter(
+                        index -> index.snapshots.stream()
+                                .anyMatch(matchedSnapshot::isNameOrIdEqual)
+                    )
+                    .map(index -> new SnapshotRepoData_ES_6_8.Index(index.name, index.id))
+                    .toList()
+            )
+            .orElse(List.of());
+    }
 
-        if (targetSnapshot != null) {
-            String targetId = targetSnapshot.getId();
-            String targetName = targetSnapshot.getName();
-
-            getRepoData().getIndices().forEach((indexName, rawIndex) -> {
-                if (rawIndex.getSnapshots() == null || rawIndex.getSnapshots().isEmpty()) {
-                    return;
-                }
-
-                boolean matches = rawIndex.getSnapshots().stream().anyMatch(ref -> 
-                    (ref.isUuid() && Objects.equals(targetId, ref.getValue())) ||
-                    (!ref.isUuid() && Objects.equals(targetName, ref.getValue()))
-                );
-                
-                if (matches) {
-                    matchedIndices.add(SnapshotRepoData_ES_6_8.Index.fromRawIndex(indexName, rawIndex));
-                }
-            });
-        }
-        return matchedIndices;
+    private Optional<? extends SnapshotRepo.Snapshot> getSnapshotForName(String snapshotName) {
+        return getRepoData().getSnapshots().stream()
+                .filter(snapshot -> snapshotName.equals(snapshot.getName()))
+                .findFirst();
     }
 
     @Override
@@ -78,10 +80,4 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
         return repo;
     }
 
-    public List<SnapshotRepoData_ES_6_8.Index> getIndices() {
-        return getRepoData().getIndices().entrySet()
-            .stream()
-            .map(entry -> SnapshotRepoData_ES_6_8.Index.fromRawIndex(entry.getKey(), entry.getValue()))
-            .collect(Collectors.toList());
-    }
 }

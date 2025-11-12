@@ -137,11 +137,6 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
         }
 
         @Override
-        public List<String> getSnapshots() {
-            return Collections.singletonList(snapshotName);
-        }
-
-        @Override
         public String toString() {
             return getName();
         }
