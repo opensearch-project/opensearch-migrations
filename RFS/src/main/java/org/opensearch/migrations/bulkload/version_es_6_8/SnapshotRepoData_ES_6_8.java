@@ -46,6 +46,7 @@ public class SnapshotRepoData_ES_6_8 {
     @Builder
     public static class Snapshot implements SnapshotRepo.Snapshot {
         private String name;
+        @JsonProperty("uuid")
         private String id;
         private int state;
     }
