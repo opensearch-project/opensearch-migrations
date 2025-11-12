@@ -58,8 +58,8 @@ def _handle_workflow_wait(
     help='Kubernetes namespace for the workflow (default: ma)'
 )
 @click.option(
-    '--prefix',
-    help='Workflow prefix (auto-generated if not provided)'
+    '--etcd-endpoints',
+    help='etcd endpoints (default: etcd.{namespace}.svc.cluster.local)'
 )
 @click.option(
     '--wait',
@@ -85,7 +85,7 @@ def _handle_workflow_wait(
     help='Configuration session name to load parameters from (default: default)'
 )
 @click.pass_context
-def submit_command(ctx, namespace, prefix, wait, timeout, wait_interval, session):
+def submit_command(ctx, namespace, etcd_endpoints, wait, timeout, wait_interval, session):
     """Submit a migration workflow using the config processor.
 
     This command submits a migration workflow by:
@@ -102,7 +102,7 @@ def submit_command(ctx, namespace, prefix, wait, timeout, wait_interval, session
     Example:
         workflow submit
         workflow submit --wait
-        workflow submit --prefix my-migration --wait --timeout 300
+        workflow submit --etcd-endpoints etcd.custom.svc.cluster.local --wait --timeout 300
     """
     # Check if configuration exists
     store = WorkflowConfigStore(namespace=namespace)
@@ -120,12 +120,16 @@ def submit_command(ctx, namespace, prefix, wait, timeout, wait_interval, session
         # Get config data as YAML
         config_yaml = config.to_yaml()
 
+        # Set default etcd_endpoints if not provided
+        if not etcd_endpoints:
+            etcd_endpoints = f"etcd.{namespace}.svc.cluster.local:2379"
+
         click.echo(f"Initializing workflow from session: {session}")
 
         # Step 2: Submit workflow to Kubernetes
         click.echo(f"Submitting workflow to namespace: {namespace}")
         try:
-            submit_result = runner.submit_workflow(config_yaml, namespace)
+            submit_result = runner.submit_workflow(config_yaml, namespace, etcd_endpoints)
 
             workflow_name = submit_result.get('workflow_name', 'unknown')
 

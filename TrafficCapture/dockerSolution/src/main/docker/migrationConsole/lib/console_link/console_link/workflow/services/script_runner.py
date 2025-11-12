@@ -131,7 +131,8 @@ class ScriptRunner:
     def submit_workflow(
         self,
         config_data: str,
-        namespace: str = "ma"
+        namespace: str = "ma",
+        etcd_endpoints: Optional[str] = None
     ) -> Dict[str, Any]:
         """Submit workflow using config processor submission script.
 
@@ -142,6 +143,7 @@ class ScriptRunner:
         Args:
             config_data: User configuration YAML as string
             namespace: Kubernetes namespace (default: "ma")
+            etcd_endpoints: etcd endpoints (default: etcd.{namespace}.svc.cluster.local)
 
         Returns:
             Dict with workflow_name, workflow_uid, and namespace
@@ -152,6 +154,10 @@ class ScriptRunner:
             ValueError: If script output cannot be parsed
         """
         logger.info(f"Submitting workflow with namespace: {namespace}")
+
+        # Set default etcd_endpoints if not provided
+        if not etcd_endpoints:
+            etcd_endpoints = f"etcd.{namespace}.svc.cluster.local:2379"
 
         script_path = self.script_dir / "createMigrationWorkflowFromUserConfiguration.sh"
 
@@ -164,7 +170,7 @@ class ScriptRunner:
             temp_file_path = temp_file.name
 
         try:
-            cmd = [str(script_path), temp_file_path, f"--prefix {namespace}"]
+            cmd = [str(script_path), temp_file_path, f"--prefix {namespace}", f"--etcd_endpoints {etcd_endpoints}"]
 
             logger.debug(f"Running workflow submission script: {' '.join(cmd)}")
             logger.debug(f"Config file: {temp_file_path}")
