@@ -16,7 +16,7 @@ shift  # Remove first argument, leaving any additional args in $@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default command, can be overridden by setting INITIALIZE_CMD environment variable
-: ${INITIALIZE_CMD:="node $SCRIPT_DIR/index.js"}
+: ${INITIALIZE_CMD:="node $SCRIPT_DIR/index.js initialize"}
 
 # Create a temporary file
 TEMPORARY_FILE=$(mktemp)

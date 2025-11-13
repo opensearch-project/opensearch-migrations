@@ -194,14 +194,21 @@ export const FullMigration = WorkflowBuilder.create({
     )
 
 
+    .addSuspendTemplate("preApproval")
+
+
     .addTemplate("main", t => t
         .addRequiredInput("migrationConfigs", typeToken<z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG>[]>(),
             "List of server configurations to direct migrated traffic toward") // expand
+        .addOptionalInput("skipPreApproval", c=>false as boolean)
 
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
 
         .addSteps(b => b
+            .addStep("preApproval", INTERNAL, "preApproval",
+                { when: { templateExp: expr.not(expr.deserializeRecord(b.inputs.skipPreApproval))}})
+
             .addStep("foreachMigrationPair", INTERNAL, "foreachMigrationPair",
                 c => {
                     return c.register({

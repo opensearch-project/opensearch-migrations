@@ -54,7 +54,7 @@ async function bundle() {
     const outputFile = path.join(outputDir, 'index.js');
 
     await esbuild.build({
-        entryPoints: ['dist/RunMigrationInitializer.js'],
+        entryPoints: ['dist/cliRouter.js'],
         bundle: true,
         platform: 'node',
         target: 'node22',

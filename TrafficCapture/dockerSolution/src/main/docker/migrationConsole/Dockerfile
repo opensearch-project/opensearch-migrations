@@ -46,13 +46,14 @@ RUN ARCH=$(cat /arch.env) && \
 FROM ${BASE_IMAGE}
 
 # Install Node.js for config processor and workflow template creation
+# NPM is to setup the schema checking that coc uses
 RUN dnf install -y  \
       --setopt=install_weak_deps=False \
       --setopt=tsflags=nodocs \
       --setopt=keepcache=False \
       --setopt=plugins=0 \
       --setopt=logfilelevel=0 \
-        nodejs22 \
+        nodejs22 npm \
         && \
         dnf clean all && \
         rm -rf /var/cache/dnf
@@ -152,5 +153,10 @@ COPY workflows /root/workflows
 
 # Set ENV to control startup script in /bin/sh mode
 ENV ENV=/root/.bashrc
+
+COPY setupVimSchemaChecker.sh /tmp/setupVimSchemaChecker.sh
+RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
+    /tmp/setupVimSchemaChecker.sh && \
+    rm /tmp/setupVimSchemaChecker.sh
 
 CMD ["/root/start-console.sh"]

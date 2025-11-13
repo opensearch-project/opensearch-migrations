@@ -52,6 +52,9 @@ export const METADATA_OPTIONS = z.object({
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
     output: z.union(["HUMAN_READABLE", "JSON"].map(s=>z.literal(s))).default("HUMAN_READABLE"),
     transformerConfigBase64: z.string().default(""),
+
+    skipEvaluateApproval: z.boolean().default(false),
+    skipMigrateApproval: z.boolean().default(false)
 });
 
 export const RFS_OPTIONS = z.object({
@@ -66,6 +69,8 @@ export const RFS_OPTIONS = z.object({
     maxConnections: z.number().default(10),
     maxShardSizeBytes: z.number().default(80*1024*1024*1024),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
+
+    skipApproval: z.boolean().default(false)
 });
 
 export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
@@ -133,7 +138,11 @@ export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     metadataMigrationConfig: METADATA_OPTIONS.optional(),
     documentBackfillConfig: RFS_OPTIONS.optional()
-});
+}).refine((data) =>
+        data.metadataMigrationConfig !== undefined || data.documentBackfillConfig !== undefined,
+    {
+        message: "At least one of metadataMigrationConfig or documentBackfillConfig must be provided",
+    });
 
 export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
     createSnapshotConfig: CREATE_SNAPSHOT_OPTIONS.optional(),
@@ -142,6 +151,7 @@ export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
 });
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
+    skipApprovals : z.boolean().default(false),
     fromSource: z.string(),
     toTarget: z.string(),
     snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).optional(),
@@ -152,6 +162,8 @@ export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);
 
 export const OVERALL_MIGRATION_CONFIG = z.object({
+    skipAllApprovals : z.boolean().default(false),
+    skipPreApproval : z.boolean().default(false),
     sourceClusters: SOURCE_CLUSTERS_MAP,
     targetClusters: TARGET_CLUSTERS_MAP,
     migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG).min(1)

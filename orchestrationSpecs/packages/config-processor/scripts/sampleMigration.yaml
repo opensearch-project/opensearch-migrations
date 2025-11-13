@@ -1,4 +1,6 @@
 {
+  skipAllApprovals : false,
+  skipPreApproval: true,
   sourceClusters: {
     "source1": {
       "endpoint": "https://elasticsearch-master-headless:9200",
@@ -35,24 +37,28 @@
     {
       "fromSource": "source1",
       "toTarget": "target1",
+      "skipApprovals": false,
 
       "snapshotExtractAndLoadConfigs": [
         {
           "snapshotConfig": {
             "snapshotNameConfig": {
-#              "externallyManagedSnapshot": "source1_source1snapshot1_88a9f10c-207e-4c04-b6c6-fbc058501131",
-              "snapshotNamePrefix": "source1snapshot1"
+              "externallyManagedSnapshot": "source1_source1snapshot1_88a9f10c-207e-4c04-b6c6-fbc058501131",
+#              "snapshotNamePrefix": "source1snapshot1"
             },
           },
-          "createSnapshotConfig": {
-            "indexAllowlist": [ "index_3", "index_4" ]
-          },
+#          "createSnapshotConfig": {
+#            "indexAllowlist": [ "index_3", "index_4" ]
+#          },
           "migrations": [
             {
               "metadataMigrationConfig": {
+                "skipEvaluateApproval" : true,
+                "skipMigrateApproval" : true
               },
               "documentBackfillConfig": {
                 "documentsPerBulkRequest": 1000,
+                "skipApproval": true,
                 "//Max connections is the effective concurrency count": "",
                 "maxConnections": 4
               }
