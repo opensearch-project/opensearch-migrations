@@ -71,6 +71,11 @@ function getRfsReplicasetManifest
     rfsImageName: BaseExpression<string>,
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>
 }): ReplicaSet {
+    const basicCredsSecretName = expr.ternary(
+        expr.isEmpty(args.basicCredsSecretNameOrEmpty),
+        expr.literal("empty"),
+        args.basicCredsSecretNameOrEmpty
+    );
     const useCustomLogging = expr.not(expr.isEmpty(args.loggingConfigMap));
     const baseContainerDefinition = {
         name: "bulk-loader",
@@ -95,7 +100,7 @@ function getRfsReplicasetManifest
                 name: "TARGET_USERNAME",
                 valueFrom: {
                     secretKeyRef: {
-                        name: makeStringTypeProxy(args.basicCredsSecretNameOrEmpty),
+                        name: makeStringTypeProxy(basicCredsSecretName),
                         key: "username",
                         optional: true
                     }
@@ -105,7 +110,7 @@ function getRfsReplicasetManifest
                 name: "TARGET_PASSWORD",
                 valueFrom: {
                     secretKeyRef: {
-                        name: makeStringTypeProxy(args.basicCredsSecretNameOrEmpty),
+                        name: makeStringTypeProxy(basicCredsSecretName),
                         key: "password",
                         optional: true
                     }
