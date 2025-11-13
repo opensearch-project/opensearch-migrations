@@ -140,8 +140,8 @@ class K8sRFSBackfill(RFSBackfill):
         session_name = self.config["reindex_from_snapshot"].get("session_name", "")
         if has_working_state(self.target_cluster, session_name):
             logger.info("Existing working state detected; resuming previous backfill. "
-                       "If you intended to start over, run 'console backfill stop' "
-                       "and then 'console backfill start' again.")
+                        "If you intended to start over, run 'console backfill stop' "
+                        "and then 'console backfill start' again.")
         
         logger.info(f"Starting RFS backfill by setting desired count to {self.default_scale} instances")
         return self.kubectl_runner.perform_scale_command(replicas=self.default_scale)
@@ -224,8 +224,8 @@ class ECSRFSBackfill(RFSBackfill):
         session_name = self.config["reindex_from_snapshot"].get("session_name", "")
         if has_working_state(self.target_cluster, session_name):
             logger.info("Existing working state detected; resuming previous backfill. "
-                       "If you intended to start over, run 'console backfill stop' "
-                       "and then 'console backfill start' again.")
+                        "If you intended to start over, run 'console backfill stop' "
+                        "and then 'console backfill start' again.")
         
         logger.info(f"Starting RFS backfill by setting desired count to {self.default_scale} instances")
         return self.ecs_client.set_desired_count(self.default_scale)
@@ -550,8 +550,13 @@ def perform_archive(target_cluster: Cluster,
         if not force_delete_working_state:
             backup_path = get_working_state_index_backup_path(archive_dir_path, archive_file_name)
             logger.info(f"Backing up working state index to {backup_path}")
-            backup_working_state_index(target_cluster, WORKING_STATE_INDEX, backup_path)
-            logger.info("Working state index backed up successfully")
+            try:
+                backup_working_state_index(target_cluster, WORKING_STATE_INDEX, backup_path)
+                logger.info("Working state index backed up successfully")
+            except Exception as e:
+                logger.warning(f"Failed to backup working state index: {e}")
+                logger.warning("Proceeding with deletion anyway. "
+                               "Use --force-delete-working-state to skip backup.")
         else:
             logger.info("Force delete enabled, skipping backup of working state index")
 
@@ -566,7 +571,8 @@ def perform_archive(target_cluster: Cluster,
         if force_delete_working_state:
             return CommandResult(True, "Working state index forcefully deleted")
         else:
-            return CommandResult(True, backup_path)
+            return CommandResult(True, backup_path if backup_path
+                                 else "Working state index deleted (backup failed)")
     except requests.HTTPError as e:
         if e.response.status_code == 404:
             return CommandResult(False, WorkingIndexDoesntExist(WORKING_STATE_INDEX))
@@ -599,15 +605,24 @@ def backup_working_state_index(cluster: Cluster, index_name: str, backup_path: s
         outfile.write("[\n")  # Start the JSON array
         first_batch = True
 
-        for batch in cluster.fetch_all_documents(index_name=index_name):
-            if not first_batch:
-                outfile.write(",\n")
-            else:
-                first_batch = False
-            
-            # Dump the batch of documents as an entry in the array
-            batch_json = json.dumps(batch, indent=4)
-            outfile.write(batch_json)
+        try:
+            for batch in cluster.fetch_all_documents(index_name=index_name):
+                if not first_batch:
+                    outfile.write(",\n")
+                else:
+                    first_batch = False
+                
+                # Dump the batch of documents as an entry in the array
+                batch_json = json.dumps(batch, indent=4)
+                outfile.write(batch_json)
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 403:
+                raise Exception("Insufficient permissions to backup working state index. "
+                                "Missing 'indices:data/read/scroll' permission. "
+                                "Use --force-delete-working-state to skip backup.")
+            raise
+        except Exception as e:
+            raise Exception(f"Failed to backup working state index: {e}")
 
         outfile.write("\n]")  # Close the JSON array
 
