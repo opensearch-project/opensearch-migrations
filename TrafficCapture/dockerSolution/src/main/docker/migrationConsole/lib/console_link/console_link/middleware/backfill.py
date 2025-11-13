@@ -57,6 +57,6 @@ def scale(backfill: Backfill, units: int, *args, **kwargs) -> CommandResult[str]
 
 
 @handle_errors("backfill")
-def archive(backfill: Backfill, *args, **kwargs) -> CommandResult[str]:
-    logger.info("Archiving backfill operation")
-    return backfill.archive(*args, **kwargs)
+def archive(backfill: Backfill, force_delete_working_state: bool = False, *args, **kwargs) -> CommandResult[str]:
+    logger.info(f"Archiving backfill operation with force_delete_working_state={force_delete_working_state}")
+    return backfill.archive(force_delete_working_state=force_delete_working_state, *args, **kwargs)
