@@ -531,6 +531,14 @@ def has_working_state(target_cluster: Cluster, session_name: str = "") -> bool:
             return doc_count.get('value', 0) > 0
         return doc_count > 0
         
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 403:
+            logger.warning("Insufficient permissions to check working state index. "
+                           "Missing 'indices:data/read/search' permission for '.migrations_working_state' index. "
+                           "See https://docs.opensearch.org/latest/migration-assistant/migration-phases/backfill/"
+                           "#stopping-the-migration for permission requirements.")
+        logger.debug(f"Failed to check working state: {e}")
+        return False
     except Exception as e:
         logger.debug(f"Failed to check working state: {e}")
         return False
@@ -618,8 +626,10 @@ def backup_working_state_index(cluster: Cluster, index_name: str, backup_path: s
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 403:
                 raise Exception("Insufficient permissions to backup working state index. "
-                                "Missing 'indices:data/read/scroll' permission. "
-                                "Use --force-delete-working-state to skip backup.")
+                                "Missing 'indices:data/read/scroll' permission for '.migrations_working_state' index. "
+                                "See https://docs.opensearch.org/latest/migration-assistant/migration-phases/backfill/"
+                                "#stopping-the-migration for permission requirements. "
+                                "Use 'console backfill stop --force-delete-working-state' to skip backup.")
             raise
         except Exception as e:
             raise Exception(f"Failed to backup working state index: {e}")
@@ -632,6 +642,15 @@ def parse_query_response(query: dict, cluster: Cluster, index_name: str, label: 
         logger.debug(f"Creating request: /{index_name}/_search; {query}")
         response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
                                     headers={'Content-Type': 'application/json'})
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 403:
+            logger.error("Insufficient permissions to query working state index. "
+                         "Missing 'indices:data/read/search' permission for '.migrations_working_state' index. "
+                         "See https://docs.opensearch.org/latest/migration-assistant/migration-phases/backfill/"
+                         "#stopping-the-migration for permission requirements.")
+        else:
+            logger.error(f"Failed to execute query: {e}")
+        return None
     except Exception as e:
         logger.error(f"Failed to execute query: {e}")
         return None
