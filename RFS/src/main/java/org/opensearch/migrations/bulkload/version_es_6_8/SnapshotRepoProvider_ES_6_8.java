@@ -31,7 +31,8 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
     private record IndexWithSnapshots(
        String name,
        String id,
-       List<? extends SnapshotRepo.Snapshot> snapshots) {};
+       List<? extends SnapshotRepo.Snapshot> snapshots) {
+    }
 
     /**
      * Retrieves all indices that belong to the specified snapshot.

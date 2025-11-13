@@ -119,11 +119,9 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
 
     public static class SimpleIndex implements SnapshotRepo.Index {
         private final String name;
-        private final String snapshotName;
 
         public SimpleIndex(String name, String snapshotName) {
             this.name = name;
-            this.snapshotName = snapshotName;
         }
 
         @Override
