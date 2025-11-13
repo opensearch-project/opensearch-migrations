@@ -27,12 +27,15 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
         return new ArrayList<>(getRepoData().getSnapshots());
     }
 
-    @SuppressWarnings("java:S100") // SonarQube does not support record classes at the moment
+    @SuppressWarnings({
+        "java:S100",   // Naming convention check
+        "java:S1186"   // Empty method check
+    })
     private record IndexWithSnapshots(
-       String name,
-       String id,
-       List<? extends SnapshotRepo.Snapshot> snapshots) {
-    }
+        String name,
+        String id,
+        List<? extends SnapshotRepo.Snapshot> snapshots
+    ) { }
 
     /**
      * Retrieves all indices that belong to the specified snapshot.
