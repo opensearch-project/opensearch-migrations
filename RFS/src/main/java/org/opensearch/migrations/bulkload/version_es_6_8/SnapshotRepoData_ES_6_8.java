@@ -62,10 +62,11 @@ public class SnapshotRepoData_ES_6_8 {
     }
 
     /**
-     * Normalizes index->snapshots entries to a list of snapshot references.
-     * Supported formats:
-     * - ES 5.0-5.4: [{"name":"snap1"}, {"name":"snap2"}] → [SnapshotReference(snap1, false), ...]
-     * - ES 5.5, 6.x: ["uuid1", "uuid1"] → [SnapshotReference(snap-name-1, false), ...]
+     * Normalizes different snapshot reference formats across ES versions.
+     * Different support layouts of snapshots containing indices:
+     * - ES 5.0-5.4: Array of objects with name → [{"name":"snap1"}, {"name":"snap2"}]
+     * - ES 5.5-7.8: Array of UUID strings → ["uuid1", "uuid2"]
+     * Both formats are normalized to Snapshot objects for unified processing.
      */
     public static class SnapshotListDeserializer extends JsonDeserializer<List<Snapshot>> {
         @Override
