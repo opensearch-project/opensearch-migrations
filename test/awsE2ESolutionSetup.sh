@@ -10,6 +10,23 @@ TMP_DIR_PATH="$TEST_DIR_PATH/tmp"
 EC2_SOURCE_CDK_PATH="$ROOT_REPO_PATH/test/opensearch-cluster-cdk"
 MIGRATION_CDK_PATH="$ROOT_REPO_PATH/deployment/cdk/opensearch-service-migration"
 
+# Configure IMDS settings on source cluster instances to allow IMDSv1 for ES 6.8 compatibility
+configure_source_imds_settings () {
+  instance_ids=($(aws ec2 describe-instances --filters "Name=tag:Name,Values=$SOURCE_INFRA_STACK_NAME/*" 'Name=instance-state-name,Values=running' --query 'Reservations[*].Instances[*].InstanceId' --output text))
+  if [ ${#instance_ids[@]} -eq 0 ]; then
+    echo "No running source instances found for stack: $SOURCE_INFRA_STACK_NAME"
+    return
+  fi
+  for id in "${instance_ids[@]}"
+  do
+    echo "Configuring IMDS settings for instance: $id"
+    aws ec2 modify-instance-metadata-options --instance-id "$id" --http-tokens optional --http-endpoint enabled
+    if [ $? -ne 0 ]; then
+      echo "Warning: Failed to configure IMDS settings for instance: $id"
+    fi
+  done
+}
+
 # Note: This function is still in an experimental state
 # Modify EC2 nodes to add required Kafka security group if it doesn't exist, as well as call the ./startCaptureProxy.sh
 # script on each node which will detect if ES and the Capture Proxy are running and on the correct port, and attempt
@@ -257,6 +274,8 @@ if [ "$SKIP_SOURCE_DEPLOY" = false ] && [ "$CLEAN_UP_ALL" = false ] ; then
     echo "Error: deploy source cluster failed, exiting."
     exit 1
   fi
+  # Configure IMDS settings after deployment
+  configure_source_imds_settings
 fi
 
 source_endpoint=$(aws cloudformation describe-stacks --stack-name "$SOURCE_INFRA_STACK_NAME" --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
