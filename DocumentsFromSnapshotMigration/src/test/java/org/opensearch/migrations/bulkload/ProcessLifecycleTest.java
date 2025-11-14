@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
@@ -17,6 +18,7 @@ import org.opensearch.migrations.data.WorkloadGenerator;
 import org.opensearch.migrations.data.WorkloadOptions;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
+import org.opensearch.migrations.utils.FileSystemUtils;
 import org.opensearch.testcontainers.OpensearchContainer;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -66,14 +68,14 @@ public class ProcessLifecycleTest extends SourceTestBase {
         testProcess(3,
             d -> {
                 var firstExitCode =
-                    runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER);
+                    runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER, false);
                 Assertions.assertEquals(0, firstExitCode);
                 for (int i=0; i<10; ++i) {
                     var secondExitCode =
-                        runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER);
+                        runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER, false);
                     if (secondExitCode != 0) {
                         var lastErrorCode =
-                            runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER);
+                            runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER, false);
                         Assertions.assertEquals(secondExitCode, lastErrorCode);
                         return lastErrorCode;
                     }
@@ -100,7 +102,13 @@ public class ProcessLifecycleTest extends SourceTestBase {
     public void testProcessExitsAsExpected(String failAfterString, int expectedExitCode) throws Exception {
         final var failHow = FailHow.valueOf(failAfterString);
         testProcess(expectedExitCode,
-            d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, failHow));
+            d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, failHow, false));
+    }
+
+    @Test
+    public void keepsRunningForContinuousMode() {
+        testProcess(3, // should return 0 when in continuous mode
+            d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER, true));
     }
 
     @SneakyThrows
@@ -159,8 +167,15 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 "The program did not exit with the expected status code."
             );
         } finally {
-            deleteTree(tempDirSnapshot);
-            deleteTree(tempDirLucene);
+            FileSystemUtils.deleteTree(tempDirSnapshot);
+            Assertions.assertTrue(isDirectoryEmpty(tempDirLucene),
+                "lucene directory "+tempDirLucene+" is not empty");
+        }
+    }
+
+    public static boolean isDirectoryEmpty(Path p) throws IOException {
+        try (var directoryStream = Files.newDirectoryStream(p)) {
+            return !directoryStream.iterator().hasNext();
         }
     }
 
@@ -169,7 +184,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
         Path tempDirSnapshot,
         Path tempDirLucene,
         ToxiProxyWrapper proxyContainer,
-        FailHow failHow
+        FailHow failHow,
+        boolean continuousMode
     ) {
         String targetAddress = proxyContainer.getProxyUriAsString();
         var tp = proxyContainer.getProxy();
@@ -182,11 +198,12 @@ public class ProcessLifecycleTest extends SourceTestBase {
         int timeoutSeconds = 90;
         String initialLeaseDuration = failHow == FailHow.NEVER ? "PT10M" : "PT1S";
 
-        String[] additionalArgs = {
-            "--documents-per-bulk-request", "10",
-            "--max-connections", "1",
-            "--initial-lease-duration", initialLeaseDuration,
-        };
+        String[] additionalArgs = Stream.concat(Stream.of(
+                "--documents-per-bulk-request", "10",
+                "--max-connections", "1",
+                "--initial-lease-duration", initialLeaseDuration),
+            continuousMode ? Stream.of("--continuousMode") : Stream.empty())
+            .toArray(String[]::new);
 
         ProcessBuilder processBuilder = setupProcess(
             tempDirSnapshot,

@@ -21,6 +21,7 @@ import org.opensearch.migrations.data.workloads.Workloads;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
+import org.opensearch.migrations.utils.FileSystemUtils;
 
 import eu.rekawek.toxiproxy.model.ToxicDirection;
 import lombok.SneakyThrows;
@@ -71,7 +72,7 @@ public class LeaseExpirationTest extends SourceTestBase {
         int continueExitCode = 2;
         int finalExitCodePerShard = 0;
         runTestProcessWithCheckpoint(continueExitCode, (migrationProcessesPerShard - 1) * shards,
-                finalExitCodePerShard, shards, shards, indexDocCount, forceMoreSegments,
+                finalExitCodePerShard, shards, shards, indexDocCount, false, forceMoreSegments,
                 sourceClusterVersion,
                 targetClusterVersion,
                 d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer,
@@ -81,7 +82,7 @@ public class LeaseExpirationTest extends SourceTestBase {
     @SneakyThrows
     private void runTestProcessWithCheckpoint(int expectedInitialExitCode, int expectedInitialExitCodeCount,
                                               int expectedEventualExitCode, int expectedEventualExitCodeCount,
-                                              int shards, int indexDocCount,
+                                              int shards, int indexDocCount, boolean continuousMode,
                                               boolean forceMoreSegments,
                                               SearchClusterContainer.ContainerVersion sourceClusterVersion,
                                               SearchClusterContainer.ContainerVersion targetClusterVersion,
@@ -167,8 +168,10 @@ public class LeaseExpirationTest extends SourceTestBase {
                 initialExitCodeCount += exitCode == expectedInitialExitCode ? 1 : 0;
                 finalExitCodeCount += exitCode == expectedEventualExitCode ? 1 : 0;
                 log.atInfo().setMessage("Process exited with code: {}").addArgument(exitCode).log();
-                // Clean tree for subsequent run
-                deleteTree(tempDirLucene);
+                // Did tree for subsequent run
+                if (Files.exists(tempDirLucene)) {
+                    FileSystemUtils.deleteTree(tempDirLucene);
+                }
             } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < expectedInitialExitCodeCount + expectedEventualExitCodeCount);
 
             // Assert doc count on the target cluster matches source
@@ -194,7 +197,9 @@ public class LeaseExpirationTest extends SourceTestBase {
                     "The program did not exit with the expected number of " + expectedInitialExitCode +" exit codes"
             );
         } finally {
-            deleteTree(tempDirSnapshot);
+            if (Files.exists(tempDirLucene)) {
+                FileSystemUtils.deleteTree(tempDirSnapshot);
+            }
         }
     }
 
