@@ -453,11 +453,11 @@ public abstract class OpenSearchClient {
                     log.atDebug().setMessage("... for request: {}").addArgument(body).log();
                     // Remove all successful documents for the next bulk request attempt
                     var successfulDocs = resp.getSuccessfulDocs(allowlist);
+                    successfulDocs.forEach(docsMap::remove);
                     // If all documents have been successfully processed (including allowlisted errors), treat as success
                     if (docsMap.isEmpty()) {
                         return Mono.just(resp);
                     }
-                    successfulDocs.forEach(docsMap::remove);
                     log.atWarn()
                         .setMessage("After bulk request attempt {} on index '{}', {} more documents have succeeded, {} remain. The error response message was: {}")
                         .addArgument(attemptCounter.incrementAndGet())

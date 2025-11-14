@@ -103,13 +103,9 @@ These arguments should be carefully considered before setting, can include exper
 | --max-connections           | The maximum number of connections to simultaneously used to communicate to the target. Default: 10                   |
 | --target-insecure           | Flag to allow untrusted SSL certificates for target cluster. Default: false                                          |
 
-## Idempotent Migrations
+### Example: Handling Target Conflicts
 
-When running migrations multiple times (e.g., for testing or recovery scenarios), you may encounter version conflict errors when documents already exist on the target cluster. The `--allowed-doc-exception-types` parameter enables idempotent migrations by treating specific document-level exceptions as successful operations.
-
-### Example: Handling Version Conflicts
-
-If you're re-running a migration and documents already exist on the target, you can allow version conflicts to be treated as success:
+If a transformation causes exceptions on the target, either from existing docs or more than once processing, you can allow conflicts to be treated as success:
 
 ```shell
 ./gradlew DocumentsFromSnapshotMigration:run --args="\
