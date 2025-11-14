@@ -900,7 +900,7 @@ export default expr;
 
 
 // This function and the next tie into the renderer
-export function makeDirectTypeProxy<T extends (boolean|number)>(value: BaseExpression<T>): T {
+export function makeDirectTypeProxy<T extends (boolean|number|NonSerializedPlainObject)>(value: BaseExpression<T>): T {
     return new UnquotedTypeWrapper(value) as any as T;
 }
 

@@ -9,7 +9,7 @@ function makeAuthDict(clusterType: string, targetConfig: BaseExpression<Serializ
         expr.ternary(
             expr.hasKey(safeAuthConfig, "sigv4"),
             expr.makeDict({
-                [`${clusterType}targetAwsServiceSigningName`]: expr.getLoose(expr.getLoose(safeAuthConfig, "sigv4"), "service"),
+                [`${clusterType}AwsServiceSigningName`]: expr.getLoose(expr.getLoose(safeAuthConfig, "sigv4"), "service"),
                 [`${clusterType}AwsRegion`]: expr.getLoose(expr.getLoose(safeAuthConfig, "sigv4"), "region")
             }),
             expr.ternary(

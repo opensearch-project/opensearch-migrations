@@ -10,6 +10,10 @@ export type TypescriptError<Message extends string> = {
     readonly __never: never;
 };
 
+// Type helper that makes specific keys required in a type
+export type SetRequired<T, K extends keyof T> =
+    Omit<T, K> & Required<Pick<T, K>>;
+
 // Type helper that remaps keys according to the mapping table
 export type RemapRecordKeys<T extends Record<string, any>, M extends Partial<Record<keyof T, string>>> = {
     [K in keyof T as K extends keyof M

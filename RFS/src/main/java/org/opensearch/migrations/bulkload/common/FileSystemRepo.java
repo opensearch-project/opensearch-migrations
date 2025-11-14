@@ -7,7 +7,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.StreamSupport;
 
-import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
 
 public class FileSystemRepo implements SourceRepo {
@@ -63,11 +62,6 @@ public class FileSystemRepo implements SourceRepo {
     @Override
     public Path getBlobFilePath(String indexId, int shardId, String blobName) {
         return fileFinder.getBlobFilePath(repoRootDir, indexId, shardId, blobName);
-    }
-
-    @Override
-    public void prepBlobFiles(ShardMetadata shardMetadata) {
-        // No work necessary for local filesystem
     }
 
     public static class CantOpenRepoDirectory extends RfsException {
