@@ -69,6 +69,8 @@ dependencies {
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
 
+    runtimeOnly libs.log4j.layout.template.json
+
     implementation libs.jcommander
     implementation libs.jackson.databind
     implementation libs.jackson.annotations

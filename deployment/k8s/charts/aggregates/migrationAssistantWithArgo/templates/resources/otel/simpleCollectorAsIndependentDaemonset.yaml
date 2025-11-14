@@ -18,8 +18,12 @@ spec:
       serviceAccountName: {{ .Values.otelConfiguration.serviceAccountName }}
       containers:
         - name: otel-collector
-          image: public.ecr.aws/aws-observability/aws-otel-collector:v0.43.2
+          image: public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3
           env:
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
             - name: OTEL_CONFIG_LOG
               value: "true"
             - name: OTEL_LOG_LEVEL
@@ -28,6 +32,9 @@ spec:
               value: {{ .Values.stageName }}
             - name: TRACE_SAMPLING_PERCENTAGE
               value: "1"
+{{- if .Values.otelConfiguration.env }}
+{{ toYaml .Values.otelConfiguration.env | indent 12 }}
+{{- end }}
           args:
             - "--config=/etc/otel/collector.yaml"
           ports:

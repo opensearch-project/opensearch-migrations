@@ -13,4 +13,9 @@ data:
   {{- else }}
   ENDPOINT: ""
   {{- end }}
+  {{- if .Values.defaultBucketConfiguration.snapshotRoleArn }}
+  SNAPSHOT_ROLE_ARN: "{{ .Values.defaultBucketConfiguration.snapshotRoleArn }}"
+  {{- else }}
+  SNAPSHOT_ROLE_ARN: ""
+  {{- end }}
   BUCKET_NAME: {{ printf "\"migrations-default-%s-%s-%s\"" (toString .Values.aws.account) .Values.stageName .Values.aws.region }}

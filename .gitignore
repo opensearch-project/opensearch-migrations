@@ -9,6 +9,8 @@ __pycache__
 .python-version
 logs
 tmp/
+*.tsbuildinfo
+*.hprof
 
 test_report.json
 
@@ -25,6 +27,7 @@ TrafficCapture/**/out/
 # CDK files from end-to-end testing
 opensearch-cluster-cdk/
 test/opensearch-cluster-cdk/
+test/amazon-opensearch-service-sample-cdk/
 TrafficCapture/dockerSolution/src/main/docker/migrationConsole/staging
 
 # Directory used to temporarily store snapshots during testing
@@ -37,4 +40,8 @@ orchestrationSpecs/node_modules/
 orchestrationSpecs/packages/**/dist/
 orchestrationSpecs/packages/**/node_modules/
 orchestrationSpecs/packages/migration-workflow-templates/k8sResources
-*.hprof
+orchestrationSpecs/k8s-schemas
+orchestrationSpecs/packages/argo-workflow-builders/src/generated
+orchestrationSpecs/packages/config-processor/bundled
+orchestrationSpecs/packages/migration-workflow-templates/workflowTemplates
+orchestrationSpecs/packages/argo-workflow-builders/k8sSchemas

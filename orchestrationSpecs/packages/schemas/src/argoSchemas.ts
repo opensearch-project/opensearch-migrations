@@ -1,4 +1,6 @@
 import {
+    CLUSTER_CONFIG,
+    KAFKA_SERVICES_CONFIG,
     NORMALIZED_COMPLETE_SNAPSHOT_CONFIG,
     NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
     NORMALIZED_SNAPSHOT_MIGRATION_CONFIG,
@@ -8,6 +10,14 @@ import {
     TARGET_CLUSTER_CONFIG
 } from "./userSchemas";
 import {z} from "zod";
+
+// DO NOT CHANGE FROM SNAKE CASE - used to create services.yaml files for the console
+export const CONSOLE_SERVICES_CONFIG_FILE = z.object({
+    kafka: KAFKA_SERVICES_CONFIG.optional(),
+    source_cluster: CLUSTER_CONFIG.optional(),
+    snapshot: NORMALIZED_COMPLETE_SNAPSHOT_CONFIG.optional(),
+    target_cluster: TARGET_CLUSTER_CONFIG.optional()
+});
 
 export const NAMED_SOURCE_CLUSTER_CONFIG =
     SOURCE_CLUSTER_CONFIG.extend({

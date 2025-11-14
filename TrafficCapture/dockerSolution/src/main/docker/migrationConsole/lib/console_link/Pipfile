@@ -8,14 +8,16 @@ requests = ">=2.32.3"
 kubernetes = ">=30.1.0"
 boto3 = "*"
 pyyaml = "*"
+"ruamel.yaml" = "*"
 Click = "*"
 cerberus = "*"
 awscli = "*"
-pydantic = "*"
+pydantic = "==2.12.2"
 gunicorn = "*"
 uvicorn = {extras = ["standard"], version = "*"}
 tinydb = "*"
-fastapi = {extras = ["standard"], version = "*"}
+fastapi = {extras = ["standard"], version = "==0.118.0"}
+rich = ">=14.0.0"
 
 [dev-packages]
 pytest = "*"

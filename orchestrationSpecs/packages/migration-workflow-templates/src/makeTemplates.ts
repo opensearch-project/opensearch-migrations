@@ -2,6 +2,7 @@ import {renderWorkflowTemplate} from "@opensearch-migrations/argo-workflow-build
 import {AllWorkflowTemplates} from "./workflowTemplates/allWorkflowTemplates";
 import * as fs from "node:fs";
 import path from "node:path";
+import {stringify as toYaml} from 'yaml';
 
 function getNamespace(): string {
     // CLI argument takes precedence over environment variable
@@ -43,7 +44,7 @@ function createDirectoryIfNotExists(dirPath: string): void {
     }
 }
 
-async function applyArgoWorkflowTemplate(workflowConfig: any, workflowName: string) {
+async function outputArgoWorkflowTemplate(workflowConfig: any, workflowName: string) {
 
     // Override namespace in metadata
     if (!workflowConfig.metadata) {
@@ -51,7 +52,8 @@ async function applyArgoWorkflowTemplate(workflowConfig: any, workflowName: stri
     }
     workflowConfig.metadata.namespace = targetNamespace;
 
-    const textFormattedResource = JSON.stringify(workflowConfig, null, 2);
+    // const textFormattedResource = JSON.stringify(workflowConfig, null, 2);
+    const textFormattedResource = toYaml(workflowConfig, { lineWidth: 0});
     if (!outputDirectory) {
         console.log(textFormattedResource);
         return;
@@ -59,15 +61,15 @@ async function applyArgoWorkflowTemplate(workflowConfig: any, workflowName: stri
         const filePath = path.join(outputDirectory, `${workflowName}.yaml`);
         try {
             fs.writeFileSync(filePath, textFormattedResource, 'utf8');
-            console.log('File written successfully (synchronous).');
+            console.log(`File written successfully (${filePath}).`);
         } catch (error) {
-            console.error('Error writing file synchronously:', error);
+            console.error(`Error writing file ${filePath}:`, error);
         }
     }
 }
 
 async function writeAllWorkflows() {
-    console.log("Deploying Argo WorkflowTemplates to Kubernetes...\n");
+    console.log("Creating Argo WorkflowTemplates...\n");
 
     if (outputDirectory !== null) {
         createDirectoryIfNotExists(outputDirectory);
@@ -78,7 +80,7 @@ async function writeAllWorkflows() {
 
         const wfName = wf.metadata.k8sMetadata.name;
         try {
-            await applyArgoWorkflowTemplate(finalConfig, wfName || finalConfig.metadata?.name || 'unknown');
+            await outputArgoWorkflowTemplate(finalConfig, wfName || finalConfig.metadata?.name || 'unknown');
         } catch (error) {
             console.error(`Failed to deploy WorkflowTemplate ${wfName}:`, error);
             // Uncomment to stop on error

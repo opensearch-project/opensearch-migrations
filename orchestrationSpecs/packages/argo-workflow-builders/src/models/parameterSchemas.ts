@@ -22,14 +22,14 @@ import {typeToken, TypeToken} from "./sharedTypes";
 
 type DefaultSpec<T extends PlainObject> =
     | {
-    expression: AllowLiteralOrExpression<T>;
-    type?: never;
-    from?: never
+        expression: AllowLiteralOrExpression<T>;
+        type?: never;
+        from?: never
 }
     | {
-    from: ConfigMapKeySelector;
-    type: TypeToken<T>;
-    expression?: never
+        from: ConfigMapKeySelector;
+        type: TypeToken<T>;
+        expression?: never
 };
 
 export type FieldIsRequired = "FieldRequired" | "FieldOptional";

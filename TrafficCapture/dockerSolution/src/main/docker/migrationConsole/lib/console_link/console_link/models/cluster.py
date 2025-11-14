@@ -225,7 +225,7 @@ class Cluster:
             raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
                                       f"benchmark workloads")
         logger.info(f"Running opensearch-benchmark with '{workload}' workload")
-        command = (f"opensearch-benchmark execute-test "
+        command = (f"opensearch-benchmark run "
                    f"--exclude-tasks=check-cluster-health "
                    f"--target-host={self.endpoint} "
                    f"--workload={workload} "

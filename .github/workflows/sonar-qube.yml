@@ -11,7 +11,7 @@ env:
 jobs:
   sonar:
     name: Run SonarQube Analysis
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     services:
       sonarqube:
@@ -92,7 +92,7 @@ jobs:
         fi
     - name: Upload SonarQube Artifacts
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: sonar-reports
         path: issues.json

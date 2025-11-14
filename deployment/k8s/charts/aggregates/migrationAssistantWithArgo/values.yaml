@@ -46,10 +46,6 @@ images:
     repository: migrations/migration_console
     tag: latest
     pullPolicy: IfNotPresent
-  etcdUtils:
-    repository: migrations/migration_console
-    tag: latest
-    pullPolicy: IfNotPresent
 
 # Default AWS values are dummy values for LocalStack usage
 aws:
@@ -99,13 +95,37 @@ extraOtelConfiguration:
 
 # For OTEL Daemonset
 otelConfiguration:
-  serviceAccountName: "migrations-service-account"
+  serviceAccountName: "otel-collector"
   collectorConfig: |
     receivers:
       otlp:
         protocols:
           grpc:
             endpoint: 0.0.0.0:4317
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'cadvisor'
+              scrape_interval: 5s
+              scheme: https
+              authorization:
+                credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              tls_config:
+                ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                insecure_skip_verify: true  # Minikube uses self-signed certs
+              kubernetes_sd_configs:
+                - role: node
+              relabel_configs:
+                # Only scrape the local node (important for DaemonSet)
+                - source_labels: [__meta_kubernetes_node_name]
+                  action: keep
+                  regex: ${K8S_NODE_NAME}
+                # Change path from /metrics to /metrics/cadvisor
+                - target_label: __metrics_path__
+                  replacement: /metrics/cadvisor
+                # Keep node name as a label
+                - source_labels: [__meta_kubernetes_node_name]
+                  target_label: node
     processors:
       batch:
         timeout: 10s
@@ -135,9 +155,9 @@ otelConfiguration:
       extensions: [ zpages, pprof, health_check ]
       pipelines:
         metrics:
-          receivers: [ otlp ]
+          receivers: [ otlp, prometheus ]
           processors: [ batch ]
-          exporters: [ prometheus ]
+          exporters: [ prometheus, debug ]
         traces:
           receivers: [ otlp ]
           processors: [ batch ]

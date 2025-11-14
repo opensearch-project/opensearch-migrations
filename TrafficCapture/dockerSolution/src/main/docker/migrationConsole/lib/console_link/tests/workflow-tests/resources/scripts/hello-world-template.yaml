@@ -1,0 +1,47 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: hello-world-template
+spec:
+  serviceAccountName: argo-workflow-executor
+  entrypoint: main
+  arguments:
+    parameters:
+      - name: message
+      - name: requiresApproval
+      - name: approver
+        value: ""
+  
+  templates:
+    - name: main
+      steps:
+        - - name: hello
+            template: echo-message
+            arguments:
+              parameters:
+                - name: message
+                  value: "{{workflow.parameters.message}}"
+        
+        # Conditional approval step based on requiresApproval parameter
+        - - name: approval
+            template: approval-gate
+            when: "{{workflow.parameters.requiresApproval}} == true"
+        
+        - - name: goodbye
+            template: echo-message
+            arguments:
+              parameters:
+                - name: message
+                  value: "Goodbye! Workflow completed."
+    
+    - name: echo-message
+      inputs:
+        parameters:
+          - name: message
+      container:
+        image: busybox:latest
+        command: [echo]
+        args: ["{{inputs.parameters.message}}"]
+    
+    - name: approval-gate
+      suspend: {}

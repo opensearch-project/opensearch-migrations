@@ -57,6 +57,7 @@ public class FilterScheme {
             "profiling",
             "search-acl-filter",
             "synthetics",
+            "tenant_template",
             "traces",
             "traces-mappings",
             "traces-settings",

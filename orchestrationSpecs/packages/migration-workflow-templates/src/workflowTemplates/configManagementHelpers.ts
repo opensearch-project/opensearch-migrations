@@ -5,15 +5,14 @@ import {
     SOURCE_CLUSTERS_MAP,
     TARGET_CLUSTERS_MAP
 } from '@opensearch-migrations/schemas'
-import {
-    CommonWorkflowParameters,
-    makeRequiredImageParametersForKeys
-} from "./commonWorkflowTemplates";
 import {TemplateBuilder, typeToken, WorkflowBuilder} from "@opensearch-migrations/argo-workflow-builders";
 
 import {initTlhScript} from "../resourceLoader";
 import {decrementTlhScript} from "../resourceLoader";
 import {cleanupTlhScript} from "../resourceLoader";
+
+import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 
 function addCommonTargetLatchInputs<
     C extends { workflowParameters: typeof CommonWorkflowParameters }
@@ -25,7 +24,7 @@ function addCommonTargetLatchInputs<
         .addOptionalInput("etcdEndpoints", s => s.workflowParameters.etcdEndpoints)
         .addOptionalInput("etcdPassword", s => s.workflowParameters.etcdPassword)
         .addOptionalInput("etcdUser", s => s.workflowParameters.etcdUser)
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["EtcdUtils"]));
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]));
 }
 
 export const ConfigManagementHelpers = WorkflowBuilder.create({
@@ -42,7 +41,7 @@ export const ConfigManagementHelpers = WorkflowBuilder.create({
         .addRequiredInput("targetName", typeToken<string>())
         .addRequiredInput("processorId", typeToken<string>())
         .addContainer(b => b
-            .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)
+            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addInputsAsEnvVars({prefix:"", suffix: ""})
             .addCommand(["sh", "-c"])
             .addArgs([decrementTlhScript])
@@ -55,7 +54,7 @@ export const ConfigManagementHelpers = WorkflowBuilder.create({
     .addTemplate("cleanup", t => t
         .addInputs(addCommonTargetLatchInputs)
         .addContainer(b => b
-            .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)
+            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addInputsAsEnvVars({prefix: "", suffix: ""})
             .addCommand(["sh", "-c"])
             .addArgs([cleanupTlhScript])

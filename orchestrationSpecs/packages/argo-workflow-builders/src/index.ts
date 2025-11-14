@@ -17,3 +17,4 @@ export * from "./models/workflowTypes";
 export * from "./renderers/argoResourceRenderer";
 export * from "./renderers/argoExpressionRender";
 export * from "./utils";
+export * from "./kubernetesResourceTypes/kubernetesTypes";

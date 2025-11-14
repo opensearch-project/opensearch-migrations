@@ -16,25 +16,112 @@ public class TransformFunctions {
 
     /* Turn dotted index settings into a tree, will start like:
      * {"index.number_of_replicas":"1","index.number_of_shards":"5","index.version.created":"6082499"}
+     * 
+     * Strategy: First pass collects all keys and extracts their prefixes (e.g., "a.b.c" yields prefixes "a" and "a.b").
+     * Second pass performs bidirectional conflict detection: checks whether each key exists in the prefix set (meaning
+     * other keys would nest under it) and whether any of its own prefixes exist in the key set (meaning it would nest
+     * under another value). Keys with conflicts remain flat; conflict-free keys are nested into tree structure.
+     * Complexity is O(N) where N is the total number of keys and prefixes across all keys.
+     * 
+     * Special handling for conflicting keys: When a scalar value like "knn": "true" exists
+     * alongside nested properties like "knn.space_type": "l2", we keep the settings flat
+     * to preserve both values. This means the output will have both "knn": "true" and
+     * "knn.space_type": "l2" as separate flat keys rather than nesting space_type under knn.
      */
     public static ObjectNode convertFlatSettingsToTree(ObjectNode flatSettings) {
         ObjectNode treeSettings = mapper.createObjectNode();
-
+        
+        // Collect all keys and build prefix map upfront for efficient conflict detection
+        ConflictDetectionContext context = buildConflictDetectionContext(flatSettings);
+        
+        // Build the tree
         flatSettings.properties().forEach(entry -> {
-            String[] parts = entry.getKey().split("\\.");
-            ObjectNode current = treeSettings;
-
-            for (int i = 0; i < parts.length - 1; i++) {
-                if (!current.has(parts[i])) {
-                    current.set(parts[i], mapper.createObjectNode());
-                }
-                current = (ObjectNode) current.get(parts[i]);
+            String key = entry.getKey();
+            
+            if (hasKeyConflict(key, context)) {
+                treeSettings.set(key, entry.getValue());
+            } else {
+                buildNestedStructure(treeSettings, key, entry.getValue());
             }
-
-            current.set(parts[parts.length - 1], entry.getValue());
         });
 
         return treeSettings;
+    }
+
+    /**
+     * Builds a context containing all keys and their prefixes for efficient conflict detection.
+     */
+    private static ConflictDetectionContext buildConflictDetectionContext(ObjectNode flatSettings) {
+        java.util.Set<String> allKeys = new java.util.HashSet<>();
+        java.util.Set<String> allPrefixes = new java.util.HashSet<>();
+        
+        flatSettings.fieldNames().forEachRemaining(key -> {
+            allKeys.add(key);
+            collectPrefixes(key, allPrefixes);
+        });
+        
+        return new ConflictDetectionContext(allKeys, allPrefixes);
+    }
+
+    /**
+     * Collects all prefixes for a given dotted key.
+     */
+    private static void collectPrefixes(String key, java.util.Set<String> allPrefixes) {
+        String[] parts = key.split("\\.");
+        for (int i = 1; i < parts.length; i++) {
+            String prefix = String.join(".", java.util.Arrays.copyOfRange(parts, 0, i));
+            allPrefixes.add(prefix);
+        }
+    }
+
+    /**
+     * Checks if a key has conflicts with other keys (either as a prefix or having a prefix that exists as a key).
+     */
+    private static boolean hasKeyConflict(String key, ConflictDetectionContext context) {
+        // Check if this key is a prefix for other keys (reverse conflict)
+        if (context.allPrefixes.contains(key)) {
+            return true;
+        }
+        
+        // Check if any prefix of this key exists as a standalone key (conflict)
+        String[] parts = key.split("\\.");
+        for (int i = 1; i < parts.length; i++) {
+            String prefix = String.join(".", java.util.Arrays.copyOfRange(parts, 0, i));
+            if (context.allKeys.contains(prefix)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    /**
+     * Builds a nested structure in the tree for a given key-value pair.
+     */
+    private static void buildNestedStructure(ObjectNode treeSettings, String key, com.fasterxml.jackson.databind.JsonNode value) {
+        String[] parts = key.split("\\.");
+        ObjectNode current = treeSettings;
+        
+        for (int i = 0; i < parts.length - 1; i++) {
+            if (!current.has(parts[i])) {
+                current.set(parts[i], mapper.createObjectNode());
+            }
+            current = (ObjectNode) current.get(parts[i]);
+        }
+        current.set(parts[parts.length - 1], value);
+    }
+
+    /**
+     * Context for conflict detection containing all keys and prefixes.
+     */
+    private static class ConflictDetectionContext {
+        final java.util.Set<String> allKeys;
+        final java.util.Set<String> allPrefixes;
+
+        ConflictDetectionContext(java.util.Set<String> allKeys, java.util.Set<String> allPrefixes) {
+            this.allKeys = allKeys;
+            this.allPrefixes = allPrefixes;
+        }
     }
 
     /**

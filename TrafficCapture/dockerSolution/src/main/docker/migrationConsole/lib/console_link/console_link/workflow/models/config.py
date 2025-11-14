@@ -1,12 +1,12 @@
 """Configuration models for the workflow library."""
 
 from typing import Dict, Any
-import yaml
-import json
+from io import StringIO
+from ruamel.yaml import YAML
 
 
 class WorkflowConfig:
-    """Simple workflow configuration that stores raw YAML/JSON data."""
+    """Simple workflow configuration that stores raw YAML data with comment preservation."""
 
     def __init__(self, data: Dict[str, Any] = None):
         """Initialize with raw configuration data.
@@ -17,23 +17,22 @@ class WorkflowConfig:
         self.data = data or {}
 
     def to_yaml(self) -> str:
-        """Convert to YAML string."""
-        return yaml.dump(self.data, default_flow_style=False, sort_keys=False)
+        """Convert to YAML string with comment preservation."""
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        yaml.default_flow_style = False
 
-    def to_json(self) -> str:
-        """Convert to JSON string."""
-        return json.dumps(self.data, indent=2)
+        stream = StringIO()
+        yaml.dump(self.data, stream)
+        return stream.getvalue()
 
     @classmethod
     def from_yaml(cls, yaml_str: str) -> 'WorkflowConfig':
-        """Create from YAML string."""
-        data = yaml.safe_load(yaml_str) or {}
-        return cls(data)
+        """Create from YAML string (supports both YAML and JSON since JSON is a subset of YAML 1.2)."""
+        yaml = YAML()
+        yaml.preserve_quotes = True
 
-    @classmethod
-    def from_json(cls, json_str: str) -> 'WorkflowConfig':
-        """Create from JSON string."""
-        data = json.loads(json_str)
+        data = yaml.load(yaml_str) or {}
         return cls(data)
 
     def get(self, key: str, default: Any = None) -> Any:

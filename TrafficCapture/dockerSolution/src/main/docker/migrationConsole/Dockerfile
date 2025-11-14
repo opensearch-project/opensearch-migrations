@@ -45,6 +45,18 @@ RUN ARCH=$(cat /arch.env) && \
 
 FROM ${BASE_IMAGE}
 
+# Install Node.js for config processor and workflow template creation
+RUN dnf install -y  \
+      --setopt=install_weak_deps=False \
+      --setopt=tsflags=nodocs \
+      --setopt=keepcache=False \
+      --setopt=plugins=0 \
+      --setopt=logfilelevel=0 \
+        nodejs22 \
+        && \
+        dnf clean all && \
+        rm -rf /var/cache/dnf
+
 # Define the virtual environment path
 ENV WORKON_HOME=/
 ENV PIPENV_CUSTOM_VENV_NAME=.venv
@@ -84,6 +96,7 @@ COPY VERSION /root/VERSION
 
 WORKDIR /root
 COPY lib /root/lib
+
 WORKDIR /root/lib/console_link
 RUN pipenv install --deploy
 WORKDIR /root/lib/integ_test
@@ -96,7 +109,14 @@ WORKDIR /root
 
 # Console setup bash completion and venv for interactive access
 RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh
-RUN dnf install -y bash-completion --setopt=install_weak_deps=False && \
+RUN dnf install -y  \
+      --setopt=install_weak_deps=False \
+      --setopt=tsflags=nodocs \
+      --setopt=keepcache=False \
+      --setopt=plugins=0 \
+      --setopt=logfilelevel=0 \
+        bash-completion \
+        && \
         dnf clean all && \
         rm -rf /var/cache/dnf
 
@@ -109,6 +129,25 @@ RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\t) \[\e[92m\]migration-console \[\e[0m\](\w) -> "' >> ~/.bashrc
 
+COPY nodeStaging/configProcessor /root/configProcessor
+
+# Copy test workflow scripts and resources with same structure as configProcessor
+COPY lib/console_link/tests/workflow-tests/resources/scripts /root/testConfigProcessor
+RUN chmod +x /root/testConfigProcessor/*.sh
+RUN chmod +x /root/configProcessor/*.sh
+
+# To use test workflows, flip the comments
+ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
+#ENV CONFIG_PROCESSOR_DIR=/root/testConfigProcessor
+
+# Once we're ready, we should replace the old workflows with the new ones.
+# Notice that the installWorkflows pulls from /root/workflows/templates -
+# so the target for the new workflows would either need to be /root/workflows/templates,
+# or the installation script would need to be updated.
+
+# Here are the new workflows that are dormant but can be installed by users on the console
+COPY nodeStaging/workflowTemplates /root/newWorkflowTemplates
+# Here are the original workflows that current integ tests are using.
 COPY workflows /root/workflows
 
 # Set ENV to control startup script in /bin/sh mode
