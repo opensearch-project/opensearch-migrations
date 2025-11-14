@@ -353,9 +353,9 @@ public class RfsMigrateDocuments {
                 "When --experimental-previous-snapshot-name is specified, --experimental-delta-mode must be provided."
             );
         }
-
     }
 
+    @SuppressWarnings({"java:S3776", "java:S106"})
     public static void main(String[] args) throws Exception {
         var workerId = ProcessHelpers.getNodeInstanceName();
         System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_TARGET_ARGS)));
@@ -541,6 +541,7 @@ public class RfsMigrateDocuments {
         cleanShutdownCompleted.set(true);
     }
 
+    @SuppressWarnings("java:S107")
     @SneakyThrows
     private static void exitOnLeaseTimeout(
             AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef,
@@ -605,6 +606,7 @@ public class RfsMigrateDocuments {
         System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
     }
 
+    @SuppressWarnings("java:S6126")
     public static int getSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider, Duration initialLeaseDuration,
                                        Instant leaseExpirationTime) {
         if (workItemTimeProvider.getLeaseAcquisitionTimeRef().get() == null ||
@@ -690,7 +692,7 @@ public class RfsMigrateDocuments {
         return new RootDocumentMigrationContext(otelSdk, compositeContextTracker);
     }
 
-
+    @SuppressWarnings("java:S107")
     public static CompletionStatus run(LuceneIndexReader.Factory readerFactory,
                                        DocumentReindexer reindexer,
                                        AtomicReference<WorkItemCursor> progressCursor,
