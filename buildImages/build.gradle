@@ -19,12 +19,22 @@ if (!imageArch) {
 }
 rootProject.ext.imageArch = imageArch
 
+def commonJvmFlags = [
+        "-XX:MaxRAMPercentage=80.0",
+        "-XX:+ExitOnOutOfMemoryError",
+        "-XshowSettings:vm"
+]
+
 def jibProjects = [
         "TrafficCapture:trafficReplayer": [
                 baseImageName : "amazoncorretto",
                 baseImageTag  : "17-al2023-headless",
                 imageName     : "traffic_replayer",
                 imageTag      : "latest",
+                jvmFlags      : [
+                        // By default enable transparent proxy with older clients for maximum compatibility
+                        "-Dio.netty.handler.codec.http.defaultStrictLineParsing=false",
+                ],
                 requiredDependencies: [
                     ":TrafficCapture:trafficReplayer": ["copyVersionFile_traffic_replayer"]
                 ]
@@ -36,10 +46,14 @@ def jibProjects = [
                 baseImageTag   : "latest",
                 imageName      : "capture_proxy",
                 imageTag       : "latest",
+                jvmFlags      : [
+                        // By default enable transparent proxy with older clients for maximum compatibility
+                        "-Dio.netty.handler.codec.http.defaultStrictLineParsing=false",
+                ],
                 requiredDependencies: [
                     "": ["buildKit_captureProxyBase"],
                     ":TrafficCapture:trafficCaptureProxyServer": ["copyVersionFile_capture_proxy"]
-                ]
+                ],
         ]
 ]
 
@@ -98,6 +112,12 @@ gradle.projectsEvaluated {
     imageHelper.registerLoginTask(rootProject)
     imageHelper.applyJibConfigurations(rootProject, jibProjects)
     imageHelper.applyBuildKitConfigurations(rootProject, buildKitProjects)
+}
+
+jibProjects.each { name, cfg ->
+    // Merge or initialize existing jvmFlags
+    def existingFlags = (cfg.jvmFlags ?: [])
+    cfg.jvmFlags = (existingFlags + commonJvmFlags).unique()
 }
 
 tasks.register("jibAll") {
