@@ -422,7 +422,13 @@ public abstract class OpenSearchClient {
     }
 
     public Mono<BulkResponse> sendBulkRequest(String indexName, List<? extends BulkOperationSpec> docs,
-                                              IRfsContexts.IRequestContext context)
+                                              IRfsContexts.IRequestContext context) {
+        return sendBulkRequest(indexName, docs, context, DocumentExceptionAllowlist.empty());
+    }
+
+    public Mono<BulkResponse> sendBulkRequest(String indexName, List<? extends BulkOperationSpec> docs,
+                                              IRfsContexts.IRequestContext context,
+                                              DocumentExceptionAllowlist allowlist)
     {
         final AtomicInteger attemptCounter = new AtomicInteger(0);
         final var docsMap = docs.stream().collect(Collectors.toMap(o ->
@@ -446,8 +452,12 @@ public abstract class OpenSearchClient {
                     log.atDebug().setMessage("Response has some errors...: {}").addArgument(response.body).log();
                     log.atDebug().setMessage("... for request: {}").addArgument(body).log();
                     // Remove all successful documents for the next bulk request attempt
-                    var successfulDocs = resp.getSuccessfulDocs();
+                    var successfulDocs = resp.getSuccessfulDocs(allowlist);
                     successfulDocs.forEach(docsMap::remove);
+                    // If all documents have been successfully processed (including allowlisted errors), treat as success
+                    if (docsMap.isEmpty()) {
+                        return Mono.just(resp);
+                    }
                     log.atWarn()
                         .setMessage("After bulk request attempt {} on index '{}', {} more documents have succeeded, {} remain. The error response message was: {}")
                         .addArgument(attemptCounter.incrementAndGet())
@@ -504,8 +514,12 @@ public abstract class OpenSearchClient {
         }
 
         public List<String> getSuccessfulDocs() {
+            return getSuccessfulDocs(DocumentExceptionAllowlist.empty());
+        }
+
+        public List<String> getSuccessfulDocs(DocumentExceptionAllowlist allowlist) {
             try {
-                return BulkResponseParser.findSuccessDocs(body);
+                return BulkResponseParser.findSuccessDocs(body, allowlist);
             } catch (IOException ioe) {
                 log.warn("Unable to process bulk request for success", ioe);
                 return List.of();
