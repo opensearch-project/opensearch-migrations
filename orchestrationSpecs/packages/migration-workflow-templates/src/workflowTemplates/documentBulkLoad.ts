@@ -4,6 +4,7 @@ import {
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
     NAMED_TARGET_CLUSTER_CONFIG,
+    ResourceRequirementsType,
     RFS_OPTIONS
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
@@ -43,7 +44,7 @@ function makeParamsDict(
     return expr.mergeDicts(
         expr.mergeDicts(
             makeTargetParamDict(targetConfig),
-            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas")
+            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas", "resources")
         ),
         expr.mergeDicts(
             expr.makeDict({
@@ -69,7 +70,8 @@ function getRfsReplicasetManifest
     loggingConfigMap: BaseExpression<string>,
 
     rfsImageName: BaseExpression<string>,
-    rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>
+    rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
+    resources: BaseExpression<ResourceRequirementsType>
 }): ReplicaSet {
     const basicCredsSecretName = expr.ternary(
         expr.isEmpty(args.basicCredsSecretNameOrEmpty),
@@ -121,7 +123,8 @@ function getRfsReplicasetManifest
             "org.opensearch.migrations.RfsMigrateDocuments",
             "---INLINE-JSON",
             makeStringTypeProxy(args.jsonConfig)
-        ]
+        ],
+        resources: makeDirectTypeProxy(args.resources)
     };
 
     const finalContainerDefinition= setupTestCredsForContainer(
@@ -235,7 +238,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
-
+        .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addResourceTask(b => b
@@ -251,7 +254,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
                     rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
                     workflowName: expr.getWorkflowValue("name"),
-                    jsonConfig: expr.toBase64(b.inputs.rfsJsonConfig)
+                    jsonConfig: expr.toBase64(b.inputs.rfsJsonConfig),
+                    resources: expr.deserializeRecord(b.inputs.resources),
                 })
             }))
     )
@@ -280,7 +284,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             b.inputs.snapshotConfig,
                             b.inputs.documentBackfillConfig,
                             b.inputs.sessionName)
-                    ))
+                    )),
+                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources"))
                 })
             )
         )

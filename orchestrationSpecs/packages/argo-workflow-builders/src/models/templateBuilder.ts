@@ -33,6 +33,8 @@ import {K8sResourceBuilder} from "./k8sResourceBuilder";
 import {AllowLiteralOrExpression, expr, isExpression} from "./expression";
 import {TypeToken} from "./sharedTypes";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
+import { Container } from "../kubernetesResourceTypes/kubernetesTypes";
+import { SetRequired } from "../utils";
 
 /**
  * Maintains a scope of all previous public parameters (workflow and previous templates' inputs/outputs)
@@ -217,17 +219,23 @@ export class TemplateBuilder<
 
     addContainer<
         FirstBuilder extends ContainerBuilder<ContextualScope, InputParamsScope, any, any, any, any>,
-        FinalBuilder extends ContainerBuilder<ContextualScope, InputParamsScope, any, any, any, any>
+        FinalBuilder extends ContainerBuilder<ContextualScope, InputParamsScope,
+
+         GenericScope &
+         // Excluding name from container as it is realized during containerBuilder::getBody()
+         SetRequired<Omit<Container, "name">, "resources">,
+          any, any, any>,
     >(
         builderFn: ScopeIsEmptyConstraint<BodyScope,
             (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}, OutputParamsScope>) => FinalBuilder>,
         factory?: (context: ContextualScope, inputs: InputParamsScope) => FirstBuilder
-    ): FinalBuilder
+    ): FinalBuilder    
     {
         const fn = builderFn as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}, {}>) => FinalBuilder;
-        return fn((factory ??
+        const result = fn((factory ??
             ((c, i) => new ContainerBuilder(c, i, {}, {}, {}, {}, {})))
         (this.contextualScope, this.inputScope));
+        return result;
     }
 
     getTemplateSignatureScope(): InputParamsScope {

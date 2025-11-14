@@ -4,19 +4,18 @@ import {
     getZodKeys,
     NAMED_TARGET_CLUSTER_CONFIG,
     REPLAYER_OPTIONS,
-    TARGET_CLUSTER_CONFIG
+    ResourceRequirementsType,
 } from "@opensearch-migrations/schemas";
 import {
-    BaseExpression, defineRequiredParam,
+    BaseExpression,
     expr,
     IMAGE_PULL_POLICY,
-    INTERNAL, makeStringTypeProxy,
+    INTERNAL, makeDirectTypeProxy, makeStringTypeProxy,
     selectInputsFieldsAsExpressionRecord,
     selectInputsForRegister, Serialized,
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
-import {makeRepoParamDict} from "./metadataMigration";
 import {setupLog4jConfigForContainer} from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
@@ -30,7 +29,7 @@ function makeParamsDict(
     return expr.mergeDicts(
         expr.mergeDicts(
             makeTargetParamDict(targetConfig),
-            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas")
+            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas", "resources")
         ),
         expr.mergeDicts(
             expr.makeDict({}),
@@ -52,6 +51,7 @@ function getReplayerDeploymentManifest
     podReplicas: BaseExpression<number>,
     replayerImageName: BaseExpression<string>,
     replayerImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
+    resources: BaseExpression<ResourceRequirementsType>
 }) {
     const baseContainerDefinition = {
         name: "replayer",
@@ -62,7 +62,8 @@ function getReplayerDeploymentManifest
             "org.opensearch.migrations.replay.TrafficReplayer",
             "---INLINE-JSON",
             makeStringTypeProxy(args.jsonConfig)
-        ]
+        ],
+        resources: makeDirectTypeProxy(args.resources)
     };
     const finalContainerDefinition =
         setupLog4jConfigForContainer(args.useCustomLogging, args.loggingConfigMap,
@@ -116,6 +117,7 @@ export const Replayer = WorkflowBuilder.create({
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
+        .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
 
         .addResourceTask(b => b
             .setDefinition({
@@ -129,7 +131,8 @@ export const Replayer = WorkflowBuilder.create({
                     replayerImageName: b.inputs.imageTrafficReplayerLocation,
                     replayerImagePullPolicy: b.inputs.imageTrafficReplayerPullPolicy,
                     workflowName: expr.getWorkflowValue("name"),
-                    jsonConfig: expr.toBase64(b.inputs.jsonConfig)
+                    jsonConfig: expr.toBase64(b.inputs.jsonConfig),
+                    resources: expr.deserializeRecord(b.inputs.resources),
                 })
             }))
     )
@@ -158,6 +161,7 @@ export const Replayer = WorkflowBuilder.create({
                     jsonConfig: expr.asString(expr.serialize(
                         makeParamsDict(b.inputs.targetConfig, b.inputs.replayerConfig)
                     )),
+                    resources: expr.serialize(expr.jsonPathStrict(b.inputs.replayerConfig, "resources"))
                 })))
     )
 
