@@ -72,7 +72,9 @@ public class FilterScheme {
             if (allowlist == null || allowlist.isEmpty()) {
                 return !isExcluded(item);
             } else {
-                return allowlist.contains(item);
+                return allowlist.stream()
+                    .map(AllowlistEntry::new)
+                    .anyMatch(entry -> entry.matches(item));
             }
         };
     }
