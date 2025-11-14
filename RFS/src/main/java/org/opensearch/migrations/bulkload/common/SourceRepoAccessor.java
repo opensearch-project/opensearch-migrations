@@ -3,7 +3,6 @@ package org.opensearch.migrations.bulkload.common;
 import java.io.InputStream;
 import java.nio.file.Path;
 
-import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
 // TODO: find a better approach to this (see https://opensearch.atlassian.net/browse/MIGRATIONS-1786)
 public abstract class SourceRepoAccessor {
@@ -43,10 +42,6 @@ public abstract class SourceRepoAccessor {
 
     public InputStream getBlobFile(String indexId, int shardId, String blobName) {
         return load(repo.getBlobFilePath(indexId, shardId, blobName));
-    }
-
-    public void prepBlobFiles(ShardMetadata shardMetadata) {
-        repo.prepBlobFiles(shardMetadata);
     }
 
     protected abstract InputStream load(Path path);
