@@ -21,6 +21,7 @@ import org.opensearch.migrations.data.workloads.Workloads;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
+import org.opensearch.migrations.utils.FileSystemUtils;
 
 import eu.rekawek.toxiproxy.model.ToxicDirection;
 import lombok.SneakyThrows;
@@ -168,7 +169,7 @@ public class LeaseExpirationTest extends SourceTestBase {
                 finalExitCodeCount += exitCode == expectedEventualExitCode ? 1 : 0;
                 log.atInfo().setMessage("Process exited with code: {}").addArgument(exitCode).log();
                 // Clean tree for subsequent run
-                deleteTree(tempDirLucene);
+                FileSystemUtils.deleteDirectories(tempDirLucene.toString());
             } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < expectedInitialExitCodeCount + expectedEventualExitCodeCount);
 
             // Assert doc count on the target cluster matches source
@@ -194,7 +195,7 @@ public class LeaseExpirationTest extends SourceTestBase {
                     "The program did not exit with the expected number of " + expectedInitialExitCode +" exit codes"
             );
         } finally {
-            deleteTree(tempDirSnapshot);
+            FileSystemUtils.deleteDirectories(tempDirSnapshot.toString());
         }
     }
 

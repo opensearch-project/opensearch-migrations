@@ -10,8 +10,12 @@ RUN dnf install -y procps && \
 COPY ./build/runtimeJars /rfs-app/jars
 COPY ./build/VERSION /rfs-app/VERSION
 WORKDIR /rfs-app
-RUN printf "#!/bin/sh\nexec java -XX:MaxRAMPercentage=80.0 -cp /rfs-app/jars/*:. \"\$@\" " > /rfs-app/runJavaWithClasspath.sh
+
+# Copy the Java runner scripts into the container
+COPY ./runJavaWithClasspath.sh /rfs-app/runJavaWithClasspath.sh
 RUN chmod +x /rfs-app/runJavaWithClasspath.sh
+COPY ./runJavaWithClasspathWithRepeat.sh /rfs-app/runJavaWithClasspathWithRepeat.sh
+RUN chmod +x /rfs-app/runJavaWithClasspathWithRepeat.sh
 
 # Copy the entry point script into the container
 COPY ./entrypoint.sh /rfs-app/entrypoint.sh

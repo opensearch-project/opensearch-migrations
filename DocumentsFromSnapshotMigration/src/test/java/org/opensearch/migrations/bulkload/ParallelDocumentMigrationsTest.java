@@ -21,6 +21,7 @@ import org.opensearch.migrations.data.WorkloadGenerator;
 import org.opensearch.migrations.data.WorkloadOptions;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.utils.FileSystemUtils;
 
 import io.opentelemetry.sdk.metrics.data.LongPointData;
 import io.opentelemetry.sdk.metrics.data.MetricData;
@@ -146,7 +147,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
 
                 verifyWorkMetrics(testDocMigrationContext, numWorkers, numTotalRuns);
             } finally {
-                deleteTree(tempDir);
+                FileSystemUtils.deleteDirectories(tempDir.toString());
             }
         } finally {
             executorService.shutdown();

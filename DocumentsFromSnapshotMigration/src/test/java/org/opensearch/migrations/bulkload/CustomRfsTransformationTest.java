@@ -17,6 +17,7 @@ import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.utils.FileSystemUtils;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -148,7 +149,7 @@ public class CustomRfsTransformationTest extends SourceTestBase {
                 expectedTargetDocs
             );
         } finally {
-            deleteTree(tempDirSnapshot);
+            FileSystemUtils.deleteDirectories(tempDirSnapshot.toString(), tempDirLucene.toString());
         }
     }
 

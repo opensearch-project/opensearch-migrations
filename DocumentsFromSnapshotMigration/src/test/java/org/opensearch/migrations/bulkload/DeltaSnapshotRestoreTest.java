@@ -17,6 +17,7 @@ import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.utils.FileSystemUtils;
 
 import io.opentelemetry.sdk.metrics.data.LongPointData;
 import lombok.SneakyThrows;
@@ -306,9 +307,8 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 // After second run (snapshot2 -> snapsho12): 3 segments, 1 addition, 1 deletion
                 assertDeltaMetrics(testDocMigrationContext, 3, 1, 1);
             }
-
         } finally {
-            deleteTree(localDirectory.toPath());
+            FileSystemUtils.deleteDirectories(localDirectory.toString());
         }
     }
 }
