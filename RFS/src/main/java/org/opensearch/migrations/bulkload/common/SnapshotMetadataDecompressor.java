@@ -16,6 +16,10 @@ import shadow.lucene9.org.apache.lucene.codecs.CodecUtil;
 public class SnapshotMetadataDecompressor {
     private static final byte[] DFL_HEADER = { 'D', 'F', 'L', 0 };
 
+    private SnapshotMetadataDecompressor() {
+        // Utility class - prevent instantiation
+    }
+
     /**
      * Processes snapshot metadata bytes, detecting and handling compression if present.
      * 
@@ -47,12 +51,17 @@ public class SnapshotMetadataDecompressor {
      * @return The starting index of the DFL\0 header, or -1 if not found
      */
     private static int findDFLHeader(byte[] data) {
-        outer:
         for (int i = 0; i <= data.length - DFL_HEADER.length; i++) {
+            boolean headerMatch = true;
             for (int j = 0; j < DFL_HEADER.length; j++) {
-                if (data[i + j] != DFL_HEADER[j]) continue outer;
+                if (data[i + j] != DFL_HEADER[j]) {
+                    headerMatch = false;
+                    break;
+                }
             }
-            return i; // header found
+            if (headerMatch) {
+                return i; // header found
+            }
         }
         return -1; // header not found
     }
