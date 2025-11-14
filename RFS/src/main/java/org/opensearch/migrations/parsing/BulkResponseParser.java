@@ -121,6 +121,7 @@ public class BulkResponseParser {
         }
     }
 
+    @SuppressWarnings("java:S3776") // Cognitive Complexity - parsing logic requires nested structure
     private static DocInfo extractDocInfo(JsonParser parser) throws IOException {
         var docInfo = DocInfo.builder();
         while (parser.nextToken() != JsonToken.END_OBJECT) {
