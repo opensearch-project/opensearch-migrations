@@ -43,6 +43,8 @@ updates:
       - dependency-name: "org.junit:junit-bom"
       - dependency-name: "org.junit.platform:*"
       - dependency-name: "org.junit.jupiter:*"
+      - dependency-name: "com.diffplug.spotless" # Spotless Plugin >= 8 requres java 17 which requires solutions release to update
+      - dependency-name: "io.freefair.lombok" # Lombok Plugin >= 9 requres java 17 which requires solutions release to update
 
   - package-ecosystem: "github-actions"
     directory: "/"

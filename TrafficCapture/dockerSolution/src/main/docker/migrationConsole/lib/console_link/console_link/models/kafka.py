@@ -124,7 +124,8 @@ class MSK(Kafka):
         return get_result_for_command(command, "Describe Consumer Group")
 
     def describe_topic_records(self, topic_name='logging-traffic-topic') -> CommandResult:
-        command = ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'kafka.tools.GetOffsetShell', '--broker-list',
+        command = ['/root/kafka-tools/kafka/bin/kafka-run-class.sh',
+                   'org.apache.kafka.tools.GetOffsetShell', '--broker-list',
                    f'{self.brokers}', '--topic', f'{topic_name}', '--time', '-1'] + MSK_AUTH_PARAMETERS
         logger.info(f"Executing command: {command}")
         result = get_result_for_command(command, "Describe Topic Records")
@@ -161,7 +162,8 @@ class StandardKafka(Kafka):
         return get_result_for_command(command, "Describe Consumer Group")
 
     def describe_topic_records(self, topic_name='logging-traffic-topic') -> CommandResult:
-        command = ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'kafka.tools.GetOffsetShell', '--broker-list',
+        command = ['/root/kafka-tools/kafka/bin/kafka-run-class.sh',
+                   'org.apache.kafka.tools.GetOffsetShell', '--broker-list',
                    f'{self.brokers}', '--topic', f'{topic_name}', '--time', '-1']
         logger.info(f"Executing command: {command}")
         result = get_result_for_command(command, "Describe Topic Records")
