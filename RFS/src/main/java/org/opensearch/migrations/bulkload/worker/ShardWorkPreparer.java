@@ -10,6 +10,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkItem;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import org.opensearch.migrations.reindexer.tracing.IRootDocumentMigrationContext;
 
@@ -54,7 +55,7 @@ public class ShardWorkPreparer {
         scopedWorkCoordinator.ensurePhaseCompletion(wc -> {
             try {
                 return wc.createOrUpdateLeaseForWorkItem(
-                    SHARD_SETUP_WORK_ITEM_ID,
+                    new WorkItem(SHARD_SETUP_WORK_ITEM_ID, null, null),
                     Duration.ofMinutes(5),
                     context::createWorkAcquisitionContext
                 );
@@ -135,7 +136,7 @@ public class ShardWorkPreparer {
                         .log();
                     try (var shardSetupContext = context.createShardWorkItemContext()) {
                         workCoordinator.createUnassignedWorkItem(
-                            new IWorkCoordinator.WorkItemAndDuration.WorkItem(indexMetadata.getName(), shardId, Integer.MIN_VALUE).toString(),
+                            new WorkItem(indexMetadata.getName(), shardId, Integer.MIN_VALUE),
                             shardSetupContext::createUnassignedWorkItemContext
                         );
                     } catch (IOException e) {

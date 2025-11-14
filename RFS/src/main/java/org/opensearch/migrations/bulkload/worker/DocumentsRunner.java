@@ -15,6 +15,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkItem;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationContexts;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
@@ -134,7 +135,7 @@ public class DocumentsRunner {
     }
 
     private Flux<WorkItemCursor> setupDocMigration(
-        IWorkCoordinator.WorkItemAndDuration.WorkItem workItem,
+        WorkItem workItem,
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) throws IOException {
         log.atInfo().setMessage("Migrating docs for {}").addArgument(workItem).log();

@@ -13,15 +13,6 @@ public class OpenSearchWorkCoordinator_OS_2_11 extends OpenSearchWorkCoordinator
             AbstractedHttpClient httpClient,
             String indexNameSuffix,
             long tolerableClientServerClockDifferenceSeconds,
-            String workerId
-        ) {
-            super(httpClient, indexNameSuffix, tolerableClientServerClockDifferenceSeconds, workerId);
-        }
-
-        public OpenSearchWorkCoordinator_OS_2_11(
-            AbstractedHttpClient httpClient,
-            String indexNameSuffix,
-            long tolerableClientServerClockDifferenceSeconds,
             String workerId,
             Clock clock,
             Consumer<WorkItemAndDuration> workItemConsumer

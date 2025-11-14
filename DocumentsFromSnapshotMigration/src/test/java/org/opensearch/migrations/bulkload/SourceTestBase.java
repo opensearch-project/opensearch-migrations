@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.UnaryOperator;
 
 import org.opensearch.migrations.CreateSnapshot;
-import org.opensearch.migrations.RfsMigrateDocuments;
+import org.opensearch.migrations.ExperimentalArgs;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
@@ -152,7 +152,7 @@ public class SourceTestBase {
 
     @AllArgsConstructor
     public static class ExpectedMigrationWorkTerminationException extends RuntimeException {
-        public final RfsMigrateDocuments.NoWorkLeftException exception;
+        public final ExperimentalArgs.NoWorkLeftException exception;
         public final int numRuns;
     }
 
@@ -241,7 +241,7 @@ public class SourceTestBase {
                 } else {
                     runCounter.incrementAndGet();
                 }
-            } catch (RfsMigrateDocuments.NoWorkLeftException e) {
+            } catch (ExperimentalArgs.NoWorkLeftException e) {
                 log.info(
                     "No work at all was found.  "
                         + "Presuming that work was complete and that all worker processes should terminate"
@@ -270,7 +270,7 @@ public class SourceTestBase {
         Version sourceVersion,
         Version targetVersion,
         String transformationConfig
-    ) throws RfsMigrateDocuments.NoWorkLeftException {
+    ) throws ExperimentalArgs.NoWorkLeftException {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
         try (var processManager = new LeaseExpireTrigger(workItemId -> {
@@ -311,7 +311,7 @@ public class SourceTestBase {
 
             var docTransformer = new TransformationLoader().getTransformerFactoryLoader(
                     Optional.ofNullable(transformationConfig).orElse(
-                            RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG
+                            ExperimentalArgs.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG
                     ));
 
             AtomicReference<WorkItemCursor> progressCursor = new AtomicReference<>();
@@ -330,7 +330,7 @@ public class SourceTestBase {
                     workItemRef::set
             )) {
                 var clientFactory = new OpenSearchClientFactory(connectionContext);
-                return RfsMigrateDocuments.run(
+                return ExperimentalArgs.run(
                     readerFactory,
                     new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> docTransformer),
                     progressCursor,
