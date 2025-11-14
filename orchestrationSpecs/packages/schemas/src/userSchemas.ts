@@ -126,6 +126,18 @@ export const RFS_OPTIONS = z.object({
         : undefined;
     const minimumEphemeralBytes = Math.ceil(2.5 * data.maxShardSizeBytes)
 
+    if (userRequestEphemeralStorageBytes != undefined && userRequestEphemeralStorageBytes < minimumEphemeralBytes) {
+        throw new Error(
+            `Resource requests for RFS storage of ${userRequestEphemeralStorageBytes} is too low to support maxShardSizeBytes value of ${data.maxShardSizeBytes}.
+            Increase to at least ${minimumEphemeralBytes} to support the migration or decrease maxShardSizeBytes`)
+    }
+
+    if (userLimitsEphemeralStorageBytes != undefined && userLimitsEphemeralStorageBytes < minimumEphemeralBytes) {
+        throw new Error(
+            `Resource limits for RFS storage of ${userLimitsEphemeralStorageBytes} is too low to support maxShardSizeBytes value of ${data.maxShardSizeBytes}.
+            Increase to at least ${minimumEphemeralBytes} to support the migration or decrease maxShardSizeBytes`)
+    }
+
     // pick the larger of (user, minimum); if neither present fall back to minimum
     const reqBytes = Math.max(userRequestEphemeralStorageBytes ?? 0, minimumEphemeralBytes);
     // ensure limits >= requests; if user set a higher limit, keep it
