@@ -67,7 +67,7 @@ jq 'def normalizeAuthConfig:
           .
         end)
     elif (.authConfig | has("sigv4")) then
-      .sigv4_auth = .authConfig.sigv4
+      .sigv4 = .authConfig.sigv4
     elif (.authConfig | has("mtls")) then
       .mtls_auth = .authConfig.mtls
     else
