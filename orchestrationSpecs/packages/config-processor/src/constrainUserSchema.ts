@@ -1,7 +1,7 @@
-import { z } from 'zod';
+import { z, ZodTypeAny } from 'zod';
 import {parse} from "yaml";
 import * as fs from "node:fs";
-import {OVERALL_MIGRATION_CONFIG} from "@opensearch-migrations/schemas";  // <-- Replace with your schema import
+import {OVERALL_MIGRATION_CONFIG, zodSchemaToJsonSchema} from "@opensearch-migrations/schemas";
 
 const COMMAND_LINE_HELP_MESSAGE = `Usage: constrain-user-schema [input-file|-]
 
@@ -11,150 +11,142 @@ that only the operational configuration is mutable while restricting the user fr
 changes that would change the setup/outcome of a migration.
 `
 
-type MutableFieldMatcher = (path: string[], key: string) => boolean;
+type PathSeg = string | "*";
+type Path = PathSeg[];
 
-function lockZodSchema<T extends z.ZodTypeAny>(
-    schema: T,
-    data: unknown,
-    isMutable: MutableFieldMatcher = (path, key) => key === 'skipApproval'
-): z.ZodTypeAny {
-    return lockZodSchemaInternal(schema, data, [], isMutable);
+/**
+ * Does a pattern path (with "*" wildcards) match a concrete path?
+ * e.g. ["steps", "*", "skipApproval"] matches ["steps", "step1", "skipApproval"]
+ */
+function pathMatches(pattern: Path, actual: Path): boolean {
+    if (pattern.length !== actual.length) return false;
+    for (let i = 0; i < pattern.length; i++) {
+        const p = pattern[i];
+        const a = actual[i];
+        if (p !== "*" && p !== a) return false;
+    }
+    return true;
 }
 
-function lockZodSchemaInternal(
-    schema: z.ZodTypeAny,
-    data: unknown,
-    path: string[],
-    isMutable: MutableFieldMatcher
-): z.ZodTypeAny {
-    const def = (schema as any)._def;
+function isSkipApprovalPath(path: Path, skipPatterns: Path[]): boolean {
+    return skipPatterns.some((p) => pathMatches(p, path));
+}
 
-    // Unwrap optionals and nullables
-    if (schema instanceof z.ZodOptional) {
-        const unwrapped = (schema as any)._def.innerType;
-        const innerLocked = lockZodSchemaInternal(unwrapped, data, path, isMutable);
-        return innerLocked.optional();
+function findSkipApprovalPatterns(
+    schema: unknown,
+    path: Path = []
+): Path[] {
+    const s = schema as any;
+    const patterns: Path[] = [];
+
+    // Very lightweight "unwrap" of things like optional(), default(), effects(), branded()
+    const def: any = s?._def;
+    if (def?.innerType || def?.schema || def?.type) {
+        const inner = def.innerType ?? def.schema ?? def.type;
+        return findSkipApprovalPatterns(inner, path);
     }
 
-    if (schema instanceof z.ZodNullable) {
-        const unwrapped = (schema as any)._def.innerType;
-        const innerLocked = lockZodSchemaInternal(unwrapped, data, path, isMutable);
-        return innerLocked.nullable();
-    }
+    // ZodObject
+    if (s instanceof z.ZodObject) {
+        const shape = s.shape;
+        for (const [key, valueSchema] of Object.entries(shape)) {
+            const nextPath = [...path, key];
 
-    // Unwrap defaults
-    if (schema instanceof z.ZodDefault) {
-        const unwrapped = (schema as any)._def.innerType;
-        return lockZodSchemaInternal(unwrapped, data, path, isMutable);
-    }
-
-    // Unwrap effects (refinements, transforms, etc)
-    if (def.typeName === 'ZodEffects') {
-        const unwrapped = def.schema;
-        return lockZodSchemaInternal(unwrapped, data, path, isMutable);
-    }
-
-    // Handle objects
-    if (schema instanceof z.ZodObject) {
-        const shape = (schema as any)._def.shape();
-        const newShape: Record<string, z.ZodTypeAny> = {};
-
-        for (const [key, fieldSchema] of Object.entries(shape)) {
-            const fieldPath = [...path, key];
-            const fieldData = (data as any)?.[key];
-
-            if (isMutable(fieldPath, key)) {
-                // Keep this field mutable - preserve original schema
-                newShape[key] = fieldSchema as z.ZodTypeAny;
-            } else {
-                // Lock this field
-                newShape[key] = lockZodSchemaInternal(
-                    fieldSchema as z.ZodTypeAny,
-                    fieldData,
-                    fieldPath,
-                    isMutable
-                );
+            if (key === "skipApproval") {
+                patterns.push(nextPath);
             }
-        }
 
-        return z.object(newShape);
+            patterns.push(...findSkipApprovalPatterns(valueSchema, nextPath));
+        }
+        return patterns;
     }
 
-    // Handle arrays
-    if (schema instanceof z.ZodArray) {
-        if (!Array.isArray(data)) {
-            return z.literal(data as any);
-        }
+    // ZodArray
+    if (s instanceof z.ZodArray) {
+        const elem = s.element;
+        const nextPath = [...path, "*"]; // wildcard index
+        patterns.push(...findSkipApprovalPatterns(elem, nextPath));
+        return patterns;
+    }
 
-        const elementSchema = (schema as any)._def.type;
+    // ZodRecord
+    if (s instanceof z.ZodRecord) {
+        const valueType = s._def.valueType;
+        const nextPath = [...path, "*"]; // wildcard key
+        patterns.push(...findSkipApprovalPatterns(valueType, nextPath));
+        return patterns;
+    }
 
-        // Lock each element in the array
-        const lockedElements = (data as any[]).map((item, index) =>
-            lockZodSchemaInternal(
-                elementSchema,
-                item,
-                [...path, String(index)],
-                isMutable
-            )
+    // Other types: nothing to do
+    return patterns;
+}
+
+function buildLockedSchemaFromValue(
+    value: unknown,
+    path: Path,
+    skipPatterns: Path[]
+): ZodTypeAny {
+    // If this path is exactly a skipApproval field, allow any boolean
+    if (isSkipApprovalPath(path, skipPatterns)) {
+        return z.boolean();
+    }
+
+    // null
+    if (value === null) {
+        return z.literal(null);
+    }
+
+    // primitives
+    const vt = typeof value;
+    if (vt === "string" || vt === "number" || vt === "boolean") {
+        return z.literal(value as any);
+    }
+
+    // array
+    if (Array.isArray(value)) {
+        const itemSchemas = value.map((item, index) =>
+            buildLockedSchemaFromValue(item, [...path, String(index)], skipPatterns)
         );
 
-        // Create a tuple schema with exact length
-        return z.tuple(lockedElements as any);
-    }
-
-    // Handle unions
-    if (schema instanceof z.ZodUnion) {
-        const options = (schema as any)._def.options as z.ZodTypeAny[];
-
-        for (const option of options) {
-            const result = option.safeParse(data);
-            if (result.success) {
-                return lockZodSchemaInternal(option, data, path, isMutable);
-            }
-        }
-
-        // If no match, fall through to literal
-    }
-
-    // Handle discriminated unions
-    if (def.typeName === 'ZodDiscriminatedUnion') {
-        const optionsMap = def.optionsMap as Map<any, z.ZodTypeAny>;
-
-        for (const option of optionsMap.values()) {
-            const result = option.safeParse(data);
-            if (result.success) {
-                return lockZodSchemaInternal(option, data, path, isMutable);
-            }
+        if (itemSchemas.length === 0) {
+            // empty tuple schema
+            return z.tuple([] as []);
+        } else {
+            // tuple with fixed items
+            return z.tuple(itemSchemas as [ZodTypeAny, ...ZodTypeAny[]]);
         }
     }
 
-    // Handle records/maps
-    if (schema instanceof z.ZodRecord) {
-        if (typeof data !== 'object' || data === null) {
-            return z.literal(data as any);
+    // object
+    if (vt === "object") {
+        const obj = value as Record<string, unknown>;
+        const shape: Record<string, ZodTypeAny> = {};
+
+        for (const [key, v] of Object.entries(obj)) {
+            const childPath: Path = [...path, key];
+            shape[key] = buildLockedSchemaFromValue(v, childPath, skipPatterns);
         }
 
-        const valueSchema = (schema as any)._def.valueType;
-        const newShape: Record<string, z.ZodTypeAny> = {};
-
-        for (const [key, value] of Object.entries(data)) {
-            const fieldPath = [...path, key];
-            if (isMutable(fieldPath, key)) {
-                newShape[key] = valueSchema;
-            } else {
-                newShape[key] = lockZodSchemaInternal(
-                    valueSchema,
-                    value,
-                    fieldPath,
-                    isMutable
-                );
-            }
-        }
-        return z.object(newShape);
+        return z.object(shape).strict(); // no extra keys allowed
     }
 
-    // For all primitive types and anything else, create a literal
-    return z.literal(data as any);
+    // fallback – you can refine as needed
+    return z.any();
+}
+
+export function makeLockedConfigSchema<TSchema extends ZodTypeAny>(
+    data: unknown,
+    baseSchema: TSchema
+): ZodTypeAny {
+    // 1. Validate the data with the original schema
+    const parsed = baseSchema.parse(data);
+
+    // 2. Discover where "skipApproval" lives in the schema
+    const skipPatterns = findSkipApprovalPatterns(baseSchema);
+
+    // 3. Build the literal-locked schema from the parsed data,
+    //    only allowing booleans at skipApproval locations
+    return buildLockedSchemaFromValue(parsed, [], skipPatterns);
 }
 
 async function readStdin(): Promise<string> {
@@ -223,10 +215,10 @@ async function main() {
     }
 
     // Create the locked schema
-    const lockedSchema = lockZodSchema(OVERALL_MIGRATION_CONFIG, data);
+    const lockedSchema = makeLockedConfigSchema(data, OVERALL_MIGRATION_CONFIG);
 
     console.log('Locked schema created successfully!');
-    process.stdout.write(JSON.stringify(lockedSchema, null, 2));
+    process.stdout.write(JSON.stringify(zodSchemaToJsonSchema(lockedSchema as any), null, 2));
 }
 
 if (require.main === module) {
@@ -235,5 +227,3 @@ if (require.main === module) {
         process.exit(1);
     });
 }
-
-export { lockZodSchema };
