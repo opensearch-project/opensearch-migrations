@@ -1,6 +1,7 @@
 """Submit command for workflow CLI - submits workflows to Argo Workflows."""
 
 import logging
+import os
 import click
 
 from ..models.utils import ExitCode
@@ -58,10 +59,6 @@ def _handle_workflow_wait(
     help='Kubernetes namespace for the workflow (default: ma)'
 )
 @click.option(
-    '--prefix',
-    help='Workflow prefix (auto-generated if not provided)'
-)
-@click.option(
     '--wait',
     is_flag=True,
     default=False,
@@ -85,7 +82,7 @@ def _handle_workflow_wait(
     help='Configuration session name to load parameters from (default: default)'
 )
 @click.pass_context
-def submit_command(ctx, namespace, prefix, wait, timeout, wait_interval, session):
+def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
     """Submit a migration workflow using the config processor.
 
     This command submits a migration workflow by:
@@ -98,11 +95,12 @@ def submit_command(ctx, namespace, prefix, wait, timeout, wait_interval, session
 
     Environment variables:
         - CONFIG_PROCESSOR_DIR: Path to config processor (default: /root/configProcessor)
+        - ETCD_ENDPOINTS: etcd endpoints (default: http://etcd.{namespace}.svc.cluster.local:2379)
 
     Example:
         workflow submit
         workflow submit --wait
-        workflow submit --prefix my-migration --wait --timeout 300
+        workflow submit --wait --timeout 300
     """
     # Check if configuration exists
     store = WorkflowConfigStore(namespace=namespace)
@@ -120,12 +118,23 @@ def submit_command(ctx, namespace, prefix, wait, timeout, wait_interval, session
         # Get config data as YAML
         config_yaml = config.to_yaml()
 
+        # Get etcd_endpoints from environment variable or use default
+        etcd_endpoints = os.getenv('ETCD_ENDPOINTS')
+        if not etcd_endpoints:
+            etcd_endpoints = f"http://etcd.{namespace}.svc.cluster.local:2379"
+
         click.echo(f"Initializing workflow from session: {session}")
 
         # Step 2: Submit workflow to Kubernetes
         click.echo(f"Submitting workflow to namespace: {namespace}")
         try:
-            submit_result = runner.submit_workflow(config_yaml, namespace)
+            # Construct arguments for the submission script
+            args = [
+                f"--prefix {namespace}",
+                f"--etcd_endpoints {etcd_endpoints}"
+            ]
+
+            submit_result = runner.submit_workflow(config_yaml, args)
 
             workflow_name = submit_result.get('workflow_name', 'unknown')
 

@@ -133,7 +133,7 @@ def test_msk_kafka_describe_topic(mocker):
 
     assert result.success
     mock.assert_called_once_with(
-        ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'kafka.tools.GetOffsetShell',
+        ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'org.apache.kafka.tools.GetOffsetShell',
          '--broker-list', f"{config['broker_endpoints']}",
          '--topic', 'new_topic',
          '--time', '-1',
@@ -152,7 +152,7 @@ def test_standard_kafka_describe_topic(mocker):
 
     assert result.success
     mock.assert_called_once_with(
-        ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'kafka.tools.GetOffsetShell',
+        ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'org.apache.kafka.tools.GetOffsetShell',
          '--broker-list', f"{config['broker_endpoints']}",
          '--topic', 'new_topic',
          '--time', '-1'

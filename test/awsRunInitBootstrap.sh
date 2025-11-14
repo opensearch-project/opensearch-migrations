@@ -160,7 +160,7 @@ check_ssm_ready() {
 
 instance_id=$(get_instance_id)
 check_ssm_ready "$instance_id"
-init_command="cd /opensearch-migrations && ./initBootstrap.sh"
+init_command="cd /opensearch-migrations && ./initBootstrap.sh --branch main"
 verify_command="cdk --version && docker --version && java --version && python3 --version"
 init_command_timeout="4200" # 70 minutes
 verify_command_timeout="300" # 5 minutes

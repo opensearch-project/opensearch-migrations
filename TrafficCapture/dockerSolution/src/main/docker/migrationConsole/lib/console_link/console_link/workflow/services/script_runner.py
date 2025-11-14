@@ -131,17 +131,17 @@ class ScriptRunner:
     def submit_workflow(
         self,
         config_data: str,
-        namespace: str = "ma"
+        args: list[str],
     ) -> Dict[str, Any]:
         """Submit workflow using config processor submission script.
 
-        Calls: {script_dir}/createMigrationWorkflowFromUserConfiguration.sh <temp_file>
+        Calls: {script_dir}/createMigrationWorkflowFromUserConfiguration.sh <temp_file> <ARGS>
 
         The script creates the workflow in Kubernetes and returns workflow information.
 
         Args:
             config_data: User configuration YAML as string
-            namespace: Kubernetes namespace (default: "ma")
+            args: Command line arguments to pass to the submission script
 
         Returns:
             Dict with workflow_name, workflow_uid, and namespace
@@ -151,7 +151,7 @@ class ScriptRunner:
             subprocess.CalledProcessError: If script fails
             ValueError: If script output cannot be parsed
         """
-        logger.info(f"Submitting workflow with namespace: {namespace}")
+        logger.info(f"Submitting workflow with args: {args}")
 
         script_path = self.script_dir / "createMigrationWorkflowFromUserConfiguration.sh"
 
@@ -164,7 +164,7 @@ class ScriptRunner:
             temp_file_path = temp_file.name
 
         try:
-            cmd = [str(script_path), temp_file_path, f"--prefix {namespace}"]
+            cmd = [str(script_path), temp_file_path] + args
 
             logger.debug(f"Running workflow submission script: {' '.join(cmd)}")
             logger.debug(f"Config file: {temp_file_path}")
@@ -194,8 +194,7 @@ class ScriptRunner:
                 workflow_name = self._parse_kubectl_output(output)
 
                 workflow_info = {
-                    'workflow_name': workflow_name,
-                    'namespace': namespace
+                    'workflow_name': workflow_name
                 }
 
                 logger.info(f"Workflow submitted successfully: {workflow_name}")

@@ -16,6 +16,7 @@ import lombok.EqualsAndHashCode;
  * This is a kludge to provide that.  Note that this code doesn't do conversions such as joining
  * or splitting.  If more control is required, callers should use the multimap interfaces.
  */
+@SuppressWarnings("java:S2160")
 @EqualsAndHashCode(callSuper = false)
 public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String, Object> {
     protected final StrictCaseInsensitiveHttpHeadersMap strictHeadersMap;
