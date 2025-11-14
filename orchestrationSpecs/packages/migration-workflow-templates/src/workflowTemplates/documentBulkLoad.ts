@@ -50,7 +50,8 @@ function makeParamsDict(
                 snapshotName: expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
                 sourceVersion: sourceVersion,
                 sessionName: sessionName,
-                luceneDir: "/tmp"
+                luceneDir: "/tmp",
+                cleanLocalDirs: true
             }),
             makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), true)
         )
