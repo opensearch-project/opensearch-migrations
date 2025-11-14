@@ -2,6 +2,8 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.util.List;
 
+import lombok.NonNull;
+
 public class SnapshotRepo {
     private SnapshotRepo() {}
 
@@ -13,7 +15,7 @@ public class SnapshotRepo {
         public List<SnapshotRepo.Snapshot> getSnapshots();
 
         // Returns a list of all indices in the specified snapshot
-        public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName);
+        public List<? extends SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName);
 
         // Get the ID of a snapshot from its name
         public String getSnapshotId(String snapshotName);
@@ -33,6 +35,13 @@ public class SnapshotRepo {
         String getName();
 
         String getId();
+
+        default boolean isNameOrIdEqual(@NonNull Snapshot other) {
+            var name = getName();
+            var id = getId();
+            return ((name != null) && name.equals(other.getName())) ||
+                    ((id != null) && id.equals(other.getId()));
+        }
     }
 
     /**
@@ -42,8 +51,6 @@ public class SnapshotRepo {
         String getName();
 
         String getId();
-
-        List<String> getSnapshots();
     }
 
     public static class CannotParseRepoFile extends RfsException {

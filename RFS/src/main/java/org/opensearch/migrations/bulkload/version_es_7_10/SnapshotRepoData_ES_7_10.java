@@ -19,9 +19,12 @@ import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 
 @Getter
+@NoArgsConstructor // for Jackson
 public class SnapshotRepoData_ES_7_10 {
     private Path filePath;
+    @JsonProperty("snapshots")
     private List<Snapshot> snapshots;
+    @JsonProperty("indices")
     private Map<String, RawIndex> indices;
 
     @JsonProperty("min_version")
@@ -61,12 +64,11 @@ public class SnapshotRepoData_ES_7_10 {
     @RequiredArgsConstructor
     public static class Index implements SnapshotRepo.Index {
         public static Index fromRawIndex(String name, RawIndex rawIndex) {
-            return new Index(name, rawIndex.id, rawIndex.snapshots, rawIndex.shardGenerations);
+            return new Index(name, rawIndex.id, rawIndex.shardGenerations);
         }
 
         private final String name;
         private final String id;
-        private final List<String> snapshots;
         private final List<String> shardGenerations;
     }
 
