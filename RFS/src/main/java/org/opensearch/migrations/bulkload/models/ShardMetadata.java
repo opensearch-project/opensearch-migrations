@@ -1,19 +1,17 @@
 package org.opensearch.migrations.bulkload.models;
 
-import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.List;
 
-import org.opensearch.migrations.bulkload.common.ByteArrayIndexInput;
 import org.opensearch.migrations.bulkload.common.RfsException;
+import org.opensearch.migrations.bulkload.common.SnapshotMetadataDecompressor;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
-import shadow.lucene9.org.apache.lucene.codecs.CodecUtil;
 
 /**
  * Defines the behavior expected of an object that will surface the metadata of an shard stored in a snapshot
@@ -64,11 +62,7 @@ public interface ShardMetadata {
                 // See:
                 // https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/repositories/blobstore/ChecksumBlobStoreFormat.java#L100
                 byte[] bytes = fis.readAllBytes();
-                ByteArrayIndexInput indexInput = new ByteArrayIndexInput("index-metadata", bytes);
-                CodecUtil.checksumEntireFile(indexInput);
-                CodecUtil.checkHeader(indexInput, "snapshot", 1, 1);
-                int filePointer = (int) indexInput.getFilePointer();
-                InputStream bis = new ByteArrayInputStream(bytes, filePointer, bytes.length - filePointer);
+                InputStream bis = SnapshotMetadataDecompressor.processMetadataBytes(bytes, "snapshot");
 
                 ObjectMapper smileMapper = new ObjectMapper(smileFactory);
                 return smileMapper.readTree(bis);
