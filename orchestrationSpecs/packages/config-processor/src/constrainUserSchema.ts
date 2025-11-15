@@ -2,6 +2,12 @@ import { z, ZodTypeAny } from 'zod';
 import {parse} from "yaml";
 import * as fs from "node:fs";
 import {OVERALL_MIGRATION_CONFIG, zodSchemaToJsonSchema} from "@opensearch-migrations/schemas";
+import {Console} from "console";
+
+global.console = new Console({
+    stdout: process.stderr,
+    stderr: process.stderr
+});
 
 const COMMAND_LINE_HELP_MESSAGE = `Usage: constrain-user-schema [input-file|-]
 
@@ -13,6 +19,12 @@ changes that would change the setup/outcome of a migration.
 
 type PathSeg = string | "*";
 type Path = PathSeg[];
+
+const SKIP_FIELD_REGEX = /^skip(?:.*)?Approvals?$/;
+
+function isSkipKeyName(key: string): boolean {
+    return SKIP_FIELD_REGEX.test(key);
+}
 
 /**
  * Does a pattern path (with "*" wildcards) match a concrete path?
@@ -32,53 +44,78 @@ function isSkipApprovalPath(path: Path, skipPatterns: Path[]): boolean {
     return skipPatterns.some((p) => pathMatches(p, path));
 }
 
+function unwrapSchema(schema: unknown): unknown {
+    const s = schema as any;
+    const def = s?._def;
+
+    if (s instanceof z.ZodOptional ||
+        s instanceof z.ZodNullable ||
+        s instanceof z.ZodDefault) {
+        return def.innerType;
+    }
+
+    return schema;
+}
+
 function findSkipApprovalPatterns(
     schema: unknown,
     path: Path = []
 ): Path[] {
-    const s = schema as any;
+    const s0 = schema as any;
+    const s = unwrapSchema(s0) as any;  // <-- only unwrap known wrappers
     const patterns: Path[] = [];
 
-    // Very lightweight "unwrap" of things like optional(), default(), effects(), branded()
-    const def: any = s?._def;
-    if (def?.innerType || def?.schema || def?.type) {
-        const inner = def.innerType ?? def.schema ?? def.type;
-        return findSkipApprovalPatterns(inner, path);
-    }
-
-    // ZodObject
     if (s instanceof z.ZodObject) {
-        const shape = s.shape;
+        const shape = s.shape;  // getter, fine
         for (const [key, valueSchema] of Object.entries(shape)) {
             const nextPath = [...path, key];
 
-            if (key === "skipApproval") {
+            if (isSkipKeyName(key)) {
                 patterns.push(nextPath);
             }
 
             patterns.push(...findSkipApprovalPatterns(valueSchema, nextPath));
         }
         return patterns;
-    }
-
-    // ZodArray
-    if (s instanceof z.ZodArray) {
+    } else if (s instanceof z.ZodArray) {
         const elem = s.element;
         const nextPath = [...path, "*"]; // wildcard index
         patterns.push(...findSkipApprovalPatterns(elem, nextPath));
         return patterns;
-    }
-
-    // ZodRecord
-    if (s instanceof z.ZodRecord) {
+    } else if (s instanceof z.ZodRecord) {
         const valueType = s._def.valueType;
         const nextPath = [...path, "*"]; // wildcard key
         patterns.push(...findSkipApprovalPatterns(valueType, nextPath));
         return patterns;
     }
 
-    // Other types: nothing to do
     return patterns;
+}
+
+function getSkipKeysForPath(path: Path, skipPatterns: Path[]): string[] {
+    const keys = new Set<string>();
+
+    for (const pattern of skipPatterns) {
+        // We’re at path `path`, skip fields will be one segment deeper
+        if (pattern.length !== path.length + 1) continue;
+
+        const keySeg = pattern[pattern.length - 1];
+        if (keySeg === "*") {
+            continue; // skip wild wildcard at the end (shouldn't be skip anyway)
+        }
+
+        const prefixPattern = pattern.slice(0, -1); // everything but the last segment
+        if (pathMatches(prefixPattern, path)) {
+            keys.add(keySeg as string);
+        }
+    }
+
+    return [...keys];
+}
+
+function isValueType(value: unknown) {
+    const vt = typeof value;
+    return vt === "string" || vt === "number" || vt === "boolean"
 }
 
 function buildLockedSchemaFromValue(
@@ -86,39 +123,23 @@ function buildLockedSchemaFromValue(
     path: Path,
     skipPatterns: Path[]
 ): ZodTypeAny {
-    // If this path is exactly a skipApproval field, allow any boolean
     if (isSkipApprovalPath(path, skipPatterns)) {
-        return z.boolean();
-    }
-
-    // null
-    if (value === null) {
+        return z.boolean().optional(); // If this was a skip field, always allow mutable boolean
+    } else if (value === null) {
         return z.literal(null);
-    }
-
-    // primitives
-    const vt = typeof value;
-    if (vt === "string" || vt === "number" || vt === "boolean") {
+    } else if (isValueType(value)) {
         return z.literal(value as any);
-    }
-
-    // array
-    if (Array.isArray(value)) {
+    } else if (Array.isArray(value)) {
         const itemSchemas = value.map((item, index) =>
             buildLockedSchemaFromValue(item, [...path, String(index)], skipPatterns)
         );
 
         if (itemSchemas.length === 0) {
-            // empty tuple schema
             return z.tuple([] as []);
         } else {
-            // tuple with fixed items
             return z.tuple(itemSchemas as [ZodTypeAny, ...ZodTypeAny[]]);
         }
-    }
-
-    // object
-    if (vt === "object") {
+    } else if (typeof value === "object") {
         const obj = value as Record<string, unknown>;
         const shape: Record<string, ZodTypeAny> = {};
 
@@ -127,26 +148,27 @@ function buildLockedSchemaFromValue(
             shape[key] = buildLockedSchemaFromValue(v, childPath, skipPatterns);
         }
 
-        return z.object(shape).strict(); // no extra keys allowed
-    }
+        // Add any skip fields at this level if they haven't already been added
+        const skipKeysHere = getSkipKeysForPath(path, skipPatterns);
+        for (const skipKey of skipKeysHere) {
+            if (!(skipKey in shape)) {
+                shape[skipKey] = z.boolean().optional();
+            }
+        }
 
-    // fallback – you can refine as needed
-    return z.any();
+        return z.object(shape).strict(); // no extra NON-skip keys allowed
+    } else {
+        return z.any();
+    }
 }
+
 
 export function makeLockedConfigSchema<TSchema extends ZodTypeAny>(
     data: unknown,
     baseSchema: TSchema
 ): ZodTypeAny {
-    // 1. Validate the data with the original schema
-    const parsed = baseSchema.parse(data);
-
-    // 2. Discover where "skipApproval" lives in the schema
     const skipPatterns = findSkipApprovalPatterns(baseSchema);
-
-    // 3. Build the literal-locked schema from the parsed data,
-    //    only allowing booleans at skipApproval locations
-    return buildLockedSchemaFromValue(parsed, [], skipPatterns);
+    return buildLockedSchemaFromValue(data, [], skipPatterns);
 }
 
 async function readStdin(): Promise<string> {

@@ -162,7 +162,7 @@ export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);
 
 export const OVERALL_MIGRATION_CONFIG = z.object({
-    skipAllApprovals : z.boolean().default(false),
+    skipApprovals : z.boolean().default(false),
     skipPreApproval : z.boolean().default(false),
     sourceClusters: SOURCE_CLUSTERS_MAP,
     targetClusters: TARGET_CLUSTERS_MAP,
