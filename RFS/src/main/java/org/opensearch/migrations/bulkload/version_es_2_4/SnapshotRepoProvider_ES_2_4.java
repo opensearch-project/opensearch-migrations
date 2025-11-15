@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.version_es_2_4;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -9,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import org.opensearch.migrations.bulkload.common.SnapshotMetadataDecompressor;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
@@ -48,12 +48,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
 
         try {
             byte[] allBytes = Files.readAllBytes(snapshotMetaFile);
-            int smileStart = findSmileHeaderOffset(allBytes);
-            if (smileStart < 0) {
-                throw new IllegalStateException("SMILE header not found in snapshot metadata file: " + snapshotMetaFile);
-            }
-
-            try (InputStream in = new ByteArrayInputStream(allBytes, smileStart, allBytes.length - smileStart)) {
+            try (InputStream in = SnapshotMetadataDecompressor.processMetadataBytes(allBytes, "snapshot")) {
                 JsonNode rootNode = smileMapper.readTree(in);
 
                 // Get the 'snapshot' node
@@ -91,21 +86,6 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
         } catch (IOException e) {
             throw new IllegalStateException("Failed to read SMILE snapshot metadata for snapshot=" + snapshotName, e);
         }
-    }
-
-    /**
-     * Lookup for the SMILE header sequence 0x3A 0x29 0x0A (":)\n") in the provided bytes.
-     * @return the offset of the SMILE header or -1 if not found
-     */
-    private int findSmileHeaderOffset(byte[] bytes) {
-        for (int i = 0; i < bytes.length - 2; i++) {
-            if ((bytes[i] & 0xFF) == 0x3A &&
-                    (bytes[i + 1] & 0xFF) == 0x29 &&
-                    (bytes[i + 2] & 0xFF) == 0x0A) {
-                return i;
-            }
-        }
-        return -1;
     }
 
     @Override

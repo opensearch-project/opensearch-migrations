@@ -431,10 +431,22 @@ public class SourceTestBase {
         String snapshotName,
         SnapshotTestContext testSnapshotContext
     ) throws Exception {
+        createSnapshot(sourceContainer, snapshotName, testSnapshotContext, false, true);
+    }
+
+    public void createSnapshot(
+        SearchClusterContainer sourceContainer,
+        String snapshotName,
+        SnapshotTestContext testSnapshotContext,
+        boolean compressionEnabled,
+        boolean includeGlobalState
+    ) throws Exception {
         var args = new CreateSnapshot.Args();
         args.snapshotName = snapshotName;
         args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
         args.sourceArgs.host = sourceContainer.getUrl();
+        args.compressionEnabled = compressionEnabled;
+        args.includeGlobalState = includeGlobalState;
 
         var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
         snapshotCreator.run();

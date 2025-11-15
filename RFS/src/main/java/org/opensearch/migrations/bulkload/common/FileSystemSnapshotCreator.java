@@ -20,7 +20,20 @@ public class FileSystemSnapshotCreator extends SnapshotCreator {
         List<String> indexAllowlist,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        super(snapshotName, snapshotRepoName, indexAllowlist, client, context);
+        this(snapshotName, snapshotRepoName, client, snapshotRepoDirectoryPath, indexAllowlist, context, false, true);
+    }
+
+    public FileSystemSnapshotCreator(
+        String snapshotName,
+        String snapshotRepoName,
+        OpenSearchClient client,
+        String snapshotRepoDirectoryPath,
+        List<String> indexAllowlist,
+        IRfsContexts.ICreateSnapshotContext context,
+        boolean compressionEnabled,
+        boolean includeGlobalState
+    ) {
+        super(snapshotName, snapshotRepoName, indexAllowlist, client, context, compressionEnabled, includeGlobalState);
         this.snapshotRepoDirectoryPath = snapshotRepoDirectoryPath;
     }
 
@@ -29,7 +42,7 @@ public class FileSystemSnapshotCreator extends SnapshotCreator {
         // Assemble the request body
         ObjectNode settings = mapper.createObjectNode();
         settings.put("location", snapshotRepoDirectoryPath);
-        settings.put("compress", false);
+        settings.put("compress", compressionEnabled);
         ObjectNode body = mapper.createObjectNode();
         body.put("type", "fs");
         body.set("settings", settings);
