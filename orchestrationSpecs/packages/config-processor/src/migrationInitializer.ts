@@ -1,4 +1,4 @@
-import {deepStrict, StreamSchemaParser} from "./StreamSchemaTransformer";
+import {deepStrict, StreamSchemaParser} from "./streamSchemaTransformer";
 import {
     ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN,
     PARAMETERIZED_MIGRATION_CONFIG,

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Readable } from 'stream';
 import { z } from 'zod';
-import {MigrationConfigTransformer} from "./MigrationConfigTransformer";
+import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 
 async function main() {
     const args = process.argv.slice(2);

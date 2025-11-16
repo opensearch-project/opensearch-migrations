@@ -13,7 +13,7 @@ switch(command) {
         require('@opensearch-migrations/schemas/makeSample');
         break;
     case 'initialize':
-        require('./RunMigrationInitializer');
+        require('./runMigrationInitializer');
         break;
     case 'showSchema':
         require('@opensearch-migrations/schemas/showUserSchema');

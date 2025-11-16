@@ -5,7 +5,7 @@ import {
     S3_REPO_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG
 } from '@opensearch-migrations/schemas';
-import {deepStrict, StreamSchemaTransformer} from './StreamSchemaTransformer';
+import {deepStrict, StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
 import {promises as dns} from "dns";
 

@@ -1,6 +1,6 @@
 import {ARGO_WORKFLOW_SCHEMA} from "@opensearch-migrations/schemas";
-import {MigrationInitializer} from "./MigrationInitializer";
-import {MigrationConfigTransformer} from "./MigrationConfigTransformer";
+import {MigrationInitializer} from "./migrationInitializer";
+import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {parse} from "yaml";
 import {Console} from "console";
 
