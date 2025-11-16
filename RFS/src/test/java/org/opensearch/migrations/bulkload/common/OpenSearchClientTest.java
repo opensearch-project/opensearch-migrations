@@ -186,7 +186,8 @@ class OpenSearchClientTest {
         var responseMono = openSearchClient.sendBulkRequest(
             "myIndex",
             bulkDocs,
-            mock(IRfsContexts.IRequestContext.class)
+            mock(IRfsContexts.IRequestContext.class),
+            false
         );
         responseMono.block();
 
@@ -214,7 +215,8 @@ class OpenSearchClientTest {
         var responseMono = openSearchClient.sendBulkRequest(
             indexName,
             List.of(bulkDoc),
-            mock(IRfsContexts.IRequestContext.class)
+            mock(IRfsContexts.IRequestContext.class),
+            false
         );
         var exception = assertThrows(Exception.class, () -> responseMono.block());
 
@@ -265,7 +267,8 @@ class OpenSearchClientTest {
         openSearchClient.sendBulkRequest(
             indexName,
             List.of(bulkDoc),
-            mock(IRfsContexts.IRequestContext.class)
+            mock(IRfsContexts.IRequestContext.class),
+            false
         ).block();
 
         // Assertions
@@ -293,7 +296,8 @@ class OpenSearchClientTest {
         openSearchClient.sendBulkRequest(
             indexName,
             List.of(bulkDoc),
-            mock(IRfsContexts.IRequestContext.class)
+            mock(IRfsContexts.IRequestContext.class),
+            false
         ).block();
 
         // Assertions
@@ -323,7 +327,8 @@ class OpenSearchClientTest {
             var responseMono = openSearchClient.sendBulkRequest(
                     indexName,
                     List.of(bulkDoc),
-                    mock(IRfsContexts.IRequestContext.class)
+                    mock(IRfsContexts.IRequestContext.class),
+            false
             );
             assertThrows(Exception.class, responseMono::block);
 
@@ -366,7 +371,8 @@ class OpenSearchClientTest {
             var responseMono = openSearchClient.sendBulkRequest(
                     indexName,
                     List.of(bulkDoc),
-                    mock(IRfsContexts.IRequestContext.class)
+                    mock(IRfsContexts.IRequestContext.class),
+            false
             );
             assertThrows(Exception.class, responseMono::block);
 

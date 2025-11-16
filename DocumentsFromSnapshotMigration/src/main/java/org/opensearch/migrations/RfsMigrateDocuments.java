@@ -211,6 +211,13 @@ public class RfsMigrateDocuments {
                 "used to communicate to the target, default 10")
         int maxConnections = 10;
 
+        @Parameter(required = false,
+            names = { "--allow-server-generated-ids", "--allowServerGeneratedIds" },
+            description = "Optional. Allow the target cluster to generate document IDs instead of preserving source IDs. " +
+                "Required for OpenSearch Serverless collections that don't support custom document IDs. " +
+                "WARNING: This will result in different document IDs on the target cluster.")
+        public boolean allowServerGeneratedIds = false;
+
         @Parameter(required = true,
             names = { "--source-version", "--sourceVersion" },
             converter = VersionConverter.class,
@@ -432,7 +439,8 @@ public class RfsMigrateDocuments {
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,
                 arguments.maxConnections,
-                docTransformerSupplier);
+                docTransformerSupplier,
+                arguments.allowServerGeneratedIds);
 
             var finder = ClusterProviderRegistry.getSnapshotFileFinder(
                     arguments.sourceVersion,
