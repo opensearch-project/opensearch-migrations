@@ -29,11 +29,35 @@ tasks.register('installDependencies', NpmTask) {
     outputs.dir(orchestrationSpecsDirP.dir("node_modules"))
 }
 
+tasks.register('typeCheckWorkflowTemplates', NpmTask) {
+    description = 'Run TypeScript type checking for workflow-templates'
+    workingDir = workflowTemplatesP.asFile
+    args = ['run', 'type-check']
+    dependsOn installDependencies
+
+    inputs.dir(workflowTemplatesP.dir("src"))
+    inputs.file(workflowTemplatesP.file("tsconfig.json"))
+    outputs.upToDateWhen { false }
+}
+
+tasks.register('testWorkflowTemplates', NpmTask) {
+    description = 'Run Jest tests for workflow-templates'
+    workingDir = workflowTemplatesP.asFile
+    args = ['run', 'test']
+    dependsOn installDependencies
+
+    inputs.dir(workflowTemplatesP.dir("src"))
+    inputs.file(workflowTemplatesP.file("jest.config.js")).optional()
+    outputs.dir(workflowTemplatesP.dir("coverage")).optional()
+}
+
 tasks.register('makeAndStageWorkflowTemplates', NpmTask) {
     description = 'Build the workflow templates from their TypeScript definitions'
     workingDir = workflowTemplatesP.asFile
     args = ['run', 'make-templates', '--', '--outputDirectory', workflowTemplatesStagingP.get().asFile.absolutePath]
     dependsOn installDependencies
+    dependsOn typeCheckWorkflowTemplates
+    dependsOn testWorkflowTemplates
 
     inputs.dir(workflowTemplatesP.dir("src"))
     outputs.dir(workflowTemplatesStagingP)
@@ -43,11 +67,35 @@ tasks.register('makeAndStageWorkflowTemplates', NpmTask) {
     }
 }
 
+tasks.register('typeCheckConfigProcessor', NpmTask) {
+    description = 'Run TypeScript type checking for config-processor'
+    workingDir = configProcessorP.asFile
+    args = ['run', 'type-check']
+    dependsOn installDependencies
+
+    inputs.dir(configProcessorP.dir("src"))
+    inputs.file(configProcessorP.file("tsconfig.json"))
+    outputs.upToDateWhen { false }
+}
+
+tasks.register('testConfigProcessor', NpmTask) {
+    description = 'Run Jest tests for config-processor'
+    workingDir = configProcessorP.asFile
+    args = ['run', 'test']
+    dependsOn installDependencies
+
+    inputs.dir(configProcessorP.dir("src"))
+    inputs.file(configProcessorP.file("jest.config.js")).optional()
+    outputs.dir(configProcessorP.dir("coverage")).optional()
+}
+
 tasks.register('buildAndStageConfigProcessor', NpmTask) {
     description = 'Build and stage the config-processor TypeScript package directly to staging'
     workingDir = configProcessorP.asFile
     args = ['run', 'bundle', '--', configProcessorStagingP.get().asFile.absolutePath]
     dependsOn installDependencies
+    dependsOn typeCheckConfigProcessor
+    dependsOn testConfigProcessor
 
     inputs.dir(configProcessorP.dir("src"))
     inputs.file(configProcessorP.file("makeBundle.js"))

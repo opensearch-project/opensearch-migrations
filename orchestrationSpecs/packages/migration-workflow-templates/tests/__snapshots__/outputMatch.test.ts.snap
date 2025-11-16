@@ -1913,11 +1913,20 @@ exports[`test workflow template renderings full-migration 1`] = `
         ],
       },
       {
+        "name": "preapproval",
+        "outputs": undefined,
+        "suspend": {},
+      },
+      {
         "inputs": {
           "parameters": [
             {
               "description": "List of server configurations to direct migrated traffic toward",
               "name": "migrationConfigs",
+            },
+            {
+              "name": "skipPreApproval",
+              "value": "false",
             },
             {
               "name": "uniqueRunNonce",
@@ -2009,6 +2018,16 @@ exports[`test workflow template renderings full-migration 1`] = `
           "parameters": [],
         },
         "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [],
+              },
+              "name": "preApproval",
+              "template": "preapproval",
+              "when": "{{=!(fromJSON(inputs.parameters.skipPreApproval))}}",
+            },
+          ],
           [
             {
               "arguments": {
