@@ -103,6 +103,55 @@ function generateSampleFromSchema(schema: z.ZodTypeAny): any {
     return '';
 }
 
+function renderUnionField(
+    fieldSchema: z.ZodTypeAny,
+    key: string,
+    spaces: string,
+    commentPrefix: string,
+    indent: number,
+    commentDepth: number
+): string {
+    const unwrappedField = unwrapSchema(fieldSchema);
+    const options = (unwrappedField as any)._def?.options || [];
+    const sampleValue = generateSampleFromSchema(fieldSchema);
+    let yaml = '';
+
+    // Check if any option is a complex type
+    const hasComplexType = options.some((option: z.ZodTypeAny) => {
+        const optionConstructor = unwrapSchema(option).constructor.name;
+        return optionConstructor === 'ZodObject' || optionConstructor === 'ZodRecord';
+    });
+
+    if (hasComplexType) {
+        // Has complex types - show full structure
+        if (sampleValue !== '') {
+            yaml += `${spaces}${commentPrefix}${key}: ${sampleValue}\n`;
+        } else {
+            yaml += `${spaces}${commentPrefix}${key}:\n`;
+        }
+
+        // Show each union option as commented examples
+        options.forEach((option: z.ZodTypeAny, idx: number) => {
+            const optionConstructor = unwrapSchema(option).constructor.name;
+            const optionType = getTypeName(option);
+
+            if (optionConstructor === 'ZodObject' || optionConstructor === 'ZodRecord') {
+                yaml += `${spaces}${commentPrefix}## Option ${idx + 1} (${optionType}):\n`;
+                yaml += schemaToYamlWithComments(option, indent + 1, commentDepth + 1);
+            } else {
+                // For simple types in union
+                yaml += `${spaces}${commentPrefix}## Option ${idx + 1}: ${optionType}\n`;
+            }
+        });
+    } else {
+        // All scalar types - show as pipe-separated list on same line
+        const scalarTypes = options.map((option: z.ZodTypeAny) => getTypeName(option)).join(' | ');
+        yaml += `${spaces}${commentPrefix}${key}:  # ${scalarTypes}\n`;
+    }
+
+    return yaml;
+}
+
 function renderArrayElement(elementSchema: z.ZodTypeAny, indent: number, commentDepth: number): string {
     const spaces = '  '.repeat(indent);
     const commentPrefix = '#'.repeat(commentDepth);
@@ -128,6 +177,54 @@ function renderArrayElement(elementSchema: z.ZodTypeAny, indent: number, comment
             }
         });
         return yaml;
+    } else if (elementConstructor === 'ZodUnion') {
+        // Handle union types in arrays
+        const options = (unwrapped as any)._def?.options || [];
+
+        // Check if any option is a complex type
+        const hasComplexType = options.some((option: z.ZodTypeAny) => {
+            const optionConstructor = unwrapSchema(option).constructor.name;
+            return optionConstructor === 'ZodObject' || optionConstructor === 'ZodRecord';
+        });
+
+        if (hasComplexType) {
+            let yaml = `\n`;
+            // Show each union option as a separate array element example
+            options.forEach((option: z.ZodTypeAny, idx: number) => {
+                const optionConstructor = unwrapSchema(option).constructor.name;
+                const optionType = getTypeName(option);
+
+                if (optionConstructor === 'ZodObject' || optionConstructor === 'ZodRecord') {
+                    yaml += `${spaces}${commentPrefix}## Option ${idx + 1} (${optionType}):\n`;
+                    const objectYaml = schemaToYamlWithComments(option, indent + 1, commentDepth);
+                    const lines = objectYaml.split('\n');
+                    lines.forEach((line, lineIdx) => {
+                        if (line.trim()) {
+                            const leadingSpaces = line.length - line.trimStart().length;
+                            const preservedIndent = ' '.repeat(leadingSpaces);
+
+                            if (lineIdx === 0) {
+                                yaml += `${spaces}${preservedIndent}${commentPrefix}-\n`;
+                                yaml += `${spaces}${preservedIndent}  ${commentPrefix}${line.trimStart()}\n`;
+                            } else {
+                                yaml += `${spaces}${preservedIndent}  ${commentPrefix}${line.trimStart()}\n`;
+                            }
+                        }
+                    });
+                } else {
+                    // Simple type in union
+                    const sampleValue = generateSampleFromSchema(option);
+                    yaml += `${spaces}${commentPrefix}## Option ${idx + 1}: ${optionType}\n`;
+                    yaml += `${spaces}${commentPrefix}- ${sampleValue || ''}\n`;
+                }
+            });
+            return yaml;
+        } else {
+            // All scalar types - show as inline array with type info
+            const scalarTypes = options.map((option: z.ZodTypeAny) => getTypeName(option)).join(' | ');
+            const sampleValue = generateSampleFromSchema(elementSchema);
+            return ` [${sampleValue || ''}]  # (${scalarTypes})[]\n`;
+        }
     } else {
         // Scalar types use block notation
         const sampleValue = generateSampleFromSchema(elementSchema);
@@ -183,42 +280,7 @@ function schemaToYamlWithComments(schema: z.ZodTypeAny, indent = 0, incomingComm
                     yaml += renderArrayElement(elementSchema, indent, arrayCommentDepth);
                 }
             } else if (fieldConstructor === 'ZodUnion') {
-                // For unions, show options as comment
-                const options = (unwrappedField as any)._def?.options || [];
-                const sampleValue = generateSampleFromSchema(fieldSchema);
-
-                // Check if any option is a complex type
-                const hasComplexType = options.some((option: z.ZodTypeAny) => {
-                    const optionConstructor = unwrapSchema(option).constructor.name;
-                    return optionConstructor === 'ZodObject' || optionConstructor === 'ZodRecord';
-                });
-
-                if (hasComplexType) {
-                    // Has complex types - show full structure
-                    if (sampleValue !== '') {
-                        yaml += `${spaces}${commentPrefix}${key}: ${sampleValue}\n`;
-                    } else {
-                        yaml += `${spaces}${commentPrefix}${key}:\n`;
-                    }
-
-                    // Show each union option as commented examples
-                    options.forEach((option: z.ZodTypeAny, idx: number) => {
-                        const optionConstructor = unwrapSchema(option).constructor.name;
-                        const optionType = getTypeName(option);
-
-                        if (optionConstructor === 'ZodObject' || optionConstructor === 'ZodRecord') {
-                            yaml += `${spaces}${commentPrefix}## Option ${idx + 1} (${optionType}):\n`;
-                            yaml += schemaToYamlWithComments(option, indent + 1, commentDepth + 1);
-                        } else {
-                            // For simple types in union
-                            yaml += `${spaces}${commentPrefix}## Option ${idx + 1}: ${optionType}\n`;
-                        }
-                    });
-                } else {
-                    // All scalar types - show as pipe-separated list on same line
-                    const scalarTypes = options.map((option: z.ZodTypeAny) => getTypeName(option)).join(' | ');
-                    yaml += `${spaces}${commentPrefix}${key}:  # ${scalarTypes}\n`;
-                }
+                yaml += renderUnionField(fieldSchema, key, spaces, commentPrefix, indent, commentDepth);
             } else {
                 const sampleValue = generateSampleFromSchema(fieldSchema);
                 if (sampleValue !== '') {

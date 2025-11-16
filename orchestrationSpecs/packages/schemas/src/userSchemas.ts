@@ -97,7 +97,7 @@ export const HTTP_AUTH_MTLS = z.object({
     })
 });
 
-export const CLUSTER_VERSION_STRING = z.string();
+export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123])(?:\.[0-9]+)*$/);
 
 export const CLUSTER_CONFIG = z.object({
     endpoint: z.string(),
@@ -136,19 +136,23 @@ export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
 });
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
+    name: z.string().optional(),
     metadataMigrationConfig: METADATA_OPTIONS.optional(),
-    documentBackfillConfig: RFS_OPTIONS.optional()
-}).refine((data) =>
-        data.metadataMigrationConfig !== undefined || data.documentBackfillConfig !== undefined,
-    {
-        message: "At least one of metadataMigrationConfig or documentBackfillConfig must be provided",
-    });
+    documentBackfillConfig: RFS_OPTIONS.optional(),
+}).refine(data =>
+        data.metadataMigrationConfig !== undefined ||
+        data.documentBackfillConfig !== undefined,
+    {message: "At least one of metadataMigrationConfig or documentBackfillConfig must be provided"});
 
 export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
     createSnapshotConfig: CREATE_SNAPSHOT_OPTIONS.optional(),
     snapshotConfig: NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
     migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
-});
+}).refine(data => {
+    const names = data.migrations.map(m => m.name).filter(s => s);
+    return names.length == new Set(names).size;
+},
+    {message: "names of migration items must be unique when they are provided"});
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     skipApprovals : z.boolean().default(false).optional(),
