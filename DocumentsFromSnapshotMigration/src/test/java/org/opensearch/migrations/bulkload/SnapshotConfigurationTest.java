@@ -62,6 +62,10 @@ public class SnapshotConfigurationTest extends SourceTestBase {
     private static Stream<Arguments> snapshotConfigurationScenarios() {
         var targetVersion = SearchClusterContainer.OS_V2_19_1;
         return SupportedClusters.supportedSources(true).stream()
+            .filter(
+                    // Compressed ES 1 snapshots use currently not supported LZF compression
+                    source -> VersionMatchers.isES_1_X.negate().test(source.getVersion())
+            )
             .flatMap(sourceVersion ->
                 Stream.of(SnapshotConfiguration.values())
                     .map(config -> Arguments.of(sourceVersion, targetVersion, config))
