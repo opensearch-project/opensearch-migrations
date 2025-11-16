@@ -28,9 +28,11 @@ function isOptional(schema: z.ZodTypeAny): boolean {
 // Check if array has minimum requirement
 function getArrayMinLength(schema: z.ZodTypeAny): number | undefined {
     const unwrapped = unwrapSchema(schema);
-    const checks = (unwrapped as any)._def?.checks || [];
-    const minCheck = checks.find((c: any) => c.kind === 'min');
-    return minCheck?.value;
+    const checks = (unwrapped as any).def?.checks || [];
+    const minCheck = checks
+        .filter((c: any) => (c._zod?.def?.check ?? c.check) === 'min_length')
+        .map((c: any) => c._zod?.def?.minimum ?? c.minimum)[0];
+    return minCheck;
 }
 
 // Get the type name for display
@@ -101,28 +103,41 @@ function generateSampleFromSchema(schema: z.ZodTypeAny): any {
     return '';
 }
 
-// Render array element for bracket notation
-function renderArrayElementBracket(elementSchema: z.ZodTypeAny, indent: number, commentDepth: number): string {
+function renderArrayElement(elementSchema: z.ZodTypeAny, indent: number, commentDepth: number): string {
     const spaces = '  '.repeat(indent);
     const commentPrefix = '#'.repeat(commentDepth);
     const unwrapped = unwrapSchema(elementSchema);
     const elementConstructor = unwrapped.constructor.name;
 
     if (elementConstructor === 'ZodObject') {
-        let yaml = `${spaces}${commentPrefix}[\n`;
-        yaml += schemaToYamlWithComments(elementSchema, indent + 1, commentDepth);
-        yaml += `${spaces}${commentPrefix}]\n`;
+        let yaml = `\n`;
+        const objectYaml = schemaToYamlWithComments(elementSchema, indent + 1, 0);
+        // Prefix first line with dash, indent rest
+        const lines = objectYaml.split('\n');
+        lines.forEach((line, idx) => {
+            if (line.trim()) {
+                const leadingSpaces = line.length - line.trimStart().length;
+                const preservedIndent = ' '.repeat(leadingSpaces);
+
+                if (idx === 0) {
+                    yaml += `${spaces}${preservedIndent}${commentPrefix}-\n`;
+                    yaml += `${spaces}${preservedIndent}  ${commentPrefix}${line.trimStart()}\n`;
+                } else {
+                    yaml += `${spaces}${preservedIndent}  ${commentPrefix}${line.trimStart()}\n`;
+                }
+            }
+        });
         return yaml;
     } else {
+        // Scalar types use block notation
         const sampleValue = generateSampleFromSchema(elementSchema);
-        return `${spaces}${commentPrefix}[${sampleValue || ''}]\n`;
+        const typeName = getTypeName(elementSchema);
+        return ` [${sampleValue || ''}]  # ${typeName}[]\n`;
     }
 }
 
-// Function to build YAML with comments
-function schemaToYamlWithComments(schema: z.ZodTypeAny, indent = 0, commentDepth = 0): string {
+function schemaToYamlWithComments(schema: z.ZodTypeAny, indent = 0, incomingCommentDepth = 0): string {
     const spaces = '  '.repeat(indent);
-    const commentPrefix = '#'.repeat(commentDepth);
     let yaml = '';
 
     const unwrapped = unwrapSchema(schema);
@@ -137,44 +152,35 @@ function schemaToYamlWithComments(schema: z.ZodTypeAny, indent = 0, commentDepth
             const fieldSchema = shape[key];
             const description = fieldSchema.description;
             const typeName = getTypeName(fieldSchema);
-            const optional = isOptional(fieldSchema);
             const hasDefault = fieldSchema.constructor.name === 'ZodDefault';
+            const optional = isOptional(fieldSchema);
+            let commentDepth = incomingCommentDepth + (optional ? 1 : 0);
+
+            const commentPrefix = '#'.repeat(commentDepth);
 
             // Build comment line
             if (description) {
-                let comment = `${commentPrefix}# `;
-                comment += ` ${description}`;
-                yaml += `${spaces}${comment}\n`;
+                yaml += `${spaces}${commentPrefix}# ${description}\n`;
             }
 
             const unwrappedField = unwrapSchema(fieldSchema);
             const fieldConstructor = unwrappedField.constructor.name;
 
-            // Increase comment depth if this field is optional
-            const newCommentDepth = optional ? commentDepth + 1 : commentDepth;
-
             if (fieldConstructor === 'ZodObject' || fieldConstructor === 'ZodRecord') {
                 yaml += `${spaces}${commentPrefix}${key}:\n`;
-                yaml += schemaToYamlWithComments(fieldSchema, indent + 1, newCommentDepth);
+                yaml += schemaToYamlWithComments(fieldSchema, indent + 1, commentDepth);
             } else if (fieldConstructor === 'ZodArray') {
                 // Check if array has minimum length requirement
                 const minLength = getArrayMinLength(fieldSchema);
                 const arrayCommentDepth = (minLength === undefined || minLength === 0)
-                    ? newCommentDepth + 1
-                    : newCommentDepth;
+                    ? commentDepth + 1
+                    : commentDepth;
 
                 // Get the element schema
                 const elementSchema = (unwrappedField as any).element || (unwrappedField as any)._def?.type;
                 if (elementSchema) {
-                    yaml += `${spaces}${commentPrefix}${key}: `;
-                    const body = renderArrayElementBracket(elementSchema, indent, arrayCommentDepth);
-                    if (body.trimStart().replace(/^#*/g, '').trimEnd() !== '[]') {
-                        yaml += '\n';
-                        yaml += body;
-                    } else {
-                        yaml += '[]\n';
-                    }
-
+                    yaml += `${spaces}${commentPrefix}${key}:`;
+                    yaml += renderArrayElement(elementSchema, indent, arrayCommentDepth);
                 }
             } else if (fieldConstructor === 'ZodUnion') {
                 // For unions, show options as comment
@@ -201,24 +207,24 @@ function schemaToYamlWithComments(schema: z.ZodTypeAny, indent = 0, commentDepth
                         const optionType = getTypeName(option);
 
                         if (optionConstructor === 'ZodObject' || optionConstructor === 'ZodRecord') {
-                            yaml += `${spaces}${commentPrefix}  # Option ${idx + 1} (${optionType}):\n`;
-                            yaml += schemaToYamlWithComments(option, indent + 1, newCommentDepth + 1);
+                            yaml += `${spaces}${commentPrefix}## Option ${idx + 1} (${optionType}):\n`;
+                            yaml += schemaToYamlWithComments(option, indent + 1, commentDepth + 1);
                         } else {
                             // For simple types in union
-                            yaml += `${spaces}${commentPrefix}  # Option ${idx + 1}: ${optionType}\n`;
+                            yaml += `${spaces}${commentPrefix}## Option ${idx + 1}: ${optionType}\n`;
                         }
                     });
                 } else {
                     // All scalar types - show as pipe-separated list on same line
                     const scalarTypes = options.map((option: z.ZodTypeAny) => getTypeName(option)).join(' | ');
-                    yaml += `${spaces}${commentPrefix}${key}: # ${scalarTypes}\n`;
+                    yaml += `${spaces}${commentPrefix}${key}:  # ${scalarTypes}\n`;
                 }
             } else {
                 const sampleValue = generateSampleFromSchema(fieldSchema);
                 if (sampleValue !== '') {
                     yaml += `${spaces}${commentPrefix}${key}: ${sampleValue}\n`;
                 } else {
-                    yaml += `${spaces}${commentPrefix}${key}: ${typeName}\n`;
+                    yaml += `${spaces}${commentPrefix}${key}:  # ${typeName}\n`;
                 }
             }
         }

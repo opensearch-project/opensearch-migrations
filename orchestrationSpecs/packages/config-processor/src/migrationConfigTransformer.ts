@@ -39,9 +39,14 @@ async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string
 async function rewriteEndpointIfLocalStack(snapshotRepo: z.infer<typeof S3_REPO_CONFIG>):
     Promise<z.infer<typeof DENORMALIZED_S3_REPO_CONFIG>>
 {
-    const useLocalStack = /^localstacks?:\/\//i.test(snapshotRepo.endpoint);
+    if (!snapshotRepo.endpoint) {
+        return { ...snapshotRepo, useLocalStack: false };
+    }
+
+    const endpoint = snapshotRepo.endpoint;
+    const useLocalStack = /^localstacks?:\/\//i.test(endpoint);
     if (useLocalStack) {
-        snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint);
+        snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(endpoint);
     }
     return {...snapshotRepo, useLocalStack };
 }

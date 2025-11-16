@@ -11,66 +11,66 @@ export const KAFKA_SERVICES_CONFIG = z.object({
 
 export const S3_REPO_CONFIG = z.object({
     awsRegion: z.string().describe("The AWS region that the bucket reside in (us-east-2, etc)"),
-    endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)/).default("")
+    endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)/).default("").optional()
         .describe("Override the default S3 endpoint for clients to connect to.  " +
             "Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"),
     s3RepoPathUri: z.string().describe("s3:///BUCKETNAME/PATH"),
-    repoName: z.string().default("migration_assistant_repo")
+    repoName: z.string().default("migration_assistant_repo").optional()
 });
 
 export const PROXY_OPTIONS = z.object({
-    loggingConfigurationOverrideConfigMap: z.string().default(""),
-    otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
+    loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
+    otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
     setHeaders: z.array(z.string()).optional(),
 });
 
 export const REPLAYER_OPTIONS = z.object({
-    speedupFactor: z.number().default(1.1),
-    podReplicas: z.number().default(1),
-    authHeaderOverride: z.string().default(""),
-    loggingConfigurationOverrideConfigMap: z.string().default(""),
-    // docTransformerBase64: z.string().default(""),
-    // otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
+    speedupFactor: z.number().default(1.1).optional(),
+    podReplicas: z.number().default(1).optional(),
+    authHeaderOverride: z.string().default("").optional(),
+    loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
+    // docTransformerBase64: z.string().default("").optional(),
+    // otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
 });
 
 export const CREATE_SNAPSHOT_OPTIONS = z.object({
-    indexAllowlist: z.array(z.string()).default([]),
-    maxSnapshotRateMbPerNode: z.number().default(0),
-    loggingConfigurationOverrideConfigMap: z.string().default(""),
-    s3RoleArn: z.string().default("")
+    indexAllowlist: z.array(z.string()).default([]).optional(),
+    maxSnapshotRateMbPerNode: z.number().default(0).optional(),
+    loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
+    s3RoleArn: z.string().default("").optional()
 });
 
 export const METADATA_OPTIONS = z.object({
-    componentTemplateAllowlist: z.array(z.string()).default([]),
-    indexAllowlist: z.array(z.string()).default([]),
-    indexTemplateAllowlist: z.array(z.string()).default([]),
+    componentTemplateAllowlist: z.array(z.string()).default([]).optional(),
+    indexAllowlist: z.array(z.string()).default([]).optional(),
+    indexTemplateAllowlist: z.array(z.string()).default([]).optional(),
 
-    allowLooseVersionMatching: z.boolean().default(true),
-    clusterAwarenessAttributes: z.number().default(1),
-    loggingConfigurationOverrideConfigMap: z.string().default(""),
-    multiTypeBehavior: z.union(["NONE", "UNION", "SPLIT"].map(s=>z.literal(s))).default("NONE"),
-    otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
-    output: z.union(["HUMAN_READABLE", "JSON"].map(s=>z.literal(s))).default("HUMAN_READABLE"),
-    transformerConfigBase64: z.string().default(""),
+    allowLooseVersionMatching: z.boolean().default(true).optional(),
+    clusterAwarenessAttributes: z.number().default(1).optional(),
+    loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
+    multiTypeBehavior: z.union(["NONE", "UNION", "SPLIT"].map(s=>z.literal(s))).default("NONE").optional(),
+    otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
+    output: z.union(["HUMAN_READABLE", "JSON"].map(s=>z.literal(s))).default("HUMAN_READABLE").optional(),
+    transformerConfigBase64: z.string().default("").optional(),
 
-    skipEvaluateApproval: z.boolean().default(false),
-    skipMigrateApproval: z.boolean().default(false)
+    skipEvaluateApproval: z.boolean().default(false).optional(),
+    skipMigrateApproval: z.boolean().default(false).optional()
 });
 
 export const RFS_OPTIONS = z.object({
-    indexAllowlist: z.array(z.string()).default([]),
-    podReplicas: z.number().default(1),
+    indexAllowlist: z.array(z.string()).default([]).optional(),
+    podReplicas: z.number().default(1).optional(),
 
-    loggingConfigurationOverrideConfigMap: z.string().default(""),
-    allowLooseVersionMatching: z.boolean().default(true).describe(""),
-    docTransformerConfigBase64: z.string().default(""),
-    documentsPerBulkRequest: z.number().default(0x7fffffff),
-    initialLeaseDuration: z.string().default("PT10M"),
-    maxConnections: z.number().default(10),
-    maxShardSizeBytes: z.number().default(80*1024*1024*1024),
-    otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
+    loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
+    allowLooseVersionMatching: z.boolean().default(true).describe("").optional(),
+    docTransformerConfigBase64: z.string().default("").optional(),
+    documentsPerBulkRequest: z.number().default(0x7fffffff).optional(),
+    initialLeaseDuration: z.string().default("PT10M").optional(),
+    maxConnections: z.number().default(10).optional(),
+    maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional(),
+    otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
 
-    skipApproval: z.boolean().default(false)
+    skipApproval: z.boolean().default(false).optional()
 });
 
 export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
@@ -97,11 +97,11 @@ export const HTTP_AUTH_MTLS = z.object({
     })
 });
 
-export const CLUSTER_VERSION_STRING = z.string().default("ES 7.10");
+export const CLUSTER_VERSION_STRING = z.string();
 
 export const CLUSTER_CONFIG = z.object({
     endpoint: z.string(),
-    allowInsecure: z.boolean().optional(),
+    allowInsecure: z.boolean().default(false).optional(),
     version: CLUSTER_VERSION_STRING,
     authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
 });
@@ -151,10 +151,10 @@ export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
 });
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
-    skipApprovals : z.boolean().default(false),
+    skipApprovals : z.boolean().default(false).optional(),
     fromSource: z.string(),
     toTarget: z.string(),
-    snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).optional(),
+    snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).min(1).optional(),
     replayerConfig: REPLAYER_OPTIONS.optional()
 });
 
@@ -162,8 +162,8 @@ export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);
 
 export const OVERALL_MIGRATION_CONFIG = z.object({
-    skipApprovals : z.boolean().default(false),
-    skipPreApproval : z.boolean().default(false),
+    skipApprovals : z.boolean().default(false).optional(),
+    skipPreApproval : z.boolean().default(false).optional(),
     sourceClusters: SOURCE_CLUSTERS_MAP,
     targetClusters: TARGET_CLUSTERS_MAP,
     migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG).min(1)

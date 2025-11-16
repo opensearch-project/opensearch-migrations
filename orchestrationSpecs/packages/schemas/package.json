@@ -23,10 +23,15 @@
     "type-check": "tsc --build --noEmit",
     "schema": "tsx src/showUserSchema.ts",
     "argo-schema": "tsx src/showArgoSchema.ts",
-    "make-sample": "tsx src/makeSample.ts"
+    "make-sample": "tsx src/makeSample.ts",
+    "test": "jest"
   },
   "dependencies": {
     "zod": "*",
     "@asteasolutions/zod-to-openapi": "^8.1.0"
+  },
+  "devDependencies": {
+    "@types/jest": "*",
+    "expect-type": "*"
   }
 }

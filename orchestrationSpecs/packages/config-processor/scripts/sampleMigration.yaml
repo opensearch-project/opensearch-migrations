@@ -1,5 +1,5 @@
 {
-  skipAllApprovals : false,
+  skipApprovals : false,
   skipPreApproval: true,
   sourceClusters: {
     "source1": {

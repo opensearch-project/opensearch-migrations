@@ -34,12 +34,17 @@ const COMMON_METADATA_PARAMETERS = {
 export function makeRepoParamDict(
     repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>,
     includes3LocalDir: boolean) {
-    return expr.makeDict({
-        "s3Endpoint": expr.get(repoConfig, "endpoint"),
-        "s3RepoUri": expr.get(repoConfig, "s3RepoPathUri"),
-        "s3Region": expr.get(repoConfig, "awsRegion"),
-        ...(includes3LocalDir ? { "s3LocalDir": expr.literal("/tmp") } : {})
-    });
+    return expr.mergeDicts(
+        expr.ternary(
+            expr.hasKey(repoConfig, "endpoint"),
+            expr.makeDict({"s3Endpoint": expr.getLoose(repoConfig, "endpoint")}),
+            expr.makeDict({})),
+        expr.makeDict({
+            "s3RepoUri": expr.get(repoConfig, "s3RepoPathUri"),
+            "s3Region": expr.get(repoConfig, "awsRegion"),
+            ...(includes3LocalDir ? { "s3LocalDir": expr.literal("/tmp") } : {})
+        })
+    );
 }
 
 function makeParamsDict(
