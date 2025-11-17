@@ -157,7 +157,7 @@ otelConfiguration:
         metrics:
           receivers: [ otlp, prometheus ]
           processors: [ batch ]
-          exporters: [ prometheus, debug ]
+          exporters: [ prometheus ]
         traces:
           receivers: [ otlp ]
           processors: [ batch ]

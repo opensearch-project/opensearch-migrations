@@ -109,7 +109,7 @@ otelConfiguration:
         metrics:
           receivers: [otlp, prometheus]
           processors: [batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta]
-          exporters: [awsemf, prometheus, debug]
+          exporters: [awsemf, prometheus]
 
 charts:
   fluent-bit:
