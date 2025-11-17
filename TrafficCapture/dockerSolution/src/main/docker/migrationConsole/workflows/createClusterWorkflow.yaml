@@ -5,10 +5,10 @@ metadata:
 spec:
   workflowTemplateRef:
     name: cluster-templates
-  entrypoint: opensearch-3-1-single-node
+  entrypoint: elasticsearch-5-6-single-node
   arguments:
     parameters:
       - name: cluster-name
-        value: "source-opensearch-3-1-test-cluster"
+        value: "elasticsearch-5-6-single-node"
       - name: namespace
         value: "ma"
