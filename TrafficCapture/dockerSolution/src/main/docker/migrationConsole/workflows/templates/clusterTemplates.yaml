@@ -12,7 +12,7 @@ spec:
           - name: cluster-name
           - name: namespace
       container:
-        image: dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:latest
         command: [ sh, -c ]
         args:
           - |
@@ -229,7 +229,7 @@ spec:
           - name: cluster-name
           - name: namespace
       container:
-        image: dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:latest
         command: [sh, -c]
         args:
           - |
@@ -421,7 +421,7 @@ spec:
           - name: cluster-name
           - name: namespace
       container:
-        image: dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:latest
         command: [sh, -c]
         args:
           - |
@@ -515,7 +515,7 @@ spec:
           - name: cluster-name
           - name: namespace
       container:
-        image: dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:latest
         command: [sh, -c]
         args:
           - |
@@ -646,7 +646,7 @@ spec:
           - name: cluster-name
           - name: namespace
       container:
-        image: dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:latest
         command: [sh, -c]
         args:
           - |
@@ -760,7 +760,7 @@ spec:
           - name: cluster-name
           - name: namespace
       container:
-        image: dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:latest
         command: [sh, -c]
         args:
           - |
@@ -839,7 +839,7 @@ spec:
           - name: cluster-name
           - name: namespace
       container:
-        image: dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:latest
         command: [sh, -c]
         args:
           - |
@@ -921,7 +921,7 @@ spec:
           - name: cluster-name
           - name: namespace
       container:
-        image: dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:latest
         command: [sh, -c]
         args:
           - |
