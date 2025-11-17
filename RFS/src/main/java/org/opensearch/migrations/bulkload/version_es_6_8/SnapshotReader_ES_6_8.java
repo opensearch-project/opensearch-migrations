@@ -57,11 +57,6 @@ public class SnapshotReader_ES_6_8 implements ClusterSnapshotReader {
     }
 
     @Override
-    public int getBufferSizeInBytes() {
-        return ElasticsearchConstants_ES_6_8.BUFFER_SIZE_IN_BYTES;
-    }
-
-    @Override
     public boolean getSoftDeletesPossible() {
         return ElasticsearchConstants_ES_6_8.SOFT_DELETES_POSSIBLE;
     }

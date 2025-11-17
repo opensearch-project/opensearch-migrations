@@ -98,14 +98,10 @@ public class LuceneDocumentsReaderTest {
         // Extract files from metadata
         Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
         filesToUnpack.addAll(shardMetadata.getFiles());
-        
-        // Ensure the blob files are prepped
-        repoAccessor.prepBlobFiles(shardMetadata);
 
         SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
             repoAccessor,
-            tempDirectory,
-            Integer.MAX_VALUE
+            tempDirectory
         ).create(filesToUnpack, "test_updates_deletes", shardMetadata.getIndexId(), 0);
         Path luceneDir = unpacker.unpack();
 
@@ -168,14 +164,10 @@ public class LuceneDocumentsReaderTest {
         // Extract files from metadata
         Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
         filesToUnpack.addAll(shardMetadata.getFiles());
-        
-        // Ensure the blob files are prepped
-        repoAccessor.prepBlobFiles(shardMetadata);
 
         SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
             repoAccessor,
-            tempDirectory,
-            Integer.MAX_VALUE
+            tempDirectory
         ).create(filesToUnpack, "test_updates_deletes", shardMetadata.getIndexId(), 0);
         Path luceneDir = unpacker.unpack();
 
@@ -328,14 +320,10 @@ public class LuceneDocumentsReaderTest {
         // Extract files from metadata
         Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
         filesToUnpack.addAll(shardMetadata.getFiles());
-        
-        // Ensure the blob files are prepped
-        repoAccessor.prepBlobFiles(shardMetadata);
 
         SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
             repoAccessor,
-            tempDirectory,
-            Integer.MAX_VALUE
+            tempDirectory
         ).create(filesToUnpack, "test_updates_deletes", shardMetadata.getIndexId(), 0);
         Path luceneDir = unpacker.unpack();
 
@@ -372,14 +360,10 @@ public class LuceneDocumentsReaderTest {
         // Extract files from metadata
         Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
         filesToUnpack.addAll(shardMetadata.getFiles());
-        
-        // Ensure the blob files are prepped
-        repoAccessor.prepBlobFiles(shardMetadata);
 
         SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
             repoAccessor,
-            tempDirectory,
-            Integer.MAX_VALUE
+            tempDirectory
         ).create(filesToUnpack, "test_updates_deletes", shardMetadata.getIndexId(), 0);
         Path luceneDir = unpacker.unpack();
 

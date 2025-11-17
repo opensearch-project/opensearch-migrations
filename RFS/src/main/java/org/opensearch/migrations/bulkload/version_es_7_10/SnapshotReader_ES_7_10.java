@@ -69,10 +69,6 @@ public class SnapshotReader_ES_7_10 implements ClusterSnapshotReader {
         return new ShardMetadataFactory_ES_7_10(this.getSnapshotRepo());
     }
 
-    @Override
-    public int getBufferSizeInBytes() {
-        return ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES;
-    }
 
     @Override
     public boolean getSoftDeletesPossible() {

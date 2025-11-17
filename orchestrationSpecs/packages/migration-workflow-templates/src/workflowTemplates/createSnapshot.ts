@@ -3,8 +3,14 @@ import {z} from "zod";
 import {
     CLUSTER_CONFIG,
     COMPLETE_SNAPSHOT_CONFIG,
-    CONSOLE_SERVICES_CONFIG_FILE, CREATE_SNAPSHOT_OPTIONS,
-    METADATA_OPTIONS, NAMED_SOURCE_CLUSTER_CONFIG, NAMED_TARGET_CLUSTER_CONFIG, S3_REPO_CONFIG, TARGET_CLUSTER_CONFIG
+    CONSOLE_SERVICES_CONFIG_FILE,
+    CREATE_SNAPSHOT_OPTIONS,
+    DEFAULT_RESOURCES,
+    METADATA_OPTIONS,
+    NAMED_SOURCE_CLUSTER_CONFIG,
+    NAMED_TARGET_CLUSTER_CONFIG,
+    S3_REPO_CONFIG,
+    TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
 import {
@@ -69,6 +75,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/root/createSnapshot/bin/CreateSnapshot"])
             .addEnvVarsFromRecord(getSourceHttpAuthCreds(getHttpAuthSecretName(b.inputs.sourceConfig)))
+            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
             .addArgs([
                 expr.literal("---INLINE-JSON"),
                 expr.asString(expr.serialize(
