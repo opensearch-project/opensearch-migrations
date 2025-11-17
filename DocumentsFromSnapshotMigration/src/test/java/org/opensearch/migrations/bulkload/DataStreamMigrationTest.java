@@ -18,6 +18,7 @@ import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.utils.FileSystemUtils;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -284,8 +285,12 @@ public class DataStreamMigrationTest extends SourceTestBase {
             log.info("✓ Document content is preserved");
 
         } finally {
-            deleteTree(tempDirSnapshot);
-            deleteTree(tempDirLucene);
+            if (tempDirSnapshot != null) {
+                FileSystemUtils.deleteDirectories(tempDirSnapshot.toString());
+            }
+            if (tempDirLucene != null) {
+                FileSystemUtils.deleteDirectories(tempDirLucene.toString());
+            }
         }
     }
 

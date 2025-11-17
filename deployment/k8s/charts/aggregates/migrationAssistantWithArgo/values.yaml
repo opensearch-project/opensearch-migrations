@@ -152,12 +152,15 @@ otelConfiguration:
         tls:
           insecure: true
     service:
+      telemetry:
+        logs:
+          level: warn
       extensions: [ zpages, pprof, health_check ]
       pipelines:
         metrics:
           receivers: [ otlp, prometheus ]
           processors: [ batch ]
-          exporters: [ prometheus, debug ]
+          exporters: [ prometheus ]
         traces:
           receivers: [ otlp ]
           processors: [ batch ]
