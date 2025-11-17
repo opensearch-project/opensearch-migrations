@@ -12,7 +12,6 @@ public class AllowlistEntryTest {
     void testLiteralEntry_exactMatch() {
         var entry = new AllowlistEntry("my-index");
         
-        assertThat(entry.isRegex(), equalTo(false));
         assertThat(entry.getOriginalValue(), equalTo("my-index"));
         assertThat(entry.matches("my-index"), equalTo(true));
         assertThat(entry.matches("my-index-2"), equalTo(false));
@@ -23,7 +22,6 @@ public class AllowlistEntryTest {
     void testLiteralEntry_withDots() {
         var entry = new AllowlistEntry("my.index.2024");
         
-        assertThat(entry.isRegex(), equalTo(false));
         assertThat(entry.matches("my.index.2024"), equalTo(true));
         assertThat(entry.matches("myXindexX2024"), equalTo(false)); // Dots are literal, not regex wildcards
         assertThat(entry.matches("my.index.2025"), equalTo(false));
@@ -33,7 +31,6 @@ public class AllowlistEntryTest {
     void testLiteralEntry_withHyphens() {
         var entry = new AllowlistEntry("logs-app-2024");
         
-        assertThat(entry.isRegex(), equalTo(false));
         assertThat(entry.matches("logs-app-2024"), equalTo(true));
         assertThat(entry.matches("logs-app-2025"), equalTo(false));
     }
@@ -42,7 +39,6 @@ public class AllowlistEntryTest {
     void testLiteralEntry_withSpecialChars() {
         var entry = new AllowlistEntry("index_name-v1.0");
         
-        assertThat(entry.isRegex(), equalTo(false));
         assertThat(entry.matches("index_name-v1.0"), equalTo(true));
         assertThat(entry.matches("index_name-v1X0"), equalTo(false));
     }
@@ -51,7 +47,6 @@ public class AllowlistEntryTest {
     void testRegexEntry_simple() {
         var entry = new AllowlistEntry("regex:logs-.*");
         
-        assertThat(entry.isRegex(), equalTo(true));
         assertThat(entry.getOriginalValue(), equalTo("regex:logs-.*"));
         assertThat(entry.matches("logs-app"), equalTo(true));
         assertThat(entry.matches("logs-web"), equalTo(true));
@@ -64,7 +59,6 @@ public class AllowlistEntryTest {
     void testRegexEntry_withDigits() {
         var entry = new AllowlistEntry("regex:test-\\d+");
         
-        assertThat(entry.isRegex(), equalTo(true));
         assertThat(entry.matches("test-1"), equalTo(true));
         assertThat(entry.matches("test-123"), equalTo(true));
         assertThat(entry.matches("test-0"), equalTo(true));
@@ -76,7 +70,6 @@ public class AllowlistEntryTest {
     void testRegexEntry_complex() {
         var entry = new AllowlistEntry("regex:logs-[a-z]+-\\d{4}");
         
-        assertThat(entry.isRegex(), equalTo(true));
         assertThat(entry.matches("logs-app-2024"), equalTo(true));
         assertThat(entry.matches("logs-web-2024"), equalTo(true));
         assertThat(entry.matches("logs-app-24"), equalTo(false)); // Only 2 digits
@@ -88,7 +81,6 @@ public class AllowlistEntryTest {
     void testRegexEntry_alternation() {
         var entry = new AllowlistEntry("regex:(logs|metrics)-.*-2024");
         
-        assertThat(entry.isRegex(), equalTo(true));
         assertThat(entry.matches("logs-app-2024"), equalTo(true));
         assertThat(entry.matches("metrics-cpu-2024"), equalTo(true));
         assertThat(entry.matches("traces-app-2024"), equalTo(false));
@@ -98,7 +90,6 @@ public class AllowlistEntryTest {
     void testRegexEntry_dotMatching() {
         var entry = new AllowlistEntry("regex:logs\\..*");
         
-        assertThat(entry.isRegex(), equalTo(true));
         assertThat(entry.matches("logs.app"), equalTo(true));
         assertThat(entry.matches("logs.web.2024"), equalTo(true));
         assertThat(entry.matches("logsXapp"), equalTo(false)); // Dot is escaped, so only literal dot matches
@@ -160,7 +151,6 @@ public class AllowlistEntryTest {
     void testEmptyString() {
         var entry = new AllowlistEntry("");
         
-        assertThat(entry.isRegex(), equalTo(false));
         assertThat(entry.matches(""), equalTo(true));
         assertThat(entry.matches("anything"), equalTo(false));
     }
@@ -169,7 +159,6 @@ public class AllowlistEntryTest {
     void testRegexEntry_matchesEmptyString() {
         var entry = new AllowlistEntry("regex:.*");
         
-        assertThat(entry.isRegex(), equalTo(true));
         assertThat(entry.matches(""), equalTo(true));
         assertThat(entry.matches("anything"), equalTo(true));
     }
@@ -179,7 +168,6 @@ public class AllowlistEntryTest {
         // A literal entry that looks like it could be regex but isn't
         var entry = new AllowlistEntry("test.*");
         
-        assertThat(entry.isRegex(), equalTo(false));
         assertThat(entry.matches("test.*"), equalTo(true));
         assertThat(entry.matches("test123"), equalTo(false)); // Not treated as regex
     }
@@ -198,7 +186,6 @@ public class AllowlistEntryTest {
     void testRegexEntry_withEscapedSpecialChars() {
         var entry = new AllowlistEntry("regex:test-\\[\\d+\\]");
         
-        assertThat(entry.isRegex(), equalTo(true));
         assertThat(entry.matches("test-[123]"), equalTo(true));
         assertThat(entry.matches("test-[0]"), equalTo(true));
         assertThat(entry.matches("test-123"), equalTo(false)); // Brackets are required

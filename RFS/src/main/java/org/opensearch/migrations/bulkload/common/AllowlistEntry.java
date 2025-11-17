@@ -19,7 +19,6 @@ public class AllowlistEntry {
     private static final String REGEX_PREFIX = "regex:";
     
     private final String originalValue;
-    private final boolean isRegex;
     private final Pattern pattern;
     
     /**
@@ -39,7 +38,6 @@ public class AllowlistEntry {
         this.originalValue = value;
         
         if (value.startsWith(REGEX_PREFIX)) {
-            this.isRegex = true;
             String patternString = value.substring(REGEX_PREFIX.length());
             
             if (patternString.isEmpty()) {
@@ -55,7 +53,6 @@ public class AllowlistEntry {
                 );
             }
         } else {
-            this.isRegex = false;
             this.pattern = null;
         }
     }
@@ -74,7 +71,7 @@ public class AllowlistEntry {
             return false;
         }
         
-        if (isRegex) {
+        if (pattern != null) {
             return pattern.matcher(testValue).matches();
         } else {
             return originalValue.equals(testValue);
@@ -88,14 +85,5 @@ public class AllowlistEntry {
      */
     public String getOriginalValue() {
         return originalValue;
-    }
-    
-    /**
-     * Returns whether this entry is a regex pattern.
-     * 
-     * @return true if this entry uses regex matching, false for literal matching
-     */
-    public boolean isRegex() {
-        return isRegex;
     }
 }
