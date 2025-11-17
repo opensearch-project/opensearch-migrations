@@ -104,6 +104,7 @@ public class TestCreateSnapshot {
 
             // Parse both JSON strings into JsonNode objects
             JsonNode actualRegisterRepoRequest = objectMapper.readTree(registerRepoRequestContent);
+            // Verify default values: compress=false (default)
             JsonNode expectedRegisterRepoRequest = objectMapper
                     .createObjectNode()
                     .put("type", "s3")
@@ -116,6 +117,7 @@ public class TestCreateSnapshot {
             Assertions.assertEquals(expectedRegisterRepoRequest, actualRegisterRepoRequest);
 
             JsonNode actualCreateSnapshotRequest = objectMapper.readTree(createSnapshotRequestContent);
+            // Verify default values: include_global_state=true (default)
             JsonNode expectedCreateSnapshotRequest = objectMapper.createObjectNode()
                             .put("indices", "_all")
                             .put("ignore_unavailable", true)

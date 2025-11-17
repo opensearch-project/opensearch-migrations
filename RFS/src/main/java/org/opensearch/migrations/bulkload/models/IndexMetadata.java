@@ -1,12 +1,11 @@
 package org.opensearch.migrations.bulkload.models;
 
-import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.file.Path;
 
-import org.opensearch.migrations.bulkload.common.ByteArrayIndexInput;
 import org.opensearch.migrations.bulkload.common.InvalidSnapshotFormatException;
+import org.opensearch.migrations.bulkload.common.SnapshotMetadataLoader;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.transformation.entity.Index;
 
@@ -15,7 +14,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
-import shadow.lucene9.org.apache.lucene.codecs.CodecUtil;
 
 // All subclasses need to be annotated with this
 @JsonTypeInfo(use = JsonTypeInfo.Id.CLASS, property = "type")
@@ -51,16 +49,8 @@ public interface IndexMetadata extends Index {
             Path filePath = getRepoDataProvider().getRepo().getIndexMetadataFilePath(indexId, indexFileId);
 
             try (InputStream fis = new FileInputStream(filePath.toFile())) {
-                // Don't fully understand what the value of this code is, but it progresses the stream so we need to do
-                // it
-                // See:
-                // https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/repositories/blobstore/ChecksumBlobStoreFormat.java#L100
                 byte[] bytes = fis.readAllBytes();
-                ByteArrayIndexInput indexInput = new ByteArrayIndexInput("index-metadata", bytes);
-                CodecUtil.checksumEntireFile(indexInput);
-                CodecUtil.checkHeader(indexInput, "index-metadata", 1, 1);
-                int filePointer = (int) indexInput.getFilePointer();
-                InputStream bis = new ByteArrayInputStream(bytes, filePointer, bytes.length - filePointer);
+                InputStream bis = SnapshotMetadataLoader.processMetadataBytes(bytes, "index-metadata");
 
                 ObjectMapper smileMapper = new ObjectMapper(smileFactory);
                 return smileMapper.readTree(bis);

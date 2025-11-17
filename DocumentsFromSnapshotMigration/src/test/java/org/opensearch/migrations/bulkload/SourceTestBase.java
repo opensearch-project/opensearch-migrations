@@ -28,6 +28,7 @@ import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
+import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
@@ -222,6 +223,36 @@ public class SourceTestBase {
         Version targetVersion,
         String transformationConfig
     ) {
+        return migrateDocumentsSequentially(
+            sourceRepo,
+            previousSnapshotName,
+            snapshotName,
+            indexAllowlist,
+            target,
+            runCounter,
+            clockJitter,
+            testContext,
+            sourceVersion,
+            targetVersion,
+            transformationConfig,
+            DocumentExceptionAllowlist.empty()
+        );
+    }
+
+    public static int migrateDocumentsSequentially(
+        FileSystemRepo sourceRepo,
+        String previousSnapshotName,
+        String snapshotName,
+        List<String> indexAllowlist,
+        SearchClusterContainer target,
+        AtomicInteger runCounter,
+        Random clockJitter,
+        DocumentMigrationTestContext testContext,
+        Version sourceVersion,
+        Version targetVersion,
+        String transformationConfig,
+        DocumentExceptionAllowlist allowlist
+    ) {
         for (int runNumber = 1; ; ++runNumber) {
             try {
                 var workResult = migrateDocumentsWithOneWorker(
@@ -234,7 +265,8 @@ public class SourceTestBase {
                     testContext,
                     sourceVersion,
                     targetVersion,
-                    transformationConfig
+                    transformationConfig,
+                    allowlist
                 );
                 if (workResult == CompletionStatus.NOTHING_DONE) {
                     return runNumber;
@@ -270,6 +302,36 @@ public class SourceTestBase {
         Version sourceVersion,
         Version targetVersion,
         String transformationConfig
+    ) throws RfsMigrateDocuments.NoWorkLeftException {
+        return migrateDocumentsWithOneWorker(
+            sourceRepo,
+            snapshotName,
+            previousSnapshotName,
+            indexAllowlist,
+            targetAddress,
+            clockJitter,
+            context,
+            sourceVersion,
+            targetVersion,
+            transformationConfig,
+            DocumentExceptionAllowlist.empty()
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    @SneakyThrows
+    public static CompletionStatus migrateDocumentsWithOneWorker(
+        SourceRepo sourceRepo,
+        String snapshotName,
+        String previousSnapshotName,
+        List<String> indexAllowlist,
+        String targetAddress,
+        Random clockJitter,
+        DocumentMigrationTestContext context,
+        Version sourceVersion,
+        Version targetVersion,
+        String transformationConfig,
+        DocumentExceptionAllowlist allowlist
     ) throws RfsMigrateDocuments.NoWorkLeftException {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
@@ -331,7 +393,7 @@ public class SourceTestBase {
                 var clientFactory = new OpenSearchClientFactory(connectionContext);
                 return RfsMigrateDocuments.run(
                     readerFactory,
-                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> docTransformer),
+                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> docTransformer, allowlist),
                     progressCursor,
                     workCoordinator,
                     Duration.ofMinutes(10),
@@ -431,10 +493,22 @@ public class SourceTestBase {
         String snapshotName,
         SnapshotTestContext testSnapshotContext
     ) throws Exception {
+        createSnapshot(sourceContainer, snapshotName, testSnapshotContext, false, true);
+    }
+
+    public void createSnapshot(
+        SearchClusterContainer sourceContainer,
+        String snapshotName,
+        SnapshotTestContext testSnapshotContext,
+        boolean compressionEnabled,
+        boolean includeGlobalState
+    ) throws Exception {
         var args = new CreateSnapshot.Args();
         args.snapshotName = snapshotName;
         args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
         args.sourceArgs.host = sourceContainer.getUrl();
+        args.compressionEnabled = compressionEnabled;
+        args.includeGlobalState = includeGlobalState;
 
         var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
         snapshotCreator.run();
