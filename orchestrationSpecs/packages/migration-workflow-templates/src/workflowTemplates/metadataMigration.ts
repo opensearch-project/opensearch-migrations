@@ -7,7 +7,7 @@ import {
     S3_REPO_CONFIG
 } from "@opensearch-migrations/schemas";
 import {
-    BaseExpression,
+    BaseExpression, configMapKey,
     defineRequiredParam,
     expr,
     INTERNAL,
@@ -121,6 +121,15 @@ export const MetadataMigration = WorkflowBuilder.create({
     .addTemplate("migrateMetaData", t => t
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof METADATA_OPTIONS>>())
         .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
+        .addOptionalOrConfigMap("skipEvaluateApproval",
+            configMapKey(t.inputs.workflowParameters.approvalConfigMapName, "WRONG_THING_FIXME_TODO", true),
+            typeToken<boolean>(),
+            c=> false as boolean)
+        .addOptionalOrConfigMap("skipMigrateApproval",
+            configMapKey(t.inputs.workflowParameters.approvalConfigMapName, "WRONG_THING_FIXME_TODO", true),
+            typeToken<boolean>(),
+            c=> false as boolean)
+
         .addSteps(b => b
             .addStep("metadataEvaluate", INTERNAL, "runMetadata", c =>
                 c.register({
@@ -128,14 +137,16 @@ export const MetadataMigration = WorkflowBuilder.create({
                     commandMode: "evaluate"
                 })
             )
-            .addStep("approveEvaluate", INTERNAL, "approveEvaluate")
+            .addStep("approveEvaluate", INTERNAL, "approveEvaluate",
+                { when:  { templateExp: expr.not(expr.deserializeRecord(b.inputs.skipEvaluateApproval))}})
             .addStep("metadataMigrate", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     commandMode: "migrate"
                 })
             )
-            .addStep("approveMigrate", INTERNAL, "approveMigrate")
+            .addStep("approveMigrate", INTERNAL, "approveMigrate",
+                { when:  { templateExp: expr.not(expr.deserializeRecord(b.inputs.skipMigrateApproval))}})
         )
     )
 

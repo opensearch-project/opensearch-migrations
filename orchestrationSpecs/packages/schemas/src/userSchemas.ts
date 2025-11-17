@@ -53,8 +53,8 @@ export const METADATA_OPTIONS = z.object({
     output: z.union(["HUMAN_READABLE", "JSON"].map(s=>z.literal(s))).default("HUMAN_READABLE").optional(),
     transformerConfigBase64: z.string().default("").optional(),
 
-    skipEvaluateApproval: z.boolean().default(false).optional(),
-    skipMigrateApproval: z.boolean().default(false).optional()
+    skipEvaluateApproval: z.boolean().default(false).optional(), // TODO - fullmigration
+    skipMigrateApproval: z.boolean().default(false).optional() // TODO - fullmigration
 });
 
 export const RFS_OPTIONS = z.object({
@@ -70,7 +70,7 @@ export const RFS_OPTIONS = z.object({
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional(),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
 
-    skipApproval: z.boolean().default(false).optional()
+    skipApproval: z.boolean().default(false).optional()  // TODO - fullmigration
 });
 
 export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
@@ -155,7 +155,7 @@ export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
     {message: "names of migration items must be unique when they are provided"});
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
-    skipApprovals : z.boolean().default(false).optional(),
+    skipApprovals : z.boolean().default(false).optional(),  // TODO - format
     fromSource: z.string(),
     toTarget: z.string(),
     snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).min(1).optional(),
@@ -166,8 +166,8 @@ export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);
 
 export const OVERALL_MIGRATION_CONFIG = z.object({
-    skipApprovals : z.boolean().default(false).optional(),
-    skipPreApproval : z.boolean().default(false).optional(),
+    skipApprovals : z.boolean().default(false).optional(), // TODO - format
+    skipPreApproval : z.boolean().default(false).optional(),  // DONE - fullmigration
     sourceClusters: SOURCE_CLUSTERS_MAP,
     targetClusters: TARGET_CLUSTERS_MAP,
     migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG).min(1)
