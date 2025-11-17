@@ -15,6 +15,9 @@ switch(command) {
     case 'initialize':
         require('./runMigrationInitializer');
         break;
+    case 'formatApprovals':
+        require('./formatApprovals');
+        break;
     case 'showSchema':
         require('@opensearch-migrations/schemas/showUserSchema');
         break;

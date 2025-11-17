@@ -3,6 +3,7 @@ import {parse} from "yaml";
 import * as fs from "node:fs";
 import {OVERALL_MIGRATION_CONFIG, zodSchemaToJsonSchema} from "@opensearch-migrations/schemas";
 import {Console} from "console";
+import {parseUserConfig} from "./userConfigReader";
 
 global.console = new Console({
     stdout: process.stderr,
@@ -171,28 +172,8 @@ export function makeLockedConfigSchema<TSchema extends ZodTypeAny>(
     return buildLockedSchemaFromValue(data, [], skipPatterns);
 }
 
-async function readStdin(): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const chunks: Buffer[] = [];
-
-        process.stdin.on('data', (chunk) => {
-            chunks.push(chunk);
-        });
-
-        process.stdin.on('end', () => {
-            resolve(Buffer.concat(chunks).toString('utf-8'));
-        });
-
-        process.stdin.on('error', (error) => {
-            reject(error);
-        });
-    });
-}
-
 async function main() {
     const args = process.argv.slice(2);
-
-    let yamlContent: string;
 
     if (args.length === 0) {
         console.error("Error: no args provided.");
@@ -200,40 +181,13 @@ async function main() {
         process.exit(2);
     }
 
-    if (args[0] === '-') {
-        try {
-            yamlContent = await readStdin();
-        } catch (error) {
-            console.error("Error reading from stdin:', error");
-            console.error(COMMAND_LINE_HELP_MESSAGE);
-            process.exit(3);
-        }
-    } else {
-        const yamlPath = args[0];
-        try {
-            yamlContent = fs.readFileSync(yamlPath, 'utf-8');
-        } catch (error) {
-            console.error(`Error reading file ${yamlPath}:`, error);
-            console.error(COMMAND_LINE_HELP_MESSAGE);
-            process.exit(4);
-        }
-    }
-
-    let data: any;
+    let data
     try {
-        data = parse(yamlContent);
+        data = await parseUserConfig(args[0]);
     } catch (error) {
-        console.error('Error parsing YAML:', error);
+        console.error('Error loading YAML:', error);
         console.error(COMMAND_LINE_HELP_MESSAGE);
-        process.exit(4);
-    }
-
-    // Validate the data against the original schema
-    const validationResult = OVERALL_MIGRATION_CONFIG.safeParse(data);
-    if (!validationResult.success) {
-        console.error('Error: YAML does not match the schema:');
-        console.error(JSON.stringify(validationResult.error.format(), null, 2));
-        process.exit(5);
+        process.exit(3);
     }
 
     // Create the locked schema
