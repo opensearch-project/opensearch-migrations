@@ -18,7 +18,7 @@ from the configuration and denormalizing them for each approval step so that the
 can do a simple check for each approval (suspension) step.
 `
 
-async function main() {
+export async function main() {
     const args = process.argv.slice(2);
 
     if (args.length === 0) {

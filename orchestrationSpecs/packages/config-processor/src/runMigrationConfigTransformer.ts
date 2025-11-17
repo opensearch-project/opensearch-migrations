@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { Readable } from 'stream';
 import { z } from 'zod';
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";

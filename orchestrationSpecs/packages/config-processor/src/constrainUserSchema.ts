@@ -172,7 +172,7 @@ export function makeLockedConfigSchema<TSchema extends ZodTypeAny>(
     return buildLockedSchemaFromValue(data, [], skipPatterns);
 }
 
-async function main() {
+export async function main() {
     const args = process.argv.slice(2);
 
     if (args.length === 0) {

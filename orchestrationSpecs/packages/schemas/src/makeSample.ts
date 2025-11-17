@@ -295,7 +295,7 @@ function schemaToYamlWithComments(schema: z.ZodTypeAny, indent = 0, incomingComm
     return yaml;
 }
 
-async function main() {
+export async function main() {
     console.info(schemaToYamlWithComments(OVERALL_MIGRATION_CONFIG));
     // console.info(schemaToYamlWithComments(PARAMETERIZED_MIGRATION_CONFIG));
 }

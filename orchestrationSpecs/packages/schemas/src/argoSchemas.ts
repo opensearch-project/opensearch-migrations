@@ -3,7 +3,7 @@ import {
     KAFKA_SERVICES_CONFIG,
     NORMALIZED_COMPLETE_SNAPSHOT_CONFIG,
     NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
-    NORMALIZED_SNAPSHOT_MIGRATION_CONFIG, PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
+    NORMALIZED_SNAPSHOT_MIGRATION_CONFIG,
     REPLAYER_OPTIONS,
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_CONFIG,
@@ -92,17 +92,10 @@ export const DYNAMIC_SNAPSHOT_CONFIG =
         repoConfig: DENORMALIZED_S3_REPO_CONFIG  // Replace string reference with actual config
     }));
 
-export const DENORMALIZED_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG =
-    makeOptionalDefaultedFieldsRequired(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG.safeExtend({
-        name: z.string()
-    }));
 
-// Then make defaulted optionals required
 export const SNAPSHOT_MIGRATION_CONFIG =
-    makeOptionalDefaultedFieldsRequired(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG
-        .omit({snapshotConfig: true, migrations: true}).extend({
-            snapshotConfig: DYNAMIC_SNAPSHOT_CONFIG,
-            migrations: z.array(DENORMALIZED_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
+    makeOptionalDefaultedFieldsRequired(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG.omit({snapshotConfig: true}).extend({
+        snapshotConfig: DYNAMIC_SNAPSHOT_CONFIG
     }));
 
 export const PARAMETERIZED_MIGRATION_CONFIG =

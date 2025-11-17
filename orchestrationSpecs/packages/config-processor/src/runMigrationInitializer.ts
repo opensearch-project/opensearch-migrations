@@ -47,7 +47,7 @@ async function parseInput(inputFile: string) {
     }
 }
 
-async function main() {
+export async function main() {
     const args = process.argv.slice(2);
 
     if (args.includes('--help') || args.includes('-h')) {
