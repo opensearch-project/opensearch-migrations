@@ -5,7 +5,7 @@ import java.io.InputStream;
 import java.nio.file.Path;
 
 import org.opensearch.migrations.bulkload.common.InvalidSnapshotFormatException;
-import org.opensearch.migrations.bulkload.common.SnapshotMetadataDecompressor;
+import org.opensearch.migrations.bulkload.common.SnapshotMetadataLoader;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.transformation.entity.Index;
 
@@ -49,12 +49,8 @@ public interface IndexMetadata extends Index {
             Path filePath = getRepoDataProvider().getRepo().getIndexMetadataFilePath(indexId, indexFileId);
 
             try (InputStream fis = new FileInputStream(filePath.toFile())) {
-                // Don't fully understand what the value of this code is, but it progresses the stream so we need to do
-                // it
-                // See:
-                // https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/repositories/blobstore/ChecksumBlobStoreFormat.java#L100
                 byte[] bytes = fis.readAllBytes();
-                InputStream bis = SnapshotMetadataDecompressor.processMetadataBytes(bytes, "index-metadata");
+                InputStream bis = SnapshotMetadataLoader.processMetadataBytes(bytes, "index-metadata");
 
                 ObjectMapper smileMapper = new ObjectMapper(smileFactory);
                 return smileMapper.readTree(bis);

@@ -8,7 +8,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import org.opensearch.migrations.bulkload.common.SnapshotMetadataDecompressor;
+import org.opensearch.migrations.bulkload.common.SnapshotMetadataLoader;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
@@ -48,7 +48,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
 
         try {
             byte[] allBytes = Files.readAllBytes(snapshotMetaFile);
-            try (InputStream in = SnapshotMetadataDecompressor.processMetadataBytes(allBytes, "snapshot")) {
+            try (InputStream in = SnapshotMetadataLoader.processMetadataBytes(allBytes, "snapshot")) {
                 JsonNode rootNode = smileMapper.readTree(in);
 
                 // Get the 'snapshot' node

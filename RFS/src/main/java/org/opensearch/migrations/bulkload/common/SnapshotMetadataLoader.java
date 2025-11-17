@@ -13,10 +13,10 @@ import shadow.lucene9.org.apache.lucene.codecs.CodecUtil;
  * Utility class for handling compression detection and decompression of snapshot metadata files.
  * Supports both standard Lucene codec format and OpenSearch DEFLATE compression with DFL\0 header.
  */
-public class SnapshotMetadataDecompressor {
+public class SnapshotMetadataLoader {
     private static final byte[] DFL_HEADER = { 'D', 'F', 'L', 0 };
 
-    private SnapshotMetadataDecompressor() {
+    private SnapshotMetadataLoader() {
         // Utility class - prevent instantiation
     }
 

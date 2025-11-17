@@ -5,7 +5,7 @@ import java.io.InputStream;
 import java.nio.file.Path;
 
 import org.opensearch.migrations.bulkload.common.RfsException;
-import org.opensearch.migrations.bulkload.common.SnapshotMetadataDecompressor;
+import org.opensearch.migrations.bulkload.common.SnapshotMetadataLoader;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 
 import com.fasterxml.jackson.core.JsonPointer;
@@ -62,12 +62,8 @@ public interface GlobalMetadata {
             Path filePath = repoDataProvider.getRepo().getGlobalMetadataFilePath(snapshotId);
 
             try (InputStream fis = new FileInputStream(filePath.toFile())) {
-                // Don't fully understand what the value of this code is, but it progresses the stream so we need to do
-                // it
-                // See:
-                // https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/repositories/blobstore/ChecksumBlobStoreFormat.java#L100
                 byte[] bytes = fis.readAllBytes();
-                InputStream bis = SnapshotMetadataDecompressor.processMetadataBytes(bytes, "metadata");
+                InputStream bis = SnapshotMetadataLoader.processMetadataBytes(bytes, "metadata");
 
                 ObjectMapper smileMapper = new ObjectMapper(smileFactory);
                 return smileMapper.readTree(bis);
