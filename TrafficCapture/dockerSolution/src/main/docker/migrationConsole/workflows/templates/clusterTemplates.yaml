@@ -453,11 +453,6 @@ spec:
             readinessProbe:
               failureThreshold: 5
               successThreshold: 2
-            extraEnvs:
-              - name: "cluster.initial_master_nodes"
-                value: ""
-              - name: "node.roles"
-                value: ""
             persistence:
               enabled: false
             
@@ -550,13 +545,7 @@ spec:
             # Disable probes to avoid transient warnings
             readinessProbe: {}
             livenessProbe: {}
-            
-            extraEnvs:
-              - name: "cluster.initial_master_nodes"
-                value: ""
-              - name: "node.roles"
-                value: ""
-            
+ 
             sysctlInitContainer:
               enabled: true
             
@@ -673,10 +662,6 @@ spec:
               failureThreshold: 5
               successThreshold: 2
             extraEnvs:
-              - name: node.roles
-                value: "master,data,ingest"
-              - name: "cluster.initial_master_nodes"
-                value: ""
               - name: "AWS_REGION"
                 value: "us-east-2"
             
