@@ -13,6 +13,7 @@ import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.utils.FileSystemUtils;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -188,7 +189,9 @@ public class SnapshotConfigurationTest extends SourceTestBase {
             
             log.info("Verification passed: All documents migrated correctly with configuration: {}", config);
         } finally {
-            deleteTree(localDirectory.toPath());
+            if (localDirectory != null && localDirectory.exists()) {
+                FileSystemUtils.deleteDirectories(localDirectory.toString());
+            }
         }
     }
 }
