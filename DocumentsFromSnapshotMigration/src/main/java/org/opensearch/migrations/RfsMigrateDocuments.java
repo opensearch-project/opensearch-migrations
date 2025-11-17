@@ -60,6 +60,7 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
+import org.opensearch.migrations.utils.FileSystemUtils;
 import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.IStringConverter;
@@ -164,6 +165,11 @@ public class RfsMigrateDocuments {
             names = { "--lucene-dir", "--luceneDir" },
             description = "The absolute path to the directory where we'll put the Lucene docs")
         public String luceneDir;
+
+        @Parameter(required = false,
+            names = { "--clean-local-dirs", "--cleanLocalDirs" },
+            description = "Optional. If enabled, deletes s3LocalDir and luceneDir before running. Default: false")
+        public boolean cleanLocalDirs = false;
 
         @ParametersDelegate
         public ConnectionContext.TargetArgs targetArgs = new ConnectionContext.TargetArgs();
@@ -376,6 +382,10 @@ public class RfsMigrateDocuments {
         }
 
         validateArgs(arguments);
+
+        if (arguments.cleanLocalDirs) {
+            FileSystemUtils.deleteDirectories(arguments.s3LocalDir, arguments.luceneDir);
+        }
 
         var context = makeRootContext(arguments, workerId);
         var luceneDirPath = Paths.get(arguments.luceneDir);
