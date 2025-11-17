@@ -22,6 +22,7 @@ import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.utils.FileSystemUtils;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -208,7 +209,7 @@ public class EndToEndTest extends SourceTestBase {
             checkDocsWithRouting(sourceCluster, testDocMigrationContext, !isSourceES1x);
             checkDocsWithRouting(targetCluster, testDocMigrationContext, !isTargetES1x);
         } finally {
-            deleteTree(localDirectory.toPath());
+            FileSystemUtils.deleteDirectories(localDirectory.toString());
         }
     }
 
