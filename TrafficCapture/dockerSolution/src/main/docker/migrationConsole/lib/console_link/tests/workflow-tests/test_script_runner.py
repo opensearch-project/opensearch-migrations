@@ -45,7 +45,7 @@ class TestScriptRunner:
   requiresApproval: false
   approver: ""
 """
-        args = ["--prefix ma", "--etcd_endpoints http://etcd.ma.svc.cluster.local:2379"]
+        args = ["--prefix ma", "--etcd-endpoints http://etcd.ma.svc.cluster.local:2379"]
         result = runner.submit_workflow(test_config, args)
 
         # Real script returns workflow info dict
@@ -70,7 +70,7 @@ class TestScriptRunner:
   approver: ""
 """
         namespace = "custom-ns"
-        args = [f"--prefix {namespace}", f"--etcd_endpoints http://etcd.{namespace}.svc.cluster.local:2379"]
+        args = [f"--prefix {namespace}", f"--etcd-endpoints http://etcd.{namespace}.svc.cluster.local:2379"]
         result = runner.submit_workflow(test_config, args)
 
         assert result["namespace"] == namespace
