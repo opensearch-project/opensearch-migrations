@@ -36,7 +36,7 @@ export function makeRepoParamDict(
     repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>,
     includes3LocalDir: boolean) {
     return expr.makeDict({
-        "s3Endpoint": expr.get(repoConfig, "endpoint"),
+        "s3Endpoint": expr.getLoose(repoConfig, "endpoint"),
         "s3RepoUri": expr.get(repoConfig, "s3RepoPathUri"),
         "s3Region": expr.get(repoConfig, "awsRegion"),
         ...(includes3LocalDir ? { "s3LocalDir": expr.literal("/tmp") } : {})
