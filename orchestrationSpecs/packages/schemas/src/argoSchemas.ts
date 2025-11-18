@@ -7,7 +7,7 @@ import {
     REPLAYER_OPTIONS,
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_CONFIG,
-    TARGET_CLUSTER_CONFIG
+    TARGET_CLUSTER_CONFIG, USER_METADATA_OPTIONS, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG, USER_RFS_OPTIONS
 } from "./userSchemas";
 import {z} from "zod";
 
@@ -92,11 +92,28 @@ export const DYNAMIC_SNAPSHOT_CONFIG =
         repoConfig: DENORMALIZED_S3_REPO_CONFIG  // Replace string reference with actual config
     }));
 
+export const METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
+    USER_METADATA_OPTIONS.omit({skipEvaluateApproval: true, skipMigrateApproval: true})
+);
+
+export const RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
+    USER_RFS_OPTIONS.omit({skipApproval: true})
+);
+
+export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG =
+    makeOptionalDefaultedFieldsRequired(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG
+        .omit({metadataMigrationConfig: true, documentBackfillConfig: true}).extend({
+            metadataMigrationConfig: METADATA_OPTIONS.optional(),
+            documentBackfillConfig: RFS_OPTIONS.optional()
+        })
+    );
 
 export const SNAPSHOT_MIGRATION_CONFIG =
-    makeOptionalDefaultedFieldsRequired(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG.omit({snapshotConfig: true}).extend({
-        snapshotConfig: DYNAMIC_SNAPSHOT_CONFIG
-    }));
+    makeOptionalDefaultedFieldsRequired(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG
+        .omit({snapshotConfig: true, migrations: true}).extend({
+            snapshotConfig: DYNAMIC_SNAPSHOT_CONFIG,
+            migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
+        }));
 
 export const PARAMETERIZED_MIGRATION_CONFIG =
     z.object({

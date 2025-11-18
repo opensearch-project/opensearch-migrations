@@ -127,7 +127,7 @@ export const CREATE_SNAPSHOT_OPTIONS = z.object({
     s3RoleArn: z.string().default("").optional()
 });
 
-export const METADATA_OPTIONS = z.object({
+export const USER_METADATA_OPTIONS = z.object({
     componentTemplateAllowlist: z.array(z.string()).default([]).optional(),
     indexAllowlist: z.array(z.string()).default([]).optional(),
     indexTemplateAllowlist: z.array(z.string()).default([]).optional(),
@@ -144,7 +144,7 @@ export const METADATA_OPTIONS = z.object({
     skipMigrateApproval: z.boolean().default(false).optional() // TODO - fullmigration
 });
 
-export const RFS_OPTIONS = z.object({
+export const USER_RFS_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional(),
     podReplicas: z.number().default(1).optional(),
 
@@ -222,10 +222,10 @@ export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
     snapshotName: z.string() // override to required
 });
 
-export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
+export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     name: z.string().default("").optional(),
-    metadataMigrationConfig: METADATA_OPTIONS.optional(),
-    documentBackfillConfig: RFS_OPTIONS.optional(),
+    metadataMigrationConfig: USER_METADATA_OPTIONS.optional(),
+    documentBackfillConfig: USER_RFS_OPTIONS.optional(),
 }).refine(data =>
         data.metadataMigrationConfig !== undefined ||
         data.documentBackfillConfig !== undefined,
@@ -234,7 +234,7 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
 export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
     createSnapshotConfig: CREATE_SNAPSHOT_OPTIONS.optional(),
     snapshotConfig: NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
-    migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
+    migrations: z.array(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
 }).refine(data => {
     const names = data.migrations.map(m => m.name).filter(s => s);
     return names.length == new Set(names).size;

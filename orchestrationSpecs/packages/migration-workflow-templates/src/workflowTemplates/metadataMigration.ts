@@ -57,8 +57,7 @@ function makeParamsDict(
         expr.mergeDicts(
             makeTargetParamDict(targetConfig),
              // TODO - tighten the type on mergeDicts - it allowed this to go through w/out first calling fromJSON
-            expr.omit(expr.deserializeRecord(options),
-                "loggingConfigurationOverrideConfigMap", "skipEvaluateApproval", "skipMigrateApproval")
+            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap")
         ),
         expr.mergeDicts(
             expr.makeDict({
@@ -85,7 +84,6 @@ export const MetadataMigration = WorkflowBuilder.create({
 
         .addContainer(b=>b
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
-            .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
             .addVolumesFromRecord({
                 'test-creds':  {
                     configMap: {
@@ -103,6 +101,7 @@ export const MetadataMigration = WorkflowBuilder.create({
                     expr.literal(""))
             )
             .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(b.inputs.targetConfig)))
+            .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
             .addArgs([
                 b.inputs.commandMode,
                 expr.literal("---INLINE-JSON"),
@@ -123,11 +122,11 @@ export const MetadataMigration = WorkflowBuilder.create({
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof METADATA_OPTIONS>>())
         .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
         .addOptionalOrConfigMap("skipEvaluateApproval",
-            configMapKey(t.inputs.workflowParameters.approvalConfigMapName, "WRONG_THING_FIXME_TODO", true),
+            configMapKey(t.inputs.workflowParameters.approvalConfigMapName, "autoApprove", true),
             typeToken<boolean>(),
             c=> false as boolean)
         .addOptionalOrConfigMap("skipMigrateApproval",
-            configMapKey(t.inputs.workflowParameters.approvalConfigMapName, "WRONG_THING_FIXME_TODO", true),
+            configMapKey(t.inputs.workflowParameters.approvalConfigMapName, "autoApprove", true),
             typeToken<boolean>(),
             c=> false as boolean)
 

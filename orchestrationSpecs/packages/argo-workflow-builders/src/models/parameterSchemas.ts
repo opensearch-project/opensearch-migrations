@@ -58,15 +58,17 @@ export type InputParamDef<
 export function defineParam<T extends PlainObject>(opts: {
     description?: string
 } & DefaultSpec<T>): InputParamDef<DeepWiden<T>, false> {
+    if (opts.expression === undefined && opts.from === undefined) {
+        throw new Error("Invalid DefaultSpec: neither expression nor from provided");
+    }
     return {
         // phantom is omitted at runtime; TS still sees it
         _hasDefault: true,
         description: opts.description,
-        defaultValue: (opts.expression !== undefined ? {expression: opts.expression as DeepWiden<T>} :
-            (opts.from !== undefined ? {from: opts.from, type: typeToken<DeepWiden<T>>()} :
-                (() => {
-                    throw new Error("Invalid DefaultSpec: neither expression nor from provided")
-                })()))
+        defaultValue: {
+            ...(opts.expression !== undefined ? {expression: opts.expression as DeepWiden<T>} : {}),
+            ...(opts.from !== undefined ? {from: opts.from, type: typeToken<DeepWiden<T>>()} : {})
+        } as any
     };
 }
 
