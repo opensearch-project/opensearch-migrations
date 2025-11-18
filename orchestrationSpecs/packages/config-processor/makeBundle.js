@@ -65,7 +65,7 @@ async function bundle() {
             'etcd3'
         ],
         banner: {
-            js: '#!/usr/bin/env node'
+            js: '#!/usr/bin/env node\nprocess.env.SUPPRESS_AUTO_LOAD = "true";'
         }
     });
 

@@ -197,7 +197,7 @@ export async function main() {
     process.stdout.write(JSON.stringify(zodSchemaToJsonSchema(lockedSchema as any), null, 2));
 }
 
-if (require.main === module) {
+if (require.main === module && !process.env.SUPPRESS_AUTO_LOAD) {
     main().catch((error) => {
         console.error('Unhandled error:', error);
         process.exit(1);

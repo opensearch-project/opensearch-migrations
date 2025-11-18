@@ -115,7 +115,7 @@ export async function main() {
         console.error('\nYou must provide either --user-config or --transformed-config');
         process.stderr.write(COMMAND_LINE_HELP_MESSAGE);
         process.exit(3);
-    } else if (!userConfigFile && !workflowConfigFile) {
+    } else if (userConfigFile && workflowConfigFile) {
         console.error('Error: Multiple configuration sources provided.');
         console.error('\nYou must provide ONE of--user-config or --transformed-config');
         process.stderr.write(COMMAND_LINE_HELP_MESSAGE);
@@ -174,7 +174,7 @@ export async function main() {
 }
 
 // Run if executed directly
-if (require.main === module) {
+if (require.main === module && !process.env.SUPPRESS_AUTO_LOAD) {
     main().catch(error => {
         console.error('Fatal error:', error);
         process.exit(1);

@@ -89,7 +89,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addOptionalInput("metadataMigrationConfig", c=>
             expr.empty<z.infer<typeof METADATA_OPTIONS>>())
-        .addOptionalInput("documentBackfillConfig",  c=>
+        .addOptionalInput("documentBackfillConfig", c=>
             expr.empty<z.infer<typeof RFS_OPTIONS>>())
 
         .addInputsFromRecord(uniqueRunNonceParam)
@@ -194,24 +194,15 @@ export const FullMigration = WorkflowBuilder.create({
     )
 
 
-    .addSuspendTemplate("preApproval")
-
 
     .addTemplate("main", t => t
         .addRequiredInput("migrationConfigs", typeToken<z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG>[]>(),
             "List of server configurations to direct migrated traffic toward") // expand
-        .addOptionalOrConfigMap("skipPreApproval",
-                configMapKey(t.inputs.workflowParameters.approvalConfigMapName, "skipPreApproval", true),
-                typeToken<boolean>(),
-                c=> false as boolean)
 
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
 
         .addSteps(b => b
-            .addStep("preApproval", INTERNAL, "preApproval",
-                { when: { templateExp: expr.not(expr.deserializeRecord(b.inputs.skipPreApproval))}})
-
             .addStep("foreachMigrationPair", INTERNAL, "foreachMigrationPair",
                 c => {
                     return c.register({

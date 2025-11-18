@@ -3,6 +3,93 @@ import {z} from "zod";
 export function getZodKeys<T extends z.ZodRawShape>(schema: z.ZodObject<T>): readonly (keyof T)[] {
     return Object.keys(schema.shape) as (keyof T)[];
 }
+class SchemaValidationError extends Error {
+    constructor(message: string, public path: string[]) {
+        super(`${message} at path: ${path.join('.')}`);
+        this.name = 'SchemaValidationError';
+    }
+}
+
+function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
+    schema: T,
+    path: string[] = []
+): T {
+    if (schema instanceof z.ZodOptional) {
+        const innerType = schema.unwrap();
+        const hasDefault = innerType instanceof z.ZodDefault;
+
+        // Unwrap to get the actual type
+        const actualType = hasDefault ? (innerType as z.ZodDefault<any>).removeDefault() : innerType;
+
+        // Check if the actual underlying type is complex
+        const isComplexType = actualType instanceof z.ZodObject ||
+            actualType instanceof z.ZodArray ||
+            actualType instanceof z.ZodRecord ||
+            actualType instanceof z.ZodUnion ||
+            actualType instanceof z.ZodDiscriminatedUnion ||
+            actualType instanceof z.ZodIntersection ||
+            actualType instanceof z.ZodTuple;
+
+        // Only enforce default requirement for scalar values
+        if (!isComplexType && !hasDefault) {
+            throw new SchemaValidationError(
+                'Optional field must have a default value',
+                path
+            );
+        }
+
+        // Recurse on the actual type
+        validateOptionalDefaultConsistency(actualType as z.ZodTypeAny, path);
+    } else if (schema instanceof z.ZodDefault) {
+        const innerType = (schema as z.ZodDefault<any>).removeDefault();
+
+        // Check if the actual underlying type is complex
+        const isComplexType = innerType instanceof z.ZodObject ||
+            innerType instanceof z.ZodArray ||
+            innerType instanceof z.ZodRecord ||
+            innerType instanceof z.ZodUnion ||
+            innerType instanceof z.ZodDiscriminatedUnion ||
+            innerType instanceof z.ZodIntersection ||
+            innerType instanceof z.ZodTuple;
+
+        // Only enforce optional requirement for scalar values
+        if (!isComplexType) {
+            throw new SchemaValidationError(
+                'Default value must be followed by .optional() (use .default(value).optional())',
+                path
+            );
+        }
+
+        // Recurse on the inner type
+        validateOptionalDefaultConsistency(innerType as z.ZodTypeAny, path);
+    } else if (schema instanceof z.ZodObject) {
+        const shape = schema.shape;
+        for (const [key, value] of Object.entries(shape)) {
+            validateOptionalDefaultConsistency(value as z.ZodTypeAny, [...path, key]);
+        }
+    } else if (schema instanceof z.ZodArray) {
+        validateOptionalDefaultConsistency(schema.element as z.ZodTypeAny, [...path, '[array element]']);
+    } else if (schema instanceof z.ZodRecord) {
+        validateOptionalDefaultConsistency(schema.valueType as z.ZodTypeAny, [...path, '[record value]']);
+    } else if (schema instanceof z.ZodUnion) {
+        schema.options.forEach((option, index) => {
+            validateOptionalDefaultConsistency(option as z.ZodTypeAny, [...path, `[union option ${index}]`]);
+        });
+    } else if (schema instanceof z.ZodDiscriminatedUnion) {
+        Array.from(schema.options.values()).forEach((option, index) => {
+            validateOptionalDefaultConsistency(option as z.ZodTypeAny, [...path, `[discriminated union option ${index}]`]);
+        });
+    } else if (schema instanceof z.ZodIntersection) {
+        validateOptionalDefaultConsistency(schema._def.left as z.ZodTypeAny, [...path, '[intersection left]']);
+        validateOptionalDefaultConsistency(schema._def.right as z.ZodTypeAny, [...path, '[intersection right]']);
+    } else if (schema instanceof z.ZodTuple) {
+        const items = schema._def.items;
+        items.forEach((item, index) => {
+            validateOptionalDefaultConsistency(item as z.ZodTypeAny, [...path, `[tuple ${index}]`]);
+        });
+    }
+    return schema;
+}
 
 export const KAFKA_SERVICES_CONFIG = z.object({
     brokerEndpoints: z.string().describe("Specify an external kafka broker list if using one other than the one managed by the workflow"),
@@ -136,7 +223,7 @@ export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
 });
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    name: z.string().optional(),
+    name: z.string().default("").optional(),
     metadataMigrationConfig: METADATA_OPTIONS.optional(),
     documentBackfillConfig: RFS_OPTIONS.optional(),
 }).refine(data =>
@@ -155,7 +242,7 @@ export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
     {message: "names of migration items must be unique when they are provided"});
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
-    skipApprovals : z.boolean().default(false).optional(),  // TODO - format
+    skipApprovals : z.boolean().default(false).optional(), // TODO - format
     fromSource: z.string(),
     toTarget: z.string(),
     snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).min(1).optional(),
@@ -165,10 +252,11 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
 export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);
 
-export const OVERALL_MIGRATION_CONFIG = z.object({
-    skipApprovals : z.boolean().default(false).optional(), // TODO - format
-    skipPreApproval : z.boolean().default(false).optional(),  // DONE - fullmigration
-    sourceClusters: SOURCE_CLUSTERS_MAP,
-    targetClusters: TARGET_CLUSTERS_MAP,
-    migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG).min(1)
-});
+export const OVERALL_MIGRATION_CONFIG = validateOptionalDefaultConsistency(
+    z.object({
+        skipApprovals : z.boolean().default(false).optional(), // TODO - format
+        sourceClusters: SOURCE_CLUSTERS_MAP,
+        targetClusters: TARGET_CLUSTERS_MAP,
+        migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG).min(1)
+    })
+);

@@ -43,7 +43,8 @@ function makeParamsDict(
     return expr.mergeDicts(
         expr.mergeDicts(
             makeTargetParamDict(targetConfig),
-            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas")
+            expr.omit(expr.deserializeRecord(options),
+                "loggingConfigurationOverrideConfigMap", "podReplicas", "skipApproval")
         ),
         expr.mergeDicts(
             expr.makeDict({

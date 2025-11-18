@@ -1262,7 +1262,7 @@ spec:
                   },
                   {
                     "name": "rfsJsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targettargetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), sprig.dict("targetHost", jsonpath(inputs.parameters.targetConfig, '$.endpoint'), "targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp'), sprig.merge((('endpoint' in fromJSON(inputs.parameters.snapshotConfig)['repoConfig']) ? (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'])) : (sprig.dict())), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp')))))}}",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targettargetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), sprig.dict("targetHost", jsonpath(inputs.parameters.targetConfig, '$.endpoint'), "targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'skipApproval')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp'), sprig.merge((('endpoint' in fromJSON(inputs.parameters.snapshotConfig)['repoConfig']) ? (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'])) : (sprig.dict())), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp')))))}}",
                   },
                 ],
               },
@@ -1795,6 +1795,10 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
+                    "name": "name",
+                    "value": "{{=jsonpath(toJSON(item), '$.name')}}",
+                  },
+                  {
                     "name": "metadataMigrationConfig",
                     "value": "{{=sprig.dig('metadataMigrationConfig', '', item)}}",
                   },
@@ -1937,20 +1941,11 @@ exports[`test workflow template renderings full-migration 1`] = `
         ],
       },
       {
-        "name": "preapproval",
-        "outputs": undefined,
-        "suspend": {},
-      },
-      {
         "inputs": {
           "parameters": [
             {
               "description": "List of server configurations to direct migrated traffic toward",
               "name": "migrationConfigs",
-            },
-            {
-              "name": "skipPreApproval",
-              "value": "false",
             },
             {
               "name": "uniqueRunNonce",
@@ -2042,16 +2037,6 @@ exports[`test workflow template renderings full-migration 1`] = `
           "parameters": [],
         },
         "steps": [
-          [
-            {
-              "arguments": {
-                "parameters": [],
-              },
-              "name": "preApproval",
-              "template": "preapproval",
-              "when": "{{=!(fromJSON(inputs.parameters.skipPreApproval))}}",
-            },
-          ],
           [
             {
               "arguments": {
@@ -2192,7 +2177,7 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           "args": [
             "{{inputs.parameters.commandMode}}",
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targettargetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), sprig.dict("targetHost", jsonpath(inputs.parameters.targetConfig, '$.endpoint'), "targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'loggingConfigurationOverrideConfigMap')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", fromJSON(inputs.parameters.sourceConfig)['version']), sprig.merge((('endpoint' in fromJSON(inputs.parameters.snapshotConfig)['repoConfig']) ? (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'])) : (sprig.dict())), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp')))))}}",
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targettargetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), sprig.dict("targetHost", jsonpath(inputs.parameters.targetConfig, '$.endpoint'), "targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'loggingConfigurationOverrideConfigMap', 'skipEvaluateApproval', 'skipMigrateApproval')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", fromJSON(inputs.parameters.sourceConfig)['version']), sprig.merge((('endpoint' in fromJSON(inputs.parameters.snapshotConfig)['repoConfig']) ? (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'])) : (sprig.dict())), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp')))))}}",
           ],
           "command": [
             "/root/metadataMigration/bin/MetadataMigration",
@@ -2305,6 +2290,14 @@ exports[`test workflow template renderings metadata-migration 1`] = `
             {
               "name": "imageMigrationConsolePullPolicy",
             },
+            {
+              "name": "skipEvaluateApproval",
+              "value": false,
+            },
+            {
+              "name": "skipMigrateApproval",
+              "value": false,
+            },
           ],
         },
         "name": "migratemetadata",
@@ -2357,6 +2350,7 @@ exports[`test workflow template renderings metadata-migration 1`] = `
               },
               "name": "approveEvaluate",
               "template": "approveevaluate",
+              "when": "{{=!(fromJSON(inputs.parameters.skipEvaluateApproval))}}",
             },
           ],
           [
@@ -2404,6 +2398,7 @@ exports[`test workflow template renderings metadata-migration 1`] = `
               },
               "name": "approveMigrate",
               "template": "approvemigrate",
+              "when": "{{=!(fromJSON(inputs.parameters.skipMigrateApproval))}}",
             },
           ],
         ],

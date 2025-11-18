@@ -57,7 +57,8 @@ function makeParamsDict(
         expr.mergeDicts(
             makeTargetParamDict(targetConfig),
              // TODO - tighten the type on mergeDicts - it allowed this to go through w/out first calling fromJSON
-            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap")
+            expr.omit(expr.deserializeRecord(options),
+                "loggingConfigurationOverrideConfigMap", "skipEvaluateApproval", "skipMigrateApproval")
         ),
         expr.mergeDicts(
             expr.makeDict({
