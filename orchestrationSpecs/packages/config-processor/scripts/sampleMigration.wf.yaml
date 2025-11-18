@@ -4,7 +4,7 @@
     "source1": {
       "endpoint": "https://elasticsearch-master-headless:9200",
       "allowInsecure": true,
-      "version": "ES 7",
+      "version": "ES 7.10",
       "authConfig": {
         "basic": {
           "secretName": "source1-creds",
@@ -24,7 +24,7 @@
     "target1": {
       "endpoint": "https://opensearch-cluster-master-headless:9200",
       "allowInsecure": true,
-      "version": "OS 2",
+      "version": "OS 2.11",
       "authConfig": {
         "basic": {
           "secretName": "target1-creds",
