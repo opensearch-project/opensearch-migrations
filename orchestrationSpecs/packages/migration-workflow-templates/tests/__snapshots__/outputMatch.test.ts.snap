@@ -1148,7 +1148,7 @@ spec:
           image: "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
           imagePullPolicy: "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
           command:
-            - /rfs-app/runJavaWithClasspath.sh
+            - /rfs-app/runJavaWithClasspathWithRepeat.sh
           args:
             - org.opensearch.migrations.RfsMigrateDocuments
             - ---INLINE-JSON
@@ -1158,13 +1158,13 @@ spec:
             - name: TARGET_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: "{{inputs.parameters.basicCredsSecretNameOrEmpty}}"
+                  name: "{{=((0 == len(inputs.parameters.basicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.basicCredsSecretNameOrEmpty))}}"
                   key: username
                   optional: true
             - name: TARGET_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "{{inputs.parameters.basicCredsSecretNameOrEmpty}}"
+                  name: "{{=((0 == len(inputs.parameters.basicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.basicCredsSecretNameOrEmpty))}}"
                   key: password
                   optional: true
             - name: JAVA_OPTS
@@ -1256,7 +1256,7 @@ spec:
                   },
                   {
                     "name": "rfsJsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), sprig.dict("targetHost", jsonpath(inputs.parameters.targetConfig, '$.endpoint'), "targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp'), sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'], "s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp'))))}}",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), sprig.dict("targetHost", jsonpath(inputs.parameters.targetConfig, '$.endpoint'), "targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp', "cleanLocalDirs", true), sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'], "s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp'))))}}",
                   },
                   {
                     "name": "resources",
@@ -3148,7 +3148,7 @@ spec:
                   },
                   {
                     "name": "jsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targettargetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), sprig.dict("targetHost", jsonpath(inputs.parameters.targetConfig, '$.endpoint'), "targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.replayerConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources')), sprig.merge(sprig.dict(), sprig.dict())))}}",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), sprig.dict("targetHost", jsonpath(inputs.parameters.targetConfig, '$.endpoint'), "targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.replayerConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources')), sprig.merge(sprig.dict(), sprig.dict())))}}",
                   },
                 ],
               },
@@ -3815,6 +3815,409 @@ echo "Cleanup complete. Workflow stats preserved under /$STATS_KEY/"",
         "outputs": {
           "parameters": [],
         },
+      },
+    ],
+  },
+}
+`;
+
+exports[`test workflow template renderings workflow-command-orchestrator 1`] = `
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "workflow-command-orchestrator",
+  },
+  "spec": {
+    "arguments": {
+      "parameters": [
+        {
+          "name": "etcdEndpoints",
+          "value": "http://etcd.ma.svc.cluster.local:2379",
+        },
+        {
+          "name": "etcdUser",
+          "value": "root",
+        },
+        {
+          "name": "etcdPassword",
+          "value": "password",
+        },
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config",
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config",
+        },
+      ],
+    },
+    "entrypoint": "main",
+    "parallelism": 100,
+    "serviceAccountName": "argo-workflow-executor",
+    "templates": [
+      {
+        "container": {
+          "args": [
+            "
+set -e -x
+
+# Save pod name to output path
+echo $HOSTNAME > /tmp/podname
+
+echo "Building migration configuration..."
+
+# Create migration config JSON
+cat > /tmp/migration_config.json << 'EOF'
+{
+  "source_cluster": {{inputs.parameters.sourceConfig}},
+  "target_cluster": {{inputs.parameters.targetConfig}},
+  "snapshot": {{inputs.parameters.snapshotConfig}},
+  "backfill": {
+    "reindex_from_snapshot": true
+  },
+  "metadata_migration": {
+    "index_allowlist": "*"
+  }
+}
+EOF
+
+echo "Migration config contents:"
+cat /tmp/migration_config.json
+
+echo "Configuring workflow..."
+. /etc/profile.d/venv.sh
+source /.venv/bin/activate
+
+workflow configure --config-file /tmp/migration_config.json
+
+echo "Workflow configured successfully"
+",
+          ],
+          "command": [
+            "/bin/sh",
+            "-c",
+          ],
+          "env": [],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "1000m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "description": "Source cluster config as JSON object fragment (e.g. {"endpoint":"..."})",
+              "name": "sourceConfig",
+              "value": "",
+            },
+            {
+              "description": "Target cluster config as JSON object fragment",
+              "name": "targetConfig",
+              "value": "",
+            },
+            {
+              "description": "Snapshot config as JSON object fragment",
+              "name": "snapshotConfig",
+              "value": "",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "configureworkflow",
+        "outputs": {
+          "parameters": [],
+        },
+      },
+      {
+        "container": {
+          "args": [
+            "
+set -e -x
+
+echo "Submitting workflow..."
+
+. /etc/profile.d/venv.sh
+source /.venv/bin/activate
+
+# Submit workflow and capture the workflow name
+WORKFLOW_OUTPUT=$(workflow submit 2>&1)
+echo "Workflow submit output: $WORKFLOW_OUTPUT"
+
+# Extract workflow name from output (format: "Workflow 'migration-xyz' submitted")
+WORKFLOW_NAME=$(echo "$WORKFLOW_OUTPUT" | grep -o "Workflow '[^']*'" | sed "s/Workflow '\\([^']*\\)'/\\1/" || echo "")
+
+if [ -z "$WORKFLOW_NAME" ]; then
+    echo "ERROR: Could not extract workflow name from output"
+    exit 1
+fi
+
+echo "Workflow submitted successfully: $WORKFLOW_NAME"
+echo "$WORKFLOW_NAME" > /tmp/workflowName
+
+# Also save to Argo output
+mkdir -p /tmp/outputs
+echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
+",
+          ],
+          "command": [
+            "/bin/sh",
+            "-c",
+          ],
+          "env": [],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "1000m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "submitworkflow",
+        "outputs": {
+          "parameters": [
+            {
+              "description": "Name of the submitted workflow",
+              "name": "workflowName",
+              "valueFrom": {
+                "path": "/tmp/outputs/workflowName",
+              },
+            },
+          ],
+        },
+      },
+      {
+        "container": {
+          "args": [
+            "
+set -e -x
+
+WORKFLOW_NAME="{{inputs.parameters.workflowName}}"
+echo "Monitoring workflow: $WORKFLOW_NAME"
+
+. /etc/profile.d/venv.sh
+source /.venv/bin/activate
+
+# Poll workflow status with timeout (30 minutes max)
+MAX_ITERATIONS=360  # 30 minutes at 5-second intervals
+ITERATION=0
+
+while [ $ITERATION -lt $MAX_ITERATIONS ]; do
+    echo "Checking workflow status (iteration $((ITERATION + 1))/$MAX_ITERATIONS)..."
+    
+    # Get workflow status
+    STATUS_OUTPUT=$(workflow status --name "$WORKFLOW_NAME" 2>&1 || echo "ERROR")
+    
+    if echo "$STATUS_OUTPUT" | grep -q "ERROR"; then
+        echo "Error getting workflow status: $STATUS_OUTPUT"
+        sleep 5
+        ITERATION=$((ITERATION + 1))
+        continue
+    fi
+    
+    echo "Status output: $STATUS_OUTPUT"
+    
+    # Check if workflow is completed (succeeded or failed)
+    if echo "$STATUS_OUTPUT" | grep -q "Succeeded\\|Failed"; then
+        if echo "$STATUS_OUTPUT" | grep -q "Succeeded"; then
+            echo "✅ Workflow completed successfully!"
+            exit 0
+        else
+            echo "❌ Workflow failed!"
+            exit 1
+        fi
+    fi
+    
+    # Check if workflow needs approval (suspended)
+    if echo "$STATUS_OUTPUT" | grep -q "Suspended\\|Waiting"; then
+        echo "Workflow is suspended, attempting to approve..."
+        APPROVE_OUTPUT=$(workflow approve --name "$WORKFLOW_NAME" 2>&1)
+        echo "Approve output: $APPROVE_OUTPUT"
+        
+        if echo "$APPROVE_OUTPUT" | grep -q "approved\\|Approved"; then
+            echo "Workflow approved, continuing monitoring..."
+        else
+            echo "Warning: Approval may have failed: $APPROVE_OUTPUT"
+        fi
+    fi
+    
+    # Check if workflow is still running
+    if echo "$STATUS_OUTPUT" | grep -q "Running\\|Pending"; then
+        echo "Workflow is still running, waiting..."
+    fi
+    
+    sleep 5
+    ITERATION=$((ITERATION + 1))
+done
+
+echo "❌ Timeout: Workflow did not complete within 30 minutes"
+exit 1
+",
+          ],
+          "command": [
+            "/bin/sh",
+            "-c",
+          ],
+          "env": [],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "1000m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "workflowName",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "monitorworkflow",
+        "outputs": {
+          "parameters": [],
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "description": "Source cluster configuration as JSON object fragment (e.g. {"endpoint":"..."})",
+              "name": "sourceClusterConfigJson",
+            },
+            {
+              "description": "Target cluster configuration as JSON object fragment",
+              "name": "targetClusterConfigJson",
+            },
+            {
+              "description": "Snapshot configuration as JSON object fragment",
+              "name": "snapshotConfigJson",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "main",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceClusterConfigJson}}",
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetClusterConfigJson}}",
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfigJson}}",
+                  },
+                ],
+              },
+              "name": "configureWorkflow",
+              "template": "configureworkflow",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                ],
+              },
+              "name": "submitWorkflow",
+              "template": "submitworkflow",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "workflowName",
+                    "value": "{{steps.submitWorkflow.outputs.parameters.workflowName}}",
+                  },
+                ],
+              },
+              "name": "monitorWorkflow",
+              "template": "monitorworkflow",
+            },
+          ],
+        ],
       },
     ],
   },
