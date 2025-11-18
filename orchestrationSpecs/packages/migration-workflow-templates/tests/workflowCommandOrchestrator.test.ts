@@ -19,8 +19,7 @@ describe("WorkflowCommandOrchestrator workflow template", () => {
         expect(serialized).toContain("workflow-command-orchestrator");
 
         // expect the key template names to show up somewhere
-        expect(serialized).toContain("configureWorkflow");
-        expect(serialized).toContain("submitWorkflow");
+        expect(serialized).toContain("configureAndSubmitWorkflow");
         expect(serialized).toContain("monitorWorkflow");
 
         // expect the embedded scripts to call the workflow CLI

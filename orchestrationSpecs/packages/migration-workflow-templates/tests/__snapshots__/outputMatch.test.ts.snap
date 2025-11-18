@@ -2169,164 +2169,15 @@ exports[`test workflow template renderings full-migration-with-cli 1`] = `
     "serviceAccountName": "argo-workflow-executor",
     "templates": [
       {
-        "name": "pausefortestdata",
-        "outputs": undefined,
-        "suspend": {},
-      },
-      {
-        "name": "pauseforverification",
-        "outputs": undefined,
-        "suspend": {},
-      },
-      {
-        "container": {
-          "args": [
-            "
-# Generate unique suffix from workflow UID
-SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
-
-SOURCE_TEMPLATE="{{inputs.parameters.sourceClusterTemplate}}"
-TARGET_TEMPLATE="{{inputs.parameters.targetClusterTemplate}}"
-SOURCE_ID=$(echo "$SOURCE_TEMPLATE" | cut -d'-' -f1-3)
-TARGET_ID=$(echo "$TARGET_TEMPLATE" | cut -d'-' -f1-3)
-
-SOURCE_CLUSTER_NAME="source-$SOURCE_ID-$SUFFIX"
-TARGET_CLUSTER_NAME="target-$TARGET_ID-$SUFFIX"
-
-# Output parameters
-echo "$SOURCE_CLUSTER_NAME" > /tmp/source-cluster-name
-echo "$TARGET_CLUSTER_NAME" > /tmp/target-cluster-name
-
-echo "Generated cluster names:"
-echo "Source: $SOURCE_CLUSTER_NAME (from template: $SOURCE_TEMPLATE)"
-echo "Target: $TARGET_CLUSTER_NAME (from template: $TARGET_TEMPLATE)"
-            ",
-          ],
-          "command": [
-            "sh",
-            "-c",
-          ],
-          "env": [],
-          "image": "alpine:latest",
-          "imagePullPolicy": "IfNotPresent",
-          "resources": {
-            "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
-            },
-            "requests": {
-              "cpu": "500m",
-              "memory": "2000Mi",
-            },
-          },
-        },
         "inputs": {
           "parameters": [
             {
-              "name": "sourceClusterTemplate",
-            },
-            {
-              "name": "targetClusterTemplate",
-            },
-          ],
-        },
-        "name": "generateclusternames",
-        "outputs": {
-          "parameters": [
-            {
-              "name": "sourceClusterName",
-              "valueFrom": {
-                "path": "/tmp/source-cluster-name",
-              },
-            },
-            {
-              "name": "targetClusterName",
-              "valueFrom": {
-                "path": "/tmp/target-cluster-name",
-              },
-            },
-          ],
-        },
-      },
-      {
-        "container": {
-          "args": [
-            "
-echo "Waiting for {{inputs.parameters.clusterType}} cluster to be ready..."
-
-# Check if StatefulSet pod exists first
-if kubectl get pod/{{inputs.parameters.clusterName}}-0      --namespace={{inputs.parameters.namespace}} >/dev/null 2>&1; then
-  echo "Found StatefulSet pod {{inputs.parameters.clusterName}}-0, waiting for readiness..."
-  kubectl wait --for=condition=ready pod/{{inputs.parameters.clusterName}}-0     --namespace={{inputs.parameters.namespace}}     --timeout=200s
-  echo "{{inputs.parameters.clusterType}} cluster pod (StatefulSet) is ready!"
-else
-  echo "StatefulSet pod not found, checking Deployment..."
-  kubectl rollout status deployment/{{inputs.parameters.clusterName}}     --namespace={{inputs.parameters.namespace}}     --timeout=200s
-  echo "{{inputs.parameters.clusterType}} cluster deployment is ready!"
-fi
-            ",
-          ],
-          "command": [
-            "sh",
-            "-c",
-          ],
-          "env": [],
-          "image": "bitnami/kubectl:latest",
-          "imagePullPolicy": "IfNotPresent",
-          "resources": {
-            "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
-            },
-            "requests": {
-              "cpu": "500m",
-              "memory": "2000Mi",
-            },
-          },
-        },
-        "inputs": {
-          "parameters": [
-            {
-              "name": "clusterName",
-            },
-            {
-              "name": "clusterType",
-            },
-            {
-              "name": "namespace",
-            },
-          ],
-        },
-        "name": "waitforcluster",
-        "outputs": {
-          "parameters": [],
-        },
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "description": "Kubernetes namespace for clusters",
-              "name": "clusterNamespace",
-            },
-            {
-              "description": "Template name for source cluster",
-              "name": "sourceClusterTemplate",
-            },
-            {
-              "description": "Template name for target cluster",
-              "name": "targetClusterTemplate",
-            },
-            {
-              "description": "JSON configuration for source cluster",
               "name": "sourceClusterConfigJson",
             },
             {
-              "description": "JSON configuration for target cluster",
               "name": "targetClusterConfigJson",
             },
             {
-              "description": "JSON configuration for snapshot",
               "name": "snapshotConfigJson",
             },
             {
@@ -2342,77 +2193,6 @@ fi
           "parameters": [],
         },
         "steps": [
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "sourceClusterTemplate",
-                    "value": "{{inputs.parameters.sourceClusterTemplate}}",
-                  },
-                  {
-                    "name": "targetClusterTemplate",
-                    "value": "{{inputs.parameters.targetClusterTemplate}}",
-                  },
-                ],
-              },
-              "name": "generateClusterNames",
-              "template": "generateclusternames",
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "clusterName",
-                    "value": "{{steps.generateClusterNames.outputs.parameters.sourceClusterName}}",
-                  },
-                  {
-                    "name": "clusterType",
-                    "value": "source",
-                  },
-                  {
-                    "name": "namespace",
-                    "value": "{{inputs.parameters.clusterNamespace}}",
-                  },
-                ],
-              },
-              "name": "waitForSourceCluster",
-              "template": "waitforcluster",
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "clusterName",
-                    "value": "{{steps.generateClusterNames.outputs.parameters.targetClusterName}}",
-                  },
-                  {
-                    "name": "clusterType",
-                    "value": "target",
-                  },
-                  {
-                    "name": "namespace",
-                    "value": "{{inputs.parameters.clusterNamespace}}",
-                  },
-                ],
-              },
-              "name": "waitForTargetCluster",
-              "template": "waitforcluster",
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [],
-              },
-              "name": "pauseForTestData",
-              "template": "pausefortestdata",
-            },
-          ],
           [
             {
               "arguments": {
@@ -2444,15 +2224,6 @@ fi
                 "name": "workflow-command-orchestrator",
                 "template": "main",
               },
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [],
-              },
-              "name": "pauseForVerification",
-              "template": "pauseforverification",
             },
           ],
         ],
