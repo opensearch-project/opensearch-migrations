@@ -131,7 +131,7 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
             # Construct arguments for the submission script
             args = [
                 f"--prefix {namespace}",
-                f"--etcd_endpoints {etcd_endpoints}"
+                f"--etcd-endpoints {etcd_endpoints}"
             ]
 
             submit_result = runner.submit_workflow(config_yaml, args)

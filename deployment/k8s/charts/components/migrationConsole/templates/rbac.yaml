@@ -12,11 +12,11 @@ metadata:
 rules:
   - apiGroups: [ "" ]
     resources: ["secrets"]
-    verbs: ["list"]
+    verbs: ["list", "create", "update", "patch", "delete"]
   - apiGroups: [ "" ]
-    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log"]
+    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log", "events"]
     verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
-  - apiGroups: [ "apps" ]
+  - apiGroups: ["apps"]
     resources: ["deployments", "deployments/scale"]
     verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
 
