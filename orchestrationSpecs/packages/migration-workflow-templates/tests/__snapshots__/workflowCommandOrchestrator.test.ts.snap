@@ -12,7 +12,7 @@ exports[`WorkflowCommandOrchestrator workflow template matches snapshot (structu
     "serviceAccountName": "argo-workflow-executor",
   },
   "templates": {
-    "configureWorkflow": {
+    "configureAndSubmitWorkflow": {
       "body": {
         "container": {
           "args": [
@@ -88,10 +88,7 @@ exports[`WorkflowCommandOrchestrator workflow template matches snapshot (structu
               "template": "
 set -e -x
 
-# Save pod name to output path
-echo $HOSTNAME > /tmp/podname
-
-echo "Building migration configuration..."
+echo "Building and submitting migration workflow..."
 
 # Create migration config JSON
 cat > /tmp/migration_config.json << 'EOF'
@@ -111,13 +108,29 @@ EOF
 echo "Migration config contents:"
 cat /tmp/migration_config.json
 
-echo "Configuring workflow..."
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
 
+# Configure workflow
+echo "Configuring workflow..."
 workflow configure --config-file /tmp/migration_config.json
 
-echo "Workflow configured successfully"
+# Submit workflow and capture the workflow name
+echo "Submitting workflow..."
+WORKFLOW_OUTPUT=$(workflow submit 2>&1)
+echo "Workflow submit output: $WORKFLOW_OUTPUT"
+
+# Extract workflow name from output (format: "Workflow 'migration-xyz' submitted")
+WORKFLOW_NAME=$(echo "$WORKFLOW_OUTPUT" | grep -o "Workflow '[^']*'" | sed "s/Workflow '\\([^']*\\)'/\\1/" || echo "")
+
+if [ -z "$WORKFLOW_NAME" ]; then
+    echo "ERROR: Could not extract workflow name from output"
+    exit 1
+fi
+
+echo "Workflow submitted successfully: $WORKFLOW_NAME"
+mkdir -p /tmp/outputs
+echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
 ",
             },
           ],
@@ -216,7 +229,13 @@ echo "Workflow configured successfully"
           "description": "Target cluster config as JSON object fragment",
         },
       },
-      "outputs": {},
+      "outputs": {
+        "workflowName": {
+          "description": "Name of the submitted workflow",
+          "fromWhere": "path",
+          "path": "/tmp/outputs/workflowName",
+        },
+      },
       "retryStrategy": {},
     },
     "main": {
@@ -287,42 +306,8 @@ echo "Workflow configured successfully"
                     },
                   },
                 },
-                "name": "configureWorkflow",
-                "template": "configureWorkflow",
-              },
-            ],
-          },
-          {
-            "steps": [
-              {
-                "args": {
-                  "imageMigrationConsoleLocation": FromParameterExpression {
-                    "_complexity": undefined,
-                    "_paramDef": {
-                      "description": undefined,
-                    },
-                    "_resultType": undefined,
-                    "kind": "parameter",
-                    "source": {
-                      "kind": "input",
-                      "parameterName": "imageMigrationConsoleLocation",
-                    },
-                  },
-                  "imageMigrationConsolePullPolicy": FromParameterExpression {
-                    "_complexity": undefined,
-                    "_paramDef": {
-                      "description": undefined,
-                    },
-                    "_resultType": undefined,
-                    "kind": "parameter",
-                    "source": {
-                      "kind": "input",
-                      "parameterName": "imageMigrationConsolePullPolicy",
-                    },
-                  },
-                },
-                "name": "submitWorkflow",
-                "template": "submitWorkflow",
+                "name": "configureAndSubmitWorkflow",
+                "template": "configureAndSubmitWorkflow",
               },
             ],
           },
@@ -366,7 +351,7 @@ echo "Workflow configured successfully"
                     "source": {
                       "kind": "steps_output",
                       "parameterName": "workflowName",
-                      "stepName": "submitWorkflow",
+                      "stepName": "configureAndSubmitWorkflow",
                     },
                   },
                 },
@@ -423,64 +408,49 @@ echo "Workflow configured successfully"
 set -e -x
 
 WORKFLOW_NAME="{{WORKFLOW_NAME}}"
-echo "Monitoring workflow: $WORKFLOW_NAME"
+echo "Checking workflow status: $WORKFLOW_NAME"
 
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
 
-# Poll workflow status with timeout (30 minutes max)
-MAX_ITERATIONS=360  # 30 minutes at 5-second intervals
-ITERATION=0
+# Simple status check - let Argo handle retries and persistence
+STATUS_OUTPUT=$(workflow status --name "$WORKFLOW_NAME" 2>&1)
+echo "Status: $STATUS_OUTPUT"
 
-while [ $ITERATION -lt $MAX_ITERATIONS ]; do
-    echo "Checking workflow status (iteration $((ITERATION + 1))/$MAX_ITERATIONS)..."
-    
-    # Get workflow status
-    STATUS_OUTPUT=$(workflow status --name "$WORKFLOW_NAME" 2>&1 || echo "ERROR")
-    
-    if echo "$STATUS_OUTPUT" | grep -q "ERROR"; then
-        echo "Error getting workflow status: $STATUS_OUTPUT"
-        sleep 5
-        ITERATION=$((ITERATION + 1))
-        continue
-    fi
-    
-    echo "Status output: $STATUS_OUTPUT"
-    
-    # Check if workflow is completed (succeeded or failed)
-    if echo "$STATUS_OUTPUT" | grep -q "Succeeded\\|Failed"; then
-        if echo "$STATUS_OUTPUT" | grep -q "Succeeded"; then
-            echo "✅ Workflow completed successfully!"
-            exit 0
-        else
-            echo "❌ Workflow failed!"
-            exit 1
-        fi
-    fi
-    
-    # Check if workflow needs approval (suspended)
-    if echo "$STATUS_OUTPUT" | grep -q "Suspended\\|Waiting"; then
-        echo "Workflow is suspended, attempting to approve..."
-        APPROVE_OUTPUT=$(workflow approve --name "$WORKFLOW_NAME" 2>&1)
-        echo "Approve output: $APPROVE_OUTPUT"
-        
-        if echo "$APPROVE_OUTPUT" | grep -q "approved\\|Approved"; then
-            echo "Workflow approved, continuing monitoring..."
-        else
-            echo "Warning: Approval may have failed: $APPROVE_OUTPUT"
-        fi
-    fi
-    
-    # Check if workflow is still running
-    if echo "$STATUS_OUTPUT" | grep -q "Running\\|Pending"; then
-        echo "Workflow is still running, waiting..."
-    fi
-    
-    sleep 5
-    ITERATION=$((ITERATION + 1))
-done
+# Check if workflow is completed successfully
+if echo "$STATUS_OUTPUT" | grep -q "Succeeded"; then
+    echo "✅ Workflow completed successfully"
+    exit 0
+fi
 
-echo "❌ Timeout: Workflow did not complete within 30 minutes"
+# Check if workflow failed permanently 
+if echo "$STATUS_OUTPUT" | grep -q "Failed"; then
+    echo "❌ Workflow failed permanently"
+    exit 1
+fi
+
+# Handle suspended workflow (needs approval)
+if echo "$STATUS_OUTPUT" | grep -q "Suspended\\|Waiting"; then
+    echo "Workflow is suspended, attempting to approve..."
+    APPROVE_OUTPUT=$(workflow approve --name "$WORKFLOW_NAME" 2>&1)
+    echo "Approve output: $APPROVE_OUTPUT"
+    
+    if echo "$APPROVE_OUTPUT" | grep -q "approved\\|Approved"; then
+        echo "Workflow approved, will check again..."
+    else
+        echo "Warning: Approval may have failed: $APPROVE_OUTPUT"
+    fi
+    exit 1  # Exit 1 to retry after approval
+fi
+
+# Workflow is still running - exit 1 to trigger retry
+if echo "$STATUS_OUTPUT" | grep -q "Running\\|Pending"; then
+    echo "⏳ Workflow still running, will retry..."
+    exit 1
+fi
+
+# Unknown status - retry
+echo "Unknown workflow status, will retry..."
 exit 1
 ",
             },
@@ -548,107 +518,15 @@ exit 1
         },
       },
       "outputs": {},
-      "retryStrategy": {},
-    },
-    "submitWorkflow": {
-      "body": {
-        "container": {
-          "args": [
-            "
-set -e -x
-
-echo "Submitting workflow..."
-
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
-
-# Submit workflow and capture the workflow name
-WORKFLOW_OUTPUT=$(workflow submit 2>&1)
-echo "Workflow submit output: $WORKFLOW_OUTPUT"
-
-# Extract workflow name from output (format: "Workflow 'migration-xyz' submitted")
-WORKFLOW_NAME=$(echo "$WORKFLOW_OUTPUT" | grep -o "Workflow '[^']*'" | sed "s/Workflow '\\([^']*\\)'/\\1/" || echo "")
-
-if [ -z "$WORKFLOW_NAME" ]; then
-    echo "ERROR: Could not extract workflow name from output"
-    exit 1
-fi
-
-echo "Workflow submitted successfully: $WORKFLOW_NAME"
-echo "$WORKFLOW_NAME" > /tmp/workflowName
-
-# Also save to Argo output
-mkdir -p /tmp/outputs
-echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
-",
-          ],
-          "command": [
-            LiteralExpression {
-              "_complexity": undefined,
-              "_resultType": undefined,
-              "kind": "literal",
-              "value": "/bin/sh",
-            },
-            LiteralExpression {
-              "_complexity": undefined,
-              "_resultType": undefined,
-              "kind": "literal",
-              "value": "-c",
-            },
-          ],
-          "env": {},
-          "image": FromParameterExpression {
-            "_complexity": undefined,
-            "_paramDef": {
-              "description": undefined,
-            },
-            "_resultType": undefined,
-            "kind": "parameter",
-            "source": {
-              "kind": "input",
-              "parameterName": "imageMigrationConsoleLocation",
-            },
-          },
-          "imagePullPolicy": FromParameterExpression {
-            "_complexity": undefined,
-            "_paramDef": {
-              "description": undefined,
-            },
-            "_resultType": undefined,
-            "kind": "parameter",
-            "source": {
-              "kind": "input",
-              "parameterName": "imageMigrationConsolePullPolicy",
-            },
-          },
-          "resources": {
-            "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
-            },
-            "requests": {
-              "cpu": "500m",
-              "memory": "2000Mi",
-            },
-          },
+      "retryStrategy": {
+        "backoff": {
+          "cap": "300",
+          "duration": "5",
+          "factor": "2",
         },
+        "limit": "864",
+        "retryPolicy": "Always",
       },
-      "inputs": {
-        "imageMigrationConsoleLocation": {
-          "description": undefined,
-        },
-        "imageMigrationConsolePullPolicy": {
-          "description": undefined,
-        },
-      },
-      "outputs": {
-        "workflowName": {
-          "description": "Name of the submitted workflow",
-          "fromWhere": "path",
-          "path": "/tmp/outputs/workflowName",
-        },
-      },
-      "retryStrategy": {},
     },
   },
   "workflowParameters": {

@@ -2132,6 +2132,336 @@ exports[`test workflow template renderings full-migration 1`] = `
 }
 `;
 
+exports[`test workflow template renderings full-migration-with-cli 1`] = `
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "full-migration-with-cli",
+  },
+  "spec": {
+    "arguments": {
+      "parameters": [
+        {
+          "name": "etcdEndpoints",
+          "value": "http://etcd.ma.svc.cluster.local:2379",
+        },
+        {
+          "name": "etcdUser",
+          "value": "root",
+        },
+        {
+          "name": "etcdPassword",
+          "value": "password",
+        },
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config",
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config",
+        },
+      ],
+    },
+    "entrypoint": "main",
+    "parallelism": 100,
+    "serviceAccountName": "argo-workflow-executor",
+    "templates": [
+      {
+        "name": "pausefortestdata",
+        "outputs": undefined,
+        "suspend": {},
+      },
+      {
+        "name": "pauseforverification",
+        "outputs": undefined,
+        "suspend": {},
+      },
+      {
+        "container": {
+          "args": [
+            "
+# Generate unique suffix from workflow UID
+SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+
+SOURCE_TEMPLATE="{{inputs.parameters.sourceClusterTemplate}}"
+TARGET_TEMPLATE="{{inputs.parameters.targetClusterTemplate}}"
+SOURCE_ID=$(echo "$SOURCE_TEMPLATE" | cut -d'-' -f1-3)
+TARGET_ID=$(echo "$TARGET_TEMPLATE" | cut -d'-' -f1-3)
+
+SOURCE_CLUSTER_NAME="source-$SOURCE_ID-$SUFFIX"
+TARGET_CLUSTER_NAME="target-$TARGET_ID-$SUFFIX"
+
+# Output parameters
+echo "$SOURCE_CLUSTER_NAME" > /tmp/source-cluster-name
+echo "$TARGET_CLUSTER_NAME" > /tmp/target-cluster-name
+
+echo "Generated cluster names:"
+echo "Source: $SOURCE_CLUSTER_NAME (from template: $SOURCE_TEMPLATE)"
+echo "Target: $TARGET_CLUSTER_NAME (from template: $TARGET_TEMPLATE)"
+            ",
+          ],
+          "command": [
+            "sh",
+            "-c",
+          ],
+          "env": [],
+          "image": "alpine:latest",
+          "imagePullPolicy": "IfNotPresent",
+          "resources": {
+            "limits": {
+              "cpu": "1000m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceClusterTemplate",
+            },
+            {
+              "name": "targetClusterTemplate",
+            },
+          ],
+        },
+        "name": "generateclusternames",
+        "outputs": {
+          "parameters": [
+            {
+              "name": "sourceClusterName",
+              "valueFrom": {
+                "path": "/tmp/source-cluster-name",
+              },
+            },
+            {
+              "name": "targetClusterName",
+              "valueFrom": {
+                "path": "/tmp/target-cluster-name",
+              },
+            },
+          ],
+        },
+      },
+      {
+        "container": {
+          "args": [
+            "
+echo "Waiting for {{inputs.parameters.clusterType}} cluster to be ready..."
+
+# Check if StatefulSet pod exists first
+if kubectl get pod/{{inputs.parameters.clusterName}}-0      --namespace={{inputs.parameters.namespace}} >/dev/null 2>&1; then
+  echo "Found StatefulSet pod {{inputs.parameters.clusterName}}-0, waiting for readiness..."
+  kubectl wait --for=condition=ready pod/{{inputs.parameters.clusterName}}-0     --namespace={{inputs.parameters.namespace}}     --timeout=200s
+  echo "{{inputs.parameters.clusterType}} cluster pod (StatefulSet) is ready!"
+else
+  echo "StatefulSet pod not found, checking Deployment..."
+  kubectl rollout status deployment/{{inputs.parameters.clusterName}}     --namespace={{inputs.parameters.namespace}}     --timeout=200s
+  echo "{{inputs.parameters.clusterType}} cluster deployment is ready!"
+fi
+            ",
+          ],
+          "command": [
+            "sh",
+            "-c",
+          ],
+          "env": [],
+          "image": "bitnami/kubectl:latest",
+          "imagePullPolicy": "IfNotPresent",
+          "resources": {
+            "limits": {
+              "cpu": "1000m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+            {
+              "name": "clusterType",
+            },
+            {
+              "name": "namespace",
+            },
+          ],
+        },
+        "name": "waitforcluster",
+        "outputs": {
+          "parameters": [],
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "description": "Kubernetes namespace for clusters",
+              "name": "clusterNamespace",
+            },
+            {
+              "description": "Template name for source cluster",
+              "name": "sourceClusterTemplate",
+            },
+            {
+              "description": "Template name for target cluster",
+              "name": "targetClusterTemplate",
+            },
+            {
+              "description": "JSON configuration for source cluster",
+              "name": "sourceClusterConfigJson",
+            },
+            {
+              "description": "JSON configuration for target cluster",
+              "name": "targetClusterConfigJson",
+            },
+            {
+              "description": "JSON configuration for snapshot",
+              "name": "snapshotConfigJson",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "main",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sourceClusterTemplate",
+                    "value": "{{inputs.parameters.sourceClusterTemplate}}",
+                  },
+                  {
+                    "name": "targetClusterTemplate",
+                    "value": "{{inputs.parameters.targetClusterTemplate}}",
+                  },
+                ],
+              },
+              "name": "generateClusterNames",
+              "template": "generateclusternames",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{steps.generateClusterNames.outputs.parameters.sourceClusterName}}",
+                  },
+                  {
+                    "name": "clusterType",
+                    "value": "source",
+                  },
+                  {
+                    "name": "namespace",
+                    "value": "{{inputs.parameters.clusterNamespace}}",
+                  },
+                ],
+              },
+              "name": "waitForSourceCluster",
+              "template": "waitforcluster",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{steps.generateClusterNames.outputs.parameters.targetClusterName}}",
+                  },
+                  {
+                    "name": "clusterType",
+                    "value": "target",
+                  },
+                  {
+                    "name": "namespace",
+                    "value": "{{inputs.parameters.clusterNamespace}}",
+                  },
+                ],
+              },
+              "name": "waitForTargetCluster",
+              "template": "waitforcluster",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [],
+              },
+              "name": "pauseForTestData",
+              "template": "pausefortestdata",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sourceClusterConfigJson",
+                    "value": "{{inputs.parameters.sourceClusterConfigJson}}",
+                  },
+                  {
+                    "name": "targetClusterConfigJson",
+                    "value": "{{inputs.parameters.targetClusterConfigJson}}",
+                  },
+                  {
+                    "name": "snapshotConfigJson",
+                    "value": "{{inputs.parameters.snapshotConfigJson}}",
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                ],
+              },
+              "name": "runMigrationViaWorkflowCli",
+              "templateRef": {
+                "name": "workflow-command-orchestrator",
+                "template": "main",
+              },
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [],
+              },
+              "name": "pauseForVerification",
+              "template": "pauseforverification",
+            },
+          ],
+        ],
+      },
+    ],
+  },
+}
+`;
+
 exports[`test workflow template renderings metadata-migration 1`] = `
 {
   "apiVersion": "argoproj.io/v1alpha1",
@@ -3863,10 +4193,7 @@ exports[`test workflow template renderings workflow-command-orchestrator 1`] = `
             "
 set -e -x
 
-# Save pod name to output path
-echo $HOSTNAME > /tmp/podname
-
-echo "Building migration configuration..."
+echo "Building and submitting migration workflow..."
 
 # Create migration config JSON
 cat > /tmp/migration_config.json << 'EOF'
@@ -3886,13 +4213,29 @@ EOF
 echo "Migration config contents:"
 cat /tmp/migration_config.json
 
-echo "Configuring workflow..."
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
 
+# Configure workflow
+echo "Configuring workflow..."
 workflow configure --config-file /tmp/migration_config.json
 
-echo "Workflow configured successfully"
+# Submit workflow and capture the workflow name
+echo "Submitting workflow..."
+WORKFLOW_OUTPUT=$(workflow submit 2>&1)
+echo "Workflow submit output: $WORKFLOW_OUTPUT"
+
+# Extract workflow name from output (format: "Workflow 'migration-xyz' submitted")
+WORKFLOW_NAME=$(echo "$WORKFLOW_OUTPUT" | grep -o "Workflow '[^']*'" | sed "s/Workflow '\\([^']*\\)'/\\1/" || echo "")
+
+if [ -z "$WORKFLOW_NAME" ]; then
+    echo "ERROR: Could not extract workflow name from output"
+    exit 1
+fi
+
+echo "Workflow submitted successfully: $WORKFLOW_NAME"
+mkdir -p /tmp/outputs
+echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
 ",
           ],
           "command": [
@@ -3938,71 +4281,7 @@ echo "Workflow configured successfully"
             },
           ],
         },
-        "name": "configureworkflow",
-        "outputs": {
-          "parameters": [],
-        },
-      },
-      {
-        "container": {
-          "args": [
-            "
-set -e -x
-
-echo "Submitting workflow..."
-
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
-
-# Submit workflow and capture the workflow name
-WORKFLOW_OUTPUT=$(workflow submit 2>&1)
-echo "Workflow submit output: $WORKFLOW_OUTPUT"
-
-# Extract workflow name from output (format: "Workflow 'migration-xyz' submitted")
-WORKFLOW_NAME=$(echo "$WORKFLOW_OUTPUT" | grep -o "Workflow '[^']*'" | sed "s/Workflow '\\([^']*\\)'/\\1/" || echo "")
-
-if [ -z "$WORKFLOW_NAME" ]; then
-    echo "ERROR: Could not extract workflow name from output"
-    exit 1
-fi
-
-echo "Workflow submitted successfully: $WORKFLOW_NAME"
-echo "$WORKFLOW_NAME" > /tmp/workflowName
-
-# Also save to Argo output
-mkdir -p /tmp/outputs
-echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
-",
-          ],
-          "command": [
-            "/bin/sh",
-            "-c",
-          ],
-          "env": [],
-          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-          "resources": {
-            "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
-            },
-            "requests": {
-              "cpu": "500m",
-              "memory": "2000Mi",
-            },
-          },
-        },
-        "inputs": {
-          "parameters": [
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "submitworkflow",
+        "name": "configureandsubmitworkflow",
         "outputs": {
           "parameters": [
             {
@@ -4022,64 +4301,49 @@ echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
 set -e -x
 
 WORKFLOW_NAME="{{inputs.parameters.workflowName}}"
-echo "Monitoring workflow: $WORKFLOW_NAME"
+echo "Checking workflow status: $WORKFLOW_NAME"
 
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
 
-# Poll workflow status with timeout (30 minutes max)
-MAX_ITERATIONS=360  # 30 minutes at 5-second intervals
-ITERATION=0
+# Simple status check - let Argo handle retries and persistence
+STATUS_OUTPUT=$(workflow status --name "$WORKFLOW_NAME" 2>&1)
+echo "Status: $STATUS_OUTPUT"
 
-while [ $ITERATION -lt $MAX_ITERATIONS ]; do
-    echo "Checking workflow status (iteration $((ITERATION + 1))/$MAX_ITERATIONS)..."
-    
-    # Get workflow status
-    STATUS_OUTPUT=$(workflow status --name "$WORKFLOW_NAME" 2>&1 || echo "ERROR")
-    
-    if echo "$STATUS_OUTPUT" | grep -q "ERROR"; then
-        echo "Error getting workflow status: $STATUS_OUTPUT"
-        sleep 5
-        ITERATION=$((ITERATION + 1))
-        continue
-    fi
-    
-    echo "Status output: $STATUS_OUTPUT"
-    
-    # Check if workflow is completed (succeeded or failed)
-    if echo "$STATUS_OUTPUT" | grep -q "Succeeded\\|Failed"; then
-        if echo "$STATUS_OUTPUT" | grep -q "Succeeded"; then
-            echo "✅ Workflow completed successfully!"
-            exit 0
-        else
-            echo "❌ Workflow failed!"
-            exit 1
-        fi
-    fi
-    
-    # Check if workflow needs approval (suspended)
-    if echo "$STATUS_OUTPUT" | grep -q "Suspended\\|Waiting"; then
-        echo "Workflow is suspended, attempting to approve..."
-        APPROVE_OUTPUT=$(workflow approve --name "$WORKFLOW_NAME" 2>&1)
-        echo "Approve output: $APPROVE_OUTPUT"
-        
-        if echo "$APPROVE_OUTPUT" | grep -q "approved\\|Approved"; then
-            echo "Workflow approved, continuing monitoring..."
-        else
-            echo "Warning: Approval may have failed: $APPROVE_OUTPUT"
-        fi
-    fi
-    
-    # Check if workflow is still running
-    if echo "$STATUS_OUTPUT" | grep -q "Running\\|Pending"; then
-        echo "Workflow is still running, waiting..."
-    fi
-    
-    sleep 5
-    ITERATION=$((ITERATION + 1))
-done
+# Check if workflow is completed successfully
+if echo "$STATUS_OUTPUT" | grep -q "Succeeded"; then
+    echo "✅ Workflow completed successfully"
+    exit 0
+fi
 
-echo "❌ Timeout: Workflow did not complete within 30 minutes"
+# Check if workflow failed permanently 
+if echo "$STATUS_OUTPUT" | grep -q "Failed"; then
+    echo "❌ Workflow failed permanently"
+    exit 1
+fi
+
+# Handle suspended workflow (needs approval)
+if echo "$STATUS_OUTPUT" | grep -q "Suspended\\|Waiting"; then
+    echo "Workflow is suspended, attempting to approve..."
+    APPROVE_OUTPUT=$(workflow approve --name "$WORKFLOW_NAME" 2>&1)
+    echo "Approve output: $APPROVE_OUTPUT"
+    
+    if echo "$APPROVE_OUTPUT" | grep -q "approved\\|Approved"; then
+        echo "Workflow approved, will check again..."
+    else
+        echo "Warning: Approval may have failed: $APPROVE_OUTPUT"
+    fi
+    exit 1  # Exit 1 to retry after approval
+fi
+
+# Workflow is still running - exit 1 to trigger retry
+if echo "$STATUS_OUTPUT" | grep -q "Running\\|Pending"; then
+    echo "⏳ Workflow still running, will retry..."
+    exit 1
+fi
+
+# Unknown status - retry
+echo "Unknown workflow status, will retry..."
 exit 1
 ",
           ],
@@ -4117,6 +4381,15 @@ exit 1
         "name": "monitorworkflow",
         "outputs": {
           "parameters": [],
+        },
+        "retryStrategy": {
+          "backoff": {
+            "cap": "300",
+            "duration": "5",
+            "factor": "2",
+          },
+          "limit": "864",
+          "retryPolicy": "Always",
         },
       },
       {
@@ -4173,26 +4446,8 @@ exit 1
                   },
                 ],
               },
-              "name": "configureWorkflow",
-              "template": "configureworkflow",
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                ],
-              },
-              "name": "submitWorkflow",
-              "template": "submitworkflow",
+              "name": "configureAndSubmitWorkflow",
+              "template": "configureandsubmitworkflow",
             },
           ],
           [
@@ -4209,7 +4464,7 @@ exit 1
                   },
                   {
                     "name": "workflowName",
-                    "value": "{{steps.submitWorkflow.outputs.parameters.workflowName}}",
+                    "value": "{{steps.configureAndSubmitWorkflow.outputs.parameters.workflowName}}",
                   },
                 ],
               },

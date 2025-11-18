@@ -34,13 +34,10 @@ const configComponentParameters = {
     })
 };
 
-const WORKFLOW_CONFIGURE_SCRIPT = `
+const WORKFLOW_CONFIGURE_AND_SUBMIT_SCRIPT = `
 set -e -x
 
-# Save pod name to output path
-echo $HOSTNAME > /tmp/podname
-
-echo "Building migration configuration..."
+echo "Building and submitting migration workflow..."
 
 # Create migration config JSON
 cat > /tmp/migration_config.json << 'EOF'
@@ -60,24 +57,15 @@ EOF
 echo "Migration config contents:"
 cat /tmp/migration_config.json
 
-echo "Configuring workflow..."
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
 
+# Configure workflow
+echo "Configuring workflow..."
 workflow configure --config-file /tmp/migration_config.json
 
-echo "Workflow configured successfully"
-`;
-
-const WORKFLOW_SUBMIT_SCRIPT = `
-set -e -x
-
-echo "Submitting workflow..."
-
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
-
 # Submit workflow and capture the workflow name
+echo "Submitting workflow..."
 WORKFLOW_OUTPUT=$(workflow submit 2>&1)
 echo "Workflow submit output: $WORKFLOW_OUTPUT"
 
@@ -90,9 +78,6 @@ if [ -z "$WORKFLOW_NAME" ]; then
 fi
 
 echo "Workflow submitted successfully: $WORKFLOW_NAME"
-echo "$WORKFLOW_NAME" > /tmp/workflowName
-
-# Also save to Argo output
 mkdir -p /tmp/outputs
 echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
 `;
@@ -101,64 +86,49 @@ const WORKFLOW_MONITOR_SCRIPT = `
 set -e -x
 
 WORKFLOW_NAME="{{WORKFLOW_NAME}}"
-echo "Monitoring workflow: $WORKFLOW_NAME"
+echo "Checking workflow status: $WORKFLOW_NAME"
 
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
 
-# Poll workflow status with timeout (30 minutes max)
-MAX_ITERATIONS=360  # 30 minutes at 5-second intervals
-ITERATION=0
+# Simple status check - let Argo handle retries and persistence
+STATUS_OUTPUT=$(workflow status --name "$WORKFLOW_NAME" 2>&1)
+echo "Status: $STATUS_OUTPUT"
 
-while [ $ITERATION -lt $MAX_ITERATIONS ]; do
-    echo "Checking workflow status (iteration $((ITERATION + 1))/$MAX_ITERATIONS)..."
-    
-    # Get workflow status
-    STATUS_OUTPUT=$(workflow status --name "$WORKFLOW_NAME" 2>&1 || echo "ERROR")
-    
-    if echo "$STATUS_OUTPUT" | grep -q "ERROR"; then
-        echo "Error getting workflow status: $STATUS_OUTPUT"
-        sleep 5
-        ITERATION=$((ITERATION + 1))
-        continue
-    fi
-    
-    echo "Status output: $STATUS_OUTPUT"
-    
-    # Check if workflow is completed (succeeded or failed)
-    if echo "$STATUS_OUTPUT" | grep -q "Succeeded\\|Failed"; then
-        if echo "$STATUS_OUTPUT" | grep -q "Succeeded"; then
-            echo "✅ Workflow completed successfully!"
-            exit 0
-        else
-            echo "❌ Workflow failed!"
-            exit 1
-        fi
-    fi
-    
-    # Check if workflow needs approval (suspended)
-    if echo "$STATUS_OUTPUT" | grep -q "Suspended\\|Waiting"; then
-        echo "Workflow is suspended, attempting to approve..."
-        APPROVE_OUTPUT=$(workflow approve --name "$WORKFLOW_NAME" 2>&1)
-        echo "Approve output: $APPROVE_OUTPUT"
-        
-        if echo "$APPROVE_OUTPUT" | grep -q "approved\\|Approved"; then
-            echo "Workflow approved, continuing monitoring..."
-        else
-            echo "Warning: Approval may have failed: $APPROVE_OUTPUT"
-        fi
-    fi
-    
-    # Check if workflow is still running
-    if echo "$STATUS_OUTPUT" | grep -q "Running\\|Pending"; then
-        echo "Workflow is still running, waiting..."
-    fi
-    
-    sleep 5
-    ITERATION=$((ITERATION + 1))
-done
+# Check if workflow is completed successfully
+if echo "$STATUS_OUTPUT" | grep -q "Succeeded"; then
+    echo "✅ Workflow completed successfully"
+    exit 0
+fi
 
-echo "❌ Timeout: Workflow did not complete within 30 minutes"
+# Check if workflow failed permanently 
+if echo "$STATUS_OUTPUT" | grep -q "Failed"; then
+    echo "❌ Workflow failed permanently"
+    exit 1
+fi
+
+# Handle suspended workflow (needs approval)
+if echo "$STATUS_OUTPUT" | grep -q "Suspended\\|Waiting"; then
+    echo "Workflow is suspended, attempting to approve..."
+    APPROVE_OUTPUT=$(workflow approve --name "$WORKFLOW_NAME" 2>&1)
+    echo "Approve output: $APPROVE_OUTPUT"
+    
+    if echo "$APPROVE_OUTPUT" | grep -q "approved\\|Approved"; then
+        echo "Workflow approved, will check again..."
+    else
+        echo "Warning: Approval may have failed: $APPROVE_OUTPUT"
+    fi
+    exit 1  # Exit 1 to retry after approval
+fi
+
+# Workflow is still running - exit 1 to trigger retry
+if echo "$STATUS_OUTPUT" | grep -q "Running\\|Pending"; then
+    echo "⏳ Workflow still running, will retry..."
+    exit 1
+fi
+
+# Unknown status - retry
+echo "Unknown workflow status, will retry..."
 exit 1
 `;
 
@@ -170,7 +140,7 @@ export const WorkflowCommandOrchestrator = WorkflowBuilder.create({
 
     .addParams(CommonWorkflowParameters)
 
-    .addTemplate("configureWorkflow", t => t
+    .addTemplate("configureAndSubmitWorkflow", t => t
         .addInputsFromRecord(configComponentParameters)
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
@@ -178,22 +148,11 @@ export const WorkflowCommandOrchestrator = WorkflowBuilder.create({
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/sh", "-c"])
             .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
-            .addArgs([expr.fillTemplate(WORKFLOW_CONFIGURE_SCRIPT, {
+            .addArgs([expr.fillTemplate(WORKFLOW_CONFIGURE_AND_SUBMIT_SCRIPT, {
                 "SOURCE_CONFIG": cb.inputs.sourceConfig,
                 "TARGET_CONFIG": cb.inputs.targetConfig,
                 "SNAPSHOT_CONFIG": cb.inputs.snapshotConfig
             })])
-        )
-    )
-
-    .addTemplate("submitWorkflow", t => t
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-
-        .addContainer(cb => cb
-            .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
-            .addCommand(["/bin/sh", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
-            .addArgs([WORKFLOW_SUBMIT_SCRIPT])
             .addPathOutput("workflowName", "/tmp/outputs/workflowName", typeToken<string>(), 
                 "Name of the submitted workflow")
         )
@@ -211,6 +170,15 @@ export const WorkflowCommandOrchestrator = WorkflowBuilder.create({
                 "WORKFLOW_NAME": cb.inputs.workflowName
             })])
         )
+        .addRetryParameters({
+            limit: "864",          // ~72 hours (864 * 5min max backoff)
+            retryPolicy: "Always",
+            backoff: {
+                duration: "5",     // Start at 5 seconds
+                factor: "2",       // Exponential backoff  
+                cap: "300"         // Cap at 5 minutes
+            }
+        })
     )
 
     .addTemplate("main", t => t
@@ -224,8 +192,8 @@ export const WorkflowCommandOrchestrator = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
-            // Step 1: Configure workflow
-            .addStep("configureWorkflow", INTERNAL, "configureWorkflow", c =>
+            // Step 1: Configure and submit workflow (combined)
+            .addStep("configureAndSubmitWorkflow", INTERNAL, "configureAndSubmitWorkflow", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     sourceConfig: b.inputs.sourceClusterConfigJson,
@@ -234,18 +202,11 @@ export const WorkflowCommandOrchestrator = WorkflowBuilder.create({
                 })
             )
 
-            // Step 2: Submit workflow
-            .addStep("submitWorkflow", INTERNAL, "submitWorkflow", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c)
-                })
-            )
-
-            // Step 3: Monitor workflow to completion (using actual workflow name from submit step)
+            // Step 2: Monitor workflow to completion (using actual workflow name from combined step)
             .addStep("monitorWorkflow", INTERNAL, "monitorWorkflow", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    workflowName: c.steps.submitWorkflow.outputs.workflowName
+                    workflowName: c.steps.configureAndSubmitWorkflow.outputs.workflowName
                 })
             )
         )
