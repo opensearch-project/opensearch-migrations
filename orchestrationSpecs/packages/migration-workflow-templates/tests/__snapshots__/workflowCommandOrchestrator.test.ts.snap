@@ -16,94 +16,53 @@ exports[`WorkflowCommandOrchestrator workflow template matches snapshot (structu
       "body": {
         "container": {
           "args": [
-            TemplateReplacementExpression {
-              "_complexity": undefined,
-              "_resultType": undefined,
-              "kind": "fillTemplate",
-              "replacements": {
-                "SNAPSHOT_CONFIG": FromParameterExpression {
-                  "_complexity": undefined,
-                  "_paramDef": {
-                    "_hasDefault": true,
-                    "defaultValue": {
-                      "expression": LiteralExpression {
-                        "_complexity": undefined,
-                        "_resultType": undefined,
-                        "kind": "literal",
-                        "value": "",
-                      },
-                    },
-                    "description": "Snapshot config as JSON object fragment",
-                  },
-                  "_resultType": undefined,
-                  "kind": "parameter",
-                  "source": {
-                    "kind": "input",
-                    "parameterName": "snapshotConfig",
-                  },
-                },
-                "SOURCE_CONFIG": FromParameterExpression {
-                  "_complexity": undefined,
-                  "_paramDef": {
-                    "_hasDefault": true,
-                    "defaultValue": {
-                      "expression": LiteralExpression {
-                        "_complexity": undefined,
-                        "_resultType": undefined,
-                        "kind": "literal",
-                        "value": "",
-                      },
-                    },
-                    "description": "Source cluster config as JSON object fragment (e.g. {"endpoint":"..."})",
-                  },
-                  "_resultType": undefined,
-                  "kind": "parameter",
-                  "source": {
-                    "kind": "input",
-                    "parameterName": "sourceConfig",
-                  },
-                },
-                "TARGET_CONFIG": FromParameterExpression {
-                  "_complexity": undefined,
-                  "_paramDef": {
-                    "_hasDefault": true,
-                    "defaultValue": {
-                      "expression": LiteralExpression {
-                        "_complexity": undefined,
-                        "_resultType": undefined,
-                        "kind": "literal",
-                        "value": "",
-                      },
-                    },
-                    "description": "Target cluster config as JSON object fragment",
-                  },
-                  "_resultType": undefined,
-                  "kind": "parameter",
-                  "source": {
-                    "kind": "input",
-                    "parameterName": "targetConfig",
-                  },
-                },
-              },
-              "template": "
+            "
 set -e -x
 
 echo "Building and submitting migration workflow..."
 
-# Create migration config JSON
-cat > /tmp/migration_config.json << 'EOF'
-{
-  "source_cluster": {{SOURCE_CONFIG}},
-  "target_cluster": {{TARGET_CONFIG}},
-  "snapshot": {{SNAPSHOT_CONFIG}},
-  "backfill": {
-    "reindex_from_snapshot": true
-  },
-  "metadata_migration": {
-    "index_allowlist": "*"
-  }
-}
-EOF
+            # Create migration config JSON
+            cat > /tmp/migration_config.json << 'EOF'
+            {
+              "sourceClusters": {
+                "source": {
+                  "endpoint": "{{inputs.parameters.sourceEndpoint}}",
+                  "allowInsecure": {{inputs.parameters.sourceAllowInsecure}},
+                  "version": "{{inputs.parameters.sourceVersion}}",
+                  "snapshotRepo": {{inputs.parameters.snapshotConfig}}
+                }
+              },
+              "targetClusters": {
+                "target": {{inputs.parameters.targetConfig}}
+              },
+              "migrationConfigs": [
+                {
+                  "fromSource": "source",
+                  "toTarget": "target",
+                  "snapshotExtractAndLoadConfigs": [
+                    {
+                      "createSnapshotConfig": {},
+                      "snapshotConfig": {
+                        "snapshotNameConfig": {
+                          "snapshotNamePrefix": "rfs"
+                        }
+                      },
+                      "migrations": [
+                        {
+                          "metadataMigrationConfig": {
+                            "indexAllowlist": ["*"]
+                          },
+                          "documentBackfillConfig": {
+                            "indexAllowlist": ["*"]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+            EOF
 
 echo "Migration config contents:"
 cat /tmp/migration_config.json
@@ -111,20 +70,25 @@ cat /tmp/migration_config.json
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
 
-# Configure workflow
-echo "Configuring workflow..."
-workflow configure --config-file /tmp/migration_config.json
+# Clear and load configuration
+echo "Clearing existing workflow configuration..."
+workflow configure clear --confirm
+
+echo "Loading configuration from JSON..."
+cat /tmp/migration_config.json | workflow configure edit --stdin
 
 # Submit workflow and capture the workflow name
 echo "Submitting workflow..."
 WORKFLOW_OUTPUT=$(workflow submit 2>&1)
 echo "Workflow submit output: $WORKFLOW_OUTPUT"
 
-# Extract workflow name from output (format: "Workflow 'migration-xyz' submitted")
-WORKFLOW_NAME=$(echo "$WORKFLOW_OUTPUT" | grep -o "Workflow '[^']*'" | sed "s/Workflow '\\([^']*\\)'/\\1/" || echo "")
+# Extract workflow name (format: "  Name: workflow-name")
+WORKFLOW_NAME=$(echo "$WORKFLOW_OUTPUT" | grep "Name:" | awk '{print $2}' | tr -d '
+')
 
 if [ -z "$WORKFLOW_NAME" ]; then
     echo "ERROR: Could not extract workflow name from output"
+    echo "Full output was: $WORKFLOW_OUTPUT"
     exit 1
 fi
 
@@ -132,7 +96,6 @@ echo "Workflow submitted successfully: $WORKFLOW_NAME"
 mkdir -p /tmp/outputs
 echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
 ",
-            },
           ],
           "command": [
             LiteralExpression {
@@ -204,7 +167,19 @@ echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
           },
           "description": "Snapshot config as JSON object fragment",
         },
-        "sourceConfig": {
+        "sourceAllowInsecure": {
+          "_hasDefault": true,
+          "defaultValue": {
+            "expression": LiteralExpression {
+              "_complexity": undefined,
+              "_resultType": undefined,
+              "kind": "literal",
+              "value": "true",
+            },
+          },
+          "description": "Allow insecure connections to source cluster",
+        },
+        "sourceEndpoint": {
           "_hasDefault": true,
           "defaultValue": {
             "expression": LiteralExpression {
@@ -214,7 +189,19 @@ echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
               "value": "",
             },
           },
-          "description": "Source cluster config as JSON object fragment (e.g. {"endpoint":"..."})",
+          "description": "Source cluster endpoint URL",
+        },
+        "sourceVersion": {
+          "_hasDefault": true,
+          "defaultValue": {
+            "expression": LiteralExpression {
+              "_complexity": undefined,
+              "_resultType": undefined,
+              "kind": "literal",
+              "value": "",
+            },
+          },
+          "description": "Source cluster version (e.g. ES_5.6, OS_2.19)",
         },
         "targetConfig": {
           "_hasDefault": true,
@@ -281,18 +268,9 @@ echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
                       "parameterName": "snapshotConfigJson",
                     },
                   },
-                  "sourceConfig": FromParameterExpression {
-                    "_complexity": undefined,
-                    "_paramDef": {
-                      "description": "Source cluster configuration as JSON object fragment (e.g. {"endpoint":"..."})",
-                    },
-                    "_resultType": undefined,
-                    "kind": "parameter",
-                    "source": {
-                      "kind": "input",
-                      "parameterName": "sourceClusterConfigJson",
-                    },
-                  },
+                  "sourceAllowInsecure": "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.allowInsecure')}}",
+                  "sourceEndpoint": "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.endpoint')}}",
+                  "sourceVersion": "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.version')}}",
                   "targetConfig": FromParameterExpression {
                     "_complexity": undefined,
                     "_paramDef": {
@@ -386,28 +364,10 @@ echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
       "body": {
         "container": {
           "args": [
-            TemplateReplacementExpression {
-              "_complexity": undefined,
-              "_resultType": undefined,
-              "kind": "fillTemplate",
-              "replacements": {
-                "WORKFLOW_NAME": FromParameterExpression {
-                  "_complexity": undefined,
-                  "_paramDef": {
-                    "description": undefined,
-                  },
-                  "_resultType": undefined,
-                  "kind": "parameter",
-                  "source": {
-                    "kind": "input",
-                    "parameterName": "workflowName",
-                  },
-                },
-              },
-              "template": "
+            "
 set -e -x
 
-WORKFLOW_NAME="{{WORKFLOW_NAME}}"
+WORKFLOW_NAME="{{inputs.parameters.workflowName}}"
 echo "Checking workflow status: $WORKFLOW_NAME"
 
 . /etc/profile.d/venv.sh
@@ -453,7 +413,6 @@ fi
 echo "Unknown workflow status, will retry..."
 exit 1
 ",
-            },
           ],
           "command": [
             LiteralExpression {

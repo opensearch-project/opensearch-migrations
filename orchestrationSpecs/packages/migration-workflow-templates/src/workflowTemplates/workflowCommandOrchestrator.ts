@@ -20,9 +20,17 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 
 const configComponentParameters = {
-    sourceConfig: defineParam({ 
+    sourceEndpoint: defineParam({ 
         expression: expr.cast(expr.literal("")).to<string>(),
-        description: "Source cluster config as JSON object fragment (e.g. {\"endpoint\":\"...\"})"
+        description: "Source cluster endpoint URL"
+    }),
+    sourceAllowInsecure: defineParam({ 
+        expression: expr.cast(expr.literal("true")).to<string>(),
+        description: "Allow insecure connections to source cluster"
+    }),
+    sourceVersion: defineParam({ 
+        expression: expr.cast(expr.literal("")).to<string>(),
+        description: "Source cluster version (e.g. ES_5.6, OS_2.19)"
     }),
     targetConfig: defineParam({ 
         expression: expr.cast(expr.literal("")).to<string>(),
@@ -39,20 +47,48 @@ set -e -x
 
 echo "Building and submitting migration workflow..."
 
-# Create migration config JSON
-cat > /tmp/migration_config.json << 'EOF'
-{
-  "source_cluster": {{SOURCE_CONFIG}},
-  "target_cluster": {{TARGET_CONFIG}},
-  "snapshot": {{SNAPSHOT_CONFIG}},
-  "backfill": {
-    "reindex_from_snapshot": true
-  },
-  "metadata_migration": {
-    "index_allowlist": "*"
-  }
-}
-EOF
+            # Create migration config JSON
+            cat > /tmp/migration_config.json << 'EOF'
+            {
+              "sourceClusters": {
+                "source": {
+                  "endpoint": "{{inputs.parameters.sourceEndpoint}}",
+                  "allowInsecure": {{inputs.parameters.sourceAllowInsecure}},
+                  "version": "{{inputs.parameters.sourceVersion}}",
+                  "snapshotRepo": {{inputs.parameters.snapshotConfig}}
+                }
+              },
+              "targetClusters": {
+                "target": {{inputs.parameters.targetConfig}}
+              },
+              "migrationConfigs": [
+                {
+                  "fromSource": "source",
+                  "toTarget": "target",
+                  "snapshotExtractAndLoadConfigs": [
+                    {
+                      "createSnapshotConfig": {},
+                      "snapshotConfig": {
+                        "snapshotNameConfig": {
+                          "snapshotNamePrefix": "rfs"
+                        }
+                      },
+                      "migrations": [
+                        {
+                          "metadataMigrationConfig": {
+                            "indexAllowlist": ["*"]
+                          },
+                          "documentBackfillConfig": {
+                            "indexAllowlist": ["*"]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+            EOF
 
 echo "Migration config contents:"
 cat /tmp/migration_config.json
@@ -60,20 +96,24 @@ cat /tmp/migration_config.json
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
 
-# Configure workflow
-echo "Configuring workflow..."
-workflow configure --config-file /tmp/migration_config.json
+# Clear and load configuration
+echo "Clearing existing workflow configuration..."
+workflow configure clear --confirm
+
+echo "Loading configuration from JSON..."
+cat /tmp/migration_config.json | workflow configure edit --stdin
 
 # Submit workflow and capture the workflow name
 echo "Submitting workflow..."
 WORKFLOW_OUTPUT=$(workflow submit 2>&1)
 echo "Workflow submit output: $WORKFLOW_OUTPUT"
 
-# Extract workflow name from output (format: "Workflow 'migration-xyz' submitted")
-WORKFLOW_NAME=$(echo "$WORKFLOW_OUTPUT" | grep -o "Workflow '[^']*'" | sed "s/Workflow '\\([^']*\\)'/\\1/" || echo "")
+# Extract workflow name (format: "  Name: workflow-name")
+WORKFLOW_NAME=$(echo "$WORKFLOW_OUTPUT" | grep "Name:" | awk '{print $2}' | tr -d '\n')
 
 if [ -z "$WORKFLOW_NAME" ]; then
     echo "ERROR: Could not extract workflow name from output"
+    echo "Full output was: $WORKFLOW_OUTPUT"
     exit 1
 fi
 
@@ -148,11 +188,7 @@ export const WorkflowCommandOrchestrator = WorkflowBuilder.create({
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/sh", "-c"])
             .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
-            .addArgs([expr.fillTemplate(WORKFLOW_CONFIGURE_AND_SUBMIT_SCRIPT, {
-                "SOURCE_CONFIG": cb.inputs.sourceConfig,
-                "TARGET_CONFIG": cb.inputs.targetConfig,
-                "SNAPSHOT_CONFIG": cb.inputs.snapshotConfig
-            })])
+            .addArgs([WORKFLOW_CONFIGURE_AND_SUBMIT_SCRIPT])
             .addPathOutput("workflowName", "/tmp/outputs/workflowName", typeToken<string>(), 
                 "Name of the submitted workflow")
         )
@@ -166,9 +202,7 @@ export const WorkflowCommandOrchestrator = WorkflowBuilder.create({
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/sh", "-c"])
             .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
-            .addArgs([expr.fillTemplate(WORKFLOW_MONITOR_SCRIPT, {
-                "WORKFLOW_NAME": cb.inputs.workflowName
-            })])
+            .addArgs([WORKFLOW_MONITOR_SCRIPT.replace("{{WORKFLOW_NAME}}", "{{inputs.parameters.workflowName}}")])
         )
         .addRetryParameters({
             limit: "864",          // ~72 hours (864 * 5min max backoff)
@@ -196,7 +230,9 @@ export const WorkflowCommandOrchestrator = WorkflowBuilder.create({
             .addStep("configureAndSubmitWorkflow", INTERNAL, "configureAndSubmitWorkflow", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    sourceConfig: b.inputs.sourceClusterConfigJson,
+                    sourceEndpoint: "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.endpoint')}}",
+                    sourceAllowInsecure: "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.allowInsecure')}}",
+                    sourceVersion: "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.version')}}",
                     targetConfig: b.inputs.targetClusterConfigJson,
                     snapshotConfig: b.inputs.snapshotConfigJson
                 })
