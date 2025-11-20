@@ -128,7 +128,7 @@ public class UpgradeTest extends SourceTestBase {
                 });
             });
 
-            // Minimal assertion on ES 5.6 for single_type index
+            // Assert single_type index on ES 5.6
             if (legacyVersion == SearchClusterContainer.ES_V5_6_16) {
                 var countResponse = targetOperations.get("/" + testData.singleTypeIndexName + "/_count");
                 var expectedCount = 2; // ClusterOperations.createEs5SingleTypeIndexWithDocs creates 2 documents
