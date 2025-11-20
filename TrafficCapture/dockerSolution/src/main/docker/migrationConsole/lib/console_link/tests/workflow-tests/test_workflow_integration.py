@@ -533,10 +533,10 @@ def argo_workflows(k3s_container):
     logger.info("Argo Workflows cleanup (handled by k3s container cleanup)")
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")
 def test_namespace(k3s_container):
-    """Create a unique namespace for each test and clean it up afterwards"""
-    # Generate a unique namespace name for this test
+    """Create a unique namespace for the entire test session and clean it up afterwards"""
+    # Generate a unique namespace name for this test session
     namespace_name = f"test-workflow-{uuid.uuid4().hex[:8]}"
 
     # Create the namespace
@@ -547,19 +547,20 @@ def test_namespace(k3s_container):
 
     try:
         v1.create_namespace(body=namespace)
-        logger.info(f"\nCreated test namespace: {namespace_name}")
+        logger.info(f"\nCreated test session namespace: {namespace_name}")
     except ApiException as e:
         if e.status != 409:  # Ignore if already exists
             raise
 
     yield namespace_name
 
-    # Clean up the namespace after the test
-    logger.info(f"\nDeleting test namespace: {namespace_name}")
+    # Clean up the namespace after the test session
+    logger.info(f"\nDeleting test session namespace: {namespace_name}")
     try:
         v1.delete_namespace(name=namespace_name)
+        logger.info(f"Successfully deleted namespace: {namespace_name}")
     except ApiException as e:
-        # Ignore errors during cleanup
+        # Log errors during cleanup but don't fail
         logger.warning(f"Failed to delete namespace {namespace_name}: {e}")
 
 
