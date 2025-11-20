@@ -423,12 +423,16 @@ public class ClusterOperations {
         assertThat(response.getKey(), equalTo(200));
     }
 
+    public boolean shouldTestEs5SingleType() {
+        return VersionMatchers.equalOrGreaterThanES_5_5.test(clusterVersion) 
+            && VersionMatchers.isES_5_X.test(clusterVersion);
+    }
+
     // Creates an ES5 single-type index with test documents.
     @SneakyThrows
     public void createEs5SingleTypeIndexWithDocs(String indexName) {
         // Only create for ES 5.5+ to 5.x
-        if (!(VersionMatchers.equalOrGreaterThanES_5_5.test(clusterVersion) 
-              && VersionMatchers.isES_5_X.test(clusterVersion))) {
+        if (!shouldTestEs5SingleType()) {
             return;
         }
 

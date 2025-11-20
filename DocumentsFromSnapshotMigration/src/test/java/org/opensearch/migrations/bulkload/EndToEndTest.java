@@ -203,7 +203,7 @@ public class EndToEndTest extends SourceTestBase {
             if (supportsCompletion) {
                 totalShards += numberOfShards; // completion_index
             }
-            if (shouldTestEs5SingleType(sourceVersion)) {
+            if (sourceClusterOperations.shouldTestEs5SingleType()) {
                 totalShards += 1; // es5_single_type index
             }
             Assertions.assertEquals(totalShards + 1, expectedTerminationException.numRuns);
@@ -222,24 +222,18 @@ public class EndToEndTest extends SourceTestBase {
             checkDocsWithRouting(targetCluster, testDocMigrationContext, !isTargetES1x);
 
             // For ES 5.x sources, verify that the single_type index was successfully migrated
-            verifyEs5SingleTypeIndex(sourceVersion, targetClusterOperations);
+            verifyEs5SingleTypeIndex(sourceClusterOperations, targetClusterOperations);
         } finally {
             FileSystemUtils.deleteDirectories(localDirectory.toString());
         }
     }
 
-    private boolean shouldTestEs5SingleType(Version sourceVersion) {
-        return VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion) 
-            && VersionMatchers.isES_5_X.test(sourceVersion);
-    }
-
-
     @SneakyThrows
     private void verifyEs5SingleTypeIndex(
-            Version sourceVersion,
+            ClusterOperations sourceClusterOperations,
             ClusterOperations targetClusterOperations) {
 
-        if (!shouldTestEs5SingleType(sourceVersion)) {
+        if (!sourceClusterOperations.shouldTestEs5SingleType()) {
             return;
         }
 
