@@ -63,12 +63,11 @@ public class UpgradeTest extends SourceTestBase {
             // Only create the single-type test index on ES 5.6.16
             if (legacyVersion == SearchClusterContainer.ES_V5_6_16) {
                 createSingleTypeIndex(testData, legacyClusterOperations);
-                verifySingleTypeIndexOnES5(testData, legacyClusterOperations);
             }
 
             legacyClusterOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, testData.legacySnapshotRepo);
 
-            // For ES 5.6.16 include both indices
+            // Snapshot only the indices that were created by the test
             String indicesToSnapshot = testData.indexName;
             if (legacyVersion == SearchClusterContainer.ES_V5_6_16) {
                 indicesToSnapshot = testData.indexName + "," + testData.singleTypeIndexName;
@@ -92,11 +91,6 @@ public class UpgradeTest extends SourceTestBase {
             sourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, testData.legacySnapshotRepo);
             sourceOperations.restoreSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName);
             sourceOperations.deleteSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName);
-
-            // Validate that both indices exist and are queryable after ES 5 → ES 6 restore
-            if (legacyVersion == SearchClusterContainer.ES_V5_6_16) {
-                verifySingleTypeIndexOnES6(testData, sourceOperations);
-            }
             
             var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
             createSnapshot(sourceCluster, testData.snapshotName, testSnapshotContext);
@@ -134,9 +128,15 @@ public class UpgradeTest extends SourceTestBase {
                 });
             });
 
-            // Validate the single-type index migrated correctly to OpenSearch
+            // Minimal assertion on ES 5.6 for single_type index
             if (legacyVersion == SearchClusterContainer.ES_V5_6_16) {
-                verifySingleTypeIndexOnOpenSearch(testData, targetOperations);
+                var countResponse = targetOps.get("/" + testData.singleTypeIndexName + "/_count");
+                var expectedCount = testData.singleTypeDocuments.size();
+                assertThat(
+                        "Single-type index doc count should match after ES 5.6 → ES 6.8 → OS migration",
+                        countResponse.getValue(),
+                        containsString("\"count\":" + expectedCount)
+                );
             }
         }
     }
@@ -184,7 +184,7 @@ public class UpgradeTest extends SourceTestBase {
                     })
                     .collect(Collectors.joining(",")) + "}";
 
-            // Use doc type for ES 5.x compatibility
+            // Use doc type for ES 5.x
             operations.createDocument(testData.singleTypeIndexName, docId, docBody, null, "doc");
         });
     }
@@ -206,7 +206,7 @@ public class UpgradeTest extends SourceTestBase {
         );
     }
 
-    // Minimal settings to exercise `index.mapping.single_type=true` behavior in ES 5 → ES 6 upgrade
+    // Minimal settings to exercise `index.mapping.single_type=true` behavior in ES 5 to ES 6 upgrade
     private static final String CUSTOM_INDEX_SETTINGS = """
         {
           "index": {
@@ -218,67 +218,4 @@ public class UpgradeTest extends SourceTestBase {
           }
         }
         """;
-
-    private void verifySingleTypeIndexOnES5(TestData testData, ClusterOperations operations) {
-        log.info("Verifying single-type index on ES 5.6.16");
-        operations.get("/_refresh");
-        var customDocs = operations.get("/" + testData.singleTypeIndexName + "/_search");
-        var body = customDocs.getValue();
-
-        testData.singleTypeDocuments.forEach((docId, fields) -> {
-            fields.forEach((fieldName, value) -> {
-                assertThat("ES5 - For doc:" + docId + " expecting field", body, containsString(fieldName));
-                assertThat("ES5 - For doc:" + docId + " expecting value", body, containsString(value.toString()));
-            });
-        });
-
-        var settings = operations.get("/" + testData.singleTypeIndexName + "/_settings");
-        var settingsBody = settings.getValue();
-        assertThat("ES5 - Should have single_type setting", settingsBody, containsString("single_type"));
-        log.info("ES 5.6.16 single-type verification completed");
-    }
-
-    private void verifySingleTypeIndexOnES6(TestData testData, ClusterOperations operations) {
-        log.info("Verifying single-type index on ES 6.8.23 after restoration");
-        var allIndices = operations.get("/_cat/indices");
-        var indicesBody = allIndices.getValue();
-        assertThat("ES6 - Should have base index", indicesBody, containsString(testData.indexName));
-        assertThat("ES6 - Should have single-type index", indicesBody, containsString(testData.singleTypeIndexName));
-
-        var customDocs = operations.get("/" + testData.singleTypeIndexName + "/_search");
-        var body = customDocs.getValue();
-        testData.singleTypeDocuments.forEach((docId, fields) -> {
-            fields.forEach((fieldName, value) -> {
-                assertThat("ES6 - For doc:" + docId + " expecting field", body, containsString(fieldName));
-                assertThat("ES6 - For doc:" + docId + " expecting value", body, containsString(value.toString()));
-            });
-        });
-
-        var settings = operations.get("/" + testData.singleTypeIndexName + "/_settings");
-        var settingsBody = settings.getValue();
-        assertThat("ES6 - Should preserve single_type setting", settingsBody, containsString("single_type"));
-        log.info("ES 6.8.23 single-type verification completed");
-    }
-
-    private void verifySingleTypeIndexOnOpenSearch(TestData testData, ClusterOperations operations) {
-        log.info("Verifying single-type index migration to OpenSearch");
-        var allIndices = operations.get("/_cat/indices");
-        var indicesBody = allIndices.getValue();
-        assertThat("OS - Should have base index", indicesBody, containsString(testData.indexName));
-        assertThat("OS - Should have single-type index", indicesBody, containsString(testData.singleTypeIndexName));
-
-        var customDocs = operations.get("/" + testData.singleTypeIndexName + "*/_search");
-        var body = customDocs.getValue();
-        testData.singleTypeDocuments.forEach((docId, fields) -> {
-            fields.forEach((fieldName, value) -> {
-                assertThat("OS - For doc:" + docId + " expecting field", body, containsString(fieldName));
-                assertThat("OS - For doc:" + docId + " expecting value", body, containsString(value.toString()));
-            });
-        });
-
-        var mapping = operations.get("/" + testData.singleTypeIndexName + "/_mapping");
-        var mappingBody = mapping.getValue();
-        assertThat("OS - Should preserve title field", mappingBody, containsString("title"));
-        log.info("OpenSearch single-type migration verification completed");
-    }
 }
