@@ -40,7 +40,6 @@ public class EndToEndTest extends SourceTestBase {
     @TempDir
     private File localDirectory;
 
-    // Minimal ES 5.x single-type index used to exercise the _id encoding edge case
     private static final String ES5_SINGLE_TYPE_INDEX = "es5_single_type";
 
     private static Stream<Arguments> scenarios() {
@@ -221,7 +220,7 @@ public class EndToEndTest extends SourceTestBase {
             checkDocsWithRouting(sourceCluster, testDocMigrationContext, !isSourceES1x);
             checkDocsWithRouting(targetCluster, testDocMigrationContext, !isTargetES1x);
 
-            // For ES 5.x sources, verify that the single_type index was successfully migrated
+            // Check that docs were migrated for shouldTestEs5SingleType cases
             verifyEs5SingleTypeIndex(sourceClusterOperations, targetClusterOperations);
         } finally {
             FileSystemUtils.deleteDirectories(localDirectory.toString());
@@ -236,13 +235,9 @@ public class EndToEndTest extends SourceTestBase {
         if (!sourceClusterOperations.shouldTestEs5SingleType()) {
             return;
         }
-
-        // After migration, verify the ES5 single_type index made it to the target
         targetClusterOperations.post("/_refresh", null);
         var res = targetClusterOperations.get("/" + ES5_SINGLE_TYPE_INDEX + "/_search");
         String body = res.getValue();
-
-        // Minimal sanity checks: index exists and our docs are present
         Assertions.assertTrue(body.contains("Doc One"),
                 "Expected migrated single_type index to contain 'Doc One'");
         Assertions.assertTrue(body.contains("Doc Two"),
