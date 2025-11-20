@@ -130,7 +130,7 @@ public class UpgradeTest extends SourceTestBase {
 
             // Minimal assertion on ES 5.6 for single_type index
             if (legacyVersion == SearchClusterContainer.ES_V5_6_16) {
-                var countResponse = targetOps.get("/" + testData.singleTypeIndexName + "/_count");
+                var countResponse = targetOperations.get("/" + testData.singleTypeIndexName + "/_count");
                 var expectedCount = testData.singleTypeDocuments.size();
                 assertThat(
                         "Single-type index doc count should match after ES 5.6 → ES 6.8 → OS migration",
