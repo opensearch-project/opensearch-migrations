@@ -1,39 +1,81 @@
-import {BaseExpression, expr} from "@opensearch-migrations/argo-workflow-builders";
+import {
+    AllowLiteralOrExpression,
+    BaseExpression,
+    configMapKey,
+    defineParam,
+    expr,
+    FromParameterExpression,
+    InputParamDef,
+    PlainObject,
+    Serialized, toExpression,
+    TypeToken,
+    WorkflowParameterSource
+} from "@opensearch-migrations/argo-workflow-builders";
 import {z} from "zod";
 import {NAMED_SOURCE_CLUSTER_CONFIG, NAMED_TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 
-function getSourceTargetPath(
-    source: BaseExpression<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>,
-    target: BaseExpression<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>
+export function getSourceTargetPath(
+    source: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
+    target: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>
 ) {
-    return expr.concat(
-        expr.get(source, "name"),
-        expr.literal(":"),
-        expr.get(target, "name"),
-    );
+    return [
+        expr.get(expr.deserializeRecord(source), "name"),
+        expr.get(expr.deserializeRecord(target), "name")
+    ];
 }
 
-function getSourceTargetPathAndSnapshotIndex(
-    source: BaseExpression<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>,
-    target: BaseExpression<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>,
-    snapshotIdx: BaseExpression<number>
+export function getSourceTargetPathAndSnapshotIndex(
+    source: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
+    target: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
+    snapshotName: AllowLiteralOrExpression<string>
 ) {
-    return expr.concat(
-        getSourceTargetPath(source, target),
-        expr.literal(":"),
-        expr.toString(snapshotIdx)
-    );
+    return [
+        ...getSourceTargetPath(source, target),
+        toExpression(snapshotName)
+    ];
 }
 
-function getSourceTargetPathAndSnapshotAndMigrationIndex(
-    source: BaseExpression<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>,
-    target: BaseExpression<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>,
-    snapshotIdx: BaseExpression<number>,
-    migrationIdx: BaseExpression<number>
+export function getSourceTargetPathAndSnapshotAndMigrationIndex(
+    source: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
+    target: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
+    snapshotName: AllowLiteralOrExpression<string>,
+    migrationName: AllowLiteralOrExpression<string>
 ) {
-    return expr.concat(
-        getSourceTargetPathAndSnapshotIndex(source, target, snapshotIdx),
-        expr.literal(":"),
-        expr.toString(migrationIdx)
-    );
+    return [
+        ...getSourceTargetPathAndSnapshotIndex(source, target, toExpression(snapshotName)),
+        toExpression(migrationName)
+    ];
+}
+
+
+export function getApprovalMap<T extends PlainObject & Partial<Record<string, boolean>>>(
+    approvalConfigMapName: FromParameterExpression<string, WorkflowParameterSource>,
+    tt: TypeToken<T>
+)
+{
+    return {
+        skipApprovalMap: defineParam({
+            from: configMapKey(approvalConfigMapName, "autoApprove", true),
+            type: tt,
+            expression: {} as const as T
+        })
+    };
+}
+
+export function getApprovalsFromMap<
+    K extends string,
+    PATH extends string
+>(
+    map: BaseExpression<Record<string, boolean>>,
+    paramsToBuild: Record<K, PATH>
+): Record<K, InputParamDef<boolean, false>>
+{
+    const result = {} as Record<K, InputParamDef<boolean, false>>;
+    for (const key in paramsToBuild) {
+        const v: string = paramsToBuild[key];
+        result[key] = defineParam({
+            expression: expr.dig(map, [v], expr.literal(false))
+        });
+    }
+    return result;
 }

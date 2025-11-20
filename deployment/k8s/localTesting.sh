@@ -1,4 +1,6 @@
 #./minikubeLocal.sh --start # New code...  Not sure if this breaks some prometheus cAdvisor scraping.  Just want to know first.
+minikube config set cpus 8
+minikube config set memory 18000
 minikube start \
   --extra-config=kubelet.authentication-token-webhook=true \
   --extra-config=kubelet.authorization-mode=Webhook \

@@ -102,15 +102,20 @@ export const RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG =
     makeOptionalDefaultedFieldsRequired(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG
-        .omit({metadataMigrationConfig: true, documentBackfillConfig: true}).extend({
+        .omit({name: true, metadataMigrationConfig: true, documentBackfillConfig: true}).safeExtend({
+            name: z.string(),
             metadataMigrationConfig: METADATA_OPTIONS.optional(),
             documentBackfillConfig: RFS_OPTIONS.optional()
         })
-    );
+    ).refine(data =>
+            data.metadataMigrationConfig !== undefined ||
+            data.documentBackfillConfig !== undefined,
+        {message: "At least one of metadataMigrationConfig or documentBackfillConfig must be provided"});
 
 export const SNAPSHOT_MIGRATION_CONFIG =
     makeOptionalDefaultedFieldsRequired(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG
-        .omit({snapshotConfig: true, migrations: true}).extend({
+        .omit({name: true, snapshotConfig: true, migrations: true}).extend({
+            name: z.string(),
             snapshotConfig: DYNAMIC_SNAPSHOT_CONFIG,
             migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
         }));

@@ -6,7 +6,6 @@ import {
 } from "@opensearch-migrations/schemas";
 import {Etcd3} from "etcd3";
 import {z} from "zod";
-import _ from 'lodash';
 
 /** etcd connection options */
 export interface EtcdOptions {
@@ -58,11 +57,12 @@ export class MigrationInitializer {
                 Math.floor(Date.now() / 1000).toString()
             );
 
-            const targetsMap = _.groupBy(workflows, w=>w.targetConfig.name);
+            const targetsMap =
+                Object.groupBy(workflows, w=> w.targetConfig.name);
 
             // Initialize target latches
             for (const [targetName, list] of Object.entries(targetsMap)) {
-                const processorCount = this.calculateProcessorCount(list);
+                const processorCount = list ? this.calculateProcessorCount(list) : 0;
                 console.log(`Total processor count: ${processorCount}`);
 
                 await this.client.put(`/${this.uniqueRunNonce}/workflow/targets/${targetName}/latch`)

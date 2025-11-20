@@ -30,6 +30,32 @@ echo "Generated unique uniqueRunNonce: $UUID"
 echo "Running configuration conversion..."
 $INITIALIZE_CMD --user-config $CONFIG_FILENAME --unique-run-nonce $UUID "$@" > "$TEMPORARY_FILE"
 
+echo "Configuring approval skips..."
+CONFIGMAP_NAME="approval-config"
+KEY="autoApprove"
+
+: ${FORMAT_APPROVALS_CMD:="node $SCRIPT_DIR/index.js formatApprovals"}
+FORMAT_APPROVALS_OUTPUT=$($FORMAT_APPROVALS_CMD $CONFIG_FILENAME)
+
+if [ -z "$FORMAT_APPROVALS_OUTPUT" ]; then
+    echo "Warning: formatApprovals command produced no output"
+fi
+
+if kubectl get configmap "$CONFIGMAP_NAME" &>/dev/null; then
+    echo "Updating existing ConfigMap '$CONFIGMAP_NAME'"
+    kubectl patch configmap "$CONFIGMAP_NAME" \
+        --type merge \
+        -p "{\"data\":{\"$KEY\":$(echo "$FORMAT_APPROVALS_OUTPUT" | jq -Rs .)}}"
+else
+    echo "Creating new ConfigMap '$CONFIGMAP_NAME'"
+    kubectl create configmap "$CONFIGMAP_NAME" \
+        --from-file="$KEY"=<(echo "$FORMAT_APPROVALS_OUTPUT") \
+        --dry-run=client -o yaml | \
+        kubectl label -f - --local -o yaml \
+            "workflows.argoproj.io/configmap-type=Parameter" | \
+        kubectl apply -f -
+fi
+
 # Set the name field based on environment variable
 if [ -n "$USE_GENERATE_NAME" ]; then
   # Keeping this as 'full-migration' so that it's intentionally different than the
@@ -53,6 +79,8 @@ spec:
     parameters:
       - name: uniqueRunNonce
         value: "$UUID"
+      - name: approval-config
+        value: "$CONFIGMAP_NAME"
       - name: migrationConfigs
         value: |
 $(sed 's/^/          /' "$TEMPORARY_FILE")

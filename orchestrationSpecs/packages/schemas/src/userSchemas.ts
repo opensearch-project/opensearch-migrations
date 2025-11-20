@@ -223,7 +223,7 @@ export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
 });
 
 export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    name: z.string().default("").optional(),
+    name: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional(),
     metadataMigrationConfig: USER_METADATA_OPTIONS.optional(),
     documentBackfillConfig: USER_RFS_OPTIONS.optional(),
 }).refine(data =>
@@ -232,6 +232,7 @@ export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     {message: "At least one of metadataMigrationConfig or documentBackfillConfig must be provided"});
 
 export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
+    name: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional(),
     createSnapshotConfig: CREATE_SNAPSHOT_OPTIONS.optional(),
     snapshotConfig: NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
     migrations: z.array(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
@@ -247,7 +248,11 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     toTarget: z.string(),
     snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).min(1).optional(),
     replayerConfig: REPLAYER_OPTIONS.optional()
-});
+}).refine(data => {
+        const names = data.snapshotExtractAndLoadConfigs?.map(m => m.name).filter(s => s);
+        return names ? names.length == new Set(names).size : true;
+    },
+    {message: "names of snapshotExtractAndLoadConfigs items must be unique when they are provided"});
 
 export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);

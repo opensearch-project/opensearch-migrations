@@ -9,8 +9,8 @@ import {
 import {
     BaseExpression, configMapKey,
     defineRequiredParam,
-    expr,
-    INTERNAL,
+    expr, FunctionExpression, InputParameterSource, InputParametersRecord, InputParamsToExpressions,
+    INTERNAL, PlainObject,
     selectInputsForRegister,
     Serialized,
     typeToken,
@@ -22,6 +22,10 @@ import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions
 import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
+import {
+    getApprovalMap,
+    getSourceTargetPathAndSnapshotAndMigrationIndex
+} from "./commonUtils/configContextPathConstructors";
 
 const COMMON_METADATA_PARAMETERS = {
     snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({ description:
@@ -29,6 +33,11 @@ const COMMON_METADATA_PARAMETERS = {
     sourceConfig: defineRequiredParam<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>(),
     targetConfig: defineRequiredParam<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
     ...makeRequiredImageParametersForKeys(["MigrationConsole"])
+};
+
+const IDENTIFIER_PARAMETERS = {
+    perSnapshotName: defineRequiredParam<string>(),
+    perMigrationName: defineRequiredParam<string>()
 };
 
 export function makeRepoParamDict(
@@ -67,6 +76,26 @@ function makeParamsDict(
             makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), true)
         )
     );
+}
+
+function makeApprovalCheck<
+    IPR extends InputParamsToExpressions<typeof COMMON_METADATA_PARAMETERS, InputParameterSource> &
+        InputParamsToExpressions<typeof IDENTIFIER_PARAMETERS, InputParameterSource>
+>(
+    inputs: IPR,
+    skipApprovalMap: BaseExpression<any>,
+    ...innerSkipFlags: string[]
+) {
+    return new FunctionExpression<boolean, any, any, "complicatedExpression">("sprig.dig", [
+        ...getSourceTargetPathAndSnapshotAndMigrationIndex(inputs.sourceConfig,
+            inputs.targetConfig,
+            inputs.perSnapshotName,
+            inputs.perMigrationName
+        ),
+        ...(innerSkipFlags !== undefined ? innerSkipFlags.map(f=>expr.literal(f)) : []),
+        expr.literal(false),
+        expr.deserializeRecord(skipApprovalMap)
+    ]);
 }
 
 export const MetadataMigration = WorkflowBuilder.create({
@@ -121,14 +150,13 @@ export const MetadataMigration = WorkflowBuilder.create({
     .addTemplate("migrateMetaData", t => t
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof METADATA_OPTIONS>>())
         .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
-        .addOptionalOrConfigMap("skipEvaluateApproval",
-            configMapKey(t.inputs.workflowParameters.approvalConfigMapName, "autoApprove", true),
-            typeToken<boolean>(),
-            c=> false as boolean)
-        .addOptionalOrConfigMap("skipMigrateApproval",
-            configMapKey(t.inputs.workflowParameters.approvalConfigMapName, "autoApprove", true),
-            typeToken<boolean>(),
-            c=> false as boolean)
+        .addInputsFromRecord(IDENTIFIER_PARAMETERS)
+        .addInputsFromRecord(
+            getApprovalMap(t.inputs.workflowParameters.approvalConfigMapName, typeToken<{}>()))
+        .addOptionalInput("skipEvaluateApproval", c=>
+            makeApprovalCheck(c.inputParameters, c.inputParameters.skipApprovalMap, "evaluateMetadata"))
+        .addOptionalInput("skipMigrateApproval", c=>
+            makeApprovalCheck(c.inputParameters, c.inputParameters.skipApprovalMap, "migrateMetadata"))
 
         .addSteps(b => b
             .addStep("metadataEvaluate", INTERNAL, "runMetadata", c =>
@@ -138,7 +166,7 @@ export const MetadataMigration = WorkflowBuilder.create({
                 })
             )
             .addStep("approveEvaluate", INTERNAL, "approveEvaluate",
-                { when:  { templateExp: expr.not(expr.deserializeRecord(b.inputs.skipEvaluateApproval))}})
+                { when: expr.not(expr.cast(b.inputs.skipEvaluateApproval).to<boolean>()) })
             .addStep("metadataMigrate", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import {parse} from "yaml";
 import {OVERALL_MIGRATION_CONFIG} from "@opensearch-migrations/schemas";
+import {z} from "zod";
 
 async function readStdin(): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -30,10 +31,16 @@ async function readFileOrStdin(yamlPathOrStdin: string): Promise<string> {
     }
 }
 
-export async function parseUserConfig(yamlPathOrStdin: string): Promise<any> {
+export async function parseUserConfig(yamlPathOrStdin: string) {
     return readFileOrStdin(yamlPathOrStdin)
         .then(yamlContents=>parse(yamlContents))
         .catch(e => {throw new Error("yaml parse error:", e);})
-        .then(data=> OVERALL_MIGRATION_CONFIG.safeParse(data))
+        .then(data => {
+            const result = OVERALL_MIGRATION_CONFIG.safeParse(data);
+            if (!result.success) {
+                throw new Error("contents do not match the schema:", { cause: result.error });
+            }
+            return result.data;
+        })
         .catch(e=>{throw new Error("contents do not match the schema:", {cause: e});})
 }
