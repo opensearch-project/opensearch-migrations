@@ -62,7 +62,7 @@ public class UpgradeTest extends SourceTestBase {
 
             // Only create the single-type test index on ES 5.6.16
             if (legacyVersion == SearchClusterContainer.ES_V5_6_16) {
-                createSingleTypeIndex(testData, legacyClusterOperations);
+                legacyClusterOperations.createEs5SingleTypeIndexWithDocs(testData.singleTypeIndexName);
             }
 
             legacyClusterOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, testData.legacySnapshotRepo);
@@ -131,7 +131,7 @@ public class UpgradeTest extends SourceTestBase {
             // Minimal assertion on ES 5.6 for single_type index
             if (legacyVersion == SearchClusterContainer.ES_V5_6_16) {
                 var countResponse = targetOperations.get("/" + testData.singleTypeIndexName + "/_count");
-                var expectedCount = testData.singleTypeDocuments.size();
+                var expectedCount = 2; // ClusterOperations.createEs5SingleTypeIndexWithDocs creates 2 documents
                 assertThat(
                         "Single-type index doc count should match after ES 5.6 → ES 6.8 → OS migration",
                         countResponse.getValue(),
@@ -160,34 +160,6 @@ public class UpgradeTest extends SourceTestBase {
         });
     }
 
-    /**
-     * Create an ES 5 single-type index that will later be restored into ES 6.
-     * This index uses `index.mapping.single_type=true` to exercise the Lucene _id encoding
-     * edge case that previously caused a NullPointerException during migration.
-     */
-    private void createSingleTypeIndex(TestData testData, ClusterOperations operations) {
-        var createIndexJson = """
-        {
-          "settings": %s
-        }
-        """.formatted(CUSTOM_INDEX_SETTINGS);
-
-        operations.createIndex(testData.singleTypeIndexName, createIndexJson);
-
-        testData.singleTypeDocuments.forEach((docId, fields) -> {
-            var docBody = "{" + fields.entrySet().stream()
-                    .map(e -> {
-                        final String valueStr = (e.getValue() instanceof String)
-                                ? "\"" + e.getValue() + "\""
-                                : e.getValue().toString();
-                        return "\"" + e.getKey() + "\":" + valueStr;
-                    })
-                    .collect(Collectors.joining(",")) + "}";
-
-            // Use doc type for ES 5.x
-            operations.createDocument(testData.singleTypeIndexName, docId, docBody, null, "doc");
-        });
-    }
  
     private class TestData {
         final String legacySnapshotRepo = "legacy_repo";
@@ -200,22 +172,5 @@ public class UpgradeTest extends SourceTestBase {
             2, Map.of("field1", "filed1-in-doc2", "field2", 2_12345),
             3, Map.of("field3", 3.12345)
         );
-        final Map<String, Map<String, Object>> singleTypeDocuments = Map.of(
-            "doc1", Map.of("title", "Document One"),
-            "doc2", Map.of("title", "Document Two")
-        );
     }
-
-    // Minimal settings to exercise `index.mapping.single_type=true` behavior in ES 5 to ES 6 upgrade
-    private static final String CUSTOM_INDEX_SETTINGS = """
-        {
-          "index": {
-            "mapping": {
-              "single_type": "true"
-            },
-            "number_of_shards": "5",
-            "number_of_replicas": "1"
-          }
-        }
-        """;
 }
