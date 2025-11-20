@@ -15,7 +15,6 @@
     "rebuildK8sSchemas": "./scripts/fetchK8sSchemas.sh && ts-node scripts/generateK8sTypes.ts",
     "build": "tsc",
     "type-check": "tsc --noEmit",
-    "make-templates": "tsx makeTemplates.cjs",
     "test": "jest"
   },
   "dependencies": {

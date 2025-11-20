@@ -4,26 +4,22 @@ const command = process.argv[2];
 process.argv.splice(2, 1);
 
 (async () => {
-    switch (command) {
-        case 'constrainSchema':
-            await require('./constrainUserSchema').main();
-            break;
-        case 'makeSample':
-            await require('@opensearch-migrations/schemas/makeSample').main();
-            break;
-        case 'initialize':
-            await require('./runMigrationInitializer').main();
-            break;
-        case 'formatApprovals':
-            await require('./formatApprovals').main();
-            break;
-        case 'showSchema':
-            await require('@opensearch-migrations/schemas/showUserSchema').main();
-            break;
-        default:
-            throw new Error(`Unknown command: ${command}` +
-                '\nAvailable commands: constrainSchema, makeSample, initialize, showSchema');
+    const commands = new Map<string, () => Promise<void>>([
+        ['constrainSchema', async () => require('./constrainUserSchema').main()],
+        ['makeSample', async () => require('@opensearch-migrations/schemas/makeSample').main()],
+        ['initialize', async () => require('./runMigrationInitializer').main()],
+        ['formatApprovals', async () => require('./formatApprovals').main()],
+        ['showSchema', async () => require('@opensearch-migrations/schemas/showUserSchema').main()],
+    ]);
+
+    const handler = commands.get(command);
+    if (!handler) {
+        console.error(`Unknown command: ${command}` +
+            `\nAvailable commands: ${Array.from(commands.keys()).join(', ')}`);
+        process.exit(2);
     }
+
+    await handler();
 })().catch(err => {
         console.error(err);
         process.exit(2);

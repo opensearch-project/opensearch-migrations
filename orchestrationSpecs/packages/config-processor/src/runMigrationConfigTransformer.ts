@@ -52,4 +52,11 @@ Arguments:
     }
 }
 
-main();
+// Run if executed directly
+if (require.main === module && !process.env.SUPPRESS_AUTO_LOAD) {
+    main().catch(error => {
+        console.error('Fatal error:', error);
+        process.exit(1);
+    });
+}
+

@@ -20,7 +20,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "default": false
               },
               "version": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
               },
               "authConfig": {
                 "anyOf": [
@@ -167,7 +168,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "default": false
               },
               "version": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
               },
               "authConfig": {
                 "anyOf": [
@@ -287,11 +289,82 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     }
                   }
                 },
+                "name": {
+                  "type": "string"
+                },
+                "snapshotConfig": {
+                  "type": "object",
+                  "properties": {
+                    "snapshotNameConfig": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "externallyManagedSnapshot": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "externallyManagedSnapshot"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "snapshotNamePrefix": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "snapshotNamePrefix"
+                          ]
+                        }
+                      ]
+                    },
+                    "repoConfig": {
+                      "type": "object",
+                      "properties": {
+                        "awsRegion": {
+                          "type": "string",
+                          "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                        },
+                        "endpoint": {
+                          "type": "string",
+                          "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)",
+                          "default": ""
+                        },
+                        "s3RepoPathUri": {
+                          "type": "string",
+                          "description": "s3:///BUCKETNAME/PATH"
+                        },
+                        "repoName": {
+                          "type": "string",
+                          "default": "migration_assistant_repo"
+                        },
+                        "useLocalStack": {
+                          "type": "boolean",
+                          "default": false
+                        }
+                      },
+                      "required": [
+                        "awsRegion",
+                        "s3RepoPathUri"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "snapshotNameConfig",
+                    "repoConfig"
+                  ]
+                },
                 "migrations": {
                   "type": "array",
                   "items": {
                     "type": "object",
                     "properties": {
+                      "name": {
+                        "type": "string"
+                      },
                       "metadataMigrationConfig": {
                         "type": "object",
                         "properties": {
@@ -375,14 +448,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "transformerConfigBase64": {
                             "type": "string",
                             "default": ""
-                          },
-                          "skipEvaluateApproval": {
-                            "type": "boolean",
-                            "default": false
-                          },
-                          "skipMigrateApproval": {
-                            "type": "boolean",
-                            "default": false
                           }
                         }
                       },
@@ -433,86 +498,80 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type": "string",
                             "default": "http://otel-collector:4317"
                           },
-                          "skipApproval": {
-                            "type": "boolean",
-                            "default": false
+                          "resources": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "limits": {
+                                "type": "object",
+                                "properties": {
+                                  "cpu": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+m$",
+                                    "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                                  },
+                                  "memory": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                                    "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                                  },
+                                  "ephemeral-storage": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                                    "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                                  }
+                                },
+                                "required": [
+                                  "cpu",
+                                  "memory"
+                                ],
+                                "description": "Resource upper bound for a container"
+                              },
+                              "requests": {
+                                "type": "object",
+                                "properties": {
+                                  "cpu": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+m$",
+                                    "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                                  },
+                                  "memory": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                                    "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                                  },
+                                  "ephemeral-storage": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                                    "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                                  }
+                                },
+                                "required": [
+                                  "cpu",
+                                  "memory"
+                                ],
+                                "description": "Resource lower bound for a container"
+                              }
+                            },
+                            "required": [
+                              "limits",
+                              "requests"
+                            ],
+                            "description": "Resource limits and requests for RFS container"
                           }
                         }
                       }
-                    }
-                  },
-                  "minItems": 1
-                },
-                "snapshotConfig": {
-                  "type": "object",
-                  "properties": {
-                    "snapshotNameConfig": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "externallyManagedSnapshot": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "externallyManagedSnapshot"
-                          ]
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "snapshotNamePrefix": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "snapshotNamePrefix"
-                          ]
-                        }
-                      ]
                     },
-                    "repoConfig": {
-                      "type": "object",
-                      "properties": {
-                        "awsRegion": {
-                          "type": "string",
-                          "description": "The AWS region that the bucket reside in (us-east-2, etc)"
-                        },
-                        "endpoint": {
-                          "type": "string",
-                          "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)",
-                          "default": "",
-                          "description": "Override the default S3 endpoint for clients to connect to.  Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
-                        },
-                        "s3RepoPathUri": {
-                          "type": "string",
-                          "description": "s3:///BUCKETNAME/PATH"
-                        },
-                        "repoName": {
-                          "type": "string",
-                          "default": "migration_assistant_repo"
-                        },
-                        "useLocalStack": {
-                          "type": "boolean",
-                          "default": false
-                        }
-                      },
-                      "required": [
-                        "awsRegion",
-                        "s3RepoPathUri"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "snapshotNameConfig",
-                    "repoConfig"
-                  ]
+                    "required": [
+                      "name"
+                    ]
+                  }
                 }
               },
               "required": [
-                "migrations",
-                "snapshotConfig"
+                "name",
+                "snapshotConfig",
+                "migrations"
               ]
             }
           },
@@ -534,6 +593,76 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               "loggingConfigurationOverrideConfigMap": {
                 "type": "string",
                 "default": ""
+              },
+              "resources": {
+                "type": "object",
+                "properties": {
+                  "limits": {
+                    "type": "object",
+                    "properties": {
+                      "cpu": {
+                        "type": "string",
+                        "pattern": "^[0-9]+m$",
+                        "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                      },
+                      "memory": {
+                        "type": "string",
+                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                        "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                      },
+                      "ephemeral-storage": {
+                        "type": "string",
+                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                        "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                      }
+                    },
+                    "required": [
+                      "cpu",
+                      "memory"
+                    ],
+                    "description": "Resource upper bound for a container"
+                  },
+                  "requests": {
+                    "type": "object",
+                    "properties": {
+                      "cpu": {
+                        "type": "string",
+                        "pattern": "^[0-9]+m$",
+                        "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                      },
+                      "memory": {
+                        "type": "string",
+                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                        "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                      },
+                      "ephemeral-storage": {
+                        "type": "string",
+                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                        "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                      }
+                    },
+                    "required": [
+                      "cpu",
+                      "memory"
+                    ],
+                    "description": "Resource lower bound for a container"
+                  }
+                },
+                "default": {
+                  "limits": {
+                    "cpu": "2000m",
+                    "memory": "4000Mi"
+                  },
+                  "requests": {
+                    "cpu": "2000m",
+                    "memory": "4000Mi"
+                  }
+                },
+                "required": [
+                  "limits",
+                  "requests"
+                ],
+                "description": "Resource limits and requests for replayer container."
               }
             }
           }
@@ -559,10 +688,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       "type": "boolean",
       "default": false
     },
-    "skipPreApproval": {
-      "type": "boolean",
-      "default": false
-    },
     "sourceClusters": {
       "type": "object",
       "additionalProperties": {
@@ -576,7 +701,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "default": false
           },
           "version": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
           },
           "authConfig": {
             "anyOf": [
@@ -722,7 +848,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "default": false
           },
           "version": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
           },
           "authConfig": {
             "anyOf": [
@@ -829,6 +956,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "items": {
               "type": "object",
               "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z][a-zA-Z0-9]*",
+                  "default": ""
+                },
                 "createSnapshotConfig": {
                   "type": "object",
                   "properties": {
@@ -892,6 +1024,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "items": {
                     "type": "object",
                     "properties": {
+                      "name": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z][a-zA-Z0-9]*",
+                        "default": ""
+                      },
                       "metadataMigrationConfig": {
                         "type": "object",
                         "properties": {
@@ -1036,6 +1173,67 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "skipApproval": {
                             "type": "boolean",
                             "default": false
+                          },
+                          "resources": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "limits": {
+                                "type": "object",
+                                "properties": {
+                                  "cpu": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+m$",
+                                    "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                                  },
+                                  "memory": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                                    "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                                  },
+                                  "ephemeral-storage": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                                    "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                                  }
+                                },
+                                "required": [
+                                  "cpu",
+                                  "memory"
+                                ],
+                                "description": "Resource upper bound for a container"
+                              },
+                              "requests": {
+                                "type": "object",
+                                "properties": {
+                                  "cpu": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+m$",
+                                    "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                                  },
+                                  "memory": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                                    "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                                  },
+                                  "ephemeral-storage": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                                    "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                                  }
+                                },
+                                "required": [
+                                  "cpu",
+                                  "memory"
+                                ],
+                                "description": "Resource lower bound for a container"
+                              }
+                            },
+                            "required": [
+                              "limits",
+                              "requests"
+                            ],
+                            "description": "Resource limits and requests for RFS container"
                           }
                         }
                       }
@@ -1069,6 +1267,76 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "loggingConfigurationOverrideConfigMap": {
                 "type": "string",
                 "default": ""
+              },
+              "resources": {
+                "type": "object",
+                "properties": {
+                  "limits": {
+                    "type": "object",
+                    "properties": {
+                      "cpu": {
+                        "type": "string",
+                        "pattern": "^[0-9]+m$",
+                        "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                      },
+                      "memory": {
+                        "type": "string",
+                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                        "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                      },
+                      "ephemeral-storage": {
+                        "type": "string",
+                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                        "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                      }
+                    },
+                    "required": [
+                      "cpu",
+                      "memory"
+                    ],
+                    "description": "Resource upper bound for a container"
+                  },
+                  "requests": {
+                    "type": "object",
+                    "properties": {
+                      "cpu": {
+                        "type": "string",
+                        "pattern": "^[0-9]+m$",
+                        "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                      },
+                      "memory": {
+                        "type": "string",
+                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                        "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                      },
+                      "ephemeral-storage": {
+                        "type": "string",
+                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
+                        "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                      }
+                    },
+                    "required": [
+                      "cpu",
+                      "memory"
+                    ],
+                    "description": "Resource lower bound for a container"
+                  }
+                },
+                "default": {
+                  "limits": {
+                    "cpu": "2000m",
+                    "memory": "4000Mi"
+                  },
+                  "requests": {
+                    "cpu": "2000m",
+                    "memory": "4000Mi"
+                  }
+                },
+                "required": [
+                  "limits",
+                  "requests"
+                ],
+                "description": "Resource limits and requests for replayer container."
               }
             }
           }
