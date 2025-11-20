@@ -43,19 +43,6 @@ public class EndToEndTest extends SourceTestBase {
     // Minimal ES 5.x single-type index used to exercise the _id encoding edge case
     private static final String ES5_SINGLE_TYPE_INDEX = "es5_single_type";
 
-    // Only the setting that matters for the bug: index.mapping.single_type = true
-    private static final String ES5_SINGLE_TYPE_SETTINGS = """
-        {
-          "index": {
-            "mapping": {
-              "single_type": "true"
-            },
-            "number_of_shards": "1",
-            "number_of_replicas": "0"
-          }
-        }
-        """;
-
     private static Stream<Arguments> scenarios() {
         return SupportedClusters.supportedPairs(true).stream()
                 .map(migrationPair -> Arguments.of(migrationPair.source(), migrationPair.target()));
@@ -164,7 +151,7 @@ public class EndToEndTest extends SourceTestBase {
             sourceClusterOperations.post("/" + indexName + "/_refresh", null);
 
             // For ES 5.x sources, also create a minimal single_type index that will be captured in the snapshot
-            createEs5SingleTypeIndex(sourceVersion, sourceClusterOperations);
+            sourceClusterOperations.createEs5SingleTypeIndexWithDocs(ES5_SINGLE_TYPE_INDEX);
 
             // === ACTION: Take a snapshot ===
             var snapshotName = "my_snap";
@@ -216,7 +203,7 @@ public class EndToEndTest extends SourceTestBase {
             if (supportsCompletion) {
                 totalShards += numberOfShards; // completion_index
             }
-            if (VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion) && VersionMatchers.isES_5_X.test(sourceVersion)) {
+            if (shouldTestEs5SingleType(sourceVersion)) {
                 totalShards += 1; // es5_single_type index
             }
             Assertions.assertEquals(totalShards + 1, expectedTerminationException.numRuns);
@@ -241,41 +228,18 @@ public class EndToEndTest extends SourceTestBase {
         }
     }
 
-    private void createEs5SingleTypeIndex(
-            Version sourceVersion,
-            ClusterOperations sourceClusterOperations) {
-
-        if (!(VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion) && VersionMatchers.isES_5_X.test(sourceVersion))) {
-            return;
-        }
-
-        // Create index with just the single_type setting; no explicit mappings needed
-        String createIndexJson = """
-        {
-          "settings": %s,
-          "mappings": {}
-        }
-        """.formatted(ES5_SINGLE_TYPE_SETTINGS);
-
-        sourceClusterOperations.createIndex(ES5_SINGLE_TYPE_INDEX, createIndexJson);
-
-        // Insert a couple of simple docs so they end up in the snapshot
-        String docBody1 = "{\"title\":\"Doc One\",\"flag\":true}";
-        String docBody2 = "{\"title\":\"Doc Two\",\"flag\":false}";
-
-        String docType = sourceClusterOperations.defaultDocType();
-        sourceClusterOperations.createDocument(ES5_SINGLE_TYPE_INDEX, "1", docBody1, null, docType);
-        sourceClusterOperations.createDocument(ES5_SINGLE_TYPE_INDEX, "2", docBody2, null, docType);
-
-        sourceClusterOperations.post("/" + ES5_SINGLE_TYPE_INDEX + "/_refresh", null);
+    private boolean shouldTestEs5SingleType(Version sourceVersion) {
+        return VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion) 
+            && VersionMatchers.isES_5_X.test(sourceVersion);
     }
+
 
     @SneakyThrows
     private void verifyEs5SingleTypeIndex(
             Version sourceVersion,
             ClusterOperations targetClusterOperations) {
 
-        if (!(VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion) && VersionMatchers.isES_5_X.test(sourceVersion))) {
+        if (!shouldTestEs5SingleType(sourceVersion)) {
             return;
         }
 
