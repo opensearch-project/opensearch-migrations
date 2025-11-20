@@ -432,14 +432,16 @@ public class ClusterOperations {
             return;
         }
 
-        // Create index with single_type setting
+        // Create index with single_type setting and 1 shard
         String createIndexJson = """
         {
           "settings": {
             "index": {
               "mapping": {
                 "single_type": "true"
-              }
+              },
+              "number_of_shards": 1,
+              "number_of_replicas": 0
             }
           },
           "mappings": {}
