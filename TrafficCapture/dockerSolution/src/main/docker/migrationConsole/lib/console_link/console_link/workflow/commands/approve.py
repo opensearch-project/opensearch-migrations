@@ -6,6 +6,7 @@ import click
 
 from ..models.utils import ExitCode
 from ..services.workflow_service import WorkflowService
+from .utils import auto_detect_workflow
 
 logger = logging.getLogger(__name__)
 
@@ -61,49 +62,11 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
 
         # Auto-detect workflow if name not provided
         if not workflow_name:
-            list_result = service.list_workflows(
-                namespace=namespace,
-                argo_server=argo_server,
-                token=token,
-                insecure=insecure,
-                phase_filter='Running'
+            workflow_name = auto_detect_workflow(
+                service, namespace, argo_server, token, insecure, ctx, phase_filter='Running'
             )
-
-            if not list_result['success']:
-                click.echo(f"Error listing workflows: {list_result['error']}", err=True)
+            if not workflow_name:
                 ctx.exit(ExitCode.FAILURE.value)
-
-            if list_result['count'] == 0:
-                # Check if any workflows exist at all (without phase filter)
-                all_workflows_result = service.list_workflows(
-                    namespace=namespace,
-                    argo_server=argo_server,
-                    token=token,
-                    insecure=insecure
-                )
-
-                if all_workflows_result['success'] and all_workflows_result['count'] > 0:
-                    # Workflows exist but none need approval
-                    click.echo(
-                        f"No workflows require approval in namespace {namespace}.\n"
-                        f"Use 'workflow status' to see workflow details.",
-                        err=True
-                    )
-                else:
-                    # No workflows exist at all
-                    click.echo(f"Error: No workflows found in namespace {namespace}", err=True)
-                ctx.exit(ExitCode.FAILURE.value)
-            elif list_result['count'] > 1:
-                workflows_list = ', '.join(list_result['workflows'])
-                click.echo(
-                    f"Error: Multiple workflows found. Please specify which one to approve.\n"
-                    f"Found workflows: {workflows_list}",
-                    err=True
-                )
-                ctx.exit(ExitCode.FAILURE.value)
-
-            workflow_name = list_result['workflows'][0]
-            click.echo(f"Auto-detected workflow: {workflow_name}")
 
         # Get workflow status to display details
         status_result = service.get_workflow_status(
@@ -161,6 +124,7 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
 
             click.echo("  [c] Cancel")
             click.echo("-" * 60)
+            click.echo(f"\nTip: To view step outputs, run: workflow output {workflow_name}")
 
             # Get user selection
             choice = click.prompt("\nEnter your choice", type=str).strip().lower()
@@ -196,7 +160,6 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
 
         if result['success']:
             click.echo(f"\nWorkflow {workflow_name} resumed successfully")
-            click.echo(f"To view step outputs, run: workflow output {workflow_name}")
         else:
             click.echo(f"\nError: {result['message']}", err=True)
             ctx.exit(ExitCode.FAILURE.value)

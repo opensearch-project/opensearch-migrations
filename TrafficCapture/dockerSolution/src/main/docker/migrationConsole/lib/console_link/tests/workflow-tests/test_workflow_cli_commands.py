@@ -247,7 +247,7 @@ class TestWorkflowCLICommands:
         assert result.exit_code == 0
         assert 'Auto-detected workflow' in result.output
         assert 'resumed successfully' in result.output
-        assert 'workflow output test-workflow' in result.output
+        # Note: output suggestion is not shown when --acknowledge flag is used
 
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
