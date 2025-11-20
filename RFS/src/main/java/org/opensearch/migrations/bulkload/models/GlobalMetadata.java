@@ -1,12 +1,11 @@
 package org.opensearch.migrations.bulkload.models;
 
-import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.file.Path;
 
-import org.opensearch.migrations.bulkload.common.ByteArrayIndexInput;
 import org.opensearch.migrations.bulkload.common.RfsException;
+import org.opensearch.migrations.bulkload.common.SnapshotMetadataLoader;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 
 import com.fasterxml.jackson.core.JsonPointer;
@@ -14,7 +13,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
-import shadow.lucene9.org.apache.lucene.codecs.CodecUtil;
 
 public interface GlobalMetadata {
     /**
@@ -64,16 +62,8 @@ public interface GlobalMetadata {
             Path filePath = repoDataProvider.getRepo().getGlobalMetadataFilePath(snapshotId);
 
             try (InputStream fis = new FileInputStream(filePath.toFile())) {
-                // Don't fully understand what the value of this code is, but it progresses the stream so we need to do
-                // it
-                // See:
-                // https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/repositories/blobstore/ChecksumBlobStoreFormat.java#L100
                 byte[] bytes = fis.readAllBytes();
-                ByteArrayIndexInput indexInput = new ByteArrayIndexInput("global-metadata", bytes);
-                CodecUtil.checksumEntireFile(indexInput);
-                CodecUtil.checkHeader(indexInput, "metadata", 1, 1);
-                int filePointer = (int) indexInput.getFilePointer();
-                InputStream bis = new ByteArrayInputStream(bytes, filePointer, bytes.length - filePointer);
+                InputStream bis = SnapshotMetadataLoader.processMetadataBytes(bytes, "metadata");
 
                 ObjectMapper smileMapper = new ObjectMapper(smileFactory);
                 return smileMapper.readTree(bis);

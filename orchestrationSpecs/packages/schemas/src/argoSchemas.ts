@@ -97,7 +97,7 @@ export const METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
 );
 
 export const RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_RFS_OPTIONS.omit({skipApproval: true})
+    USER_RFS_OPTIONS.in.omit({skipApproval: true})
 );
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG =

@@ -5,6 +5,8 @@ on:
   push:
     tags:
       - "*"
+  workflow_dispatch:
+
 env:
   java-version: '17'
   gradle-version: '8.12.1'
@@ -32,9 +34,9 @@ jobs:
         with:
           secret: ${{ github.TOKEN }}
           approvers: ${{ steps.get_data.outputs.approvers }}
-          minimum-approvals: 2
+          minimum-approvals: 1
           issue-title: 'Release opensearch-migrations version ${{ steps.get_data.outputs.version }}'
-          issue-body: "This release requires approval from at least two reviewers. Please approve or deny the release of opensearch-migrations **TAG**: ${{ github.ref_name }}  **COMMIT**: ${{ github.sha }} **VERSION**: ${{ steps.get_data.outputs.version }}. The published TrafficCapture version will be 0.${{ steps.get_data.outputs.version }}."
+          issue-body: "This release requires approval from at least one reviewer. Please approve or deny the release of opensearch-migrations **TAG**: ${{ github.ref_name }}  **COMMIT**: ${{ github.sha }} **VERSION**: ${{ steps.get_data.outputs.version }}. The published TrafficCapture version will be 0.${{ steps.get_data.outputs.version }}."
           exclude-workflow-initiator-as-approver: true
       - name: Download Repo Tar
         # Preface Traffic Capture version with 0. to signal interface immaturity
@@ -111,14 +113,33 @@ jobs:
       - name: Logout to DockerHub
         if: always()
         run: docker logout
-      - name: Configure AWS Credentials for Solutions Upload
+      - name: Configure AWS Credentials for Solutions Credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: ${{ secrets.SOLUTIONS_UPLOAD_ROLE }}
+          role-to-assume: ${{ secrets.SOLUTIONS_CREDENTIALS_ROLE }}
           aws-region: us-east-1
+      - name: Assume second role for Solutions Upload
+        run: |
+          CREDS=$(aws sts assume-role --role-arn ${{ secrets.SOLUTIONS_UPLOAD_ROLE }} --role-session-name github-actions)
+          echo "AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(echo $CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
       - name: Upload Solutions Artifact to S3
         run: |
-          aws s3 cp deployment/migration-assistant-solution/build/artifacts.zip s3://cornerstone-amazonaws/SO0290/${{ steps.get_data.outputs.version }}/artifacts.zip
+          aws s3 cp deployment/migration-assistant-solution/build/artifact.zip \
+            s3://cornerstone-amazonaws/SO0290/${{ steps.get_data.outputs.version }}/${{ github.sha }}/artifact.zip \
+            --content-type application/zip \
+            --metadata branch=${{ github.ref_name }},\
+          commitauthor="$(git log -1 --format='%an' | sed 's/"//g')",\
+          commitid=${{ github.sha }},\
+          commitmessage="Release opensearch-migrations version ${{ steps.get_data.outputs.version }}",\
+          committimestamp=$(git log -1 --format='%cI'),\
+          enablequicksight=No,\
+          package=https://github.com/${{ github.repository }},\
+          publishpublicecrimage=false,\
+          solutionid=SO0290,\
+          solutionname="migration-assistant-for-amazon-opensearch-service",\
+          solutionversion=${{ steps.get_data.outputs.version }}
       - name: Draft a release
         uses: softprops/action-gh-release@v2
         with:

@@ -23,8 +23,9 @@ import {inputsToEnvVars, TypescriptError} from "../utils";
 import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "./templateBodyBuilder"; // <-- import TemplateRebinder
 import {extendScope, FieldGroupConstraint, ScopeIsEmptyConstraint} from "./scopeConstraints";
 import {PlainObject} from "./plainObject";
-import {AllowLiteralOrExpression, BaseExpression, toExpression} from "./expression";
+import {AllowLiteralOrExpression, BaseExpression, expr, toExpression} from "./expression";
 import {TypeToken} from "./sharedTypes";
+import { DEFAULT_RESOURCES } from "@opensearch-migrations/schemas";
 
 export type IMAGE_PULL_POLICY = "Always" | "Never" | "IfNotPresent";
 
@@ -110,13 +111,13 @@ export class ContainerBuilder<
     // Update existing methods to preserve EnvScope type parameter
 
     addImageInfo(image: AllowLiteralOrExpression<string>,
-                 pullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>):
+                 imagePullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>):
         ContainerBuilder<
             ContextualScope,
             InputParamsScope,
             ExtendScope<ContainerScope, {
                 image: AllowLiteralOrExpression<string>,
-                pullPolicy: AllowLiteralOrExpression<string>
+                imagePullPolicy: AllowLiteralOrExpression<string>
             }>,
             VolumeScope,
             EnvScope,
@@ -125,7 +126,7 @@ export class ContainerBuilder<
         return new ContainerBuilder(
             this.contextualScope,
             this.inputsScope,
-            {...this.bodyScope, image, pullPolicy},
+            {...this.bodyScope, image, imagePullPolicy},
             this.volumeScope,
             this.envScope,
             this.outputsScope,
@@ -359,5 +360,41 @@ export class ContainerBuilder<
             this.outputsScope,
             this.retryParameters
         ) as any;
+    }
+
+    /**
+     * Add resource requirements (CPU, memory limits and requests) to the container.
+     * 
+     * @param resources - Resource requirements (limits and requests for CPU, memory, ephemeral-storage)
+     * @returns New ContainerBuilder with resources applied and branded
+     */
+    addResources(
+        // Merged Resources failing due to argo validation that is not allowing expressions in resources
+        // Solve this by requesting an argo change https://github.com/argoproj/argo-workflows/issues/15005
+        // When we have this we will be able to use
+        // resources: AllowLiteralOrExpression<Record<string, any>> 
+        // and
+        // const mergedResources = expr.serialize(expr.mergeDicts(
+        //     expr.literal(this.bodyScope?.resources || {}),
+        //     toExpression(resources)));
+        resources: Record<string, any>
+    ): ContainerBuilder<
+        ContextualScope,
+        InputParamsScope,
+        ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
+        VolumeScope,
+        EnvScope,
+        OutputParamsScope
+    > {
+        const mergedResources = resources;
+        return new ContainerBuilder(
+            {...this.contextualScope},
+            this.inputsScope,
+            {...this.bodyScope, resources: mergedResources} as ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
+            this.volumeScope,
+            this.envScope,
+            this.outputsScope,
+            this.retryParameters
+        );
     }
 }

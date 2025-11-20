@@ -31,9 +31,6 @@ public class RegularDocumentReaderEngine implements DocumentReaderEngine {
         // Extract files from metadata
         Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
         filesToUnpack.addAll(shardMetadata.getFiles());
-        
-        // TODO: Refactor this away from here for shard downloading
-        unpackerFactory.getRepoAccessor().prepBlobFiles(shardMetadata);
 
         return unpackerFactory.create(
             filesToUnpack,

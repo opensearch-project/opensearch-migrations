@@ -45,13 +45,13 @@ class TestScriptRunner:
   requiresApproval: false
   approver: ""
 """
-        result = runner.submit_workflow(test_config)
+        args = ["--prefix ma", "--etcd-endpoints http://etcd.ma.svc.cluster.local:2379"]
+        result = runner.submit_workflow(test_config, args)
 
         # Real script returns workflow info dict
         assert "workflow_name" in result
         assert result["workflow_name"].startswith("test-workflow-")
         assert "workflow_uid" in result
-        assert result["namespace"] == "ma"
 
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     def test_submit_workflow_custom_namespace(self, mock_run):
@@ -70,7 +70,8 @@ class TestScriptRunner:
   approver: ""
 """
         namespace = "custom-ns"
-        result = runner.submit_workflow(test_config, namespace)
+        args = [f"--prefix {namespace}", f"--etcd-endpoints http://etcd.{namespace}.svc.cluster.local:2379"]
+        result = runner.submit_workflow(test_config, args)
 
         assert result["namespace"] == namespace
         assert "workflow_name" in result

@@ -25,7 +25,7 @@ public class S3SnapshotCreator extends SnapshotCreator {
         List<String> indexAllowlist,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        this(snapshotName, snapshotRepoName, client, s3Uri, s3Region, null, indexAllowlist, null, null, context);
+        this(snapshotName, snapshotRepoName, client, s3Uri, s3Region, null, indexAllowlist, null, null, context, false, true);
     }
 
     public S3SnapshotCreator(
@@ -38,9 +38,11 @@ public class S3SnapshotCreator extends SnapshotCreator {
         List<String> indexAllowlist,
         Integer maxSnapshotRateMBPerNode,
         String snapshotRoleArn,
-        IRfsContexts.ICreateSnapshotContext context
+        IRfsContexts.ICreateSnapshotContext context,
+        boolean compressionEnabled,
+        boolean includeGlobalState
     ) {
-        super(snapshotName, snapshotRepoName, indexAllowlist, client, context);
+        super(snapshotName, snapshotRepoName, indexAllowlist, client, context, compressionEnabled, includeGlobalState);
         this.s3Uri = s3Uri;
         this.s3Region = s3Region;
         this.s3Endpoint = s3Endpoint;
@@ -55,7 +57,7 @@ public class S3SnapshotCreator extends SnapshotCreator {
         settings.put("bucket", getBucketName());
         settings.put("region", s3Region);
         settings.put("base_path", getBasePath());
-        settings.put("compress", false);
+        settings.put("compress", compressionEnabled);
         if (snapshotRoleArn != null) {
             settings.put("role_arn", snapshotRoleArn);
         }

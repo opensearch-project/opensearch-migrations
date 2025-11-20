@@ -1,6 +1,7 @@
 import {z} from "zod";
 import {
     COMPLETE_SNAPSHOT_CONFIG,
+    DEFAULT_RESOURCES,
     METADATA_OPTIONS,
     NAMED_SOURCE_CLUSTER_CONFIG,
     NAMED_TARGET_CLUSTER_CONFIG,
@@ -130,6 +131,7 @@ export const MetadataMigration = WorkflowBuilder.create({
                     expr.literal(""))
             )
             .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(b.inputs.targetConfig)))
+            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
             .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
             .addArgs([
                 b.inputs.commandMode,

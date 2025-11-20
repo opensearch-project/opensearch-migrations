@@ -1,5 +1,5 @@
 import {
-    DENORMALIZED_S3_REPO_CONFIG,
+    DENORMALIZED_S3_REPO_CONFIG, NORMALIZED_SNAPSHOT_MIGRATION_CONFIG,
     OVERALL_MIGRATION_CONFIG,
     PARAMETERIZED_MIGRATION_CONFIG_ARRAYS, PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     S3_REPO_CONFIG,
@@ -39,14 +39,9 @@ async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string
 async function rewriteEndpointIfLocalStack(snapshotRepo: z.infer<typeof S3_REPO_CONFIG>):
     Promise<z.infer<typeof DENORMALIZED_S3_REPO_CONFIG>>
 {
-    if (!snapshotRepo.endpoint) {
-        return { ...snapshotRepo, useLocalStack: false };
-    }
-
-    const endpoint = snapshotRepo.endpoint;
-    const useLocalStack = /^localstacks?:\/\//i.test(endpoint);
-    if (useLocalStack) {
-        snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(endpoint);
+    const useLocalStack =/^localstacks?:\/\//i.test(snapshotRepo.endpoint ?? "");
+    if (snapshotRepo.endpoint && useLocalStack) {
+        snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint);
     }
     return {...snapshotRepo, useLocalStack };
 }
@@ -76,7 +71,7 @@ export function setNamesInUserConfig(userConfig: InputConfig): InputConfig {
                         ...rest,
                         ...(migrations ? { migrations: migrations.flatMap(namePerIndexSnapshotMigration) } : {}),
                         ...({ name: name? name : idx.toString() }),
-                    } as z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>;
+                    } as z.infer<typeof NORMALIZED_SNAPSHOT_MIGRATION_CONFIG>;
                 });
 
             return {

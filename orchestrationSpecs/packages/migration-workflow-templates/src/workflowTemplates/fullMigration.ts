@@ -1,6 +1,9 @@
 import {z} from 'zod';
 import {
-    COMPLETE_SNAPSHOT_CONFIG, CREATE_SNAPSHOT_OPTIONS, DYNAMIC_SNAPSHOT_CONFIG,
+    COMPLETE_SNAPSHOT_CONFIG,
+    CREATE_SNAPSHOT_OPTIONS,
+    DEFAULT_RESOURCES,
+    DYNAMIC_SNAPSHOT_CONFIG,
     getZodKeys,
     METADATA_OPTIONS,
     NAMED_SOURCE_CLUSTER_CONFIG,
@@ -80,6 +83,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["sh", "-c"])
+            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
             .addArgs(["echo runReplayerForTarget"])))
 
 

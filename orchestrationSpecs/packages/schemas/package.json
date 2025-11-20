@@ -28,7 +28,8 @@
   },
   "dependencies": {
     "zod": "*",
-    "@asteasolutions/zod-to-openapi": "^8.1.0"
+    "@asteasolutions/zod-to-openapi": "^8.1.0",
+    "deepmerge": "^4.3.1"
   },
   "devDependencies": {
     "@types/jest": "*",

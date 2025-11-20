@@ -17,6 +17,7 @@ import org.opensearch.migrations.data.WorkloadGenerator;
 import org.opensearch.migrations.data.WorkloadOptions;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
+import org.opensearch.migrations.utils.FileSystemUtils;
 import org.opensearch.testcontainers.OpensearchContainer;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -159,8 +160,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 "The program did not exit with the expected status code."
             );
         } finally {
-            deleteTree(tempDirSnapshot);
-            deleteTree(tempDirLucene);
+            FileSystemUtils.deleteDirectories(tempDirSnapshot.toString(), tempDirLucene.toString());
         }
     }
 

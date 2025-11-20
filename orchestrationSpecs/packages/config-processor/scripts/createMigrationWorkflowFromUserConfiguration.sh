@@ -28,7 +28,7 @@ UUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 echo "Generated unique uniqueRunNonce: $UUID"
 
 echo "Running configuration conversion..."
-$INITIALIZE_CMD --user-config $CONFIG_FILENAME --unique-run-nonce $UUID "$@" > "$TEMPORARY_FILE"
+$INITIALIZE_CMD --user-config $CONFIG_FILENAME --unique-run-nonce $UUID $@ > "$TEMPORARY_FILE"
 
 echo "Configuring approval skips..."
 CONFIGMAP_NAME="approval-config"

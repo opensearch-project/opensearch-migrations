@@ -17,9 +17,6 @@ public interface ClusterSnapshotReader extends ClusterReader {
     /** Reads information about index shards */
     ShardMetadata.Factory getShardMetadata();
 
-    /** buffer size - bytes */
-    int getBufferSizeInBytes();
-
     /** if soft deletes can be in the snapshot */
     boolean getSoftDeletesPossible();
 

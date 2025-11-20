@@ -1,0 +1,8 @@
+id: SO0290
+name: migration-assistant-for-amazon-opensearch-service
+version: X.Y.Z
+cloudformation_templates:
+  - template: migration-assistant-for-amazon-opensearch-service-create-vpc.template
+    main_template: true
+  - template: migration-assistant-for-amazon-opensearch-service-import-vpc.template
+    main_template: true

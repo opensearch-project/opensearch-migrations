@@ -17,8 +17,9 @@ echo "Solution: ${SOLUTION_NAME}"
 echo "Version: ${CODE_VERSION}"
 
 rm -rf "${BUILD_DIR}"
-mkdir -p "${TEMP_DIR}/global-s3-assets"
-mkdir -p "${TEMP_DIR}/regional-s3-assets"
+mkdir -p "${TEMP_DIR}/deployment/global-s3-assets"
+mkdir -p "${TEMP_DIR}/deployment/regional-s3-assets"
+mkdir -p "${TEMP_DIR}/deployment/open-source"
 
 export CODE_BUCKET SOLUTION_NAME CODE_VERSION
 
@@ -26,17 +27,28 @@ cd "${SCRIPT_DIR}"
 npm install
 
 echo "Synthesizing CloudFormation templates..."
-npx cdk synth "Migration-Assistant-Infra-Create-VPC" --asset-metadata false --path-metadata false > "${TEMP_DIR}/global-s3-assets/${SOLUTION_NAME}-create-vpc.template"
-npx cdk synth "Migration-Assistant-Infra-Import-VPC" --asset-metadata false --path-metadata false > "${TEMP_DIR}/global-s3-assets/${SOLUTION_NAME}-import-vpc.template"
+npx cdk synth --asset-metadata false --path-metadata false --quiet
 
-# Waiting for v3.0 release
-# npx cdk synth "Migration-Assistant-Infra-Create-VPC-v3" --asset-metadata false --path-metadata false > "${TEMP_DIR}/global-s3-assets/${SOLUTION_NAME}-create-vpc-v3.template"
-# npx cdk synth "Migration-Assistant-Infra-Import-VPC-v3" --asset-metadata false --path-metadata false > "${TEMP_DIR}/global-s3-assets/${SOLUTION_NAME}-import-vpc-v3.template"
+cp "cdk.out/Migration-Assistant-Infra-Create-VPC.template.json" "${TEMP_DIR}/deployment/global-s3-assets/${SOLUTION_NAME}-create-vpc.template"
+cp "cdk.out/Migration-Assistant-Infra-Import-VPC.template.json" "${TEMP_DIR}/deployment/global-s3-assets/${SOLUTION_NAME}-import-vpc.template"
 
-touch "${TEMP_DIR}/regional-s3-assets/test.txt"
+echo "Copying solution-manifest.yaml..."
+cp "${SCRIPT_DIR}/solution-manifest.yaml" "${TEMP_DIR}/solution-manifest.yaml"
+sed -i "s/version: .*/version: ${CODE_VERSION}/" "${TEMP_DIR}/solution-manifest.yaml"
 
-echo "Creating artifacts.zip..."
+touch "${TEMP_DIR}/deployment/regional-s3-assets/test.txt"
+touch "${TEMP_DIR}/deployment/open-source/test.txt"
+
+cat > "${TEMP_DIR}/CHANGELOG.md" << EOF
+# Changelog
+## [${CODE_VERSION}] - $(date +%Y-%m-%d)
+### Added
+- For detailed changes, please refer to the [GitHub releases page](https://github.com/opensearch-project/opensearch-migrations/releases).
+EOF
+
+
+echo "Creating artifact.zip..."
 cd "${TEMP_DIR}"
-zip -r "${BUILD_DIR}/artifacts.zip" .
+zip -r "${BUILD_DIR}/artifact.zip" .
 
-echo "Packaging complete. Artifacts in: ${BUILD_DIR}/artifacts.zip"
+echo "Packaging complete. Artifacts in: ${BUILD_DIR}/artifact.zip"

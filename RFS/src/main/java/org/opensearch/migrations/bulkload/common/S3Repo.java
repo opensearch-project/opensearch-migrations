@@ -7,8 +7,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletionException;
 
-import org.opensearch.migrations.bulkload.models.ShardMetadata;
-
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
@@ -19,29 +17,12 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.S3Object;
-import software.amazon.awssdk.transfer.s3.S3TransferManager;
-import software.amazon.awssdk.transfer.s3.model.CompletedDirectoryDownload;
-import software.amazon.awssdk.transfer.s3.model.DirectoryDownload;
-import software.amazon.awssdk.transfer.s3.model.DownloadDirectoryRequest;
 
 @Slf4j
 public class S3Repo implements SourceRepo {
     private static final double S3_TARGET_THROUGHPUT_GIBPS = 8.0; // Arbitrarily chosen
     private static final long S3_MAX_MEMORY_BYTES = 1024L * 1024 * 1024; // Arbitrarily chosen
     private static final long S3_MINIMUM_PART_SIZE_BYTES = 8L * 1024 * 1024; // Default, but be explicit
-
-    // Transfer Manager maintains buffers for CRT responses which without being careful can overload heap.
-    // A quick calculation for heap usage is:
-    //  MaxHeapUsedByCrtBuffers = (initialReadBufferSizeInBytes *  concurrentFileDownloads) +
-    //                                  minimalPartSizeInBytes * min(concurrentFileDownloads, maxConcurrency)
-    // The default values that we use are:
-    //      initialReadBufferSizeInBytes = 80MB
-    //      minimalPartSizeInBytes = 8MB
-    //      maxConcurrency = 100
-    //
-    //  To reduce heap memory usage to under 1GB we will set concurrentFileDownloads to 10 (otherwise it defaults to 100)
-    private static final int TRANSFER_DIRECTORY_MAX_CONCURRENT_FILE_DOWNLOADS = 10;
-
 
     public static final String INDICES_PREFIX_STR = "indices/";
     private final Path s3LocalDir;
@@ -162,44 +143,6 @@ public class S3Repo implements SourceRepo {
         return fetch(fileFinder.getBlobFilePath(s3LocalDir, indexId, shardId, blobName));
     }
 
-    @Override
-    public void prepBlobFiles(ShardMetadata shardMetadata) {
-        try (S3TransferManager transferManager = S3TransferManager.builder()
-        .s3Client(s3Client)
-        .transferDirectoryMaxConcurrency(TRANSFER_DIRECTORY_MAX_CONCURRENT_FILE_DOWNLOADS)
-        .build()) {
-
-            Path shardDirPath = getShardDirPath(shardMetadata.getIndexId(), shardMetadata.getShardId());
-            ensureS3LocalDirectoryExists(shardDirPath);
-
-            String blobFilesS3Prefix = s3RepoUri.key
-                + INDICES_PREFIX_STR
-                + shardMetadata.getIndexId()
-                + "/"
-                + shardMetadata.getShardId()
-                + "/";
-
-            log.atInfo().setMessage("Downloading blob files from S3: s3://{}/{} to {}")
-                .addArgument(s3RepoUri.bucketName)
-                .addArgument(blobFilesS3Prefix)
-                .addArgument(shardDirPath).log();
-            DirectoryDownload directoryDownload = transferManager.downloadDirectory(
-                DownloadDirectoryRequest.builder()
-                    .destination(shardDirPath)
-                    .bucket(s3RepoUri.bucketName)
-                    .listObjectsV2RequestTransformer(l -> l.prefix(blobFilesS3Prefix))
-                    .build()
-            );
-
-            // Wait for the transfer to complete
-            CompletedDirectoryDownload completedDirectoryDownload = directoryDownload.completionFuture().join();
-
-            log.atInfo().setMessage("Blob file download(s) complete").log();
-
-            // Print out any failed downloads
-            completedDirectoryDownload.failedTransfers().forEach(x->log.error("{}", x));
-        }
-    }
 
     public static class CannotFindSnapshotRepoRoot extends RfsException {
         public CannotFindSnapshotRepoRoot(String bucket, String prefix) {
