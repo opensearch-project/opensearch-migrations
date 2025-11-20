@@ -239,7 +239,7 @@ def output_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
 
                 except ApiException as container_error:
                     if container_error.status == 400:
-                        click.echo(f"(Container not ready or no output available)")
+                        click.echo("(Container not ready or no output available)")
                     else:
                         click.echo(f"(Error retrieving output: {container_error.reason})")
 
