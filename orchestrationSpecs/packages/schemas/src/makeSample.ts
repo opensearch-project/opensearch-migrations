@@ -5,20 +5,7 @@ import {
     PARAMETERIZED_MIGRATION_CONFIG,
     PARAMETERIZED_MIGRATION_CONFIG_ARRAYS
 } from "./argoSchemas";
-
-// Helper to unwrap Zod schema modifiers
-function unwrapSchema(schema: z.ZodTypeAny): z.ZodTypeAny {
-    const constructorName = schema.constructor.name;
-
-    if (constructorName === 'ZodDefault' || constructorName === 'ZodOptional' || constructorName === 'ZodNullable') {
-        const innerType = (schema as any)._def?.innerType;
-        if (innerType) {
-            return unwrapSchema(innerType as z.ZodTypeAny);
-        }
-    }
-
-    return schema;
-}
+import {fullUnwrapType, unwrapSchema, ZOD_OPTIONAL_TYPES} from "./schemaUtilities";
 
 // Check if schema is optional
 function isOptional(schema: z.ZodTypeAny): boolean {
@@ -69,6 +56,7 @@ function getTypeName(schema: z.ZodTypeAny): string {
 
 // Function to generate sample data from schema using defaults
 function generateSampleFromSchema(schema: z.ZodTypeAny): any {
+    schema = unwrapSchema(schema, ZOD_OPTIONAL_TYPES);
     const constructorName = schema.constructor.name;
 
     if (constructorName === 'ZodDefault') {
@@ -247,7 +235,7 @@ function schemaToYamlWithComments(schema: z.ZodTypeAny, indent = 0, incomingComm
 
         for (const key in shape) {
             const fieldSchema = shape[key];
-            const description = fieldSchema.description;
+            const description = fullUnwrapType(fieldSchema).description;
             const typeName = getTypeName(fieldSchema);
             const hasDefault = fieldSchema.constructor.name === 'ZodDefault';
             const optional = isOptional(fieldSchema);

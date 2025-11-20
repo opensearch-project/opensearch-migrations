@@ -58,9 +58,21 @@
               },
               "documentBackfillConfig": {
                 "documentsPerBulkRequest": 1000,
-                "skipApproval": true,
+                "maxShardSizeBytes": 16000000,
                 "//Max connections is the effective concurrency count": "",
-                "maxConnections": 4
+                "maxConnections": 4,
+                "resources": {
+                  requests: {
+                    cpu: "250m",
+                    memory: "1Gi",
+                    ephemeral-storage: "5Gi"
+                  },
+                  limits: {
+                    cpu: "250m",
+                    memory: "1Gi",
+                    ephemeral-storage: "5Gi"
+                  },
+                }
               }
             }
           ]
