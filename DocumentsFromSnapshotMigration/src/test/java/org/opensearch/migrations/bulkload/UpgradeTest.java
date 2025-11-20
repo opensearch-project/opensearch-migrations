@@ -133,7 +133,7 @@ public class UpgradeTest extends SourceTestBase {
                 var countResponse = targetOperations.get("/" + testData.singleTypeIndexName + "/_count");
                 var expectedCount = 2; // ClusterOperations.createEs5SingleTypeIndexWithDocs creates 2 documents
                 assertThat(
-                        "Single-type index doc count should match after ES 5.6 → ES 6.8 → OS migration",
+                        "Single-type index doc count should match after ES 5.6 upgraded to ES 6.8 and migrated to OS",
                         countResponse.getValue(),
                         containsString("\"count\":" + expectedCount)
                 );

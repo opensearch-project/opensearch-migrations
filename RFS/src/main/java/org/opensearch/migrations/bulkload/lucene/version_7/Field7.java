@@ -25,8 +25,7 @@ public class Field7 implements LuceneField {
             return Uid.decodeId(binaryValue.bytes);
         }
 
-        // Fallback for upgraded indices where _id is stored as a string
-        // Example: ES 5.x → ES 6.x with mapping.single_type = true
+        // Fallback for the ES 5.x + single_type case where _id was stored as a string.
         return wrapped.stringValue();
     }
 
