@@ -189,7 +189,7 @@ public class LuceneReader {
                 }
             }
             if (openSearchDocId == null) {
-                log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have an referenceable id.")
+                log.atDebug().setMessage("Skipping document with index {} from segment {} from source {}, it does not have an referenceable id.")
                     .addArgument(luceneDocId)
                     .addArgument(getSegmentReaderDebugInfo)
                     .addArgument(indexDirectoryPath)
