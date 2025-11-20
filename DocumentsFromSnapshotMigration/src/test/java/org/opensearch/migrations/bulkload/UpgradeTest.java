@@ -115,7 +115,7 @@ public class UpgradeTest extends SourceTestBase {
                                           sourceVersion.getVersion(),
                                           targetVersion.getVersion(),
                         null));
-            int expectedWorkers = hasEs5SingleTypeIndex ? 11 : 6;
+            int expectedWorkers = hasEs5SingleTypeIndex ? 7 : 6;
             assertThat("Expected workers should spin up", result.numRuns, equalTo(expectedWorkers));
 
             var targetOperations = new ClusterOperations(targetCluster);
