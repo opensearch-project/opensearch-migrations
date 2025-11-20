@@ -149,8 +149,10 @@ public class EndToEndTest extends SourceTestBase {
             sourceClusterOperations.deleteDocument(indexName, "toBeDeleted" , "1", null);
             sourceClusterOperations.post("/" + indexName + "/_refresh", null);
 
-            // For ES 5.x sources, also create a minimal single_type index that will be captured in the snapshot
-            sourceClusterOperations.createEs5SingleTypeIndexWithDocs(ES5_SINGLE_TYPE_INDEX);
+            // For ES 5.x sources (5.5 and 5.6 only)
+            if (sourceClusterOperations.shouldTestEs5SingleType()) {
+                sourceClusterOperations.createEs5SingleTypeIndexWithDocs(ES5_SINGLE_TYPE_INDEX);
+            }
 
             // === ACTION: Take a snapshot ===
             var snapshotName = "my_snap";

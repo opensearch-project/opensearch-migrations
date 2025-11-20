@@ -51,17 +51,19 @@ public class UpgradeTest extends SourceTestBase {
         final SearchClusterContainer.ContainerVersion sourceVersion,
         final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
         var testData = new TestData();
+        boolean hasEs5SingleTypeIndex;
         try (
             final var legacyCluster = new SearchClusterContainer(legacyVersion)
         ) {
             legacyCluster.start();
 
             var legacyClusterOperations = new ClusterOperations(legacyCluster);
+            hasEs5SingleTypeIndex = legacyClusterOperations.shouldTestEs5SingleType();
 
             createMultiTypeIndex(testData, legacyClusterOperations);
 
-            // Only create the single-type test index on ES 5.6.16
-            if (legacyVersion == SearchClusterContainer.ES_V5_6_16) {
+            // Only create the single-type test index on ES 5.5+
+            if (hasEs5SingleTypeIndex) {
                 legacyClusterOperations.createEs5SingleTypeIndexWithDocs(testData.singleTypeIndexName);
             }
 
@@ -69,7 +71,7 @@ public class UpgradeTest extends SourceTestBase {
 
             // Snapshot only the indices that were created by the test
             String indicesToSnapshot = testData.indexName;
-            if (legacyVersion == SearchClusterContainer.ES_V5_6_16) {
+            if (hasEs5SingleTypeIndex) {
                 indicesToSnapshot = testData.indexName + "," + testData.singleTypeIndexName;
             }
             legacyClusterOperations.takeSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName, indicesToSnapshot);
@@ -113,7 +115,7 @@ public class UpgradeTest extends SourceTestBase {
                                           sourceVersion.getVersion(),
                                           targetVersion.getVersion(),
                         null));
-            int expectedWorkers = (legacyVersion == SearchClusterContainer.ES_V5_6_16) ? 11 : 6;
+            int expectedWorkers = hasEs5SingleTypeIndex ? 11 : 6;
             assertThat("Expected workers should spin up", result.numRuns, equalTo(expectedWorkers));
 
             var targetOperations = new ClusterOperations(targetCluster);
@@ -128,12 +130,12 @@ public class UpgradeTest extends SourceTestBase {
                 });
             });
 
-            // Assert single_type index on ES 5.6
-            if (legacyVersion == SearchClusterContainer.ES_V5_6_16) {
+            // Assert single_type index for versions that support it
+            if (hasEs5SingleTypeIndex) {
                 var countResponse = targetOperations.get("/" + testData.singleTypeIndexName + "/_count");
-                var expectedCount = 2; // ClusterOperations.createEs5SingleTypeIndexWithDocs creates 2 documents
+                var expectedCount = 2; // createEs5SingleTypeIndexWithDocs creates 2 documents
                 assertThat(
-                        "Single-type index doc count should match after ES 5.6 upgraded to ES 6.8 and migrated to OS",
+                        "Single-type index doc count should match after ES 5.x upgraded and migrated to OS",
                         countResponse.getValue(),
                         containsString("\"count\":" + expectedCount)
                 );
@@ -159,7 +161,6 @@ public class UpgradeTest extends SourceTestBase {
             operations.createDocument(testData.indexName, docId.toString(), docBody, null, docType);
         });
     }
-
  
     private class TestData {
         final String legacySnapshotRepo = "legacy_repo";

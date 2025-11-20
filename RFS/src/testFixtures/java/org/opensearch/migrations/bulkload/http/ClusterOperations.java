@@ -428,14 +428,13 @@ public class ClusterOperations {
             && VersionMatchers.isES_5_X.test(clusterVersion);
     }
 
-    // Creates an ES5 single-type index with test documents.
+    /**
+     * Creates an ES5 single-type index with test documents.
+     * The index.mapping.single_type setting only exists in ES 5.5 and ES 5.6.
+     * Callers should check shouldTestEs5SingleType() before invoking this method.
+     */
     @SneakyThrows
     public void createEs5SingleTypeIndexWithDocs(String indexName) {
-        // Only create for ES 5.5+ to 5.x
-        if (!shouldTestEs5SingleType()) {
-            return;
-        }
-
         // Create index with single_type setting and 1 shard
         String createIndexJson = """
         {
