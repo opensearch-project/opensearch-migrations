@@ -18,7 +18,19 @@ public class Field6 implements LuceneField {
 
     @Override
     public String asUid() {
-        return Uid.decodeId(wrapped.binaryValue().bytes);
+        var binaryValue = wrapped.binaryValue();
+        if (binaryValue != null && binaryValue.bytes != null) {
+            // Normal ES 5.x with binary _id storage
+            return Uid.decodeId(binaryValue.bytes);
+        }
+        // Fallback for ES 5.x indices with index.mapping.single_type=true
+        // where _id is stored as a string, not binary
+        String stringValue = wrapped.stringValue();
+        if (stringValue != null) {
+            return stringValue;
+        }
+
+        return null;
     }
 
     @Override
@@ -29,7 +41,7 @@ public class Field6 implements LuceneField {
     @Override
     public String utf8ToStringValue() {
         var bytesRef = wrapped.binaryValue();
-        if (bytesRef.bytes != null && bytesRef.bytes.length != 0) {
+        if (bytesRef != null && bytesRef.bytes != null && bytesRef.bytes.length != 0) {
             return bytesRef.utf8ToString();
         }
         return null;
