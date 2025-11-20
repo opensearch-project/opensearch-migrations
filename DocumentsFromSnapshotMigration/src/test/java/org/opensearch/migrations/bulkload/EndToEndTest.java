@@ -40,6 +40,22 @@ public class EndToEndTest extends SourceTestBase {
     @TempDir
     private File localDirectory;
 
+    // Minimal ES 5.x single-type index used to exercise the _id encoding edge case
+    private static final String ES5_SINGLE_TYPE_INDEX = "es5_single_type";
+
+    // Only the setting that matters for the bug: index.mapping.single_type = true
+    private static final String ES5_SINGLE_TYPE_SETTINGS = """
+        {
+          "index": {
+            "mapping": {
+              "single_type": "true"
+            },
+            "number_of_shards": "1",
+            "number_of_replicas": "0"
+          }
+        }
+        """;
+
     private static Stream<Arguments> scenarios() {
         return SupportedClusters.supportedPairs(true).stream()
                 .map(migrationPair -> Arguments.of(migrationPair.source(), migrationPair.target()));
@@ -147,6 +163,9 @@ public class EndToEndTest extends SourceTestBase {
             sourceClusterOperations.deleteDocument(indexName, "toBeDeleted" , "1", null);
             sourceClusterOperations.post("/" + indexName + "/_refresh", null);
 
+            // For ES 5.x sources, also create a minimal single_type index that will be captured in the snapshot
+            createEs5SingleTypeIndex(sourceVersion, sourceClusterOperations);
+
             // === ACTION: Take a snapshot ===
             var snapshotName = "my_snap";
             var snapshotRepoName = "my_snap_repo";
@@ -193,7 +212,13 @@ public class EndToEndTest extends SourceTestBase {
                     transformationConfig
             ));
 
-            int totalShards = supportsCompletion ? 2 * numberOfShards : numberOfShards;
+            int totalShards = numberOfShards; // blog_2023 index
+            if (supportsCompletion) {
+                totalShards += numberOfShards; // completion_index
+            }
+            if (VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion) && VersionMatchers.isES_5_X.test(sourceVersion)) {
+                totalShards += 1; // es5_single_type index
+            }
             Assertions.assertEquals(totalShards + 1, expectedTerminationException.numRuns);
 
             // Check that the docs were migrated
@@ -208,9 +233,62 @@ public class EndToEndTest extends SourceTestBase {
             // Check that that docs were migrated with routing, routing field not returned on es1 so skip validation
             checkDocsWithRouting(sourceCluster, testDocMigrationContext, !isSourceES1x);
             checkDocsWithRouting(targetCluster, testDocMigrationContext, !isTargetES1x);
+
+            // For ES 5.x sources, verify that the single_type index was successfully migrated
+            verifyEs5SingleTypeIndex(sourceVersion, targetClusterOperations);
         } finally {
             FileSystemUtils.deleteDirectories(localDirectory.toString());
         }
+    }
+
+    private void createEs5SingleTypeIndex(
+            Version sourceVersion,
+            ClusterOperations sourceClusterOperations) {
+
+        if (!(VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion) && VersionMatchers.isES_5_X.test(sourceVersion))) {
+            return;
+        }
+
+        // Create index with just the single_type setting; no explicit mappings needed
+        String createIndexJson = """
+        {
+          "settings": %s,
+          "mappings": {}
+        }
+        """.formatted(ES5_SINGLE_TYPE_SETTINGS);
+
+        sourceClusterOperations.createIndex(ES5_SINGLE_TYPE_INDEX, createIndexJson);
+
+        // Insert a couple of simple docs so they end up in the snapshot
+        String docBody1 = "{\"title\":\"Doc One\",\"flag\":true}";
+        String docBody2 = "{\"title\":\"Doc Two\",\"flag\":false}";
+
+        String docType = sourceClusterOperations.defaultDocType();
+        sourceClusterOperations.createDocument(ES5_SINGLE_TYPE_INDEX, "1", docBody1, null, docType);
+        sourceClusterOperations.createDocument(ES5_SINGLE_TYPE_INDEX, "2", docBody2, null, docType);
+
+        sourceClusterOperations.post("/" + ES5_SINGLE_TYPE_INDEX + "/_refresh", null);
+    }
+
+    @SneakyThrows
+    private void verifyEs5SingleTypeIndex(
+            Version sourceVersion,
+            ClusterOperations targetClusterOperations) {
+
+        if (!(VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion) && VersionMatchers.isES_5_X.test(sourceVersion))) {
+            return;
+        }
+
+        // After migration, verify the ES5 single_type index made it to the target
+        targetClusterOperations.post("/_refresh", null);
+        var res = targetClusterOperations.get("/" + ES5_SINGLE_TYPE_INDEX + "/_search");
+        String body = res.getValue();
+
+        // Minimal sanity checks: index exists and our docs are present
+        Assertions.assertTrue(body.contains("Doc One"),
+                "Expected migrated single_type index to contain 'Doc One'");
+        Assertions.assertTrue(body.contains("Doc Two"),
+                "Expected migrated single_type index to contain 'Doc Two'");
     }
 
     private boolean sourceSupportsCompletionFields(Version sourceVersion) {
