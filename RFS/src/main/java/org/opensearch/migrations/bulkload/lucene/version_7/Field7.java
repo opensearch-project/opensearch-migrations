@@ -18,7 +18,25 @@ public class Field7 implements LuceneField {
 
     @Override
     public String asUid() {
-        return Uid.decodeId(wrapped.binaryValue().bytes);
+        var binaryValue = wrapped.binaryValue();
+        
+        // Normal case for ES 6.x / ES 7.x → _id stored as binary
+        if (binaryValue != null && binaryValue.bytes != null) {
+            return Uid.decodeId(binaryValue.bytes);
+        }
+
+        // Fallback for upgraded indices:
+        // ES 5.x → ES 6.x with mapping.single_type = true
+        // _id is stored as a stored string field, not binary
+        String stringValue = wrapped.stringValue();
+        if (stringValue != null) {
+            // Normalize "type#id"
+            int hash = stringValue.indexOf('#');
+            return (hash >= 0) ? stringValue.substring(hash + 1) : stringValue;
+        }
+
+        // Expected behavior with no id : warn about skipping document
+        return null;
     }
 
     @Override
