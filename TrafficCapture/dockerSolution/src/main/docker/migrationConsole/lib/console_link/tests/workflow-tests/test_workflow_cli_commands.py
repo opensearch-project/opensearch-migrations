@@ -120,6 +120,7 @@ class TestWorkflowCLICommands:
         assert 'Running' in result.output
         assert 'step1' in result.output
         assert 'step2' in result.output
+        assert 'workflow output test-workflow' in result.output
 
     @patch('console_link.workflow.commands.status.WorkflowService')
     def test_status_command_list_all(self, mock_service_class):
@@ -246,6 +247,7 @@ class TestWorkflowCLICommands:
         assert result.exit_code == 0
         assert 'Auto-detected workflow' in result.output
         assert 'resumed successfully' in result.output
+        assert 'workflow output test-workflow' in result.output
 
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')

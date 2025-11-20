@@ -377,4 +377,9 @@ def _display_workflow_status(result: dict):
 
     # Use tree display if available, otherwise fall back to flat display
     step_tree = result.get('step_tree', [])
-    _display_workflow_steps(result['steps'], step_tree)
+    _display_workflow_steps(result.get('steps', []), step_tree)
+
+    # Add message about viewing step outputs for active workflows
+    if phase in ('Running', 'Pending'):
+        click.echo("")
+        click.echo(f"To view step outputs, run: workflow output {name}")

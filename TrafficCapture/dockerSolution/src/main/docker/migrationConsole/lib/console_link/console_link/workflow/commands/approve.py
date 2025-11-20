@@ -196,6 +196,7 @@ def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token,
 
         if result['success']:
             click.echo(f"\nWorkflow {workflow_name} resumed successfully")
+            click.echo(f"To view step outputs, run: workflow output {workflow_name}")
         else:
             click.echo(f"\nError: {result['message']}", err=True)
             ctx.exit(ExitCode.FAILURE.value)

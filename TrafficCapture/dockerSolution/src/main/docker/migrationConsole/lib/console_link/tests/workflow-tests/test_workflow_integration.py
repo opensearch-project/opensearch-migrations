@@ -43,6 +43,7 @@ no existing cluster is detected, ensuring tests work in all environments.
 import logging
 import os
 import pytest
+import subprocess
 import tempfile
 import time
 import uuid
@@ -477,13 +478,59 @@ def argo_workflows(k3s_container):
     if not waiter.wait_for_ready(logger):
         raise TimeoutError("Argo Workflows pods did not become ready in time")
 
+    # Set up port-forwarding to argo-server so output command can access it
+    logger.info("\nSetting up port-forward to argo-server...")
+    port_forward_process = None
+
+    try:
+        # Start kubectl port-forward in background
+        # Forward local port 2746 to argo-server service port 2746
+        port_forward_cmd = [
+            "kubectl", "port-forward",
+            f"--namespace={argo_namespace}",
+            "svc/argo-server",
+            "2746:2746"
+        ]
+
+        port_forward_process = subprocess.Popen(
+            port_forward_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+
+        # Wait a moment for port-forward to establish
+        time.sleep(3)
+
+        # Verify port-forward is working by checking if process is still running
+        if port_forward_process.poll() is not None:
+            # Process died, get error output
+            _, stderr = port_forward_process.communicate()
+            logger.warning(f"Port-forward failed to start: {stderr.decode()}")
+            logger.warning("Output command tests may fail without port-forward")
+        else:
+            logger.info("✓ Port-forward to argo-server established on localhost:2746")
+
+    except Exception as e:
+        logger.warning(f"Failed to set up port-forward: {e}")
+        logger.warning("Output command tests may fail without port-forward")
+
     yield {
         "namespace": argo_namespace,
-        "version": argo_version
+        "version": argo_version,
+        "port_forward_process": port_forward_process
     }
 
+    # Cleanup port-forward
+    if port_forward_process and port_forward_process.poll() is None:
+        logger.info("\nStopping port-forward to argo-server...")
+        port_forward_process.terminate()
+        try:
+            port_forward_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            port_forward_process.kill()
+
     # Cleanup is handled by k3s_container fixture
-    logger.info("\nArgo Workflows cleanup (handled by k3s container cleanup)")
+    logger.info("Argo Workflows cleanup (handled by k3s container cleanup)")
 
 
 @pytest.fixture(scope="function")
@@ -1017,6 +1064,115 @@ class TestArgoWorkflows:
             logger.info(f"✓ Container output verified: {output_message}")
             logger.info("✓ Output verification successful - container executed correctly!")
 
+            # Test output command with the completed workflow
+            logger.info("\nTesting output command for completed workflow...")
+            runner = CliRunner()
+            _test_output_command_for_workflow(runner, workflow_name, argo_namespace)
+
+        except ApiException as e:
+            pytest.fail(f"Failed to submit workflow via Kubernetes API: {e}")
+
+    def test_workflow_status_after_submit(self, argo_workflows):
+        """Test workflow status command after submitting a workflow"""
+        argo_namespace = argo_workflows["namespace"]
+
+        logger.info(f"\nTesting workflow status command in namespace {argo_namespace}")
+
+        # Create unique message for this test
+        test_message = f"hello world from status test {uuid.uuid4().hex[:8]}"
+
+        # Create workflow specification (same as test_workflow_submit_hello_world)
+        workflow_spec = {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Workflow",
+            "metadata": {
+                "generateName": "test-status-",
+                "namespace": argo_namespace,
+                "labels": {
+                    "workflows.argoproj.io/completed": "false"
+                }
+            },
+            "spec": {
+                "templates": [
+                    {
+                        "name": "hello-world",
+                        "outputs": {
+                            "parameters": [
+                                {
+                                    "name": "message",
+                                    "valueFrom": {
+                                        "path": "/tmp/message.txt"
+                                    }
+                                }
+                            ]
+                        },
+                        "container": {
+                            "image": "busybox",
+                            "command": ["sh", "-c"],
+                            "args": [f'echo "{test_message}" | tee /tmp/message.txt']
+                        }
+                    }
+                ],
+                "entrypoint": "hello-world"
+            }
+        }
+
+        # Submit workflow using Kubernetes API
+        custom_api = client.CustomObjectsApi()
+
+        try:
+            logger.info("Submitting workflow for status test...")
+
+            # Create the workflow custom resource
+            result = custom_api.create_namespaced_custom_object(
+                group="argoproj.io",
+                version="v1alpha1",
+                namespace=argo_namespace,
+                plural="workflows",
+                body=workflow_spec
+            )
+
+            workflow_name = result.get("metadata", {}).get("name")
+            assert workflow_name is not None, "Workflow name not returned"
+            assert workflow_name.startswith("test-status-"), f"Unexpected workflow name: {workflow_name}"
+
+            logger.info(f"✓ Workflow submitted: {workflow_name}")
+
+            # Wait for workflow to complete
+            logger.info("Waiting for workflow to complete...")
+            max_wait = 60  # 60 seconds timeout
+            start_time = time.time()
+            workflow_phase = "Unknown"
+
+            while time.time() - start_time < max_wait:
+                workflow = custom_api.get_namespaced_custom_object(
+                    group="argoproj.io",
+                    version="v1alpha1",
+                    namespace=argo_namespace,
+                    plural="workflows",
+                    name=workflow_name
+                )
+
+                workflow_phase = workflow.get("status", {}).get("phase", "Unknown")
+                logger.info(f"  Workflow phase: {workflow_phase}")
+
+                # Check if workflow reached a terminal state
+                if workflow_phase in ["Succeeded", "Failed", "Error"]:
+                    break
+
+                time.sleep(2)
+
+            # Verify workflow succeeded
+            assert workflow_phase == "Succeeded", f"Workflow did not succeed, phase: {workflow_phase}"
+            logger.info(f"✓ Workflow completed with phase: {workflow_phase}")
+
+            # Test status command with the completed workflow
+            logger.info("\nTesting status command for completed workflow...")
+            runner = CliRunner()
+            _test_status_command_for_workflow(runner, workflow_name, argo_namespace)
+
+            logger.info("✓ Status command test completed successfully!")
+
         except ApiException as e:
             pytest.fail(f"Failed to submit workflow via Kubernetes API: {e}")
 
@@ -1028,3 +1184,87 @@ def test_k3s_container_support():
         assert DockerContainer is not None
     except ImportError:
         pytest.skip("testcontainers not installed - run: pip install testcontainers")
+
+
+def _test_output_command_for_workflow(runner, workflow_name, namespace):
+    """
+    Helper function to test output command for a given workflow.
+
+    Tests that the output command can retrieve output from a completed workflow.
+    Selects step 0 and verifies that output is actually displayed.
+
+    Args:
+        runner: Click test runner
+        workflow_name: Name of the workflow to get output for
+        namespace: Kubernetes namespace
+
+    Raises:
+        AssertionError: If output command fails or output is not retrieved
+    """
+    # Invoke output command with explicit argo-server URL (HTTPS with insecure flag for self-signed cert)
+    result = runner.invoke(
+        workflow_cli,
+        ['output', workflow_name, '--namespace', namespace, '--argo-server', 'https://localhost:2746', '--insecure'],
+        input='0\n'  # Select first step
+    )
+
+    # Verify command succeeded
+    assert result.exit_code == 0, f"Output command failed with exit code {result.exit_code}. Output: {result.output}"
+
+    # Verify step selection menu was shown
+    assert "Select a step to view output:" in result.output, \
+        f"Step selection menu not found in output: {result.output}"
+
+    # Verify output section header is present (indicates output was retrieved)
+    assert "Output for:" in result.output, \
+        f"Output header not found in output: {result.output}"
+
+    # Verify container output section is present
+    assert "Container:" in result.output, \
+        f"Container output section not found in output: {result.output}"
+
+    logger.info(f"✓ Output command successfully retrieved output for workflow {workflow_name}")
+
+
+def _test_status_command_for_workflow(runner, workflow_name, namespace):
+    """
+    Helper function to test status command for a given workflow.
+
+    Tests that the status command can retrieve and display workflow status information.
+    Verifies that status output contains workflow name, phase, and step information.
+
+    Args:
+        runner: Click test runner
+        workflow_name: Name of the workflow to get status for
+        namespace: Kubernetes namespace
+
+    Raises:
+        AssertionError: If status command fails or status information is not retrieved
+    """
+    # Invoke status command with explicit argo-server URL (HTTPS with insecure flag for self-signed cert)
+    result = runner.invoke(
+        workflow_cli,
+        ['status', workflow_name, '--namespace', namespace, '--argo-server', 'https://localhost:2746', '--insecure']
+    )
+
+    # Verify command succeeded
+    assert result.exit_code == 0, \
+        f"Status command failed with exit code {result.exit_code}. Output: {result.output}"
+
+    # Verify workflow name is in output
+    assert workflow_name in result.output, \
+        f"Workflow name '{workflow_name}' not found in output: {result.output}"
+
+    # Verify phase information is present
+    assert "Phase:" in result.output, \
+        f"Phase information not found in output: {result.output}"
+
+    # Verify step information is present (either tree format or flat format)
+    assert "Workflow Steps" in result.output or "Steps:" in result.output, \
+        f"Step information not found in output: {result.output}"
+
+    # Verify workflow completed successfully
+    assert "Succeeded" in result.output, \
+        f"Workflow did not succeed. Output: {result.output}"
+
+    logger.info(f"✓ Status command successfully retrieved status for workflow {workflow_name}")
