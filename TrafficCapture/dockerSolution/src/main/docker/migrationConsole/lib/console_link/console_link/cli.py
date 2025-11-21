@@ -37,12 +37,11 @@ def temporarily_disable_logging():
     """
     A context manager that temporarily disables logging.
     """
-    original_level = logger.root.level
     logging.disable(logging.CRITICAL)
     try:
         yield
     finally:
-        logging.disable(original_level)
+        logging.disable(logging.NOTSET)
 
 
 def workflow_exists():
