@@ -91,13 +91,13 @@ function generateSampleFromSchema(schema: z.ZodTypeAny): any {
     return '';
 }
 
+const INDENT_FACTOR = 4;
+const COMMENT_FACTOR = 1;
+
 function renderUnionField(
     fieldSchema: z.ZodTypeAny,
     key: string,
-    spaces: string,
-    commentPrefix: string,
-    indent: number,
-    commentDepth: number
+    indent: Readonly<Indentation>
 ): string {
     const unwrappedField = unwrapSchema(fieldSchema);
     const options = (unwrappedField as any)._def?.options || [];
@@ -113,9 +113,9 @@ function renderUnionField(
     if (hasComplexType) {
         // Has complex types - show full structure
         if (sampleValue !== '') {
-            yaml += `${spaces}${commentPrefix}${key}: ${sampleValue}\n`;
+            yaml += `${makeHeader(indent)}${key}: ${sampleValue}\n`;
         } else {
-            yaml += `${spaces}${commentPrefix}${key}:\n`;
+            yaml += `${makeHeader(indent)}${key}:\n`;
         }
 
         // Show each union option as commented examples
@@ -124,47 +124,50 @@ function renderUnionField(
             const optionType = getTypeName(option);
 
             if (optionConstructor === 'ZodObject' || optionConstructor === 'ZodRecord') {
-                yaml += `${spaces}${commentPrefix}## Option ${idx + 1} (${optionType}):\n`;
-                yaml += schemaToYamlWithComments(option, indent + 1, commentDepth + 1);
+                const nextIndent = indent.incrementComment();
+                yaml += `${makeHeader(nextIndent)}## Option ${idx + 1} (${optionType}):\n`;
+                yaml += schemaToYamlWithComments(option, nextIndent);
             } else {
                 // For simple types in union
-                yaml += `${spaces}${commentPrefix}## Option ${idx + 1}: ${optionType}\n`;
+                yaml += `${makeHeader(indent)}## Option ${idx + 1}: ${optionType}\n`;
             }
         });
     } else {
         // All scalar types - show as pipe-separated list on same line
         const scalarTypes = options.map((option: z.ZodTypeAny) => getTypeName(option)).join(' | ');
-        yaml += `${spaces}${commentPrefix}${key}:  # ${scalarTypes}\n`;
+        yaml += `${makeHeader(indent)}${key}:  # ${scalarTypes}\n`;
     }
 
     return yaml;
 }
 
-function renderArrayElement(elementSchema: z.ZodTypeAny, indent: number, commentDepth: number): string {
-    const spaces = '  '.repeat(indent);
-    const commentPrefix = '#'.repeat(commentDepth);
+export const createIndentation = (comment: number, spaces: number) => {
+    const rval = {
+        comment,
+        spaces,
+        incrementComment(doShift: boolean = true) {
+            return createIndentation(comment + (doShift ? COMMENT_FACTOR : 0), spaces);
+        },
+        incrementSpaces(doShift: boolean = true) {
+            return createIndentation(comment, spaces + (doShift ? INDENT_FACTOR : 0));
+        }
+    };
+    return rval as Readonly<typeof rval>;
+};
+
+export type Indentation = ReturnType<typeof createIndentation>;
+
+function makeHeader(i: Indentation) {
+    return '#'.repeat(i.comment) + ' '.repeat(i.spaces);
+}
+
+function renderArrayElement(elementSchema: z.ZodTypeAny, indent: Indentation): string {
     const unwrapped = unwrapSchema(elementSchema);
     const elementConstructor = unwrapped.constructor.name;
 
     if (elementConstructor === 'ZodObject') {
-        let yaml = `\n`;
-        const objectYaml = schemaToYamlWithComments(elementSchema, indent + 1, 0);
-        // Prefix first line with dash, indent rest
-        const lines = objectYaml.split('\n');
-        lines.forEach((line, idx) => {
-            if (line.trim()) {
-                const leadingSpaces = line.length - line.trimStart().length;
-                const preservedIndent = ' '.repeat(leadingSpaces);
-
-                if (idx === 0) {
-                    yaml += `${spaces}${preservedIndent}${commentPrefix}-\n`;
-                    yaml += `${spaces}${preservedIndent}  ${commentPrefix}${line.trimStart()}\n`;
-                } else {
-                    yaml += `${spaces}${preservedIndent}  ${commentPrefix}${line.trimStart()}\n`;
-                }
-            }
-        });
-        return yaml;
+        let yaml = `\n${makeHeader(indent)}-\n`;
+        return yaml + schemaToYamlWithComments(elementSchema, indent);
     } else if (elementConstructor === 'ZodUnion') {
         // Handle union types in arrays
         const options = (unwrapped as any)._def?.options || [];
@@ -183,27 +186,13 @@ function renderArrayElement(elementSchema: z.ZodTypeAny, indent: number, comment
                 const optionType = getTypeName(option);
 
                 if (optionConstructor === 'ZodObject' || optionConstructor === 'ZodRecord') {
-                    yaml += `${spaces}${commentPrefix}## Option ${idx + 1} (${optionType}):\n`;
-                    const objectYaml = schemaToYamlWithComments(option, indent + 1, commentDepth);
-                    const lines = objectYaml.split('\n');
-                    lines.forEach((line, lineIdx) => {
-                        if (line.trim()) {
-                            const leadingSpaces = line.length - line.trimStart().length;
-                            const preservedIndent = ' '.repeat(leadingSpaces);
-
-                            if (lineIdx === 0) {
-                                yaml += `${spaces}${preservedIndent}${commentPrefix}-\n`;
-                                yaml += `${spaces}${preservedIndent}  ${commentPrefix}${line.trimStart()}\n`;
-                            } else {
-                                yaml += `${spaces}${preservedIndent}  ${commentPrefix}${line.trimStart()}\n`;
-                            }
-                        }
-                    });
+                    yaml += `${makeHeader(indent)}## Option ${idx + 1} (${optionType}):\n`;
+                    yaml += schemaToYamlWithComments(option, indent);
                 } else {
                     // Simple type in union
                     const sampleValue = generateSampleFromSchema(option);
-                    yaml += `${spaces}${commentPrefix}## Option ${idx + 1}: ${optionType}\n`;
-                    yaml += `${spaces}${commentPrefix}- ${sampleValue || ''}\n`;
+                    yaml += `${makeHeader(indent)}## Option ${idx + 1}: ${optionType}\n`;
+                    yaml += `${makeHeader(indent)}- ${sampleValue || ''}\n`;
                 }
             });
             return yaml;
@@ -221,12 +210,12 @@ function renderArrayElement(elementSchema: z.ZodTypeAny, indent: number, comment
     }
 }
 
-function schemaToYamlWithComments(schema: z.ZodTypeAny, indent = 0, incomingCommentDepth = 0): string {
-    const spaces = '  '.repeat(indent);
+function schemaToYamlWithComments(schema: z.ZodTypeAny, incomingIndent: Readonly<Indentation>): string {
     let yaml = '';
 
     const unwrapped = unwrapSchema(schema);
     const unwrappedConstructor = unwrapped.constructor.name;
+    const currentIndent = incomingIndent.incrementSpaces();
 
     if (unwrappedConstructor === 'ZodObject' || unwrappedConstructor === 'ZodRecord') {
         const shape = unwrappedConstructor === 'ZodObject'
@@ -237,44 +226,33 @@ function schemaToYamlWithComments(schema: z.ZodTypeAny, indent = 0, incomingComm
             const fieldSchema = shape[key];
             const description = fullUnwrapType(fieldSchema).description;
             const typeName = getTypeName(fieldSchema);
-            const hasDefault = fieldSchema.constructor.name === 'ZodDefault';
             const optional = isOptional(fieldSchema);
-            let commentDepth = incomingCommentDepth + (optional ? 1 : 0);
+            const nextIndent = currentIndent.incrementComment(optional);
 
-            const commentPrefix = '#'.repeat(commentDepth);
-
-            // Build comment line
-            if (description) {
-                yaml += `${spaces}${commentPrefix}# ${description}\n`;
+            if (description) { // Build comment line
+                yaml += `${makeHeader(nextIndent)}# ${description}\n`;
             }
 
             const unwrappedField = unwrapSchema(fieldSchema);
             const fieldConstructor = unwrappedField.constructor.name;
 
             if (fieldConstructor === 'ZodObject' || fieldConstructor === 'ZodRecord') {
-                yaml += `${spaces}${commentPrefix}${key}:\n`;
-                yaml += schemaToYamlWithComments(fieldSchema, indent + 1, commentDepth);
+                yaml += `${makeHeader(nextIndent)}${key}:\n`;
+                yaml += schemaToYamlWithComments(fieldSchema, nextIndent);
             } else if (fieldConstructor === 'ZodArray') {
-                // Check if array has minimum length requirement
-                const minLength = getArrayMinLength(fieldSchema);
-                const arrayCommentDepth = (minLength === undefined || minLength === 0)
-                    ? commentDepth + 1
-                    : commentDepth;
-
-                // Get the element schema
                 const elementSchema = (unwrappedField as any).element || (unwrappedField as any)._def?.type;
                 if (elementSchema) {
-                    yaml += `${spaces}${commentPrefix}${key}:`;
-                    yaml += renderArrayElement(elementSchema, indent, arrayCommentDepth);
+                    yaml += `${makeHeader(nextIndent)}${key}:`;
+                    yaml += renderArrayElement(elementSchema, nextIndent);
                 }
             } else if (fieldConstructor === 'ZodUnion') {
-                yaml += renderUnionField(fieldSchema, key, spaces, commentPrefix, indent, commentDepth);
+                yaml += renderUnionField(fieldSchema, key, nextIndent);
             } else {
                 const sampleValue = generateSampleFromSchema(fieldSchema);
                 if (sampleValue !== '') {
-                    yaml += `${spaces}${commentPrefix}${key}: ${sampleValue}\n`;
+                    yaml += `${makeHeader(nextIndent)}${key}: ${sampleValue}\n`;
                 } else {
-                    yaml += `${spaces}${commentPrefix}${key}:  # ${typeName}\n`;
+                    yaml += `${makeHeader(nextIndent)}${key}:  # ${typeName}\n`;
                 }
             }
         }
@@ -283,15 +261,18 @@ function schemaToYamlWithComments(schema: z.ZodTypeAny, indent = 0, incomingComm
     return yaml;
 }
 
+function schemaToYamlWithCommentsTop(schema: z.ZodTypeAny): string {
+    return schemaToYamlWithComments(schema, createIndentation(0, -1*INDENT_FACTOR));
+}
+
 export async function main() {
-    console.info(schemaToYamlWithComments(OVERALL_MIGRATION_CONFIG));
-    // console.info(schemaToYamlWithComments(PARAMETERIZED_MIGRATION_CONFIG));
+    console.info(schemaToYamlWithCommentsTop(OVERALL_MIGRATION_CONFIG));
 }
 
 // Run if executed directly
 if (require.main === module && !process.env.SUPPRESS_AUTO_LOAD) {
     main().catch(error => {
         console.error('Fatal error:', error);
-        process.exit(1);
+        process.exit(2);
     });
 }

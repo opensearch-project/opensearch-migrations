@@ -77,6 +77,9 @@ export function unwrapSchema(schema: z.ZodTypeAny, constructorNames = ZOD_OPTION
         if (innerType) {
             return unwrapSchema(innerType as z.ZodTypeAny, constructorNames);
         }
+    } else if (schema instanceof z.ZodPipe) {
+        const inner = schema._def.in;
+        return unwrapSchema(inner as any, constructorNames);
     }
 
     return schema;

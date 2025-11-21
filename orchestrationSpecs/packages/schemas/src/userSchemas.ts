@@ -103,7 +103,7 @@ export const S3_REPO_CONFIG = z.object({
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)/).default("").optional()
         .describe("Override the default S3 endpoint for clients to connect to.  " +
             "Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"),
-    s3RepoPathUri: z.string().describe("s3:///BUCKETNAME/PATH"),
+    s3RepoPathUri: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/).describe("s3:///BUCKETNAME/PATH"),
     repoName: z.string().default("migration_assistant_repo").optional()
 });
 
@@ -147,9 +147,9 @@ export const REPLAYER_OPTIONS = z.object({
     podReplicas: z.number().default(1).optional(),
     authHeaderOverride: z.string().default("").optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
-    resources: RESOURCE_REQUIREMENTS.optional()
+    resources: RESOURCE_REQUIREMENTS
         .describe("Resource limits and requests for replayer container.")
-        .default(DEFAULT_RESOURCES.REPLAYER),
+        .default(DEFAULT_RESOURCES.REPLAYER).optional(),
     // docTransformerBase64: z.string().default("").optional(),
     // otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
 });
@@ -158,7 +158,7 @@ export const CREATE_SNAPSHOT_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional(),
     maxSnapshotRateMbPerNode: z.number().default(0).optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
-    s3RoleArn: z.string().default("").optional()
+    s3RoleArn: z.string().regex(/^arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+$/).default("").optional()
 });
 
 export const USER_METADATA_OPTIONS = z.object({

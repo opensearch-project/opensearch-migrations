@@ -3232,7 +3232,7 @@ spec:
                   },
                   {
                     "name": "resources",
-                    "value": "{{=toJSON(jsonpath(inputs.parameters.replayerConfig, '$.resources'))}}",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.replayerConfig)['resources'])}}",
                   },
                   {
                     "name": "sessionName",
