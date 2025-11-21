@@ -44,7 +44,7 @@ def temporarily_disable_logging():
         logging.disable(logging.NOTSET)
 
 
-def workflow_exists():
+def can_use_k8s_config_store():
     # disable logging before making this call to prevent the `Invalid kube-config file.`
     # error message from confusing the user.
     with temporarily_disable_logging():
@@ -58,7 +58,7 @@ def workflow_exists():
 class Context(object):
     def __init__(self, config_file) -> None:
         # Expanding this to include handling `workflow` config objects, for a k8s deployment.
-        if workflow_exists():
+        if can_use_k8s_config_store():
             logger.warning("Assuming k8s deployment, loading cluster information from workflow config")
             self.env = Environment.from_workflow_config()
             return
