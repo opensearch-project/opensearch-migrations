@@ -3,10 +3,10 @@
 import logging
 import os
 import click
-from kubernetes import client, config
+from kubernetes import client
 from kubernetes.client.rest import ApiException
 
-from ..models.utils import ExitCode
+from ..models.utils import ExitCode, load_k8s_config
 from ..services.workflow_service import WorkflowService
 from .status import _display_workflow_status
 from .utils import auto_detect_workflow
@@ -61,30 +61,37 @@ def _get_user_choice(pod_nodes, ctx):
 
 
 def _initialize_k8s_client(ctx):
-    """Initialize Kubernetes client with appropriate configuration."""
+    """Initialize Kubernetes client with appropriate configuration.
+
+    Attempts to load in-cluster config first (for pods), then falls back to kubeconfig.
+
+    Args:
+        ctx: Click context for exit handling
+
+    Returns:
+        client.CoreV1Api: Kubernetes Core V1 API client
+
+    Exits:
+        If neither configuration method succeeds
+    """
     try:
-        config.load_incluster_config()
-        logger.info("Using in-cluster Kubernetes configuration")
-    except config.ConfigException:
-        try:
-            config.load_kube_config()
-            logger.info("Using kubeconfig file")
-        except config.ConfigException as e:
-            click.echo(
-                f"Error: Could not load Kubernetes configuration. "
-                f"Make sure kubectl is configured or you're running inside a cluster.\n"
-                f"Details: {e}",
-                err=True
-            )
-            ctx.exit(ExitCode.FAILURE.value)
+        load_k8s_config()
+    except Exception as e:
+        click.echo(
+            f"Error: Could not load Kubernetes configuration. "
+            f"Make sure kubectl is configured or you're running inside a cluster.\n"
+            f"Details: {e}",
+            err=True
+        )
+        ctx.exit(ExitCode.FAILURE.value)
     return client.CoreV1Api()
 
 
-def _find_pod_by_node_id(v1, namespace, workflow_name, node_id, selected_node, ctx):
+def _find_pod_by_node_id(k8s_core_api, namespace, workflow_name, node_id, selected_node, ctx):
     """Find the pod associated with a workflow node ID."""
     click.echo(f"\nSearching for pod with node-id: {node_id}...")
 
-    pods = v1.list_namespaced_pod(
+    pods = k8s_core_api.list_namespaced_pod(
         namespace=namespace,
         label_selector=f"workflows.argoproj.io/workflow={workflow_name}"
     )
@@ -113,11 +120,11 @@ def _get_all_container_names(pod):
     return all_containers
 
 
-def _stream_container_logs(v1, pod_name, namespace, container_name, tail_lines):
+def _stream_container_logs(k8s_core_api, pod_name, namespace, container_name, tail_lines):
     """Stream logs from a container in real-time.
 
     Args:
-        v1: Kubernetes CoreV1Api client
+        k8s_core_api: Kubernetes CoreV1Api client
         pod_name: Name of the pod
         namespace: Kubernetes namespace
         container_name: Name of the container
@@ -125,7 +132,7 @@ def _stream_container_logs(v1, pod_name, namespace, container_name, tail_lines):
     """
     try:
         # Use follow=True and _preload_content=False for streaming
-        stream = v1.read_namespaced_pod_log(
+        stream = k8s_core_api.read_namespaced_pod_log(
             name=pod_name,
             namespace=namespace,
             container=container_name,
@@ -149,11 +156,11 @@ def _stream_container_logs(v1, pod_name, namespace, container_name, tail_lines):
             click.echo(f"(Error streaming output: {e.reason})")
 
 
-def _display_container_output(v1, pod_name, namespace, container_name, tail_lines, follow=False):
+def _display_container_output(k8s_core_api, pod_name, namespace, container_name, tail_lines, follow=False):
     """Display output from a single container.
 
     Args:
-        v1: Kubernetes CoreV1Api client
+        k8s_core_api: Kubernetes CoreV1Api client
         pod_name: Name of the pod
         namespace: Kubernetes namespace
         container_name: Name of the container
@@ -166,11 +173,11 @@ def _display_container_output(v1, pod_name, namespace, container_name, tail_line
 
     if follow:
         # Stream logs in real-time
-        _stream_container_logs(v1, pod_name, namespace, container_name, tail_lines)
+        _stream_container_logs(k8s_core_api, pod_name, namespace, container_name, tail_lines)
     else:
         # Display static snapshot
         try:
-            container_output = v1.read_namespaced_pod_log(
+            container_output = k8s_core_api.read_namespaced_pod_log(
                 name=pod_name,
                 namespace=namespace,
                 container=container_name,
@@ -189,11 +196,11 @@ def _display_container_output(v1, pod_name, namespace, container_name, tail_line
                 click.echo(f"(Error retrieving output: {container_error.reason})")
 
 
-def _display_pod_output(v1, pod_name, namespace, selected_node, tail_lines, follow, ctx):
+def _display_pod_output(k8s_core_api, pod_name, namespace, selected_node, tail_lines, follow, ctx):
     """Display output from all containers in a pod.
 
     Args:
-        v1: Kubernetes CoreV1Api client
+        k8s_core_api: Kubernetes CoreV1Api client
         pod_name: Name of the pod
         namespace: Kubernetes namespace
         selected_node: Selected workflow node information
@@ -204,7 +211,7 @@ def _display_pod_output(v1, pod_name, namespace, selected_node, tail_lines, foll
     try:
         click.echo(f"Found pod: {pod_name}")
 
-        pod = v1.read_namespaced_pod(name=pod_name, namespace=namespace)
+        pod = k8s_core_api.read_namespaced_pod(name=pod_name, namespace=namespace)
 
         # Get container lists
         init_containers = [c.name for c in pod.spec.init_containers] if pod.spec.init_containers else []
@@ -237,7 +244,7 @@ def _display_pod_output(v1, pod_name, namespace, selected_node, tail_lines, foll
         # Display output from each container
         try:
             for container_name in containers_to_stream:
-                _display_container_output(v1, pod_name, namespace, container_name, tail_lines, follow)
+                _display_container_output(k8s_core_api, pod_name, namespace, container_name, tail_lines, follow)
         except KeyboardInterrupt:
             click.echo("\n\nStreaming interrupted by user (Ctrl+C)")
             return
@@ -351,12 +358,12 @@ def output_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
         selected_node = pod_nodes[choice_idx]
 
         # Initialize Kubernetes client and find pod
-        v1 = _initialize_k8s_client(ctx)
+        k8s_core_api = _initialize_k8s_client(ctx)
         node_id = selected_node['id']
 
         try:
-            pod_name = _find_pod_by_node_id(v1, namespace, workflow_name, node_id, selected_node, ctx)
-            _display_pod_output(v1, pod_name, namespace, selected_node, tail_lines, follow, ctx)
+            pod_name = _find_pod_by_node_id(k8s_core_api, namespace, workflow_name, node_id, selected_node, ctx)
+            _display_pod_output(k8s_core_api, pod_name, namespace, selected_node, tail_lines, follow, ctx)
 
         except ApiException as e:
             click.echo(f"\nError retrieving output: {e}", err=True)
