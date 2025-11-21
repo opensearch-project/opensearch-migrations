@@ -1,5 +1,5 @@
 apiVersion: argoproj.io/v1alpha1
-kind: WorkflowTemplate
+kind: WorkflowTemplate //
 metadata:
   name: full-migration-with-clusters
 spec:
@@ -116,17 +116,30 @@ spec:
                 - name: replayer-config
                   value: "{{workflow.parameters.replayer-config}}"
 
-        # Run the full migration
+        # Run the full migration using CLI orchestrator
         - - name: run-full-migration
             templateRef:
-              name: full-migration
+              name: full-migration-with-cli
               template: main
             arguments:
               parameters:
-                - name: source-migration-configs
-                  value: "{{steps.generate-migration-configs.outputs.parameters.source-migration-configs}}"
-                - name: targets
-                  value: "{{steps.generate-migration-configs.outputs.parameters.targets}}"
+                - name: sourceClusterConfigJson
+                  value: "{{steps.create-source-cluster.outputs.parameters.cluster-config}}"
+                - name: targetClusterConfigJson
+                  value: "{{steps.create-target-cluster.outputs.parameters.cluster-config}}"
+                - name: snapshotConfigJson
+                  value: |
+                    {
+                      "s3Repo": {
+                        "awsRegion": "us-east-1",
+                        "repoUri": "s3://test-bucket/rfs-snapshot",
+                        "snapshotName": "snapshot_{{workflow.uid}}"
+                      }
+                    }
+                - name: imageMigrationConsoleLocation
+                  value: "{{=configmap(workflow.parameters['migration-image-configmap'], 'migrationConsoleImage')}}"
+                - name: imageMigrationConsolePullPolicy
+                  value: "{{=configmap(workflow.parameters['migration-image-configmap'], 'migrationConsolePullPolicy')}}"
         
         - - name: pause-for-migration-verification
             template: suspend-step
