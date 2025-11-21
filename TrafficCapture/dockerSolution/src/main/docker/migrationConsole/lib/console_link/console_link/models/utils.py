@@ -104,56 +104,47 @@ class SigV4AuthPlugin(requests.auth.AuthBase):
         return r
 
 
-def map_cluster_auth_from_workflow_config(auth_config) -> dict:
-    mapped_config = {}
+def _map_sigv4_config(sigv4_config) -> dict:
+    sigv4_mapped = {}
+    if isinstance(sigv4_config, dict):
+        if "region" in sigv4_config:
+            sigv4_mapped["region"] = sigv4_config["region"]
+        if "service" in sigv4_config:
+            sigv4_mapped["service"] = sigv4_config["service"]
+    return {"sigv4": sigv4_mapped if sigv4_mapped else None}
+
+
+def _map_basic_auth_config(basic_config) -> dict:
+    if not isinstance(basic_config, dict):
+        raise ValueError("authConfig.basic must be a dictionary")
+    
+    if "secretName" in basic_config:
+        return {"basic_auth": {"k8s_secret_name": basic_config["secretName"]}}
+    
+    if "secretArn" in basic_config:
+        return {"basic_auth": {"user_secret_arn": basic_config["secretArn"]}}
+    
+    if "username" in basic_config and "password" in basic_config:
+        return {"basic_auth": {"username": basic_config["username"], "password": basic_config["password"]}}
+    
+    raise ValueError("authConfig.basic must contain either a secret or username/password")
+
+
+def _map_cluster_auth_from_workflow_config(auth_config) -> dict:
     if auth_config is None or not isinstance(auth_config, dict):
-        # No auth configuration provided, use no_auth
-        mapped_config["no_auth"] = None
-        return mapped_config
+        return {"no_auth": None}
     
     if "sigv4" in auth_config:
-        # Handle SigV4/AWS IAM authentication
-        sigv4_config = auth_config.get("sigv4")
-        sigv4_mapped = {}
-
-        if isinstance(sigv4_config, dict):
-            if "region" in sigv4_config:
-                sigv4_mapped["region"] = sigv4_config["region"]
-            if "service" in sigv4_config:
-                sigv4_mapped["service"] = sigv4_config["service"]
-
-        # If no specific sigv4 config provided, use empty dict
-        mapped_config["sigv4"] = sigv4_mapped if sigv4_mapped else None
-        return mapped_config
-
+        return _map_sigv4_config(auth_config.get("sigv4"))
+    
     if "mtls" in auth_config:
         raise NotImplementedError("MTLS auth is not currently supported.")
-
+    
     if "basic" not in auth_config:
         raise ValueError(f"authConfig seems to be an unsupported format: {list(auth_config.keys())}. "
                          "Supported formats are SigV4, mTLS, and basic auth.")
-
-    # Map basic auth configuration
-    basic_config = auth_config["basic"]
-    if not isinstance(basic_config, dict):
-        raise ValueError("authConfig.basic must be a dictionary")
-        
-    # Currently, a workflow config might have a secret_name AND username/password.
-    # In this case, we want to ignore the username/password and use the secret_name.
-    if "secretName" in basic_config:
-        mapped_config["basic_auth"] = {"k8s_secret_name": basic_config["secretName"]}
-        return mapped_config
     
-    if "secretArn" in basic_config:
-        mapped_config["basic_auth"] = {"user_secret_arn": basic_config["secretArn"]}
-        return mapped_config
-
-    # Check if we have username/password directly
-    if "username" in basic_config and "password" in basic_config:
-        mapped_config["basic_auth"] = {"username": basic_config["username"], "password": basic_config["password"]}
-        return mapped_config
-    
-    raise ValueError("authConfig.basic must contain either a secret or username/password")
+    return _map_basic_auth_config(auth_config["basic"])
 
 
 def map_cluster_from_workflow_config(workflow_config_obj) -> dict:
@@ -178,6 +169,6 @@ def map_cluster_from_workflow_config(workflow_config_obj) -> dict:
     
     # Handle authentication configuration
     auth_config = workflow_config_obj.get("authConfig")
-    mapped_config.update(map_cluster_auth_from_workflow_config(auth_config))
+    mapped_config.update(_map_cluster_auth_from_workflow_config(auth_config))
     
     return mapped_config
