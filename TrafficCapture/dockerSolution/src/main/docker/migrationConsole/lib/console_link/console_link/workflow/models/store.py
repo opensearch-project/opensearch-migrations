@@ -13,6 +13,12 @@ logger = logging.getLogger(__name__)
 CONFIG_YAML_KEY = "workflow_config.yaml"
 
 
+class KubernetesConfigNotFoundError(Exception):
+    """Raised when the Kubernetes ConfigMap is not found."""
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
 class WorkflowConfigStore:
     """
     Workflow configuration store using Kubernetes etcd via ConfigMaps.
@@ -52,7 +58,7 @@ class WorkflowConfigStore:
                     logger.info("Loaded local Kubernetes configuration")
                 except config.ConfigException as e:
                     logger.error(f"Failed to load Kubernetes configuration: {e}")
-                    raise
+                    raise KubernetesConfigNotFoundError("Failed to load Kubernetes configuration") from e
 
             self.v1 = client.CoreV1Api()
 

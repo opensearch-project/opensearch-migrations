@@ -10,13 +10,22 @@ from console_link.models.snapshot import Snapshot
 from console_link.models.replayer_base import Replayer
 from console_link.models.kafka import Kafka
 from console_link.models.client_options import ClientOptions
+from console_link.models.utils import map_cluster_from_workflow_config
+from console_link.workflow.models.store import WorkflowConfigStore
 
 import yaml
 from cerberus import Validator
 
 from console_link.models.metadata import Metadata
 
+
 logger = logging.getLogger(__name__)
+
+
+class WorkflowConfigException(Exception):
+    """Workflow config object does not provide valid information"""
+    def __init__(self, message):
+        super().__init__(message)
 
 
 SCHEMA = {
@@ -123,3 +132,49 @@ class Environment:
         if 'kafka' in self.config:
             self.kafka = get_kafka(self.config["kafka"])
             logger.info(f"Kafka initialized: {self.kafka}")
+
+    @classmethod
+    def from_workflow_config(cls, namespace='ma', session_name='default') -> 'Environment':
+        store = WorkflowConfigStore(namespace=namespace)
+        config = store.load_config(session_name=session_name)
+        logger.info(f"Loading workflow config with namespace {namespace} and session {session_name}")
+        if config is None:
+            raise WorkflowConfigException(
+                f"A workflow config can't be found for namespace `{namespace}` and session name `{session_name}`."
+            )
+        
+        try:
+            target_cluster_name, target_cluster_config = next(iter(config.get("targetClusters").items()))
+        except (KeyError, AttributeError, StopIteration):
+            logger.warning("No target cluster is defined in the workflow config.")
+            target_cluster_name, target_cluster_config = None, None
+        logger.info(f"Using target cluster: {target_cluster_name}")
+        
+        if target_cluster_config:
+            try:
+                target_cluster = Cluster(config=map_cluster_from_workflow_config(target_cluster_config))
+            except ValueError as e:
+                raise WorkflowConfigException("Target cluster config is not correctly defined.") from e
+        else:
+            target_cluster = None
+            
+        try:
+            source_cluster_name, source_cluster_config = next(iter(config.get("sourceClusters").items()))
+        except (KeyError, AttributeError, StopIteration):
+            logger.warning("No source cluster is defined in the workflow config.")
+            source_cluster_name, source_cluster_config = None, None
+        logger.info(f"Using source cluster: {source_cluster_name}")
+
+        if source_cluster_config:
+            try:
+                source_cluster = Cluster(config=map_cluster_from_workflow_config(source_cluster_config))
+            except ValueError as e:
+                raise WorkflowConfigException("Source cluster config is not correctly defined.") from e
+        else:
+            source_cluster = None
+        
+        instance = super().__new__(cls)
+
+        instance.target_cluster = target_cluster
+        instance.source_cluster = source_cluster
+        return instance

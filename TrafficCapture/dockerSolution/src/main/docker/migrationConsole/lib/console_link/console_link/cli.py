@@ -1,9 +1,12 @@
+# pyright: ignore[reportCallIssue]
+from contextlib import contextmanager
 import json
 from pprint import pprint
 import sys
 import time
 from typing import Dict
 import click
+
 import console_link.middleware.clusters as clusters_
 import console_link.middleware.metrics as metrics_
 import console_link.middleware.backfill as backfill_
@@ -19,6 +22,7 @@ from console_link.models.backfill_rfs import RfsWorkersInProgress, WorkingIndexD
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME, ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
+from console_link.workflow.models.store import WorkflowConfigStore, KubernetesConfigNotFoundError
 from click.shell_completion import get_completion_class
 
 import logging
@@ -28,8 +32,37 @@ logger = logging.getLogger(__name__)
 # ################### UNIVERSAL ####################
 
 
+@contextmanager
+def temporarily_disable_logging():
+    """
+    A context manager that temporarily disables logging.
+    """
+    original_level = logger.root.level
+    logging.disable(logging.CRITICAL)
+    try:
+        yield
+    finally:
+        logging.disable(original_level)
+
+
+def workflow_exists():
+    # disable logging before making this call to prevent the `Invalid kube-config file.`
+    # error message from confusing the user.
+    with temporarily_disable_logging():
+        try:
+            WorkflowConfigStore()
+            return True
+        except KubernetesConfigNotFoundError:
+            return False
+
+
 class Context(object):
     def __init__(self, config_file) -> None:
+        # Expanding this to include handling `workflow` config objects, for a k8s deployment.
+        if workflow_exists():
+            logger.warning("Assuming k8s deployment, loading cluster information from workflow config")
+            self.env = Environment.from_workflow_config()
+            return
         self.config_file = config_file
         try:
             self.env = Environment(config_file=config_file)
@@ -57,7 +90,14 @@ def cli(ctx, config_file, json, verbose, version):
 
     logging.basicConfig(level=logging.WARN - (10 * verbose))
     logger.info(f"Logging set to {logging.getLevelName(logger.getEffectiveLevel())}")
-    ctx.obj = Context(config_file)
+    # Disabling all logging for gathering the context for shell completion (run automatically)
+    # on container startup
+    if ctx.invoked_subcommand == 'completion':
+        with temporarily_disable_logging():
+            ctx.obj = Context(config_file)
+    else:
+        ctx.obj = Context(config_file)
+
     ctx.obj.json = json
 
 

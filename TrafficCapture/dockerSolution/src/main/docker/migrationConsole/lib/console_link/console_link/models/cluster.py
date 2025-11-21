@@ -95,8 +95,6 @@ SCHEMA = {
 }
 
 
-
-
 class AuthDetails(NamedTuple):
     username: str
     password: str
