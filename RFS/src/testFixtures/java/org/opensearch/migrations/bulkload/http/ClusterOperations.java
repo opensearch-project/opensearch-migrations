@@ -423,6 +423,44 @@ public class ClusterOperations {
         assertThat(response.getKey(), equalTo(200));
     }
 
+    public boolean shouldTestEs5SingleType() {
+        return VersionMatchers.equalOrGreaterThanES_5_5.test(clusterVersion) 
+            && VersionMatchers.isES_5_X.test(clusterVersion);
+    }
+
+    /**
+     * Creates an ES5 single-type index with test documents.
+     * The index.mapping.single_type setting only exists in ES 5.5 and ES 5.6.
+     * Callers should check shouldTestEs5SingleType() before invoking this method.
+     */
+    @SneakyThrows
+    public void createEs5SingleTypeIndexWithDocs(String indexName) {
+        // Create index with single_type setting and 1 shard
+        String createIndexJson = """
+        {
+          "settings": {
+            "index": {
+              "mapping": {
+                "single_type": "true"
+              },
+              "number_of_shards": 1,
+              "number_of_replicas": 0
+            }
+          },
+          "mappings": {}
+        }
+        """;
+
+        createIndex(indexName, createIndexJson);
+
+        // Insert test documents
+        String docType = defaultDocType();
+        createDocument(indexName, "1", "{\"title\":\"Doc One\",\"flag\":true}", null, docType);
+        createDocument(indexName, "2", "{\"title\":\"Doc Two\",\"flag\":false}", null, docType);
+
+        post("/" + indexName + "/_refresh", null);
+    }
+
     public String defaultDocType() {
         if (UnboundVersionMatchers.isBelowES_6_X
             .or(VersionMatchers.equalOrBetween_ES_6_0_and_6_1)
