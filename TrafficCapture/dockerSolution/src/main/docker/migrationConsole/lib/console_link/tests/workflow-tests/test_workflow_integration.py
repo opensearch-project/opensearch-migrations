@@ -264,8 +264,46 @@ class ArgoWorkflowsWaiter:
 
 
 # ============================================================================
-# Cluster Detection Helper Functions
+# Helper Functions
 # ============================================================================
+
+def _wait_for_port_forward(process, port, timeout=10):
+    """
+    Wait for a port-forward process to establish connection.
+
+    Args:
+        process: subprocess.Popen object for the port-forward command
+        port: Local port number to check
+        timeout: Maximum seconds to wait (default: 10)
+
+    Returns:
+        bool: True if port-forward is ready, False otherwise
+    """
+    import socket
+    start_time = time.time()
+
+    while time.time() - start_time < timeout:
+        # Check if process died
+        if process.poll() is not None:
+            _, stderr = process.communicate()
+            logger.warning(f"Port-forward failed to start: {stderr.decode()}")
+            return False
+
+        # Try to connect to the port
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            if sock.connect_ex(('localhost', port)) == 0:
+                sock.close()
+                return True
+            sock.close()
+        except Exception:
+            pass
+
+        time.sleep(0.5)
+
+    return False
+
 
 def _detect_existing_kubernetes_cluster():
     """
@@ -498,17 +536,11 @@ def argo_workflows(k3s_container):
             stderr=subprocess.PIPE
         )
 
-        # Wait a moment for port-forward to establish
-        time.sleep(3)
-
-        # Verify port-forward is working by checking if process is still running
-        if port_forward_process.poll() is not None:
-            # Process died, get error output
-            _, stderr = port_forward_process.communicate()
-            logger.warning(f"Port-forward failed to start: {stderr.decode()}")
-            logger.warning("Output command tests may fail without port-forward")
-        else:
+        # Wait for port-forward to establish
+        if _wait_for_port_forward(port_forward_process, 2746):
             logger.info("✓ Port-forward to argo-server established on localhost:2746")
+        else:
+            logger.warning("Port-forward not ready - output command tests may fail")
 
     except Exception as e:
         logger.warning(f"Failed to set up port-forward: {e}")
