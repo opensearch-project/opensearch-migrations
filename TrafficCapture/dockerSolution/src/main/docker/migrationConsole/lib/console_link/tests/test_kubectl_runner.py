@@ -112,3 +112,13 @@ def test_retrieve_deployment_status_failure_deployment_read(kubectl_runner):
 
     status = kubectl_runner.retrieve_deployment_status()
     assert status is None
+
+
+def test_read_secret(kubectl_runner):
+    def mock_read_namespaced_secret(name, namespace):
+        return SimpleNamespace(data={"key": "value"})
+    kubectl_runner.k8s_core.read_namespaced_secret = mock_read_namespaced_secret
+
+    secret = kubectl_runner.read_secret("test-secret")
+    assert secret is not None
+    assert secret.data == {"key": "value"}

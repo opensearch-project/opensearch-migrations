@@ -1,6 +1,8 @@
+import base64
 import logging
 
 from kubernetes import client, config
+from kubernetes.client import V1Secret
 from typing import Optional
 
 from console_link.models.command_result import CommandResult
@@ -65,3 +67,20 @@ class KubectlRunner:
             desired=desired_pods,
             terminating=terminating_pods
         )
+    
+    def read_secret(self, secret_name: str) -> dict[str, str]:
+        secret: V1Secret = self.k8s_core.read_namespaced_secret(secret_name, self.namespace)
+
+        if not secret.data:
+            return {}
+
+        decoded: dict[str, str] = {}
+        for key, b64_val in secret.data.items():
+            try:
+                decoded[key] = base64.b64decode(b64_val).decode("utf-8")
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to base64-decode key '{key}' in secret '{secret_name}'"
+                ) from e
+
+        return decoded
