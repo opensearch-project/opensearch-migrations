@@ -103,7 +103,7 @@ export const S3_REPO_CONFIG = z.object({
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)/).default("").optional()
         .describe("Override the default S3 endpoint for clients to connect to.  " +
             "Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"),
-    s3RepoPathUri: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/).describe("s3:///BUCKETNAME/PATH"),
+    s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/).describe("s3:///BUCKETNAME/PATH"),
     repoName: z.string().default("migration_assistant_repo").optional()
 });
 
@@ -270,16 +270,17 @@ export const HTTP_AUTH_MTLS = z.object({
 });
 
 export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123])(?:\.[0-9]+)+$/);
+export const ENDPOINT_STRING = z.string().regex(/^https?:\/\/[^:\/\s]+(:\d+)?(\/)?$/);
 
 export const CLUSTER_CONFIG = z.object({
-    endpoint: z.string(),
+    endpoint: ENDPOINT_STRING.default("").optional(),
     allowInsecure: z.boolean().default(false).optional(),
     version: CLUSTER_VERSION_STRING,
     authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
 });
 
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
-    endpoint: z.string(), // override to required
+    endpoint: ENDPOINT_STRING, // override to required
 });
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({

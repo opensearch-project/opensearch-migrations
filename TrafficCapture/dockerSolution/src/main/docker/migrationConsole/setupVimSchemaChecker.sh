@@ -7,14 +7,15 @@ curl -fLo ~/.vim/autoload/plug.vim --create-dirs \
 
 echo "=== Configuring ~/.vimrc ==="
 cat > ~/.vimrc << 'EOF'
-call plug#begin()
+call plug#begin('~/.vim/plugged')
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
+Plug 'tpope/vim-commentary'
 call plug#end()
 
 " Enable sign column (where error indicators appear)
 set signcolumn=yes
 
-" Show diagnostic messages faster
+" Show diagnostic messages faster (this is the key setting for responsiveness)
 set updatetime=100
 
 " Highlight errors
@@ -47,10 +48,36 @@ autocmd TextChangedP * call CocActionAsync('diagnosticRefresh')
 autocmd CursorMovedI * call CocActionAsync('diagnosticRefresh')
 EOF
 
-echo "=== Installing coc.nvim plugin ==="
+echo "=== Creating coc-settings.json ==="
+mkdir -p ~/.vim
+cat > ~/.vim/coc-settings.json << 'EOF'
+{
+  "diagnostic.refreshOnInsertMode": true,
+  "diagnostic.checkCurrentLine": true,
+  "diagnostic.virtualText": true,
+  "diagnostic.messageDelay": 100,
+  "diagnostic.refreshAfterSave": false,
+  "yaml.validate": true,
+  "yaml.hover": true,
+  "yaml.completion": true,
+  "yaml.format.enable": true,
+  "yaml.trace.server": "verbose"
+}
+EOF
+
+echo "=== Installing vim plugins ==="
 vim +PlugInstall +qall
 
 echo "=== Installing coc-yaml extension ==="
 vim -c 'CocInstall -sync coc-yaml' +qall
 
+echo ""
 echo "=== Vim setup complete ==="
+echo ""
+echo "To use a schema with your YAML files, add this line at the top:"
+echo "# yaml-language-server: \$schema=/path/to/your/schema.json"
+echo ""
+echo "Or configure schemas in ~/.vim/coc-settings.json like:"
+echo '  "yaml.schemas": {'
+echo '    "file:///path/to/schema.json": "*.config.yaml"'
+echo '  }'
