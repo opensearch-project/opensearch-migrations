@@ -47,7 +47,7 @@ set -e -x
 
 echo "Building and submitting migration workflow..."
 
-            # Create migration config JSON
+# Create migration config JSON
             cat > /tmp/migration_config.json << 'EOF'
             {
               "sourceClusters": {
@@ -173,7 +173,7 @@ exit 1
 `;
 
 export const WorkflowCommandOrchestrator = WorkflowBuilder.create({
-    k8sResourceName: "workflow-command-orchestrator",
+    k8sResourceName: "full-migration-with-cli",
     parallelism: 1,
     serviceAccountName: "argo-workflow-executor"
 })
@@ -250,3 +250,6 @@ export const WorkflowCommandOrchestrator = WorkflowBuilder.create({
 
     .setEntrypoint("main")
     .getFullScope();
+
+// Alias for backward compatibility - FullMigrationWithCli is now folded into WorkflowCommandOrchestrator
+export const FullMigrationWithCli = WorkflowCommandOrchestrator;

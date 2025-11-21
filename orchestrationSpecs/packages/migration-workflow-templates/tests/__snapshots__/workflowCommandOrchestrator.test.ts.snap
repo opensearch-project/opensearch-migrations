@@ -5,7 +5,7 @@ exports[`WorkflowCommandOrchestrator workflow template matches snapshot (structu
   "metadata": {
     "entrypoint": "main",
     "k8sMetadata": {
-      "name": "workflow-command-orchestrator",
+      "name": "full-migration-with-cli",
     },
     "name": "",
     "parallelism": 1,
@@ -21,7 +21,7 @@ set -e -x
 
 echo "Building and submitting migration workflow..."
 
-            # Create migration config JSON
+# Create migration config JSON
             cat > /tmp/migration_config.json << 'EOF'
             {
               "sourceClusters": {
