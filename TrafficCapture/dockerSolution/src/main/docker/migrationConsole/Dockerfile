@@ -53,6 +53,7 @@ RUN dnf install -y  \
       --setopt=plugins=0 \
       --setopt=logfilelevel=0 \
         nodejs22 \
+        nodejs22-npm \
         && \
         dnf clean all && \
         rm -rf /var/cache/dnf
