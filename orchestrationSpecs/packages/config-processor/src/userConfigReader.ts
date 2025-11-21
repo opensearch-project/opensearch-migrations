@@ -31,16 +31,16 @@ async function readFileOrStdin(yamlPathOrStdin: string): Promise<string> {
     }
 }
 
+export async function parseYaml(yamlPathOrStdin: string) {
+    const yamlContents = await readFileOrStdin(yamlPathOrStdin);
+    return parse(yamlContents);
+}
+
 export async function parseUserConfig(yamlPathOrStdin: string) {
-    return readFileOrStdin(yamlPathOrStdin)
-        .then(yamlContents=>parse(yamlContents))
-        .catch(e => {throw new Error("yaml parse error:", e);})
-        .then(data => {
-            const result = OVERALL_MIGRATION_CONFIG.safeParse(data);
-            if (!result.success) {
-                throw new Error("contents do not match the schema:", { cause: result.error });
-            }
-            return result.data;
-        })
-        .catch(e=>{throw new Error("contents do not match the schema:", {cause: e});})
+    const data = await parseYaml(yamlPathOrStdin);
+    const result = OVERALL_MIGRATION_CONFIG.safeParse(data);
+    if (!result.success) {
+        throw result.error; // Throw Zod error directly
+    }
+    return result.data;
 }
