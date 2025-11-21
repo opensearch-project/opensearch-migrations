@@ -62,6 +62,7 @@ tasks.register('typeCheckConfigProcessor', NpmTask) {
     dependsOn installDependencies
 
     inputs.dir(configProcessorP.dir("src"))
+    inputs.dir(configProcessorP.dir("scripts/createMigrationWorkflowFromUserConfiguration.sh"))
     inputs.file(configProcessorP.file("tsconfig.json"))
     outputs.upToDateWhen { false }
 }

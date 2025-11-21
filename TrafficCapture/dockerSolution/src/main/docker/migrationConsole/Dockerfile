@@ -143,9 +143,10 @@ RUN chmod +x /root/testConfigProcessor/*.sh
 RUN chmod +x /root/configProcessor/*.sh
 ENV WORKFLOW_SCHEMA_FILENAME=/root/.workflowUser.schema.json
 ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
-RUN node "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME"
+ENV NODEJS=node-22
+RUN "$NODEJS" "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME"
 RUN echo "# yaml-language-server: \$schema=$WORKFLOW_SCHEMA_FILENAME" > "${CONFIG_PROCESSOR_DIR}/sample.yaml" && \
-    node "$CONFIG_PROCESSOR_DIR" makeSample >> "${CONFIG_PROCESSOR_DIR}/sample.yaml"
+    "$NODEJS" "$CONFIG_PROCESSOR_DIR" makeSample >> "${CONFIG_PROCESSOR_DIR}/sample.yaml"
 
 # To use test workflows, flip the comments
 

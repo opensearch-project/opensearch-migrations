@@ -10,7 +10,7 @@
     "type-check-all": "npm run type-check && npm run type-check-deps",
     "test": "jest --config ./jest.config.js",
     "test-all": "npm run test && npm run -w @opensearch-migrations/argo-workflow-builders test && npm run -w @opensearch-migrations/schemas test",
-    "check-and-make-templates": "npm run type-check-all && npm run test-all && npm run make-templates"
+    "check-and-make-templates": "npm run type-check-all && npm run test-all && tsx makeTemplates.cjs"
   },
   "dependencies": {
     "@opensearch-migrations/argo-workflow-builders": "*",

@@ -14,9 +14,10 @@ shift  # Remove first argument, leaving any additional args in $@
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+: "${NODEJS:=node}"
 
 # Default command, can be overridden by setting INITIALIZE_CMD environment variable
-: ${INITIALIZE_CMD:="node $SCRIPT_DIR/index.js initialize"}
+: ${INITIALIZE_CMD:="$NODEJS $SCRIPT_DIR/index.js initialize"}
 
 # Create a temporary file
 TEMPORARY_FILE=$(mktemp)
@@ -34,7 +35,7 @@ echo "Configuring approval skips..."
 CONFIGMAP_NAME="approval-config"
 KEY="autoApprove"
 
-: ${FORMAT_APPROVALS_CMD:="node $SCRIPT_DIR/index.js formatApprovals"}
+: ${FORMAT_APPROVALS_CMD:="$NODEJS $SCRIPT_DIR/index.js formatApprovals"}
 FORMAT_APPROVALS_OUTPUT=$($FORMAT_APPROVALS_CMD $CONFIG_FILENAME)
 
 if [ -z "$FORMAT_APPROVALS_OUTPUT" ]; then

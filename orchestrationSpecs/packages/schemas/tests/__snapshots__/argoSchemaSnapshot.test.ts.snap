@@ -13,7 +13,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             "type": "object",
             "properties": {
               "endpoint": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?$",
+                "default": ""
               },
               "allowInsecure": {
                 "type": "boolean",
@@ -116,6 +118,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   },
                   "s3RepoPathUri": {
                     "type": "string",
+                    "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
                     "description": "s3:///BUCKETNAME/PATH"
                   },
                   "repoName": {
@@ -152,7 +155,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               }
             },
             "required": [
-              "endpoint",
               "version",
               "name"
             ]
@@ -161,7 +163,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             "type": "object",
             "properties": {
               "endpoint": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?$"
               },
               "allowInsecure": {
                 "type": "boolean",
@@ -285,6 +288,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "s3RoleArn": {
                       "type": "string",
+                      "pattern": "^arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+$",
                       "default": ""
                     }
                   }
@@ -335,6 +339,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         },
                         "s3RepoPathUri": {
                           "type": "string",
+                          "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
                           "description": "s3:///BUCKETNAME/PATH"
                         },
                         "repoName": {
@@ -694,7 +699,9 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "type": "object",
         "properties": {
           "endpoint": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?$",
+            "default": ""
           },
           "allowInsecure": {
             "type": "boolean",
@@ -797,6 +804,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               },
               "s3RepoPathUri": {
                 "type": "string",
+                "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
                 "description": "s3:///BUCKETNAME/PATH"
               },
               "repoName": {
@@ -830,7 +838,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           }
         },
         "required": [
-          "endpoint",
           "version"
         ]
       }
@@ -841,7 +848,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "type": "object",
         "properties": {
           "endpoint": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?$"
           },
           "allowInsecure": {
             "type": "boolean",
@@ -981,6 +989,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "s3RoleArn": {
                       "type": "string",
+                      "pattern": "^arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+$",
                       "default": ""
                     }
                   }
