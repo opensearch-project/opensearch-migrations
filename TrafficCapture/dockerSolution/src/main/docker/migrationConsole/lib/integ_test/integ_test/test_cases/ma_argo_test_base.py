@@ -63,7 +63,7 @@ class MATestBase:
                                              f"{self.target_version.minor_version}-single-node")
 
         self.parameters = {}
-        self.workflow_template = "full-migration-with-clusters"
+        self.workflow_template = "full-migration-with-clusters" //changes to new name
         self.workflow_snapshot_and_migration_config = None
         self.source_operations = get_operations_library_by_version(self.source_version)
         self.target_operations = get_operations_library_by_version(self.target_version)

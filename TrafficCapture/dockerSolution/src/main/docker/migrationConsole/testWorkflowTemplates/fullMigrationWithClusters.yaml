@@ -1,5 +1,5 @@
 apiVersion: argoproj.io/v1alpha1
-kind: WorkflowTemplate //
+kind: WorkflowTemplate
 metadata:
   name: full-migration-with-clusters
 spec:
