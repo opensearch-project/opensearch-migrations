@@ -18,7 +18,15 @@ public class Field7 implements LuceneField {
 
     @Override
     public String asUid() {
-        return Uid.decodeId(wrapped.binaryValue().bytes);
+        var binaryValue = wrapped.binaryValue();
+        
+        // For ES 6.x / ES 7.x case: _id stored as binary
+        if (binaryValue != null && binaryValue.bytes != null) {
+            return Uid.decodeId(binaryValue.bytes);
+        }
+
+        // Fallback for the ES 5.x + single_type case where _id was stored as a string.
+        return wrapped.stringValue();
     }
 
     @Override
