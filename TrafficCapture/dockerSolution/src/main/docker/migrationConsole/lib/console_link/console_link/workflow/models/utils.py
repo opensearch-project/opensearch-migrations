@@ -3,7 +3,6 @@
 import logging
 from enum import Enum
 from kubernetes import config
-from ..models.store import WorkflowConfigStore
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +42,7 @@ def load_k8s_config():
 
 def get_store(ctx) -> "WorkflowConfigStore":
     """Lazy initialization of WorkflowConfigStore"""
+    from ..models.store import WorkflowConfigStore
     if ctx.obj['store'] is None:
         ctx.obj['store'] = WorkflowConfigStore(namespace=ctx.obj['namespace'])
     return ctx.obj['store']
