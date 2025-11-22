@@ -40,7 +40,7 @@ def load_k8s_config():
             raise
 
 
-def get_store(ctx) -> "WorkflowConfigStore":
+def get_store(ctx):
     """Lazy initialization of WorkflowConfigStore"""
     from ..models.store import WorkflowConfigStore
     if ctx.obj['store'] is None:
