@@ -91,9 +91,11 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
+        .addRequiredInput("perSnapshotName", typeToken<string>())
+        .addRequiredInput("name", typeToken<string>())
         .addOptionalInput("metadataMigrationConfig", c=>
             expr.empty<z.infer<typeof METADATA_OPTIONS>>())
-        .addOptionalInput("documentBackfillConfig",  c=>
+        .addOptionalInput("documentBackfillConfig", c=>
             expr.empty<z.infer<typeof RFS_OPTIONS>>())
 
         .addInputsFromRecord(uniqueRunNonceParam)
@@ -103,7 +105,8 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("idGenerator", INTERNAL, "doNothing")
             .addStep("metadataMigrate", MetadataMigration, "migrateMetaData", c => {
                     return c.register({
-                        ...selectInputsForRegister(b, c)
+                        ...selectInputsForRegister(b, c),
+                        perMigrationName: b.inputs.name
                     });
                 },
                 { when: { templateExp: expr.not(expr.isEmpty(b.inputs.metadataMigrationConfig)) }}
@@ -137,6 +140,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['snapshotConfig']>())
         .addRequiredInput("migrations", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['migrations']>())
+        .addRequiredInput("name", typeToken<string>())
         .addOptionalInput("createSnapshotConfig",
                 c=> expr.empty<z.infer<typeof CREATE_SNAPSHOT_OPTIONS>>())
 
@@ -155,12 +159,13 @@ export const FullMigration = WorkflowBuilder.create({
                     console.log(d + " " + o);
                     return c.register({
                         ...(() => {
-                            const { snapshotConfig, ...rest } = selectInputsForRegister(b, c);
+                            const {snapshotConfig, ...rest} = selectInputsForRegister(b, c);
                             return rest;
                         })(),
                         ...selectInputsFieldsAsExpressionRecord(c.item, c,
                             getZodKeys(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)),
-                        snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig
+                        snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
+                        perSnapshotName: b.inputs.name
                     });
                 },
                 {loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.migrations))}
@@ -196,6 +201,7 @@ export const FullMigration = WorkflowBuilder.create({
             // TODO - add a sensor here to wait for an event
         )
     )
+
 
 
     .addTemplate("main", t => t

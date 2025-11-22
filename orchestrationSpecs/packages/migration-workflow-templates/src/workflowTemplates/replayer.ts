@@ -161,7 +161,7 @@ export const Replayer = WorkflowBuilder.create({
                     jsonConfig: expr.asString(expr.serialize(
                         makeParamsDict(b.inputs.targetConfig, b.inputs.replayerConfig)
                     )),
-                    resources: expr.serialize(expr.jsonPathStrict(b.inputs.replayerConfig, "resources"))
+                    resources: expr.serialize(expr.getLoose(expr.deserializeRecord(b.inputs.replayerConfig), "resources"))
                 })))
     )
 

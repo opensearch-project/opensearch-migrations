@@ -8,10 +8,10 @@ import {
     S3_REPO_CONFIG
 } from "@opensearch-migrations/schemas";
 import {
-    BaseExpression,
+    BaseExpression, configMapKey,
     defineRequiredParam,
-    expr,
-    INTERNAL,
+    expr, FunctionExpression, InputParameterSource, InputParametersRecord, InputParamsToExpressions,
+    INTERNAL, PlainObject,
     selectInputsForRegister,
     Serialized,
     typeToken,
@@ -23,6 +23,10 @@ import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions
 import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
+import {
+    getApprovalMap,
+    getSourceTargetPathAndSnapshotAndMigrationIndex
+} from "./commonUtils/configContextPathConstructors";
 
 const COMMON_METADATA_PARAMETERS = {
     snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({ description:
@@ -32,15 +36,25 @@ const COMMON_METADATA_PARAMETERS = {
     ...makeRequiredImageParametersForKeys(["MigrationConsole"])
 };
 
+const IDENTIFIER_PARAMETERS = {
+    perSnapshotName: defineRequiredParam<string>(),
+    perMigrationName: defineRequiredParam<string>()
+};
+
 export function makeRepoParamDict(
     repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>,
     includes3LocalDir: boolean) {
-    return expr.makeDict({
-        "s3Endpoint": expr.get(repoConfig, "endpoint"),
-        "s3RepoUri": expr.get(repoConfig, "s3RepoPathUri"),
-        "s3Region": expr.get(repoConfig, "awsRegion"),
-        ...(includes3LocalDir ? { "s3LocalDir": expr.literal("/tmp") } : {})
-    });
+    return expr.mergeDicts(
+        expr.ternary(
+            expr.hasKey(repoConfig, "endpoint"),
+            expr.makeDict({"s3Endpoint": expr.getLoose(repoConfig, "endpoint")}),
+            expr.makeDict({})),
+        expr.makeDict({
+            "s3RepoUri": expr.get(repoConfig, "s3RepoPathUri"),
+            "s3Region": expr.get(repoConfig, "awsRegion"),
+            ...(includes3LocalDir ? { "s3LocalDir": expr.literal("/tmp") } : {})
+        })
+    );
 }
 
 function makeParamsDict(
@@ -65,6 +79,26 @@ function makeParamsDict(
     );
 }
 
+function makeApprovalCheck<
+    IPR extends InputParamsToExpressions<typeof COMMON_METADATA_PARAMETERS, InputParameterSource> &
+        InputParamsToExpressions<typeof IDENTIFIER_PARAMETERS, InputParameterSource>
+>(
+    inputs: IPR,
+    skipApprovalMap: BaseExpression<any>,
+    ...innerSkipFlags: string[]
+) {
+    return new FunctionExpression<boolean, any, any, "complicatedExpression">("sprig.dig", [
+        ...getSourceTargetPathAndSnapshotAndMigrationIndex(inputs.sourceConfig,
+            inputs.targetConfig,
+            inputs.perSnapshotName,
+            inputs.perMigrationName
+        ),
+        ...(innerSkipFlags !== undefined ? innerSkipFlags.map(f=>expr.literal(f)) : []),
+        expr.literal(false),
+        expr.deserializeRecord(skipApprovalMap)
+    ]);
+}
+
 export const MetadataMigration = WorkflowBuilder.create({
     k8sResourceName: "metadata-migration",
     serviceAccountName: "argo-workflow-executor"
@@ -80,7 +114,6 @@ export const MetadataMigration = WorkflowBuilder.create({
 
         .addContainer(b=>b
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
-            .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
             .addVolumesFromRecord({
                 'test-creds':  {
                     configMap: {
@@ -99,6 +132,7 @@ export const MetadataMigration = WorkflowBuilder.create({
             )
             .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(b.inputs.targetConfig)))
             .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
             .addArgs([
                 b.inputs.commandMode,
                 expr.literal("---INLINE-JSON"),
@@ -118,21 +152,31 @@ export const MetadataMigration = WorkflowBuilder.create({
     .addTemplate("migrateMetaData", t => t
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof METADATA_OPTIONS>>())
         .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
+        .addInputsFromRecord(IDENTIFIER_PARAMETERS)
+        .addInputsFromRecord(
+            getApprovalMap(t.inputs.workflowParameters.approvalConfigMapName, typeToken<{}>()))
+        .addOptionalInput("skipEvaluateApproval", c=>
+            makeApprovalCheck(c.inputParameters, c.inputParameters.skipApprovalMap, "evaluateMetadata"))
+        .addOptionalInput("skipMigrateApproval", c=>
+            makeApprovalCheck(c.inputParameters, c.inputParameters.skipApprovalMap, "migrateMetadata"))
+
         .addSteps(b => b
-            .addStep("metadataEvaluate", INTERNAL, "runMetadata", c =>
+            .addStep("evaluateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     commandMode: "evaluate"
                 })
             )
-            .addStep("approveEvaluate", INTERNAL, "approveEvaluate")
-            .addStep("metadataMigrate", INTERNAL, "runMetadata", c =>
+            .addStep("approveEvaluate", INTERNAL, "approveEvaluate",
+                { when: expr.not(expr.cast(b.inputs.skipEvaluateApproval).to<boolean>()) })
+            .addStep("migrateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     commandMode: "migrate"
                 })
             )
-            .addStep("approveMigrate", INTERNAL, "approveMigrate")
+            .addStep("approveMigrate", INTERNAL, "approveMigrate",
+                { when:  { templateExp: expr.not(expr.deserializeRecord(b.inputs.skipMigrateApproval))}})
         )
     )
 
