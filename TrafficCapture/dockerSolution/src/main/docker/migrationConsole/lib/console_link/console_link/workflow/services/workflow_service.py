@@ -317,11 +317,13 @@ class WorkflowService:
             url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
 
             logger.info(f"Getting status for workflow {workflow_name}")
+            logger.debug(f"Request URL: {url}")
 
             response = requests.get(url, headers=headers, verify=not insecure)
 
             if response.status_code != 200:
-                error_msg = f"Failed to get workflow status: HTTP {response.status_code}"
+                error_msg = self._format_error_message("get workflow status", response)
+                logger.error(error_msg)
                 return self._create_error_status_result(workflow_name, namespace, error_msg)
 
             workflow = response.json()
