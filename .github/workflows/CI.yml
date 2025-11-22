@@ -8,7 +8,7 @@ env:
   python-version: '3.11'
   java-version: '17'
   gradle-version: '8.12.1'
-  node-version: '18.x'
+  node-version: '22.x'
   gradle-test-parallelization: '30'
 
 # Prevent multiple simultaneous runs except on main repo
@@ -108,6 +108,8 @@ jobs:
       - name: Upload coverage to Codecov
         if: always()
         uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SKIP_VALIDATION: true
         with:
           fail_ci_if_error: true
           flags: python
@@ -184,6 +186,8 @@ jobs:
       - name: Upload coverage to Codecov
         if: always()
         uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SKIP_VALIDATION: true
         with:
           fail_ci_if_error: true
           flags: gradle
@@ -267,6 +271,8 @@ jobs:
       - name: Upload coverage to Codecov
         if: always()
         uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SKIP_VALIDATION: true
         with:
           fail_ci_if_error: true
           flags: node
