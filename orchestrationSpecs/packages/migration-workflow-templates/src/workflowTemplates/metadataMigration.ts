@@ -161,7 +161,7 @@ export const MetadataMigration = WorkflowBuilder.create({
             makeApprovalCheck(c.inputParameters, c.inputParameters.skipApprovalMap, "migrateMetadata"))
 
         .addSteps(b => b
-            .addStep("metadataEvaluate", INTERNAL, "runMetadata", c =>
+            .addStep("evaluateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     commandMode: "evaluate"
@@ -169,7 +169,7 @@ export const MetadataMigration = WorkflowBuilder.create({
             )
             .addStep("approveEvaluate", INTERNAL, "approveEvaluate",
                 { when: expr.not(expr.cast(b.inputs.skipEvaluateApproval).to<boolean>()) })
-            .addStep("metadataMigrate", INTERNAL, "runMetadata", c =>
+            .addStep("migrateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     commandMode: "migrate"
