@@ -9,6 +9,7 @@ from click.testing import CliRunner
 from subprocess import CompletedProcess
 
 import console_link.middleware as middleware
+import console_link.cli as cli_module
 from console_link.cli import cli, main
 from console_link.environment import Environment
 from console_link.models.backfill_rfs import ECSRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist
@@ -36,6 +37,15 @@ def runner():
 def env():
     """A valid Environment for the given VALID_SERVICES_YAML file"""
     return Environment(config_file=VALID_SERVICES_YAML)
+
+
+@pytest.fixture(autouse=True)
+def block_k8s_config_store_usage(monkeypatch):
+    # If these tests are running on a computer with k8s, they may be able to instantiate
+    # the WorkflowConfigStore and believe they are running in a k8s environment, which causes
+    # it to ignore any `services.yaml`-type config files. This fixture caues the `can_use_k8s_config_store`
+    # check to always return False.
+    monkeypatch.setattr(cli_module, "can_use_k8s_config_store", lambda: False)
 
 
 @pytest.fixture(autouse=True)

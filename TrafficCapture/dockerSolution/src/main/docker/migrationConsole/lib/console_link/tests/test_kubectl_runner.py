@@ -6,6 +6,7 @@ import pytest
 from console_link.models.command_result import CommandResult
 from console_link.models.kubectl_runner import KubectlRunner
 from kubernetes import config
+from kubernetes.client import V1Secret
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 
@@ -112,3 +113,15 @@ def test_retrieve_deployment_status_failure_deployment_read(kubectl_runner):
 
     status = kubectl_runner.retrieve_deployment_status()
     assert status is None
+
+
+def test_read_secret(kubectl_runner):
+    import base64
+    
+    def mock_read_namespaced_secret(name, namespace):
+        return V1Secret(data={"key": base64.b64encode(b"value").decode("utf-8")})
+    kubectl_runner.k8s_core.read_namespaced_secret = mock_read_namespaced_secret
+
+    secret = kubectl_runner.read_secret("test-secret")
+    assert secret is not None
+    assert secret == {"key": "value"}
