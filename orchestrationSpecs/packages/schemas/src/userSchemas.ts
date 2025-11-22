@@ -270,17 +270,16 @@ export const HTTP_AUTH_MTLS = z.object({
 });
 
 export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123])(?:\.[0-9]+)+$/);
-export const ENDPOINT_STRING = z.string().regex(/^https?:\/\/[^:\/\s]+(:\d+)?(\/)?$/);
 
 export const CLUSTER_CONFIG = z.object({
-    endpoint: ENDPOINT_STRING.default("").optional(),
+    endpoint:  z.string().regex(/^(?:https?:\/\/[^:\/\s]+(:\d+)?(\/)?)?$/).default("").optional(),
     allowInsecure: z.boolean().default(false).optional(),
     version: CLUSTER_VERSION_STRING,
     authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
 });
 
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
-    endpoint: ENDPOINT_STRING, // override to required
+    endpoint:  z.string().regex(/^https?:\/\/[^:\/\s]+(:\d+)?(\/)?$/), // override to required
 });
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
