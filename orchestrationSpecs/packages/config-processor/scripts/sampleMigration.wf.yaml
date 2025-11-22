@@ -14,7 +14,10 @@
       },
       "snapshotRepo": {
         "awsRegion": "us-east-2",
-        "endpoint": "localstack://10.97.178.71:4566",
+        # Notice that the localstack name will become an IP address.
+        # If you're not able to resolve the IP Address (e.g. if you're
+        # running out of the k8s cluster, you can set it manually
+        "endpoint": "localstack://localstack.ma.svc.cluster.local:4566",
         "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2"
       },
       "proxy": { }

@@ -14,7 +14,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             "properties": {
               "endpoint": {
                 "type": "string",
-                "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?$",
+                "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?)?$",
                 "default": ""
               },
               "allowInsecure": {
@@ -700,7 +700,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "properties": {
           "endpoint": {
             "type": "string",
-            "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?$",
+            "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?)?$",
             "default": ""
           },
           "allowInsecure": {

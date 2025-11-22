@@ -9,6 +9,11 @@ plugins {
     id 'com.github.node-gradle.node' version '7.1.0'
 }
 
+node {
+    version = '22.14.0'
+    download = true
+}
+
 // Define paths at the top level
 def orchestrationSpecsDirP = rootProject.layout.projectDirectory.dir("orchestrationSpecs")
 def orchestrationP     = orchestrationSpecsDirP

@@ -103,7 +103,7 @@ export const S3_REPO_CONFIG = z.object({
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)/).default("").optional()
         .describe("Override the default S3 endpoint for clients to connect to.  " +
             "Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"),
-    s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/).describe("s3:///BUCKETNAME/PATH"),
+    s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/).describe("s3://BUCKETNAME/PATH"),
     repoName: z.string().default("migration_assistant_repo").optional()
 });
 
