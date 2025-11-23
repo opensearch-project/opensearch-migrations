@@ -18,6 +18,7 @@ uvicorn = {extras = ["standard"], version = "*"}
 tinydb = "*"
 fastapi = {extras = ["standard"], version = "==0.118.0"}
 rich = ">=14.0.0"
+console-link = {file = ".", editable = true}
 
 [dev-packages]
 pytest = "*"

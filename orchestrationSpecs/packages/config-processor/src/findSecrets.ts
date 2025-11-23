@@ -70,7 +70,9 @@ export async function main() {
         const reducedData = scrapeAndCategorize(userConfig);
         process.stdout.write(JSON.stringify(reducedData, null, 2));
     } else {
-        console.error("Could not ");
+        console.error("No userConfig cound");
+        console.error(COMMAND_LINE_HELP_MESSAGE);
+        process.exit(6);
     }
 }
 

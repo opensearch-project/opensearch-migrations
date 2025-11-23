@@ -5,7 +5,7 @@ import os
 import click
 
 from ..models.utils import ExitCode
-from ..models.store import WorkflowConfigStore
+from ..models.workflow_config_store import WorkflowConfigStore
 from ..services.workflow_service import WorkflowService
 from ..services.script_runner import ScriptRunner
 

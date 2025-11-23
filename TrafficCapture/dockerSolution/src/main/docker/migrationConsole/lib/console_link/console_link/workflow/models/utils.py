@@ -40,9 +40,24 @@ def load_k8s_config():
             raise
 
 
-def get_store(ctx):
+def get_workflow_config_store(ctx):
     """Lazy initialization of WorkflowConfigStore"""
-    from ..models.store import WorkflowConfigStore
-    if ctx.obj['store'] is None:
-        ctx.obj['store'] = WorkflowConfigStore(namespace=ctx.obj['namespace'])
-    return ctx.obj['store']
+    from ..models.workflow_config_store import WorkflowConfigStore
+    if ctx.obj['config_store'] is None:
+        ctx.obj['config_store'] = WorkflowConfigStore(namespace=ctx.obj['namespace'])
+    return ctx.obj['config_store']
+
+
+def get_secret_store(ctx, use_case:str):
+    """Lazy initialization of SecretStore"""
+    from ..models.secret_store import SecretStore
+    if ctx.obj['secret_store'] is None:
+        ctx.obj['secret_store'] = SecretStore(
+            namespace=ctx.obj['namespace'],
+            default_labels={"use-case": use_case}
+        )
+    return ctx.obj['secret_store']
+
+
+def get_credentials_secret_store(ctx):
+    return get_secret_store(ctx, "http-basic-credentials")

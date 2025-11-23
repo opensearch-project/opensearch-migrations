@@ -7,10 +7,11 @@ import tempfile
 from typing import Optional, cast
 
 import click
+
+from ..models.secret_store import SecretStore
 from ...models.command_result import CommandResult
 from ..models.config import WorkflowConfig
-from ..models.utils import get_store
-
+from ..models.utils import get_workflow_config_store, get_credentials_secret_store
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ def configure_group(ctx):
 @click.pass_context
 def view_config(ctx):
     """Show workflow configuration"""
-    store = get_store(ctx)
+    store = get_workflow_config_store(ctx)
 
     try:
         config = store.load_config(session_name)
@@ -107,6 +108,23 @@ def _parse_config_from_stdin(stdin_content: str) -> WorkflowConfig:
         raise click.ClickException(f"Failed to parse input as YAML: {e}")
 
 
+def _get_secrets_in_config(secret_store: SecretStore, new_config: WorkflowConfig):
+    """Scrape any auth credentials secrets that need to be created."""
+
+    from ..services.script_runner import ScriptRunner
+    runner = ScriptRunner()
+    result = runner.get_secrets_in_config(new_config.to_yaml())
+    logger.info(f"got back script result for get_secrets_in_config: {result}")
+
+    if 'invalidSecrets' in result and (invalid_secrets := result['invalidSecrets']):
+        raise click.ClickException(f"Invalidly named secrets found: {invalid_secrets}")
+    elif 'validSecrets' in result and (valid_secrets := result.get('validSecrets', [])):
+        valid_existing_secrets = list(filter(secret_store.secret_exists, valid_secrets))
+        return set(valid_existing_secrets), list(set(valid_secrets) - set(valid_existing_secrets))
+    else:
+        return [], []
+
+
 def _save_config(store, new_config: WorkflowConfig, session_name: str):
     """Save configuration to store"""
     try:
@@ -118,13 +136,21 @@ def _save_config(store, new_config: WorkflowConfig, session_name: str):
         raise click.ClickException(f"Failed to save configuration: {e}")
 
 
-def _handle_stdin_edit(store, session_name: str):
+def _handle_stdin_edit(wf_config_store, secret_store, session_name: str):
     """Handle configuration edit from stdin"""
     stdin_stream = click.get_text_stream('stdin')
     stdin_content = stdin_stream.read()
 
     new_config = _parse_config_from_stdin(stdin_content)
-    _save_config(store, new_config, session_name)
+    _save_config(wf_config_store, new_config, session_name)
+    existing_secrets, missing_secrets = _get_secrets_in_config(secret_store, new_config)
+    logger.debug(f"_get_secrets_in_config result: secrets={existing_secrets}, missing={missing_secrets}")
+
+    if existing_secrets:
+        click.echo(f"Found {len(existing_secrets)} existing secrets that will be used for HTTP-Basic authentication of requests to clusters:\n  " + "\n  ".join(existing_secrets))
+    if missing_secrets:
+        raise click.ClickException(f"Found {len(missing_secrets)} missing secrets that still need to be created to make well-formed HTTP-Basic requests to clusters:\n  " +
+                                   "\n  ".join(missing_secrets))
 
 
 def _handle_editor_edit(store, session_name: str):
@@ -147,12 +173,13 @@ def _handle_editor_edit(store, session_name: str):
 @click.pass_context
 def edit_config(ctx, stdin):
     """Edit workflow configuration"""
-    store = get_store(ctx)
+    wf_config_store = get_workflow_config_store(ctx)
+    secret_store = get_credentials_secret_store(ctx)
 
     if stdin:
-        _handle_stdin_edit(store, session_name)
+        _handle_stdin_edit(wf_config_store, secret_store, session_name)
     else:
-        _handle_editor_edit(store, session_name)
+        _handle_editor_edit(wf_config_store, secret_store, session_name)
 
 
 @configure_group.command(name="clear")
@@ -160,7 +187,7 @@ def edit_config(ctx, stdin):
 @click.pass_context
 def clear_config(ctx, confirm):
     """Reset the pending workflow configuration"""
-    store = get_store(ctx)
+    store = get_workflow_config_store(ctx)
 
     if not confirm and not click.confirm(f'Clear workflow configuration for session "{session_name}"?'):
         logger.info("Clear configuration cancelled by user")
@@ -196,7 +223,7 @@ def sample_config(ctx, load):
 
         if load:
             # Load sample into session
-            store = get_store(ctx)
+            store = get_workflow_config_store(ctx)
             config = WorkflowConfig.from_yaml(sample_content)
             _save_config(store, config, session_name)
             click.echo("Sample configuration loaded successfully")
