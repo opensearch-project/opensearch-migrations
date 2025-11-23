@@ -33,6 +33,9 @@
     "@types/jest": "*",
     "tsx": "^4.20.5",
     "typescript": "^5.9.3",
-    "@typescript/native-preview": "*"
+    "@typescript/native-preview": "*",
+    "@typescript/native-preview-linux-x64": "*",
+    "@typescript/native-preview-darwin-arm64": "*",
+    "@typescript/native-preview-darwin-x64": "*"
   }
 }

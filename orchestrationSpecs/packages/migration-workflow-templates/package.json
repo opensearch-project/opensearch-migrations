@@ -19,6 +19,9 @@
   "devDependencies": {
     "@types/jest": "*",
     "expect-type": "*",
-    "@typescript/native-preview": "*"
+    "@typescript/native-preview": "*",
+    "@typescript/native-preview-linux-x64": "*",
+    "@typescript/native-preview-darwin-arm64": "*",
+    "@typescript/native-preview-darwin-x64": "*"
   }
 }
