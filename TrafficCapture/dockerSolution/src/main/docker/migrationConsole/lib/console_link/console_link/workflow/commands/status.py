@@ -362,11 +362,12 @@ def _display_workflow_steps(steps: list, step_tree: list = None):
             click.echo(f"{symbol} {step_name} ({step_phase})")
 
 
-def _display_workflow_status(result: dict):
+def _display_workflow_status(result: dict, show_output_hint: bool = True):
     """Display formatted workflow status.
 
     Args:
         result: WorkflowStatusResult dict from get_workflow_status
+        show_output_hint: Whether to show the hint about viewing step outputs (default: True)
     """
     name = result['workflow_name']
     phase = result['phase']
@@ -377,4 +378,9 @@ def _display_workflow_status(result: dict):
 
     # Use tree display if available, otherwise fall back to flat display
     step_tree = result.get('step_tree', [])
-    _display_workflow_steps(result['steps'], step_tree)
+    _display_workflow_steps(result.get('steps', []), step_tree)
+
+    # Add message about viewing step outputs for active workflows
+    if show_output_hint and phase in ('Running', 'Pending'):
+        click.echo("")
+        click.echo(f"To view step outputs, run: workflow output {name}")

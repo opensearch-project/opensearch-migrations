@@ -118,6 +118,11 @@ function getRfsReplicasetManifest
                         optional: true
                     }
                 }
+            },
+            // We don't have a mechanism to scrape these off disk so need to disable this to avoid filling up the disk
+            {
+                name: "FAILED_REQUESTS_LOGGER_LEVEL",
+                value: "OFF"
             }
         ],
         args: [
