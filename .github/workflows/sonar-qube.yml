@@ -27,7 +27,7 @@ jobs:
           SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - uses: ./.github/actions/setup-env
     - name: Cache SonarQube Scanner
       uses: actions/cache@v4
