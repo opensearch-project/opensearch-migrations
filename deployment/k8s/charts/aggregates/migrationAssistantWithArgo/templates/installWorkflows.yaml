@@ -56,8 +56,7 @@ spec:
                 popd
               }
               
-              apply_workflows "workflowTemplates"
-              apply_workflows "testWorkflowTemplates"
+              apply_workflows "workflows"
 ---
 # templates/remove-argo-migration-templates
 apiVersion: batch/v1

@@ -137,9 +137,9 @@ spec:
                       }
                     }
                 - name: imageMigrationConsoleLocation
-                  value: "{{=configmap(workflow.parameters['migration-image-configmap'], 'migrationConsoleImage')}}"
+                  value: "migrations/migration_console:latest"
                 - name: imageMigrationConsolePullPolicy
-                  value: "{{=configmap(workflow.parameters['migration-image-configmap'], 'migrationConsolePullPolicy')}}"
+                  value: "IfNotPresent"
         
         - - name: pause-for-migration-verification
             template: suspend-step

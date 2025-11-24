@@ -60,6 +60,17 @@ tasks.register('makeAndStageWorkflowTemplates', NpmTask) {
     }
 }
 
+tasks.register('copyTestWorkflowTemplates', Copy) {
+    description = 'Copy test workflow templates (YAML) to staging alongside DSL templates'
+    from project.file("src/main/docker/migrationConsole/testWorkflowTemplates")
+    into workflowTemplatesStagingP
+    include '*.yaml'
+    dependsOn makeAndStageWorkflowTemplates
+
+    inputs.dir(project.file("src/main/docker/migrationConsole/testWorkflowTemplates"))
+    outputs.dir(workflowTemplatesStagingP)
+}
+
 tasks.register('typeCheckConfigProcessor', NpmTask) {
     description = 'Run TypeScript type checking for config-processor'
     workingDir = configProcessorP.asFile
@@ -118,6 +129,7 @@ dockerFilesForExternalServices.each { dockerImageName, projectName ->
     task("buildDockerImage_${dockerImageName}", type: DockerBuildImage) {
         if (projectName == "migrationConsole") {
             dependsOn makeAndStageWorkflowTemplates
+            dependsOn copyTestWorkflowTemplates
             dependsOn buildAndStageConfigProcessor
 
             def libraries = [

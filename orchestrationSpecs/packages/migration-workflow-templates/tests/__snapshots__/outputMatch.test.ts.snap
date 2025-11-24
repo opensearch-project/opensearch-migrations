@@ -2217,6 +2217,10 @@ exports[`test workflow template renderings full-migration-with-cli 1`] = `
           "name": "imageConfigMapName",
           "value": "migration-image-config",
         },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config",
+        },
       ],
     },
     "entrypoint": "main",
@@ -2232,47 +2236,47 @@ set -e -x
 echo "Building and submitting migration workflow..."
 
 # Create migration config JSON
-            cat > /tmp/migration_config.json << 'EOF'
-            {
-              "sourceClusters": {
-                "source": {
-                  "endpoint": "{{inputs.parameters.sourceEndpoint}}",
-                  "allowInsecure": {{inputs.parameters.sourceAllowInsecure}},
-                  "version": "{{inputs.parameters.sourceVersion}}",
-                  "snapshotRepo": {{inputs.parameters.snapshotConfig}}
-                }
-              },
-              "targetClusters": {
-                "target": {{inputs.parameters.targetConfig}}
-              },
-              "migrationConfigs": [
-                {
-                  "fromSource": "source",
-                  "toTarget": "target",
-                  "snapshotExtractAndLoadConfigs": [
-                    {
-                      "createSnapshotConfig": {},
-                      "snapshotConfig": {
-                        "snapshotNameConfig": {
-                          "snapshotNamePrefix": "rfs"
-                        }
-                      },
-                      "migrations": [
-                        {
-                          "metadataMigrationConfig": {
-                            "indexAllowlist": ["*"]
-                          },
-                          "documentBackfillConfig": {
-                            "indexAllowlist": ["*"]
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
+cat > /tmp/migration_config.json << 'EOF'
+{
+  "sourceClusters": {
+    "source": {
+      "endpoint": "{{inputs.parameters.sourceEndpoint}}",
+      "allowInsecure": {{inputs.parameters.sourceAllowInsecure}},
+      "version": "{{inputs.parameters.sourceVersion}}",
+      "snapshotRepo": {{inputs.parameters.snapshotConfig}}
+    }
+  },
+  "targetClusters": {
+    "target": {{inputs.parameters.targetConfig}}
+  },
+  "migrationConfigs": [
+    {
+      "fromSource": "source",
+      "toTarget": "target",
+      "snapshotExtractAndLoadConfigs": [
+        {
+          "createSnapshotConfig": {},
+          "snapshotConfig": {
+            "snapshotNameConfig": {
+              "snapshotNamePrefix": "rfs"
             }
-            EOF
+          },
+          "migrations": [
+            {
+              "metadataMigrationConfig": {
+                "indexAllowlist": ["*"]
+              },
+              "documentBackfillConfig": {
+                "indexAllowlist": ["*"]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+EOF
 
 echo "Migration config contents:"
 cat /tmp/migration_config.json
@@ -2305,6 +2309,8 @@ fi
 echo "Workflow submitted successfully: $WORKFLOW_NAME"
 mkdir -p /tmp/outputs
 echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
+sync
+sleep 2
 ",
           ],
           "command": [
@@ -2517,7 +2523,7 @@ exit 1
                   },
                   {
                     "name": "sourceAllowInsecure",
-                    "value": "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.allowInsecure')}}",
+                    "value": "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.allow_insecure')}}",
                   },
                   {
                     "name": "sourceVersion",
@@ -2596,6 +2602,10 @@ exports[`test workflow template renderings full-migration-with-cli 2`] = `
           "name": "imageConfigMapName",
           "value": "migration-image-config",
         },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config",
+        },
       ],
     },
     "entrypoint": "main",
@@ -2611,47 +2621,47 @@ set -e -x
 echo "Building and submitting migration workflow..."
 
 # Create migration config JSON
-            cat > /tmp/migration_config.json << 'EOF'
-            {
-              "sourceClusters": {
-                "source": {
-                  "endpoint": "{{inputs.parameters.sourceEndpoint}}",
-                  "allowInsecure": {{inputs.parameters.sourceAllowInsecure}},
-                  "version": "{{inputs.parameters.sourceVersion}}",
-                  "snapshotRepo": {{inputs.parameters.snapshotConfig}}
-                }
-              },
-              "targetClusters": {
-                "target": {{inputs.parameters.targetConfig}}
-              },
-              "migrationConfigs": [
-                {
-                  "fromSource": "source",
-                  "toTarget": "target",
-                  "snapshotExtractAndLoadConfigs": [
-                    {
-                      "createSnapshotConfig": {},
-                      "snapshotConfig": {
-                        "snapshotNameConfig": {
-                          "snapshotNamePrefix": "rfs"
-                        }
-                      },
-                      "migrations": [
-                        {
-                          "metadataMigrationConfig": {
-                            "indexAllowlist": ["*"]
-                          },
-                          "documentBackfillConfig": {
-                            "indexAllowlist": ["*"]
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
+cat > /tmp/migration_config.json << 'EOF'
+{
+  "sourceClusters": {
+    "source": {
+      "endpoint": "{{inputs.parameters.sourceEndpoint}}",
+      "allowInsecure": {{inputs.parameters.sourceAllowInsecure}},
+      "version": "{{inputs.parameters.sourceVersion}}",
+      "snapshotRepo": {{inputs.parameters.snapshotConfig}}
+    }
+  },
+  "targetClusters": {
+    "target": {{inputs.parameters.targetConfig}}
+  },
+  "migrationConfigs": [
+    {
+      "fromSource": "source",
+      "toTarget": "target",
+      "snapshotExtractAndLoadConfigs": [
+        {
+          "createSnapshotConfig": {},
+          "snapshotConfig": {
+            "snapshotNameConfig": {
+              "snapshotNamePrefix": "rfs"
             }
-            EOF
+          },
+          "migrations": [
+            {
+              "metadataMigrationConfig": {
+                "indexAllowlist": ["*"]
+              },
+              "documentBackfillConfig": {
+                "indexAllowlist": ["*"]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+EOF
 
 echo "Migration config contents:"
 cat /tmp/migration_config.json
@@ -2684,6 +2694,8 @@ fi
 echo "Workflow submitted successfully: $WORKFLOW_NAME"
 mkdir -p /tmp/outputs
 echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
+sync
+sleep 2
 ",
           ],
           "command": [
@@ -2896,7 +2908,7 @@ exit 1
                   },
                   {
                     "name": "sourceAllowInsecure",
-                    "value": "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.allowInsecure')}}",
+                    "value": "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.allow_insecure')}}",
                   },
                   {
                     "name": "sourceVersion",
