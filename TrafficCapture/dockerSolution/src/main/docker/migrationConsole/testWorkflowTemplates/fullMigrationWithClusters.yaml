@@ -116,6 +116,16 @@ spec:
                 - name: replayer-config
                   value: "{{workflow.parameters.replayer-config}}"
 
+        # Transform cluster configs to match CLI schema
+        - - name: transform-cluster-configs
+            template: transform-cluster-configs
+            arguments:
+              parameters:
+                - name: source-config
+                  value: "{{steps.create-source-cluster.outputs.parameters.cluster-config}}"
+                - name: target-config
+                  value: "{{steps.create-target-cluster.outputs.parameters.cluster-config}}"
+
         # Run the full migration using CLI orchestrator
         - - name: run-full-migration
             templateRef:
@@ -124,17 +134,15 @@ spec:
             arguments:
               parameters:
                 - name: sourceClusterConfigJson
-                  value: "{{steps.create-source-cluster.outputs.parameters.cluster-config}}"
+                  value: "{{steps.transform-cluster-configs.outputs.parameters.transformed-source-config}}"
                 - name: targetClusterConfigJson
-                  value: "{{steps.create-target-cluster.outputs.parameters.cluster-config}}"
+                  value: "{{steps.transform-cluster-configs.outputs.parameters.transformed-target-config}}"
                 - name: snapshotConfigJson
                   value: |
                     {
-                      "s3Repo": {
-                        "awsRegion": "us-east-1",
-                        "repoUri": "s3://test-bucket/rfs-snapshot",
-                        "snapshotName": "snapshot_{{workflow.uid}}"
-                      }
+                      "awsRegion": "us-east-1",
+                      "s3RepoPathUri": "s3://test-bucket",
+                      "endpoint": "http://localstack:4566/"
                     }
                 - name: imageMigrationConsoleLocation
                   value: "migrations/migration_console:latest"
@@ -225,6 +233,55 @@ spec:
     - name: suspend-step
       suspend: {}
 
+    # Template to transform cluster configs to match CLI schema expectations
+    - name: transform-cluster-configs
+      inputs:
+        parameters:
+          - name: source-config
+          - name: target-config
+      container:
+        image: alpine:latest
+        command: [sh, -c]
+        args:
+          - |
+            # Transform source cluster config
+            echo "Transforming source config..."
+            SOURCE_CONFIG='{{inputs.parameters.source-config}}'
+            echo "$SOURCE_CONFIG" | \
+            sed 's/"ES_\([0-9.]\+\)"/"ES \1"/g; s/"OS_\([0-9.]\+\)"/"OS \1"/g' \
+            > /tmp/transformed-source-config.json
+            
+            echo "Transformed source config:"
+            cat /tmp/transformed-source-config.json
+            
+            # Transform target cluster config
+            echo "Transforming target config..."
+            TARGET_CONFIG='{{inputs.parameters.target-config}}'
+
+            TARGET_ENDPOINT=$(echo "$TARGET_CONFIG" | sed -n 's/.*"endpoint": *"\([^"]*\)".*/\1/p')
+            TARGET_ALLOW_INSECURE=$(echo "$TARGET_CONFIG" | sed -n 's/.*"allow_insecure": *\([^,}]*\).*/\1/p')
+            TARGET_VERSION_RAW=$(echo "$TARGET_CONFIG" | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p')
+            TARGET_VERSION=$(echo "$TARGET_VERSION_RAW" | sed 's/^ES_/ES /; s/^OS_/OS /')
+
+            cat > /tmp/transformed-target-config.json <<EOF
+            {
+              "endpoint": "$TARGET_ENDPOINT",
+              "allowInsecure": $TARGET_ALLOW_INSECURE,
+              "version": "$TARGET_VERSION"
+            }
+            EOF
+
+            echo "Transformed target config:"
+            cat /tmp/transformed-target-config.json
+      outputs:
+        parameters:
+          - name: transformed-source-config
+            valueFrom:
+              path: /tmp/transformed-source-config.json
+          - name: transformed-target-config
+            valueFrom:
+              path: /tmp/transformed-target-config.json
+
     # Template to generate migration configurations from cluster configs using expressions
     - name: generate-migration-configs
       inputs:
@@ -253,7 +310,7 @@ spec:
       steps:
         - - name: check-cleanup-needed
             template: cleanup-all-clusters
-            when: "{{workflow.parameters.skip-cleanup}} != true"
+            when: "{{workflow.parameters.skip-cleanup}} != 'true'"
 
     - name: cleanup-all-clusters
       container:

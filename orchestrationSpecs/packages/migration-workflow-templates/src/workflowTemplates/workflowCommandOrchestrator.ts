@@ -67,7 +67,9 @@ cat > /tmp/migration_config.json << 'EOF'
       "toTarget": "target",
       "snapshotExtractAndLoadConfigs": [
         {
-          "createSnapshotConfig": {},
+          "createSnapshotConfig": {
+            "s3RoleArn": "arn:aws:iam::123456789012:role/test-migration-role"
+          },
           "snapshotConfig": {
             "snapshotNameConfig": {
               "snapshotNamePrefix": "rfs"
