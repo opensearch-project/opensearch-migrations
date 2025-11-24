@@ -10,7 +10,13 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {defineParam, InputParamDef, InputParametersRecord, OutputParametersRecord} from "./parameterSchemas";
+import {
+    ConfigMapKeySelector,
+    defineParam,
+    InputParamDef,
+    InputParametersRecord,
+    OutputParametersRecord
+} from "./parameterSchemas";
 import {
     ExtendScope,
     GenericScope,
@@ -27,11 +33,11 @@ import {
 } from "./scopeConstraints";
 import {StepsBuilder} from "./stepsBuilder";
 import {ContainerBuilder} from "./containerBuilder";
-import {PlainObject} from "./plainObject";
+import {DeepWiden, PlainObject} from "./plainObject";
 import {DagBuilder} from "./dagBuilder";
 import {K8sResourceBuilder} from "./k8sResourceBuilder";
 import {AllowLiteralOrExpression, expr, isExpression} from "./expression";
-import {TypeToken} from "./sharedTypes";
+import {typeToken, TypeToken} from "./sharedTypes";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
 import { Container } from "../kubernetesResourceTypes/kubernetesTypes";
 import { SetRequired } from "../utils";
@@ -74,6 +80,20 @@ export class TemplateBuilder<
         return new TemplateBuilder(this.contextualScope, this.bodyScope, newScope, this.outputScope);
     }
 
+    public get inputs() {
+        const workflowParams = workflowParametersAsExpressions(this.contextualScope.workflowParameters || {});
+        const inputParams = templateInputParametersAsExpressions(this.inputScope);
+
+        return {
+            workflowParameters: workflowParams as WorkflowInputsToExpressions<ContextualScope>,
+            inputParameters: inputParams as InputParamsToExpressions<InputParamsScope>,
+            rawParameters: { // just for debugging
+                workflow: this.contextualScope,
+                currentTemplate: this.getTemplateSignatureScope()
+            }
+        };
+    }
+
     addOptionalInput<T extends PlainObject, Name extends string>(
         name: UniqueNameConstraintAtDeclaration<Name, InputParamsScope>,
         defaultValueFromScopeFn: UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
@@ -101,18 +121,37 @@ export class TemplateBuilder<
             defineParam({expression: isExpression(e) ? e : expr.literal(e), description})) as any;
     }
 
-    public get inputs() {
-        const workflowParams = workflowParametersAsExpressions(this.contextualScope.workflowParameters || {});
-        const inputParams = templateInputParametersAsExpressions(this.inputScope);
-
-        return {
-            workflowParameters: workflowParams as WorkflowInputsToExpressions<ContextualScope>,
-            inputParameters: inputParams as InputParamsToExpressions<InputParamsScope>,
-            rawParameters: { // just for debugging
-                workflow: this.contextualScope,
-                currentTemplate: this.getTemplateSignatureScope()
-            }
-        };
+    addOptionalOrConfigMap<T extends PlainObject, Name extends string>(
+        name: UniqueNameConstraintAtDeclaration<Name, InputParamsScope>,
+        configMapRef: ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope, ConfigMapKeySelector>>,
+        t: ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope, TypeToken<T>>>,
+        defaultValueFromScopeFn?: UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
+            (s: {
+                workflowParameters: WorkflowInputsToExpressions<ContextualScope>,
+                inputParameters: InputParamsToExpressions<InputParamsScope>,
+                rawParameters: { workflow: ContextualScope; currentTemplate: InputParamsScope }
+            }) => AllowLiteralOrExpression<T>>,
+        description?: string
+    ): ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
+        TemplateBuilder<
+            ContextualScope,
+            BodyScope,
+            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, false> }>,
+            OutputParamsScope
+        >>>
+    {
+        const fn = defaultValueFromScopeFn as (s: {
+            workflowParameters: WorkflowInputsToExpressions<ContextualScope>,
+            inputParameters: InputParamsToExpressions<InputParamsScope>,
+            rawParameters: { workflow: ContextualScope; currentTemplate: InputParamsScope }
+        }) => T;
+        return this.extendWithParam(name as string,
+            defineParam<DeepWiden<T>>({
+                from: configMapRef as ConfigMapKeySelector,
+                type: t as TypeToken<DeepWiden<T>>,
+                description,
+                ...( fn ? {expression: fn(this.inputs) as DeepWiden<T>} : {})
+            })) as any;
     }
 
     addRequiredInput<Name extends string, T extends PlainObject>(
@@ -125,7 +164,8 @@ export class TemplateBuilder<
             BodyScope,
             ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, true> }>,
             OutputParamsScope
-        >> {
+        >>
+    {
         const param: InputParamDef<T, true> = {description} as const;
         return this.extendWithParam(name as any, param) as any;
     }

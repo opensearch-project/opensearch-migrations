@@ -41,16 +41,17 @@ export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder<any
     };
 }
 
-function formatParameterDefinition<T extends PlainObject, P extends InputParamDef<T, boolean>>(inputs: P) {
+function formatParameterDefinition<T extends PlainObject, P extends InputParamDef<T, boolean>>(input: P) {
     const out: Record<string, unknown> = {};
-    if (inputs.description != null) {
-        out.description = inputs.description;
+    if (input.description != null) {
+        out.description = input.description;
     }
-    if (isDefault(inputs)) {
-        if (inputs.defaultValue.expression !== undefined) {
-            out.value = transformExpressionsDeep(inputs.defaultValue.expression);
-        } else if (inputs.defaultValue.from !== undefined) {
-            const f = inputs.defaultValue.from;
+    if (isDefault(input)) {
+        if (input.defaultValue.expression !== undefined) {
+            out.value = transformExpressionsDeep(input.defaultValue.expression);
+        }
+        if (input.defaultValue.from !== undefined) {
+            const f = input.defaultValue.from;
             out.valueFrom = {
                 configMapKeyRef: {
                     name: transformExpressionsDeep(f.name),
@@ -58,7 +59,8 @@ function formatParameterDefinition<T extends PlainObject, P extends InputParamDe
                     optional: f.optional
                 }
             }
-        } else {
+        }
+        if (input.defaultValue.expression === undefined && input.defaultValue.from === undefined) {
             throw new Error("Invalid DefaultSpec: neither expression nor from provided");
         }
     }
