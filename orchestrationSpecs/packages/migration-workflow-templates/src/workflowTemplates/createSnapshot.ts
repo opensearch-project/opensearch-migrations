@@ -47,7 +47,7 @@ function makeParamsDict(
             expr.makeDict({
                 "snapshotName": expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
                 "snapshotRepoName": expr.dig(expr.deserializeRecord(snapshotConfig), ["repoConfig", "repoName"],
-                    S3_REPO_CONFIG.shape.repoName.def.defaultValue)
+                    S3_REPO_CONFIG.shape.repoName.unwrap().parse(undefined))
             }),
             makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), false)
         )

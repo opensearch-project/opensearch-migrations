@@ -1,7 +1,6 @@
-#!/usr/bin/env node
 import { Readable } from 'stream';
 import { z } from 'zod';
-import {MigrationConfigTransformer} from "./MigrationConfigTransformer";
+import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 
 async function main() {
     const args = process.argv.slice(2);
@@ -53,4 +52,11 @@ Arguments:
     }
 }
 
-main();
+// Run if executed directly
+if (require.main === module && !process.env.SUPPRESS_AUTO_LOAD) {
+    main().catch(error => {
+        console.error('Fatal error:', error);
+        process.exit(1);
+    });
+}
+

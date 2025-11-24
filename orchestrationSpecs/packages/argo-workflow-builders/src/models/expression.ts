@@ -804,6 +804,13 @@ class ExprBuilder {
         return fn<Serialized<R>,CIn,"complicatedExpression">("toJSON", data);
     }
 
+    toString<
+        R extends PlainObject,
+        CIn extends ExpressionType
+    >(data: AllowLiteralOrExpression<R,CIn>) {
+        return fn<string,CIn,"complicatedExpression">("string", toExpression(data));
+    }
+
     stringToRecord<
         R extends PlainObject,
         CIn extends ExpressionType

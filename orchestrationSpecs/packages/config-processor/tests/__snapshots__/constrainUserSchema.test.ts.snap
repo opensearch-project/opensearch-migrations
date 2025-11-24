@@ -1,0 +1,135 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`paramsFns runtime validation simple transform matches expected 1`] = `
+{
+  "additionalProperties": false,
+  "properties": {
+    "migrationConfigs": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "fromSource": {
+            "enum": [
+              "source1",
+            ],
+            "type": "string",
+          },
+          "skipApprovals": {
+            "type": "boolean",
+          },
+          "toTarget": {
+            "enum": [
+              "target1",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "fromSource",
+          "toTarget",
+        ],
+        "type": "object",
+      },
+      "maxItems": 1,
+      "minItems": 1,
+      "type": "array",
+    },
+    "skipApprovals": {
+      "type": "boolean",
+    },
+    "sourceClusters": {
+      "additionalProperties": false,
+      "properties": {
+        "source1": {
+          "additionalProperties": false,
+          "properties": {
+            "endpoint": {
+              "enum": [
+                "https://source:9200",
+              ],
+              "type": "string",
+            },
+          },
+          "required": [
+            "endpoint",
+          ],
+          "type": "object",
+        },
+      },
+      "required": [
+        "source1",
+      ],
+      "type": "object",
+    },
+    "targetClusters": {
+      "additionalProperties": false,
+      "properties": {
+        "target1": {
+          "additionalProperties": false,
+          "properties": {
+            "authConfig": {
+              "additionalProperties": false,
+              "properties": {
+                "basic": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "password": {
+                      "enum": [
+                        "admin",
+                      ],
+                      "type": "string",
+                    },
+                    "secretName": {
+                      "enum": [
+                        "target1-creds",
+                      ],
+                      "type": "string",
+                    },
+                    "username": {
+                      "enum": [
+                        "admin",
+                      ],
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "secretName",
+                    "username",
+                    "password",
+                  ],
+                  "type": "object",
+                },
+              },
+              "required": [
+                "basic",
+              ],
+              "type": "object",
+            },
+            "endpoint": {
+              "enum": [
+                "https://target:9200",
+              ],
+              "type": "string",
+            },
+          },
+          "required": [
+            "endpoint",
+            "authConfig",
+          ],
+          "type": "object",
+        },
+      },
+      "required": [
+        "target1",
+      ],
+      "type": "object",
+    },
+  },
+  "required": [
+    "sourceClusters",
+    "targetClusters",
+    "migrationConfigs",
+  ],
+  "type": "object",
+}
+`;

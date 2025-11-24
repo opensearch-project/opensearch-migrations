@@ -15,9 +15,12 @@
     "type-check": "NODE_OPTIONS='--conditions=development' npx  tsgo -p ../../tsconfig.typecheck.processor.json --noEmit",
     "start-initialize": "tsx src/RunMigrationConfigTransformer.ts",
     "start-transform": "tsx src/RunMigrationConfigTransformer.ts",
+    "dev-cmd": "NODE_OPTIONS='--conditions=development' tsx src/cliRouter.ts",
+    "dev-constrain": "NODE_OPTIONS='--conditions=development' tsx src/constrainUserSchema.ts",
     "dev-initialize": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationInitializer.ts -- --etcd-endpoints http://localhost:2379 ",
     "dev-transform": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationConfigTransformer.ts",
-    "bundle": "npm run build && node makeBundle.js"
+    "bundle": "npm run build && node makeBundle.js",
+    "test": "jest --config ./jest.config.js"
   },
   "dependencies": {
     "@opensearch-migrations/schemas": "*",
@@ -27,8 +30,12 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.13",
+    "@types/jest": "*",
     "tsx": "^4.20.5",
     "typescript": "^5.9.3",
-    "@typescript/native-preview": "*"
+    "@typescript/native-preview": "*",
+    "@typescript/native-preview-linux-x64": "*",
+    "@typescript/native-preview-darwin-arm64": "*",
+    "@typescript/native-preview-darwin-x64": "*"
   }
 }

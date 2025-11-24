@@ -1,6 +1,6 @@
 import {ARGO_WORKFLOW_SCHEMA} from "@opensearch-migrations/schemas";
-import {MigrationInitializer} from "./MigrationInitializer";
-import {MigrationConfigTransformer} from "./MigrationConfigTransformer";
+import {MigrationInitializer} from "./migrationInitializer";
+import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {parse} from "yaml";
 import {Console} from "console";
 
@@ -47,7 +47,7 @@ async function parseInput(inputFile: string) {
     }
 }
 
-async function main() {
+export async function main() {
     const args = process.argv.slice(2);
 
     if (args.includes('--help') || args.includes('-h')) {
@@ -115,7 +115,7 @@ async function main() {
         console.error('\nYou must provide either --user-config or --transformed-config');
         process.stderr.write(COMMAND_LINE_HELP_MESSAGE);
         process.exit(3);
-    } else if (!userConfigFile && !workflowConfigFile) {
+    } else if (userConfigFile && workflowConfigFile) {
         console.error('Error: Multiple configuration sources provided.');
         console.error('\nYou must provide ONE of--user-config or --transformed-config');
         process.stderr.write(COMMAND_LINE_HELP_MESSAGE);
@@ -174,7 +174,7 @@ async function main() {
 }
 
 // Run if executed directly
-if (require.main === module) {
+if (require.main === module && !process.env.SUPPRESS_AUTO_LOAD) {
     main().catch(error => {
         console.error('Fatal error:', error);
         process.exit(1);

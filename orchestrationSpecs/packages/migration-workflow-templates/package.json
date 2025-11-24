@@ -8,7 +8,9 @@
     "type-check-deps": "npm run -w @opensearch-migrations/argo-workflow-builders type-check && npm run -w @opensearch-migrations/schemas type-check",
     "type-check": "NODE_OPTIONS='--conditions=development' npx  tsgo -p ../../tsconfig.typecheck.templates.json --noEmit",
     "type-check-all": "npm run type-check && npm run type-check-deps",
-    "test": "jest --config ./jest.config.js"
+    "test": "jest --config ./jest.config.js",
+    "test-all": "npm run test && npm run -w @opensearch-migrations/argo-workflow-builders test && npm run -w @opensearch-migrations/schemas test",
+    "check-and-make-templates": "npm run type-check-all && npm run test-all && tsx makeTemplates.cjs"
   },
   "dependencies": {
     "@opensearch-migrations/argo-workflow-builders": "*",
@@ -17,6 +19,9 @@
   "devDependencies": {
     "@types/jest": "*",
     "expect-type": "*",
-    "@typescript/native-preview": "*"
+    "@typescript/native-preview": "*",
+    "@typescript/native-preview-linux-x64": "*",
+    "@typescript/native-preview-darwin-arm64": "*",
+    "@typescript/native-preview-darwin-x64": "*"
   }
 }
