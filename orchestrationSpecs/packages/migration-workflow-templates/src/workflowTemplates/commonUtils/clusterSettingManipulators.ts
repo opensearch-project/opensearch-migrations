@@ -2,7 +2,7 @@ import {BaseExpression, expr, Serialized} from "@opensearch-migrations/argo-work
 import {CLUSTER_CONFIG, SOURCE_CLUSTER_CONFIG, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 
-function makeAuthDict(clusterType: string, targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
+function makeAuthDict(clusterType: string, targetConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
     const safeAuthConfig = (expr.getLoose(expr.deserializeRecord(targetConfig), "authConfig"));
     return expr.ternary(
         expr.hasKey(expr.deserializeRecord(targetConfig), "authConfig"),
@@ -28,10 +28,19 @@ export function getHttpAuthSecretName(clusterConfig: BaseExpression<Serialized<z
 }
 
 export function makeClusterParamDict(clusterType: string, clusterConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
+    const cc = expr.deserializeRecord(clusterConfig);
     return expr.mergeDicts(
-        makeAuthDict(clusterType, clusterConfig),
+        expr.mergeDicts(
+            makeAuthDict(clusterType, clusterConfig),
+            expr.ternary(
+                expr.hasKey(cc, "endpoint"),
+                expr.makeDict({
+                    [`${clusterType}Host`]: expr.getLoose(cc, "endpoint")
+                }),
+                expr.literal({})
+            )
+        ),
         expr.makeDict({
-            [`${clusterType}Host`]: expr.jsonPathStrict(clusterConfig, "endpoint"),
             [`${clusterType}Insecure`]: expr.dig(expr.deserializeRecord(clusterConfig), ["allowInsecure"], false)
         })
     );

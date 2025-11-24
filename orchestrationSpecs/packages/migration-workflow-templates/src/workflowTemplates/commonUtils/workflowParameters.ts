@@ -5,5 +5,6 @@ export const CommonWorkflowParameters = {
     etcdUser: defineParam({expression: "root"}),
     etcdPassword: defineParam({expression: "password"}),
     s3SnapshotConfigMap: defineParam({expression: "s3-snapshot-config"}),
-    imageConfigMapName: defineParam({expression: "migration-image-config"})
+    imageConfigMapName: defineParam({expression: "migration-image-config"}),
+    approvalConfigMapName: defineParam({expression: "approval-config"})
 } as const;
