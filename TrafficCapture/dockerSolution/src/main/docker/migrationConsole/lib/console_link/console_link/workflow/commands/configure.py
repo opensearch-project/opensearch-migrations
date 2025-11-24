@@ -108,12 +108,12 @@ def _parse_config_from_stdin(stdin_content: str) -> WorkflowConfig:
         raise click.ClickException(f"Failed to parse input as YAML: {e}")
 
 
-def _get_secrets_in_config(secret_store: SecretStore, new_config: WorkflowConfig):
+def _get_basic_creds_secrets_in_config(secret_store: SecretStore, new_config: WorkflowConfig):
     """Scrape any auth credentials secrets that need to be created."""
 
     from ..services.script_runner import ScriptRunner
     runner = ScriptRunner()
-    result = runner.get_secrets_in_config(new_config.to_yaml())
+    result = runner.get_basic_creds_secrets_in_config(new_config.to_yaml())
     logger.info(f"got back script result for get_secrets_in_config: {result}")
 
     if 'invalidSecrets' in result and (invalid_secrets := result['invalidSecrets']):
@@ -123,6 +123,34 @@ def _get_secrets_in_config(secret_store: SecretStore, new_config: WorkflowConfig
         return set(valid_existing_secrets), list(set(valid_secrets) - set(valid_existing_secrets))
     else:
         return [], []
+
+
+def _handle_add_basic_creds_secrets(secret_store, missing_secrets):
+    click.echo("Some secrets don't yet exist.  "
+               "Set the values now OR cancel and create them before running 'submit'")
+
+    i = 0
+    while i < len(missing_secrets):
+        s = missing_secrets[i]
+
+        if not click.confirm(f"Would you like to create secret '{s}' now?", default=True):
+            click.echo(f"Skipped creating {s}")
+            i += 1
+            continue
+
+        try:
+            username = click.prompt("Username", type=str)
+            password = click.prompt("Password", hide_input=True, confirmation_prompt=True)
+
+            secret_store.save_secret(s, {"username": username, "password": password})
+            click.echo(f"Secret {s} saved successfully")
+            i += 1  # Only advance on success
+        except click.Abort:
+            click.echo(f"\nCancelled {s}")
+            if click.confirm("Retry this secret?", default=True):
+                continue  # Stay on same secret to give the user another chance (they can skip too)
+            else:
+                i += 1  # Move to next secret
 
 
 def _save_config(store, new_config: WorkflowConfig, session_name: str):
@@ -143,17 +171,18 @@ def _handle_stdin_edit(wf_config_store, secret_store, session_name: str):
 
     new_config = _parse_config_from_stdin(stdin_content)
     _save_config(wf_config_store, new_config, session_name)
-    existing_secrets, missing_secrets = _get_secrets_in_config(secret_store, new_config)
-    logger.debug(f"_get_secrets_in_config result: secrets={existing_secrets}, missing={missing_secrets}")
 
+    existing_secrets, missing_secrets = _get_basic_creds_secrets_in_config(secret_store, new_config)
     if existing_secrets:
-        click.echo(f"Found {len(existing_secrets)} existing secrets that will be used for HTTP-Basic authentication of requests to clusters:\n  " + "\n  ".join(existing_secrets))
+        click.echo(f"Found {len(existing_secrets)} existing secrets that will be used for HTTP-Basic authentication "
+                   f"of requests to clusters:\n  " + "\n  ".join(existing_secrets))
     if missing_secrets:
-        raise click.ClickException(f"Found {len(missing_secrets)} missing secrets that still need to be created to make well-formed HTTP-Basic requests to clusters:\n  " +
+        raise click.ClickException(f"Found {len(missing_secrets)} missing secrets that still need to be created "
+                                   f"to make well-formed HTTP-Basic requests to clusters:\n  " +
                                    "\n  ".join(missing_secrets))
 
 
-def _handle_editor_edit(store, session_name: str):
+def _handle_editor_edit(store, secret_store, session_name: str):
     """Handle configuration edit via editor"""
     try:
         current_config = store.load_config(session_name)
@@ -165,7 +194,15 @@ def _handle_editor_edit(store, session_name: str):
     if not edit_result.success:
         raise click.ClickException(str(edit_result.value))
 
-    _save_config(store, cast(WorkflowConfig, edit_result.value), session_name)
+    new_config = cast(WorkflowConfig, edit_result.value)
+    _save_config(store, new_config, session_name)
+
+    existing_secrets, missing_secrets = _get_basic_creds_secrets_in_config(secret_store, new_config)
+    if existing_secrets:
+        click.echo(f"Found {len(existing_secrets)} existing secrets that will be used for HTTP-Basic authentication"
+                   f" of requests to clusters:\n  " + "\n  ".join(existing_secrets))
+    if missing_secrets:
+        _handle_add_basic_creds_secrets(secret_store, missing_secrets)
 
 
 @configure_group.command(name="edit")

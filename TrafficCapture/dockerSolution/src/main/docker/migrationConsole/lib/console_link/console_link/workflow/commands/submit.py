@@ -111,6 +111,8 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
         click.echo("\nPlease configure the workflow first using 'workflow configure edit'", err=True)
         ctx.exit(ExitCode.FAILURE.value)
 
+    click.echo("NOT checking if all secrets have been created.  Run `workflow configure edit` to confirm")
+
     try:
         # Initialize ScriptRunner
         runner = ScriptRunner()

@@ -64,7 +64,7 @@ class SecretStore:
 
     def save_secret(
             self,
-            secret_name: str,
+            basic_creds_resource_name: str,
             credentials: Dict[str, str],
             secret_type: str = "Opaque",
             labels: Optional[Dict[str, str]] = None,
@@ -73,7 +73,7 @@ class SecretStore:
         """Save credentials to Kubernetes Secret
 
         Args:
-            secret_name: Name of the secret (e.g., "source-cluster", "target-cluster")
+            basic_creds_resource_name: Name of the secret (e.g., "source-cluster", "target-cluster")
             credentials: Dictionary of key-value pairs (e.g., {"username": "admin", "password": "secret"})
             secret_type: Kubernetes secret type (default: "Opaque")
             labels: Additional labels to merge with default_labels
@@ -87,7 +87,7 @@ class SecretStore:
             Exception: For other errors during save operation
         """
         # Merge provided labels with defaults
-        merged_labels = {**self.default_labels, "secret-name": secret_name}
+        merged_labels = {**self.default_labels, "secret-name": basic_creds_resource_name}
         if labels:
             merged_labels.update(labels)
 
@@ -101,7 +101,7 @@ class SecretStore:
         # Create Secret body
         secret_body = client.V1Secret(
             metadata=client.V1ObjectMeta(
-                name=secret_name,
+                name=basic_creds_resource_name,
                 labels=merged_labels,
                 annotations=annotations
             ),
@@ -112,12 +112,12 @@ class SecretStore:
         try:
             # Try to update existing Secret
             self.v1.patch_namespaced_secret(
-                name=secret_name,
+                name=basic_creds_resource_name,
                 namespace=self.namespace,
                 body=secret_body
             )
-            logger.info(f"Updated secret: {secret_name}")
-            return f"Secret updated: {secret_name}"
+            logger.info(f"Updated secret: {basic_creds_resource_name}")
+            return f"Secret updated: {basic_creds_resource_name}"
         except ApiException as e:
             if e.status == 404:
                 # Secret doesn't exist, create it
@@ -125,21 +125,21 @@ class SecretStore:
                     namespace=self.namespace,
                     body=secret_body
                 )
-                logger.info(f"Created secret: {secret_name}")
-                return f"Secret created: {secret_name}"
+                logger.info(f"Created secret: {basic_creds_resource_name}")
+                return f"Secret created: {basic_creds_resource_name}"
             else:
-                logger.error(f"Kubernetes API error saving secret {secret_name}: {e}")
+                logger.error(f"Kubernetes API error saving secret {basic_creds_resource_name}: {e}")
                 raise
 
     def load_secret(
             self,
-            secret_name: str,
+            basic_creds_resource_name: str,
             decode: bool = True
     ) -> Optional[Dict[str, str]]:
         """Load credentials from Kubernetes Secret
 
         Args:
-            secret_name: Name of the secret to load
+            basic_creds_resource_name: Name of the secret to load
             decode: Whether to decode base64 values (default: True)
 
         Returns:
@@ -151,19 +151,19 @@ class SecretStore:
         """
         try:
             secret = self.v1.read_namespaced_secret(
-                name=secret_name,
+                name=basic_creds_resource_name,
                 namespace=self.namespace
             )
         except ApiException as e:
             if e.status == 404:
-                logger.info(f"No secret found: {secret_name}")
+                logger.info(f"No secret found: {basic_creds_resource_name}")
                 return None
             else:
-                logger.error(f"Kubernetes API error loading secret {secret_name}: {e}")
+                logger.error(f"Kubernetes API error loading secret {basic_creds_resource_name}: {e}")
                 raise
 
         if not secret.data:
-            logger.info(f"Secret {secret_name} exists but has no data")
+            logger.info(f"Secret {basic_creds_resource_name} exists but has no data")
             return None
 
         # Kubernetes secret data is base64-encoded
@@ -177,14 +177,14 @@ class SecretStore:
                 # Return raw base64 string
                 credentials[key] = value
 
-        logger.info(f"Loaded secret: {secret_name} (keys: {list(credentials.keys())})")
+        logger.info(f"Loaded secret: {basic_creds_resource_name} (keys: {list(credentials.keys())})")
         return credentials
 
-    def delete_secret(self, secret_name: str) -> str:
+    def delete_secret(self, basic_creds_resource_name: str) -> str:
         """Delete secret from Kubernetes
 
         Args:
-            secret_name: Name of the secret to delete
+            basic_creds_resource_name: Name of the secret to delete
 
         Returns:
             A message describing the deletion
@@ -195,17 +195,17 @@ class SecretStore:
         """
         try:
             self.v1.delete_namespaced_secret(
-                name=secret_name,
+                name=basic_creds_resource_name,
                 namespace=self.namespace
             )
-            logger.info(f"Deleted secret: {secret_name}")
-            return f"Secret deleted: {secret_name}"
+            logger.info(f"Deleted secret: {basic_creds_resource_name}")
+            return f"Secret deleted: {basic_creds_resource_name}"
         except ApiException as e:
             if e.status == 404:
-                logger.warning(f"No secret found: {secret_name}")
-                raise ApiException(status=404, reason=f"No secret found: {secret_name}")
+                logger.warning(f"No secret found: {basic_creds_resource_name}")
+                raise ApiException(status=404, reason=f"No secret found: {basic_creds_resource_name}")
             else:
-                logger.error(f"Kubernetes API error deleting secret {secret_name}: {e}")
+                logger.error(f"Kubernetes API error deleting secret {basic_creds_resource_name}: {e}")
                 raise
 
     def list_secrets(
@@ -242,17 +242,17 @@ class SecretStore:
             label_selector=label_selector
         )
 
-        secret_names: List[str] = []
+        basic_creds_resource_names: List[str] = []
         for secret in secrets.items:
             if secret.metadata and secret.metadata.name:
-                secret_names.append(secret.metadata.name)
+                basic_creds_resource_names.append(secret.metadata.name)
 
-        logger.info(f"Found {len(secret_names)} secrets matching: {label_selector}")
-        return secret_names
+        logger.info(f"Found {len(basic_creds_resource_names)} secrets matching: {label_selector}")
+        return basic_creds_resource_names
 
     def secrets_exist(
             self,
-            secret_names: List[str]
+            basic_creds_resource_names: List[str]
     ) -> Dict[str, bool]:
         """Check existence of multiple secrets efficiently in a single API call
 
@@ -260,7 +260,7 @@ class SecretStore:
         as it fetches all secrets matching our labels in one call and checks locally.
 
         Args:
-            secret_names: List of secret names to check
+            basic_creds_resource_names: List of secret names to check
 
         Returns:
             Dictionary mapping secret names to existence (True/False)
@@ -268,7 +268,7 @@ class SecretStore:
         Raises:
             ApiException: If Kubernetes API call fails
         """
-        if not secret_names:
+        if not basic_creds_resource_names:
             return {}
 
         # Get all secrets matching our default labels
@@ -289,26 +289,28 @@ class SecretStore:
         }
 
         # Check each requested secret
-        result = {name: name in existing_secrets for name in secret_names}
+        result = {name: name in existing_secrets for name in basic_creds_resource_names}
 
         found_count = sum(1 for exists in result.values() if exists)
-        logger.info(f"Checked {len(secret_names)} secrets: {found_count} exist, {len(secret_names) - found_count} missing")
+        logger.info(f"Checked {len(basic_creds_resource_names)} secrets: "
+                    f"{found_count} exist, "
+                    f"{len(basic_creds_resource_names) - found_count} missing")
 
         return result
 
-    def secret_exists(self, secret_name: str) -> bool:
+    def secret_exists(self, basic_creds_resource_name: str) -> bool:
         """Check if a single secret exists
 
 
         Args:
-            secret_name: Name of the secret to check
+            basic_creds_resource_name: Name of the secret to check
 
         Returns:
             True if secret exists, False otherwise
         """
         try:
             self.v1.read_namespaced_secret(
-                name=secret_name,
+                name=basic_creds_resource_name,
                 namespace=self.namespace
             )
             return True
@@ -316,14 +318,14 @@ class SecretStore:
             if e.status == 404:
                 return False
             else:
-                logger.error(f"Kubernetes API error checking secret {secret_name}: {e}")
+                logger.error(f"Kubernetes API error checking secret {basic_creds_resource_name}: {e}")
                 raise
 
-    def get_secret_keys(self, secret_name: str) -> Optional[List[str]]:
+    def get_secret_keys(self, basic_creds_resource_name: str) -> Optional[List[str]]:
         """Get the keys stored in a secret without retrieving values
 
         Args:
-            secret_name: Name of the secret
+            basic_creds_resource_name: Name of the secret
 
         Returns:
             List of keys in the secret, None if secret not found
@@ -333,7 +335,7 @@ class SecretStore:
         """
         try:
             secret = self.v1.read_namespaced_secret(
-                name=secret_name,
+                name=basic_creds_resource_name,
                 namespace=self.namespace
             )
             if secret.data:
@@ -341,10 +343,10 @@ class SecretStore:
             return []
         except ApiException as e:
             if e.status == 404:
-                logger.info(f"No secret found: {secret_name}")
+                logger.info(f"No secret found: {basic_creds_resource_name}")
                 return None
             else:
-                logger.error(f"Kubernetes API error reading secret {secret_name}: {e}")
+                logger.error(f"Kubernetes API error reading secret {basic_creds_resource_name}: {e}")
                 raise
 
     def close(self):

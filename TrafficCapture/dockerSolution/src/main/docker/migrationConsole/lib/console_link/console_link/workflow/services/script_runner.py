@@ -65,7 +65,7 @@ class ScriptRunner:
         if not shutil.which(program_name):
             raise FileNotFoundError(f"Command not found: {program_name}")
 
-        cmd = [program_name, *args]
+        cmd = [str(program_name), *args]
 
         logger.debug(f"Running script: {' '.join(cmd)}")
         if input_data:
@@ -110,7 +110,7 @@ class ScriptRunner:
             FileNotFoundError: If script doesn't exist
             subprocess.CalledProcessError: If script fails
         """
-        return self.run(self.script_dir / script_name, input_data, args)
+        return self.run(self.script_dir / script_name, input_data, *args)
 
     def run_config_processor_node_script(
             self,
@@ -202,12 +202,11 @@ class ScriptRunner:
 
         try:
             logger.debug(f"Config file: {temp_file_path}")
-            result = self.run_script("createMigrationWorkflowFromUserConfiguration.sh", None,
-                                     [temp_file_path] + args)
+            output = self.run_script("createMigrationWorkflowFromUserConfiguration.sh", None,
+                                     *([temp_file_path] + args))
 
             # Parse kubectl output to extract workflow information
             # The script should output workflow creation details
-            output = result.stdout.strip()
             logger.debug(f"Submission script output: {output}")
 
             # Try to parse as JSON first (if script returns JSON)
@@ -264,7 +263,7 @@ class ScriptRunner:
         # If we can't parse it, raise an error
         raise ValueError(f"Could not extract workflow name from output: {output}")
 
-    def get_secrets_in_config(self, config_data: str):
+    def get_basic_creds_secrets_in_config(self, config_data: str):
         # Create temporary file with config data
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_file:
             temp_file.write(config_data)

@@ -54,7 +54,7 @@ from kubernetes.client.rest import ApiException
 from testcontainers.k3s import K3SContainer
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.models.config import WorkflowConfig
-from console_link.workflow.models.store import WorkflowConfigStore
+from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
 from testcontainers.core.container import DockerContainer
 from kubernetes import utils
 

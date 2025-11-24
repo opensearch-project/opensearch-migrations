@@ -48,7 +48,7 @@ def get_workflow_config_store(ctx):
     return ctx.obj['config_store']
 
 
-def get_secret_store(ctx, use_case:str):
+def get_secret_store(ctx, use_case: str):
     """Lazy initialization of SecretStore"""
     from ..models.secret_store import SecretStore
     if ctx.obj['secret_store'] is None:
