@@ -17,30 +17,30 @@ node {
 def jsSrcDir = "${projectDir}/src"
 def jsDistDir = "${buildDir}/dist"
 
-task installDependencies(type: NpmTask) {
+tasks.register('installDependencies', NpmTask) {
     description = "Install Node.js dependencies"
     args = ['install']
 }
 
-task test(type: NpmTask) {
+tasks.register('test', NpmTask) {
     description = "Run JavaScript tests with coverage"
     args = ['run', 'test']
     dependsOn installDependencies
 }
 
-task lint(type: NpmTask) {
+tasks.register('lint', NpmTask) {
     description = "Run ESLint on JavaScript files"
     args = ['run', 'lint']
     dependsOn installDependencies
 }
 
-task packageJs(type: Copy) {
+tasks.register('packageJs', Copy) {
     description = "Package JavaScript files for distribution"
     from jsSrcDir
     into jsDistDir
 }
 
-task createNpmPackage(type: NpmTask) {
+tasks.register('createNpmPackage', NpmTask) {
     description = "Create local npm package (.tgz file)"
     args = ['pack']
     dependsOn test

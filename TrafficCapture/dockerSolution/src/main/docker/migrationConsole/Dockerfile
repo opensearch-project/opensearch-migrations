@@ -46,6 +46,7 @@ RUN ARCH=$(cat /arch.env) && \
 FROM ${BASE_IMAGE}
 
 # Install Node.js for config processor and workflow template creation
+# NPM is to setup the schema checking that coc uses
 RUN dnf install -y  \
       --setopt=install_weak_deps=False \
       --setopt=tsflags=nodocs \
@@ -130,15 +131,26 @@ RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\t) \[\e[92m\]migration-console \[\e[0m\](\w) -> "' >> ~/.bashrc
 
+COPY setupVimSchemaChecker.sh /tmp/setupVimSchemaChecker.sh
+RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
+    /tmp/setupVimSchemaChecker.sh && \
+    rm /tmp/setupVimSchemaChecker.sh
+
 COPY nodeStaging/configProcessor /root/configProcessor
 
 # Copy test workflow scripts and resources with same structure as configProcessor
 COPY lib/console_link/tests/workflow-tests/resources/scripts /root/testConfigProcessor
 RUN chmod +x /root/testConfigProcessor/*.sh
 RUN chmod +x /root/configProcessor/*.sh
+ENV WORKFLOW_SCHEMA_FILENAME=/root/.workflowUser.schema.json
+ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
+ENV NODEJS=node-22
+RUN "$NODEJS" "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME"
+RUN echo "# yaml-language-server: \$schema=$WORKFLOW_SCHEMA_FILENAME" > "${CONFIG_PROCESSOR_DIR}/sample.yaml" && \
+    "$NODEJS" "$CONFIG_PROCESSOR_DIR" makeSample >> "${CONFIG_PROCESSOR_DIR}/sample.yaml"
 
 # To use test workflows, flip the comments
-ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
+
 #ENV CONFIG_PROCESSOR_DIR=/root/testConfigProcessor
 
 # Once we're ready, we should replace the old workflows with the new ones.
