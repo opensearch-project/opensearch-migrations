@@ -1,4 +1,6 @@
 #./minikubeLocal.sh --start # New code...  Not sure if this breaks some prometheus cAdvisor scraping.  Just want to know first.
+minikube config set cpus 8
+minikube config set memory 18000
 minikube start \
   --extra-config=kubelet.authentication-token-webhook=true \
   --extra-config=kubelet.authorization-mode=Webhook \
@@ -34,3 +36,11 @@ kubectl port-forward svc/kube-prometheus-stack-grafana  9000:80 &
 #  kubectl --namespace ma get secrets kube-prometheus-stack-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
 
 kubectl -n ma exec --stdin --tty migration-console-0 -- /bin/bash
+
+## To test a new migration console container with kubectl wired up to your minikube instance
+kubectl config view --minify --flatten | sed "s/127.0.0.1:.*/$(minikube ip):8443/g" > /tmp/kubeconfig-docker
+docker run -v /tmp/kubeconfig-docker:/root/.kube/config:ro --network container:minikube \
+  -e KUBECONFIG=/root/.kube/config \
+  -it \
+  migrations/migration_console:latest \
+  /bin/bash

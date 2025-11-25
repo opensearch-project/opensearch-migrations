@@ -4,19 +4,14 @@ import logging
 from typing import Optional, List
 
 from .config import WorkflowConfig
-from kubernetes import client, config
+from .utils import load_k8s_config
+from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 logger = logging.getLogger(__name__)
 
 # Constants
 CONFIG_YAML_KEY = "workflow_config.yaml"
-
-
-class KubernetesConfigNotFoundError(Exception):
-    """Raised when the Kubernetes ConfigMap is not found."""
-    def __init__(self, *args: object) -> None:
-        super().__init__(*args)
 
 
 class WorkflowConfigStore:
@@ -47,19 +42,7 @@ class WorkflowConfigStore:
             logger.info("Using provided Kubernetes client")
         else:
             # Load Kubernetes configuration
-            try:
-                # Try to load in-cluster config first (when running in a pod)
-                config.load_incluster_config()
-                logger.info("Loaded in-cluster Kubernetes configuration")
-            except config.ConfigException:
-                try:
-                    # Fall back to local kubeconfig (for development/minikube)
-                    config.load_kube_config()
-                    logger.info("Loaded local Kubernetes configuration")
-                except config.ConfigException as e:
-                    logger.error(f"Failed to load Kubernetes configuration: {e}")
-                    raise KubernetesConfigNotFoundError("Failed to load Kubernetes configuration") from e
-
+            load_k8s_config()
             self.v1 = client.CoreV1Api()
 
     def save_config(self, config: WorkflowConfig, session_name: str = "default") -> str:

@@ -179,7 +179,7 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = fa
                     throw new Error(`Unknown parameter source: ${(pe.source as any).kind}`);
             }
         }).call({});
-        return formattedResult(useIdentifierMarkers ? `'{{${expandedName}}}'` : expandedName, false);
+        return formattedResult(useIdentifierMarkers ? `{{${expandedName}}}` : expandedName, false);
     }
 
     if (isLoopItem(expr)) {

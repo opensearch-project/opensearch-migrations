@@ -8,19 +8,31 @@
       "development": "./src/index.ts",
       "default": "./dist/index.js"
     },
-    "./*": null,
+    "./makeSample": {
+      "types": "./dist/makeSample.d.ts",
+      "default": "./dist/makeSample.js"
+    },
+    "./showUserSchema": {
+      "types": "./dist/showUserSchema.d.ts",
+      "default": "./dist/showUserSchema.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
     "build": "tsc",
     "type-check": "tsc --build --noEmit",
-    "schema": "tsx src/dumpSchema.ts",
-    "argo-schema": "tsx src/dumpArgoSchema.ts",
-    "make-sample": "tsx src/makeSample.ts"
+    "schema": "tsx src/showUserSchema.ts",
+    "argo-schema": "tsx src/showArgoSchema.ts",
+    "make-sample": "tsx src/makeSample.ts",
+    "test": "jest"
   },
   "dependencies": {
+    "zod": "*",
     "@asteasolutions/zod-to-openapi": "^8.1.0",
-    "deepmerge": "^4.3.1",
-    "zod": "*"
+    "deepmerge": "^4.3.1"
+  },
+  "devDependencies": {
+    "@types/jest": "*",
+    "expect-type": "*"
   }
 }

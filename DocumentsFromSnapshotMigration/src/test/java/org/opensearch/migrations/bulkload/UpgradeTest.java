@@ -51,17 +51,30 @@ public class UpgradeTest extends SourceTestBase {
         final SearchClusterContainer.ContainerVersion sourceVersion,
         final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
         var testData = new TestData();
+        boolean hasEs5SingleTypeIndex;
         try (
             final var legacyCluster = new SearchClusterContainer(legacyVersion)
         ) {
             legacyCluster.start();
 
             var legacyClusterOperations = new ClusterOperations(legacyCluster);
+            hasEs5SingleTypeIndex = legacyClusterOperations.shouldTestEs5SingleType();
 
             createMultiTypeIndex(testData, legacyClusterOperations);
 
+            // Only create the single-type test index on ES 5.5+
+            if (hasEs5SingleTypeIndex) {
+                legacyClusterOperations.createEs5SingleTypeIndexWithDocs(testData.singleTypeIndexName);
+            }
+
             legacyClusterOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, testData.legacySnapshotRepo);
-            legacyClusterOperations.takeSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName, testData.indexName);
+
+            // Snapshot only the indices that were created by the test
+            String indicesToSnapshot = testData.indexName;
+            if (hasEs5SingleTypeIndex) {
+                indicesToSnapshot = testData.indexName + "," + testData.singleTypeIndexName;
+            }
+            legacyClusterOperations.takeSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName, indicesToSnapshot);
             legacyCluster.copySnapshotData(legacySnapshotDirectory.toString());
         }
 
@@ -102,7 +115,8 @@ public class UpgradeTest extends SourceTestBase {
                                           sourceVersion.getVersion(),
                                           targetVersion.getVersion(),
                         null));
-            assertThat("5 shards + 1 nothing to do worker shoul d spin up", result.numRuns, equalTo(6));
+            int expectedWorkers = hasEs5SingleTypeIndex ? 7 : 6;
+            assertThat("Expected workers should spin up", result.numRuns, equalTo(expectedWorkers));
 
             var targetOperations = new ClusterOperations(targetCluster);
             targetOperations.get("/_refresh");
@@ -115,6 +129,17 @@ public class UpgradeTest extends SourceTestBase {
                     assertThat("For doc:" + docId + " expecting value", searchResponseBody, containsString(e.getValue().toString()));
                 });
             });
+
+            // Assert single_type index for versions that support it
+            if (hasEs5SingleTypeIndex) {
+                var countResponse = targetOperations.get("/" + testData.singleTypeIndexName + "/_count");
+                var expectedCount = 2; // createEs5SingleTypeIndexWithDocs creates 2 documents
+                assertThat(
+                        "Single-type index doc count should match after ES 5.x upgraded and migrated to OS",
+                        countResponse.getValue(),
+                        containsString("\"count\":" + expectedCount)
+                );
+            }
         }
     }
 
@@ -136,12 +161,13 @@ public class UpgradeTest extends SourceTestBase {
             operations.createDocument(testData.indexName, docId.toString(), docBody, null, docType);
         });
     }
-
+ 
     private class TestData {
         final String legacySnapshotRepo = "legacy_repo";
         final String legacySnapshotName = "legacy_snapshot";
         final String snapshotName = "snapshot_name";
         final String indexName = "test_index";
+        final String singleTypeIndexName = "es5_single_type_index";
         final Map<Integer, Map<String, Object>> documentsAndFields = Map.of(
             1, Map.of("field1", "field1-in-doc1"),
             2, Map.of("field1", "filed1-in-doc2", "field2", 2_12345),

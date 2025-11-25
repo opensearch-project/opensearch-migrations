@@ -11,6 +11,7 @@ from .commands.submit import submit_command
 from .commands.stop import stop_command
 from .commands.approve import approve_command
 from .commands.status import status_command
+from .commands.output import output_command
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ workflow_cli.add_command(submit_command)
 workflow_cli.add_command(stop_command)
 workflow_cli.add_command(approve_command)
 workflow_cli.add_command(status_command)
+workflow_cli.add_command(output_command)
 workflow_cli.add_command(util_group)
 
 
