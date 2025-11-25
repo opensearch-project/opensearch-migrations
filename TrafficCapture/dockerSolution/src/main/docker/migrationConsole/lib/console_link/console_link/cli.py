@@ -22,7 +22,8 @@ from console_link.models.backfill_rfs import RfsWorkersInProgress, WorkingIndexD
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME, ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
-from console_link.workflow.models.store import WorkflowConfigStore, KubernetesConfigNotFoundError
+from console_link.workflow.models.store import WorkflowConfigStore
+from console_link.workflow.models.utils import KubernetesConfigNotFoundError
 from click.shell_completion import get_completion_class
 
 import logging
