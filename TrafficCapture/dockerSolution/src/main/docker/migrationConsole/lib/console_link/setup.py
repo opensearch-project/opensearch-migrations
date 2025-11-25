@@ -6,7 +6,7 @@ setup(
     description="A Python module to create a console application from a Python script",
     packages=find_packages(exclude=("tests")),
     install_requires=["requests", "boto3", "pyyaml", "Click", "cerberus",
-    "kubernetes", "rich>=14.0.0", "ruamel.yaml", "pydantic", "awscli"],
+                      "kubernetes", "rich>=14.0.0", "ruamel.yaml", "pydantic", "awscli"],
     entry_points={
         "console_scripts": [
             "console = console_link.cli:main",

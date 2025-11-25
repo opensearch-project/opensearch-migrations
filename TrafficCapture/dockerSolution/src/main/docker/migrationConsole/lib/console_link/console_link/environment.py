@@ -143,38 +143,29 @@ class Environment:
                 f"A workflow config can't be found for namespace `{namespace}` and session name `{session_name}`."
             )
         
-        try:
-            target_cluster_name, target_cluster_config = next(iter(config.get("targetClusters").items()))
-        except (KeyError, AttributeError, StopIteration):
-            logger.warning("No target cluster is defined in the workflow config.")
-            target_cluster_name, target_cluster_config = None, None
-        logger.info(f"Using target cluster: {target_cluster_name}")
-        
-        if target_cluster_config:
-            try:
-                target_cluster = Cluster(config=map_cluster_from_workflow_config(target_cluster_config))
-            except ValueError as e:
-                raise WorkflowConfigException("Target cluster config is not correctly defined.") from e
-        else:
-            target_cluster = None
-            
-        try:
-            source_cluster_name, source_cluster_config = next(iter(config.get("sourceClusters").items()))
-        except (KeyError, AttributeError, StopIteration):
-            logger.warning("No source cluster is defined in the workflow config.")
-            source_cluster_name, source_cluster_config = None, None
-        logger.info(f"Using source cluster: {source_cluster_name}")
+        target_cluster = cls._get_cluster_from_workflow_config(config, "targetClusters", "target cluster")
+        source_cluster = cls._get_cluster_from_workflow_config(config, "sourceClusters", "source cluster")
 
-        if source_cluster_config:
-            try:
-                source_cluster = Cluster(config=map_cluster_from_workflow_config(source_cluster_config))
-            except ValueError as e:
-                raise WorkflowConfigException("Source cluster config is not correctly defined.") from e
-        else:
-            source_cluster = None
-        
         instance = super().__new__(cls)
 
         instance.target_cluster = target_cluster
         instance.source_cluster = source_cluster
         return instance
+
+    @classmethod
+    def _get_cluster_from_workflow_config(cls, config: Dict, cluster_key: str, cluster_label: str) -> Optional[Cluster]:
+        try:
+            cluster_name, cluster_config = next(iter(config.get(cluster_key).items()))
+        except (KeyError, AttributeError, StopIteration):
+            logger.warning(f"No {cluster_label} is defined in the workflow config.")
+            return None
+        
+        logger.info(f"Using {cluster_label}: {cluster_name}")
+        
+        if cluster_config:
+            try:
+                return Cluster(config=map_cluster_from_workflow_config(cluster_config))
+            except ValueError as e:
+                logger.warning(f"{cluster_label.capitalize()} config is not correctly defined: {e}")
+                return None
+        return None
