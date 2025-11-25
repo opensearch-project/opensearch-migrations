@@ -1,0 +1,32 @@
+{
+  "sourceRequest": {
+    "Request-URI": "/_snapshot/migration_assistant_repo/rfs-snapshot",
+    "Method": "DELETE",
+    "HTTP-Version": "HTTP/1.1",
+    "payload": {
+      "inlinedTextBody": ""
+    }
+  },
+  "targetRequest": {
+    "Request-URI": "/_snapshot/migration_assistant_repo/rfs-snapshot",
+    "Method": "DELETE",
+    "payload": {
+      "inlinedTextBody": ""
+    }
+  },
+  "targetResponses": [
+    {
+      "Date": ["Tue, 10 Dec 2024 21:07:03 GMT"],
+      "Content-Type": ["application/json; charset=UTF-8"],
+      "Status-Code": 404,
+      "Reason-Phrase": "Not Found",
+      "response_time_ms": 49,
+      "payload": {
+        "inlinedJsonBody": {}
+      }
+    }
+  ],
+  "connectionId": "024ad2fffe460aed-00000007-00000ac1-61aca27669436ce2-fdb9a98a.1563",
+  "numRequests": 4,
+  "numErrors": 0
+}

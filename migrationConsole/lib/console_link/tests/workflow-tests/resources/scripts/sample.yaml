@@ -1,0 +1,14 @@
+# Sample workflow configuration
+# Only includes parameters that are actually used by the workflow system
+
+# Parameters that will be injected into the workflow template
+parameters:
+  # Message to display in the workflow
+  message: "Hello from workflow"
+  
+  # Whether the workflow requires manual approval before proceeding
+  # Set to true to pause workflow for approval, false to skip approval step
+  requiresApproval: false
+  
+  # User who can approve the workflow (only used when requiresApproval is true)
+  approver: ""

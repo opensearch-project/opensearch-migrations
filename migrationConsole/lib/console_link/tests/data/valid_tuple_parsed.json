@@ -1,0 +1,49 @@
+{
+    "sourceRequest": {
+        "Request-URI": "/_cat/indices?v",
+        "Method": "GET",
+        "HTTP-Version": "HTTP/1.1",
+        "Host": "capture-proxy:9200",
+        "Authorization": "Basic YWRtaW46YWRtaW4=",
+        "User-Agent": "curl/8.5.0",
+        "Accept": "*/*",
+        "body": ""
+    },
+    "sourceResponse": {
+        "HTTP-Version": {
+            "keepAliveDefault": true
+        },
+        "Status-Code": 200,
+        "Reason-Phrase": "OK",
+        "response_time_ms": 59,
+        "content-type": "text/plain; charset=UTF-8",
+        "content-length": "214",
+        "body": "health status index       uuid                   pri rep docs.count docs.deleted store.size pri.store.size\ngreen  open   searchguard yJKXPMHtTRONIXSZXC_wmQ   1   0          8            0     44.7kb         44.7kb\n"
+    },
+    "targetRequest": {
+        "Request-URI": "/_cat/indices?v",
+        "Method": "GET",
+        "HTTP-Version": "HTTP/1.1",
+        "Host": "opensearchtarget",
+        "Authorization": "Basic YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE=",
+        "User-Agent": "curl/8.5.0",
+        "Accept": "*/*",
+        "body": ""
+    },
+    "targetResponses": [
+        {
+            "HTTP-Version": {
+                "keepAliveDefault": true
+            },
+            "Status-Code": 200,
+            "Reason-Phrase": "OK",
+            "response_time_ms": 721,
+            "content-type": "text/plain; charset=UTF-8",
+            "content-length": "484",
+            "body": "health status index                     uuid                   pri rep docs.count docs.deleted store.size pri.store.size\ngreen  open   .opensearch-observability 8W-oYHfbSySrdxQE_sOnzg   1   0          0            0       208b           208b\ngreen  open   .plugins-ml-config        F9nvxvsgRzSblmfJvvhjmw   1   0          1            0      3.8kb          3.8kb\ngreen  open   .opendistro_security      5fXyanFnSkCQD6n1JQmJNQ   1   0         10            0     77.5kb         77.5kb\n"
+        }
+    ],
+    "connectionId": "0242acfffe13000a-0000000a-00000005-1eb087a9beb83f3e-a32794b4.0",
+    "numRequests": 1,
+    "numErrors": 0
+}
