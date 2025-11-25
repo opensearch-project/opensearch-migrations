@@ -10,6 +10,8 @@ plugins {
 task buildDockerImage_migrationConsoleBase(type: DockerBuildImage) {
     // Depend on the elasticsearch test console base image
     dependsOn ":TrafficCapture:dockerSolution:buildDockerImage_elasticsearch_client_test_console"
+    // Depend on console_link's generated OpenAPI spec (copied into Docker image)
+    dependsOn ":console_link:generateOpenApiSpec"
     
     def dockerImageName = "migration_console_base"
     def projectName = "migrationConsoleBase"
