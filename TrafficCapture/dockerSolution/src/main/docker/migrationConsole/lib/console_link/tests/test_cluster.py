@@ -112,7 +112,7 @@ def test_invalid_cluster_with_two_passwords_refused():
         Cluster(two_passwords)
     assert "Invalid config file for cluster" in excinfo.value.args[0]
     assert excinfo.value.args[1]["cluster"][0]['basic_auth'] == [
-        "Cannot provide both (username + password) and user_secret_arn"
+        "Cannot provide both (username + password) and a secret (user_secret_arn or k8s_secret_name)"
     ]
 
 
@@ -128,7 +128,7 @@ def test_invalid_cluster_with_zero_passwords_refused():
         Cluster(two_passwords)
     assert "Invalid config file for cluster" in excinfo.value.args[0]
     assert excinfo.value.args[1]["cluster"][0]['basic_auth'] == [
-        "Must provide either (username + password) or user_secret_arn"
+        "Must provide either (username + password) or a secret (user_secret_arn or k8s_secret_name)"
     ]
 
 

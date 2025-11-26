@@ -1,9 +1,12 @@
+# pyright: ignore[reportCallIssue]
+from contextlib import contextmanager
 import json
 from pprint import pprint
 import sys
 import time
 from typing import Dict
 import click
+
 import console_link.middleware.clusters as clusters_
 import console_link.middleware.metrics as metrics_
 import console_link.middleware.backfill as backfill_
@@ -19,17 +22,50 @@ from console_link.models.backfill_rfs import RfsWorkersInProgress, WorkingIndexD
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME, ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
+from console_link.workflow.models.store import WorkflowConfigStore
+from console_link.workflow.models.utils import KubernetesConfigNotFoundError
 from click.shell_completion import get_completion_class
 
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 # ################### UNIVERSAL ####################
 
 
+@contextmanager
+def temporarily_disable_logging():
+    """
+    A context manager that temporarily disables logging.
+    """
+    logging.disable(logging.CRITICAL)
+    try:
+        yield
+    finally:
+        logging.disable(logging.NOTSET)
+
+
+def can_use_k8s_config_store():
+    # disable logging before making this call to prevent the `Invalid kube-config file.`
+    # error message from confusing the user.
+    with temporarily_disable_logging():
+        try:
+            WorkflowConfigStore()
+            return True
+        except KubernetesConfigNotFoundError:
+            return False
+
+
 class Context(object):
-    def __init__(self, config_file) -> None:
+    def __init__(self, config_file: str, force_use_config_file: bool = False) -> None:
+        # Expanding this to include handling `workflow` config objects, for a k8s deployment.
+        # Even if we _can_ use the k8s config store, we don't if MIGRATION_USE_SERVICES_YAML_CONFIG is set
+        # or if `--force-use-config-file` is passed in.
+        if can_use_k8s_config_store() and not force_use_config_file:
+            logger.warning("Assuming k8s deployment, loading cluster information from workflow config")
+            self.env = Environment.from_workflow_config()
+            return
         self.config_file = config_file
         try:
             self.env = Environment(config_file=config_file)
@@ -40,11 +76,13 @@ class Context(object):
 
 @click.group(invoke_without_command=True)
 @click.option("--config-file", default="/config/migration_services.yaml", help="Path to config file")
+@click.option("--force-use-config-file", is_flag=True,
+              help="Force use of config file, even if k8s deployment is detected.")
 @click.option("--json", is_flag=True)
 @click.option('-v', '--verbose', count=True, help="Verbosity level. Default is warn, -v is info, -vv is debug.")
 @click.option("--version", is_flag=True, is_eager=True, help="Show the Migration Assistant version.")
 @click.pass_context
-def cli(ctx, config_file, json, verbose, version):
+def cli(ctx, config_file: str, force_use_config_file: bool, json: bool, verbose: int, version: bool):
     if version:
         click.echo(get_version_str())
         ctx.exit(0)
@@ -57,7 +95,19 @@ def cli(ctx, config_file, json, verbose, version):
 
     logging.basicConfig(level=logging.WARN - (10 * verbose))
     logger.info(f"Logging set to {logging.getLevelName(logger.getEffectiveLevel())}")
-    ctx.obj = Context(config_file)
+
+    # Set the `force_use_config_file` based on the CLI flag OR the env var MIGRATION_USE_SERVICES_YAML_CONFIG
+    force_use_config_file = (force_use_config_file or
+                             (os.getenv("MIGRATION_USE_SERVICES_YAML_CONFIG", "false") not in ("false", 0)))
+    logger.info(f"force_use_config_file set to {force_use_config_file}")
+    # Disabling all logging for gathering the context for shell completion (run automatically)
+    # on container startup
+    if ctx.invoked_subcommand == 'completion':
+        with temporarily_disable_logging():
+            ctx.obj = Context(config_file, force_use_config_file)
+    else:
+        ctx.obj = Context(config_file, force_use_config_file)
+
     ctx.obj.json = json
 
 

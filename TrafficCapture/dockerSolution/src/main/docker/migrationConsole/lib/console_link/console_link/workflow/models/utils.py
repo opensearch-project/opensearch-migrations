@@ -17,6 +17,12 @@ class ExitCode(Enum):
     PERMISSION_DENIED = 5
 
 
+class KubernetesConfigNotFoundError(Exception):
+    """Raised when the Kubernetes ConfigMap is not found."""
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
 def load_k8s_config():
     """Load Kubernetes configuration.
 
@@ -24,7 +30,7 @@ def load_k8s_config():
     then falls back to kubeconfig file (for local development).
 
     Raises:
-        config.ConfigException: If neither configuration method succeeds
+        KubernetesConfigNotFoundError: If neither configuration method succeeds
     """
     try:
         # Try to load in-cluster config first (when running in a pod)
@@ -37,7 +43,7 @@ def load_k8s_config():
             logger.info("Loaded local Kubernetes configuration")
         except config.ConfigException as e:
             logger.error(f"Failed to load Kubernetes configuration: {e}")
-            raise
+            raise KubernetesConfigNotFoundError("Failed to load Kubernetes configuration") from e
 
 
 def get_store(ctx):
