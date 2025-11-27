@@ -12,13 +12,13 @@ task buildDockerImage_migrationConsoleBase(type: DockerBuildImage) {
     dependsOn ":TrafficCapture:dockerSolution:buildDockerImage_elasticsearch_client_test_console"
     // Depend on console_link's generated OpenAPI spec (copied into Docker image)
     dependsOn ":console_link:generateOpenApiSpec"
-    
+
     def dockerImageName = "migration_console_base"
     def projectName = "migrationConsoleBase"
-    
+
     inputDir = project.file(".")
     dockerFile = project.file("Dockerfile.base")
-    
+
     def hashNonce = CommonUtils.calculateDockerHash(project.fileTree(inputDir) {
         exclude '**/.venv/**', '**/.gradle/**', '**/build/**', '**/.pytest_cache/**', '**/__pycache__/**'
     })

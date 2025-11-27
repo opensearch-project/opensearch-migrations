@@ -249,7 +249,7 @@ static Sync getMigrationConsoleFinalSyncTask(Project project, String dockerImage
 
         // Copy the Dockerfile and supporting files from the new location
         from(project.layout.projectDirectory.dir("src/main/docker/${projectName}").asFileTree)
-        
+
         // Copy lib/ directory for test workflow scripts (only this specific subdirectory is needed)
         from(project.rootProject.layout.projectDirectory.dir("migrationConsole/lib/console_link/tests/workflow-tests/resources/scripts")) {
             into "lib/console_link/tests/workflow-tests/resources/scripts"
