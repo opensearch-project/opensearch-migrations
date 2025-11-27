@@ -117,7 +117,8 @@ def _get_basic_creds_secrets_in_config(secret_store: SecretStore, new_config: Wo
     logger.info(f"got back script result for get_secrets_in_config: {result}")
 
     if 'invalidSecrets' in result and (invalid_secrets := result['invalidSecrets']):
-        raise click.ClickException(f"Invalidly named secrets found: {invalid_secrets}")
+        raise click.ClickException(f"Invalidly named secret{'s' if len(invalid_secrets) > 0 else ''} found:"
+                                   f" {invalid_secrets}")
     elif 'validSecrets' in result and (valid_secrets := result.get('validSecrets', [])):
         valid_existing_secrets = list(filter(secret_store.secret_exists, valid_secrets))
         return set(valid_existing_secrets), list(set(valid_secrets) - set(valid_existing_secrets))
@@ -126,8 +127,8 @@ def _get_basic_creds_secrets_in_config(secret_store: SecretStore, new_config: Wo
 
 
 def _handle_add_basic_creds_secrets(secret_store, missing_secrets):
-    click.echo("Some secrets don't yet exist.  "
-               "Set the values now OR cancel and create them before running 'submit'")
+    num_missing = len(missing_secrets)
+    click.echo(f"{num_missing} secret{'s' if num_missing > 1 else ''} used in the cluster definitions must be created.")
 
     i = 0
     while i < len(missing_secrets):
@@ -174,12 +175,14 @@ def _handle_stdin_edit(wf_config_store, secret_store, session_name: str):
 
     existing_secrets, missing_secrets = _get_basic_creds_secrets_in_config(secret_store, new_config)
     if existing_secrets:
-        click.echo(f"Found {len(existing_secrets)} existing secrets that will be used for HTTP-Basic authentication "
-                   f"of requests to clusters:\n  " + "\n  ".join(existing_secrets))
+        logger.info(f"Found {len(existing_secrets)} existing secret{'s' if len(existing_secrets) > 0 else ''} "
+                    f"that will be used for HTTP-Basic authentication "
+                    f"of requests to clusters:\n  " + "\n  ".join(existing_secrets))
     if missing_secrets:
-        raise click.ClickException(f"Found {len(missing_secrets)} missing secrets that still need to be created "
-                                   f"to make well-formed HTTP-Basic requests to clusters:\n  " +
-                                   "\n  ".join(missing_secrets))
+        raise click.ClickException(
+            f"Found {len(missing_secrets)} missing secret{'s' if len(missing_secrets) > 0 else ''} that must be created "
+            f"to make well-formed HTTP-Basic requests to clusters:\n  " +
+            "\n  ".join(missing_secrets))
 
 
 def _handle_editor_edit(store, secret_store, session_name: str):
