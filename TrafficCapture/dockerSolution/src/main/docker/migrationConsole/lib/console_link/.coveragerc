@@ -1,6 +1,0 @@
-[run]
-source = console_link
-
-[report]
-omit =
-   */tests/*
