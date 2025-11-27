@@ -39,6 +39,14 @@ def env():
 
 
 @pytest.fixture(autouse=True)
+def block_k8s_config_store_usage(monkeypatch):
+    # If these tests are running on a computer with k8s, they may be able to instantiate
+    # the WorkflowConfigStore and believe they are running in a k8s environment. Setting this
+    # env var forces them to use the provided config file.
+    os.environ["MIGRATION_USE_SERVICES_YAML_CONFIG"] = "true"
+
+
+@pytest.fixture(autouse=True)
 def set_fake_aws_credentials():
     # These are example credentials from
     # https://docs.aws.amazon.com/IAM/latest/UserGuide/security-creds.html#sec-access-keys-and-secret-access-keys
