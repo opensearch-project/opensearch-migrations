@@ -202,8 +202,8 @@ class TestRunner:
         self.k8s_service.create_namespace(self.k8s_service.namespace)
         if developer_mode:
             workflow_templates_dir = (
-                "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/"
-                "workflows/templates/"
+                "../../TrafficCapture/dockerSolution/build/docker/"
+                "migration_console_migrationConsole/nodeStaging/workflowTemplates/"
             )
             self.k8s_service.run_command([
                 "kubectl", "apply", "-f", workflow_templates_dir, "-n", "ma"

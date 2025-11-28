@@ -158,10 +158,11 @@ RUN echo "# yaml-language-server: \$schema=$WORKFLOW_SCHEMA_FILENAME" > "${CONFI
 # so the target for the new workflows would either need to be /root/workflows/templates,
 # or the installation script would need to be updated.
 
-# Here are the new workflows that are dormant but can be installed by users on the console
-COPY nodeStaging/workflowTemplates /root/newWorkflowTemplates
-# Here are the original workflows that current integ tests are using.
-COPY workflows /root/workflows
+# DSL-generated workflow templates
+COPY nodeStaging/workflowTemplates /root/workflows
+
+# For backward compatibility, also make available at old path
+RUN ln -s /root/testWorkflows /root/testWorkflows
 
 # Set ENV to control startup script in /bin/sh mode
 ENV ENV=/root/.bashrc
