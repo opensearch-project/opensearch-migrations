@@ -13,6 +13,7 @@ from requests.auth import HTTPBasicAuth
 from console_link.models.client_options import ClientOptions
 from console_link.models.schema_tools import contains_one_of
 from console_link.models.utils import SigV4AuthPlugin, create_boto3_client, append_user_agent_header_for_requests
+from console_link.models.kubectl_runner import KubectlRunner
 
 requests.packages.urllib3.disable_warnings()  # ignore: type
 
@@ -31,16 +32,19 @@ def validate_basic_auth_options(field, value, error):
     username = value.get("username")
     password = value.get("password")
     user_secret_arn = value.get("user_secret_arn")
+    k8s_secret_name = value.get("k8s_secret_name")
 
     has_user_pass = username is not None and password is not None
-    has_user_secret = user_secret_arn is not None
+    has_secret = user_secret_arn is not None or k8s_secret_name is not None
 
-    if has_user_pass and has_user_secret:
-        error(field, "Cannot provide both (username + password) and user_secret_arn")
+    if has_user_pass and has_secret:
+        error(field, "Cannot provide both (username + password) and a secret (user_secret_arn or k8s_secret_name)")
     elif has_user_pass and (username == "" or password == ""):
         error(field, "Both username and password must be non-empty")
-    elif not has_user_pass and not has_user_secret:
-        error(field, "Must provide either (username + password) or user_secret_arn")
+    elif not has_user_pass and not has_secret:
+        error(field, "Must provide either (username + password) or a secret (user_secret_arn or k8s_secret_name)")
+    elif user_secret_arn is not None and k8s_secret_name is not None:
+        error(field, "Only one secret reference can be provided")
 
 
 BASIC_AUTH_SCHEMA = {
@@ -57,6 +61,10 @@ BASIC_AUTH_SCHEMA = {
         "user_secret_arn": {
             "type": "string",
             "required": False,
+        },
+        "k8s_secret_name": {
+            "type": "string",
+            "required": False
         }
     },
     "check_with": validate_basic_auth_options
@@ -135,15 +143,23 @@ class Cluster:
         assert self.auth_details is not None  # for mypy's sake
         if "username" in self.auth_details and "password" in self.auth_details:
             return AuthDetails(username=self.auth_details["username"], password=self.auth_details["password"])
+        
         # Pull password from AWS Secrets Manager
-        assert "user_secret_arn" in self.auth_details  # for mypy's sake
-        client = create_boto3_client(aws_service_name="secretsmanager", client_options=self.client_options)
-        secret_response = client.get_secret_value(SecretId=self.auth_details["user_secret_arn"])
-        try:
-            secret_dict = json.loads(secret_response["SecretString"])
-        except json.JSONDecodeError:
-            raise ValueError(f"Expected secret {self.auth_details['user_secret_arn']} to be a JSON object with username"
-                             f" and password fields")
+        if "user_secret_arn" in self.auth_details:
+            client = create_boto3_client(aws_service_name="secretsmanager", client_options=self.client_options)
+            secret_response = client.get_secret_value(SecretId=self.auth_details["user_secret_arn"])
+            try:
+                secret_dict = json.loads(secret_response["SecretString"])
+            except json.JSONDecodeError:
+                raise ValueError(f"Expected secret {self.auth_details['user_secret_arn']} to be a JSON object with"
+                                 " username and password fields")
+        # Pull password from k8s secret
+        elif "k8s_secret_name" in self.auth_details:
+            kubectl_runner = KubectlRunner("ma", "")
+            secret_dict = kubectl_runner.read_secret(self.auth_details["k8s_secret_name"])
+
+        if not secret_dict or type(secret_dict) is not dict:
+            raise ValueError("Secret is not a valid object containing a username and password.")
 
         missing_keys = [k for k in ("username", "password") if k not in secret_dict]
         if missing_keys:
