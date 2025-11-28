@@ -6,6 +6,8 @@ from typing import Optional, List, Dict, Set
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 
+from console_link.workflow.models.utils import load_k8s_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,20 +48,7 @@ class SecretStore:
             self.v1 = k8s_client
             logger.info("Using provided Kubernetes client")
         else:
-            # Load Kubernetes configuration
-            try:
-                # Try to load in-cluster config first (when running in a pod)
-                config.load_incluster_config()
-                logger.info("Loaded in-cluster Kubernetes configuration")
-            except config.ConfigException:
-                try:
-                    # Fall back to local kubeconfig (for development/minikube)
-                    config.load_kube_config()
-                    logger.info("Loaded local Kubernetes configuration")
-                except config.ConfigException as e:
-                    logger.error(f"Failed to load Kubernetes configuration: {e}")
-                    raise
-
+            load_k8s_config()
             self.v1 = client.CoreV1Api()
 
     def save_secret(

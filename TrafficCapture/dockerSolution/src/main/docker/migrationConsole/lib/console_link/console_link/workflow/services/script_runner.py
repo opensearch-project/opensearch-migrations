@@ -128,8 +128,8 @@ class ScriptRunner:
                 raise ValueError(
                     "nodejs_location environment variable must be set when nodejs_location is not provided"
                 )
-
-        return self.run(nodejs_location, input_data, self.config_processor_dir, processor_name, *args)
+        script_entrypoint = os.path.join(self.config_processor_dir, "index.js")
+        return self.run(nodejs_location, input_data, script_entrypoint, processor_name, *args)
 
     def _get_blank_starter_config(self) -> str:
         """Get a minimal blank starter configuration template.

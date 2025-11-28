@@ -11,7 +11,7 @@ from console_link.models.replayer_base import Replayer
 from console_link.models.kafka import Kafka
 from console_link.models.client_options import ClientOptions
 from console_link.models.utils import map_cluster_from_workflow_config
-from console_link.workflow.models.store import WorkflowConfigStore
+from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
 
 import yaml
 from cerberus import Validator
