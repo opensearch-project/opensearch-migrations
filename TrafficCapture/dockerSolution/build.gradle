@@ -99,11 +99,6 @@ tasks.register('buildAndStageConfigProcessor', NpmTask) {
     }
 }
 
-ext.directorySize = { File dir ->
-    if (!dir.exists()) return 0L
-    return dir.directorySize()
-}
-
 def dockerFilesForExternalServices = [
         "elasticsearch_searchguard": "elasticsearchWithSearchGuard",
         "capture_proxy_base": "captureProxyBase",
@@ -113,44 +108,58 @@ def dockerFilesForExternalServices = [
         "otel_collector": "otelCollector",
         "grafana": "grafana"
 ]
-
 dockerFilesForExternalServices.each { dockerImageName, projectName ->
-    task("buildDockerImage_${dockerImageName}", type: DockerBuildImage) {
+    // Register sync tasks FIRST, outside of any task configuration
+    def syncTaskProvider = null
+    def syncTaskProviderNoDocker = null
+
+    if (projectName == "migrationConsole") {
+        def libraries = [
+                project(":libraries:kafkaCommandLineFormatter")
+        ]
+
+        def applications = [
+                project(":CreateSnapshot"),
+                project(":MetadataMigration")
+        ]
+
+        // Register both sync tasks outside the docker task
+        syncTaskProviderNoDocker = getMigrationConsoleSyncTask(project, dockerImageName, projectName, libraries, applications, false)
+        syncTaskProvider = getMigrationConsoleSyncTask(project, dockerImageName, projectName, libraries, applications, true)
+    }
+
+    // Now register the docker build task
+    tasks.register("buildDockerImage_${dockerImageName}", DockerBuildImage) {
         if (projectName == "migrationConsole") {
             dependsOn makeAndStageWorkflowTemplates
             dependsOn buildAndStageConfigProcessor
+            dependsOn syncTaskProvider
 
-            def libraries = [
-                    project(":libraries:kafkaCommandLineFormatter")
-            ]
-
-            def applications = [
-                    project(":CreateSnapshot"),
-                    project(":MetadataMigration")
-            ]
-            // Setup additional sync task which doesn't depend on the base image being built, for other projects to use
-            getMigrationConsoleSyncTask(project, dockerImageName, projectName, libraries, applications, false)
-            def syncTask = getMigrationConsoleSyncTask(project, dockerImageName, projectName, libraries, applications, true)
-
-            dependsOn syncTask
+            // Realize the task to get directory
+            def syncTask = syncTaskProvider.get()
             inputDir = syncTask.destinationDir
+
+            // Calculate hash from the staging directory
+            def hashNonce = CommonUtils.calculateDockerHash(project.fileTree(syncTask.destinationDir))
+            images.add("migrations/${dockerImageName}:${hashNonce}".toString())
+            images.add("migrations/${dockerImageName}:latest".toString())
         } else {
             inputDir = project.file("src/main/docker/${projectName}")
+            def hashNonce = CommonUtils.calculateDockerHash(project.fileTree(inputDir))
+            images.add("migrations/${dockerImageName}:${hashNonce}".toString())
+            images.add("migrations/${dockerImageName}:latest".toString())
         }
-        def hashNonce = CommonUtils.calculateDockerHash(project.fileTree(inputDir))
-        images.add("migrations/${dockerImageName}:${hashNonce}".toString())
-        images.add("migrations/${dockerImageName}:latest".toString())
     }
 }
 
-static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName, String projectName, List<Project> libraries, List<Project> applications, boolean dependOnBaseImage) {
-    // Create a single sync task to copy the required files
+static TaskProvider<Sync> getMigrationConsoleSyncTask(Project project, String dockerImageName, String projectName, List<Project> libraries, List<Project> applications, boolean dependOnBaseImage) {
     def destDir = "build/docker/${dockerImageName}_${projectName}"
     def taskName = "syncArtifact_${dockerImageName}_${projectName}"
     if (!dependOnBaseImage) {
-        taskName= "${taskName}_noDockerBuild"
+        taskName = "${taskName}_noDockerBuild"
     }
-    def syncTask = project.tasks.create(taskName, Sync) {
+
+    def syncTaskProvider = project.tasks.register(taskName, Sync) {
         into destDir
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
@@ -161,9 +170,6 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
         // Applications and Standalone Libraries both have libraries, sync them
         (libraries + applications).each { lib ->
             def applicationDestDir = "staging/${lib.name}/"
-
-            // Ensure dependencies are resolved within the correct project context
-            project.evaluationDependsOn(lib.path)
 
             from (lib.files { lib.configurations.runtimeClasspath }) {
                 into "${applicationDestDir}/lib"
@@ -187,19 +193,17 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
         from(project.layout.projectDirectory.dir("src/main/docker/${projectName}").asFileTree.matching {
             exclude("**/build/**", "**/.venv/**")
         })
+
+        // Collect assemble tasks from libraries and applications
+        def assembleTasks = (libraries + applications).collect { it.tasks.named("assemble") }
+        dependsOn assembleTasks
+
+        if (dependOnBaseImage) {
+            dependsOn "buildDockerImage_elasticsearch_client_test_console"
+        }
     }
 
-    // Collect assemble tasks from libraries and applications
-    def assembleTasks = (libraries + applications).collect { it.tasks.named("assemble") }
-    // Ensure the sync task depends on the assemble tasks
-    syncTask.dependsOn assembleTasks
-
-    if (dependOnBaseImage) {
-        // Migration Console base image is the test console
-        syncTask.dependsOn "buildDockerImage_elasticsearch_client_test_console"
-    }
-
-    return syncTask
+    return syncTaskProvider
 }
 
 def javaContainerServices = [
@@ -240,14 +244,14 @@ dockerCompose {
 }
 
 task buildDockerImages {
-    dependsOn buildDockerImage_k8s_config_map_util_scripts
-    dependsOn buildDockerImage_elasticsearch_searchguard
-    dependsOn buildDockerImage_migration_console
-    dependsOn buildDockerImage_otel_collector
-    dependsOn buildDockerImage_grafana
-    dependsOn buildDockerImage_traffic_replayer
-    dependsOn buildDockerImage_capture_proxy
-    dependsOn buildDockerImage_capture_proxy_es
+    dependsOn tasks.named('buildDockerImage_k8s_config_map_util_scripts')
+    dependsOn tasks.named('buildDockerImage_elasticsearch_searchguard')
+    dependsOn tasks.named('buildDockerImage_migration_console')
+    dependsOn tasks.named('buildDockerImage_otel_collector')
+    dependsOn tasks.named('buildDockerImage_grafana')
+    dependsOn tasks.named('buildDockerImage_traffic_replayer')
+    dependsOn tasks.named('buildDockerImage_capture_proxy')
+    dependsOn tasks.named('buildDockerImage_capture_proxy_es')
 }
 
 tasks.getByName('composeUp')
