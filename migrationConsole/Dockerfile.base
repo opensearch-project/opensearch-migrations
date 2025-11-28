@@ -8,7 +8,7 @@ RUN ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
         echo "Unsupported architecture: $ARCH" && exit 1; \
     fi && \
     echo "Using architecture: $ARCH" && \
-    echo $ARCH > /arch.env
+    echo "$ARCH" > /arch.env
 
 ARG HELM_VERSION="3.14.0"
 ARG KUBECTL_VERSION="1.32.1"
@@ -18,11 +18,14 @@ ARG KAFKA_VERSION="3.9.1"
 RUN mkdir -p /root/kafka-tools/kafka && \
     url_cdn="https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/kafka_2.13-${KAFKA_VERSION}.tgz" && \
     url_archive="https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/kafka_2.13-${KAFKA_VERSION}.tgz" && \
-    curl --retry 2 --retry-delay 5 --retry-connrefused -fSL "$url_cdn" -o /tmp/kafka.tgz || curl  --retry 5 --retry-delay 5 --retry-connrefused -fSL "$url_archive" -o /tmp/kafka.tgz && \
+    curl --retry 2 --retry-delay 5 --retry-connrefused -fSL "$url_cdn" -o /tmp/kafka.tgz || \
+        curl --retry 5 --retry-delay 5 --retry-connrefused -fSL "$url_archive" -o /tmp/kafka.tgz && \
     tar -xzf /tmp/kafka.tgz -C /root/kafka-tools/kafka --strip-components=1 && \
-    rm -f /tmp/kafka.tgz
-RUN mkdir -p /root/kafka-tools/aws && \
-    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL https://github.com/aws/aws-msk-iam-auth/releases/download/v2.0.3/aws-msk-iam-auth-2.0.3-all.jar -o /root/kafka-tools/kafka/libs/msk-iam-auth.jar
+    rm -f /tmp/kafka.tgz && \
+    mkdir -p /root/kafka-tools/aws && \
+    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL \
+        https://github.com/aws/aws-msk-iam-auth/releases/download/v2.0.3/aws-msk-iam-auth-2.0.3-all.jar \
+        -o /root/kafka-tools/kafka/libs/msk-iam-auth.jar
 
 # Get kubectl and Helm distributions
 RUN ARCH=$(cat /arch.env) && \
@@ -59,9 +62,8 @@ COPY --from=migration-console-tools /k8s/bin/ /usr/local/bin
 COPY --from=migration-console-tools /etcd/bin/ /usr/local/bin
 
 RUN kubectl completion bash > /etc/bash_completion.d/kubectl && \
-    helm completion bash > /etc/bash_completion.d/helm
-
-RUN mkdir -p /config
+    helm completion bash > /etc/bash_completion.d/helm && \
+    mkdir -p /config
 
 WORKDIR /root
 
@@ -112,9 +114,8 @@ RUN dnf install -y  \
         rm -rf /var/cache/dnf
 
 # Console setup bash completion and venv for interactive access
-RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh
-
-RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
+RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh && \
+    echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo '. /etc/profile.d/venv.sh' >> ~/.bashrc && \
     echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc && \
     echo 'eval "$(register-python-argcomplete cluster_tools)"' >> ~/.bashrc && \
