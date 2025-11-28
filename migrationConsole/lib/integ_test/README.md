@@ -19,7 +19,7 @@ like other test files.
 
 ### Running tests in K8s setup
 
-Follow the quickstart guide [here](../../../../../deployment/k8s/quickstart.md) to set up a Migration Assistant environment with source and
+Follow the quickstart guide [here](../../../deployment/k8s/quickstart.md) to set up a Migration Assistant environment with source and
 target test clusters
 
 Access the migration console:
@@ -32,7 +32,7 @@ Perform pytest:
 pytest ~/lib/integ_test/integ_test/ma_workflow_test.py
 ```
 
-To tear-down resources, follow the end of the quickstart guide [here](../../../../../deployment/k8s/quickstart.md#cleanup)
+To tear-down resources, follow the end of the quickstart guide [here](../../../deployment/k8s/quickstart.md#cleanup)
 
 
 ### Pytest parameters

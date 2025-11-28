@@ -134,11 +134,13 @@ class Environment:
             logger.info(f"Kafka initialized: {self.kafka}")
 
     @classmethod
-    def from_workflow_config(cls, namespace='ma', session_name='default') -> 'Environment':
+    def from_workflow_config(cls, namespace='ma', session_name='default', allow_empty=False) -> 'Environment':
         store = WorkflowConfigStore(namespace=namespace)
         config = store.load_config(session_name=session_name)
         logger.info(f"Loading workflow config with namespace {namespace} and session {session_name}")
         if config is None:
+            if allow_empty:
+                return cls()
             raise WorkflowConfigException(
                 f"A workflow config can't be found for namespace `{namespace}` and session name `{session_name}`."
             )

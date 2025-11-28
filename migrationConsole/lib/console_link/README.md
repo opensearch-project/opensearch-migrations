@@ -366,4 +366,4 @@ curl http://localhost:8080/api/docs
 
 #### Deployment
 
-Consult the [frontend readme](../../../../../frontend/README.md) for access when hosted in AWS or kubernetes.
+Consult the [frontend readme](../../../frontend/README.md) for access when hosted in AWS or kubernetes.
