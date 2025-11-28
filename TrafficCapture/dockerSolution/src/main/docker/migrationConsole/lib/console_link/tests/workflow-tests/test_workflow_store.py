@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import Mock
 from kubernetes.client.rest import ApiException
 
-from console_link.workflow.models.store import WorkflowConfigStore
+from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
 from console_link.workflow.models.config import WorkflowConfig
 
 

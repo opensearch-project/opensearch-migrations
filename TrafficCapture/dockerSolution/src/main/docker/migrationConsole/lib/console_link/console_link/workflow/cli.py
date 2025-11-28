@@ -37,8 +37,10 @@ def workflow_cli(ctx, verbose):
     # Store initialization is deferred - will be created when first accessed
     # This allows utility commands (like completions) to run without K8s access
     # Only set defaults if not already provided (e.g., in tests)
-    if 'store' not in ctx.obj:
-        ctx.obj['store'] = None
+    if 'config_store' not in ctx.obj:
+        ctx.obj['config_store'] = None
+    if 'secret_store' not in ctx.obj:
+        ctx.obj['secret_store'] = None
     if 'namespace' not in ctx.obj:
         ctx.obj['namespace'] = "ma"  # Use 'ma' namespace where the migration console is deployed
 

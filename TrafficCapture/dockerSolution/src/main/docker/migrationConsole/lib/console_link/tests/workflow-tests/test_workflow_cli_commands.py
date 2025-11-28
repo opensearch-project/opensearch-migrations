@@ -284,14 +284,14 @@ class TestWorkflowCLICommands:
 class TestConfigureCommands:
     """Test suite for configure CLI commands."""
 
-    @patch('console_link.workflow.commands.configure.get_store')
-    def test_configure_sample_load(self, mock_get_store):
+    @patch('console_link.workflow.commands.configure.get_workflow_config_store')
+    def test_configure_sample_load(self, mock_get_workflow_config):
         """Test configure sample --load command."""
         runner = CliRunner()
 
         # Mock the store
         mock_store = Mock()
-        mock_get_store.return_value = mock_store
+        mock_get_workflow_config.return_value = mock_store
         mock_store.save_config.return_value = "Configuration saved"
 
         result = runner.invoke(workflow_cli, ['configure', 'sample', '--load'])

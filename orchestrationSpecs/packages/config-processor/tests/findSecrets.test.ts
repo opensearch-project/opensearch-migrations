@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { scrapeSecrets, scrapeAndCategorize } from '../src/findSecrets';
+import { scrapeSecrets, getCategorizedCredentialsSecretsFromConfig } from '../src/findSecrets';
 import { z } from 'zod';
 import { OVERALL_MIGRATION_CONFIG } from '@opensearch-migrations/schemas';
 
@@ -133,7 +133,7 @@ describe('scrapeAndCategorize', () => {
             }
         };
 
-        const result = scrapeAndCategorize(config as any);
+        const result = getCategorizedCredentialsSecretsFromConfig(config as any);
         expect(result.validSecrets).toHaveLength(2);
         expect(result.validSecrets).toContain('valid-secret-name');
         expect(result.validSecrets).toContain('another-valid-123');
@@ -171,7 +171,7 @@ describe('scrapeAndCategorize', () => {
             migrationConfigs: []
         };
 
-        const result = scrapeAndCategorize(config as any);
+        const result = getCategorizedCredentialsSecretsFromConfig(config as any);
         expect(result.invalidSecrets).toHaveLength(3);
         expect(result.invalidSecrets).toContain('Invalid_Secret_Name');
         expect(result.invalidSecrets).toContain('-invalid-start');
@@ -220,7 +220,7 @@ describe('scrapeAndCategorize', () => {
             migrationConfigs: []
         };
 
-        const result = scrapeAndCategorize(config as any);
+        const result = getCategorizedCredentialsSecretsFromConfig(config as any);
         expect(result.validSecrets).toHaveLength(2);
         expect(result.validSecrets).toContain('valid-secret');
         expect(result.validSecrets).toContain('another-valid.secret');
@@ -232,7 +232,7 @@ describe('scrapeAndCategorize', () => {
     it('should handle empty result when no secrets found', () => {
         const config = {};
 
-        const result = scrapeAndCategorize(config);
+        const result = getCategorizedCredentialsSecretsFromConfig(config);
         expect(result.validSecrets).toBeUndefined();
         expect(result.invalidSecrets).toBeUndefined();
     });
