@@ -69,7 +69,7 @@ spec:
         {{- if $developerModeEnabled  }}
         - name: local-console-libs
           hostPath:
-            path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib
+            path: /opensearch-migrations/migrationConsole/lib
             type: Directory
         {{- end }}
         {{- if $sharedLogsVolumeEnabled  }}

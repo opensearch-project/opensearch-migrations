@@ -1,0 +1,27 @@
+import org.opensearch.migrations.common.CommonUtils
+import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
+
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'com.bmuschko.docker-remote-api'
+}
+
+// Build the base migration console image with Python libraries and scripts
+task buildDockerImage_migrationConsoleBase(type: DockerBuildImage) {
+    // Depend on the elasticsearch test console base image
+    dependsOn ":TrafficCapture:dockerSolution:buildDockerImage_elasticsearch_client_test_console"
+    // Depend on console_link's generated OpenAPI spec (copied into Docker image)
+    dependsOn ":console_link:generateOpenApiSpec"
+
+    def dockerImageName = "migration_console_base"
+    def projectName = "migrationConsoleBase"
+
+    inputDir = project.file(".")
+    dockerFile = project.file("Dockerfile")
+
+    def hashNonce = CommonUtils.calculateDockerHash(project.fileTree(inputDir) {
+        exclude '**/.venv/**', '**/.gradle/**', '**/build/**', '**/.pytest_cache/**', '**/__pycache__/**'
+    })
+    images.add("migrations/${dockerImageName}:${hashNonce}".toString())
+    images.add("migrations/${dockerImageName}:latest".toString())
+}

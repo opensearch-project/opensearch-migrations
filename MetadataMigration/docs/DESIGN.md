@@ -250,7 +250,7 @@ Result:
 ## Design Details
 
 ### Configuration
-Configuration data should be stored in a way that mirrors the existing [Services.yaml spec](../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/README.md)
+Configuration data should be stored in a way that mirrors the existing [Services.yaml spec](../../migrationConsole/lib/console_link/README.md)
 
 This ensures that if the tool is run locally its setup can be deployed to the cloud with minimal effort.
 

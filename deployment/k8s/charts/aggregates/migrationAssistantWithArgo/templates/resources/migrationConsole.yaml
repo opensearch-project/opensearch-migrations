@@ -86,11 +86,11 @@ spec:
     {{- if $developerModeEnabled  }}
         - name: local-console-libs
           hostPath:
-            path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib
+            path: /opensearch-migrations/migrationConsole/lib
             type: Directory
         - name: local-test-config-processor
           hostPath:
-            path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/tests/workflow-tests/resources/scripts
+            path: /opensearch-migrations/migrationConsole/lib/console_link/tests/workflow-tests/resources/scripts
             type: Directory
     {{- end }}
     {{- if $sharedLogsVolumeEnabled  }}

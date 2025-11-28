@@ -70,7 +70,7 @@ jobs:
           - migrationConsole/cluster_tools
           - k8sConfigMapUtilScripts
     env:
-      WORKING_DIR: ./TrafficCapture/dockerSolution/src/main/docker/${{ matrix.py-project }}
+      WORKING_DIR: ${{ startsWith(matrix.py-project, 'migrationConsole/') && format('./{0}', matrix.py-project) || format('./TrafficCapture/dockerSolution/src/main/docker/{0}', matrix.py-project) }}
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
