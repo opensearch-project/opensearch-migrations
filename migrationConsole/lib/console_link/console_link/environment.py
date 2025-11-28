@@ -140,7 +140,7 @@ class Environment:
         logger.info(f"Loading workflow config with namespace {namespace} and session {session_name}")
         if config is None:
             if allow_empty:
-                return cls()
+                return super().__new__(cls)
             raise WorkflowConfigException(
                 f"A workflow config can't be found for namespace `{namespace}` and session name `{session_name}`."
             )

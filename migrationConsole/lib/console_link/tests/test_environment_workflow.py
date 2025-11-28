@@ -86,12 +86,14 @@ def test_from_workflow_config_no_config(mock_store_cls):
         Environment.from_workflow_config()
 
 
+@patch('console_link.cli.can_use_k8s_config_store')
 @patch('console_link.environment.WorkflowConfigStore')
-def test_from_workflow_config_allow_empty(mock_store_cls):
+def test_from_workflow_config_allow_empty(mock_store_cls, mock_can_use_k8s):
     # Test that allow_empty=True returns an empty Environment when no config is found
     mock_store = MagicMock()
     mock_store_cls.return_value = mock_store
     mock_store.load_config.return_value = None
+    mock_can_use_k8s.return_value = True
     
     # Should not raise exception when allow_empty=True
     env = Environment.from_workflow_config(allow_empty=True)

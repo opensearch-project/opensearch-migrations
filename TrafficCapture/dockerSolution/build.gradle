@@ -20,9 +20,9 @@ def orchestrationP     = orchestrationSpecsDirP
 def configProcessorP   = orchestrationP.dir("packages/config-processor")
 def workflowTemplatesP = orchestrationP.dir("packages/migration-workflow-templates")
 def configProcessorStagingP =
-        layout.buildDirectory.dir(CommonUtils.getDockerBuildDirName("migration_console", "migrationConsoleFinal")+"/nodeStaging/configProcessor")
+        layout.buildDirectory.dir(CommonUtils.getDockerBuildDirName("migration_console", "staging")+"/nodeStaging/configProcessor")
 def workflowTemplatesStagingP =
-        layout.buildDirectory.dir(CommonUtils.getDockerBuildDirName("migration_console", "migrationConsoleFinal")+"/nodeStaging/workflowTemplates")
+        layout.buildDirectory.dir(CommonUtils.getDockerBuildDirName("migration_console", "staging")+"/nodeStaging/workflowTemplates")
 
 tasks.register('installDependencies', NpmTask) {
     description = 'Install npm dependencies for orchestrationSpecs'
@@ -103,20 +103,26 @@ ext.directorySize = { File dir ->
     if (!dir.exists()) return 0L
     return dir.directorySize()
 }
+// This keeps the build directory name concise (migration_console_staging)
+// while allowing the source directory to have a more descriptive name (migrationConsoleStaging)
+def migrationConsoleStagingDirName = "staging"
+def sourceDirectoryOverrides = [
+        "staging": "migrationConsoleStaging"
+]
 
 def dockerFilesForExternalServices = [
         "elasticsearch_searchguard": "elasticsearchWithSearchGuard",
         "capture_proxy_base": "captureProxyBase",
         "k8s_config_map_util_scripts": "k8sConfigMapUtilScripts",
         "elasticsearch_client_test_console": "elasticsearchTestConsole",
-        "migration_console": "migrationConsoleFinal",
+        "migration_console": migrationConsoleStagingDirName,
         "otel_collector": "otelCollector",
         "grafana": "grafana"
 ]
 
 dockerFilesForExternalServices.each { dockerImageName, projectName ->
     task("buildDockerImage_${dockerImageName}", type: DockerBuildImage) {
-        if (projectName == "migrationConsoleFinal") {
+        if (projectName == migrationConsoleStagingDirName) {
             // Depend on the base image from migrationConsole project
             dependsOn ":migrationConsole:buildDockerImage_migrationConsoleBase"
             dependsOn makeAndStageWorkflowTemplates
@@ -131,13 +137,14 @@ dockerFilesForExternalServices.each { dockerImageName, projectName ->
                     project(":MetadataMigration")
             ]
             // Setup additional sync task which doesn't depend on the base image being built, for other projects to use
-            getMigrationConsoleFinalSyncTask(project, dockerImageName, projectName, libraries, applications, false)
-            def syncTask = getMigrationConsoleFinalSyncTask(project, dockerImageName, projectName, libraries, applications, true)
+            getMigrationConsoleFinalSyncTask(project, dockerImageName, projectName, libraries, applications, sourceDirectoryOverrides, false)
+            def syncTask = getMigrationConsoleFinalSyncTask(project, dockerImageName, projectName, libraries, applications, sourceDirectoryOverrides, true)
 
             dependsOn syncTask
             inputDir = syncTask.destinationDir
         } else {
-            inputDir = project.file("src/main/docker/${projectName}")
+            def sourceDirName = sourceDirectoryOverrides.get(projectName, projectName)
+            inputDir = project.file("src/main/docker/${sourceDirName}")
         }
         def hashNonce = CommonUtils.calculateDockerHash(project.fileTree(inputDir))
         images.add("migrations/${dockerImageName}:${hashNonce}".toString())
@@ -145,7 +152,7 @@ dockerFilesForExternalServices.each { dockerImageName, projectName ->
     }
 }
 
-static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName, String projectName, List<Project> libraries, List<Project> applications, boolean dependOnBaseImage) {
+static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName, String projectName, List<Project> libraries, List<Project> applications, Map sourceDirectoryOverrides, boolean dependOnBaseImage) {
     // Create a single sync task to copy the required files
     def destDir = "build/docker/${dockerImageName}_${projectName}"
     def taskName = "syncArtifact_${dockerImageName}_${projectName}"
@@ -204,7 +211,7 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
     return syncTask
 }
 
-static Sync getMigrationConsoleFinalSyncTask(Project project, String dockerImageName, String projectName, List<Project> libraries, List<Project> applications, boolean dependOnBaseImage) {
+static Sync getMigrationConsoleFinalSyncTask(Project project, String dockerImageName, String projectName, List<Project> libraries, List<Project> applications, Map sourceDirectoryOverrides, boolean dependOnBaseImage) {
     // Create a sync task for final migration console assembly
     // This only copies Java artifacts and Node.js components
     // Python libraries are already in the base image
@@ -248,7 +255,8 @@ static Sync getMigrationConsoleFinalSyncTask(Project project, String dockerImage
         from (project.rootProject.layout.projectDirectory.file("VERSION"))
 
         // Copy the Dockerfile and supporting files from the new location
-        from(project.layout.projectDirectory.dir("src/main/docker/${projectName}").asFileTree)
+        def sourceDirName = sourceDirectoryOverrides.get(projectName, projectName)
+        from(project.layout.projectDirectory.dir("src/main/docker/${sourceDirName}").asFileTree)
 
         // Copy lib/ directory for test workflow scripts (only this specific subdirectory is needed)
         from(project.rootProject.layout.projectDirectory.dir("migrationConsole/lib/console_link/tests/workflow-tests/resources/scripts")) {

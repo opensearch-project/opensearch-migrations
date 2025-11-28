@@ -70,7 +70,7 @@ def buildKitProjects = [
         ],
         [
                 serviceName: "migrationConsole",
-                contextDir: "TrafficCapture/dockerSolution/build/docker/migration_console_migrationConsoleFinal",
+                contextDir: "TrafficCapture/dockerSolution/build/docker/migration_console_staging",
                 imageName:  "migration_console",
                 imageTag:   "latest",
                 buildArgs: [
@@ -78,7 +78,7 @@ def buildKitProjects = [
                 ],
                 requiredDependencies: [
                         ":migrationConsole:buildDockerImage_migrationConsoleBase",
-                        ":TrafficCapture:dockerSolution:syncArtifact_migration_console_migrationConsoleFinal_noDockerBuild",
+                        ":TrafficCapture:dockerSolution:syncArtifact_migration_console_staging_noDockerBuild",
                         "buildKit_elasticsearchTestConsole",
                         ":TrafficCapture:dockerSolution:makeAndStageWorkflowTemplates",
                         ":TrafficCapture:dockerSolution:buildAndStageConfigProcessor"
