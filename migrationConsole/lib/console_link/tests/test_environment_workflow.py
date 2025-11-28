@@ -84,3 +84,38 @@ def test_from_workflow_config_no_config(mock_store_cls):
     
     with pytest.raises(WorkflowConfigException):
         Environment.from_workflow_config()
+
+
+@patch('console_link.environment.WorkflowConfigStore')
+def test_from_workflow_config_allow_empty(mock_store_cls):
+    # Test that allow_empty=True returns an empty Environment when no config is found
+    mock_store = MagicMock()
+    mock_store_cls.return_value = mock_store
+    mock_store.load_config.return_value = None
+    
+    # Should not raise exception when allow_empty=True
+    env = Environment.from_workflow_config(allow_empty=True)
+    
+    assert env is not None
+    # Verify it's an empty environment with no clusters configured
+    assert env.source_cluster is None
+    assert env.target_cluster is None
+
+
+@patch('console_link.cli.can_use_k8s_config_store')
+@patch('console_link.environment.Environment.from_workflow_config')
+def test_context_init_with_allow_empty_workflow_config(mock_from_workflow, mock_can_use_k8s):
+    # Test that Context.__init__ passes allow_empty_workflow_config to Environment.from_workflow_config
+    from console_link.cli import Context
+    
+    # Use k8s environment
+    mock_can_use_k8s.return_value = True
+    mock_env = MagicMock()
+    mock_from_workflow.return_value = mock_env
+    
+    # Test with allow_empty_workflow_config=True
+    ctx = Context(config_file='/fake/path', allow_empty_workflow_config=True)
+    
+    # Verify from_workflow_config was called with allow_empty=True
+    mock_from_workflow.assert_called_once_with(allow_empty=True)
+    assert ctx.env == mock_env
