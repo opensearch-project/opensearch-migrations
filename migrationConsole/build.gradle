@@ -17,7 +17,7 @@ task buildDockerImage_migrationConsoleBase(type: DockerBuildImage) {
     def projectName = "migrationConsoleBase"
 
     inputDir = project.file(".")
-    dockerFile = project.file("Dockerfile.base")
+    dockerFile = project.file("Dockerfile")
 
     def hashNonce = CommonUtils.calculateDockerHash(project.fileTree(inputDir) {
         exclude '**/.venv/**', '**/.gradle/**', '**/build/**', '**/.pytest_cache/**', '**/__pycache__/**'
