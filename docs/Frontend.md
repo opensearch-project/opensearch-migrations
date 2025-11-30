@@ -14,7 +14,7 @@ Authorization is currently managed by limiting access to users who can start an 
 
 ### APIs: Transform actions in the Console Link into APIs
 
-Executing actions on the Migration Console uses the [console link](../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/README.md) command-line utility to define and control these actions. This tool is highly powerful and often serves as the initial platform for new features; as features mature, they will be integrated into the user interface.
+Executing actions on the Migration Console uses the [console link](../migrationConsole/lib/console_link/README.md) command-line utility to define and control these actions. This tool is highly powerful and often serves as the initial platform for new features; as features mature, they will be integrated into the user interface.
 
 To enable website access to console link functionality, we will create an API layer. Existing tooling supports this space, and we will expand on its functionality.
 

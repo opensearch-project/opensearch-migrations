@@ -58,13 +58,14 @@ def can_use_k8s_config_store():
 
 
 class Context(object):
-    def __init__(self, config_file: str, force_use_config_file: bool = False) -> None:
+    def __init__(self, config_file: str, force_use_config_file: bool = False,
+                 allow_empty_workflow_config: bool = False) -> None:
         # Expanding this to include handling `workflow` config objects, for a k8s deployment.
         # Even if we _can_ use the k8s config store, we don't if MIGRATION_USE_SERVICES_YAML_CONFIG is set
         # or if `--force-use-config-file` is passed in.
         if can_use_k8s_config_store() and not force_use_config_file:
             logger.warning("Assuming k8s deployment, loading cluster information from workflow config")
-            self.env = Environment.from_workflow_config()
+            self.env = Environment.from_workflow_config(allow_empty=allow_empty_workflow_config)
             return
         self.config_file = config_file
         try:
@@ -104,7 +105,7 @@ def cli(ctx, config_file: str, force_use_config_file: bool, json: bool, verbose:
     # on container startup
     if ctx.invoked_subcommand == 'completion':
         with temporarily_disable_logging():
-            ctx.obj = Context(config_file, force_use_config_file)
+            ctx.obj = Context(config_file, force_use_config_file, allow_empty_workflow_config=True)
     else:
         ctx.obj = Context(config_file, force_use_config_file)
 

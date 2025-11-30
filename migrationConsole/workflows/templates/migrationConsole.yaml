@@ -149,6 +149,7 @@ spec:
                         echo ---
                         cat /config/migration_services.yaml
                         echo ---
+                        export MIGRATION_USE_SERVICES_YAML_CONFIG=true
 
                         if [ "{{inputs.parameters.kafka-client-secret-bundle}}" = "" ]; then
                           echo "WARNING: No kafka-client-secret-bundle provided. Kafka functionality will be limited or unavailable."
