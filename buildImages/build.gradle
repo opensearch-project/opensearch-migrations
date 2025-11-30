@@ -1,9 +1,9 @@
 import org.opensearch.migrations.image.RegistryImageBuildUtils
 import org.opensearch.migrations.image.ImageRegistryFormatterFactory
 
-def registryEndpoint = rootProject.hasProperty('registryEndpoint') ? rootProject.property('registryEndpoint') : 'localhost:5000'
+def registryEndpoint = rootProject.hasProperty('registryEndpoint') ? rootProject.property('registryEndpoint') : 'localhost:5001'
 rootProject.ext.registryEndpoint = registryEndpoint
-def buildKitRegistryEndpoint = registryEndpoint == "localhost:5000" ? 'docker-registry:5000' : registryEndpoint
+def buildKitRegistryEndpoint = registryEndpoint == "localhost:5001" ? 'docker-registry:5000' : registryEndpoint
 rootProject.ext.buildKitRegistryEndpoint = buildKitRegistryEndpoint
 def imageArch = rootProject.hasProperty('imageArch') ? rootProject.property('imageArch') : ''
 if (!imageArch) {
@@ -116,7 +116,7 @@ tasks.register("buildKitAll") {
 }
 
 tasks.register("buildImagesToRegistry") {
-    println "Building images to registry: ${registryEndpoint} (${imageArch}) with buildKit container using registry: ${buildKitRegistryEndpoint}"
+    println "Will build images to registry: ${registryEndpoint} (${imageArch}) with buildKit container using registry: ${buildKitRegistryEndpoint}"
     dependsOn("buildKitAll")
     dependsOn("jibAll")
 }
