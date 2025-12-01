@@ -72,6 +72,7 @@ class Snapshot(ABC):
     """
     Interface for creating and managing snapshots.
     """
+
     def __init__(self, config: Dict, source_cluster: Optional[Cluster]) -> None:
         self.config = config
         self.source_cluster = source_cluster
@@ -110,20 +111,20 @@ class Snapshot(ABC):
     def get_snapshot_indexes(self, index_patterns: Optional[List[str]] = None) -> SnapshotIndexes:
         """
         Fetch all indexes that will be included in the snapshot with accurate document count and size information.
-        
+
         Args:
             index_patterns: Optional list of index patterns to filter the indexes. If None,
                           all indexes in the cluster will be considered.
-        
+
         Returns:
             SnapshotIndexes containing information about all indexes that will be included in the snapshot.
-        
+
         Raises:
             NoSourceClusterDefinedError: If no source cluster is defined.
         """
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-        
+
         try:
             return get_cluster_indexes(self.source_cluster, index_patterns)
         except Exception as e:
@@ -359,16 +360,16 @@ class SnapshotStatus(BaseModel):
         Create a SnapshotStatus object from snapshot information.
         """
         progress_metrics = cls._extract_progress_metrics(snapshot_info)
-        
+
         percentage, eta_ms = cls._calculate_progress_metrics(
             progress_metrics["processed_units"],
             progress_metrics["total_units"],
             progress_metrics["elapsed_ms"],
             progress_metrics["state"]
         )
-        
+
         indexes = cls._extract_index_statuses(snapshot_info, progress_metrics["state"])
-        
+
         return cls(
             status=progress_metrics["state"],
             percentage_completed=percentage,
@@ -384,7 +385,7 @@ class SnapshotStatus(BaseModel):
             shard_complete=progress_metrics["completed_shards"],
             indexes=indexes
         )
-        
+
     @classmethod
     def _extract_progress_metrics(cls, snapshot_info: dict) -> dict:
         """
@@ -394,7 +395,7 @@ class SnapshotStatus(BaseModel):
         total_shards = completed_shards = failed_shards = None
         total_units = processed_units = 0
         start_ms = elapsed_ms = 0
-        
+
         if shards_stats := snapshot_info.get("shards_stats"):
             # ES ≥7.8 / OS: shard-level stats
             total_units = total_shards = shards_stats.get("total", 0)
@@ -428,10 +429,10 @@ class SnapshotStatus(BaseModel):
                 (processed_bytes / (1024 ** 2)) / (duration_ms / 1000)
                 if duration_ms > 0 else 0
             )
-        
+
         raw_state = snapshot_info.get("state", "")
         state = convert_snapshot_state_to_step_state(raw_state)
-        
+
         return {
             "total_bytes": total_bytes,
             "processed_bytes": processed_bytes,
@@ -446,7 +447,7 @@ class SnapshotStatus(BaseModel):
             "finished_ms": start_ms + elapsed_ms,
             "state": state
         }
-    
+
     @classmethod
     def _calculate_progress_metrics(
         cls,
@@ -460,19 +461,19 @@ class SnapshotStatus(BaseModel):
         """
         # Compute percentage complete
         percentage = (processed_units / total_units * 100) if total_units else 0.0
-        
+
         # Compute ETA in ms (only once we've made some progress)
         eta_ms: Optional[float] = None
         if 0 < percentage < 100:
             eta_ms = (elapsed_ms / percentage) * (100 - percentage)
-        
+
         # If it's already done, clamp to 100%
         if state == StepState.COMPLETED:
             percentage = 100.0
             eta_ms = 0.0
-            
+
         return percentage, eta_ms
-    
+
     @classmethod
     def _extract_index_statuses(cls, snapshot_info: dict, overall_state: StepState) -> List[SnapshotIndexStatus]:
         """
@@ -480,10 +481,10 @@ class SnapshotStatus(BaseModel):
         """
         indexes = []
         indices = snapshot_info.get("indices", {})
-        
+
         if not indices:
             return indexes
-            
+
         for index_name, index_info in indices.items():
             # Extract basic index info
             shards_info = index_info.get("shards", 0)
@@ -497,10 +498,10 @@ class SnapshotStatus(BaseModel):
 
             doc_count = index_info.get("docs", 0)
             size_bytes = index_info.get("size_in_bytes", 0)
-            
+
             # Determine index status
             index_status = cls._determine_index_status(index_info.get("state", ""), overall_state)
-            
+
             # Create and add SnapshotIndexStatus
             indexes.append(
                 SnapshotIndexStatus(
@@ -513,7 +514,7 @@ class SnapshotStatus(BaseModel):
             )
 
         return indexes
-    
+
     @staticmethod
     def _determine_index_status(index_state: str, overall_state: StepState) -> SnapshotIndexState:
         """
@@ -557,7 +558,7 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
     snapshots = snapshot_data.get('snapshots', [])
     if not snapshots:
         raise SnapshotNotStarted()
-    
+
     snapshot_info = snapshots[0]
     state = snapshot_info.get("state")
     if not deep_check:
@@ -575,7 +576,7 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
     snapshots = snapshot_data.get('snapshots', [])
     if not snapshots or not snapshots[0]:
         raise SnapshotStatusUnavailable()
-    
+
     return SnapshotStateAndDetails(state, snapshots[0])
 
 
@@ -588,11 +589,11 @@ def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_c
             return CommandResult(success=True, value=latest_snapshot_status_raw.state)
 
         snapshot_status = SnapshotStatus.from_snapshot_info(latest_snapshot_status_raw.details)
-        
+
         # Format datetime values for display
         start_time = snapshot_status.started.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.started else ''
         finish_time = snapshot_status.finished.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.finished else ''
-        
+
         # Format the ETA string
         eta_ms = snapshot_status.eta_ms or 0
         eta_str = format_duration(int(eta_ms)) if eta_ms else "0h 0m 0s"
@@ -616,7 +617,7 @@ def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_c
             f"Total shards: {snapshot_status.shard_total}\n"
             f"Successful shards: {snapshot_status.shard_complete}\n"
         )
-        
+
         return CommandResult(success=True, value=message)
     except SnapshotNotStarted:
         return CommandResult(success=False, value="Snapshot not started")
@@ -640,7 +641,7 @@ def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str, wait_
             logger.info(f"Snapshot '{snapshot_name}' not found in repository '{repository}', "
                         "considering it already deleted.")
             return f"Deleted snapshot: {snapshot_name} from repository '{repository}'"
-        
+
         ex = FailedToDeleteSnapshot()
         ex.add_note(f"Unable to delete snapshot {snapshot_name} from repo {repository}, cause {str(e)}")
         raise ex
@@ -706,7 +707,7 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> str:
         ex = FailedToDeleteSnapshot()
         ex.add_note(f"Cause {str(e)}")
         raise ex
-    
+
     return f"All snapshots cleared from repository '{repository}'"
 
 
@@ -735,7 +736,7 @@ def delete_snapshot_repo(cluster: Cluster, repository: str) -> str:
         ex = FailedToDeleteSnapshotRepo()
         ex.add_note(f"Cause {str(e)}")
         raise ex
-    
+
     return f"Repository '{repository}' deleted"
 
 
@@ -819,7 +820,7 @@ def _get_index_stats(cluster: Cluster, targets: Optional[str]) -> Dict:
         "expand_wildcards": "all",
         "metric": "docs,store",
     }
-    
+
     stats = cluster.call_api(path, params=params).json()
     return stats.get("indices", {}) or {}
 
@@ -833,7 +834,7 @@ def _get_shard_counts(cluster: Cluster, targets: Optional[str]) -> Dict[str, int
         "filter_path": "*.settings.index.number_of_shards",
         "expand_wildcards": "all",
     }
-    
+
     settings_response = cluster.call_api(settings_path, params=settings_params).json()
 
     # Create a mapping of index name to shard count
@@ -847,7 +848,7 @@ def _get_shard_counts(cluster: Cluster, targets: Optional[str]) -> Dict[str, int
         except (ValueError, AttributeError):
             # In case of parsing issues, default to 0
             shard_count_map[clean_name] = 0
-            
+
     return shard_count_map
 
 
@@ -865,7 +866,7 @@ def _build_index_list(indices: Dict, shard_count_map: Dict[str, int]) -> List[Sn
         # Live docs (excludes deletions)
         doc_count = int(docs.get("count", 0) or 0)
         size_bytes = int(store.get("size_in_bytes", 0) or 0)
-        
+
         shard_count = shard_count_map.get(name, 0)
 
         index_list.append(SnapshotIndex(
@@ -895,7 +896,7 @@ def get_cluster_indexes(cluster: Cluster, index_patterns: Optional[List[str]] = 
         indices = _get_index_stats(cluster, targets)
         shard_count_map = _get_shard_counts(cluster, targets)
         index_list = _build_index_list(indices, shard_count_map)
-        
+
         return SnapshotIndexes(indexes=index_list)
 
     except Exception as e:

@@ -45,7 +45,7 @@ def test_get_latest_existing(mock_db):
         "detailed_results": {"status": "success"}
     }
     mock_table.search.return_value = [entry1, entry2]
-    
+
     result = get_latest("test-session")
     assert isinstance(result, MetadataEntry)
     assert result.timestamp.day == 2  # Should get the more recent entry
@@ -56,7 +56,7 @@ def test_get_latest_existing(mock_db):
 def test_get_latest_nonexistent(mock_db):
     _, mock_table, mock_query = mock_db
     mock_table.search.return_value = []
-    
+
     with pytest.raises(MetadataNotAvailable):
         get_latest("nonexistent")
     mock_table.search.assert_called_once()
@@ -64,6 +64,6 @@ def test_get_latest_nonexistent(mock_db):
 
 def test_create_entry(mock_db, valid_metadata_entry):
     _, mock_table, _ = mock_db
-    
+
     create_entry(valid_metadata_entry)
     mock_table.insert.assert_called_once_with(valid_metadata_entry.model_dump())

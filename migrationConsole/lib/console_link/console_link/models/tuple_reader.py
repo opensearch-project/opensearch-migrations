@@ -15,6 +15,7 @@ class TupleReader:
     """ This class is fairly minimal for now. There is likely a future in which multiple
     tuple storage locations/types are supported, but we are not there yet and don't have
     a clear enough vision for it to make sense to frame it out now."""
+
     def __init__(self) -> None:
         # Initialize a TupleReader object.
         pass
@@ -62,7 +63,7 @@ def get_element_with_regex(regex: re.Pattern, dict_: Dict, raise_on_error=False)
         if raise_on_error:
             raise DictionaryPathException(f"An element matching the regex ({regex}) was not found.")
         return None
-    
+
     return dict_[match]
 
 
@@ -109,7 +110,7 @@ class TupleComponent:
     def __init__(self, component_name: str, component: Dict, line_no: int, is_bulk_path: bool):
         body = get_element("body", component)
         self.value: bytes | str = body
-        
+
         self.flags = get_flags_for_component(component, is_bulk_path)
 
         self.line_no = line_no
@@ -148,7 +149,7 @@ class TupleComponent:
         if Flag.Json not in self.flags:
             self.final_value = self.value
             return self
-        
+
         if self.value.strip() == "":
             self.final_value = self.value
             return self
