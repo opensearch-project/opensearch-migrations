@@ -88,7 +88,7 @@ Configuration defines the services, connection details, and preferences for a mi
 
 #### Configuration with a `services.yaml` file
 
-As discussed above and additionally in the next session, a `services.yaml` file is effectively an implementation detail and not the only way of specifying a configuration. However, in our current implementation, it is the default and most widely used way and therefore merits some discussion here. The YAML file has a fully defined spec in the [Migration Console README](https://github.com/opensearch-project/opensearch-migrations/blob/main/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/README.md#servicesyaml-spec).
+As discussed above and additionally in the next session, a `services.yaml` file is effectively an implementation detail and not the only way of specifying a configuration. However, in our current implementation, it is the default and most widely used way and therefore merits some discussion here. The YAML file has a fully defined spec in the [Migration Console README](https://github.com/opensearch-project/opensearch-migrations/blob/main/migrationConsole/lib/console_link/README.md#servicesyaml-spec).
 
 In general, there is one block in the YAML file for each object that will be instantiated, with all of the configuration details necessary to determine which model implementation should be created and used. The structure of the YAML is enforced by schemas in each model.
 

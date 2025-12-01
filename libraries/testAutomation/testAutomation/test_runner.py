@@ -202,7 +202,7 @@ class TestRunner:
         self.k8s_service.create_namespace(self.k8s_service.namespace)
         if developer_mode:
             workflow_templates_dir = (
-                "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/"
+                "../../migrationConsole/"
                 "workflows/templates/"
             )
             self.k8s_service.run_command([

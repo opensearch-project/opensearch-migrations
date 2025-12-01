@@ -79,4 +79,4 @@ Source Context substitutable values
 
 
 ### Running Integration Tests
-Details can be found in the integration testing README [here](../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/integ_test/README.md)
+Details can be found in the integration testing README [here](../migrationConsole/lib/integ_test/README.md)
