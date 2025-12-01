@@ -90,19 +90,7 @@ DockerServiceProps[] dockerServices = [
         new DockerServiceProps([projectName:"reindexFromSnapshot",
                                 dockerImageName:"reindex_from_snapshot",
                                 inputDir:"./docker",
-                                taskDependencies:["copyDockerRuntimeJars", "copyVersionFile_reindexFromSnapshot"]]),
-        new DockerServiceProps([projectName:"emptyElasticsearchSource_5_6",
-                                dockerImageName:"empty_elasticsearch_source_5_6",
-                                inputDir:"./docker/TestSource_ES_5_6"]),
-        new DockerServiceProps([projectName:"emptyElasticsearchSource_6_8",
-                                dockerImageName:"empty_elasticsearch_source_6_8",
-                                inputDir:"./docker/TestSource_ES_6_8"]),
-        new DockerServiceProps([projectName:"emptyElasticsearchSource_7_10",
-                                dockerImageName:"empty_elasticsearch_source_7_10",
-                                inputDir:"./docker/TestSource_ES_7_10"]),
-        new DockerServiceProps([projectName:"emptyElasticsearchSource_7_17",
-                                dockerImageName:"empty_elasticsearch_source_7_17",
-                                inputDir:"./docker/TestSource_ES_7_17"])
+                                taskDependencies:["copyDockerRuntimeJars", "copyVersionFile_reindexFromSnapshot"]])
 ] as DockerServiceProps[]
 
 for (dockerService in dockerServices) {
@@ -117,19 +105,6 @@ for (dockerService in dockerServices) {
         images.add("migrations/${dockerService.dockerImageName}:${hash}".toString())
         images.add("migrations/${dockerService.dockerImageName}:${version}".toString())
         images.add("migrations/${dockerService.dockerImageName}:latest".toString())
-    }
-}
-
-dockerCompose {
-    useComposeFiles = ['docker/docker-compose-es710.yml']
-    projectName = 'rfs-compose'
-
-    es56 {
-        useComposeFiles = ['docker/docker-compose-es56.yml']
-    }
-
-    es68 {
-        useComposeFiles = ['docker/docker-compose-es68.yml']
     }
 }
 
