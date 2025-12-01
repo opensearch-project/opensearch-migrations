@@ -64,7 +64,7 @@ class Context(object):
         # Even if we _can_ use the k8s config store, we don't if MIGRATION_USE_SERVICES_YAML_CONFIG is set
         # or if `--force-use-config-file` is passed in.
         if can_use_k8s_config_store() and not force_use_config_file:
-            logger.warning("Assuming k8s deployment, loading cluster information from workflow config")
+            logger.info("Assuming k8s deployment, loading cluster information from workflow config")
             self.env = Environment.from_workflow_config(allow_empty=allow_empty_workflow_config)
             return
         self.config_file = config_file
