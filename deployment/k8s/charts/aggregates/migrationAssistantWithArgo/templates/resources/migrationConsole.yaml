@@ -63,6 +63,9 @@ spec:
         - name: console
           image: {{ .Values.images.migrationConsole.repository}}:{{ .Values.images.migrationConsole.tag }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
+          env:
+            - name: MIGRATIONS_CLI_CONSOLE_DISABLE_LEGACY_COMMANDS
+              value: "true"
           command:
             - "/bin/sh"
             - "-c"
