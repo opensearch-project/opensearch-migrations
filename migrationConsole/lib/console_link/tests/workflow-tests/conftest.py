@@ -69,7 +69,7 @@ def ensure_config_processor_dir():
             raise ValueError(f"Gradle did not output CONFIG_PROCESSOR_DIR=. Received:\n{output}")
         config_path = config_match.group(1).strip()
         os.environ["CONFIG_PROCESSOR_DIR"] = config_path
-        print(f"CONFIG_PROCESSOR_DIR set to: {config_path}")
+        print("CONFIG_PROCESSOR_DIR set to: {config_path}")
 
     # Only set NODEJS if not already set
     if not node_already_set:
@@ -78,6 +78,4 @@ def ensure_config_processor_dir():
             raise ValueError(f"Gradle did not output NODEJS=. Received:\n{output}")
         node_path = node_match.group(1).strip()
         os.environ["NODEJS"] = node_path
-        os.environ["PATH"] = f"{node_path}:{os.environ.get('PATH', '')}"
         print(f"NODEJS set to: {node_path}")
-        print(f"Node.js added to PATH")

@@ -173,16 +173,16 @@ def _handle_stdin_edit(wf_config_store, secret_store, session_name: str):
     new_config = _parse_config_from_stdin(stdin_content)
     _save_config(wf_config_store, new_config, session_name)
 
-    existing_secrets, missing_secrets = _get_basic_creds_secrets_in_config(secret_store, new_config)
-    if existing_secrets:
-        logger.info(f"Found {len(existing_secrets)} existing secret{'s' if len(existing_secrets) > 0 else ''} "
+    existing_items, missing_items = _get_basic_creds_secrets_in_config(secret_store, new_config)
+    if existing_items:
+        logger.info(f"Found {len(existing_items)} existing secret{'s' if len(existing_items) > 0 else ''} "
                     f"that will be used for HTTP-Basic authentication "
-                    f"of requests to clusters:\n  " + "\n  ".join(existing_secrets))
-    if missing_secrets:
+                    f"of requests to clusters:\n  " + "\n  ".join(existing_items))
+    if missing_items:
         raise click.ClickException(
-            f"Found {len(missing_secrets)} missing secret{'s' if len(missing_secrets) > 0 else ''} "
+            f"Found {len(missing_items)} missing secret{'s' if len(missing_items) > 0 else ''} "
             f"that must be created to make well-formed HTTP-Basic requests to clusters:\n  " +
-            "\n  ".join(missing_secrets))
+            "\n  ".join(missing_items))
 
 
 def _handle_editor_edit(store, secret_store, session_name: str):
@@ -200,12 +200,12 @@ def _handle_editor_edit(store, secret_store, session_name: str):
     new_config = cast(WorkflowConfig, edit_result.value)
     _save_config(store, new_config, session_name)
 
-    existing_secrets, missing_secrets = _get_basic_creds_secrets_in_config(secret_store, new_config)
-    if existing_secrets:
-        click.echo(f"Found {len(existing_secrets)} existing secrets that will be used for HTTP-Basic authentication"
-                   f" of requests to clusters:\n  " + "\n  ".join(existing_secrets))
-    if missing_secrets:
-        _handle_add_basic_creds_secrets(secret_store, missing_secrets)
+    existing_items, missing_items = _get_basic_creds_secrets_in_config(secret_store, new_config)
+    if existing_items:
+        click.echo(f"Found {len(existing_items)} existing secrets that will be used for HTTP-Basic authentication"
+                   f" of requests to clusters:\n  " + "\n  ".join(existing_items))
+    if missing_items:
+        _handle_add_basic_creds_secrets(secret_store, missing_items)
 
 
 @configure_group.command(name="edit")
