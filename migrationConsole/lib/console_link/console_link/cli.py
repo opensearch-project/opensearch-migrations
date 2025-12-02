@@ -31,6 +31,8 @@ import os
 
 logger = logging.getLogger(__name__)
 
+DISABLE_LEGACY_COMMANDS = os.getenv("MIGRATIONS_CLI_CONSOLE_DISABLE_LEGACY_COMMANDS", "").lower() == "true"
+
 # ################### UNIVERSAL ####################
 
 
@@ -64,7 +66,7 @@ class Context(object):
         # Even if we _can_ use the k8s config store, we don't if MIGRATION_USE_SERVICES_YAML_CONFIG is set
         # or if `--force-use-config-file` is passed in.
         if can_use_k8s_config_store() and not force_use_config_file:
-            logger.warning("Assuming k8s deployment, loading cluster information from workflow config")
+            logger.info("Assuming k8s deployment, loading cluster information from workflow config")
             self.env = Environment.from_workflow_config(allow_empty=allow_empty_workflow_config)
             return
         self.config_file = config_file
@@ -134,7 +136,7 @@ def main():
 # ##################### CLUSTERS ###################
 
 
-@cli.group(name="clusters", help="Commands to interact with source and target clusters")
+@click.group(name="clusters", help="Commands to interact with source and target clusters")
 @click.pass_obj
 def cluster_group(ctx):
     if ctx.env.source_cluster is None and ctx.env.target_cluster is None:
@@ -160,7 +162,7 @@ def cat_indices_cmd(ctx, refresh):
             )
         )
         return
-    
+
     if not refresh:
         click.echo("\nWARNING: Cluster information may be stale. Use --refresh to update.\n")
     click.echo("SOURCE CLUSTER")
@@ -250,12 +252,12 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
     By default the cluster definition is configured to use the `/config/migration_services.yaml` file that is
     pre-prepared on the migration console, but `--config-file` can point to any YAML file that defines a
     source_cluster` or target_cluster` based on the schema of the `services.yaml` file.
-    
+
     In specifying the path of the route, use the name of the YAML object as the domain, followed by a space and the
     path, e.g. `source_cluster /_cat/indices`."""
 
     headers = parse_headers(header)
-    
+
     if json_data:
         try:
             data = json.dumps(json.loads(json_data))
@@ -295,8 +297,8 @@ def _external_snapshots_check(snapshot):
                        f"the source cluster as snapshot commands will perform requests to the source cluster")
 
 
-@cli.group(name="snapshot",
-           help="Commands to create and check status of snapshots of the source cluster.")
+@click.group(name="snapshot",
+             help="Commands to create and check status of snapshots of the source cluster.")
 @click.pass_obj
 def snapshot_group(ctx):
     """All actions related to snapshot creation"""
@@ -371,7 +373,7 @@ def unregister_snapshot_repo_cmd(ctx, acknowledge_risk: bool):
 # arguments depending on the type of backfill migration
 
 
-@cli.group(name="backfill", help="Commands related to controlling the configured backfill mechanism.")
+@click.group(name="backfill", help="Commands related to controlling the configured backfill mechanism.")
 @click.pass_obj
 def backfill_group(ctx):
     """All actions related to historical/backfill data migrations"""
@@ -454,7 +456,7 @@ def status_backfill_cmd(ctx, deep_check):
 
 # ##################### REPLAY ###################
 
-@cli.group(name="replay", help="Commands related to controlling the replayer.")
+@click.group(name="replay", help="Commands related to controlling the replayer.")
 @click.pass_obj
 def replay_group(ctx):
     """All actions related to replaying data"""
@@ -508,7 +510,7 @@ def status_replay_cmd(ctx):
 # ##################### METADATA ###################
 
 
-@cli.group(name="metadata", help="Commands related to migrating metadata to the target cluster.")
+@click.group(name="metadata", help="Commands related to migrating metadata to the target cluster.")
 @click.pass_obj
 def metadata_group(ctx):
     """All actions related to metadata migration"""
@@ -544,7 +546,7 @@ def evaluate_metadata_cmd(ctx, extra_args):
 # ##################### METRICS ###################
 
 
-@cli.group(name="metrics", help="Commands related to checking metrics emitted by the capture proxy and replayer.")
+@click.group(name="metrics", help="Commands related to checking metrics emitted by the capture proxy and replayer.")
 @click.pass_obj
 def metrics_group(ctx):
     if ctx.env.metrics_source is None:
@@ -594,7 +596,7 @@ def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
 # ##################### KAFKA ###################
 
 
-@cli.group(name="kafka")
+@click.group(name="kafka")
 @click.pass_obj
 def kafka_group(ctx):
     """All actions related to Kafka operations"""
@@ -647,7 +649,7 @@ def describe_topic_records_cmd(ctx, topic_name):
 # ##################### UTILITIES ###################
 
 
-@cli.command()
+@click.command()
 @click.option(
     "--config-file", default="/config/migration_services.yaml", help="Path to config file"
 )
@@ -693,7 +695,7 @@ def completion(ctx, config_file, json, shell):
         ctx.exit(1)
 
 
-@cli.group(name="tuples")
+@click.group(name="tuples")
 @click.pass_obj
 def tuples_group(ctx):
     """ All commands related to tuples. """
@@ -714,6 +716,18 @@ def show(inputfile, outputfile):
 
 
 #################################################
+
+cli.add_command(cluster_group)
+cli.add_command(completion)
+
+if not DISABLE_LEGACY_COMMANDS:
+    cli.add_command(snapshot_group)
+    cli.add_command(backfill_group)
+    cli.add_command(replay_group)
+    cli.add_command(metadata_group)
+    cli.add_command(metrics_group)
+    cli.add_command(kafka_group)
+    cli.add_command(tuples_group)
 
 if __name__ == "__main__":
     main()

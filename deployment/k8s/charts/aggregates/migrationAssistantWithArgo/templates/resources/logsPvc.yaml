@@ -1,4 +1,6 @@
 # Only create PVC, if PVC with same name does not already exist
+# The fluent-bit chart is installed via the installer job (pre-install hook weight 0),
+# so this PVC must be created earlier (weight -2) to be available when fluent-bit starts.
 {{- if .Values.logs.sharedLogsVolume.enabled }}
 {{- $pvc := lookup "v1" "PersistentVolumeClaim" .Release.Namespace .Values.logs.sharedLogsVolume.name -}}
 {{- if not $pvc }}
@@ -7,6 +9,8 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ .Values.logs.sharedLogsVolume.name }}
   annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-2"
     "helm.sh/resource-policy": keep
 spec:
   accessModes:

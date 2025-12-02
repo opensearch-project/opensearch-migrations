@@ -6,3 +6,7 @@ cloudformation_templates:
     main_template: true
   - template: migration-assistant-for-amazon-opensearch-service-import-vpc.template
     main_template: true
+  - template: migration-assistant-for-amazon-opensearch-service-import-vpc-v3.template
+    main_template: true
+  - template: migration-assistant-for-amazon-opensearch-service-import-vpc-v3.template
+    main_template: true
