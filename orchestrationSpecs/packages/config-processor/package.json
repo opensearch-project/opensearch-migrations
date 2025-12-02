@@ -20,6 +20,7 @@
     "dev-initialize": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationInitializer.ts -- --etcd-endpoints http://localhost:2379 ",
     "dev-transform": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationConfigTransformer.ts",
     "bundle": "npm run build && node makeBundle.js",
+    "check-and-bundle": "npm run type-check && npm run test && npm run build && node makeBundle.js",
     "test": "jest --config ./jest.config.js"
   },
   "dependencies": {

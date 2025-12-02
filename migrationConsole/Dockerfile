@@ -85,6 +85,7 @@ WORKDIR /root
 COPY lib /root/lib
 
 # Remove any pre-existing .venv to ensure clean pipenv install
+# TODO - remove this, .venv's shouldn't be included in the build context
 RUN rm -rf /root/lib/console_link/.venv /root/lib/integ_test/.venv
 
 WORKDIR /root/lib/console_link
@@ -130,31 +131,28 @@ RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
     rm /tmp/setupVimSchemaChecker.sh
 
 ## TODO - activate this.  The workflow commands can't do critical steps without this
-#COPY nodeStaging/configProcessor /root/configProcessor
-#
-## Copy test workflow scripts and resources with same structure as configProcessor
-#COPY lib/console_link/tests/workflow-tests/resources/scripts /root/testConfigProcessor
-#RUN chmod +x /root/testConfigProcessor/*.sh
-#RUN chmod +x /root/configProcessor/*.sh
-#ENV WORKFLOW_SCHEMA_FILENAME=/root/.workflowUser.schema.json
-#ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
-#ENV NODEJS=node-22
-#RUN "$NODEJS" "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME"
-#RUN echo "# yaml-language-server: \$schema=$WORKFLOW_SCHEMA_FILENAME" > "${CONFIG_PROCESSOR_DIR}/sample.yaml" && \
-#    "$NODEJS" "$CONFIG_PROCESSOR_DIR" makeSample >> "${CONFIG_PROCESSOR_DIR}/sample.yaml"
-#
-## To use test workflows, flip the comments
-#
-##ENV CONFIG_PROCESSOR_DIR=/root/testConfigProcessor
-#
-## Once we're ready, we should replace the old workflows with the new ones.
-## Notice that the installWorkflows pulls from /root/workflows/templates -
-## so the target for the new workflows would either need to be /root/workflows/templates,
-## or the installation script would need to be updated.
-#
-## Here are the new workflows that are dormant but can be installed by users on the console
-#COPY nodeStaging/workflowTemplates /root/newWorkflowTemplates
-## Here are the original workflows that current integ tests are using.
+COPY nodeStaging/configProcessor /root/configProcessor
+
+RUN chmod +x /root/configProcessor/*.sh
+ENV WORKFLOW_SCHEMA_FILENAME=/root/.workflowUser.schema.json
+ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
+ENV NODEJS=node-22
+RUN "$NODEJS" "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME"
+RUN echo "# yaml-language-server: \$schema=$WORKFLOW_SCHEMA_FILENAME" > "${CONFIG_PROCESSOR_DIR}/sample.yaml" && \
+    "$NODEJS" "$CONFIG_PROCESSOR_DIR" makeSample >> "${CONFIG_PROCESSOR_DIR}/sample.yaml"
+
+# To use test workflows, flip the comments
+
+#ENV CONFIG_PROCESSOR_DIR=/root/testConfigProcessor
+
+# Once we're ready, we should replace the old workflows with the new ones.
+# Notice that the installWorkflows pulls from /root/workflows/templates -
+# so the target for the new workflows would either need to be /root/workflows/templates,
+# or the installation script would need to be updated.
+
+# Here are the new workflows that are dormant but can be installed by users on the console
+COPY nodeStaging/workflowTemplates /root/newWorkflowTemplates
+# Here are the original workflows that current integ tests are using.
 
 COPY workflows /root/workflows
 

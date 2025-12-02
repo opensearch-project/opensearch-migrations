@@ -17,7 +17,9 @@ See [README.md](README.md) for instructions that do NOT require minikube or any 
 
 If not already running:
 ```bash
-minikube start
+INSECURE_REGISTRY_CIDR="${INSECURE_REGISTRY_CIDR:-0.0.0.0/0}"
+minikube start \
+  --insecure-registry="${INSECURE_REGISTRY_CIDR}"
 ```
 
 ### 2. Deploy BuildKit using the helm chart
@@ -28,8 +30,7 @@ helm install buildkit ../deployment/k8s/charts/components/buildImages \
   --create-namespace \
   -n buildkit \
   --set skipBuildJob=true \
-  --set namespace=buildkit \
-  --set serviceAccountName=default
+  --set namespace=buildkit
 ```
 
 ### 3. Deploy a local Docker registry
@@ -45,7 +46,7 @@ kubectl apply -f docker-registry.yaml -n buildkit
 ```bash
 kubectl get pods -n buildkit
 
-# Wait for both pods to be Running
+echo Wait for both pods to be Running
 kubectl wait --for=condition=ready pod -l app=buildkitd -n buildkit --timeout=120s
 kubectl wait --for=condition=ready pod -l app=docker-registry -n buildkit --timeout=60s
 ```
@@ -61,11 +62,9 @@ docker-registry-xxxxxxxxxx-xxxxx   1/1     Running   0          20s
 
 Port forward both services to your local machine. You can run these in separate terminals or background them:
 ```bash
-# Port forward BuildKit (run in background)
-nohup kubectl port-forward -n buildkit svc/buildkitd 1234:1234 > /tmp/buildkit-forward.log 2>&1 &
-
-# Port forward Docker registry (run in background)
-nohup kubectl port-forward -n buildkit svc/docker-registry 5001:5000 > /tmp/registry-forward.log 2>&1 &
+echo Port forward BuildKit & Docker Registry (run in background)
+nohup kubectl port-forward -n buildkit svc/buildkitd 1234:1234 --address 0.0.0.0 > /tmp/buildkit-forward.log 2>&1 &
+nohup kubectl port-forward -n buildkit svc/docker-registry 5001:5000 --address 0.0.0.0 > /tmp/registry-forward.log 2>&1 &
 ```
 
 **Important**: Keep these port-forward processes running while building images. If they terminate, your builds will fail with connection errors.
@@ -74,11 +73,11 @@ nohup kubectl port-forward -n buildkit svc/docker-registry 5001:5000 > /tmp/regi
 
 Test that both services are accessible from your host:
 ```bash
-# Test registry (should return empty repositories list)
+echo Test registry (should return empty repositories list)
 curl http://localhost:5001/v2/_catalog
 # Expected output: {"repositories":[]}
 
-# Test BuildKit (will return HTTP/0.9 error - this is expected for gRPC services)
+echo Test BuildKit (will return HTTP/0.9 error - this is expected for gRPC services)
 curl http://localhost:1234
 # Expected output: curl: (1) Received HTTP/0.9 when not allowed
 ```
@@ -92,16 +91,16 @@ ps aux | grep port-forward
 
 Create a builder that connects to the BuildKit service in Minikube:
 ```bash
-# Remove any existing builder with this name
+echo Remove any existing builder with this name
 docker buildx rm local-remote-builder 2>/dev/null || true
 
-# Create the builder pointing to localhost:1234 (port-forwarded to Minikube BuildKit)
+echo Create the builder pointing to localhost:1234 (port-forwarded to Minikube BuildKit)
 docker buildx create --name local-remote-builder --driver remote tcp://localhost:1234
 
-# Set it as the active builder
+echo Set it as the active builder
 docker buildx use local-remote-builder
 
-# Bootstrap and verify connection
+echo Bootstrap and verify connection
 docker buildx inspect --bootstrap
 ```
 
@@ -123,7 +122,7 @@ The key indicators of success:
 
 Now you can build images using Gradle from your host machine:
 ```bash
-./gradlew buildImagesToRegistry
+../gradlew buildImagesToRegistry
 ```
 
 This will:
@@ -142,6 +141,33 @@ curl http://localhost:5001/v2/_catalog
 You should see a list of repositories like:
 ```json
 {"repositories":["migrations/traffic_replayer","migrations/capture_proxy_base","migrations/migration_console"]}
+```
+
+### 10. Using the registry with your local docker engine
+
+Make sure that docker engine's settings include.
+```
+{
+  "insecure-registries": [
+    "localhost:5001",
+    "host.docker.internal:5001"
+  ]
+}
+```
+
+To verify those settings, run `docker info`.  The following should be listed.
+```
+Insecure Registries:
+  host.docker.internal:5001
+  localhost:5001
+  ::1/128
+  127.0.0.0/8
+```
+
+To pull/run images, run 
+```bash
+docker pull host.docker.internal:5001/migrations/migration_console:latest
+docker run -it --rm host.docker.internal:5001/migrations/migration_console:latest /bin/bash
 ```
 
 ## Cleaning Up

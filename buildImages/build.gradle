@@ -44,7 +44,6 @@ def jibProjects = [
 ]
 
 def formatter = ImageRegistryFormatterFactory.getFormatter(rootProject.ext.buildKitRegistryEndpoint)
-def consoleBaseImage = formatter.getFullBaseImageIdentifier(rootProject.ext.buildKitRegistryEndpoint, "migrations", "elasticsearch_test_console", "latest")
 def buildKitProjects = [
         [
                 serviceName: "elasticsearchTestConsole",
@@ -69,19 +68,31 @@ def buildKitProjects = [
                 ]
         ],
         [
+                serviceName: "migrationConsoleBase",
+                contextDir: "migrationConsole/build/dockerContext",
+                imageName:  "migration_console_base",
+                imageTag:   "latest",
+                buildArgs: [
+                        BASE_IMAGE: formatter.getFullBaseImageIdentifier(rootProject.ext.buildKitRegistryEndpoint,
+                                "migrations", "elasticsearch_test_console", "latest")
+                ],
+                requiredDependencies: [
+                        ":migrationConsole:syncDockerBuildContext",
+                        "buildKit_elasticsearchTestConsole" // All buildKit projects are configured at the root
+                ]
+        ],
+        [
                 serviceName: "migrationConsole",
                 contextDir: "TrafficCapture/dockerSolution/build/docker/migration_console_staging",
                 imageName:  "migration_console",
                 imageTag:   "latest",
                 buildArgs: [
-                        BASE_IMAGE: consoleBaseImage
+                        BASE_IMAGE: formatter.getFullBaseImageIdentifier(rootProject.ext.buildKitRegistryEndpoint,
+                                "migrations", "migration_console_base", "latest")
                 ],
                 requiredDependencies: [
-                        ":migrationConsole:buildDockerImage_migrationConsoleBase",
                         ":TrafficCapture:dockerSolution:syncArtifact_migration_console_staging_noDockerBuild",
-                        "buildKit_elasticsearchTestConsole",
-                        ":TrafficCapture:dockerSolution:makeAndStageWorkflowTemplates",
-                        ":TrafficCapture:dockerSolution:buildAndStageConfigProcessor"
+                        "buildKit_migrationConsoleBase" // All buildKit projects are configured at the root
                 ]
         ],
         // Not required for main MA operations, but has been helpful for creating test scenarios

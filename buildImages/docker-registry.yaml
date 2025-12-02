@@ -40,4 +40,17 @@ spec:
               mountPath: /var/lib/registry
       volumes:
         - name: registry-data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: registry-pvc
+---
+# Add a PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
