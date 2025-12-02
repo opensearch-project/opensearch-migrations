@@ -120,8 +120,8 @@ def _get_basic_creds_secrets_in_config(secret_store: SecretStore, new_config: Wo
         raise click.ClickException(f"Invalidly named secret{'s' if len(invalid_secrets) > 0 else ''} found:"
                                    f" {invalid_secrets}")
     elif 'validSecrets' in result and (valid_secrets := result.get('validSecrets', [])):
-        valid_existing_secrets = list(filter(secret_store.secret_exists, valid_secrets))
-        return set(valid_existing_secrets), list(set(valid_secrets) - set(valid_existing_secrets))
+        valid_existing_resource_names = list(filter(secret_store.secret_exists, valid_secrets))
+        return set(valid_existing_resource_names), list(set(valid_secrets) - set(valid_existing_resource_names))
     else:
         return [], []
 
@@ -180,8 +180,8 @@ def _handle_stdin_edit(wf_config_store, secret_store, session_name: str):
                     f"of requests to clusters:\n  " + "\n  ".join(existing_secrets))
     if missing_secrets:
         raise click.ClickException(
-            f"Found {len(missing_secrets)} missing secret{'s' if len(missing_secrets) > 0 else ''} that must be created "
-            f"to make well-formed HTTP-Basic requests to clusters:\n  " +
+            f"Found {len(missing_secrets)} missing secret{'s' if len(missing_secrets) > 0 else ''} "
+            f"that must be created to make well-formed HTTP-Basic requests to clusters:\n  " +
             "\n  ".join(missing_secrets))
 
 

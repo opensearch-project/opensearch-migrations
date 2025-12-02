@@ -40,6 +40,7 @@ def agradle(*args):
 CONFIG_RE = re.compile(r"CONFIG_PROCESSOR_DIR=(.*)")
 NODE_RE = re.compile(r"NODEJS_BIN=(.*)")
 
+
 @pytest.fixture(scope="session", autouse=True)
 def ensure_config_processor_dir():
     """

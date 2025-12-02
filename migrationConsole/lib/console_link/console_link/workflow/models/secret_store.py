@@ -3,7 +3,7 @@
 import logging
 from typing import Optional, List, Dict, Set
 
-from kubernetes import client, config
+from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 from console_link.workflow.models.utils import load_k8s_config
