@@ -1,6 +1,7 @@
 import org.opensearch.migrations.common.CommonUtils
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 import com.github.gradle.node.npm.task.NpmTask
+import com.github.gradle.node.NodeExtension
 
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
@@ -62,9 +63,19 @@ tasks.register('buildAndStageConfigProcessor', NpmTask) {
     }
 }
 
+def buildAndStageConfigProcessorProvider = tasks.named("buildAndStageConfigProcessor")
+def nodeSetupProvider = tasks.named("nodeSetup")
+def nodeExt = extensions.getByType(NodeExtension)
+
 tasks.register("confirmConfigProcessorStagingPath") {
-    dependsOn tasks.named('buildAndStageConfigProcessor')
+    // make sure both bits of work are done
+    dependsOn(buildAndStageConfigProcessorProvider)
+    dependsOn(nodeSetupProvider)
+
     doLast {
+        def nodeDir = nodeExt.resolvedNodeDir.get().asFile
+        def nodeBin = new File(nodeDir, "bin/node")
+        println "NODEJS_BIN=${nodeBin.absolutePath}"
         println "CONFIG_PROCESSOR_DIR=${configProcessorStagingP.get().asFile.absolutePath}"
     }
 }

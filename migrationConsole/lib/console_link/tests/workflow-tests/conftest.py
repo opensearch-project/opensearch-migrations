@@ -38,18 +38,22 @@ def agradle(*args):
 
 
 CONFIG_RE = re.compile(r"CONFIG_PROCESSOR_DIR=(.*)")
+NODE_RE = re.compile(r"NODEJS_BIN=(.*)")
 
 @pytest.fixture(scope="session", autouse=True)
 def ensure_config_processor_dir():
     """
-    Ensures CONFIG_PROCESSOR_DIR is set.
+    Ensures CONFIG_PROCESSOR_DIR and NODEJS are set.
     If not set, runs the Gradle confirmConfigProcessorStagingPath task once
-    and extracts the value from its output.
+    and extracts the values from its output.
     """
-    if "CONFIG_PROCESSOR_DIR" in os.environ:
-        return  # already set externally
+    config_already_set = "CONFIG_PROCESSOR_DIR" in os.environ
+    node_already_set = "NODEJS" in os.environ
 
-    print("CONFIG_PROCESSOR_DIR not set — running Gradle task...")
+    if config_already_set and node_already_set:
+        return  # both already set externally
+
+    print("CONFIG_PROCESSOR_DIR or NODEJS not set — running Gradle task...")
 
     output = agradle(
         ":migrationConsole:confirmConfigProcessorStagingPath",
@@ -57,16 +61,22 @@ def ensure_config_processor_dir():
         "--console=plain"
     )
 
-    # Look for the `CONFIG_PROCESSOR_DIR=/path` line
-    match = CONFIG_RE.search(output)
-    if not match:
-        raise RuntimeError(
-            "Gradle did not output CONFIG_PROCESSOR_DIR=. "
-            f"Received:\n{output}"
-        )
+    # Only set CONFIG_PROCESSOR_DIR if not already set
+    if not config_already_set:
+        config_match = CONFIG_RE.search(output)
+        if not config_match:
+            raise ValueError(f"Gradle did not output CONFIG_PROCESSOR_DIR=. Received:\n{output}")
+        config_path = config_match.group(1).strip()
+        os.environ["CONFIG_PROCESSOR_DIR"] = config_path
+        print(f"CONFIG_PROCESSOR_DIR set to: {config_path}")
 
-    path = match.group(1).strip()
-
-    # Export for the remainder of the pytest session
-    os.environ["CONFIG_PROCESSOR_DIR"] = path
-    print(f"CONFIG_PROCESSOR_DIR set to: {path}")
+    # Only set NODEJS if not already set
+    if not node_already_set:
+        node_match = NODE_RE.search(output)
+        if not node_match:
+            raise ValueError(f"Gradle did not output NODEJS=. Received:\n{output}")
+        node_path = node_match.group(1).strip()
+        os.environ["NODEJS"] = node_path
+        os.environ["PATH"] = f"{node_path}:{os.environ.get('PATH', '')}"
+        print(f"NODEJS set to: {node_path}")
+        print(f"Node.js added to PATH")
