@@ -71,7 +71,7 @@ class Context(object):
             return
         self.config_file = config_file
         try:
-            self.env = Environment(config_file=config_file)
+            self.env = Environment(config_file=config_file, allow_empty=allow_empty_workflow_config)
         except Exception as e:
             raise click.ClickException(str(e))
         self.json = False

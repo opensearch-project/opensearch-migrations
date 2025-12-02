@@ -53,7 +53,8 @@ class Environment:
     client_options: Optional[ClientOptions] = None
     config: Dict
 
-    def __init__(self, config: Optional[Dict] = None, config_file: Optional[Union[str, Path]] = None):
+    def __init__(self, config: Optional[Dict] = None, config_file: Optional[Union[str, Path]] = None,
+                 allow_empty: bool = False):
         """
         Initialize the environment either from a configuration file or a direct configuration object.
 
@@ -62,9 +63,15 @@ class Environment:
         """
         if config_file:
             logger.info(f"Loading config file: {config_file}")
-            with open(config_file) as f:
-                self.config = yaml.safe_load(f)
+            try:
+                with open(config_file) as f:
+                    self.config = yaml.safe_load(f)
                 logger.info(f"Loaded config file: {self.config}")
+            except Exception:
+                if allow_empty:
+                    self.config = {}  # or {} or whatever default you want
+                else:
+                    raise
         elif isinstance(config, Dict):
             self.config = config
             logger.info(f"Using provided config: {self.config}")

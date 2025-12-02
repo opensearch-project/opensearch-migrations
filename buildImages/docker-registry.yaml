@@ -1,3 +1,10 @@
+# Service Account (no permissions)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: docker-registry
+
+---
 # Docker registry service
 apiVersion: v1
 kind: Service
@@ -29,6 +36,14 @@ spec:
       labels:
         app: docker-registry
     spec:
+      serviceAccountName: docker-registry
+      automountServiceAccountToken: false  # Don't even mount the token
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: registry
           image: registry:2
@@ -38,12 +53,39 @@ spec:
           volumeMounts:
             - name: registry-data
               mountPath: /var/lib/registry
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 2000Mi
+              ephemeral-storage: 1Gi
+            requests:
+              cpu: 500m
+              memory: 1000Mi
+              ephemeral-storage: 100Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
       volumes:
         - name: registry-data
           persistentVolumeClaim:
             claimName: registry-pvc
+
 ---
-# Add a PVC
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

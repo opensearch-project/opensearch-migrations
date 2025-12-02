@@ -67,6 +67,26 @@ RUN kubectl completion bash > /etc/bash_completion.d/kubectl && \
 
 WORKDIR /root
 
+# Install Node.js for config processor and workflow template creation
+# NPM is to setup the schema checking that coc uses
+RUN dnf install -y  \
+      --setopt=install_weak_deps=False \
+      --setopt=tsflags=nodocs \
+      --setopt=keepcache=False \
+      --setopt=plugins=0 \
+      --setopt=logfilelevel=0 \
+        nodejs22 \
+        nodejs22-npm \
+        bash-completion \
+        && \
+        dnf clean all && \
+        rm -rf /var/cache/dnf
+
+COPY setupVimSchemaChecker.sh /tmp/setupVimSchemaChecker.sh
+RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
+    /tmp/setupVimSchemaChecker.sh && \
+    rm /tmp/setupVimSchemaChecker.sh
+
 # Copy migration console scripts and configs
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
@@ -84,10 +104,6 @@ RUN chmod +x /root/start-console.sh
 WORKDIR /root
 COPY lib /root/lib
 
-# Remove any pre-existing .venv to ensure clean pipenv install
-# TODO - remove this, .venv's shouldn't be included in the build context
-RUN rm -rf /root/lib/console_link/.venv /root/lib/integ_test/.venv
-
 WORKDIR /root/lib/console_link
 RUN pipenv install --deploy
 WORKDIR /root/lib/integ_test
@@ -99,38 +115,6 @@ WORKDIR /root/cluster_tools
 RUN pipenv install
 WORKDIR /root
 
-# Install Node.js for config processor and workflow template creation
-# NPM is to setup the schema checking that coc uses
-RUN dnf install -y  \
-      --setopt=install_weak_deps=False \
-      --setopt=tsflags=nodocs \
-      --setopt=keepcache=False \
-      --setopt=plugins=0 \
-      --setopt=logfilelevel=0 \
-        nodejs22 \
-        nodejs22-npm \
-        bash-completion \
-        && \
-        dnf clean all && \
-        rm -rf /var/cache/dnf
-
-# Console setup bash completion and venv for interactive access
-RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh && \
-    echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
-    echo '. /etc/profile.d/venv.sh' >> ~/.bashrc && \
-    echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc && \
-    echo 'eval "$(register-python-argcomplete cluster_tools)"' >> ~/.bashrc && \
-    echo 'source /.venv/bin/activate' >> ~/.bashrc && \
-    echo 'console --config-file=/root/lib/console_link/services.yaml completion bash > /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
-    echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
-    echo 'PS1="(\\t) \\[\\e[92m\\]migration-console \\[\\e[0m\\](\\w) -> "'>> ~/.bashrc
-
-COPY setupVimSchemaChecker.sh /tmp/setupVimSchemaChecker.sh
-RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
-    /tmp/setupVimSchemaChecker.sh && \
-    rm /tmp/setupVimSchemaChecker.sh
-
-## TODO - activate this.  The workflow commands can't do critical steps without this
 COPY nodeStaging/configProcessor /root/configProcessor
 
 RUN chmod +x /root/configProcessor/*.sh
@@ -152,6 +136,18 @@ RUN "$NODEJS" "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME" &
 COPY nodeStaging/workflowTemplates /root/newWorkflowTemplates
 # Here are the original workflows that current integ tests are using.
 COPY workflows /root/workflows
+
+
+# Console setup bash completion and venv for interactive access
+RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh && \
+    echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
+    echo '. /etc/profile.d/venv.sh' >> ~/.bashrc && \
+    echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc && \
+    echo 'eval "$(register-python-argcomplete cluster_tools)"' >> ~/.bashrc && \
+    echo 'source /.venv/bin/activate' >> ~/.bashrc && \
+    echo 'console completion bash 2> /dev/null > /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
+    echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
+    echo 'PS1="(\\t) \\[\\e[92m\\]migration-console \\[\\e[0m\\](\\w) -> "'>> ~/.bashrc
 
 # Set ENV to control startup script in /bin/sh mode
 ENV ENV=/root/.bashrc
