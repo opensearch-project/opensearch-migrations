@@ -137,13 +137,11 @@ RUN chmod +x /root/configProcessor/*.sh
 ENV WORKFLOW_SCHEMA_FILENAME=/root/.workflowUser.schema.json
 ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
 ENV NODEJS=node-22
-RUN "$NODEJS" "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME"
-RUN echo "# yaml-language-server: \$schema=$WORKFLOW_SCHEMA_FILENAME" > "${CONFIG_PROCESSOR_DIR}/sample.yaml" && \
+RUN "$NODEJS" "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME" && \
+    echo "# yaml-language-server: \$schema=$WORKFLOW_SCHEMA_FILENAME" > "${CONFIG_PROCESSOR_DIR}/sample.yaml" && \
     "$NODEJS" "$CONFIG_PROCESSOR_DIR" makeSample >> "${CONFIG_PROCESSOR_DIR}/sample.yaml"
 
 # To use test workflows, flip the comments
-
-#ENV CONFIG_PROCESSOR_DIR=/root/testConfigProcessor
 
 # Once we're ready, we should replace the old workflows with the new ones.
 # Notice that the installWorkflows pulls from /root/workflows/templates -
@@ -153,7 +151,6 @@ RUN echo "# yaml-language-server: \$schema=$WORKFLOW_SCHEMA_FILENAME" > "${CONFI
 # Here are the new workflows that are dormant but can be installed by users on the console
 COPY nodeStaging/workflowTemplates /root/newWorkflowTemplates
 # Here are the original workflows that current integ tests are using.
-
 COPY workflows /root/workflows
 
 # Set ENV to control startup script in /bin/sh mode

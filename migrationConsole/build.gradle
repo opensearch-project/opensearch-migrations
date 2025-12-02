@@ -62,6 +62,13 @@ tasks.register('buildAndStageConfigProcessor', NpmTask) {
     }
 }
 
+tasks.register("confirmConfigProcessorStagingPath") {
+    dependsOn tasks.named('buildAndStageConfigProcessor')
+    doLast {
+        println "CONFIG_PROCESSOR_DIR=${configProcessorStagingP.get().asFile.absolutePath}"
+    }
+}
+
 tasks.register('syncDockerBuildContext', Sync) {
     into layout.buildDirectory.dir("dockerContext")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE

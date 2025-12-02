@@ -440,7 +440,6 @@ gradle.projectsEvaluated {
         subproject.tasks.matching { task ->
             task.name == 'test' && !(task instanceof Test)
         }.configureEach { task ->
-            println "adding task named 'test' = ${task}"
             sharedProcessTestsTasks.add(task)
         }
     }

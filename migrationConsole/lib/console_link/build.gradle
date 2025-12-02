@@ -1,3 +1,13 @@
+/**
+ * This gradle file is purely to facilitate building an openapi spec.
+ * The Dockerfile does NOT create a final image used by the MA runtime,
+ * but it is rather a build step to codify how we're extracting schema information
+ * for downstream steps - specifically to create network clients.
+ *
+ * To build the console_link code and its dependencies into the migration_console
+ * image, use the gradle project further up the tree.
+ */
+
 plugins {
     id 'base'
 }
