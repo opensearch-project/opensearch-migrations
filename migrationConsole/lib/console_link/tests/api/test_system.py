@@ -24,7 +24,7 @@ def test_healthcheck_ok():
     failed_check = {
         "status_code": 503
     }
-    
+
     # This API depends on the host configuration matching, allowing for getting a 503 on dev machines
     expected_result = failed_check
     if os.path.exists("/shared-logs-output"):

@@ -22,7 +22,7 @@ def example_session_with_clusters():
     """Create an example session with both source and target clusters for testing"""
     session = MagicMock(spec=Session)
     session.env = MagicMock()
-    
+
     # Mock source cluster with no_auth
     source_cluster = MagicMock(spec=Cluster)
     source_cluster.endpoint = "http://source-cluster:9200"
@@ -30,7 +30,7 @@ def example_session_with_clusters():
     source_cluster.auth_details = None
     source_cluster.allow_insecure = True
     source_cluster.version = "2.7.0"
-    
+
     # Mock target cluster with basic_auth
     target_cluster = MagicMock(spec=Cluster)
     target_cluster.endpoint = "https://target-cluster:9200"
@@ -41,10 +41,10 @@ def example_session_with_clusters():
     target_cluster.allow_insecure = False
     target_cluster.version = "2.9.0"
     target_cluster.get_basic_auth_details.return_value = MagicMock(username="admin", password="admin")
-    
+
     session.env.source_cluster = source_cluster
     session.env.target_cluster = target_cluster
-    
+
     return session
 
 
@@ -53,7 +53,7 @@ def example_session_with_basic_auth_arn():
     """Create an example session with a source cluster using basic_auth_arn for testing"""
     session = MagicMock(spec=Session)
     session.env = MagicMock()
-    
+
     # Mock source cluster with basic_auth_arn
     source_cluster = MagicMock(spec=Cluster)
     source_cluster.endpoint = "https://source-cluster:9200"
@@ -64,11 +64,11 @@ def example_session_with_basic_auth_arn():
     }
     source_cluster.allow_insecure = False
     source_cluster.version = "2.7.0"
-    
+
     # No target cluster in this session
     session.env.source_cluster = source_cluster
     session.env.target_cluster = None
-    
+
     return session
 
 
@@ -77,7 +77,7 @@ def example_session_with_sigv4():
     """Create an example session with a source cluster using sigv4 auth for testing"""
     session = MagicMock(spec=Session)
     session.env = MagicMock()
-    
+
     # Mock source cluster with sigv4
     source_cluster = MagicMock(spec=Cluster)
     source_cluster.endpoint = "https://source-cluster.amazonaws.com"
@@ -86,20 +86,20 @@ def example_session_with_sigv4():
     source_cluster.allow_insecure = False
     source_cluster.version = None
     source_cluster._get_sigv4_details.return_value = ("es", "us-west-2")
-    
+
     # No target cluster in this session
     session.env.source_cluster = source_cluster
     session.env.target_cluster = None
-    
+
     return session
 
 
 def test_get_source_cluster_no_auth(mock_http_safe_find_session, example_session_with_clusters):
     """Test getting source cluster with no_auth configuration"""
     mock_http_safe_find_session.return_value = example_session_with_clusters
-    
+
     response = client.get("/sessions/test-session/clusters/source")
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["endpoint"] == "http://source-cluster:9200"
@@ -112,9 +112,9 @@ def test_get_source_cluster_no_auth(mock_http_safe_find_session, example_session
 def test_get_target_cluster_basic_auth(mock_http_safe_find_session, example_session_with_clusters):
     """Test getting target cluster with basic_auth configuration"""
     mock_http_safe_find_session.return_value = example_session_with_clusters
-    
+
     response = client.get("/sessions/test-session/clusters/target")
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["endpoint"] == "https://target-cluster:9200"
@@ -128,9 +128,9 @@ def test_get_target_cluster_basic_auth(mock_http_safe_find_session, example_sess
 def test_get_source_cluster_basic_auth_arn(mock_http_safe_find_session, example_session_with_basic_auth_arn):
     """Test getting source cluster with basic_auth_arn configuration"""
     mock_http_safe_find_session.return_value = example_session_with_basic_auth_arn
-    
+
     response = client.get("/sessions/test-session/clusters/source")
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["endpoint"] == "https://source-cluster:9200"
@@ -143,9 +143,9 @@ def test_get_source_cluster_basic_auth_arn(mock_http_safe_find_session, example_
 def test_get_source_cluster_sigv4(mock_http_safe_find_session, example_session_with_sigv4):
     """Test getting source cluster with sigv4 auth configuration"""
     mock_http_safe_find_session.return_value = example_session_with_sigv4
-    
+
     response = client.get("/sessions/test-session/clusters/source")
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["endpoint"] == "https://source-cluster.amazonaws.com"

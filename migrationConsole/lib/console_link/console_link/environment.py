@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 class WorkflowConfigException(Exception):
     """Workflow config object does not provide valid information"""
+
     def __init__(self, message):
         super().__init__(message)
 
@@ -151,7 +152,7 @@ class Environment:
             raise WorkflowConfigException(
                 f"A workflow config can't be found for namespace `{namespace}` and session name `{session_name}`."
             )
-        
+
         target_cluster = cls._get_cluster_from_workflow_config(config, "targetClusters", "target cluster")
         source_cluster = cls._get_cluster_from_workflow_config(config, "sourceClusters", "source cluster")
 
@@ -168,9 +169,9 @@ class Environment:
         except (KeyError, AttributeError, StopIteration):
             logger.warning(f"No {cluster_label} is defined in the workflow config.")
             return None
-        
+
         logger.info(f"Using {cluster_label}: {cluster_name}")
-        
+
         if cluster_config:
             try:
                 return Cluster(config=map_cluster_from_workflow_config(cluster_config))

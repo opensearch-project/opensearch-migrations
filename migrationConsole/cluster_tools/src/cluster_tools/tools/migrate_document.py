@@ -93,10 +93,10 @@ def identify_fields_to_chunk(doc: Dict[str, Any], max_request_size: int) -> List
         # Calculate size with this field removed
         working_doc[field_name] = ""
         new_size = calculate_document_size(working_doc)
-        
+
         # Calculate how much size was reduced
         current_size = new_size
-        
+
         # Add field to chunking list
         fields_to_chunk.append((field_name, field_value))
 
@@ -181,7 +181,7 @@ def verify_migration(env: Environment, src_index: str, src_id: str,
         # Get source document if not provided
         if src_source is None:
             src_source = get_document_source(env, src_index, src_id, src_type)
-            
+
         # Get target document
         dst_source = get_document_source(env, dst_index, dst_id, DST_CLUSTER)
 

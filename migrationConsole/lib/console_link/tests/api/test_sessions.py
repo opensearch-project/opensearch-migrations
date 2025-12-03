@@ -14,12 +14,12 @@ client = TestClient(app)
 def mock_db():
     """Fixture to mock the database operations"""
     with patch("console_link.db.session_db.existence_check") as existence_check, \
-         patch("console_link.db.session_db.find_session") as find_session, \
-         patch("console_link.db.session_db.all_sessions") as all_sessions, \
-         patch("console_link.db.session_db.create_session") as create_session, \
-         patch("console_link.db.session_db.update_session") as update_session, \
-         patch("console_link.db.session_db.delete_session") as delete_session:
-        
+            patch("console_link.db.session_db.find_session") as find_session, \
+            patch("console_link.db.session_db.all_sessions") as all_sessions, \
+            patch("console_link.db.session_db.create_session") as create_session, \
+            patch("console_link.db.session_db.update_session") as update_session, \
+            patch("console_link.db.session_db.delete_session") as delete_session:
+
         # Bundle them into a mock namespace for convenience
         db_mocks = MagicMock()
         db_mocks.existence_check = existence_check
@@ -67,7 +67,7 @@ def example_session():
 def test_list_sessions(mock_db, example_session):
     """Test listing all sessions"""
     mock_db.all_sessions.return_value = [example_session, example_session]
-    
+
     response = client.get("/sessions/")
     assert response.status_code == 200
     assert len(response.json()) == 2
@@ -78,7 +78,7 @@ def test_get_session(mock_db, example_session):
     """Test getting a single session"""
     mock_db.find_session.return_value = example_session
     mock_db.existence_check.return_value = example_session
-    
+
     response = client.get("/sessions/test-session")
     assert response.status_code == 200
     assert response.json()["name"] == "test-session"
@@ -89,7 +89,7 @@ def test_get_session(mock_db, example_session):
 def test_get_session_not_found(mock_db):
     """Test getting a session that doesn't exist"""
     mock_db.existence_check.side_effect = SessionNotFound
-    
+
     response = client.get("/sessions/nonexistent")
     assert response.status_code == 404
     assert response.json()["detail"] == "Session not found."
@@ -104,7 +104,7 @@ def test_create_session(mock_db, mock_env):
         "/sessions/",
         json={"name": "newSession"}
     )
-    
+
     assert response.status_code == 201
     mock_env.assert_called_once_with(config={})
 
@@ -113,12 +113,12 @@ def test_create_session_already_exists(mock_db, mock_env):
     """Test creating a session that already exists"""
     # Session already exists
     mock_db.create_session.side_effect = SessionAlreadyExists
-    
+
     response = client.post(
         "/sessions/",
         json={"name": "existing-session"}
     )
-    
+
     assert response.status_code == 409
     assert response.json()["detail"] == "Session already exists."
     mock_env.assert_called_once_with(config={})
@@ -134,7 +134,7 @@ def test_update_session(mock_db, example_session):
         "/sessions/test-session",
         json=example_session.model_dump()
     )
-    
+
     assert response.status_code == 200
     mock_db.update_session.assert_called_once()
     assert response.json()["name"] == "test-session"
@@ -146,9 +146,9 @@ def test_delete_session(mock_db):
     """Test deleting a session"""
     # Session exists
     mock_db.delete_session.return_value = None
-    
+
     response = client.delete("/sessions/test-session")
-    
+
     assert response.status_code == 200
     assert response.json()["detail"] == "Session 'test-session' deleted."
     mock_db.delete_session.assert_called_once()
@@ -158,8 +158,8 @@ def test_delete_session_not_found(mock_db):
     """Test deleting a session that doesn't exist"""
     # Session doesn't exist
     mock_db.delete_session.side_effect = SessionNotFound()
-    
+
     response = client.delete("/sessions/nonexistent")
-    
+
     assert response.status_code == 404
     assert response.json()["detail"] == "Session not found."

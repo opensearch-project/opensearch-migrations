@@ -119,19 +119,19 @@ class WorkingStateDoc:
 def create_test_documents(cluster: Cluster):
     """
     Create test documents for backfill testing.
-    
+
     This function creates different types of test documents:
     1. Completed documents - documents that have been processed
     2. In-progress documents - documents that are currently being processed
     3. Unclaimed documents - documents that are waiting to be processed
     4. Successor documents - documents that have successors
-    
+
     Args:
         cluster: The cluster to create documents in
     """
     docs_to_create: List[WorkingStateDoc] = []
     index_counter = 0
-    
+
     # Create completed documents
     for i in range(COMPLETED_DOC_COUNT):
         index_counter += 1
@@ -174,7 +174,7 @@ def create_test_documents(cluster: Cluster):
     # Create successor documents
     index_counter += 1
     successor_index = f"index{index_counter}"
-    
+
     # Add document with successor
     docs_to_create.append(WorkingStateDoc(
         index=successor_index,
