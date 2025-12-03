@@ -53,7 +53,6 @@ tasks.register('buildAndStageConfigProcessor', NpmTask) {
     workingDir = configProcessorP.asFile
     args = ['run', 'check-and-bundle', '--', configProcessorStagingP.get().asFile.absolutePath]
     dependsOn installDependencies
-    mustRunAfter 'makeAndStageWorkflowTemplates'
 
     inputs.dir(configProcessorP.dir("src"))
     inputs.file(configProcessorP.file("makeBundle.js"))
