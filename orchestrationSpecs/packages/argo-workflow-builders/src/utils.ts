@@ -1,9 +1,6 @@
-import {AllowLiteralOrExpression, BaseExpression, expr} from "./models/expression";
-import {z} from "zod";
-import {ConfigMapKeySelector, defineParam, defineRequiredParam, InputParamDef} from "./models/parameterSchemas";
 import {PlainObject} from "./models/plainObject";
-import {TypeToken} from "./models/sharedTypes";
 import {ExpressionOrConfigMapValue} from "./models/workflowTypes";
+import {stringify as toYaml, Scalar} from "yaml";
 
 export type TypescriptError<Message extends string> = {
     readonly __error: Message;
@@ -100,4 +97,27 @@ export function inputsToEnvVarsList<T extends Record<string, ExpressionOrConfigM
     envVarDecorator: {prefix: string, suffix: string}
 ) {
     return Object.entries(inputsToEnvVars(inputs, envVarDecorator)).map(([name, value]) => ({name, value}));
+}
+
+export function toSafeYamlOutput(workflowConfig: any) {
+    return toYaml(workflowConfig,
+        (k, v) => {
+            if (typeof v === 'string') {
+                // Quote strings that could be misinterpreted as booleans
+                const looksLikeBoolean =
+                    ['OFF', 'ON', 'YES', 'NO', 'TRUE', 'FALSE', 'Y', 'N'].includes(v.toUpperCase());
+                const looksLikeNumber = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(v) ||
+                    /^0[xX][0-9a-fA-F]+$/.test(v) ||  // hex
+                    /^0[oO][0-7]+$/.test(v);           // octal
+
+                if (looksLikeBoolean || looksLikeNumber) {
+                    const scalar = new Scalar(v);
+                    scalar.type = 'QUOTE_DOUBLE';
+                    return scalar;
+                }
+            }
+            return v;
+        },
+        {lineWidth: 0}
+    );
 }
