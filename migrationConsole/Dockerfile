@@ -67,37 +67,6 @@ RUN kubectl completion bash > /etc/bash_completion.d/kubectl && \
 
 WORKDIR /root
 
-# Copy migration console scripts and configs
-COPY msk-iam-auth.properties /root/kafka-tools/aws
-COPY kafkaCmdRef.md /root/kafka-tools
-COPY kafkaExport.sh /root/kafka-tools
-RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
-
-COPY loadServicesFromParameterStore.sh /root/
-RUN chmod ug+x /root/loadServicesFromParameterStore.sh
-
-COPY start-console.sh /root/
-RUN chmod +x /root/start-console.sh
-
-# Copy Python libraries and install dependencies  
-# Note: .dockerignore should exclude .venv, but we ensure clean install
-WORKDIR /root
-COPY lib /root/lib
-
-# Remove any pre-existing .venv to ensure clean pipenv install
-RUN rm -rf /root/lib/console_link/.venv /root/lib/integ_test/.venv
-
-WORKDIR /root/lib/console_link
-RUN pipenv install --deploy
-WORKDIR /root/lib/integ_test
-RUN pipenv install --deploy
-
-COPY cluster_tools /root/cluster_tools
-RUN rm -rf /root/cluster_tools/.venv
-WORKDIR /root/cluster_tools
-RUN pipenv install
-WORKDIR /root
-
 # Install Node.js for config processor and workflow template creation
 # NPM is to setup the schema checking that coc uses
 RUN dnf install -y  \
@@ -113,6 +82,62 @@ RUN dnf install -y  \
         dnf clean all && \
         rm -rf /var/cache/dnf
 
+COPY setupVimSchemaChecker.sh /tmp/setupVimSchemaChecker.sh
+RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
+    /tmp/setupVimSchemaChecker.sh && \
+    rm /tmp/setupVimSchemaChecker.sh
+
+# Copy migration console scripts and configs
+COPY msk-iam-auth.properties /root/kafka-tools/aws
+COPY kafkaCmdRef.md /root/kafka-tools
+COPY kafkaExport.sh /root/kafka-tools
+RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
+
+COPY loadServicesFromParameterStore.sh /root/
+RUN chmod ug+x /root/loadServicesFromParameterStore.sh
+
+COPY start-console.sh /root/
+RUN chmod +x /root/start-console.sh
+
+# Copy Python libraries and install dependencies
+# Note: .dockerignore should exclude .venv, but we ensure clean install
+WORKDIR /root
+COPY lib /root/lib
+
+WORKDIR /root/lib/console_link
+RUN pipenv install --deploy
+WORKDIR /root/lib/integ_test
+RUN pipenv install --deploy
+
+COPY cluster_tools /root/cluster_tools
+RUN rm -rf /root/cluster_tools/.venv
+WORKDIR /root/cluster_tools
+RUN pipenv install
+WORKDIR /root
+
+COPY nodeStaging/configProcessor /root/configProcessor
+
+RUN chmod +x /root/configProcessor/*.sh
+ENV WORKFLOW_SCHEMA_FILENAME=/root/.workflowUser.schema.json
+ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
+ENV NODEJS=node-22
+RUN "$NODEJS" "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME" && \
+    echo "# yaml-language-server: \$schema=$WORKFLOW_SCHEMA_FILENAME" > "${CONFIG_PROCESSOR_DIR}/sample.yaml" && \
+    "$NODEJS" "$CONFIG_PROCESSOR_DIR" makeSample >> "${CONFIG_PROCESSOR_DIR}/sample.yaml"
+
+# To use test workflows, flip the comments
+
+# Once we're ready, we should replace the old workflows with the new ones.
+# Notice that the installWorkflows pulls from /root/workflows/templates -
+# so the target for the new workflows would either need to be /root/workflows/templates,
+# or the installation script would need to be updated.
+
+# Here are the new workflows that are dormant but can be installed by users on the console
+COPY nodeStaging/workflowTemplates /root/newWorkflowTemplates
+# Here are the original workflows that current integ tests are using.
+COPY workflows /root/workflows
+
+
 # Console setup bash completion and venv for interactive access
 RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh && \
     echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
@@ -120,17 +145,9 @@ RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh && \
     echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc && \
     echo 'eval "$(register-python-argcomplete cluster_tools)"' >> ~/.bashrc && \
     echo 'source /.venv/bin/activate' >> ~/.bashrc && \
-    echo 'console --config-file=/root/lib/console_link/services.yaml completion bash > /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
+    echo 'console completion bash 2> /dev/null > /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
     echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\\t) \\[\\e[92m\\]migration-console \\[\\e[0m\\](\\w) -> "'>> ~/.bashrc
-
-COPY setupVimSchemaChecker.sh /tmp/setupVimSchemaChecker.sh
-RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
-    /tmp/setupVimSchemaChecker.sh && \
-    rm /tmp/setupVimSchemaChecker.sh
-
-# Copy workflows
-COPY workflows /root/workflows
 
 # Set ENV to control startup script in /bin/sh mode
 ENV ENV=/root/.bashrc

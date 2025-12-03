@@ -17,8 +17,11 @@ class TestScriptRunner:
         runner = ScriptRunner()
         assert runner.script_dir.exists()
 
-    def test_get_sample_config(self):
+    def test_get_sample_config(self, monkeypatch):
         """Test getting sample configuration."""
+        scripts_dir = Path(__file__).parent / "resources" / "scripts"
+        monkeypatch.setenv("CONFIG_PROCESSOR_DIR", str(scripts_dir))
+
         runner = ScriptRunner()
         sample = runner.get_sample_config()
 

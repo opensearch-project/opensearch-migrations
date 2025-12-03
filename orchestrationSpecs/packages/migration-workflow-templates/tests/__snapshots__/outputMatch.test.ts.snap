@@ -396,48 +396,6 @@ exports[`test workflow template renderings capture-replay 1`] = `
                 "template": "createdeploymentfromconfig",
               },
             },
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "sourceConfig",
-                    "value": "{{inputs.parameters.sourceConfig}}",
-                  },
-                  {
-                    "name": "targetConfig",
-                    "value": "{{inputs.parameters.targetConfig}}",
-                  },
-                  {
-                    "name": "name",
-                    "value": "{{='diagnostic-console-'+inputs.parameters.sessionName}}",
-                  },
-                  {
-                    "name": "command",
-                    "value": "tail -f /dev/null",
-                  },
-                  {
-                    "name": "kafkaInfo",
-                    "value": "{{=toJSON(sprig.dict("broker_endpoints", tasks.getBrokersList.outputs.parameters.bootstrapServers, "standard", ''))}}",
-                  },
-                ],
-              },
-              "dependencies": [
-                "getBrokersList",
-              ],
-              "name": "runMigrationConsole",
-              "templateRef": {
-                "name": "migration-console",
-                "template": "deployconsole",
-              },
-            },
           ],
         },
         "inputs": {
@@ -1188,7 +1146,7 @@ spec:
                   key: password
                   optional: true
             - name: FAILED_REQUESTS_LOGGER_LEVEL
-              value: OFF
+              value: "OFF"
             - name: CONSOLE_LOG_FORMAT
               value: json
             - name: JAVA_OPTS
@@ -2593,7 +2551,7 @@ jq 'def normalizeAuthConfig:
     if (.authConfig | has("basic")) then
       .basic_auth = (.authConfig.basic | 
         if has("secretName") then
-          del(.secretName)
+          .k8s_secret_name = .secretName | del(.secretName)
         else
           .
         end)
@@ -2664,6 +2622,7 @@ source /.venv/bin/activate
 
 echo file dump
 echo ---
+export MIGRATION_USE_SERVICES_YAML_CONFIG=true
 cat /config/migration_services.yaml
 echo ---
 
@@ -2757,84 +2716,6 @@ echo ---
               "name": "command",
             },
             {
-              "name": "configContents",
-            },
-            {
-              "name": "name",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "deployconsolewithconfig",
-        "outputs": {
-          "parameters": [
-            {
-              "name": "deploymentName",
-              "valueFrom": {
-                "path": "{.metadata.name}",
-              },
-            },
-          ],
-        },
-        "resource": {
-          "action": "create",
-          "manifest": "apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: "{{inputs.parameters.name}}"
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: user-environment
-  template:
-    metadata:
-      labels:
-        app: user-environment
-    spec:
-      containers:
-        - name: main
-          image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
-          imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-          resources:
-            limits:
-              cpu: 1000m
-              memory: 2000Mi
-            requests:
-              cpu: 500m
-              memory: 2000Mi
-          command:
-            - /bin/sh
-            - -c
-            - |-
-              set -e -x
-
-              base64 -d > /config/migration_services.yaml << EOF
-              [object Object]EOF
-              . /etc/profile.d/venv.sh
-              source /.venv/bin/activate
-              echo file dump
-              echo ---
-              cat /config/migration_services.yaml
-              echo ---
-              [object Object]
-",
-          "setOwnerReference": true,
-          "successCondition": "status.availableReplicas > 0",
-        },
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "command",
-            },
-            {
               "description": "Snapshot configuration information (JSON)",
               "name": "kafkaInfo",
               "value": "",
@@ -2917,113 +2798,6 @@ spec:
               },
               "name": "runConsoleWithConfig",
               "template": "runmigrationcommand",
-            },
-          ],
-        ],
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "command",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-            {
-              "description": "Snapshot configuration information (JSON)",
-              "name": "kafkaInfo",
-              "value": "",
-            },
-            {
-              "description": "Source cluster configuration (JSON)",
-              "name": "sourceConfig",
-              "value": "",
-            },
-            {
-              "description": "Target cluster configuration (JSON)",
-              "name": "targetConfig",
-              "value": "",
-            },
-            {
-              "description": "Snapshot configuration information (JSON)",
-              "name": "snapshotConfig",
-              "value": "",
-            },
-            {
-              "name": "name",
-            },
-          ],
-        },
-        "name": "deployconsole",
-        "outputs": {
-          "parameters": [
-            {
-              "name": "deploymentName",
-              "valueFrom": {
-                "expression": "steps.getConsoleConfig.outputs.parameters.configContents",
-              },
-            },
-          ],
-        },
-        "steps": [
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "kafkaInfo",
-                    "value": "{{inputs.parameters.kafkaInfo}}",
-                  },
-                  {
-                    "name": "sourceConfig",
-                    "value": "{{inputs.parameters.sourceConfig}}",
-                  },
-                  {
-                    "name": "targetConfig",
-                    "value": "{{inputs.parameters.targetConfig}}",
-                  },
-                  {
-                    "name": "snapshotConfig",
-                    "value": "{{inputs.parameters.snapshotConfig}}",
-                  },
-                ],
-              },
-              "name": "getConsoleConfig",
-              "template": "getconsoleconfig",
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "command",
-                    "value": "{{inputs.parameters.command}}",
-                  },
-                  {
-                    "name": "name",
-                    "value": "{{inputs.parameters.name}}",
-                  },
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "configContents",
-                    "value": "{{steps.getConsoleConfig.outputs.parameters.configContents}}",
-                  },
-                ],
-              },
-              "name": "deployConsoleWithConfig",
-              "template": "deployconsolewithconfig",
             },
           ],
         ],

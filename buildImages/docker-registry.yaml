@@ -1,0 +1,98 @@
+# Service Account (no permissions)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: docker-registry
+
+---
+# Docker registry service
+apiVersion: v1
+kind: Service
+metadata:
+  name: docker-registry
+spec:
+  type: NodePort
+  ports:
+    - port: 5000
+      targetPort: 5000
+      nodePort: 30500
+      protocol: TCP
+      name: registry
+  selector:
+    app: docker-registry
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: docker-registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: docker-registry
+  template:
+    metadata:
+      labels:
+        app: docker-registry
+    spec:
+      serviceAccountName: docker-registry
+      automountServiceAccountToken: false  # Don't even mount the token
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: registry
+          image: registry:2
+          ports:
+            - containerPort: 5000
+              name: registry
+          volumeMounts:
+            - name: registry-data
+              mountPath: /var/lib/registry
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 2000Mi
+              ephemeral-storage: 1Gi
+            requests:
+              cpu: 500m
+              memory: 1000Mi
+              ephemeral-storage: 100Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: registry-data
+          persistentVolumeClaim:
+            claimName: registry-pvc
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi

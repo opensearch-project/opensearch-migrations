@@ -10,8 +10,8 @@ import {GenericScope, LoopWithUnion} from "../models/workflowTypes";
 import {WorkflowBuilder} from "../models/workflowBuilder";
 import {BaseExpression, makeDirectTypeProxy, UnquotedTypeWrapper} from "../models/expression";
 import {NamedTask} from "../models/sharedTypes";
-import { stringify as toYaml } from 'yaml';
 import { omit } from 'lodash';
+import {toSafeYamlOutput} from "../utils";
 
 function isDefault<T extends PlainObject>(
     p: InputParamDef<T, boolean>
@@ -139,7 +139,7 @@ function formatContainerEnvs(envVars: Record<string, BaseExpression<any>>) {
 }
 
 export function unwrapPlaceholdersAndStringify(obj: any): string {
-    const result = toYaml(obj, { lineWidth: 0});
+    const result = toSafeYamlOutput(obj);
     // in this yaml output, the value won't need to be quoted when it starts with a string -
     // as long as REMOVE_PREVIOUS_QUOTE_SENTINEL starts with a character, there won't actually be a quote
     return result

@@ -1,3 +1,4 @@
+{{- if not .Values.skipBuildJob }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -98,3 +99,4 @@ spec:
               mountPath: /local-workspace
               readOnly: true
             {{- end }}
+{{- end }}

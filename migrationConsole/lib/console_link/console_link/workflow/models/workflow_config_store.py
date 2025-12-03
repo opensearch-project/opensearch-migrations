@@ -16,7 +16,7 @@ CONFIG_YAML_KEY = "workflow_config.yaml"
 
 class WorkflowConfigStore:
     """
-    Workflow configuration store using Kubernetes etcd via ConfigMaps.
+    Workflow configuration store using ConfigMaps.
     Stores configurations persistently in the Kubernetes cluster and provides session management.
     """
 
