@@ -37,7 +37,9 @@ export function scrapeSecrets(userConfig: Partial<z.infer<typeof OVERALL_MIGRATI
         .map(ac => ac.basic.secretName);
 }
 
-export function scrapeAndCategorize(userConfig: Partial<z.infer<typeof OVERALL_MIGRATION_CONFIG>>) {
+export function getCategorizedCredentialsSecretsFromConfig(
+    userConfig: Partial<z.infer<typeof OVERALL_MIGRATION_CONFIG>>
+) {
     const rawSecrets = scrapeSecrets(userConfig);
     return Object.groupBy(rawSecrets, s=> s.match(K8S_NAMING_PATTERN) ? "validSecrets" : "invalidSecrets");
 }
@@ -67,10 +69,12 @@ export async function main() {
     }
 
     if (userConfig) {
-        const reducedData = scrapeAndCategorize(userConfig);
+        const reducedData = getCategorizedCredentialsSecretsFromConfig(userConfig);
         process.stdout.write(JSON.stringify(reducedData, null, 2));
     } else {
-        console.error("Could not ");
+        console.error("No userConfig cound");
+        console.error(COMMAND_LINE_HELP_MESSAGE);
+        process.exit(6);
     }
 }
 

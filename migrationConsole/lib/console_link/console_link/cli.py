@@ -22,7 +22,7 @@ from console_link.models.backfill_rfs import RfsWorkersInProgress, WorkingIndexD
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME, ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
-from console_link.workflow.models.store import WorkflowConfigStore
+from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
 from console_link.workflow.models.utils import KubernetesConfigNotFoundError
 from click.shell_completion import get_completion_class
 from click.core import ParameterSource
@@ -72,7 +72,7 @@ class Context(object):
             return
         self.config_file = config_file
         try:
-            self.env = Environment(config_file=config_file)
+            self.env = Environment(config_file=config_file, allow_empty=allow_empty_workflow_config)
         except Exception as e:
             raise click.ClickException(str(e))
         self.json = False

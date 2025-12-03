@@ -5,7 +5,7 @@ import os
 import click
 
 from ..models.utils import ExitCode
-from ..models.store import WorkflowConfigStore
+from ..models.workflow_config_store import WorkflowConfigStore
 from ..services.workflow_service import WorkflowService
 from ..services.script_runner import ScriptRunner
 
@@ -110,6 +110,8 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
         click.echo(f"Error: No workflow configuration found for session '{session}'", err=True)
         click.echo("\nPlease configure the workflow first using 'workflow configure edit'", err=True)
         ctx.exit(ExitCode.FAILURE.value)
+
+    click.echo("NOT checking if all secrets have been created.  Run `workflow configure edit` to confirm")
 
     try:
         # Initialize ScriptRunner
