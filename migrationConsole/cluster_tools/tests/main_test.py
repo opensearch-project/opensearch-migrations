@@ -27,14 +27,14 @@ def test_list_tools(caplog):
 def test_main_with_tool(caplog, env, monkeypatch):
     """Test the main function with a specific tool to ensure it executes correctly."""
     caplog.set_level(logging.INFO)
-    
+
     # Create a mock Environment constructor that returns our fixture env
     def mock_environment_init(*args, **kwargs):
         return env
-    
+
     # Patch the Environment class to return our fixture env
     monkeypatch.setattr("src.cluster_tools.base.main.Environment", mock_environment_init)
-    
+
     args = argparse.Namespace(tool="create_index", index_name="test-index",
                               primary_shards=10)
     args.func = create_index.main

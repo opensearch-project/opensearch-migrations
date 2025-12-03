@@ -41,7 +41,7 @@ def _get_snapshot_from_session(session_name):
     if not snapshot_obj.source_cluster:
         raise HTTPException(status_code=400,
                             detail=f"Source cluster was unable to be used to get snapshot indexes: {env}")
-                            
+
     return snapshot_obj
 
 
@@ -55,7 +55,7 @@ def get_snapshot_status(session_name: str):
                                                        snapshot_obj.snapshot_name,
                                                        snapshot_obj.snapshot_repo_name,
                                                        True)
-        
+
         # Create the status object - index statuses are now handled within the from_snapshot_info method
         return SnapshotStatus.from_snapshot_info(latest_status.details)
     except SnapshotNotStarted:
@@ -82,7 +82,7 @@ def convert_from_snapshot(snapshot: Snapshot) -> SnapshotConfig:
         )
     else:
         raise ValueError(f"Unsupported snapshot type: {type(snapshot).__name__}")
-    
+
     return SnapshotConfig(
         snapshot_name=snapshot.snapshot_name,
         repository_name=snapshot.snapshot_repo_name,
@@ -107,13 +107,13 @@ def get_snapshot_config(session_name: str):
 @snapshot_router.get("/indexes", response_model=SnapshotIndexes, operation_id="snapshotIndexes")
 def get_snapshot_indexes(session_name: str, index_pattern: Optional[str] = None):
     snapshot_obj = _get_snapshot_from_session(session_name)
-    
+
     try:
         # Convert comma-separated string to list if provided
         index_patterns = None
         if index_pattern:
             index_patterns = [pattern.strip() for pattern in index_pattern.split(',')]
-        
+
         return snapshot_obj.get_snapshot_indexes(index_patterns)
     except Exception as e:
         logger.error(f"Failed to get snapshot indexes: {type(e).__name__} {str(e)}")

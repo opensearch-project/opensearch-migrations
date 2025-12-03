@@ -114,7 +114,7 @@ def test_get_flags_none():
     }
     flags = get_flags_for_component(request, False)
     assert flags == set()
-    
+
 
 def test_get_flags_for_component_only_bulk():
     request = {

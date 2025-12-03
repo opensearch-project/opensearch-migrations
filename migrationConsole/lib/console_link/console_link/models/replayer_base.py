@@ -53,6 +53,7 @@ class Replayer(ABC):
     """
     Interface for replaying data from kafka to a target cluster.
     """
+
     def __init__(self, config: Dict) -> None:
         v = Validator(SCHEMA)
         self.config = config

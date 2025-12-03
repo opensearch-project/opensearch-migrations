@@ -197,11 +197,11 @@ def test_ecs_rfs_get_status_deep_check(ecs_rfs_backfill, mocker):
     with open(TEST_DATA_DIRECTORY / "migrations_working_state_search.json") as f:
         data = json.load(f)
         total_shards = data['hits']['total']['value']
-    
+
     # Mock the deployment status retrieval
     mock = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
                                return_value=mocked_instance_status)
-    
+
     # Mock the detailed status function to return a known value
     mocked_detailed_status = f"Work items total: {total_shards}"
     mock_detailed = mocker.patch('console_link.models.backfill_rfs.get_detailed_status',
@@ -213,7 +213,7 @@ def test_ecs_rfs_get_status_deep_check(ecs_rfs_backfill, mocker):
     # Verify the mocks were called
     mock.assert_called_once_with(ecs_rfs_backfill.ecs_client)
     mock_detailed.assert_called_once()
-    
+
     # Verify the output
     assert value.success
     assert BackfillStatus.RUNNING == value.value[0]
@@ -233,14 +233,14 @@ def test_ecs_rfs_deep_status_check_failure(ecs_rfs_backfill, mocker, caplog):
 
     # Call function being tested
     result = ecs_rfs_backfill.get_status(deep_check=True)
-    
+
     # Verify the logs contain failure message
     assert "Failed to get detailed status" in caplog.text
-    
+
     # Verify mock calls
     mock_ecs.assert_called_once_with(ecs_rfs_backfill.ecs_client)
     mock_api.assert_called_once()
-    
+
     # Verify result
     assert result.success
     assert result.value[0] == BackfillStatus.RUNNING
@@ -329,17 +329,17 @@ def test_docker_backfill_not_implemented_commands():
 
 
 class TestComputeDerivedValues:
-    
+
     def setup_method(self):
         # Create a mock for the target_cluster
         self.mock_cluster = MagicMock()
         self.mock_cluster.call_api.return_value.json.return_value = {
             "aggregations": {"max_completed": {"value": 1000000000}}
         }
-        
+
         # Test index name
         self.test_index = ".migrations_working_state"
-    
+
     def test_zero_indices(self):
         """Test compute_dervived_values when there are 0 indices to migrate."""
         # When total=0, it should report as COMPLETED
@@ -347,59 +347,59 @@ class TestComputeDerivedValues:
         completed = 0
         started_epoch = None
         active_workers = False
-        
+
         finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
             self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
         )
-        
+
         assert status == StepStateWithPause.COMPLETED
         assert percentage_completed == 100.0
         assert eta_ms is None
         assert finished_iso is not None  # Should have a timestamp for completion
-    
+
     def test_all_completed(self):
         """Test compute_dervived_values when all indices are completed."""
         total = 10
         completed = 10
         started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600  # Started 1 hour ago
         active_workers = False
-        
+
         finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
             self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
         )
-        
+
         assert status == StepStateWithPause.COMPLETED
         assert percentage_completed == 100.0
         assert eta_ms is None
         assert finished_iso is not None
-    
+
     def test_partially_completed(self):
         """Test compute_dervived_values when some indices are still in progress."""
         total = 10
         completed = 5
         started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600  # Started 1 hour ago
         active_workers = True
-        
+
         finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
             self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
         )
-        
+
         assert status == StepStateWithPause.RUNNING
         assert percentage_completed == 50.0
         assert eta_ms is not None  # Should have an ETA
         assert finished_iso is None  # Not completed yet
-    
+
     def test_partially_completed_paused(self):
         """Test compute_dervived_values when some indices are completed but workers are paused."""
         total = 10
         completed = 5
         started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600  # Started 1 hour ago
         active_workers = False
-        
+
         finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
             self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
         )
-        
+
         assert status == StepStateWithPause.PAUSED
         assert percentage_completed == 50.0
         assert eta_ms is None  # No ETA when paused

@@ -41,9 +41,9 @@ class ArgoService:
                 "--namespace": self.namespace,
                 "-o": "jsonpath={.metadata.name}"
             }
-            
+
             result = self._run_kubectl_command(kubectl_args)
-            
+
             # Clean up temporary file
             try:
                 os.unlink(temp_file)
@@ -57,7 +57,7 @@ class ArgoService:
                 success=True,
                 value=name
             )
-            
+
         except Exception as e:
             logger.error(f"Failed to start workflow: {e}")
             return CommandResult(
@@ -122,7 +122,7 @@ class ArgoService:
             status_result = self.get_workflow_status(workflow_name)
             if not status_result.success:
                 raise ValueError(f"Failed to get workflow status: {status_result}")
-                
+
             status_info = status_result.value
             phase = status_info.get("phase", "")
             has_suspended_nodes = status_info.get("has_suspended_nodes", False)
@@ -248,7 +248,7 @@ class ArgoService:
             "--": FlagOnlyArgument,
         }
         command_args.update(argo_args)
-        
+
         runner = CommandRunner("kubectl", command_args)
         try:
             return runner.run(print_to_console=print_output, stream_output=stream_output)
@@ -279,7 +279,7 @@ class ArgoService:
                 "entrypoint": "main"
             }
         }
-        
+
         # Add parameters if provided
         if parameters:
             workflow_data["spec"]["arguments"] = {
@@ -294,12 +294,12 @@ class ArgoService:
                     for key, value in parameters.items()
                 ]
             }
-        
+
         # Create temporary file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
             yaml.dump(workflow_data, f, default_flow_style=False, sort_keys=False)
             temp_file_path = f.name
-        
+
         # Log created file contents
         try:
             with open(temp_file_path, 'r') as f:
@@ -307,7 +307,7 @@ class ArgoService:
                 logger.info(f"Created workflow YAML file at {temp_file_path}:\n{file_contents}")
         except Exception as e:
             logger.warning(f"Failed to read temporary file for debugging: {e}")
-        
+
         return temp_file_path
 
     def _wait_for_workflow_exists(self, workflow_name: str, timeout_seconds: int = 15,

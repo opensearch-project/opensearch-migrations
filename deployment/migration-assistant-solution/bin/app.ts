@@ -49,14 +49,14 @@ new SolutionsInfrastructureStack(app, "Migration-Assistant-Infra-Create-VPC", {
   createVPC: true,
   ...infraProps
 });
-new SolutionsInfrastructureEKSStack(app, "Migration-Assistant-Infra-Import-VPC-v3", {
+new SolutionsInfrastructureEKSStack(app, "Migration-Assistant-Infra-Import-VPC-eks", {
   synthesizer: new DefaultStackSynthesizer({
     generateBootstrapVersionRule: false
   }),
   createVPC: false,
   ...infraProps
 });
-new SolutionsInfrastructureEKSStack(app, "Migration-Assistant-Infra-Create-VPC-v3", {
+new SolutionsInfrastructureEKSStack(app, "Migration-Assistant-Infra-Create-VPC-eks", {
   synthesizer: new DefaultStackSynthesizer({
     generateBootstrapVersionRule: false
   }),

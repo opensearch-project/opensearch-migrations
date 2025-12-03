@@ -67,7 +67,7 @@ class KubectlRunner:
             desired=desired_pods,
             terminating=terminating_pods
         )
-    
+
     def read_secret(self, secret_name: str) -> dict[str, str]:
         secret: V1Secret = self.k8s_core.read_namespaced_secret(secret_name, self.namespace)
 

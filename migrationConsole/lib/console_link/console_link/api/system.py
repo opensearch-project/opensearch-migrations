@@ -42,7 +42,7 @@ def check_env_config() -> str:
     env_config = "/config/migration_services.yaml"
     if not os.path.exists(env_config):
         raise FileNotFoundError(f"Environment config not found: {env_config}")
-    
+
     try:
         Environment(config_file=env_config)
     except Exception as e:
