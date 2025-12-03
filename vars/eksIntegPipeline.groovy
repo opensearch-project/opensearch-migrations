@@ -136,7 +136,7 @@ def call(Map config = [:]) {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh """
-                                            cdk deploy Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} \
+                                            cdk deploy Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} \
                                               --parameters Stage=${maStageName} \
                                               --parameters VPCId=${vpcId} \
                                               --parameters VPCSubnetIds=${subnetIds} \
@@ -160,14 +160,14 @@ def call(Map config = [:]) {
                                     def rawOutput = sh(
                                         script: """
                                           aws cloudformation describe-stacks \
-                                          --stack-name Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} \
+                                          --stack-name Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} \
                                           --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
                                           --output text
                                         """,
                                         returnStdout: true
                                     ).trim()
                                     if (!rawOutput) {
-                                        error("Could not retrieve CloudFormation Output 'MigrationsExportString' from stack Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX}")
+                                        error("Could not retrieve CloudFormation Output 'MigrationsExportString' from stack Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}")
                                     }
                                     def exportsMap = rawOutput.split(';')
                                             .collect { it.trim().replaceFirst(/^export\s+/, '') }
@@ -387,7 +387,7 @@ def call(Map config = [:]) {
                                             echo "No ingress rule to revoke."
                                           fi
                                         """
-                                        sh "cd $WORKSPACE/deployment/migration-assistant-solution && cdk destroy Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} --force --concurrency 3"
+                                        sh "cd $WORKSPACE/deployment/migration-assistant-solution && cdk destroy Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} --force --concurrency 3"
                                         sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json"
                                     }
                                 }
