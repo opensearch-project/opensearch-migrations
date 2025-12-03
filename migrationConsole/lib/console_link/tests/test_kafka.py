@@ -50,7 +50,7 @@ def test_multiple_kafka_types_raises_error():
     }
     with pytest.raises(ValueError) as exc_info:
         get_kafka(config)
-    
+
     assert "More than one value is present" in exc_info.value.args[0]['kafka'][0]
 
 

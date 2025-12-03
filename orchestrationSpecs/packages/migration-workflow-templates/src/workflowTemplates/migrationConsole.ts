@@ -33,7 +33,7 @@ const KafkaServicesConfig = z.object({
     standard: z.string()
 })
 
-const configComponentParameters = {
+export const configComponentParameters = {
     kafkaInfo: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof KafkaServicesConfig>>(),
         description: "Snapshot configuration information (JSON)"}),
     sourceConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof CLUSTER_CONFIG>>(),
@@ -64,7 +64,7 @@ jq 'def normalizeAuthConfig:
     if (.authConfig | has("basic")) then
       .basic_auth = (.authConfig.basic | 
         if has("secretName") then
-          del(.secretName)
+          .k8s_secret_name = .secretName | del(.secretName)
         else
           .
         end)
@@ -135,70 +135,12 @@ source /.venv/bin/activate
 
 echo file dump
 echo ---
+export MIGRATION_USE_SERVICES_YAML_CONFIG=true
 cat /config/migration_services.yaml
 echo ---
 
 {{COMMAND}}
 `;
-
-function getConsoleDeploymentResource(
-    name: AllowLiteralOrExpression<string>,
-    migrationConsoleImage: AllowLiteralOrExpression<string>,
-    migrationConsolePullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>,
-    base64ConfigContents: AllowLiteralOrExpression<string>,
-    command: AllowLiteralOrExpression<string>,
-    resources: AllowLiteralOrExpression<ResourceRequirementsType>
-) {
-    return {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {
-            "name": name
-        },
-        "spec": {
-            "replicas": 1,
-            "selector": {
-                "matchLabels": {
-                    "app": "user-environment"
-                }
-            },
-            "template": {
-                "metadata": {
-                    "labels": {
-                        "app": "user-environment"
-                    }
-                },
-                "spec": {
-                    "containers": [
-                        {
-                            "name": "main",
-                            "image": migrationConsoleImage,
-                            "imagePullPolicy": migrationConsolePullPolicy,
-                            resources,
-                            "command": [
-                                "/bin/sh",
-                                "-c",
-                                "set -e -x\n\nbase64 -d > /config/migration_services.yaml << EOF\n" +
-                                "" +
-                                base64ConfigContents +
-                                "EOF\n" +
-                                "" +
-                                ". /etc/profile.d/venv.sh\n" +
-                                "source /.venv/bin/activate\n" +
-                                "" +
-                                "echo file dump\necho ---\n" +
-                                "cat /config/migration_services.yaml\n" +
-                                "echo ---\n" +
-                                "" +
-                                command
-                            ]
-                        }
-                    ]
-                }
-            }
-        }
-    }
-}
 
 function makeOptionalDict<
     T extends PlainObject,
@@ -258,30 +200,6 @@ export const MigrationConsole = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("deployConsoleWithConfig", t => t
-        .addRequiredInput("command", typeToken<string>())
-        .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
-        .addRequiredInput("name", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "create",
-                setOwnerReference: true,
-                successCondition: "status.availableReplicas > 0",
-                manifest: getConsoleDeploymentResource(b.inputs.name,
-                    b.inputs.imageMigrationConsoleLocation,
-                    b.inputs.imageMigrationConsolePullPolicy,
-                    expr.toBase64(expr.asString(b.inputs.configContents)),
-                    b.inputs.command,
-                    DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI
-                )
-            }))
-
-        .addJsonPathOutput("deploymentName", "{.metadata.name}", typeToken<string>())
-    )
-
-
     .addTemplate("runConsole", t => t
         .addRequiredInput("command", typeToken<string>())
         .addInputsFromRecord(configComponentParameters)
@@ -300,22 +218,5 @@ export const MigrationConsole = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("deployConsole", t => t
-        .addRequiredInput("command", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addInputsFromRecord(configComponentParameters)
-        .addRequiredInput("name", typeToken<string>())
-        .addSteps(s => s
-            .addStep("getConsoleConfig", INTERNAL, "getConsoleConfig", c =>
-                c.register(selectInputsForRegister(s, c)))
-            .addStep("deployConsoleWithConfig", INTERNAL, "deployConsoleWithConfig", c =>
-                c.register({
-                    ...selectInputsForRegister(s, c),
-                    configContents: c.steps.getConsoleConfig.outputs.configContents
-                }))
-        )
-        .addExpressionOutput("deploymentName",
-            c => c.steps.getConsoleConfig.outputs.configContents)
-    )
 
     .getFullScope();

@@ -37,7 +37,7 @@ class MetadataEntry(BaseModel):
 @with_lock(_LOCK)
 def get_latest(session_name: str) -> MetadataEntry:
     results = _TABLE.search(_QUERY.session_name == session_name)
-    
+
     if not results or len(results) == 0:
         raise MetadataNotAvailable
 

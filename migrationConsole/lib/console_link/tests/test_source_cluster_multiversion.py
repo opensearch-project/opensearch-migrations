@@ -38,7 +38,7 @@ def seed_data_with_types(cluster: Cluster, doc_count):
     cluster.call_api(f"/{TEST_INDEX_NAME}", HttpMethod.PUT,
                      data=json.dumps({"settings": {"index": {"number_of_shards": 1, "number_of_replicas": 0}}}),
                      headers={"Content-Type": "application/json"})
-    
+
     doc_type = "document"
     for i, _ in enumerate(range(doc_count)):
         cluster.call_api(f"/{TEST_INDEX_NAME}/{doc_type}/{i + 1}", HttpMethod.PUT,

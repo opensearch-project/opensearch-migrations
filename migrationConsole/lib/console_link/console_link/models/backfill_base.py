@@ -29,6 +29,7 @@ class Backfill(ABC):
     """
     Interface for backfilling data from a source to target cluster.
     """
+
     def __init__(self, config: Dict) -> None:
         v = Validator(SCHEMA)
         self.config = config

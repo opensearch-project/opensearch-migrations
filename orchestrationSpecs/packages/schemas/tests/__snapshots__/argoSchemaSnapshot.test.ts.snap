@@ -272,7 +272,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "s3RoleArn": {
                       "type": "string",
-                      "pattern": "^arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+$",
+                      "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                       "default": ""
                     }
                   }
@@ -957,7 +957,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "s3RoleArn": {
                       "type": "string",
-                      "pattern": "^arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+$",
+                      "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                       "default": ""
                     }
                   }

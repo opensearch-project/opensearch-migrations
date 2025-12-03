@@ -143,7 +143,7 @@ class Cluster:
         assert self.auth_details is not None  # for mypy's sake
         if "username" in self.auth_details and "password" in self.auth_details:
             return AuthDetails(username=self.auth_details["username"], password=self.auth_details["password"])
-        
+
         # Pull password from AWS Secrets Manager
         if "user_secret_arn" in self.auth_details:
             client = create_boto3_client(aws_service_name="secretsmanager", client_options=self.client_options)
@@ -319,7 +319,7 @@ class NoSourceClusterDefinedError(Exception):
     def __init__(self):
         super().__init__("Unable to continue without a source cluster specified")
 
-    
+
 class NoTargetClusterDefinedError(Exception):
     def __init__(self):
         super().__init__("Unable to continue without a target cluster specified")

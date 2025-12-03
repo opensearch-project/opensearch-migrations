@@ -19,6 +19,7 @@ class ExitCode(Enum):
 
 class KubernetesConfigNotFoundError(Exception):
     """Raised when the Kubernetes ConfigMap is not found."""
+
     def __init__(self, *args: object) -> None:
         super().__init__(*args)
 

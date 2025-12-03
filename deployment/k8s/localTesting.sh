@@ -44,12 +44,12 @@ USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-false}"
 ###############################################################################
 
 helm dependency build charts/aggregates/testClusters
-helm install --create-namespace -n ma tc charts/aggregates/testClusters
-
 helm dependency build charts/aggregates/migrationAssistantWithArgo
 
 if [ "${USE_LOCAL_REGISTRY}" = "true" ]; then
   echo "Using LOCAL_REGISTRY for images: ${LOCAL_REGISTRY}"
+  helm install --create-namespace -n ma tc charts/aggregates/testClusters \
+      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard"
 
   helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
     -f charts/aggregates/migrationAssistantWithArgo/valuesDev.yaml \
@@ -70,6 +70,8 @@ if [ "${USE_LOCAL_REGISTRY}" = "true" ]; then
     --set "images.reindexFromSnapshot.pullPolicy=Always"
 else
   echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
+  helm install --create-namespace -n ma tc charts/aggregates/testClusters
+
   helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
     -f charts/aggregates/migrationAssistantWithArgo/valuesDev.yaml
 fi

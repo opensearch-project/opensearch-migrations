@@ -99,15 +99,15 @@ class CommandRunner:
                             sys.stdout.write(line)
                             sys.stdout.flush()
                         logger.debug(f"STDOUT: {line.rstrip()}")
-            
+
             # Wait for process to complete
             return_code = process.wait()
-            
+
             if return_code == 0:
                 return CommandResult(success=True, value="Command executed successfully")
             else:
                 raise CommandRunnerError(return_code, self.sanitized_command())
-                
+
         except Exception as e:
             logger.error(f"Streaming command failed: {e}")
             raise CommandRunnerError(-1, self.sanitized_command(), None, str(e))
