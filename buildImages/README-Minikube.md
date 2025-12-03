@@ -1,6 +1,14 @@
 # Building Images Locally with Minikube
 
-This guide walks through setting up BuildKit and a local Docker registry in Minikube to build and store container images for this project. This approach provides consistent DNS resolution, proper networking, and uses the same BuildKit configuration as what's provided to customer's that need to build images during a deployment.
+This guide walks through setting up BuildKit and a local Docker registry in Minikube to build and store container images for this project. This approach provides consistent DNS resolution, proper networking, and uses the same BuildKit configuration as what's provided to users that need to build images from the aws-bootstrap script.
+
+Pros of this approach:
+- The gradle package in this project builds java images (currently only 2) with Jib, which are able to be optimized more, especially to minimize developer rebuild times.
+- This lets one test the ability to build images very similar to how a user would do with the aws-bootstrap.sh flag `--build-images true`.
+- Users can override the image locations and pull policies to use a local repository and pull images Always to make continuous testing easier.
+Cons:
+- This is more to configure.
+- BuildKit builds and registry pushes/pulls are slower than regular direct docker builds. 
 
 See [README.md](README.md) for instructions that do NOT require minikube or any Kubernetes environment. 
 
@@ -35,7 +43,7 @@ helm install buildkit ../deployment/k8s/charts/components/buildImages \
 
 ### 3. Deploy a local Docker registry
 
-The production chart doesn't include a registry (since it uses ECR/external registries). For local development, we need to deploy one separately.
+The aws-bootstrap mechanism doesn't need to worry about a registry since it uses ECR/external registries. For local development, we need to deploy one separately.  It's also possible to use a registry that ships with minikube, though this guide doesn't explore that.
 
 Deploy it:
 ```bash
@@ -46,7 +54,7 @@ kubectl apply -f docker-registry.yaml -n buildkit
 ```bash
 kubectl get pods -n buildkit
 
-echo Wait for both pods to be Running
+echo "Wait for both pods to be Running"
 kubectl wait --for=condition=ready pod -l app=buildkitd -n buildkit --timeout=120s
 kubectl wait --for=condition=ready pod -l app=docker-registry -n buildkit --timeout=60s
 ```
@@ -62,7 +70,7 @@ docker-registry-xxxxxxxxxx-xxxxx   1/1     Running   0          20s
 
 Port forward both services to your local machine. You can run these in separate terminals or background them:
 ```bash
-echo Port forward BuildKit & Docker Registry (run in background)
+echo "Port forward BuildKit & Docker Registry (run in background)"
 nohup kubectl port-forward -n buildkit svc/buildkitd 1234:1234 --address 0.0.0.0 > /tmp/buildkit-forward.log 2>&1 &
 nohup kubectl port-forward -n buildkit svc/docker-registry 5001:5000 --address 0.0.0.0 > /tmp/registry-forward.log 2>&1 &
 ```
@@ -73,13 +81,13 @@ nohup kubectl port-forward -n buildkit svc/docker-registry 5001:5000 --address 0
 
 Test that both services are accessible from your host:
 ```bash
-echo Test registry (should return empty repositories list)
+echo "Test registry (should return empty repositories list)"
 curl http://localhost:5001/v2/_catalog
-# Expected output: {"repositories":[]}
+echo "^^ Expected output: {"repositories":[]}"
 
-echo Test BuildKit (will return HTTP/0.9 error - this is expected for gRPC services)
+echo "Test BuildKit (will return HTTP/0.9 error - this is expected for gRPC services)"
 curl http://localhost:1234
-# Expected output: curl: (1) Received HTTP/0.9 when not allowed
+echo "^^ Expected output: curl: (1) Received HTTP/0.9 when not allowed"
 ```
 
 If either command times out or fails to connect, the port-forward may not be running. Check with:
@@ -91,16 +99,16 @@ ps aux | grep port-forward
 
 Create a builder that connects to the BuildKit service in Minikube:
 ```bash
-echo Remove any existing builder with this name
+echo "Remove any existing builder with this name"
 docker buildx rm local-remote-builder 2>/dev/null || true
 
-echo Create the builder pointing to localhost:1234 (port-forwarded to Minikube BuildKit)
+echo "Create the builder pointing to localhost:1234 (port-forwarded to Minikube BuildKit)"
 docker buildx create --name local-remote-builder --driver remote tcp://localhost:1234
 
-echo Set it as the active builder
+echo "Set it as the active builder"
 docker buildx use local-remote-builder
 
-echo Bootstrap and verify connection
+echo "Bootstrap and verify connection"
 docker buildx inspect --bootstrap
 ```
 
@@ -174,7 +182,7 @@ docker run -it --rm host.docker.internal:5001/migrations/migration_console:lates
 
 ### Stop port forwards but keep everything running
 ```bash
-# Kill port forward processes
+echo "Kill port forward processes"
 pkill -f "port-forward.*buildkit"
 ```
 
@@ -185,19 +193,19 @@ kubectl delete -f docker-registry.yaml
 
 ### Complete cleanup (removes everything)
 ```bash
-# Remove port forwards
+echo "Remove port forwards"
 pkill -f "port-forward.*buildkit"
 
-# Uninstall helm chart
-helm uninstall buildkit -n buildkit
-
-# Remove registry
+echo "Remove registry"
 kubectl delete -f docker-registry.yaml
 
-# Delete namespace
+echo "Uninstall helm chart"
+helm uninstall buildkit -n buildkit
+
+echo "Delete namespace"
 kubectl delete namespace buildkit
 
-# Remove buildx builder
+echo "Remove buildx builder"
 docker buildx rm local-remote-builder
 ```
 
@@ -215,40 +223,3 @@ aws ecr get-login-password --region us-west-2 | docker login --username AWS --pa
 ```
 
 This is how the production build job works - it uses the same BuildKit setup but pushes to ECR instead of a local registry.
-
-## Comparison: Local Development vs Production
-
-| Aspect | Local Development | Production |
-|--------|------------------|------------|
-| BuildKit | Runs in Minikube (via helm chart) | Runs in EKS/K8s (via helm chart) |
-| Registry | Local registry in Minikube | AWS ECR (or other external registry) |
-| Build trigger | Manual `./gradlew` on host | Kubernetes Job in cluster |
-| Gradle execution | On developer's machine | Inside build job container |
-| Port forwarding | Required | Not needed |
-| Use case | Fast iteration, local testing | CI/CD, deployments |
-
-## Advanced: Persistent Registry Storage
-
-The current setup uses `emptyDir` for registry storage, which means images are lost when the registry pod restarts. For persistent storage:
-```yaml
-# In docker-registry.yaml, replace the emptyDir volume with a PVC:
-volumes:
-  - name: registry-data
-    persistentVolumeClaim:
-      claimName: registry-pvc
----
-# Add a PVC
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: registry-pvc
-  namespace: buildkit
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 20Gi
-```
-
-This is optional for local development but recommended if you want to avoid rebuilding images after restarting Minikube.
