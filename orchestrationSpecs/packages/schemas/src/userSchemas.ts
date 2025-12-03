@@ -249,9 +249,7 @@ export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a
 
 export const HTTP_AUTH_BASIC = z.object({
     basic: z.object({
-        secretName: z.string().regex(K8S_NAMING_PATTERN),
-        username: z.string(),
-        password: z.string()
+        secretName: z.string().regex(K8S_NAMING_PATTERN)
     })
 });
 

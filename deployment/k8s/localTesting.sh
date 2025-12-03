@@ -70,8 +70,6 @@ if [ "${USE_LOCAL_REGISTRY}" = "true" ]; then
     --set "images.reindexFromSnapshot.pullPolicy=Always"
 else
   echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
-
-  # Fallback – keep your original repos or whatever your "remote" is:
   helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
     -f charts/aggregates/migrationAssistantWithArgo/valuesDev.yaml
 fi

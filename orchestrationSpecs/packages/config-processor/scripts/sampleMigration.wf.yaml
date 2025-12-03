@@ -7,9 +7,7 @@
       "version": "ES 7.10",
       "authConfig": {
         "basic": {
-          "secretName": "source1-creds",
-          "username": "admin",
-          "password": "admin"
+          "secretName": "source1-creds"
         }
       },
       "snapshotRepo": {
@@ -30,9 +28,7 @@
       "version": "OS 2.11",
       "authConfig": {
         "basic": {
-          "secretName": "target1-creds",
-          "username": "admin",
-          "password": "admin"
+          "secretName": "target1-creds"
         }
       }
     }
