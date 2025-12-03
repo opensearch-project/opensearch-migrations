@@ -25,6 +25,7 @@ from console_link.models.metrics_source import Component, MetricStatistic
 from console_link.workflow.models.store import WorkflowConfigStore
 from console_link.workflow.models.utils import KubernetesConfigNotFoundError
 from click.shell_completion import get_completion_class
+from click.core import ParameterSource
 
 import logging
 import os
@@ -100,8 +101,10 @@ def cli(ctx, config_file: str, force_use_config_file: bool, json: bool, verbose:
     logger.info(f"Logging set to {logging.getLevelName(logger.getEffectiveLevel())}")
 
     # Set the `force_use_config_file` based on the CLI flag OR the env var MIGRATION_USE_SERVICES_YAML_CONFIG
+    #  OR if --config-file was passed on the command line
     force_use_config_file = (force_use_config_file or
-                             (os.getenv("MIGRATION_USE_SERVICES_YAML_CONFIG", "false") not in ("false", 0)))
+                             (os.getenv("MIGRATION_USE_SERVICES_YAML_CONFIG", "false") not in ("false", 0)) or
+                             (ctx.get_parameter_source("config_file") == ParameterSource.COMMANDLINE))
     logger.info(f"force_use_config_file set to {force_use_config_file}")
     # Disabling all logging for gathering the context for shell completion (run automatically)
     # on container startup
