@@ -1189,6 +1189,8 @@ spec:
                   optional: true
             - name: FAILED_REQUESTS_LOGGER_LEVEL
               value: OFF
+            - name: CONSOLE_LOG_FORMAT
+              value: json
             - name: JAVA_OPTS
               value: "{{=' ' + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}"
             - name: AWS_SHARED_CREDENTIALS_FILE

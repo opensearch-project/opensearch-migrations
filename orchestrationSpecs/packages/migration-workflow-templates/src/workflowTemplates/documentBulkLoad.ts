@@ -123,6 +123,10 @@ function getRfsReplicasetManifest
             {
                 name: "FAILED_REQUESTS_LOGGER_LEVEL",
                 value: "OFF"
+            },
+            {
+                name: "CONSOLE_LOG_FORMAT",
+                value: "json"
             }
         ],
         args: [
