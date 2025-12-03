@@ -158,7 +158,7 @@ export const CREATE_SNAPSHOT_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional(),
     maxSnapshotRateMbPerNode: z.number().default(0).optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
-    s3RoleArn: z.string().regex(/^arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+$/).default("").optional()
+    s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
 });
 
 export const USER_METADATA_OPTIONS = z.object({

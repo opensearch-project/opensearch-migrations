@@ -99,7 +99,7 @@ def buildKitProjects = [
         [
                 serviceName: "elasticsearchWithSearchGuard",
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard",
-                imageName:  "elasticsearch_with_searchguard",
+                imageName:  "elasticsearch_searchguard",
                 imageTag:   "latest"
         ]
 ]

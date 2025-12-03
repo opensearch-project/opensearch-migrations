@@ -64,7 +64,7 @@ jq 'def normalizeAuthConfig:
     if (.authConfig | has("basic")) then
       .basic_auth = (.authConfig.basic | 
         if has("secretName") then
-          del(.secretName)
+          .k8s_secret_name = .secretName | del(.secretName)
         else
           .
         end)
@@ -135,6 +135,7 @@ source /.venv/bin/activate
 
 echo file dump
 echo ---
+export MIGRATION_USE_SERVICES_YAML_CONFIG=true
 cat /config/migration_services.yaml
 echo ---
 
