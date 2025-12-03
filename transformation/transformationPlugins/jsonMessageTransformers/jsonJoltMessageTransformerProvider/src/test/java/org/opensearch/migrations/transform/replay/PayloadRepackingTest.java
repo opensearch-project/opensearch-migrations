@@ -115,7 +115,7 @@ public class PayloadRepackingTest extends InstrumentationTest {
         transformerBuilder.addOperationObject(simpleTransform);
 
         var jsonPayload = "{\"top\": {\"A\": 1,\"B\": 2}}";
-        String extraHeaders = "content-type: application/json; charset=UTF-8\n";
+        String extraHeaders = "content-type: application/json; charset=UTF-8\r\n";
 
         DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
         // netty's decompressor and aggregator remove some header values (& add others)
