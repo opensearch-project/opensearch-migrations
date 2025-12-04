@@ -11,10 +11,7 @@ metadata:
   name: migration-console-access-role
 rules:
   - apiGroups: [ "" ]
-    resources: ["secrets"]
-    verbs: ["list"]
-  - apiGroups: [ "" ]
-    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log", "services"]
+    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log", "secrets", "services"]
     verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
   - apiGroups: [""]
     resources: ["pods/attach"]
