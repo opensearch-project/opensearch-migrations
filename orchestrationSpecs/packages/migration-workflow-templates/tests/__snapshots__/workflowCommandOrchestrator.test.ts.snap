@@ -5,7 +5,11 @@ exports[`WorkflowCommandOrchestrator workflow template matches snapshot (structu
   "metadata": {
     "entrypoint": "main",
     "k8sMetadata": {
+<<<<<<< HEAD
       "name": "workflow-command-orchestrator",
+=======
+      "name": "full-migration-with-cli",
+>>>>>>> origin/jenkins-k8s-local-test
     },
     "name": "",
     "parallelism": 1,
@@ -21,6 +25,7 @@ set -e -x
 
 echo "Building and submitting migration workflow..."
 
+<<<<<<< HEAD
             # Create migration config JSON
             cat > /tmp/migration_config.json << 'EOF'
             {
@@ -63,6 +68,52 @@ echo "Building and submitting migration workflow..."
               ]
             }
             EOF
+=======
+# Create migration config JSON
+cat > /tmp/migration_config.json << 'EOF'
+{
+  "sourceClusters": {
+    "source": {
+      "endpoint": "{{inputs.parameters.sourceEndpoint}}",
+      "allowInsecure": {{inputs.parameters.sourceAllowInsecure}},
+      "version": "{{inputs.parameters.sourceVersion}}",
+      "snapshotRepo": {{inputs.parameters.snapshotConfig}}
+    }
+  },
+  "targetClusters": {
+    "target": {{inputs.parameters.targetConfig}}
+  },
+  "migrationConfigs": [
+    {
+      "fromSource": "source",
+      "toTarget": "target",
+      "snapshotExtractAndLoadConfigs": [
+        {
+          "createSnapshotConfig": {
+            "s3RoleArn": "arn:aws:iam::123456789012:role/test-migration-role"
+          },
+          "snapshotConfig": {
+            "snapshotNameConfig": {
+              "snapshotNamePrefix": "rfs"
+            }
+          },
+          "migrations": [
+            {
+              "metadataMigrationConfig": {
+                "indexAllowlist": ["*"]
+              },
+              "documentBackfillConfig": {
+                "indexAllowlist": ["*"]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+EOF
+>>>>>>> origin/jenkins-k8s-local-test
 
 echo "Migration config contents:"
 cat /tmp/migration_config.json
@@ -95,6 +146,11 @@ fi
 echo "Workflow submitted successfully: $WORKFLOW_NAME"
 mkdir -p /tmp/outputs
 echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
+<<<<<<< HEAD
+=======
+sync
+sleep 2
+>>>>>>> origin/jenkins-k8s-local-test
 ",
           ],
           "command": [
@@ -268,7 +324,11 @@ echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
                       "parameterName": "snapshotConfigJson",
                     },
                   },
+<<<<<<< HEAD
                   "sourceAllowInsecure": "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.allowInsecure')}}",
+=======
+                  "sourceAllowInsecure": "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.allow_insecure')}}",
+>>>>>>> origin/jenkins-k8s-local-test
                   "sourceEndpoint": "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.endpoint')}}",
                   "sourceVersion": "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.version')}}",
                   "targetConfig": FromParameterExpression {

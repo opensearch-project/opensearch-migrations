@@ -10,7 +10,11 @@ import {MigrationConsole} from "./migrationConsole";
 import {Replayer} from "./replayer";
 import {SetupKafka} from "./setupKafka";
 import {ConfigManagementHelpers} from "./configManagementHelpers";
+<<<<<<< HEAD
 import {WorkflowCommandOrchestrator} from "./workflowCommandOrchestrator";
+=======
+import {WorkflowCommandOrchestrator, FullMigrationWithCli} from "./workflowCommandOrchestrator";
+>>>>>>> origin/jenkins-k8s-local-test
 
 export const AllWorkflowTemplates = [
     CaptureProxy,

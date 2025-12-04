@@ -1,4 +1,5 @@
 import { WorkflowCommandOrchestrator } from "../src/workflowTemplates/workflowCommandOrchestrator";
+<<<<<<< HEAD
 import { AllWorkflowTemplates } from "../src/workflowTemplates/allWorkflowTemplates";
 
 describe("WorkflowCommandOrchestrator workflow template", () => {
@@ -44,6 +45,10 @@ describe("WorkflowCommandOrchestrator workflow template", () => {
         expect(found).toBe(true);
     });
 
+=======
+
+describe("WorkflowCommandOrchestrator workflow template", () => {
+>>>>>>> origin/jenkins-k8s-local-test
     it("matches snapshot (structure regression guard)", () => {
         // This will create a __snapshots__/ file the first time you run it.
         // Future changes to the DSL structure will cause a diff, which is

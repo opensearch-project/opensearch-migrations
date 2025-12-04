@@ -47,6 +47,7 @@ set -e -x
 
 echo "Building and submitting migration workflow..."
 
+<<<<<<< HEAD
             # Create migration config JSON
             cat > /tmp/migration_config.json << 'EOF'
             {
@@ -89,6 +90,52 @@ echo "Building and submitting migration workflow..."
               ]
             }
             EOF
+=======
+# Create migration config JSON
+cat > /tmp/migration_config.json << 'EOF'
+{
+  "sourceClusters": {
+    "source": {
+      "endpoint": "{{inputs.parameters.sourceEndpoint}}",
+      "allowInsecure": {{inputs.parameters.sourceAllowInsecure}},
+      "version": "{{inputs.parameters.sourceVersion}}",
+      "snapshotRepo": {{inputs.parameters.snapshotConfig}}
+    }
+  },
+  "targetClusters": {
+    "target": {{inputs.parameters.targetConfig}}
+  },
+  "migrationConfigs": [
+    {
+      "fromSource": "source",
+      "toTarget": "target",
+      "snapshotExtractAndLoadConfigs": [
+        {
+          "createSnapshotConfig": {
+            "s3RoleArn": "arn:aws:iam::123456789012:role/test-migration-role"
+          },
+          "snapshotConfig": {
+            "snapshotNameConfig": {
+              "snapshotNamePrefix": "rfs"
+            }
+          },
+          "migrations": [
+            {
+              "metadataMigrationConfig": {
+                "indexAllowlist": ["*"]
+              },
+              "documentBackfillConfig": {
+                "indexAllowlist": ["*"]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+EOF
+>>>>>>> origin/jenkins-k8s-local-test
 
 echo "Migration config contents:"
 cat /tmp/migration_config.json
@@ -120,6 +167,11 @@ fi
 echo "Workflow submitted successfully: $WORKFLOW_NAME"
 mkdir -p /tmp/outputs
 echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
+<<<<<<< HEAD
+=======
+sync
+sleep 2
+>>>>>>> origin/jenkins-k8s-local-test
 `;
 
 const WORKFLOW_MONITOR_SCRIPT = `
@@ -173,7 +225,11 @@ exit 1
 `;
 
 export const WorkflowCommandOrchestrator = WorkflowBuilder.create({
+<<<<<<< HEAD
     k8sResourceName: "workflow-command-orchestrator",
+=======
+    k8sResourceName: "full-migration-with-cli",
+>>>>>>> origin/jenkins-k8s-local-test
     parallelism: 1,
     serviceAccountName: "argo-workflow-executor"
 })
@@ -231,7 +287,11 @@ export const WorkflowCommandOrchestrator = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     sourceEndpoint: "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.endpoint')}}",
+<<<<<<< HEAD
                     sourceAllowInsecure: "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.allowInsecure')}}",
+=======
+                    sourceAllowInsecure: "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.allow_insecure')}}",
+>>>>>>> origin/jenkins-k8s-local-test
                     sourceVersion: "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.version')}}",
                     targetConfig: b.inputs.targetClusterConfigJson,
                     snapshotConfig: b.inputs.snapshotConfigJson
@@ -250,3 +310,9 @@ export const WorkflowCommandOrchestrator = WorkflowBuilder.create({
 
     .setEntrypoint("main")
     .getFullScope();
+<<<<<<< HEAD
+=======
+
+// Alias for backward compatibility - FullMigrationWithCli is now folded into WorkflowCommandOrchestrator
+export const FullMigrationWithCli = WorkflowCommandOrchestrator;
+>>>>>>> origin/jenkins-k8s-local-test

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import {FullMigrationWithCli} from "../src/workflowTemplates/fullMigrationWithCli";
 import {AllWorkflowTemplates} from "../src/workflowTemplates/allWorkflowTemplates";
 
@@ -25,6 +26,11 @@ describe("FullMigrationWithCli workflow template", () => {
         expect(found).toBe(true);
     });
 
+=======
+import {FullMigrationWithCli} from "../src/workflowTemplates/workflowCommandOrchestrator";
+
+describe("FullMigrationWithCli workflow template", () => {
+>>>>>>> origin/jenkins-k8s-local-test
     it("matches snapshot", () => {
         expect(FullMigrationWithCli).toMatchSnapshot();
     });
