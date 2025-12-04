@@ -3,6 +3,7 @@ import {
     COMPLETE_SNAPSHOT_CONFIG,
     CREATE_SNAPSHOT_OPTIONS,
     DEFAULT_RESOURCES,
+    DYNAMIC_SNAPSHOT_CONFIG,
     getZodKeys,
     METADATA_OPTIONS,
     NAMED_SOURCE_CLUSTER_CONFIG,
@@ -153,6 +154,9 @@ export const FullMigration = WorkflowBuilder.create({
                 }))
 
             .addStep("foreachSnapshotMigration", INTERNAL, "foreachSnapshotMigration", c=> {
+                    const d = c.defaults;
+                    const o = c.item;
+                    console.log(d + " " + o);
                     return c.register({
                         ...(() => {
                             const {snapshotConfig, ...rest} = selectInputsForRegister(b, c);
