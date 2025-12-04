@@ -17,12 +17,11 @@
 ## Prerequisites
 
 - Java Development Kit (JDK) 11-17
-- Gradle 8
 - Python3
-- Docker and Docker Compose (for local deployment)
+- Docker/Minikube/K3s/etc (for local deployment)
+- Node.js v22 (downloaded automatically by Gradle)
 - [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html#getting-started-install-instructions) (for AWS deployment)
 - [AWS Cloud Development Kit (CDK)](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html) (for AWS deployment)
-- Node.js v18+ (for AWS deployment)
 
 
 ## Project Structure
@@ -34,8 +33,8 @@
   - Migration utilities for document reindexing and metadata migration.
   - Includes tracing contexts for both document and metadata migrations.
 - [`TrafficCapture`](TrafficCapture/README.md) (Capture-and-Replay): Projects for proxying, capturing, and replaying HTTP traffic.
-- [`migrationConsole`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/README.md): A comprehensive CLI tool for executing the migration workflow.
-  - [`lib/console_link`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/README.md): Core library for migration operations.
+- [`migrationConsole`](migrationConsole/README.md): A comprehensive CLI tool for executing the migration workflow.
+  - [`lib/console_link`](migrationConsole/lib/console_link/README.md): Core library for migration operations.
 - [`deployment`](deployment/README.md): AWS deployment scripts and configurations.
 - `dev-tools`: Development utilities and API request templates.
 - `docs`: Project documentation and architecture diagrams.

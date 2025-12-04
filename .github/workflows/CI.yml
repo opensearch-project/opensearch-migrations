@@ -8,7 +8,7 @@ env:
   python-version: '3.11'
   java-version: '17'
   gradle-version: '8.12.1'
-  node-version: '18.x'
+  node-version: '22.x'
   gradle-test-parallelization: '30'
 
 # Prevent multiple simultaneous runs except on main repo
@@ -22,7 +22,7 @@ jobs:
     outputs:
       docker_cache_key: ${{ steps.generate_docker_cache_key.outputs.key }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Generate Docker Cache Key
         id: generate_docker_cache_key
         run: |
@@ -40,7 +40,7 @@ jobs:
           - spotlessCheck
           - publishToMavenLocal
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
       - name: Run Gradle Build
         run: gradle ${{matrix.tasks}}
@@ -50,7 +50,7 @@ jobs:
   python-lint:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
       - name: Install dependencies
         run: |
@@ -70,12 +70,12 @@ jobs:
           - migrationConsole/cluster_tools
           - k8sConfigMapUtilScripts
     env:
-      WORKING_DIR: ./TrafficCapture/dockerSolution/src/main/docker/${{ matrix.py-project }}
+      WORKING_DIR: ${{ startsWith(matrix.py-project, 'migrationConsole/') && format('./{0}', matrix.py-project) || format('./TrafficCapture/dockerSolution/src/main/docker/{0}', matrix.py-project) }}
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
 
       # Set up Kind cluster for workflow integration tests (only for console_link project)
@@ -108,6 +108,8 @@ jobs:
       - name: Upload coverage to Codecov
         if: always()
         uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SKIP_VALIDATION: true
         with:
           fail_ci_if_error: true
           flags: python
@@ -136,7 +138,7 @@ jobs:
       matrix:
         index: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
       - name: Restore Docker Cache
         uses: AndreKurait/docker-cache@0.6.0
@@ -184,6 +186,8 @@ jobs:
       - name: Upload coverage to Codecov
         if: always()
         uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SKIP_VALIDATION: true
         with:
           fail_ci_if_error: true
           flags: gradle
@@ -200,7 +204,7 @@ jobs:
     needs: [ generate-cache-key ]
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
       - name: Cache Docker Images
         uses: AndreKurait/docker-cache@0.6.0
@@ -258,7 +262,7 @@ jobs:
       run:
         working-directory: ${{ matrix.npm-project }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
       - name: Install NPM dependencies
         run: npm ci
@@ -267,6 +271,8 @@ jobs:
       - name: Upload coverage to Codecov
         if: always()
         uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SKIP_VALIDATION: true
         with:
           fail_ci_if_error: true
           flags: node
@@ -277,7 +283,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: lychee Link Checker
         id: lychee
         uses: lycheeverse/lychee-action@v2

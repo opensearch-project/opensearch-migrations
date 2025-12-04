@@ -50,7 +50,7 @@ def test_valid_config_map_creates_proper_migration_services_yaml(tmp_path, mock_
         mock_k8s_client.list_namespaced_config_map.assert_called_once()
         mock_k8s_config.assert_called_once()
         with open(TEST_DATA_DIRECTORY / "0001_expected_migration_services_yaml.yaml") as expected_output, \
-             open(generated_services_yaml_path) as actual_output:
+                open(generated_services_yaml_path) as actual_output:
             yaml1 = yaml.safe_load(expected_output)
             yaml2 = yaml.safe_load(actual_output)
             assert yaml1 == yaml2, "Expected migration_services.yaml and actual migration_services.yaml do not match"

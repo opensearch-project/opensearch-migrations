@@ -31,6 +31,8 @@ npx cdk synth --asset-metadata false --path-metadata false --quiet
 
 cp "cdk.out/Migration-Assistant-Infra-Create-VPC.template.json" "${TEMP_DIR}/deployment/global-s3-assets/${SOLUTION_NAME}-create-vpc.template"
 cp "cdk.out/Migration-Assistant-Infra-Import-VPC.template.json" "${TEMP_DIR}/deployment/global-s3-assets/${SOLUTION_NAME}-import-vpc.template"
+cp "cdk.out/Migration-Assistant-Infra-Create-VPC-eks.template.json" "${TEMP_DIR}/deployment/global-s3-assets/${SOLUTION_NAME}-create-vpc-eks.template"
+cp "cdk.out/Migration-Assistant-Infra-Import-VPC-eks.template.json" "${TEMP_DIR}/deployment/global-s3-assets/${SOLUTION_NAME}-import-vpc-eks.template"
 
 echo "Copying solution-manifest.yaml..."
 cp "${SCRIPT_DIR}/solution-manifest.yaml" "${TEMP_DIR}/solution-manifest.yaml"

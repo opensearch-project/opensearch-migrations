@@ -131,7 +131,7 @@ def get_cluster_and_auth(config_file, cluster_type):
 
 def main():
     args = parse_args()
-    
+
     url_base, auth = get_cluster_and_auth(args.config_file, args.cluster)
 
     session = requests.Session()

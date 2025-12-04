@@ -112,6 +112,13 @@ exports[`FullMigrationWithCli workflow template matches snapshot 1`] = `
     },
   },
   "workflowParameters": {
+    "approvalConfigMapName": {
+      "_hasDefault": true,
+      "defaultValue": {
+        "expression": "approval-config",
+      },
+      "description": undefined,
+    },
     "etcdEndpoints": {
       "_hasDefault": true,
       "defaultValue": {

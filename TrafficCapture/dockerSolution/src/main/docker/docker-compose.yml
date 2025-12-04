@@ -97,7 +97,7 @@ services:
       - migrations
     volumes:
       - sharedLogsVolume:/shared-logs-output
-      - ./migrationConsole/lib/console_link/services.yaml:/config/migration_services.yaml
+      - ./services.yaml:/config/migration_services.yaml
       # this is a convenience thing for testing -- it should be removed before this makes it to prod.
       # - ./migrationConsole/lib/console_link:/root/lib/console_link
       - ~/.aws:/root/.aws

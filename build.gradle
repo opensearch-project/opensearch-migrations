@@ -9,6 +9,7 @@ plugins {
     id 'me.champeau.jmh' version '0.7.3' apply false
     id 'com.gradleup.shadow' version '8.3.8' apply false
     id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
+    id 'com.github.node-gradle.node' version '7.1.0' apply false
     id 'com.google.protobuf' version "0.9.5" apply false
     id 'com.google.cloud.tools.jib' version '3.4.5' apply false
 
@@ -440,7 +441,6 @@ gradle.projectsEvaluated {
         subproject.tasks.matching { task ->
             task.name == 'test' && !(task instanceof Test)
         }.configureEach { task ->
-            println "adding task named 'test' = ${task}"
             sharedProcessTestsTasks.add(task)
         }
     }

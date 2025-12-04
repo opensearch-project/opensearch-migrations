@@ -23,13 +23,13 @@ import {typeToken, TypeToken} from "./sharedTypes";
 type DefaultSpec<T extends PlainObject> =
     | {
         expression: AllowLiteralOrExpression<T>;
-        type?: never;
-        from?: never
+        from?: ConfigMapKeySelector;
+        type?: TypeToken<T>;
 }
     | {
+        expression?: AllowLiteralOrExpression<T>;
         from: ConfigMapKeySelector;
         type: TypeToken<T>;
-        expression?: never
 };
 
 export type FieldIsRequired = "FieldRequired" | "FieldOptional";
@@ -58,15 +58,17 @@ export type InputParamDef<
 export function defineParam<T extends PlainObject>(opts: {
     description?: string
 } & DefaultSpec<T>): InputParamDef<DeepWiden<T>, false> {
+    if (opts.expression === undefined && opts.from === undefined) {
+        throw new Error("Invalid DefaultSpec: neither expression nor from provided");
+    }
     return {
         // phantom is omitted at runtime; TS still sees it
         _hasDefault: true,
         description: opts.description,
-        defaultValue: (opts.expression !== undefined ? {expression: opts.expression as DeepWiden<T>} :
-            (opts.from !== undefined ? {from: opts.from, type: typeToken<DeepWiden<T>>()} :
-                (() => {
-                    throw new Error("Invalid DefaultSpec: neither expression nor from provided")
-                })()))
+        defaultValue: {
+            ...(opts.expression !== undefined ? {expression: opts.expression as DeepWiden<T>} : {}),
+            ...(opts.from !== undefined ? {from: opts.from, type: typeToken<DeepWiden<T>>()} : {})
+        } as any
     };
 }
 
@@ -85,13 +87,13 @@ export function defineRequiredParam<T extends PlainObject>(opts?: {
  */
 export type ConfigMapKeySelector = {
     name: AllowLiteralOrExpression<string>;
-    key: string;
+    key: AllowLiteralOrExpression<string>;
     optional?: boolean;
 };
 
 export function configMapKey(
     name: AllowLiteralOrExpression<string>,
-    key: string,
+    key: AllowLiteralOrExpression<string>,
     optional?: boolean
 ): ConfigMapKeySelector {
     return {'name': name, 'key': key, 'optional': optional};

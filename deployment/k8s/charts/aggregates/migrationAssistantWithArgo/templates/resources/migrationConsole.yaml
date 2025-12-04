@@ -11,10 +11,7 @@ metadata:
   name: migration-console-access-role
 rules:
   - apiGroups: [ "" ]
-    resources: ["secrets"]
-    verbs: ["list"]
-  - apiGroups: [ "" ]
-    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log", "services"]
+    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log", "secrets", "services"]
     verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
   - apiGroups: [""]
     resources: ["pods/attach"]
@@ -63,6 +60,9 @@ spec:
         - name: console
           image: {{ .Values.images.migrationConsole.repository}}:{{ .Values.images.migrationConsole.tag }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
+          env:
+            - name: MIGRATIONS_CLI_CONSOLE_DISABLE_LEGACY_COMMANDS
+              value: "true"
           command:
             - "/bin/sh"
             - "-c"
@@ -86,11 +86,11 @@ spec:
     {{- if $developerModeEnabled  }}
         - name: local-console-libs
           hostPath:
-            path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib
+            path: /opensearch-migrations/migrationConsole/lib
             type: Directory
         - name: local-test-config-processor
           hostPath:
-            path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/tests/workflow-tests/resources/scripts
+            path: /opensearch-migrations/migrationConsole/lib/console_link/tests/workflow-tests/resources/scripts
             type: Directory
     {{- end }}
     {{- if $sharedLogsVolumeEnabled  }}
