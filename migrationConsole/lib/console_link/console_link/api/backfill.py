@@ -26,7 +26,7 @@ def _get_backfill(session_name):
     if not env or not env.target_cluster:
         raise HTTPException(status_code=400,
                             detail=f"Cannot run backfill without a target cluster defined in the configuration: {env}")
-                            
+
     return env.backfill
 
 
@@ -58,7 +58,7 @@ def start_backfill(session_name: str) -> Dict:
             if isinstance(result.value, Exception):
                 raise result.value
             raise HTTPException(status_code=500, detail=f"Failed to start backfill: {result.value}")
-        
+
         return {
             "status": "success",
             "message": f"Backfill process started successfully: {result.display()}"
@@ -80,7 +80,7 @@ def pause_backfill(session_name: str) -> Dict:
             if isinstance(result.value, Exception):
                 raise result.value
             raise HTTPException(status_code=500, detail=f"Failed to pause backfill: {result.value}")
-        
+
         return {
             "status": "success",
             "message": f"Backfill process paused successfully: {result.display()}"
@@ -102,7 +102,7 @@ def stop_backfill(session_name: str) -> Dict:
             if isinstance(result.value, Exception):
                 raise result.value
             raise HTTPException(status_code=500, detail=f"Failed to stop backfill: {result.value}")
-        
+
         return {
             "status": "success",
             "message": f"Backfill process stopped successfully: {result.display()}"

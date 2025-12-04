@@ -10,9 +10,9 @@ class TestMapFromWorkflowConfig:
         workflow_config = {
             "endpoint": "https://elasticsearch-master-headless:9200"
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://elasticsearch-master-headless:9200",
             "no_auth": None
@@ -25,9 +25,9 @@ class TestMapFromWorkflowConfig:
             "endpoint": "https://opensearch-cluster:9200",
             "allowInsecure": True
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://opensearch-cluster:9200",
             "allow_insecure": True,
@@ -41,9 +41,9 @@ class TestMapFromWorkflowConfig:
             "endpoint": "https://opensearch-cluster:9200",
             "allowInsecure": False
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://opensearch-cluster:9200",
             "allow_insecure": False,
@@ -63,9 +63,9 @@ class TestMapFromWorkflowConfig:
                 }
             }
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://elasticsearch-master-headless:9200",
             "allow_insecure": True,
@@ -87,9 +87,9 @@ class TestMapFromWorkflowConfig:
                 }
             }
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://opensearch-cluster-master-headless:9200",
             "allow_insecure": True,
@@ -112,9 +112,9 @@ class TestMapFromWorkflowConfig:
                 }
             }
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://elasticsearch-master-headless:9200",
             "allow_insecure": True,
@@ -136,9 +136,9 @@ class TestMapFromWorkflowConfig:
                 }
             }
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://search-mydomain.us-east-1.es.amazonaws.com",
             "allow_insecure": False,
@@ -159,9 +159,9 @@ class TestMapFromWorkflowConfig:
                 }
             }
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://search-mydomain.us-west-2.es.amazonaws.com",
             "sigv4": {
@@ -180,9 +180,9 @@ class TestMapFromWorkflowConfig:
                 }
             }
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://search-mydomain.us-east-1.es.amazonaws.com",
             "sigv4": {
@@ -199,9 +199,9 @@ class TestMapFromWorkflowConfig:
                 "sigv4": {}
             }
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://search-mydomain.us-east-1.es.amazonaws.com",
             "sigv4": None
@@ -245,9 +245,9 @@ class TestMapFromWorkflowConfig:
             "endpoint": "https://elasticsearch-master-headless:9200",
             "authConfig": None
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://elasticsearch-master-headless:9200",
             "no_auth": None
@@ -260,9 +260,9 @@ class TestMapFromWorkflowConfig:
             "endpoint": "https://elasticsearch-master-headless:9200",
             "allowInsecure": True
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://elasticsearch-master-headless:9200",
             "allow_insecure": True,
@@ -283,9 +283,9 @@ class TestMapFromWorkflowConfig:
                 }
             }
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://elasticsearch-master-headless:9200",
             "allow_insecure": True,
@@ -316,9 +316,9 @@ class TestMapFromWorkflowConfig:
             },
             "proxy": {}
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://elasticsearch-master-headless:9200",
             "allow_insecure": True,
@@ -342,7 +342,7 @@ class TestMapFromWorkflowConfig:
                 }
             }
         }
-        
+
         with pytest.raises(ValueError,
                            match="The cluster data from the workflow config does not contain an 'endpoint' field"):
             map_cluster_from_workflow_config(workflow_config)
@@ -350,7 +350,7 @@ class TestMapFromWorkflowConfig:
     def test_empty_config_raises_value_error(self):
         """Test that empty config raises ValueError."""
         workflow_config = {}
-        
+
         with pytest.raises(ValueError,
                            match="The cluster data from the workflow config does not contain an 'endpoint' field"):
             map_cluster_from_workflow_config(workflow_config)
@@ -361,9 +361,9 @@ class TestMapFromWorkflowConfig:
             "endpoint": "https://elasticsearch-master-headless:9200",
             "authConfig": "invalid-auth-config"
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://elasticsearch-master-headless:9200",
             "no_auth": None
@@ -378,7 +378,7 @@ class TestMapFromWorkflowConfig:
                 "basic": "invalid-basic-config"
             }
         }
-        
+
         with pytest.raises(ValueError, match="authConfig.basic must be a dictionary"):
             map_cluster_from_workflow_config(workflow_config)
 
@@ -390,7 +390,7 @@ class TestMapFromWorkflowConfig:
                 "basic": {}
             }
         }
-        
+
         with pytest.raises(ValueError, match="authConfig.basic must contain either a secret or username/password"):
             map_cluster_from_workflow_config(workflow_config)
 
@@ -404,7 +404,7 @@ class TestMapFromWorkflowConfig:
                 }
             }
         }
-        
+
         with pytest.raises(ValueError, match="authConfig.basic must contain either a secret or username/password"):
             map_cluster_from_workflow_config(workflow_config)
 
@@ -418,7 +418,7 @@ class TestMapFromWorkflowConfig:
                 }
             }
         }
-        
+
         with pytest.raises(ValueError, match="authConfig.basic must contain either a secret or username/password"):
             map_cluster_from_workflow_config(workflow_config)
 
@@ -428,9 +428,9 @@ class TestMapFromWorkflowConfig:
         workflow_config = {
             "endpoint": "http://elasticsearch-master:9200"
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "http://elasticsearch-master:9200",
             "no_auth": None
@@ -443,9 +443,9 @@ class TestMapFromWorkflowConfig:
             "endpoint": "https://my-cluster.example.com:9243",
             "allowInsecure": False
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://my-cluster.example.com:9243",
             "allow_insecure": False,
@@ -458,9 +458,9 @@ class TestMapFromWorkflowConfig:
         workflow_config = {
             "endpoint": "https://proxy.example.com/elasticsearch"
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://proxy.example.com/elasticsearch",
             "no_auth": None
@@ -487,9 +487,9 @@ class TestMapFromWorkflowConfig:
             },
             "proxy": {}
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://elasticsearch-master-headless:9200",
             "allow_insecure": True,
@@ -512,9 +512,9 @@ class TestMapFromWorkflowConfig:
                 }
             }
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://opensearch-cluster-master-headless:9200",
             "allow_insecure": True,
@@ -536,9 +536,9 @@ class TestMapFromWorkflowConfig:
                 }
             }
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://search-mydomain.us-east-1.es.amazonaws.com",
             "allow_insecure": False,
@@ -560,9 +560,9 @@ class TestMapFromWorkflowConfig:
                 }
             }
         }
-        
+
         result = map_cluster_from_workflow_config(workflow_config)
-        
+
         expected = {
             "endpoint": "https://my-collection.us-west-2.aoss.amazonaws.com",
             "sigv4": {

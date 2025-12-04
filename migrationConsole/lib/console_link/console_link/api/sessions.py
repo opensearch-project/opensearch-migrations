@@ -77,7 +77,7 @@ def update_session(session_name: str, data: Dict = Body(...)) -> Session:
 
     try:
         session_dict = existing.model_dump()
-        
+
         for key, value in data.items():
             # Don't allow overriding creation date
             if key == 'created':
@@ -86,7 +86,7 @@ def update_session(session_name: str, data: Dict = Body(...)) -> Session:
             # Don't allow updating the name
             if key == 'name':
                 continue
-                
+
             # Allow updating any other field
             if key:
                 session_dict[key] = value

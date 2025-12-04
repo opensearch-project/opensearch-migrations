@@ -52,14 +52,14 @@ class TestMetadataAPI:
                 "no_auth": None
             }
         })
-        
+
         if has_metadata:
             mock_metadata = Mock()
             mock_metadata.migrate_or_evaluate.return_value.output.stdout = str(self.mock_result)
             env.metadata = mock_metadata
         else:
             env.metadata = None
-            
+
         return Session(
             name=self.session_name,
             created=datetime.now(timezone.utc),
@@ -73,12 +73,12 @@ class TestMetadataAPI:
         """Test successful metadata migration."""
         mock_find_session.return_value = self.create_mock_session()
         mock_parse_result.return_value = self.mock_result
-        
+
         response = client.post(
             f"/sessions/{self.session_name}/metadata/migrate",
             json=self.sample_request
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == StepState.COMPLETED
@@ -92,12 +92,12 @@ class TestMetadataAPI:
     def test_migrate_metadata_not_configured(self, mock_find_session):
         """Test error when metadata is not configured in environment."""
         mock_find_session.return_value = self.create_mock_session(has_metadata=False)
-        
+
         response = client.post(
             f"/sessions/{self.session_name}/metadata/migrate",
             json=self.sample_request
         )
-        
+
         assert response.status_code == 400
         assert "not configured" in response.json()["detail"]
 
@@ -111,12 +111,12 @@ class TestMetadataAPI:
             "errorCount": 1,
             "errors": ["Error occurred"]
         }
-        
+
         response = client.post(
             f"/sessions/{self.session_name}/metadata/migrate",
             json=self.sample_request
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == StepState.FAILED
@@ -129,7 +129,7 @@ class TestMetadataAPI:
     def test_get_metadata_status_success(self, mock_get_latest, mock_find_session):
         """Test successful metadata status retrieval."""
         mock_find_session.return_value = self.create_mock_session()
-        
+
         mock_entry = MetadataEntry(
             session_name=self.session_name,
             timestamp=datetime.now(timezone.utc),
@@ -139,9 +139,9 @@ class TestMetadataAPI:
             detailed_results=self.mock_result
         )
         mock_get_latest.return_value = mock_entry
-        
+
         response = client.get(f"/sessions/{self.session_name}/metadata/status")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == StepState.COMPLETED
@@ -155,9 +155,9 @@ class TestMetadataAPI:
         """Test metadata status when no operations have been performed."""
         mock_find_session.return_value = self.create_mock_session()
         mock_get_latest.side_effect = MetadataNotAvailable()
-        
+
         response = client.get(f"/sessions/{self.session_name}/metadata/status")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == StepState.PENDING
@@ -168,9 +168,9 @@ class TestMetadataAPI:
         """Test metadata status retrieval error handling."""
         mock_find_session.return_value = self.create_mock_session()
         mock_get_latest.side_effect = Exception("Unexpected error")
-        
+
         response = client.get(f"/sessions/{self.session_name}/metadata/status")
-        
+
         assert response.status_code == 500
         assert "Failed to get metadata status" in response.json()["detail"]
 
@@ -179,12 +179,12 @@ class TestMetadataAPI:
         """Test error when session doesn't exist."""
         from fastapi import HTTPException
         mock_find_session.side_effect = HTTPException(status_code=404, detail="Session not found")
-        
+
         response = client.post(
             "/sessions/nonexistent/metadata/migrate",
             json=self.sample_request
         )
-        
+
         assert response.status_code == 404
         assert "Session not found" in response.json()["detail"]
 
@@ -194,11 +194,11 @@ class TestMetadataAPI:
         """Test handling of unexpected errors during migration."""
         mock_find_session.return_value = self.create_mock_session()
         mock_parse_result.side_effect = Exception("Unexpected error")
-        
+
         response = client.post(
             f"/sessions/{self.session_name}/metadata/migrate",
             json=self.sample_request
         )
-        
+
         assert response.status_code == 500
         assert "Unexpected error during metadata" in response.json()["detail"]

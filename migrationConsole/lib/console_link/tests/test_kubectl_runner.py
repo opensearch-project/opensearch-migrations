@@ -117,7 +117,7 @@ def test_retrieve_deployment_status_failure_deployment_read(kubectl_runner):
 
 def test_read_secret(kubectl_runner):
     import base64
-    
+
     def mock_read_namespaced_secret(name, namespace):
         return V1Secret(data={"key": base64.b64encode(b"value").decode("utf-8")})
     kubectl_runner.k8s_core.read_namespaced_secret = mock_read_namespaced_secret

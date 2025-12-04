@@ -20,7 +20,7 @@ def get_metric_data(metrics_source: MetricsSource, component: str, metric_name: 
     except KeyError:
         logger.error(f"Statistic {statistic} was not found in {list(MetricStatistic)}")
         raise ValueError("Invalid statistic", {statistic})
-    
+
     starttime = datetime.now() - timedelta(minutes=lookback)
     logger.info(f"Setting starttime to current time ({datetime.now()}) minus lookback ({lookback}: {starttime}")
 

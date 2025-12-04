@@ -417,16 +417,16 @@ def store_metadata_result(
 def extra_args_from_request(request: MetadataMigrateRequest) -> List[str]:
     """Build extra args list from the request parameters."""
     extra_args = []
-    
+
     if request.indexAllowlist:
         extra_args.extend(["--index-allowlist", ",".join(request.indexAllowlist)])
-    
+
     if request.indexTemplateAllowlist:
         extra_args.extend(["--index-template-allowlist", ",".join(request.indexTemplateAllowlist)])
-    
+
     if request.componentTemplateAllowlist:
         extra_args.extend(["--component-template-allowlist", ",".join(request.componentTemplateAllowlist)])
-    
+
     extra_args.extend(["--output", "json"])
 
     return extra_args
@@ -459,5 +459,5 @@ def build_status_from_entry(entry: metadata_db.MetadataEntry) -> MetadataStatus:
         errorCode=entry.detailed_results.get("errorCode", 0),
         errorMessage=error_message,
     )
-    
+
     return response

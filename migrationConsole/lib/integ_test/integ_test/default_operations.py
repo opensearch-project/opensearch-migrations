@@ -193,6 +193,6 @@ class DefaultOperationsLibrary:
         return {
             "NoopTransformerProvider": ""
         }
-    
+
     def run_test_benchmarks(self, cluster: Cluster):
         run_test_benchmarks(cluster=cluster)

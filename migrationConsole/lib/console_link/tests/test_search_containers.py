@@ -33,7 +33,7 @@ def env_with_source_container(request):
     with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_config:
         yaml.dump(services_config, temp_config)
         temp_config_path = temp_config.name
-    
+
     yield Environment(config_file=temp_config_path)
 
     # Stop the container and clean up the temporary services.yaml file after tests complete

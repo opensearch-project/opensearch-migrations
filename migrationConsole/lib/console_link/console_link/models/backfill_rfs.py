@@ -105,13 +105,13 @@ class DockerRFSBackfill(RFSBackfill):
 
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
         raise NotImplementedError()
-    
+
     def archive(self, *args, **kwargs) -> CommandResult:
         raise NotImplementedError()
 
     def build_backfill_status(self, *args) -> BackfillStatus:
         raise NotImplementedError()
-    
+
 
 class RfsWorkersInProgress(Exception):
     def __init__(self):
@@ -179,7 +179,7 @@ class K8sRFSBackfill(RFSBackfill):
         if deployment_status.pending > 0:
             return CommandResult(True, (BackfillStatus.STARTING, status_str))
         return CommandResult(True, (BackfillStatus.STOPPED, status_str))
-    
+
     def build_backfill_status(self) -> BackfillOverallStatus:
         deployment_status = self.kubectl_runner.retrieve_deployment_status()
         active_workers = True  # Assume there are active workers if we cannot lookup the deployment status
@@ -204,7 +204,7 @@ class ECSRFSBackfill(RFSBackfill):
     def start(self, *args, **kwargs) -> CommandResult:
         logger.info(f"Starting RFS backfill by setting desired count to {self.default_scale} instances")
         return self.ecs_client.set_desired_count(self.default_scale)
-    
+
     def pause(self, *args, **kwargs) -> CommandResult:
         logger.info("Pausing RFS backfill by setting desired count to 0 instances")
         return self.ecs_client.set_desired_count(0)
@@ -216,7 +216,7 @@ class ECSRFSBackfill(RFSBackfill):
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
         logger.info(f"Scaling RFS backfill by setting desired count to {units} instances")
         return self.ecs_client.set_desired_count(units)
-    
+
     def archive(self, *args, archive_dir_path: str = None, archive_file_name: str = None, **kwargs) -> CommandResult:
         status = self.ecs_client.get_instance_statuses()
         return perform_archive(target_cluster=self.target_cluster,
@@ -245,7 +245,7 @@ class ECSRFSBackfill(RFSBackfill):
         elif instance_statuses.pending > 0:
             return CommandResult(True, (BackfillStatus.STARTING, status_string))
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
-    
+
     def build_backfill_status(self) -> BackfillOverallStatus:
         deployment_status = self.ecs_client.get_instance_statuses()
         active_workers = True  # Assume there are active workers if we cannot lookup the deployment status
@@ -460,7 +460,7 @@ def generate_status_queries():
         "in progress": in_progress_query,
         "unclaimed": unclaimed_query
     }
-    
+
     return queries
 
 
@@ -528,7 +528,7 @@ def backup_working_state_index(cluster: Cluster, index_name: str, backup_path: s
                 outfile.write(",\n")
             else:
                 first_batch = False
-            
+
             # Dump the batch of documents as an entry in the array
             batch_json = json.dumps(batch, indent=4)
             outfile.write(batch_json)

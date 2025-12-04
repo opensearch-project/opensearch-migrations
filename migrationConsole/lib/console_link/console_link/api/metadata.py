@@ -26,21 +26,21 @@ def migrate_metadata(session_name: str, request: metadata.MetadataMigrateRequest
     """
     session = http_safe_find_session(session_name)
     env = session.env
-    
+
     if not env or not env.metadata:
         raise HTTPException(
             status_code=400,
             detail="Metadata migration is not configured in the environment"
         )
-    
+
     try:
         # Build extra arguments from request
         extra_args = metadata.extra_args_from_request(request)
-        
+
         # Execute metadata migration or evaluation based on dry_run
         operation_type = "evaluation" if request.dryRun else "migration"
         logger.info(f"Starting metadata {operation_type} for session {session_name}")
-        
+
         start_time = datetime.now(timezone.utc)
         result = env.metadata.migrate_or_evaluate("migrate" if not request.dryRun else "evaluate", extra_args)
         end_time = datetime.now(timezone.utc)
@@ -51,9 +51,9 @@ def migrate_metadata(session_name: str, request: metadata.MetadataMigrateRequest
                                                 start_time,
                                                 end_time,
                                                 dry_run=request.dryRun)
-        
+
         return metadata.build_status_from_entry(result)
-            
+
     except Exception as e:
         logger.error(f"Unexpected error during metadata {operation_type} for session {session_name}: {e}")
         raise HTTPException(
@@ -68,7 +68,7 @@ def migrate_metadata(session_name: str, request: metadata.MetadataMigrateRequest
 def get_metadata_status(session_name: str):
     """Get the status of the most recent metadata operation for the session."""
     http_safe_find_session(session_name)
-    
+
     try:
         latest_result = metadata_db.get_latest(session_name)
         return metadata.build_status_from_entry(latest_result)
