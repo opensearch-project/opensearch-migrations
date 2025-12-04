@@ -115,7 +115,6 @@ otelConfiguration:
                 insecure_skip_verify: true # Minikube uses self-signed certs
               kubernetes_sd_configs:
                 - role: node
-                  port: 10250 # The common default secure port for Kubelet
               relabel_configs:
                 # Only scrape the local node (important for DaemonSet)
                 - source_labels: [__meta_kubernetes_node_name]
