@@ -34,6 +34,7 @@ function makeMigrationParams(
             {
                 fromSource: "source1",
                 toTarget: "target1",
+                skipApprovals: false,
                 snapshotExtractAndLoadConfigs: [
                     {
                         snapshotConfig: {
@@ -41,14 +42,37 @@ function makeMigrationParams(
                                 snapshotNamePrefix: "source1snapshot1"
                             }
                         },
+                        createSnapshotConfig: {},
                         migrations: [
                             {
-                                metadataMigrationConfig: {},
-                                documentBackfillConfig: {}
+                                metadataMigrationConfig: {
+                                    skipEvaluateApproval: true,
+                                    skipMigrateApproval: true
+                                },
+                                documentBackfillConfig: {
+                                    documentsPerBulkRequest: 1000,
+                                    maxShardSizeBytes: 16000000,
+                                    maxConnections: 4,
+                                    resources: {
+                                        requests: {
+                                            cpu: "250m",
+                                            memory: "1Gi",
+                                            "ephemeral-storage": "5Gi"
+                                        },
+                                        limits: {
+                                            cpu: "250m",
+                                            memory: "1Gi",
+                                            "ephemeral-storage": "5Gi"
+                                        }
+                                    }
+                                }
                             }
                         ]
                     }
-                ]
+                ],
+                replayerConfig: {
+                    podReplicas: 0
+                }
             }
         ]
     });
@@ -102,7 +126,7 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
             )
         )
         .addRetryParameters({
-            limit: "3",          // ~72 hours (864 * 5min max backoff)
+            limit: "10",          // ~72 hours (864 * 5min max backoff)
             retryPolicy: "Always",
             backoff: {
                 duration: "5",     // Start at 5 seconds
