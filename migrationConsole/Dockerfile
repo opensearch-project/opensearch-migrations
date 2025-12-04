@@ -126,7 +126,7 @@ RUN "$NODEJS" "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME" &
     "$NODEJS" "$CONFIG_PROCESSOR_DIR" makeSample >> "${CONFIG_PROCESSOR_DIR}/sample.yaml"
 
 # DSL-generated workflows are now the primary workflow templates
-COPY nodeStaging/workflowTemplates /root/workflows/templates
+COPY nodeStaging/workflowTemplates /root/workflows
 
 
 # Console setup bash completion and venv for interactive access

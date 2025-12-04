@@ -6,7 +6,7 @@ metadata:
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": hook-succeeded
+    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 3
@@ -25,7 +25,7 @@ spec:
             - "/bin/sh"
             - "-c"
             - |
-              set -e
+              set -exo pipefail
               echo "Installing templates for argo workflows."
               NAMESPACE="{{ .Release.Name }}"
               APP_NAME="{{ .Release.Name }}"
@@ -55,9 +55,8 @@ spec:
                 done
                 popd
               }
-              
-              apply_workflows "workflows"
               apply_workflows "lib/integ_test/testWorkflows"
+              apply_workflows "workflows"
 ---
 # templates/remove-argo-migration-templates
 apiVersion: batch/v1
@@ -67,7 +66,7 @@ metadata:
   annotations:
     "helm.sh/hook": pre-delete
     "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": hook-succeeded
+    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 3

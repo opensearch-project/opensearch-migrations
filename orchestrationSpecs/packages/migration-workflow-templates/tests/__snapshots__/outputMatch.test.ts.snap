@@ -2190,46 +2190,13 @@ exports[`test workflow template renderings full-migration-with-clusters 1`] = `
       {
         "container": {
           "args": [
-            "
-set -e -x
+            "set -e -x
 
 echo "Building and submitting migration workflow..."
 
-# Create migration config JSON
-cat > /tmp/migration_config.json << 'EOF'
-{
-  "skipApprovals": true,
-  "sourceClusters": {
-    "source1": {{inputs.parameters.sourceConfig}}
-    }
-  },
-  "targetClusters": {
-    "target1": {{inputs.parameters.targetConfig}}
-  },
-  "migrationConfigs": [
-    {
-      "fromSource": "source1",
-      "toTarget": "target1",
-      "snapshotExtractAndLoadConfigs": [
-        {
-          "snapshotConfig": {
-            "snapshotNameConfig": {
-              "snapshotNamePrefix": "source1snapshot1"
-            }
-          },
-          "migrations": [
-            {
-              "metadataMigrationConfig": {
-              },
-              "documentBackfillConfig": {
-              }
-            }
-          ]
-        }
-      ]
-    }
-  ]
-}
+# Decode base64 migration config and write to file
+base64 -d > /tmp/migration_config.json << EOF
+{{=toBase64(toJSON(sprig.dict("skipApprovals", true, "sourceClusters", sprig.dict("source1", fromJSON(inputs.parameters.sourceConfig)), "targetClusters", sprig.dict("target1", fromJSON(inputs.parameters.targetConfig)), "migrationConfigs", [{"fromSource":"source1","toTarget":"target1","snapshotExtractAndLoadConfigs":[{"snapshotConfig":{"snapshotNameConfig":{"snapshotNamePrefix":"source1snapshot1"}},"migrations":[{"metadataMigrationConfig":{},"documentBackfillConfig":{}}]}]}])))}}
 EOF
 
 echo "Migration config contents:"
@@ -2238,12 +2205,11 @@ cat /tmp/migration_config.json
 echo "Loading configuration from JSON..."
 cat /tmp/migration_config.json | workflow configure edit --stdin
 
- # Submit workflow
+# Submit workflow
 echo "Submitting workflow..."
 WORKFLOW_OUTPUT=$(workflow submit 2>&1)
 echo "Workflow submit output: $WORKFLOW_OUTPUT"
 ",
-            "{{=toJSON(sprig.dict("skipApprovals", true, "sourceClusters", sprig.dict("source1", fromJSON(inputs.parameters.sourceConfig)), "targetClusters", sprig.dict("target1", fromJSON(inputs.parameters.targetConfig)), "migrationConfigs", [{"fromSource":"source1","toTarget":"target1","snapshotExtractAndLoadConfigs":[{"snapshotConfig":{"snapshotNameConfig":{"snapshotNamePrefix":"source1snapshot1"}},"migrations":[{"metadataMigrationConfig":{},"documentBackfillConfig":{}}]}]}]))}}",
           ],
           "command": [
             "/bin/sh",
@@ -2287,8 +2253,7 @@ echo "Workflow submit output: $WORKFLOW_OUTPUT"
       {
         "container": {
           "args": [
-            "
-set -e -x
+            "set -e -x
 
 echo "Checking workflow status"
 . /etc/profile.d/venv.sh

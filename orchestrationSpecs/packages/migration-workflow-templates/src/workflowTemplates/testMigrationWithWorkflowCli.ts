@@ -16,6 +16,7 @@ import {z} from "zod";
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {configureAndSubmitScript, monitorScript} from "../resourceLoader";
 
 function makeMigrationParams(
     sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
@@ -53,118 +54,6 @@ function makeMigrationParams(
     });
 }
 
-
-const WORKFLOW_CONFIGURE_AND_SUBMIT_SCRIPT = `
-set -e -x
-
-echo "Building and submitting migration workflow..."
-
-# Create migration config JSON
-cat > /tmp/migration_config.json << 'EOF'
-{
-  "skipApprovals": true,
-  "sourceClusters": {
-    "source1": {{inputs.parameters.sourceConfig}}
-    }
-  },
-  "targetClusters": {
-    "target1": {{inputs.parameters.targetConfig}}
-  },
-  "migrationConfigs": [
-    {
-      "fromSource": "source1",
-      "toTarget": "target1",
-      "snapshotExtractAndLoadConfigs": [
-        {
-          "snapshotConfig": {
-            "snapshotNameConfig": {
-              "snapshotNamePrefix": "source1snapshot1"
-            }
-          },
-          "migrations": [
-            {
-              "metadataMigrationConfig": {
-              },
-              "documentBackfillConfig": {
-              }
-            }
-          ]
-        }
-      ]
-    }
-  ]
-}
-EOF
-
-echo "Migration config contents:"
-cat /tmp/migration_config.json
-
-echo "Loading configuration from JSON..."
-cat /tmp/migration_config.json | workflow configure edit --stdin
-
- # Submit workflow
-echo "Submitting workflow..."
-WORKFLOW_OUTPUT=$(workflow submit 2>&1)
-echo "Workflow submit output: $WORKFLOW_OUTPUT"
-`;
-
-const WORKFLOW_MONITOR_SCRIPT = `
-set -e -x
-
-echo "Checking workflow status"
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
-
-STATUS_OUTPUT=$(workflow status 2>&1 || true)
-echo "Status output:"
-echo "$STATUS_OUTPUT"
-
-RESULT="ERROR"
-EXIT_CODE=2
-
-# 1) Terminal success: stop monitoring, proceed, mark success
-if echo "$STATUS_OUTPUT" | grep -q "Phase: Succeeded"; then
-    echo "Workflow completed successfully"
-    RESULT="SUCCEEDED"
-    EXIT_CODE=0
-
-# 2) Terminal failure: stop monitoring, proceed, mark failure
-elif echo "$STATUS_OUTPUT" | grep -q "Phase: Failed"; then
-    echo "Workflow failed permanently"
-    RESULT="FAILED"
-    EXIT_CODE=0
-
-# 3) Suspended / waiting for approval: try to approve once, then retry
-elif echo "$STATUS_OUTPUT" | grep -q "Suspended\\|Waiting"; then
-    echo "Workflow is suspended or waiting for approval, attempting to approve..."
-    APPROVE_OUTPUT=$(workflow approve 2>&1 || true)
-    echo "Approve output:"
-    echo "$APPROVE_OUTPUT"
-    # Regardless of approve result, tell Argo to check again
-    RESULT="RETRY"
-    EXIT_CODE=1
-
-# 4) Still running: keep checking
-elif echo "$STATUS_OUTPUT" | grep -q "Phase: Running\\|Phase: Pending"; then
-    echo "⏳ Workflow still running, will retry..."
-    RESULT="RETRY"
-    EXIT_CODE=1
-
-# 5) Anything else is treated as an error (e.g. CLI failure, unknown output)
-else
-    echo "Unknown or error status from 'workflow status'"
-    RESULT="ERROR"
-    EXIT_CODE=2
-fi
-
-mkdir -p /tmp/outputs
-echo "$RESULT" > /tmp/outputs/monitorResult
-sync
-
-echo "Monitor result: $RESULT (exit code: $EXIT_CODE)"
-exit $EXIT_CODE
-`;
-
 export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
     k8sResourceName: "full-migration-with-clusters",
     parallelism: 1,
@@ -183,10 +72,12 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/sh", "-c"])
             .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
-            .addArgs([WORKFLOW_CONFIGURE_AND_SUBMIT_SCRIPT,
-                expr.asString(expr.serialize(
-                    makeMigrationParams(cb.inputs.sourceConfig, cb.inputs.targetConfig)
-                ))
+            .addArgs([
+                expr.fillTemplate(configureAndSubmitScript, {
+                    "MIGRATION_CONFIG_BASE64": expr.toBase64(expr.asString(expr.serialize(
+                        makeMigrationParams(cb.inputs.sourceConfig, cb.inputs.targetConfig)
+                    )))
+                })
             ])
         )
     )
@@ -198,7 +89,7 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/sh", "-c"])
             .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
-            .addArgs([WORKFLOW_MONITOR_SCRIPT])
+            .addArgs([monitorScript])
             .addPathOutput(
                 "monitorResult",
                 "/tmp/outputs/monitorResult",
