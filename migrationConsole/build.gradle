@@ -127,10 +127,6 @@ tasks.register('syncDockerBuildContext', Sync) {
         into "lib/integ_test"
         exclude commonExcludes
     }
-    from(project.file("workflows")) {
-        into "workflows"
-        exclude commonExcludes
-    }
 
     // Preserve the nodeStaging directory if it exists
     preserve {

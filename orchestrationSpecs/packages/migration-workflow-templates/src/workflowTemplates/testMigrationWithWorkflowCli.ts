@@ -1,53 +1,58 @@
 import {
-    defineParam,
+    BaseExpression,
     expr,
     INTERNAL,
     selectInputsForRegister,
+    Serialized,
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {
     DEFAULT_RESOURCES,
+    NAMED_SOURCE_CLUSTER_CONFIG,
+    NAMED_TARGET_CLUSTER_CONFIG,
 } from "@opensearch-migrations/schemas";
+import {z} from "zod";
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 
-const configComponentParameters = {
-    // SOURCE parameters
-    sourceEndpoint: defineParam({ 
-        expression: expr.literal(""),
-        description: "Source cluster endpoint URL"
-    }),
-    sourceAllowInsecure: defineParam({ 
-        expression: expr.literal("true"),
-        description: "Allow insecure connections to source cluster"
-    }),
-    sourceVersion: defineParam({ 
-        expression: expr.literal(""),
-        description: "Source cluster version (example : ES 7.10)"
-    }),
-    
-    // TARGET parameters
-    targetEndpoint: defineParam({ 
-        expression: expr.literal(""),
-        description: "Target cluster endpoint URL"
-    }),
-    targetAllowInsecure: defineParam({ 
-        expression: expr.literal("true"),
-        description: "Allow insecure connections to target cluster"
-    }),
-    targetVersion: defineParam({ 
-        expression: expr.literal(""),
-        description: "Target cluster version (example : OS 2.19)"
-    }),
-    
-    // SNAPSHOT parameters
-    snapshotConfig: defineParam({
-        expression: expr.literal(""),
-        description: "Snapshot repository configuration as JSON object fragment (S3_REPO_CONFIG)"
-    })
-};
+function makeMigrationParams(
+    sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
+    targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>
+) {
+    return expr.makeDict({
+        skipApprovals: true,
+        sourceClusters: expr.makeDict({
+            source1: expr.deserializeRecord(sourceConfig)
+        }),
+        targetClusters: expr.makeDict({
+            target1: expr.deserializeRecord(targetConfig)
+        }),
+        migrationConfigs: [
+            {
+                fromSource: "source1",
+                toTarget: "target1",
+                snapshotExtractAndLoadConfigs: [
+                    {
+                        snapshotConfig: {
+                            snapshotNameConfig: {
+                                snapshotNamePrefix: "source1snapshot1"
+                            }
+                        },
+                        migrations: [
+                            {
+                                metadataMigrationConfig: {},
+                                documentBackfillConfig: {}
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    });
+}
+
 
 const WORKFLOW_CONFIGURE_AND_SUBMIT_SCRIPT = `
 set -e -x
@@ -59,19 +64,11 @@ cat > /tmp/migration_config.json << 'EOF'
 {
   "skipApprovals": true,
   "sourceClusters": {
-    "source1": {
-      "endpoint": "{{inputs.parameters.sourceEndpoint}}",
-      "allowInsecure": {{inputs.parameters.sourceAllowInsecure}},
-      "version": "{{inputs.parameters.sourceVersion}}",
-      "snapshotRepo": {{inputs.parameters.snapshotConfig}}
+    "source1": {{inputs.parameters.sourceConfig}}
     }
   },
   "targetClusters": {
-    "target1": {
-      "endpoint": "{{inputs.parameters.targetEndpoint}}",
-      "allowInsecure": {{inputs.parameters.targetAllowInsecure}},
-      "version": "{{inputs.parameters.targetVersion}}"
-    }
+    "target1": {{inputs.parameters.targetConfig}}
   },
   "migrationConfigs": [
     {
@@ -87,10 +84,8 @@ cat > /tmp/migration_config.json << 'EOF'
           "migrations": [
             {
               "metadataMigrationConfig": {
-                "indexAllowlist": ["*"]
               },
               "documentBackfillConfig": {
-                "indexAllowlist": ["*"]
               }
             }
           ]
@@ -104,12 +99,6 @@ EOF
 echo "Migration config contents:"
 cat /tmp/migration_config.json
 
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
-
-# Clear and load configuration
-echo "Clearing existing workflow configuration..."
-workflow configure clear --confirm
 echo "Loading configuration from JSON..."
 cat /tmp/migration_config.json | workflow configure edit --stdin
 
@@ -185,14 +174,20 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
 
     .addTemplate("configureAndSubmitWorkflow", t => t
-        .addInputsFromRecord(configComponentParameters)
+        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/sh", "-c"])
             .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
-            .addArgs([WORKFLOW_CONFIGURE_AND_SUBMIT_SCRIPT])
+            .addArgs([WORKFLOW_CONFIGURE_AND_SUBMIT_SCRIPT,
+                expr.asString(expr.serialize(
+                    makeMigrationParams(cb.inputs.sourceConfig, cb.inputs.targetConfig)
+                ))
+            ])
         )
     )
 
@@ -212,7 +207,7 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
             )
         )
         .addRetryParameters({
-            limit: "864",          // ~72 hours (864 * 5min max backoff)
+            limit: "3",          // ~72 hours (864 * 5min max backoff)
             retryPolicy: "Always",
             backoff: {
                 duration: "5",     // Start at 5 seconds
@@ -222,20 +217,9 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
         })
     )
 
-    .addTemplate("testRunMigration", t => t
-        // Source cluster parameters
-        .addRequiredInput("sourceEndpoint", typeToken<string>(), "Source cluster endpoint URL")
-        .addRequiredInput("sourceAllowInsecure", typeToken<string>(), "Allow insecure connections to source cluster")
-        .addRequiredInput("sourceVersion", typeToken<string>(), "Source cluster version (example: ES 7.10)")
-        
-        // Target cluster parameters
-        .addRequiredInput("targetEndpoint", typeToken<string>(), "Target cluster endpoint URL")
-        .addRequiredInput("targetAllowInsecure", typeToken<string>(), "Allow insecure connections to target cluster")
-        .addRequiredInput("targetVersion", typeToken<string>(), "Target cluster version (example: OS 2.19)")
-        
-        // Snapshot configuration (JSON blob)
-        .addRequiredInput("snapshotConfigJson", typeToken<string>(), 
-            "Snapshot repository configuration as JSON object fragment (S3_REPO_CONFIG)")
+    .addTemplate("main", t => t
+        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
@@ -244,13 +228,8 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addStep("configureAndSubmitWorkflow", INTERNAL, "configureAndSubmitWorkflow", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    sourceEndpoint: b.inputs.sourceEndpoint,
-                    sourceAllowInsecure: b.inputs.sourceAllowInsecure,
-                    sourceVersion: b.inputs.sourceVersion,
-                    targetEndpoint: b.inputs.targetEndpoint,
-                    targetAllowInsecure: b.inputs.targetAllowInsecure,
-                    targetVersion: b.inputs.targetVersion,
-                    snapshotConfig: b.inputs.snapshotConfigJson
+                    sourceConfig: b.inputs.sourceConfig,
+                    targetConfig: b.inputs.targetConfig,
                 })
             )
 
@@ -263,5 +242,5 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
         )
     )
 
-    .setEntrypoint("testRunMigration")
+    .setEntrypoint("main")
     .getFullScope();

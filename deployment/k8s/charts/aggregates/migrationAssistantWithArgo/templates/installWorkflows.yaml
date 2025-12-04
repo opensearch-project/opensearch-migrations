@@ -26,7 +26,7 @@ spec:
             - "-c"
             - |
               set -e
-              echo "Installing templates from originalArgoWorkflows."
+              echo "Installing templates for argo workflows."
               NAMESPACE="{{ .Release.Name }}"
               APP_NAME="{{ .Release.Name }}"
               OWNER="{{ .Release.Name }}"
@@ -57,6 +57,7 @@ spec:
               }
               
               apply_workflows "workflows"
+              apply_workflows "lib/integ_test/testWorkflows"
 ---
 # templates/remove-argo-migration-templates
 apiVersion: batch/v1

@@ -2183,7 +2183,7 @@ exports[`test workflow template renderings full-migration-with-clusters 1`] = `
         },
       ],
     },
-    "entrypoint": "testRunMigration",
+    "entrypoint": "main",
     "parallelism": 100,
     "serviceAccountName": "argo-workflow-executor",
     "templates": [
@@ -2200,19 +2200,11 @@ cat > /tmp/migration_config.json << 'EOF'
 {
   "skipApprovals": true,
   "sourceClusters": {
-    "source1": {
-      "endpoint": "{{inputs.parameters.sourceEndpoint}}",
-      "allowInsecure": {{inputs.parameters.sourceAllowInsecure}},
-      "version": "{{inputs.parameters.sourceVersion}}",
-      "snapshotRepo": {{inputs.parameters.snapshotConfig}}
+    "source1": "{{inputs.parameters.sourceConfig}}"
     }
   },
   "targetClusters": {
-    "target1": {
-      "endpoint": "{{inputs.parameters.targetEndpoint}}",
-      "allowInsecure": {{inputs.parameters.targetAllowInsecure}},
-      "version": "{{inputs.parameters.targetVersion}}"
-    }
+    "target1": "{{inputs.parameters.targetConfig}}"
   },
   "migrationConfigs": [
     {
@@ -2228,10 +2220,8 @@ cat > /tmp/migration_config.json << 'EOF'
           "migrations": [
             {
               "metadataMigrationConfig": {
-                "indexAllowlist": ["*"]
               },
               "documentBackfillConfig": {
-                "indexAllowlist": ["*"]
               }
             }
           ]
@@ -2245,12 +2235,6 @@ EOF
 echo "Migration config contents:"
 cat /tmp/migration_config.json
 
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
-
-# Clear and load configuration
-echo "Clearing existing workflow configuration..."
-workflow configure clear --confirm
 echo "Loading configuration from JSON..."
 cat /tmp/migration_config.json | workflow configure edit --stdin
 
@@ -2281,39 +2265,10 @@ echo "Workflow submit output: $WORKFLOW_OUTPUT"
         "inputs": {
           "parameters": [
             {
-              "description": "Source cluster endpoint URL",
-              "name": "sourceEndpoint",
-              "value": "",
+              "name": "sourceConfig",
             },
             {
-              "description": "Allow insecure connections to source cluster",
-              "name": "sourceAllowInsecure",
-              "value": "true",
-            },
-            {
-              "description": "Source cluster version (example : ES 7.10)",
-              "name": "sourceVersion",
-              "value": "",
-            },
-            {
-              "description": "Target cluster endpoint URL",
-              "name": "targetEndpoint",
-              "value": "",
-            },
-            {
-              "description": "Allow insecure connections to target cluster",
-              "name": "targetAllowInsecure",
-              "value": "true",
-            },
-            {
-              "description": "Target cluster version (example : OS 2.19)",
-              "name": "targetVersion",
-              "value": "",
-            },
-            {
-              "description": "Snapshot repository configuration as JSON object fragment (S3_REPO_CONFIG)",
-              "name": "snapshotConfig",
-              "value": "",
+              "name": "targetConfig",
             },
             {
               "name": "imageMigrationConsoleLocation",
@@ -2434,7 +2389,7 @@ exit $EXIT_CODE
             "duration": "5",
             "factor": "2",
           },
-          "limit": "864",
+          "limit": "3",
           "retryPolicy": "Always",
         },
       },
@@ -2442,32 +2397,10 @@ exit $EXIT_CODE
         "inputs": {
           "parameters": [
             {
-              "description": "Source cluster endpoint URL",
-              "name": "sourceEndpoint",
+              "name": "sourceConfig",
             },
             {
-              "description": "Allow insecure connections to source cluster",
-              "name": "sourceAllowInsecure",
-            },
-            {
-              "description": "Source cluster version (example: ES 7.10)",
-              "name": "sourceVersion",
-            },
-            {
-              "description": "Target cluster endpoint URL",
-              "name": "targetEndpoint",
-            },
-            {
-              "description": "Allow insecure connections to target cluster",
-              "name": "targetAllowInsecure",
-            },
-            {
-              "description": "Target cluster version (example: OS 2.19)",
-              "name": "targetVersion",
-            },
-            {
-              "description": "Snapshot repository configuration as JSON object fragment (S3_REPO_CONFIG)",
-              "name": "snapshotConfigJson",
+              "name": "targetConfig",
             },
             {
               "name": "imageMigrationConsoleLocation",
@@ -2477,7 +2410,7 @@ exit $EXIT_CODE
             },
           ],
         },
-        "name": "testrunmigration",
+        "name": "main",
         "outputs": {
           "parameters": [],
         },
@@ -2487,28 +2420,12 @@ exit $EXIT_CODE
               "arguments": {
                 "parameters": [
                   {
-                    "name": "sourceEndpoint",
-                    "value": "{{inputs.parameters.sourceEndpoint}}",
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}",
                   },
                   {
-                    "name": "sourceAllowInsecure",
-                    "value": "{{inputs.parameters.sourceAllowInsecure}}",
-                  },
-                  {
-                    "name": "sourceVersion",
-                    "value": "{{inputs.parameters.sourceVersion}}",
-                  },
-                  {
-                    "name": "targetEndpoint",
-                    "value": "{{inputs.parameters.targetEndpoint}}",
-                  },
-                  {
-                    "name": "targetAllowInsecure",
-                    "value": "{{inputs.parameters.targetAllowInsecure}}",
-                  },
-                  {
-                    "name": "targetVersion",
-                    "value": "{{inputs.parameters.targetVersion}}",
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}",
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -2517,10 +2434,6 @@ exit $EXIT_CODE
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "snapshotConfig",
-                    "value": "{{inputs.parameters.snapshotConfigJson}}",
                   },
                 ],
               },
