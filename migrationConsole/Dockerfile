@@ -125,17 +125,8 @@ RUN "$NODEJS" "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME" &
     echo "# yaml-language-server: \$schema=$WORKFLOW_SCHEMA_FILENAME" > "${CONFIG_PROCESSOR_DIR}/sample.yaml" && \
     "$NODEJS" "$CONFIG_PROCESSOR_DIR" makeSample >> "${CONFIG_PROCESSOR_DIR}/sample.yaml"
 
-# To use test workflows, flip the comments
-
-# Once we're ready, we should replace the old workflows with the new ones.
-# Notice that the installWorkflows pulls from /root/workflows/templates -
-# so the target for the new workflows would either need to be /root/workflows/templates,
-# or the installation script would need to be updated.
-
-# Here are the new workflows that are dormant but can be installed by users on the console
-COPY nodeStaging/workflowTemplates /root/newWorkflowTemplates
-# Here are the original workflows that current integ tests are using.
-COPY workflows /root/workflows
+# DSL-generated workflows are now the primary workflow templates
+COPY nodeStaging/workflowTemplates /root/workflows/templates
 
 
 # Console setup bash completion and venv for interactive access

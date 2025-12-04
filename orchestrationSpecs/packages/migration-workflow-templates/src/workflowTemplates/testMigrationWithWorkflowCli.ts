@@ -177,7 +177,7 @@ exit $EXIT_CODE
 `;
 
 export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
-    k8sResourceName: "full-migration",
+    k8sResourceName: "full-migration-with-clusters",
     parallelism: 1,
     serviceAccountName: "argo-workflow-executor"
 })

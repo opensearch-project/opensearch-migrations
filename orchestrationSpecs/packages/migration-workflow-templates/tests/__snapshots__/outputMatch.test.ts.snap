@@ -2145,12 +2145,12 @@ exports[`test workflow template renderings full-migration 1`] = `
 }
 `;
 
-exports[`test workflow template renderings full-migration 2`] = `
+exports[`test workflow template renderings full-migration-with-clusters 1`] = `
 {
   "apiVersion": "argoproj.io/v1alpha1",
   "kind": "WorkflowTemplate",
   "metadata": {
-    "name": "full-migration",
+    "name": "full-migration-with-clusters",
   },
   "spec": {
     "arguments": {
