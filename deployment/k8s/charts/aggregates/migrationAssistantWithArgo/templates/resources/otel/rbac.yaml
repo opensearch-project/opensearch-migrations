@@ -11,6 +11,10 @@ metadata:
   name: otel-collector
   namespace: {{ .Release.Namespace }}
 rules:
+  - nonResourceURLs:
+    - "/metrics/cadvisor"
+    verbs:
+      - get
   - apiGroups: [""]
     resources:
       - pods
@@ -43,7 +47,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: otel-collector
-    namespace: ma
+    namespace: {{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
