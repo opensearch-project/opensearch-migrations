@@ -2181,20 +2181,290 @@ exports[`test workflow template renderings full-migration-with-cli 1`] = `
         },
       ],
     },
-    "entrypoint": "main",
+    "entrypoint": "testRunMigration",
     "parallelism": 100,
     "serviceAccountName": "argo-workflow-executor",
     "templates": [
       {
+        "container": {
+          "args": [
+            "
+set -e -x
+
+echo "Building and submitting migration workflow..."
+
+# Create migration config JSON
+cat > /tmp/migration_config.json << 'EOF'
+{
+  "skipApprovals": true,
+  "sourceClusters": {
+    "source1": {
+      "endpoint": "{{inputs.parameters.sourceEndpoint}}",
+      "allowInsecure": {{inputs.parameters.sourceAllowInsecure}},
+      "version": "{{inputs.parameters.sourceVersion}}",
+      "snapshotRepo": {{inputs.parameters.snapshotConfig}}
+    }
+  },
+  "targetClusters": {
+    "target1": {
+      "endpoint": "{{inputs.parameters.targetEndpoint}}",
+      "allowInsecure": {{inputs.parameters.targetAllowInsecure}},
+      "version": "{{inputs.parameters.targetVersion}}"
+    }
+  },
+  "migrationConfigs": [
+    {
+      "fromSource": "source1",
+      "toTarget": "target1",
+      "snapshotExtractAndLoadConfigs": [
+        {
+          "snapshotConfig": {
+            "snapshotNameConfig": {
+              "snapshotNamePrefix": "source1snapshot1"
+            }
+          },
+          "migrations": [
+            {
+              "metadataMigrationConfig": {
+                "indexAllowlist": ["*"]
+              },
+              "documentBackfillConfig": {
+                "indexAllowlist": ["*"]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+EOF
+
+echo "Migration config contents:"
+cat /tmp/migration_config.json
+
+. /etc/profile.d/venv.sh
+source /.venv/bin/activate
+
+# Clear and load configuration
+echo "Clearing existing workflow configuration..."
+workflow configure clear --confirm
+echo "Loading configuration from JSON..."
+cat /tmp/migration_config.json | workflow configure edit --stdin
+
+ # Submit workflow
+echo "Submitting workflow..."
+WORKFLOW_OUTPUT=$(workflow submit 2>&1)
+echo "Workflow submit output: $WORKFLOW_OUTPUT"
+",
+          ],
+          "command": [
+            "/bin/sh",
+            "-c",
+          ],
+          "env": [],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "1000m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
         "inputs": {
           "parameters": [
             {
-              "name": "sourceClusterConfigJson",
+              "description": "Source cluster endpoint URL",
+              "name": "sourceEndpoint",
+              "value": "",
             },
             {
-              "name": "targetClusterConfigJson",
+              "description": "Allow insecure connections to source cluster",
+              "name": "sourceAllowInsecure",
+              "value": "true",
             },
             {
+              "description": "Source cluster version (example : ES 7.10)",
+              "name": "sourceVersion",
+              "value": "",
+            },
+            {
+              "description": "Target cluster endpoint URL",
+              "name": "targetEndpoint",
+              "value": "",
+            },
+            {
+              "description": "Allow insecure connections to target cluster",
+              "name": "targetAllowInsecure",
+              "value": "true",
+            },
+            {
+              "description": "Target cluster version (example : OS 2.19)",
+              "name": "targetVersion",
+              "value": "",
+            },
+            {
+              "description": "Snapshot repository configuration as JSON object fragment (S3_REPO_CONFIG)",
+              "name": "snapshotConfig",
+              "value": "",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "configureandsubmitworkflow",
+        "outputs": {
+          "parameters": [],
+        },
+      },
+      {
+        "container": {
+          "args": [
+            "
+set -e -x
+
+echo "Checking workflow status"
+. /etc/profile.d/venv.sh
+source /.venv/bin/activate
+
+STATUS_OUTPUT=$(workflow status 2>&1 || true)
+echo "Status output:"
+echo "$STATUS_OUTPUT"
+
+RESULT="ERROR"
+EXIT_CODE=2
+
+# 1) Terminal success: stop monitoring, proceed, mark success
+if echo "$STATUS_OUTPUT" | grep -q "Phase: Succeeded"; then
+    echo "Workflow completed successfully"
+    RESULT="SUCCEEDED"
+    EXIT_CODE=0
+
+# 2) Terminal failure: stop monitoring, proceed, mark failure
+elif echo "$STATUS_OUTPUT" | grep -q "Phase: Failed"; then
+    echo "Workflow failed permanently"
+    RESULT="FAILED"
+    EXIT_CODE=0
+
+# 3) Suspended / waiting for approval: try to approve once, then retry
+elif echo "$STATUS_OUTPUT" | grep -q "Suspended\\|Waiting"; then
+    echo "Workflow is suspended or waiting for approval, attempting to approve..."
+    APPROVE_OUTPUT=$(workflow approve 2>&1 || true)
+    echo "Approve output:"
+    echo "$APPROVE_OUTPUT"
+    # Regardless of approve result, tell Argo to check again
+    RESULT="RETRY"
+    EXIT_CODE=1
+
+# 4) Still running: keep checking
+elif echo "$STATUS_OUTPUT" | grep -q "Phase: Running\\|Phase: Pending"; then
+    echo "⏳ Workflow still running, will retry..."
+    RESULT="RETRY"
+    EXIT_CODE=1
+
+# 5) Anything else is treated as an error (e.g. CLI failure, unknown output)
+else
+    echo "Unknown or error status from 'workflow status'"
+    RESULT="ERROR"
+    EXIT_CODE=2
+fi
+
+mkdir -p /tmp/outputs
+echo "$RESULT" > /tmp/outputs/monitorResult
+sync
+
+echo "Monitor result: $RESULT (exit code: $EXIT_CODE)"
+exit $EXIT_CODE
+",
+          ],
+          "command": [
+            "/bin/sh",
+            "-c",
+          ],
+          "env": [],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "1000m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "monitorworkflow",
+        "outputs": {
+          "parameters": [
+            {
+              "description": "Result of monitoring (SUCCEEDED, FAILED, RETRY, ERROR)",
+              "name": "monitorResult",
+              "valueFrom": {
+                "path": "/tmp/outputs/monitorResult",
+              },
+            },
+          ],
+        },
+        "retryStrategy": {
+          "backoff": {
+            "cap": "300",
+            "duration": "5",
+            "factor": "2",
+          },
+          "limit": "864",
+          "retryPolicy": "Always",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "description": "Source cluster endpoint URL",
+              "name": "sourceEndpoint",
+            },
+            {
+              "description": "Allow insecure connections to source cluster",
+              "name": "sourceAllowInsecure",
+            },
+            {
+              "description": "Source cluster version (example: ES 7.10)",
+              "name": "sourceVersion",
+            },
+            {
+              "description": "Target cluster endpoint URL",
+              "name": "targetEndpoint",
+            },
+            {
+              "description": "Allow insecure connections to target cluster",
+              "name": "targetAllowInsecure",
+            },
+            {
+              "description": "Target cluster version (example: OS 2.19)",
+              "name": "targetVersion",
+            },
+            {
+              "description": "Snapshot repository configuration as JSON object fragment (S3_REPO_CONFIG)",
               "name": "snapshotConfigJson",
             },
             {
@@ -2205,7 +2475,7 @@ exports[`test workflow template renderings full-migration-with-cli 1`] = `
             },
           ],
         },
-        "name": "main",
+        "name": "testrunmigration",
         "outputs": {
           "parameters": [],
         },
@@ -2215,17 +2485,51 @@ exports[`test workflow template renderings full-migration-with-cli 1`] = `
               "arguments": {
                 "parameters": [
                   {
-                    "name": "sourceClusterConfigJson",
-                    "value": "{{inputs.parameters.sourceClusterConfigJson}}",
+                    "name": "sourceEndpoint",
+                    "value": "{{inputs.parameters.sourceEndpoint}}",
                   },
                   {
-                    "name": "targetClusterConfigJson",
-                    "value": "{{inputs.parameters.targetClusterConfigJson}}",
+                    "name": "sourceAllowInsecure",
+                    "value": "{{inputs.parameters.sourceAllowInsecure}}",
                   },
                   {
-                    "name": "snapshotConfigJson",
+                    "name": "sourceVersion",
+                    "value": "{{inputs.parameters.sourceVersion}}",
+                  },
+                  {
+                    "name": "targetEndpoint",
+                    "value": "{{inputs.parameters.targetEndpoint}}",
+                  },
+                  {
+                    "name": "targetAllowInsecure",
+                    "value": "{{inputs.parameters.targetAllowInsecure}}",
+                  },
+                  {
+                    "name": "targetVersion",
+                    "value": "{{inputs.parameters.targetVersion}}",
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "snapshotConfig",
                     "value": "{{inputs.parameters.snapshotConfigJson}}",
                   },
+                ],
+              },
+              "name": "configureAndSubmitWorkflow",
+              "template": "configureandsubmitworkflow",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
                   {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -2236,11 +2540,8 @@ exports[`test workflow template renderings full-migration-with-cli 1`] = `
                   },
                 ],
               },
-              "name": "runMigrationViaWorkflowCli",
-              "templateRef": {
-                "name": "workflow-command-orchestrator",
-                "template": "main",
-              },
+              "name": "monitorWorkflow",
+              "template": "monitorworkflow",
             },
           ],
         ],
@@ -3796,389 +4097,6 @@ echo "Cleanup complete. Workflow stats preserved under /$STATS_KEY/"",
         "outputs": {
           "parameters": [],
         },
-      },
-    ],
-  },
-}
-`;
-
-exports[`test workflow template renderings workflow-command-orchestrator 1`] = `
-{
-  "apiVersion": "argoproj.io/v1alpha1",
-  "kind": "WorkflowTemplate",
-  "metadata": {
-    "name": "workflow-command-orchestrator",
-  },
-  "spec": {
-    "arguments": {
-      "parameters": [
-        {
-          "name": "etcdEndpoints",
-          "value": "http://etcd.ma.svc.cluster.local:2379",
-        },
-        {
-          "name": "etcdUser",
-          "value": "root",
-        },
-        {
-          "name": "etcdPassword",
-          "value": "password",
-        },
-        {
-          "name": "s3SnapshotConfigMap",
-          "value": "s3-snapshot-config",
-        },
-        {
-          "name": "imageConfigMapName",
-          "value": "migration-image-config",
-        },
-        {
-          "name": "approvalConfigMapName",
-          "value": "approval-config",
-        },
-      ],
-    },
-    "entrypoint": "main",
-    "parallelism": 100,
-    "serviceAccountName": "argo-workflow-executor",
-    "templates": [
-      {
-        "container": {
-          "args": [
-            "
-set -e -x
-
-echo "Building and submitting migration workflow..."
-
-            # Create migration config JSON
-            cat > /tmp/migration_config.json << 'EOF'
-            {
-              "sourceClusters": {
-                "source": {
-                  "endpoint": "{{inputs.parameters.sourceEndpoint}}",
-                  "allowInsecure": {{inputs.parameters.sourceAllowInsecure}},
-                  "version": "{{inputs.parameters.sourceVersion}}",
-                  "snapshotRepo": {{inputs.parameters.snapshotConfig}}
-                }
-              },
-              "targetClusters": {
-                "target": {{inputs.parameters.targetConfig}}
-              },
-              "migrationConfigs": [
-                {
-                  "fromSource": "source",
-                  "toTarget": "target",
-                  "snapshotExtractAndLoadConfigs": [
-                    {
-                      "createSnapshotConfig": {},
-                      "snapshotConfig": {
-                        "snapshotNameConfig": {
-                          "snapshotNamePrefix": "rfs"
-                        }
-                      },
-                      "migrations": [
-                        {
-                          "metadataMigrationConfig": {
-                            "indexAllowlist": ["*"]
-                          },
-                          "documentBackfillConfig": {
-                            "indexAllowlist": ["*"]
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            }
-            EOF
-
-echo "Migration config contents:"
-cat /tmp/migration_config.json
-
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
-
-# Clear and load configuration
-echo "Clearing existing workflow configuration..."
-workflow configure clear --confirm
-
-echo "Loading configuration from JSON..."
-cat /tmp/migration_config.json | workflow configure edit --stdin
-
-# Submit workflow and capture the workflow name
-echo "Submitting workflow..."
-WORKFLOW_OUTPUT=$(workflow submit 2>&1)
-echo "Workflow submit output: $WORKFLOW_OUTPUT"
-
-# Extract workflow name (format: "  Name: workflow-name")
-WORKFLOW_NAME=$(echo "$WORKFLOW_OUTPUT" | grep "Name:" | awk '{print $2}' | tr -d '
-')
-
-if [ -z "$WORKFLOW_NAME" ]; then
-    echo "ERROR: Could not extract workflow name from output"
-    echo "Full output was: $WORKFLOW_OUTPUT"
-    exit 1
-fi
-
-echo "Workflow submitted successfully: $WORKFLOW_NAME"
-mkdir -p /tmp/outputs
-echo "$WORKFLOW_NAME" > /tmp/outputs/workflowName
-",
-          ],
-          "command": [
-            "/bin/sh",
-            "-c",
-          ],
-          "env": [],
-          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-          "resources": {
-            "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
-            },
-            "requests": {
-              "cpu": "500m",
-              "memory": "2000Mi",
-            },
-          },
-        },
-        "inputs": {
-          "parameters": [
-            {
-              "description": "Source cluster endpoint URL",
-              "name": "sourceEndpoint",
-              "value": "",
-            },
-            {
-              "description": "Allow insecure connections to source cluster",
-              "name": "sourceAllowInsecure",
-              "value": "true",
-            },
-            {
-              "description": "Source cluster version (e.g. ES_5.6, OS_2.19)",
-              "name": "sourceVersion",
-              "value": "",
-            },
-            {
-              "description": "Target cluster config as JSON object fragment",
-              "name": "targetConfig",
-              "value": "",
-            },
-            {
-              "description": "Snapshot config as JSON object fragment",
-              "name": "snapshotConfig",
-              "value": "",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "configureandsubmitworkflow",
-        "outputs": {
-          "parameters": [
-            {
-              "description": "Name of the submitted workflow",
-              "name": "workflowName",
-              "valueFrom": {
-                "path": "/tmp/outputs/workflowName",
-              },
-            },
-          ],
-        },
-      },
-      {
-        "container": {
-          "args": [
-            "
-set -e -x
-
-WORKFLOW_NAME="{{inputs.parameters.workflowName}}"
-echo "Checking workflow status: $WORKFLOW_NAME"
-
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
-
-# Simple status check - let Argo handle retries and persistence
-STATUS_OUTPUT=$(workflow status --name "$WORKFLOW_NAME" 2>&1)
-echo "Status: $STATUS_OUTPUT"
-
-# Check if workflow is completed successfully
-if echo "$STATUS_OUTPUT" | grep -q "Succeeded"; then
-    echo "✅ Workflow completed successfully"
-    exit 0
-fi
-
-# Check if workflow failed permanently 
-if echo "$STATUS_OUTPUT" | grep -q "Failed"; then
-    echo "❌ Workflow failed permanently"
-    exit 1
-fi
-
-# Handle suspended workflow (needs approval)
-if echo "$STATUS_OUTPUT" | grep -q "Suspended\\|Waiting"; then
-    echo "Workflow is suspended, attempting to approve..."
-    APPROVE_OUTPUT=$(workflow approve --name "$WORKFLOW_NAME" 2>&1)
-    echo "Approve output: $APPROVE_OUTPUT"
-    
-    if echo "$APPROVE_OUTPUT" | grep -q "approved\\|Approved"; then
-        echo "Workflow approved, will check again..."
-    else
-        echo "Warning: Approval may have failed: $APPROVE_OUTPUT"
-    fi
-    exit 1  # Exit 1 to retry after approval
-fi
-
-# Workflow is still running - exit 1 to trigger retry
-if echo "$STATUS_OUTPUT" | grep -q "Running\\|Pending"; then
-    echo "⏳ Workflow still running, will retry..."
-    exit 1
-fi
-
-# Unknown status - retry
-echo "Unknown workflow status, will retry..."
-exit 1
-",
-          ],
-          "command": [
-            "/bin/sh",
-            "-c",
-          ],
-          "env": [],
-          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-          "resources": {
-            "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
-            },
-            "requests": {
-              "cpu": "500m",
-              "memory": "2000Mi",
-            },
-          },
-        },
-        "inputs": {
-          "parameters": [
-            {
-              "name": "workflowName",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "monitorworkflow",
-        "outputs": {
-          "parameters": [],
-        },
-        "retryStrategy": {
-          "backoff": {
-            "cap": "300",
-            "duration": "5",
-            "factor": "2",
-          },
-          "limit": "864",
-          "retryPolicy": "Always",
-        },
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "description": "Source cluster configuration as JSON object fragment (e.g. {"endpoint":"..."})",
-              "name": "sourceClusterConfigJson",
-            },
-            {
-              "description": "Target cluster configuration as JSON object fragment",
-              "name": "targetClusterConfigJson",
-            },
-            {
-              "description": "Snapshot configuration as JSON object fragment",
-              "name": "snapshotConfigJson",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "main",
-        "outputs": {
-          "parameters": [],
-        },
-        "steps": [
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "sourceEndpoint",
-                    "value": "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.endpoint')}}",
-                  },
-                  {
-                    "name": "sourceAllowInsecure",
-                    "value": "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.allowInsecure')}}",
-                  },
-                  {
-                    "name": "sourceVersion",
-                    "value": "{{=jsonpath(inputs.parameters.sourceClusterConfigJson, '$.version')}}",
-                  },
-                  {
-                    "name": "targetConfig",
-                    "value": "{{inputs.parameters.targetClusterConfigJson}}",
-                  },
-                  {
-                    "name": "snapshotConfig",
-                    "value": "{{inputs.parameters.snapshotConfigJson}}",
-                  },
-                ],
-              },
-              "name": "configureAndSubmitWorkflow",
-              "template": "configureandsubmitworkflow",
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "workflowName",
-                    "value": "{{steps.configureAndSubmitWorkflow.outputs.parameters.workflowName}}",
-                  },
-                ],
-              },
-              "name": "monitorWorkflow",
-              "template": "monitorworkflow",
-            },
-          ],
-        ],
       },
     ],
   },
