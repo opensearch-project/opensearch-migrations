@@ -62,23 +62,27 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
 
     .addParams(CommonWorkflowParameters)
 
-    .addTemplate("configureAndSubmitWorkflow", t => t
+    .addTemplate("buildMigrationConfig", t => t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addSteps(s => s.addStepGroup(c => c))
+        .addExpressionOutput("migrationConfigBase64", c =>
+            expr.toBase64(expr.asString(expr.serialize(
+                makeMigrationParams(c.inputs.sourceConfig, c.inputs.targetConfig)
+            )))
+        )
+    )
 
+    .addTemplate("configureAndSubmitWorkflow", t => t
+        .addRequiredInput("migrationConfigBase64", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
-            .addCommand(["/bin/sh", "-c"])
+            .addCommand(["/bin/bash", "-c"])
             .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
-            .addArgs([
-                expr.fillTemplate(configureAndSubmitScript, {
-                    "MIGRATION_CONFIG_BASE64": expr.toBase64(expr.asString(expr.serialize(
-                        makeMigrationParams(cb.inputs.sourceConfig, cb.inputs.targetConfig)
-                    )))
-                })
-            ])
+            .addEnvVar("MIGRATION_CONFIG_BASE64", cb.inputs.migrationConfigBase64)
+            .addArgs([configureAndSubmitScript])
         )
     )
 
@@ -87,7 +91,7 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
 
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
-            .addCommand(["/bin/sh", "-c"])
+            .addCommand(["/bin/bash", "-c"])
             .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
             .addArgs([monitorScript])
             .addPathOutput(
@@ -115,12 +119,19 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
+            // Step 0: Build migration config and encode as base64
+            .addStep("buildMigrationConfig", INTERNAL, "buildMigrationConfig", c =>
+                c.register({
+                    sourceConfig: b.inputs.sourceConfig,
+                    targetConfig: b.inputs.targetConfig,
+                })
+            )
+
             // Step 1: Configure and submit workflow (combined)
             .addStep("configureAndSubmitWorkflow", INTERNAL, "configureAndSubmitWorkflow", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    sourceConfig: b.inputs.sourceConfig,
-                    targetConfig: b.inputs.targetConfig,
+                    migrationConfigBase64: c.steps.buildMigrationConfig.outputs.migrationConfigBase64,
                 })
             )
 

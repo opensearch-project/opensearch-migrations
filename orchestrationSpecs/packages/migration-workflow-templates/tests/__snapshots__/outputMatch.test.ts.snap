@@ -2188,16 +2188,44 @@ exports[`test workflow template renderings full-migration-with-clusters 1`] = `
     "serviceAccountName": "argo-workflow-executor",
     "templates": [
       {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceConfig",
+            },
+            {
+              "name": "targetConfig",
+            },
+          ],
+        },
+        "name": "buildmigrationconfig",
+        "outputs": {
+          "parameters": [
+            {
+              "name": "migrationConfigBase64",
+              "valueFrom": {
+                "expression": "toBase64(toJSON(sprig.dict("skipApprovals", true, "sourceClusters", sprig.dict("source1", fromJSON(inputs.parameters.sourceConfig)), "targetClusters", sprig.dict("target1", fromJSON(inputs.parameters.targetConfig)), "migrationConfigs", [{"fromSource":"source1","toTarget":"target1","snapshotExtractAndLoadConfigs":[{"snapshotConfig":{"snapshotNameConfig":{"snapshotNamePrefix":"source1snapshot1"}},"migrations":[{"metadataMigrationConfig":{},"documentBackfillConfig":{}}]}]}])))",
+              },
+            },
+          ],
+        },
+        "steps": [
+          [],
+        ],
+      },
+      {
         "container": {
           "args": [
             "set -e -x
 
+# Activate the Python virtual environment to get access to workflow CLI
+. /etc/profile.d/venv.sh
+source /.venv/bin/activate
+
 echo "Building and submitting migration workflow..."
 
-# Decode base64 migration config and write to file
-base64 -d > /tmp/migration_config.json << EOF
-{{=toBase64(toJSON(sprig.dict("skipApprovals", true, "sourceClusters", sprig.dict("source1", fromJSON(inputs.parameters.sourceConfig)), "targetClusters", sprig.dict("target1", fromJSON(inputs.parameters.targetConfig)), "migrationConfigs", [{"fromSource":"source1","toTarget":"target1","snapshotExtractAndLoadConfigs":[{"snapshotConfig":{"snapshotNameConfig":{"snapshotNamePrefix":"source1snapshot1"}},"migrations":[{"metadataMigrationConfig":{},"documentBackfillConfig":{}}]}]}])))}}
-EOF
+# Decode base64 migration config from environment variable and write to file
+echo "$MIGRATION_CONFIG_BASE64" | base64 -d > /tmp/migration_config.json
 
 echo "Migration config contents:"
 cat /tmp/migration_config.json
@@ -2212,10 +2240,15 @@ echo "Workflow submit output: $WORKFLOW_OUTPUT"
 ",
           ],
           "command": [
-            "/bin/sh",
+            "/bin/bash",
             "-c",
           ],
-          "env": [],
+          "env": [
+            {
+              "name": "MIGRATION_CONFIG_BASE64",
+              "value": "{{inputs.parameters.migrationConfigBase64}}",
+            },
+          ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
@@ -2232,10 +2265,7 @@ echo "Workflow submit output: $WORKFLOW_OUTPUT"
         "inputs": {
           "parameters": [
             {
-              "name": "sourceConfig",
-            },
-            {
-              "name": "targetConfig",
+              "name": "migrationConfigBase64",
             },
             {
               "name": "imageMigrationConsoleLocation",
@@ -2310,7 +2340,7 @@ exit $EXIT_CODE
 ",
           ],
           "command": [
-            "/bin/sh",
+            "/bin/bash",
             "-c",
           ],
           "env": [],
@@ -2393,6 +2423,16 @@ exit $EXIT_CODE
                     "name": "targetConfig",
                     "value": "{{inputs.parameters.targetConfig}}",
                   },
+                ],
+              },
+              "name": "buildMigrationConfig",
+              "template": "buildmigrationconfig",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
                   {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -2400,6 +2440,10 @@ exit $EXIT_CODE
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "migrationConfigBase64",
+                    "value": "{{steps.buildMigrationConfig.outputs.parameters.migrationConfigBase64}}",
                   },
                 ],
               },
