@@ -2200,11 +2200,11 @@ cat > /tmp/migration_config.json << 'EOF'
 {
   "skipApprovals": true,
   "sourceClusters": {
-    "source1": "{{inputs.parameters.sourceConfig}}"
+    "source1": {{inputs.parameters.sourceConfig}}
     }
   },
   "targetClusters": {
-    "target1": "{{inputs.parameters.targetConfig}}"
+    "target1": {{inputs.parameters.targetConfig}}
   },
   "migrationConfigs": [
     {
@@ -2243,6 +2243,7 @@ echo "Submitting workflow..."
 WORKFLOW_OUTPUT=$(workflow submit 2>&1)
 echo "Workflow submit output: $WORKFLOW_OUTPUT"
 ",
+            "{{=toJSON(sprig.dict("skipApprovals", true, "sourceClusters", sprig.dict("source1", fromJSON(inputs.parameters.sourceConfig)), "targetClusters", sprig.dict("target1", fromJSON(inputs.parameters.targetConfig)), "migrationConfigs", [{"fromSource":"source1","toTarget":"target1","snapshotExtractAndLoadConfigs":[{"snapshotConfig":{"snapshotNameConfig":{"snapshotNamePrefix":"source1snapshot1"}},"migrations":[{"metadataMigrationConfig":{},"documentBackfillConfig":{}}]}]}]))}}",
           ],
           "command": [
             "/bin/sh",
