@@ -2186,6 +2186,7 @@ exports[`test workflow template renderings full-migration-with-cli 1`] = `
     "serviceAccountName": "argo-workflow-executor",
     "templates": [
       {
+<<<<<<< HEAD
         "container": {
           "args": [
             "
@@ -2465,6 +2466,17 @@ exit $EXIT_CODE
             },
             {
               "description": "Snapshot repository configuration as JSON object fragment (S3_REPO_CONFIG)",
+=======
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceClusterConfigJson",
+            },
+            {
+              "name": "targetClusterConfigJson",
+            },
+            {
+>>>>>>> origin/jenkins-k8s-local-test
               "name": "snapshotConfigJson",
             },
             {
@@ -2475,7 +2487,11 @@ exit $EXIT_CODE
             },
           ],
         },
+<<<<<<< HEAD
         "name": "testrunmigration",
+=======
+        "name": "main",
+>>>>>>> origin/jenkins-k8s-local-test
         "outputs": {
           "parameters": [],
         },
@@ -2485,6 +2501,7 @@ exit $EXIT_CODE
               "arguments": {
                 "parameters": [
                   {
+<<<<<<< HEAD
                     "name": "sourceEndpoint",
                     "value": "{{inputs.parameters.sourceEndpoint}}",
                   },
@@ -2530,6 +2547,19 @@ exit $EXIT_CODE
             {
               "arguments": {
                 "parameters": [
+=======
+                    "name": "sourceClusterConfigJson",
+                    "value": "{{inputs.parameters.sourceClusterConfigJson}}",
+                  },
+                  {
+                    "name": "targetClusterConfigJson",
+                    "value": "{{inputs.parameters.targetClusterConfigJson}}",
+                  },
+                  {
+                    "name": "snapshotConfigJson",
+                    "value": "{{inputs.parameters.snapshotConfigJson}}",
+                  },
+>>>>>>> origin/jenkins-k8s-local-test
                   {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -2540,8 +2570,16 @@ exit $EXIT_CODE
                   },
                 ],
               },
+<<<<<<< HEAD
               "name": "monitorWorkflow",
               "template": "monitorworkflow",
+=======
+              "name": "runMigrationViaWorkflowCli",
+              "templateRef": {
+                "name": "workflow-command-orchestrator",
+                "template": "main",
+              },
+>>>>>>> origin/jenkins-k8s-local-test
             },
           ],
         ],
