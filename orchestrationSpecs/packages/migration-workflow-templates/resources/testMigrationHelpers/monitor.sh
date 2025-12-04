@@ -4,7 +4,7 @@ echo "Checking workflow status"
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
 
-STATUS_OUTPUT=$(workflow status 2>&1 || true)
+STATUS_OUTPUT=$(workflow status migration-workflow 2>&1 || true)
 echo "Status output:"
 echo "$STATUS_OUTPUT"
 
