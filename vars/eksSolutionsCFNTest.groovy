@@ -6,7 +6,7 @@ def call(Map config = [:]) {
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
-            string(name: 'STAGE', defaultValue: "eks-integ", description: 'Stage name for deployment environment')
+            string(name: 'STAGE', defaultValue: "dev", description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: "us-east-1", description: 'AWS region for deployment')
             booleanParam(name: 'BUILD_IMAGES', defaultValue: false, description: 'Build container images from source instead of using public images')
         }

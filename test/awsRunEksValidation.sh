@@ -21,7 +21,7 @@ usage() {
 }
 
 # Default values
-STAGE=""
+STAGE="dev"
 REGION="us-east-1"
 STACK_NAME=""
 BUILD_IMAGES="false"
