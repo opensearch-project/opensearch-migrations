@@ -154,9 +154,6 @@ export const FullMigration = WorkflowBuilder.create({
                 }))
 
             .addStep("foreachSnapshotMigration", INTERNAL, "foreachSnapshotMigration", c=> {
-                    const d = c.defaults;
-                    const o = c.item;
-                    console.log(d + " " + o);
                     return c.register({
                         ...(() => {
                             const {snapshotConfig, ...rest} = selectInputsForRegister(b, c);
