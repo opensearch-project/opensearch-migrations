@@ -52,10 +52,10 @@ spec:
               kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
               kubectl apply -f -
 
-            # 3) Create/update cluster credentials secret (ES 1.5 has no auth, but secret is required by config)
+            # 3) Create/update cluster credentials secret (ES 1.5 has no auth, using admin/admin as placeholder)
             kubectl create secret generic "${CLUSTER_NAME}-creds" \
-              --from-literal=username= \
-              --from-literal=password= \
+              --from-literal=username=admin \
+              --from-literal=password=admin \
               -n "${NAMESPACE}" \
               --dry-run=client -o yaml | \
               kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
@@ -281,10 +281,10 @@ spec:
               kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
               kubectl apply -f -
 
-            # 3) Create/update cluster credentials secret (ES 2.4 has no auth, but secret is required by config)
+            # 3) Create/update cluster credentials secret (ES 2.4 has no auth, using admin/admin as placeholder)
             kubectl create secret generic "${CLUSTER_NAME}-creds" \
-              --from-literal=username= \
-              --from-literal=password= \
+              --from-literal=username=admin \
+              --from-literal=password=admin \
               -n "${NAMESPACE}" \
               --dry-run=client -o yaml | \
               kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
@@ -511,10 +511,10 @@ spec:
               --values /tmp/es-values.yaml \
               --set-file esConfig."elasticsearch\.yml"=/tmp/elasticsearch.yml
             
-            # Create cluster credentials secret (ES 5.6 OSS has no auth, but secret is required by config)
+            # Create cluster credentials secret (ES 5.6 OSS has no auth, using admin/admin as placeholder)
             kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
-              --from-literal=username= \
-              --from-literal=password= \
+              --from-literal=username=admin \
+              --from-literal=password=admin \
               -n "{{inputs.parameters.namespace}}" \
               --dry-run=client -o yaml | \
               kubectl label --local -f - migration-test=true cluster-name={{inputs.parameters.cluster-name}} -o yaml | \
@@ -655,10 +655,10 @@ spec:
               --values /tmp/es-values.yaml \
               --set-file esConfig."elasticsearch\.yml"=/tmp/elasticsearch.yml
             
-            # Create cluster credentials secret (ES 6.8 OSS has no auth, but secret is required by config)
+            # Create cluster credentials secret (ES 6.8 OSS has no auth, using admin/admin as placeholder)
             kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
-              --from-literal=username= \
-              --from-literal=password= \
+              --from-literal=username=admin \
+              --from-literal=password=admin \
               -n "{{inputs.parameters.namespace}}" \
               --dry-run=client -o yaml | \
               kubectl label --local -f - migration-test=true cluster-name={{inputs.parameters.cluster-name}} -o yaml | \
@@ -782,10 +782,10 @@ spec:
               --values /tmp/es-values.yaml \
               --set-file esConfig."elasticsearch\.yml"=/tmp/elasticsearch.yml
             
-            # Create cluster credentials secret (ES 7.10 OSS has no auth, but secret is required by config)
+            # Create cluster credentials secret (ES 7.10 OSS has no auth, using admin/admin as placeholder)
             kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
-              --from-literal=username= \
-              --from-literal=password= \
+              --from-literal=username=admin \
+              --from-literal=password=admin \
               -n "{{inputs.parameters.namespace}}" \
               --dry-run=client -o yaml | \
               kubectl label --local -f - migration-test=true cluster-name={{inputs.parameters.cluster-name}} -o yaml | \
