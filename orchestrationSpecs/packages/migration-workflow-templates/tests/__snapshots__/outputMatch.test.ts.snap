@@ -2147,12 +2147,12 @@ exports[`test workflow template renderings full-migration 1`] = `
 }
 `;
 
-exports[`test workflow template renderings full-migration-with-clusters 1`] = `
+exports[`test workflow template renderings full-migration-with-workflow-cli 1`] = `
 {
   "apiVersion": "argoproj.io/v1alpha1",
   "kind": "WorkflowTemplate",
   "metadata": {
-    "name": "full-migration-with-clusters",
+    "name": "full-migration-with-workflow-cli",
   },
   "spec": {
     "arguments": {
@@ -2204,7 +2204,7 @@ exports[`test workflow template renderings full-migration-with-clusters 1`] = `
             {
               "name": "migrationConfigBase64",
               "valueFrom": {
-                "expression": "toBase64(toJSON(sprig.dict("skipApprovals", true, "sourceClusters", sprig.dict("source1", fromJSON(inputs.parameters.sourceConfig)), "targetClusters", sprig.dict("target1", fromJSON(inputs.parameters.targetConfig)), "migrationConfigs", [{"fromSource":"source1","toTarget":"target1","snapshotExtractAndLoadConfigs":[{"snapshotConfig":{"snapshotNameConfig":{"snapshotNamePrefix":"source1snapshot1"}},"migrations":[{"metadataMigrationConfig":{},"documentBackfillConfig":{}}]}]}])))",
+                "expression": "toBase64(toJSON(sprig.dict("skipApprovals", true, "sourceClusters", sprig.dict("source1", fromJSON(inputs.parameters.sourceConfig)), "targetClusters", sprig.dict("target1", fromJSON(inputs.parameters.targetConfig)), "migrationConfigs", [{"fromSource":"source1","toTarget":"target1","skipApprovals":false,"snapshotExtractAndLoadConfigs":[{"snapshotConfig":{"snapshotNameConfig":{"snapshotNamePrefix":"source1snapshot1"}},"createSnapshotConfig":{},"migrations":[{"metadataMigrationConfig":{"skipEvaluateApproval":true,"skipMigrateApproval":true},"documentBackfillConfig":{"documentsPerBulkRequest":1000,"maxShardSizeBytes":16000000,"maxConnections":4,"resources":{"requests":{"cpu":"250m","memory":"1Gi","ephemeral-storage":"5Gi"},"limits":{"cpu":"250m","memory":"1Gi","ephemeral-storage":"5Gi"}}}}]}],"replayerConfig":{"podReplicas":0}}])))",
               },
             },
           ],
@@ -2289,7 +2289,7 @@ echo "Checking workflow status"
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
 
-STATUS_OUTPUT=$(workflow status 2>&1 || true)
+STATUS_OUTPUT=$(workflow status migration-workflow 2>&1 || true)
 echo "Status output:"
 echo "$STATUS_OUTPUT"
 
@@ -2385,7 +2385,7 @@ exit $EXIT_CODE
             "duration": "5",
             "factor": "2",
           },
-          "limit": "3",
+          "limit": "10",
           "retryPolicy": "Always",
         },
       },

@@ -79,7 +79,7 @@ function makeMigrationParams(
 }
 
 export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
-    k8sResourceName: "full-migration-with-clusters",
+    k8sResourceName: "full-migration-with-workflow-cli",
     parallelism: 1,
     serviceAccountName: "argo-workflow-executor"
 })
