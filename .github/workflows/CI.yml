@@ -107,12 +107,11 @@ jobs:
         run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT//\//-}" >> $GITHUB_ENV
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@v5
-        env:
-          CODECOV_SKIP_VALIDATION: true
+        uses: codecov/codecov-action@9b6d1f84bde660b0f784003009b1f0aa4663cdeb
         with:
           fail_ci_if_error: true
           flags: python
+          skip_validation: true
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
@@ -185,12 +184,11 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@v5
-        env:
-          CODECOV_SKIP_VALIDATION: true
+        uses: codecov/codecov-action@9b6d1f84bde660b0f784003009b1f0aa4663cdeb
         with:
           fail_ci_if_error: true
           flags: gradle
+          skip_validation: true
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
@@ -270,12 +268,11 @@ jobs:
         run: npm run test
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@v5
-        env:
-          CODECOV_SKIP_VALIDATION: true
+        uses: codecov/codecov-action@9b6d1f84bde660b0f784003009b1f0aa4663cdeb
         with:
           fail_ci_if_error: true
           flags: node
+          skip_validation: true
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
