@@ -117,17 +117,26 @@ spec:
                   value: "{{workflow.parameters.replayer-config}}"
 
         # Run the full migration
-        - - name: run-full-migration
+        - - name: run-full-migration-with-workflow-cli
             templateRef:
-              name: full-migration
+              name: full-migration-with-workflow-cli
               template: main
             arguments:
               parameters:
-                - name: source-migration-configs
+                - name: sourceConfig
                   value: "{{steps.generate-migration-configs.outputs.parameters.source-migration-configs}}"
-                - name: targets
+                - name: targetConfig
                   value: "{{steps.generate-migration-configs.outputs.parameters.targets}}"
-        
+                - name: imageMigrationConsoleLocation
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: imageMigrationConsolePullPolicy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
         - - name: pause-for-migration-verification
             template: suspend-step
 
@@ -225,15 +234,11 @@ spec:
           - name: source-migration-configs
             valueFrom:
               expression: >-
-                '[{' +
-                  '"source": ' + inputs.parameters['source-config'] + ', ' +
-                  '"snapshot-and-migration-configs": ' + inputs.parameters['snapshot-and-migration-configs'] + ', ' +
-                  '"replayer-config": ' + inputs.parameters['replayer-config'] +
-                '}]'
+                inputs.parameters['source-config']
           - name: targets
             valueFrom:
               expression: >-
-                '[' + inputs.parameters['target-config'] + ']'
+                inputs.parameters['target-config']
       steps: [[]]  # no-op
 
     - name: conditional-cleanup
