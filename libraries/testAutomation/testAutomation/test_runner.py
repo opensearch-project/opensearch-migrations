@@ -52,12 +52,13 @@ class TestsFailed(Exception):
 class TestRunner:
 
     def __init__(self, k8s_service: K8sService, unique_id: str, test_ids: List[str], ma_chart_path: str,
-                 combinations: List[Tuple[str, str]]) -> None:
+                 combinations: List[Tuple[str, str]], use_minikube_registry: bool = False) -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
         self.ma_chart_path = ma_chart_path
         self.combinations = combinations
+        self.use_minikube_registry = use_minikube_registry
 
     def _print_test_stats(self, report: TestReport) -> None:
         for test in report.tests:
@@ -219,9 +220,23 @@ class TestRunner:
                 logger.info(f"Performing helm deployment for migration testing environment "
                             f"from {source_version} to {target_version}")
 
-                chart_values = {"developerModeEnabled": "true"} if developer_mode else None
+                chart_values = {"developerModeEnabled": "true"} if developer_mode else {}
+                if self.use_minikube_registry:
+                    registry = "localhost:5000"
+                    chart_values.update({
+                        "images.captureProxy.repository": f"{registry}/migrations/capture_proxy",
+                        "images.captureProxy.pullPolicy": "Always",
+                        "images.trafficReplayer.repository": f"{registry}/migrations/traffic_replayer",
+                        "images.trafficReplayer.pullPolicy": "Always",
+                        "images.reindexFromSnapshot.repository": f"{registry}/migrations/reindex_from_snapshot",
+                        "images.reindexFromSnapshot.pullPolicy": "Always",
+                        "images.migrationConsole.repository": f"{registry}/migrations/migration_console",
+                        "images.migrationConsole.pullPolicy": "Always",
+                        "images.installer.repository": f"{registry}/migrations/migration_console",
+                        "images.installer.pullPolicy": "Always",
+                    })
                 if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME,
-                                                     values=chart_values):
+                                                     values=chart_values if chart_values else None):
                     raise HelmCommandFailed("Helm install of Migrations Assistant chart failed")
 
                 self.k8s_service.wait_for_all_healthy_pods()
@@ -365,6 +380,11 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Comma-separated list of test IDs to run (e.g. 0001,0003)"
     )
+    parser.add_argument(
+        "--use-minikube-registry",
+        action="store_true",
+        help="If set, use the minikube registry addon (localhost:5000) for images"
+    )
     return parser.parse_args()
 
 
@@ -382,7 +402,8 @@ def main() -> None:
                              unique_id=args.unique_id,
                              test_ids=args.test_ids,
                              ma_chart_path=ma_chart_path,
-                             combinations=combinations)
+                             combinations=combinations,
+                             use_minikube_registry=args.use_minikube_registry)
 
     if args.delete_only:
         return test_runner.cleanup_deployment()

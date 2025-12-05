@@ -102,21 +102,41 @@ spec:
         - - name: pause-for-test-data
             template: suspend-step
 
-        # Run the full migration with clusters
-        - - name: run-full-migration
+        # Generate migration configurations
+        - - name: generate-migration-configs
+            template: generate-migration-configs
+            arguments:
+              parameters:
+                - name: source-config
+                  value: "{{steps.create-source-cluster.outputs.parameters.cluster-config}}"
+                - name: target-config
+                  value: "{{steps.create-target-cluster.outputs.parameters.cluster-config}}"
+                - name: snapshot-and-migration-configs
+                  value: "{{workflow.parameters.snapshot-and-migration-configs}}"
+                - name: replayer-config
+                  value: "{{workflow.parameters.replayer-config}}"
+
+        # Run the full migration
+        - - name: run-full-migration-with-workflow-cli
             templateRef:
               name: full-migration-with-workflow-cli
+              template: main
             arguments:
               parameters:
                 - name: sourceConfig
-                  value: "{{steps.create-source-cluster.outputs.parameters.cluster-config}}"
+                  value: "{{steps.generate-migration-configs.outputs.parameters.source-migration-configs}}"
                 - name: targetConfig
-                  value: "{{steps.create-target-cluster.outputs.parameters.cluster-config}}"
+                  value: "{{steps.generate-migration-configs.outputs.parameters.targets}}"
                 - name: imageMigrationConsoleLocation
-                  value: "migrations/migration_console:latest"
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
                 - name: imageMigrationConsolePullPolicy
-                  value: "IfNotPresent"
-        
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
         - - name: pause-for-migration-verification
             template: suspend-step
 
@@ -200,6 +220,26 @@ spec:
     # Generic suspend template for pausing workflow execution
     - name: suspend-step
       suspend: {}
+
+    # Template to generate migration configurations from cluster configs using expressions
+    - name: generate-migration-configs
+      inputs:
+        parameters:
+          - name: source-config
+          - name: target-config
+          - name: snapshot-and-migration-configs
+          - name: replayer-config
+      outputs:
+        parameters:
+          - name: source-migration-configs
+            valueFrom:
+              expression: >-
+                inputs.parameters['source-config']
+          - name: targets
+            valueFrom:
+              expression: >-
+                inputs.parameters['target-config']
+      steps: [[]]  # no-op
 
     - name: conditional-cleanup
       steps:
