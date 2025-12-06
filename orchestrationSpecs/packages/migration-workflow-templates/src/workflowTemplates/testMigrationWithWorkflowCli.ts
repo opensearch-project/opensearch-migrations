@@ -9,8 +9,8 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {
     DEFAULT_RESOURCES,
-    NAMED_SOURCE_CLUSTER_CONFIG,
-    NAMED_TARGET_CLUSTER_CONFIG,
+    TARGET_CLUSTER_CONFIG,
+    SOURCE_CLUSTER_CONFIG,
 } from "@opensearch-migrations/schemas";
 import {z} from "zod";
 
@@ -19,13 +19,22 @@ import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions
 import {configureAndSubmitScript, monitorScript} from "../resourceLoader";
 
 function makeMigrationParams(
-    sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
-    targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>
+    sourceConfig: BaseExpression<Serialized<z.infer<typeof SOURCE_CLUSTER_CONFIG>>>,
+    targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>
 ) {
     return expr.makeDict({
         skipApprovals: true,
         sourceClusters: expr.makeDict({
-            source1: expr.deserializeRecord(sourceConfig)
+            source1: expr.cast(expr.mergeDicts(
+                expr.deserializeRecord(sourceConfig),
+                expr.makeDict({
+                    snapshotRepo: {
+                        awsRegion: "us-east-2",
+                        endpoint: "localstack://localstack.ma.svc.cluster.local:4566",
+                        s3RepoPathUri: "s3://migrations-default-123456789012-dev-us-east-2"
+                    }
+                })
+            )).to<z.infer<typeof SOURCE_CLUSTER_CONFIG>>()
         }),
         targetClusters: expr.makeDict({
             target1: expr.deserializeRecord(targetConfig)
@@ -87,8 +96,8 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
 
     .addTemplate("buildMigrationConfig", t => t
-        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
-        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof SOURCE_CLUSTER_CONFIG>>())
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
         .addSteps(s => s.addStepGroup(c => c))
         .addExpressionOutput("migrationConfigBase64", c =>
             expr.toBase64(expr.asString(expr.serialize(
@@ -137,8 +146,8 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
     )
 
     .addTemplate("main", t => t
-        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
-        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof SOURCE_CLUSTER_CONFIG>>())
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 

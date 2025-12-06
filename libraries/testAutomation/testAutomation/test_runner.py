@@ -52,13 +52,15 @@ class TestsFailed(Exception):
 class TestRunner:
 
     def __init__(self, k8s_service: K8sService, unique_id: str, test_ids: List[str], ma_chart_path: str,
-                 combinations: List[Tuple[str, str]], use_minikube_registry: bool = False) -> None:
+                 combinations: List[Tuple[str, str]], always_pull_images: bool = False,
+                 registry_prefix: str = "") -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
         self.ma_chart_path = ma_chart_path
         self.combinations = combinations
-        self.use_minikube_registry = use_minikube_registry
+        self.always_pull_images = always_pull_images
+        self.registry_prefix = registry_prefix
 
     def _print_test_stats(self, report: TestReport) -> None:
         for test in report.tests:
@@ -221,18 +223,18 @@ class TestRunner:
                             f"from {source_version} to {target_version}")
 
                 chart_values = {"developerModeEnabled": "true"} if developer_mode else {}
-                if self.use_minikube_registry:
-                    registry = "localhost:5000"
+                if self.registry_prefix:
+                    logger.info(f"Setting registry prefix to: {self.registry_prefix}")
                     chart_values.update({
-                        "images.captureProxy.repository": f"{registry}/migrations/capture_proxy",
+                        "images.registryPrefix": self.registry_prefix,
+                    })
+                if self.always_pull_images:
+                    logger.info("Setting image pull policy to 'Always' for all images")
+                    chart_values.update({
                         "images.captureProxy.pullPolicy": "Always",
-                        "images.trafficReplayer.repository": f"{registry}/migrations/traffic_replayer",
                         "images.trafficReplayer.pullPolicy": "Always",
-                        "images.reindexFromSnapshot.repository": f"{registry}/migrations/reindex_from_snapshot",
                         "images.reindexFromSnapshot.pullPolicy": "Always",
-                        "images.migrationConsole.repository": f"{registry}/migrations/migration_console",
                         "images.migrationConsole.pullPolicy": "Always",
-                        "images.installer.repository": f"{registry}/migrations/migration_console",
                         "images.installer.pullPolicy": "Always",
                     })
                 if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME,
@@ -381,9 +383,17 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated list of test IDs to run (e.g. 0001,0003)"
     )
     parser.add_argument(
-        "--use-minikube-registry",
+        "--always-pull-images",
         action="store_true",
-        help="If set, use the minikube registry addon (localhost:5000) for images"
+        help="If set, set image pull policy to 'Always' for all images."
+    )
+    parser.add_argument(
+        "--registry-prefix",
+        type=str,
+        default="",
+        help="Optional registry prefix to prepend to all image repositories. "
+             "Example: 'registry.kube-system.svc.cluster.local/' or 'myregistry.com/'. "
+             "Leave empty to use image repositories as-is."
     )
     return parser.parse_args()
 
@@ -398,12 +408,14 @@ def main() -> None:
     combinations = get_version_combinations(source_version=args.source_version, target_version=args.target_version)
     logger.info("Detected the following version combinations to test:\n" +
                 "\n".join([f"- {src} → {tgt}" for src, tgt in combinations]))
+    
     test_runner = TestRunner(k8s_service=k8s_service,
                              unique_id=args.unique_id,
                              test_ids=args.test_ids,
                              ma_chart_path=ma_chart_path,
                              combinations=combinations,
-                             use_minikube_registry=args.use_minikube_registry)
+                             always_pull_images=args.always_pull_images,
+                             registry_prefix=args.registry_prefix)
 
     if args.delete_only:
         return test_runner.cleanup_deployment()

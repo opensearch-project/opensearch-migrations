@@ -358,6 +358,42 @@ class ArgoService:
             raise
         return data
 
+    def _convert_basic_auth(self, basic: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert workflow basic auth config to Python schema."""
+        if "secretName" in basic:
+            return {"k8s_secret_name": basic["secretName"]}
+        if "username" in basic and "password" in basic:
+            return {"username": basic["username"], "password": basic["password"]}
+        if "secretArn" in basic:
+            return {"user_secret_arn": basic["secretArn"]}
+        return {}
+
+    def _convert_sigv4_auth(self, sigv4: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Convert workflow sigv4 auth config to Python schema."""
+        if not sigv4:
+            return None
+        return {"region": sigv4.get("region"), "service": sigv4.get("service", "es")}
+
+    def _convert_auth_config(self, auth_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert workflow authConfig to Python auth fields."""
+        if "basic" in auth_config:
+            return {"basic_auth": self._convert_basic_auth(auth_config["basic"])}
+        if "noAuth" in auth_config:
+            return {"no_auth": None}
+        if "sigv4" in auth_config:
+            return {"sigv4": self._convert_sigv4_auth(auth_config["sigv4"])}
+        return {}
+
+    def _get_legacy_auth_fields(self, workflow_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract auth fields if workflow config already uses Python schema."""
+        if "basic_auth" in workflow_config:
+            return {"basic_auth": workflow_config["basic_auth"]}
+        if "no_auth" in workflow_config:
+            return {"no_auth": workflow_config["no_auth"]}
+        if "sigv4" in workflow_config and "authConfig" not in workflow_config:
+            return {"sigv4": workflow_config["sigv4"]}
+        return {}
+
     def _convert_workflow_config_to_cluster_config(self, workflow_config: Dict[str, Any]) -> Dict[str, Any]:
         """
         Convert workflow cluster config schema to Python Cluster schema.
@@ -374,56 +410,24 @@ class ArgoService:
           - no_auth (nullable)
           - sigv4 (dict with region/service)
         """
-        converted = {
-            "endpoint": workflow_config.get("endpoint"),
-        }
+        converted: Dict[str, Any] = {"endpoint": workflow_config.get("endpoint")}
         
         # Convert allowInsecure -> allow_insecure
-        if "allowInsecure" in workflow_config:
-            converted["allow_insecure"] = workflow_config["allowInsecure"]
-        elif "allow_insecure" in workflow_config:
-            converted["allow_insecure"] = workflow_config["allow_insecure"]
+        allow_insecure = workflow_config.get("allowInsecure", workflow_config.get("allow_insecure"))
+        if allow_insecure is not None:
+            converted["allow_insecure"] = allow_insecure
         
         # Copy version if present
         if "version" in workflow_config:
             converted["version"] = workflow_config["version"]
         
-        # Convert auth config
+        # Convert auth config (workflow schema takes precedence)
         auth_config = workflow_config.get("authConfig", {})
-        
-        if "basic" in auth_config:
-            basic = auth_config["basic"]
-            if "secretName" in basic:
-                converted["basic_auth"] = {
-                    "k8s_secret_name": basic["secretName"]
-                }
-            elif "username" in basic and "password" in basic:
-                converted["basic_auth"] = {
-                    "username": basic["username"],
-                    "password": basic["password"]
-                }
-            elif "secretArn" in basic:
-                converted["basic_auth"] = {
-                    "user_secret_arn": basic["secretArn"]
-                }
-        elif "noAuth" in auth_config or auth_config.get("noAuth") is None:
-            # Check if noAuth is explicitly set (even to null/None)
-            if "noAuth" in auth_config:
-                converted["no_auth"] = None
-        elif "sigv4" in auth_config:
-            sigv4 = auth_config["sigv4"]
-            converted["sigv4"] = {
-                "region": sigv4.get("region"),
-                "service": sigv4.get("service", "es")
-            } if sigv4 else None
-        
-        # Handle legacy/direct auth fields (if workflow config already uses Python schema)
-        if "basic_auth" in workflow_config:
-            converted["basic_auth"] = workflow_config["basic_auth"]
-        elif "no_auth" in workflow_config:
-            converted["no_auth"] = workflow_config["no_auth"]
-        elif "sigv4" in workflow_config and "authConfig" not in workflow_config:
-            converted["sigv4"] = workflow_config["sigv4"]
+        if auth_config:
+            converted.update(self._convert_auth_config(auth_config))
+        else:
+            # Fall back to legacy/direct auth fields
+            converted.update(self._get_legacy_auth_fields(workflow_config))
         
         return converted
 
