@@ -22,6 +22,7 @@ skip_git_pull=false
 base_dir="./opensearch-migrations"
 namespace="ma"
 build_images=false
+build_images_locally=false
 keep_build_images_job_alive=false
 use_public_images=true
 skip_console_exec=false
@@ -39,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     --ma-chart-dir) ma_chart_dir="$2"; shift 2 ;;
     --namespace) namespace="$2"; shift 2 ;;
     --build-images) build_images="$2"; shift 2 ;;
+    --build-images-locally) build_images_locally=true; shift 1 ;;
     --use-public-images) use_public_images="$2"; shift 2 ;;
     --keep-build-images-job-alive) keep_build_images_job_alive=true; shift 1 ;;
     --skip-console-exec) skip_console_exec=true; shift 1 ;;
@@ -55,6 +57,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --ma-chart-dir <path>                     (default: $ma_chart_dir)"
       echo "  --namespace <val>                         (default: $namespace)"
       echo "  --build-images <true|false>               (default: $build_images)"
+      echo "  --build-images-locally                    (default: $build_images_locally)"
       echo "  --use-public-images <true|false>          (default: $use_public_images)"
       echo "  --keep-build-images-job-alive             (default: $keep_build_images_job_alive)"
       echo "  --skip-console-exec                       (default: $skip_console_exec)"
@@ -66,6 +69,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$build_images_locally" == "true" ]]; then
+  build_images="true"
+fi
 
 # --- validation ---
 if [[ "$build_images" == "true" && "$use_public_images" == "true" ]]; then
@@ -289,51 +296,62 @@ if [[ "$skip_git_pull" == "false" ]]; then
 fi
 
 if [[ "$build_images" == "true" ]]; then
-  if helm status build-images -n "$namespace" >/dev/null 2>&1; then
-    read -rp "Helm release 'build-images' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
-    if [[ "$answer" == [Yy]* ]]; then
-      helm uninstall build-images -n "$namespace"
-      sleep 2
-    else
-      echo "The 'build-images' release must be uninstalled before proceeding. This can be uninstalled with 'helm uninstall build-images -n $namespace'"
-      exit 1
-    fi
-  fi
-  helm install build-images "${build_images_chart_dir}" \
-    --namespace "$namespace" \
-    --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
-    --set awsEKSEnabled=true \
-    --set keepJobAlive="${keep_build_images_job_alive}" \
-    --set repositoryUrl="https://github.com/${org_name}/${repo_name}.git" \
-    --set repositoryBranch="${branch}" \
-    || { echo "Installing buildImages chart failed..."; exit 1; }
+  if [[ "$build_images_locally" == "true" ]]; then
+    echo "Expecting a build-images service to have already been deployed such that it will push images to ECR."
+    echo "See ${base_dir}/buildImages/README-Minikube.md"
+    echo "Building amd64 images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"
 
-  if [[ "$keep_build_images_job_alive" == "true" ]]; then
-    echo "The keep_build_images_job_alive setting was enabled, will not proceed with installing the Migration Assistant chart"
-    exit 0
-  fi
-  pod_name=$(kubectl get pod -n "$namespace" -o name | grep '^pod/build-images' | cut -d/ -f2)
-  echo "Waiting for pod ${pod_name} to be ready..."
-  kubectl -n "$namespace" wait --for=condition=ready pod/"$pod_name" --timeout=300s
-  sleep 5
-  echo "Tailing logs for ${pod_name}..."
-  echo "-------------------------------"
-  kubectl -n "$namespace" logs -f "$pod_name"
-  echo "-------------------------------"
-  sleep 5
-  final_status=$(kubectl get pod "$pod_name" -n "$namespace" -o jsonpath='{.status.phase}')
-  echo "Pod ${pod_name} ended with status: ${final_status}"
-  if [[ "$final_status" != "Succeeded" ]]; then
-    echo "The $pod_name pod did not end with 'Succeeded'. Exiting..."
-    exit 1
+    pushd $base_dir || exit
+    ./gradlew :buildImages:buildImagesToRegistry -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -PimageArch=amd64 -x test || exit
+    popd > /dev/null || exit
   else
-    echo "Uninstalling buildImages chart after successful setup"
-    helm uninstall build-images -n "$namespace"
+    if helm status build-images -n "$namespace" >/dev/null 2>&1; then
+      read -rp "Helm release 'build-images' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
+      if [[ "$answer" == [Yy]* ]]; then
+        helm uninstall build-images -n "$namespace"
+        sleep 2
+      else
+        echo "The 'build-images' release must be uninstalled before proceeding. This can be uninstalled with 'helm uninstall build-images -n $namespace'"
+        exit 1
+      fi
+    fi
+    helm install build-images "${build_images_chart_dir}" \
+      --namespace "$namespace" \
+      --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
+      --set awsEKSEnabled=true \
+      --set keepJobAlive="${keep_build_images_job_alive}" \
+      --set repositoryUrl="https://github.com/${org_name}/${repo_name}.git" \
+      --set repositoryBranch="${branch}" \
+      || { echo "Installing buildImages chart failed..."; exit 1; }
+
+    if [[ "$keep_build_images_job_alive" == "true" ]]; then
+      echo "The keep_build_images_job_alive setting was enabled, will not proceed with installing the Migration Assistant chart"
+      exit 0
+    fi
+    pod_name=$(kubectl get pod -n "$namespace" -o name | grep '^pod/build-images' | cut -d/ -f2)
+    echo "Waiting for pod ${pod_name} to be ready..."
+    kubectl -n "$namespace" wait --for=condition=ready pod/"$pod_name" --timeout=300s
+    sleep 5
+    echo "Tailing logs for ${pod_name}..."
+    echo "-------------------------------"
+    kubectl -n "$namespace" logs -f "$pod_name"
+    echo "-------------------------------"
+    sleep 5
+    final_status=$(kubectl get pod "$pod_name" -n "$namespace" -o jsonpath='{.status.phase}')
+    echo "Pod ${pod_name} ended with status: ${final_status}"
+    if [[ "$final_status" != "Succeeded" ]]; then
+      echo "The $pod_name pod did not end with 'Succeeded'. Exiting..."
+      exit 1
+    else
+      echo "Uninstalling buildImages chart after successful setup"
+      helm uninstall build-images -n "$namespace"
+    fi
   fi
 fi
 
 RELEASE_VERSION=$(<"$base_dir/VERSION")
 RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
+echo "Using RELEASE_VERSION=$RELEASE_VERSION"
 
 if [[ "$use_public_images" == "false" ]]; then
   IMAGE_FLAGS="\

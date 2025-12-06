@@ -2,7 +2,7 @@
 
 OpenSearch Migration assistant is distributed in AWS Solutions Library, see the most recent release in https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/
 
-## Solutions Architecture
+## Solutions Architecture (ECS)
 
 For the solutions project to allow customization of the feature used by Migration assistant first a bootstrap environment is deployed then a secondary step is used to deploy the configured version of Migration Assistant.  See more details about this configuration options from [options.md](../cdk/opensearch-service-migration/options.md).
 
@@ -28,6 +28,25 @@ sequenceDiagram
     User ->> MA: Migration Actions
 ```
 
+## Solutions Architecture (EKS)
+
+The EKS solution has a simpler initial configuration surface.  A user deploys an
+EKS cluster via one of the vended CloudFormation templates.  Once deployed, the
+user runs the aws-bootstrap.sh script, which can be downloaded directly from
+github and run as-is.  Both of these commands can be run from an AWS CloudShell 
+or from anywhere else with credentials and network access.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Cfn as Cloud Formation
+    participant MA as Migration Assistant EKS Cluster
+
+    User ->> Cfn: Deploy EKS
+    User ->> MA: `aws-bootstrap.sh` Deploys Helm Chart and Configures EKS Cluster 
+    User ->> MA: kubectl Logs into Migration Assistant Console
+    User ->> MA: Migration Workflow Commands Perform Migration Tasks
+```
 ### Migration Assistant
 
 The full range of functionality offered by the migration assistant deployed through the opensearch-service-migration project, see its [README.MD](../cdk/opensearch-service-migration/README.md) for additon details.
@@ -38,7 +57,7 @@ This project is writen in TypeScript and uses the cloud developer tookit (CDK) t
 
 ### Hardcoded AMIs
 
-While using EC2 we have run into issues with AMI's being released that broken our functionality so we are hardcoding all AMIs to ensure the solution will work.  Setup your AWS credentials in the command line and run the script `create-ami-map.sh` in this directory to find the matching AMI in all regions, then update the map inside the solutions stack, [ref](./create-ami-map.sh).
+While using EC2 in the ECS solution, we have run into issues with AMI's being released that broken our functionality so we are hardcoding all AMIs to ensure the solution will work.  Setup your AWS credentials in the command line and run the script `create-ami-map.sh` in this directory to find the matching AMI in all regions, then update the map inside the solutions stack, [ref](./create-ami-map.sh).
 
 ### Quick Start Guide
 

@@ -1,5 +1,0 @@
-globalParameters:
-  kubernetesDeploymentVersion:
-    allowRuntimeOverride: false
-    object:
-      value: "0.1"

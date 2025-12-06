@@ -82,7 +82,8 @@ export class SolutionsInfrastructureStack extends Stack {
         const parameterLabels: Record<string, ParameterLabel> = {};
         const stageParameter = new CfnParameter(this, 'Stage', {
             type: 'String',
-            description: 'Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1',
+            description: 'Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1.  ' +
+                'This name should be unique for the all deployments in the region.',
             default: 'dev',
         });
         additionalParameters.push(stageParameter.logicalId)

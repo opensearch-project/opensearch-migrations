@@ -66,6 +66,27 @@ Users can interact with the migration process through the CLI, which orchestrate
 ./gradlew test
 ```
 
+## Building Images
+
+Build images with docker (requires docker)
+
+```bash
+../gradlew buildDockerImages
+```
+
+Build images with buildkit and jib. 
+See [buildImages](buildImages/README-Minikube.md) for instructions to set 
+that up.
+
+```bash
+../gradlew :buildImages:buildImagesToRegistry
+```
+
+## Running the Project
+
+* Running the project in [Kubernetes](deployment/k8s/README.md) 
+* Running the legacy solution with [Docker Compose](TrafficCapture/dockerSolution/README.md)
+
 ## Code Style
 
 We use Spotless for code formatting. To check and apply the code style:
@@ -83,7 +104,7 @@ Install the pre-commit hooks:
 ./install_githooks.sh
 ```
 
-## Publishing
+## Publishing Images
 
 This project can be published to a local Maven repository with:
 ```sh
