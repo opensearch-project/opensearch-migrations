@@ -75,7 +75,7 @@ Build images with docker (requires docker)
 ```
 
 Build images with buildkit and jib. 
-See [buildImages](buildImages/README-Minikube.md) for instructions to set 
+See [buildImages](buildImages/README-K8s.md) for instructions to set 
 that up.
 
 ```bash

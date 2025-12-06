@@ -41,4 +41,4 @@ Or customized to use a specific registry endpoint and architecture
 
 ## Using Minikube (buildkit container matches aws-bootstrap.sh script)
 
-[README-Minikube.sh](README-Minikube.md)
+[README-K8s.sh](README-K8s.md)
