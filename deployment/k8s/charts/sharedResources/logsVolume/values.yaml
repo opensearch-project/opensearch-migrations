@@ -1,8 +1,0 @@
-volume:
-  volumeName: shared-logs
-  mountPath: /shared-logs-output # Path inside the container where the volume should be mounted
-  # Persistent volume claim settings
-  pvcClaimName: shared-logs-pvc
-  storageClass: ""
-  accessMode: ReadWriteOnce
-  size: 10Gi

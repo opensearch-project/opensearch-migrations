@@ -1,7 +1,0 @@
-replicas: 1
-storageType: ephemeral
-storageSize: 100Gi
-storageDeleteClaim: true
-dedicatedController:
-  replicas: 1
-  storageSize: 10Gi

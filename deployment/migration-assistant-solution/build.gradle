@@ -1,0 +1,39 @@
+import org.opensearch.migrations.common.CommonUtils
+import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
+import com.github.gradle.node.npm.task.NpmTask
+import com.github.gradle.node.NodeExtension
+
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'com.bmuschko.docker-remote-api'
+    id 'com.github.node-gradle.node'
+}
+
+node {
+    version = '22.14.0'
+    download = true
+}
+
+tasks.register('installDependencies', NpmTask) {
+    description = 'Install npm dependencies including dev dependencies'
+    args = ['install', '--include=dev']
+
+    inputs.file('package.json')
+    inputs.file('package-lock.json')
+    outputs.dir('node_modules')
+}
+
+tasks.register('cdkSynth', NpxTask) {
+    description = 'Synthesize CDK stacks'
+    dependsOn 'installDependencies'
+
+    command = 'cdk'
+    args = ['synth', '*']
+
+    inputs.dir('node_modules')
+    inputs.files(fileTree('.') {
+        include '**/*.ts', '**/*.js', '**/*.json'
+        exclude 'node_modules/**', 'cdk.out/**', 'build/**'
+    })
+    outputs.dir('cdk.out')
+}

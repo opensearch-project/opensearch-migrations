@@ -14,25 +14,28 @@ See [README.md](README.md) for instructions that do NOT require minikube or any 
 
 ## Prerequisites
 
-- Minikube is running & kubectl is configured to use it
+- Minikube or another K8s cluster (e.g. EKS) is running & kubectl is configured to use it
 - Docker CLI installed (for buildx)
 - Gradle installed
 - Helm 3 installed
 
 ## Setup Instructions
 
-### 1. Start Minikube
+### 1.a Start Minikube
 
-If not already running:
 ```bash
 INSECURE_REGISTRY_CIDR="${INSECURE_REGISTRY_CIDR:-0.0.0.0/0}"
 minikube start \
   --insecure-registry="${INSECURE_REGISTRY_CIDR}"
 ```
 
+### 1.b Start EKS
+
+See the steps to deploy EKS in [Deploying Migration Assistant into EKS](../deployment/k8s/aws/README.md). 
+
 ### 2. Deploy BuildKit using the helm chart
 
-This deploys the BuildKit pod and service (but skips the build job since we'll be running Gradle locally):
+This deploys the BuildKit pod and service (but skips the build job that comes along with the chart since we'll be running Gradle locally, as necessary):
 ```bash
 helm install buildkit ../deployment/k8s/charts/components/buildImages \
   --create-namespace \
@@ -41,9 +44,15 @@ helm install buildkit ../deployment/k8s/charts/components/buildImages \
   --set namespace=buildkit
 ```
 
-### 3. Deploy a local Docker registry
+### 3. Deploy a local Docker registry (for local deployments)
 
-The aws-bootstrap mechanism doesn't need to worry about a registry since it uses ECR/external registries. For local development, we need to deploy one separately.  It's also possible to use a registry that ships with minikube, though this guide doesn't explore that.
+If you already have a registry set up that your cluster and build environment
+can use, skip this step and note the registry (ECR) endpoint.
+
+The aws-bootstrap mechanism doesn't need to worry about a registry since it 
+uses ECR/external registries. For local development, we need to deploy one
+separately.  It's also possible to use a registry that ships with minikube,
+though this guide doesn't explore that.
 
 Deploy it:
 ```bash
@@ -97,12 +106,15 @@ ps aux | grep port-forward
 
 ### 7. Create Docker buildx builder
 
-Create a builder that connects to the BuildKit service in Minikube:
+Create a builder that connects to the BuildKit service at port 1234 on the 
+localhost. As per the above port-forward commands, that will be the service 
+deployed earlier on the K8s cluster:
+
 ```bash
 echo "Remove any existing builder with this name"
 docker buildx rm local-remote-builder 2>/dev/null || true
 
-echo "Create the builder pointing to localhost:1234 (port-forwarded to Minikube BuildKit)"
+echo "Create the builder pointing to localhost:1234 (port-forwarded to the BuildKit service)"
 docker buildx create --name local-remote-builder --driver remote tcp://localhost:1234
 
 echo "Set it as the active builder"
@@ -121,29 +133,46 @@ Endpoint:      tcp://localhost:1234
 BuildKit version: v0.22.0
 ```
 
-The key indicators of success:
-- Status: **running**
-- Endpoint: **tcp://localhost:1234**
-- "Handling connection for 1234" appears in your terminal (from port-forward)
-
 ### 8. Build images
 
 Now you can build images using Gradle from your host machine:
+
+To build and push images to localhost:5001, simply run the gradle target.
+
 ```bash
 ../gradlew buildImagesToRegistry
 ```
 
-This will:
-- Use Jib to build Java-based images and push to `localhost:5001` (your local registry)
-- Use BuildKit (running in Minikube) to build Dockerfile-based images and push to `docker-registry:5000` (the Kubernetes service name)
+To instead build and push to an ECR registry:
+
+```bash
+echo "Login to your remote registry first"
+aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-west-2.amazonaws.com
+
+echo "Build with custom registry endpoint and architecture"
+./gradlew buildImagesToRegistry \
+  -PregistryEndpoint=$MIGRATIONS_ECR_REGISTRY \
+  -PimageArch=amd64
+```
+
+This is how the production build job works - it uses the same BuildKit setup but pushes to ECR instead of a local registry.
+
 
 **Note**: The first build may take several minutes as base images are pulled and layers are built.
 
 ### 9. Verify images were pushed
 
 Check that images were successfully pushed to your local registry:
+
+Local docker registry
 ```bash
 curl http://localhost:5001/v2/_catalog
+```
+
+ECR (assumes that environment variables were set in step 1)
+
+```bash
+aws ecr list-images --repository-name $(echo $MIGRATIONS_ECR_REGISTRY| cut -d'/' -f2 | cut -d':' -f1)
 ```
 
 You should see a list of repositories like:
@@ -151,7 +180,9 @@ You should see a list of repositories like:
 {"repositories":["migrations/traffic_replayer","migrations/capture_proxy_base","migrations/migration_console"]}
 ```
 
-### 10. Using the registry with your local docker engine
+### 10. Using the local registry with your local docker engine
+
+**Not relevant for ECR.**
 
 Make sure that docker engine's settings include.
 ```
@@ -209,17 +240,14 @@ echo "Remove buildx builder"
 docker buildx rm local-remote-builder
 ```
 
-## Using with Remote Registries
+Delete minikube (if necessary)
 
-To build and push to a remote registry (e.g., AWS ECR) instead of the local registry:
 ```bash
-# Login to your remote registry first
-aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-west-2.amazonaws.com
-
-# Build with custom registry endpoint and architecture
-./gradlew buildImagesToRegistry \
-  -PregistryEndpoint=123456789012.dkr.ecr.us-west-2.amazonaws.com/my-repo \
-  -PimageArch=amd64
+minikube delete
 ```
 
-This is how the production build job works - it uses the same BuildKit setup but pushes to ECR instead of a local registry.
+Delete EKS (if necessary)
+
+```bash
+aws cloudformation delete-stack --stack-name "$CFN_STACK_NAME"
+```

@@ -2,11 +2,6 @@ apiVersion: v2
 name: test-clusters
 version: 0.1.0
 dependencies:
-  - name: capture-proxy
-    alias: proxy
-    condition: conditionalPackageInstalls.proxy
-    version: "0.1.0"
-    repository: file://../../components/captureProxy
   - name: elasticsearch
     alias: source
     condition: conditionalPackageInstalls.source

@@ -40,6 +40,7 @@ void addSubProjects(String path, File dir) {
 rootProject.name = 'OpensearchMigrations'
 include 'awsUtilities'
 include 'coreUtilities'
+include 'deployment:migration-assistant-solution'
 include 'libraries:kafkaCommandLineFormatter'
 include 'libraries:kafkaUtils'
 include 'transformation'

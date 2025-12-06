@@ -1,7 +1,0 @@
-weights:
-  sharedConfigMaps: 0
-globalParameters:
-  foo:
-    value: "Foo"
-  bar:
-    value: "bar"

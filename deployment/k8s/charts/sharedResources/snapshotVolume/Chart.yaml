@@ -1,6 +1,0 @@
-apiVersion: v2
-name: snapshot-volume
-description: A utility Helm chart to create a storage volume for snapshots
-type: application
-version: 0.1.0
-appVersion: "1.16.0"
