@@ -55,7 +55,7 @@ tasks.register('makeAndStageWorkflowTemplates', NpmTask) {
     inputs.file(orchestrationSpecsDirP.file("tsconfig.base.json"))
     inputs.file(orchestrationSpecsDirP.file("tsconfig.json"))
     inputs.file(orchestrationSpecsDirP.file("tsconfig.workspaces.json"))
-    outputs.dir(workflowTemplatesStagingP)
+    outputs.dir(workflowTefmplatesStagingP)
 
     doFirst {
         workflowTemplatesStagingP.get().asFile.mkdirs()
