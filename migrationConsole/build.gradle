@@ -47,7 +47,6 @@ tasks.register('makeAndStageWorkflowTemplates', NpmTask) {
     inputs.dir(workflowTemplatesP.dir("src"))
     // Resource files embedded in templates
     inputs.dir(workflowTemplatesP.dir("resources"))
-    inputs.dir(workflowTemplatesP.dir("k8sResources"))
     // Package-level config files
     inputs.file(workflowTemplatesP.file("package.json"))
     inputs.file(workflowTemplatesP.file("tsconfig.json"))
