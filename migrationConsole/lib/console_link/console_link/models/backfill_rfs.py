@@ -416,7 +416,7 @@ def compute_dervived_values(target_cluster, index_to_check, total, completed, st
         if successor_items:
             # shard_setup has successor_items but work items haven't been created yet
             # This is the intermediate state - NOT completed
-            logger.info(f"shard_setup has successor_items but total=0, migration is still in progress")
+            logger.info("shard_setup has successor_items but total=0, migration is still in progress")
             finished_iso = None
             percentage_completed = 0.0
             if active_workers:

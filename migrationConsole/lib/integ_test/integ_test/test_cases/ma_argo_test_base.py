@@ -1,7 +1,6 @@
 from enum import Enum
 import logging
 import json
-import base64
 
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
