@@ -397,13 +397,13 @@ class ArgoService:
     def _convert_workflow_config_to_cluster_config(self, workflow_config: Dict[str, Any]) -> Dict[str, Any]:
         """
         Convert workflow cluster config schema to Python Cluster schema.
-        
+
         Workflow schema uses:
           - allowInsecure -> allow_insecure
           - authConfig.basic.secretName -> basic_auth.k8s_secret_name
           - authConfig.noAuth -> no_auth
           - authConfig.sigv4 -> sigv4
-        
+
         Python Cluster schema expects:
           - allow_insecure (boolean)
           - basic_auth (dict with username/password or k8s_secret_name or user_secret_arn)
@@ -411,16 +411,16 @@ class ArgoService:
           - sigv4 (dict with region/service)
         """
         converted: Dict[str, Any] = {"endpoint": workflow_config.get("endpoint")}
-        
+
         # Convert allowInsecure -> allow_insecure
         allow_insecure = workflow_config.get("allowInsecure", workflow_config.get("allow_insecure"))
         if allow_insecure is not None:
             converted["allow_insecure"] = allow_insecure
-        
+
         # Copy version if present
         if "version" in workflow_config:
             converted["version"] = workflow_config["version"]
-        
+
         # Convert auth config (workflow schema takes precedence)
         auth_config = workflow_config.get("authConfig", {})
         if auth_config:
@@ -428,7 +428,7 @@ class ArgoService:
         else:
             # Fall back to legacy/direct auth fields
             converted.update(self._get_legacy_auth_fields(workflow_config))
-        
+
         return converted
 
     def _get_cluster_config_from_workflow(self, workflow_name: str, cluster_type: str) -> Cluster:
@@ -459,9 +459,9 @@ class ArgoService:
             raise
 
         logger.info(f"Found {cluster_type} cluster config from workflow: {cfg}")
-        
+
         # Convert workflow schema to Python Cluster schema
         converted_cfg = self._convert_workflow_config_to_cluster_config(cfg)
         logger.info(f"Converted {cluster_type} cluster config: {converted_cfg}")
-        
+
         return Cluster(config=converted_cfg)

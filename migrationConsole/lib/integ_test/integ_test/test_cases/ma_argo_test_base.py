@@ -105,7 +105,7 @@ class MATestBase:
     def prepare_workflow_snapshot_and_migration_config(self):
         """
         Prepare the snapshot and migration configuration.
-        
+
         The structure follows the NORMALIZED_SNAPSHOT_MIGRATION_CONFIG schema:
         [{
             "snapshotConfig": { ... },  # Optional, added by workflow
@@ -115,7 +115,7 @@ class MATestBase:
                 "documentBackfillConfig": { ... }  # Optional
             }]
         }]
-        
+
         Subclasses can override this to provide custom configurations,
         especially for transformer configs.
         """
@@ -174,8 +174,8 @@ class MATestBase:
             self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=timeout_seconds)
 
     def display_final_cluster_state(self):
-        source_response = cat_indices(cluster=self.source_cluster,refresh=True).decode("utf-8")
-        target_response = cat_indices(cluster=self.target_cluster,refresh=True).decode("utf-8")
+        source_response = cat_indices(cluster=self.source_cluster, refresh=True).decode("utf-8")
+        target_response = cat_indices(cluster=self.target_cluster, refresh=True).decode("utf-8")
         logger.info("Printing document counts for source and target clusters:")
         print("SOURCE CLUSTER")
         print(source_response)

@@ -26,6 +26,11 @@ conditionalPackageInstalls:
   jaeger: true
 
 images:
+  # Optional registry prefix to prepend to all image repositories
+  # Example: "registry.kube-system.svc.cluster.local/" or "myregistry.com/"
+  # Leave empty to use image repositories as-is
+  registryPrefix: ""
+  
   captureProxy:
     repository: migrations/capture_proxy
     tag: latest

@@ -24,7 +24,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: helm-uninstaller
-          image: {{ .Values.images.installer.repository}}:{{ .Values.images.installer.tag }}
+          image: {{ include "migrationAssistant.image" (dict "imageConfig" .Values.images.installer "registryPrefix" .Values.images.registryPrefix) }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
           command:
             - /bin/sh
@@ -64,7 +64,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: helm-uninstaller-logging
-          image: {{ .Values.images.installer.repository}}:{{ .Values.images.installer.tag }}
+          image: {{ include "migrationAssistant.image" (dict "imageConfig" .Values.images.installer "registryPrefix" .Values.images.registryPrefix) }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
           command:
             - /bin/sh

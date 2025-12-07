@@ -426,8 +426,8 @@ def compute_dervived_values(target_cluster, index_to_check, total, completed, st
                 eta_ms = None
                 status = StepStateWithPause.PAUSED
             return finished_iso, percentage_completed, eta_ms, status
-    
-    # Consider it completed if there's nothing to do (total = 0 with no successor_items) 
+
+    # Consider it completed if there's nothing to do (total = 0 with no successor_items)
     # or we've completed all shards
     if total == 0 or (total > 0 and completed >= total):
         max_completed_epoch = _get_max_completed_epoch(target_cluster, index_to_check)

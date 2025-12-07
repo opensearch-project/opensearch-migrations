@@ -410,7 +410,7 @@ def main() -> None:
     combinations = get_version_combinations(source_version=args.source_version, target_version=args.target_version)
     logger.info("Detected the following version combinations to test:\n" +
                 "\n".join([f"- {src} → {tgt}" for src, tgt in combinations]))
-    
+
     dev_values_file = f"{ma_chart_path}/valuesDev.yaml"
     test_runner = TestRunner(k8s_service=k8s_service,
                              unique_id=args.unique_id,
