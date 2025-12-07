@@ -24,19 +24,19 @@ export const DEFAULT_RESOURCES = {
             memory: "2000Mi",
         },
         requests: {
-            cpu: "500m",
-            memory: "2000Mi",
+            cpu: "100m",
+            memory: "500Mi",
         }
     },
 
     RFS: {
         limits: {
-            cpu: "2000m",
-            memory: "4000Mi",
+            cpu: "1000m",
+            memory: "3000Mi",
         },
         requests: {
-            cpu: "1000m",
-            memory: "4000Mi",
+            cpu: "100m",
+            memory: "1000Mi",
         }
     },
 } as const;
