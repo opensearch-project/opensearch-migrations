@@ -1152,7 +1152,7 @@ spec:
             - name: JAVA_OPTS
               value: "{{=' ' + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}"
             - name: AWS_SHARED_CREDENTIALS_FILE
-              value: "{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('/config/credentials') : (''))}}"
+              value: "{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('/config/credentials/configuration') : (''))}}"
           volumeMounts:
             - name: log4j-configuration
               mountPath: /config/logConfiguration
@@ -2188,32 +2188,6 @@ exports[`test workflow template renderings full-migration-with-workflow-cli 1`] 
     "serviceAccountName": "argo-workflow-executor",
     "templates": [
       {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "sourceConfig",
-            },
-            {
-              "name": "targetConfig",
-            },
-          ],
-        },
-        "name": "buildmigrationconfig",
-        "outputs": {
-          "parameters": [
-            {
-              "name": "migrationConfigBase64",
-              "valueFrom": {
-                "expression": "toBase64(toJSON(sprig.dict("skipApprovals", true, "sourceClusters", sprig.dict("source1", sprig.merge(fromJSON(inputs.parameters.sourceConfig), sprig.dict("snapshotRepo", {"awsRegion":"us-east-2","endpoint":"localstack://localstack.ma.svc.cluster.local:4566","s3RepoPathUri":"s3://migrations-default-123456789012-dev-us-east-2"}))), "targetClusters", sprig.dict("target1", fromJSON(inputs.parameters.targetConfig)), "migrationConfigs", [{"fromSource":"source1","toTarget":"target1","skipApprovals":false,"snapshotExtractAndLoadConfigs":[{"snapshotConfig":{"snapshotNameConfig":{"snapshotNamePrefix":"source1snapshot1"}},"createSnapshotConfig":{},"migrations":[{"metadataMigrationConfig":{"skipEvaluateApproval":true,"skipMigrateApproval":true},"documentBackfillConfig":{"documentsPerBulkRequest":1000,"maxShardSizeBytes":16000000,"maxConnections":4,"resources":{"requests":{"cpu":"250m","memory":"1Gi","ephemeral-storage":"5Gi"},"limits":{"cpu":"250m","memory":"1Gi","ephemeral-storage":"5Gi"}}}}]}],"replayerConfig":{"podReplicas":0}}])))",
-              },
-            },
-          ],
-        },
-        "steps": [
-          [],
-        ],
-      },
-      {
         "container": {
           "args": [
             "set -e -x
@@ -2391,12 +2365,29 @@ exit $EXIT_CODE
       },
       {
         "inputs": {
+          "parameters": [],
+        },
+        "name": "deletemigrationworkflow",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found",
+          ],
+          "manifest": "apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: migration-workflow
+",
+        },
+      },
+      {
+        "inputs": {
           "parameters": [
             {
-              "name": "sourceConfig",
-            },
-            {
-              "name": "targetConfig",
+              "name": "migrationConfigBase64",
             },
             {
               "name": "imageMigrationConsoleLocation",
@@ -2416,23 +2407,9 @@ exit $EXIT_CODE
               "arguments": {
                 "parameters": [
                   {
-                    "name": "sourceConfig",
-                    "value": "{{inputs.parameters.sourceConfig}}",
+                    "name": "migrationConfigBase64",
+                    "value": "{{inputs.parameters.migrationConfigBase64}}",
                   },
-                  {
-                    "name": "targetConfig",
-                    "value": "{{inputs.parameters.targetConfig}}",
-                  },
-                ],
-              },
-              "name": "buildMigrationConfig",
-              "template": "buildmigrationconfig",
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
                   {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -2440,10 +2417,6 @@ exit $EXIT_CODE
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "migrationConfigBase64",
-                    "value": "{{steps.buildMigrationConfig.outputs.parameters.migrationConfigBase64}}",
                   },
                 ],
               },
@@ -2467,6 +2440,15 @@ exit $EXIT_CODE
               },
               "name": "monitorWorkflow",
               "template": "monitorworkflow",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [],
+              },
+              "name": "deleteMigrationWorkflow",
+              "template": "deletemigrationworkflow",
             },
           ],
         ],

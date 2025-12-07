@@ -11,6 +11,7 @@ import yaml
 from console_link.environment import Environment
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_rfs import get_detailed_status_obj, BackfillOverallStatus
+from console_link.models.step_state import StepStateWithPause
 from tests.search_containers import SearchContainer, Version
 
 logging.basicConfig(level=logging.INFO)
@@ -292,3 +293,144 @@ def test_get_detailed_status_obj(env_with_cluster: Environment):
     assert status_obj.shard_in_progress == (IN_PROGRESS_DOC_COUNT * SHARD_COUNT +
                                             IN_PROGRESS_SUCCESSOR_COUNT), f"{status_obj}"
     assert status_obj.shard_waiting == UNCLAIMED_DOC_COUNT * SHARD_COUNT, f"{status_obj}"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "env_with_cluster",
+    [TEST_VERSION],
+    indirect=True
+)
+def test_intermediate_state_with_successor_items_but_no_work_items(env_with_cluster: Environment):
+    """
+    Test the intermediate state where shard_setup has successor_items but the work items
+    haven't been created yet. This tests the fix for the race condition where status
+    incorrectly reported "Completed" with 0 shards.
+    """
+    assert env_with_cluster.target_cluster is not None
+    target_cluster = env_with_cluster.target_cluster
+
+    create_working_state_index(target_cluster)
+
+    # Create only the shard_setup document with successor_items but NO actual work items
+    # This simulates the intermediate state during the race condition
+    setup_doc = {
+        "completedAt": current_time,
+        "successor_items": "index1__0__-2147483648,index1__1__-2147483648,index2__0__-2147483648",
+        "status": "completed",
+        "scriptVersion": "2.0",
+        "leaseHolderId": "test-worker"
+    }
+    target_cluster.call_api(
+        f"/{WORKING_STATE_INDEX}/_doc/shard_setup",
+        HttpMethod.PUT,
+        data=json.dumps(setup_doc),
+        headers={"Content-Type": "application/json"}
+    )
+
+    # Refresh the index
+    target_cluster.call_api("/_refresh", HttpMethod.POST)
+
+    # Get status - should NOT be COMPLETED even though total=0
+    status_obj = get_detailed_status_obj(target_cluster, active_workers=True)
+
+    # Verify results - status should be RUNNING, not COMPLETED
+    assert isinstance(status_obj, BackfillOverallStatus), "Expected BackfillOverallStatus object"
+    assert status_obj.shard_total == 0, f"Expected total=0 since work items not created yet: {status_obj}"
+    assert status_obj.status == StepStateWithPause.RUNNING, \
+        f"Expected RUNNING status due to successor_items, got {status_obj.status}: {status_obj}"
+    assert status_obj.percentage_completed == 0.0, \
+        f"Expected 0% completion, got {status_obj.percentage_completed}: {status_obj}"
+    assert status_obj.finished is None, \
+        f"Expected finished to be None, got {status_obj.finished}: {status_obj}"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "env_with_cluster",
+    [TEST_VERSION],
+    indirect=True
+)
+def test_intermediate_state_paused_with_successor_items(env_with_cluster: Environment):
+    """
+    Test the intermediate state where shard_setup has successor_items but the work items
+    haven't been created yet, and workers are paused.
+    """
+    assert env_with_cluster.target_cluster is not None
+    target_cluster = env_with_cluster.target_cluster
+
+    create_working_state_index(target_cluster)
+
+    # Create only the shard_setup document with successor_items but NO actual work items
+    setup_doc = {
+        "completedAt": current_time,
+        "successor_items": "index1__0__-2147483648,index1__1__-2147483648",
+        "status": "completed",
+        "scriptVersion": "2.0",
+        "leaseHolderId": "test-worker"
+    }
+    target_cluster.call_api(
+        f"/{WORKING_STATE_INDEX}/_doc/shard_setup",
+        HttpMethod.PUT,
+        data=json.dumps(setup_doc),
+        headers={"Content-Type": "application/json"}
+    )
+
+    # Refresh the index
+    target_cluster.call_api("/_refresh", HttpMethod.POST)
+
+    # Get status with active_workers=False (paused)
+    status_obj = get_detailed_status_obj(target_cluster, active_workers=False)
+
+    # Verify results - status should be PAUSED, not COMPLETED
+    assert isinstance(status_obj, BackfillOverallStatus), "Expected BackfillOverallStatus object"
+    assert status_obj.shard_total == 0, f"Expected total=0 since work items not created yet: {status_obj}"
+    assert status_obj.status == StepStateWithPause.PAUSED, \
+        f"Expected PAUSED status due to successor_items with no workers, got {status_obj.status}: {status_obj}"
+    assert status_obj.percentage_completed == 0.0, \
+        f"Expected 0% completion, got {status_obj.percentage_completed}: {status_obj}"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "env_with_cluster",
+    [TEST_VERSION],
+    indirect=True
+)
+def test_completed_state_without_successor_items(env_with_cluster: Environment):
+    """
+    Test that when shard_setup has no successor_items and total=0, the status is COMPLETED.
+    This is the legitimate case where there's nothing to migrate.
+    """
+    assert env_with_cluster.target_cluster is not None
+    target_cluster = env_with_cluster.target_cluster
+
+    create_working_state_index(target_cluster)
+
+    # Create shard_setup document WITHOUT successor_items (nothing to migrate)
+    setup_doc = {
+        "completedAt": current_time,
+        "status": "completed",
+        "scriptVersion": "2.0",
+        "leaseHolderId": "test-worker"
+    }
+    target_cluster.call_api(
+        f"/{WORKING_STATE_INDEX}/_doc/shard_setup",
+        HttpMethod.PUT,
+        data=json.dumps(setup_doc),
+        headers={"Content-Type": "application/json"}
+    )
+
+    # Refresh the index
+    target_cluster.call_api("/_refresh", HttpMethod.POST)
+
+    # Get status - should be COMPLETED since there's nothing to migrate
+    status_obj = get_detailed_status_obj(target_cluster, active_workers=True)
+
+    # Verify results - status should be COMPLETED
+    assert isinstance(status_obj, BackfillOverallStatus), "Expected BackfillOverallStatus object"
+    assert status_obj.shard_total == 0, f"Expected total=0: {status_obj}"
+    assert status_obj.status == StepStateWithPause.COMPLETED, \
+        f"Expected COMPLETED status when no successor_items, got {status_obj.status}: {status_obj}"
+    assert status_obj.percentage_completed == 100.0, \
+        f"Expected 100% completion, got {status_obj.percentage_completed}: {status_obj}"

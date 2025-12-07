@@ -19,13 +19,11 @@ spec:
       - name: snapshot-and-migration-configs
         value: |
           [{
-            "indices": ["index_3", "index_4"],
             "migrations": [{
-              "metadata": {
-                "from_snapshot": null,
-                "transformer_config_base64": ""
+              "metadataMigrationConfig": {
+                "otelCollectorEndpoint": "http://otel-collector:4317"
               },
-              "documentBackfillConfigs": [{"indices": ["index_3", "index_4"]}]
+              "documentBackfillConfig": {}
             }]
           }]
       - name: replayer-config
@@ -123,10 +121,8 @@ spec:
               template: main
             arguments:
               parameters:
-                - name: sourceConfig
-                  value: "{{steps.generate-migration-configs.outputs.parameters.source-migration-configs}}"
-                - name: targetConfig
-                  value: "{{steps.generate-migration-configs.outputs.parameters.targets}}"
+                - name: migrationConfigBase64
+                  value: "{{steps.generate-migration-configs.outputs.parameters.migrationConfigBase64}}"
                 - name: imageMigrationConsoleLocation
                   valueFrom:
                     configMapKeyRef:
@@ -221,7 +217,8 @@ spec:
     - name: suspend-step
       suspend: {}
 
-    # Template to generate migration configurations from cluster configs using expressions
+    # Template to generate migration configurations from cluster configs
+    # Builds the complete OVERALL_MIGRATION_CONFIG structure and encodes as base64
     - name: generate-migration-configs
       inputs:
         parameters:
@@ -229,17 +226,74 @@ spec:
           - name: target-config
           - name: snapshot-and-migration-configs
           - name: replayer-config
+      container:
+        image: alpine:latest
+        command: [sh, -c]
+        args:
+          - |
+            apk add --no-cache jq > /dev/null 2>&1
+            
+            # Parse inputs
+            SOURCE_CONFIG='{{inputs.parameters.source-config}}'
+            TARGET_CONFIG='{{inputs.parameters.target-config}}'
+            SNAPSHOT_MIGRATION_CONFIGS='{{inputs.parameters.snapshot-and-migration-configs}}'
+            
+            # Add snapshot repo config to source cluster
+            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq '. + {
+              "snapshotRepo": {
+                "awsRegion": "us-east-2",
+                "endpoint": "localstack://localstack.ma.svc.cluster.local:4566",
+                "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2"
+              }
+            }')
+            
+            # Build snapshotExtractAndLoadConfigs from the test's snapshot-and-migration-configs
+            # Each item in the array becomes a snapshotExtractAndLoadConfig with snapshotConfig added
+            SNAPSHOT_EXTRACT_CONFIGS=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '[.[] | {
+              "snapshotConfig": {
+                "snapshotNameConfig": {
+                  "snapshotNamePrefix": "testsnapshot"
+                }
+              },
+              "createSnapshotConfig": {},
+              "migrations": .migrations
+            }]')
+            
+            # Build the complete OVERALL_MIGRATION_CONFIG
+            MIGRATION_CONFIG=$(jq -n \
+              --argjson source "$SOURCE_WITH_REPO" \
+              --argjson target "$TARGET_CONFIG" \
+              --argjson snapshotConfigs "$SNAPSHOT_EXTRACT_CONFIGS" \
+              '{
+                "skipApprovals": true,
+                "sourceClusters": {
+                  "source1": $source
+                },
+                "targetClusters": {
+                  "target1": $target
+                },
+                "migrationConfigs": [{
+                  "fromSource": "source1",
+                  "toTarget": "target1",
+                  "snapshotExtractAndLoadConfigs": $snapshotConfigs,
+                  "replayerConfig": {
+                    "podReplicas": 0
+                  }
+                }]
+              }')
+            
+            # Encode as base64 (single line, no wrapping)
+            MIGRATION_CONFIG_BASE64=$(echo "$MIGRATION_CONFIG" | base64 | tr -d '\n')
+            
+            echo "Generated migration config:"
+            echo "$MIGRATION_CONFIG" | jq .
+            
+            echo "$MIGRATION_CONFIG_BASE64" > /tmp/migration-config-base64
       outputs:
         parameters:
-          - name: source-migration-configs
+          - name: migrationConfigBase64
             valueFrom:
-              expression: >-
-                inputs.parameters['source-config']
-          - name: targets
-            valueFrom:
-              expression: >-
-                inputs.parameters['target-config']
-      steps: [[]]  # no-op
+              path: /tmp/migration-config-base64
 
     - name: conditional-cleanup
       steps:

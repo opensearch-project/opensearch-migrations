@@ -44,14 +44,13 @@ class Test0004MultiTypeUnionMigration(MATestBase):
         transformation_b64 = convert_to_b64([union_transform])
         snapshot_and_migration_configs = [{
             "migrations": [{
-                "metadata": {
-                    "from_snapshot": None,
-                    "otel_endpoint": OTEL_COLLECTOR_ENDPOINT,
-                    "transformer_config_base64": transformation_b64
+                "metadataMigrationConfig": {
+                    "otelCollectorEndpoint": OTEL_COLLECTOR_ENDPOINT,
+                    "transformerConfigBase64": transformation_b64
                 },
-                "documentBackfillConfigs": [{
-                    "transformer_config_base64": transformation_b64
-                }]
+                "documentBackfillConfig": {
+                    "docTransformerConfigBase64": transformation_b64
+                }
             }]
         }]
         self.workflow_snapshot_and_migration_config = snapshot_and_migration_configs
@@ -121,14 +120,13 @@ class Test0005MultiTypeSplitMigration(MATestBase):
         transformation_b64 = convert_to_b64([split_transform])
         snapshot_and_migration_configs = [{
             "migrations": [{
-                "metadata": {
-                    "from_snapshot": None,
-                    "otel_endpoint": OTEL_COLLECTOR_ENDPOINT,
-                    "transformer_config_base64": transformation_b64
+                "metadataMigrationConfig": {
+                    "otelCollectorEndpoint": OTEL_COLLECTOR_ENDPOINT,
+                    "transformerConfigBase64": transformation_b64
                 },
-                "documentBackfillConfigs": [{
-                    "transformer_config_base64": transformation_b64
-                }]
+                "documentBackfillConfig": {
+                    "docTransformerConfigBase64": transformation_b64
+                }
             }]
         }]
         self.workflow_snapshot_and_migration_config = snapshot_and_migration_configs

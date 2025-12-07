@@ -32,14 +32,20 @@ type ConfigWithSnapshot = z.infer<typeof NORMALIZED_PARAMETERIZED_MIGRATION_CONF
     snapshotExtractAndLoadConfigs: z.infer<typeof NORMALIZED_SNAPSHOT_MIGRATION_CONFIG>[]
 };
 
-export function scrapeApprovalsForSnapshotConfigs(perSnapshotCfgs: z.infer<typeof NORMALIZED_SNAPSHOT_MIGRATION_CONFIG>[]) {
+export function scrapeApprovalsForSnapshotConfigs(
+    perSnapshotCfgs: z.infer<typeof NORMALIZED_SNAPSHOT_MIGRATION_CONFIG>[],
+    globalSkipApprovals: boolean,
+    perMigrationSkipApprovals: boolean
+) {
+    const skipAll = globalSkipApprovals || perMigrationSkipApprovals;
     return Object.fromEntries(
         perSnapshotCfgs.map(snapshotCfg=>[snapshotCfg.name,
             Object.fromEntries(
                 snapshotCfg.migrations.map(migrationCfg =>
                     [migrationCfg.name, {
-                    ...( migrationCfg.metadataMigrationConfig?.skipEvaluateApproval ? { evaluateMetadata: true } : {}),
-                    ...( migrationCfg.metadataMigrationConfig?.skipMigrateApproval ? { migrateMetadata: true } : {}),
+                    ...( (skipAll || migrationCfg.metadataMigrationConfig?.skipEvaluateApproval) ? { evaluateMetadata: true } : {}),
+                    ...( (skipAll || migrationCfg.metadataMigrationConfig?.skipMigrateApproval) ? { migrateMetadata: true } : {}),
+                    ...( (skipAll || migrationCfg.documentBackfillConfig?.skipApproval) ? { documentBackfill: true } : {}),
                 }])
             )
         ])
@@ -47,6 +53,7 @@ export function scrapeApprovalsForSnapshotConfigs(perSnapshotCfgs: z.infer<typeo
 }
 
 export function scrapeApprovals(userConfig: z.infer<typeof OVERALL_MIGRATION_CONFIG>) {
+    const globalSkipApprovals = userConfig.skipApprovals ?? false;
     return Object.fromEntries(
         Object.entries(Object.groupBy(userConfig.migrationConfigs, m=>m.fromSource))
             .filter(hasDefinedList)
@@ -59,7 +66,11 @@ export function scrapeApprovals(userConfig: z.infer<typeof OVERALL_MIGRATION_CON
                             entry[1][0].snapshotExtractAndLoadConfigs !== undefined)
                         .map(([target,cfgs])=>
                             cfgs.flatMap(c=>
-                                [target,scrapeApprovalsForSnapshotConfigs(c.snapshotExtractAndLoadConfigs)]
+                                [target, scrapeApprovalsForSnapshotConfigs(
+                                    c.snapshotExtractAndLoadConfigs,
+                                    globalSkipApprovals,
+                                    c.skipApprovals ?? false
+                                )]
                             )
                         )
                 )]

@@ -391,8 +391,44 @@ def get_detailed_status_obj(target_cluster,
     )
 
 
+def _get_shard_setup_successor_items(cluster, index_name: str) -> Optional[str]:
+    """
+    Try to read the special shard_setup doc and return its successor_items field.
+    Returns None if not present or if the field doesn't exist.
+    """
+    try:
+        resp = cluster.call_api(f"/{index_name}/_doc/shard_setup")
+        body = resp.json()
+        src = body.get("_source") or {}
+        return src.get("successor_items")
+    except requests.exceptions.RequestException as e:
+        logger.debug(f"shard_setup doc not available: {e}")
+    except Exception as e:
+        logger.debug(f"Failed to parse shard_setup doc: {e}")
+    return None
+
+
 def compute_dervived_values(target_cluster, index_to_check, total, completed, started_epoch, active_workers: bool):
-    # Consider it completed if there's nothing to do (total = 0) or we've completed all shards
+    # When total == 0, we need to check if shard_setup has successor_items
+    # If it does, the work items are still being created (race condition scenario)
+    if total == 0:
+        successor_items = _get_shard_setup_successor_items(target_cluster, index_to_check)
+        if successor_items:
+            # shard_setup has successor_items but work items haven't been created yet
+            # This is the intermediate state - NOT completed
+            logger.info(f"shard_setup has successor_items but total=0, migration is still in progress")
+            finished_iso = None
+            percentage_completed = 0.0
+            if active_workers:
+                eta_ms = None  # Can't estimate ETA without knowing total
+                status = StepStateWithPause.RUNNING
+            else:
+                eta_ms = None
+                status = StepStateWithPause.PAUSED
+            return finished_iso, percentage_completed, eta_ms, status
+    
+    # Consider it completed if there's nothing to do (total = 0 with no successor_items) 
+    # or we've completed all shards
     if total == 0 or (total > 0 and completed >= total):
         max_completed_epoch = _get_max_completed_epoch(target_cluster, index_to_check)
         finished_iso = (

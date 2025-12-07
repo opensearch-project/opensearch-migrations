@@ -53,7 +53,7 @@ class TestRunner:
 
     def __init__(self, k8s_service: K8sService, unique_id: str, test_ids: List[str], ma_chart_path: str,
                  combinations: List[Tuple[str, str]], always_pull_images: bool = False,
-                 registry_prefix: str = "") -> None:
+                 registry_prefix: str = "", values_file: str = None) -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
@@ -61,6 +61,7 @@ class TestRunner:
         self.combinations = combinations
         self.always_pull_images = always_pull_images
         self.registry_prefix = registry_prefix
+        self.values_file = values_file
 
     def _print_test_stats(self, report: TestReport) -> None:
         for test in report.tests:
@@ -238,6 +239,7 @@ class TestRunner:
                         "images.installer.pullPolicy": "Always",
                     })
                 if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME,
+                                                     values_file=self.values_file,
                                                      values=chart_values if chart_values else None):
                     raise HelmCommandFailed("Helm install of Migrations Assistant chart failed")
 
@@ -409,13 +411,15 @@ def main() -> None:
     logger.info("Detected the following version combinations to test:\n" +
                 "\n".join([f"- {src} → {tgt}" for src, tgt in combinations]))
     
+    dev_values_file = f"{ma_chart_path}/valuesDev.yaml"
     test_runner = TestRunner(k8s_service=k8s_service,
                              unique_id=args.unique_id,
                              test_ids=args.test_ids,
                              ma_chart_path=ma_chart_path,
                              combinations=combinations,
                              always_pull_images=args.always_pull_images,
-                             registry_prefix=args.registry_prefix)
+                             registry_prefix=args.registry_prefix,
+                             values_file=dev_values_file)
 
     if args.delete_only:
         return test_runner.cleanup_deployment()

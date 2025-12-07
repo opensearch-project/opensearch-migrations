@@ -1,6 +1,7 @@
 from enum import Enum
 import logging
 import json
+import base64
 
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
@@ -102,15 +103,28 @@ class MATestBase:
                 self.target_operations.clear_index_templates(cluster=target_cluster)
 
     def prepare_workflow_snapshot_and_migration_config(self):
+        """
+        Prepare the snapshot and migration configuration.
+        
+        The structure follows the NORMALIZED_SNAPSHOT_MIGRATION_CONFIG schema:
+        [{
+            "snapshotConfig": { ... },  # Optional, added by workflow
+            "createSnapshotConfig": { ... },  # Optional
+            "migrations": [{
+                "metadataMigrationConfig": { ... },  # Optional
+                "documentBackfillConfig": { ... }  # Optional
+            }]
+        }]
+        
+        Subclasses can override this to provide custom configurations,
+        especially for transformer configs.
+        """
         snapshot_and_migration_configs = [{
             "migrations": [{
-                "metadata": {
-                    "from_snapshot": None,
-                    "otel_endpoint": OTEL_COLLECTOR_ENDPOINT
+                "metadataMigrationConfig": {
+                    "otelCollectorEndpoint": OTEL_COLLECTOR_ENDPOINT
                 },
-                "documentBackfillConfigs": [{
-                    "test": None
-                }]
+                "documentBackfillConfig": {}
             }]
         }]
         self.workflow_snapshot_and_migration_config = snapshot_and_migration_configs

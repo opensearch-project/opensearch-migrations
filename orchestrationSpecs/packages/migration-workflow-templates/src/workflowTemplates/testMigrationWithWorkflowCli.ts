@@ -1,91 +1,17 @@
 import {
-    BaseExpression,
     expr,
     INTERNAL,
     selectInputsForRegister,
-    Serialized,
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {
     DEFAULT_RESOURCES,
-    TARGET_CLUSTER_CONFIG,
-    SOURCE_CLUSTER_CONFIG,
 } from "@opensearch-migrations/schemas";
-import {z} from "zod";
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {configureAndSubmitScript, monitorScript} from "../resourceLoader";
-
-function makeMigrationParams(
-    sourceConfig: BaseExpression<Serialized<z.infer<typeof SOURCE_CLUSTER_CONFIG>>>,
-    targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>
-) {
-    return expr.makeDict({
-        skipApprovals: true,
-        sourceClusters: expr.makeDict({
-            source1: expr.cast(expr.mergeDicts(
-                expr.deserializeRecord(sourceConfig),
-                expr.makeDict({
-                    snapshotRepo: {
-                        awsRegion: "us-east-2",
-                        endpoint: "localstack://localstack.ma.svc.cluster.local:4566",
-                        s3RepoPathUri: "s3://migrations-default-123456789012-dev-us-east-2"
-                    }
-                })
-            )).to<z.infer<typeof SOURCE_CLUSTER_CONFIG>>()
-        }),
-        targetClusters: expr.makeDict({
-            target1: expr.deserializeRecord(targetConfig)
-        }),
-        migrationConfigs: [
-            {
-                fromSource: "source1",
-                toTarget: "target1",
-                skipApprovals: false,
-                snapshotExtractAndLoadConfigs: [
-                    {
-                        snapshotConfig: {
-                            snapshotNameConfig: {
-                                snapshotNamePrefix: "source1snapshot1"
-                            }
-                        },
-                        createSnapshotConfig: {},
-                        migrations: [
-                            {
-                                metadataMigrationConfig: {
-                                    skipEvaluateApproval: true,
-                                    skipMigrateApproval: true
-                                },
-                                documentBackfillConfig: {
-                                    documentsPerBulkRequest: 1000,
-                                    maxShardSizeBytes: 16000000,
-                                    maxConnections: 4,
-                                    resources: {
-                                        requests: {
-                                            cpu: "250m",
-                                            memory: "1Gi",
-                                            "ephemeral-storage": "5Gi"
-                                        },
-                                        limits: {
-                                            cpu: "250m",
-                                            memory: "1Gi",
-                                            "ephemeral-storage": "5Gi"
-                                        }
-                                    }
-                                }
-                            }
-                        ]
-                    }
-                ],
-                replayerConfig: {
-                    podReplicas: 0
-                }
-            }
-        ]
-    });
-}
 
 export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
     k8sResourceName: "full-migration-with-workflow-cli",
@@ -94,17 +20,6 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
 })
 
     .addParams(CommonWorkflowParameters)
-
-    .addTemplate("buildMigrationConfig", t => t
-        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof SOURCE_CLUSTER_CONFIG>>())
-        .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
-        .addSteps(s => s.addStepGroup(c => c))
-        .addExpressionOutput("migrationConfigBase64", c =>
-            expr.toBase64(expr.asString(expr.serialize(
-                makeMigrationParams(c.inputs.sourceConfig, c.inputs.targetConfig)
-            )))
-        )
-    )
 
     .addTemplate("configureAndSubmitWorkflow", t => t
         .addRequiredInput("migrationConfigBase64", typeToken<string>())
@@ -145,26 +60,34 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
         })
     )
 
+    .addTemplate("deleteMigrationWorkflow", t => t
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "delete",
+                flags: ["--ignore-not-found"],
+                manifest: {
+                    "apiVersion": "argoproj.io/v1alpha1",
+                    "kind": "Workflow",
+                    "metadata": {
+                        "name": expr.literal("migration-workflow")
+                    }
+                }
+            })
+        )
+    )
+
     .addTemplate("main", t => t
-        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof SOURCE_CLUSTER_CONFIG>>())
-        .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
+        // Accept pre-built migration config as base64-encoded JSON
+        .addRequiredInput("migrationConfigBase64", typeToken<string>())
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
-            // Step 0: Build migration config and encode as base64
-            .addStep("buildMigrationConfig", INTERNAL, "buildMigrationConfig", c =>
-                c.register({
-                    sourceConfig: b.inputs.sourceConfig,
-                    targetConfig: b.inputs.targetConfig,
-                })
-            )
-
-            // Step 1: Configure and submit workflow (combined)
+            // Step 1: Configure and submit workflow
             .addStep("configureAndSubmitWorkflow", INTERNAL, "configureAndSubmitWorkflow", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    migrationConfigBase64: c.steps.buildMigrationConfig.outputs.migrationConfigBase64,
+                    migrationConfigBase64: b.inputs.migrationConfigBase64,
                 })
             )
 
@@ -174,6 +97,9 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c),
                 })
             )
+
+            // Step 3: Delete the migration workflow
+            .addStep("deleteMigrationWorkflow", INTERNAL, "deleteMigrationWorkflow")
         )
     )
 
