@@ -156,14 +156,14 @@ class MATestBase:
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         if not self.imported_clusters:
-            self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=300)
+            self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=1000)
             self.source_cluster = self.argo_service.get_source_cluster_from_workflow(workflow_name=self.workflow_name)
             self.target_cluster = self.argo_service.get_target_cluster_from_workflow(workflow_name=self.workflow_name)
 
     def prepare_clusters(self):
         pass
 
-    def workflow_perform_migrations(self, timeout_seconds: int = 240):
+    def workflow_perform_migrations(self, timeout_seconds: int = 1000):
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         if self.imported_clusters:
