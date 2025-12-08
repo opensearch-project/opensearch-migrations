@@ -37,6 +37,10 @@ start() {
   rm -f "$TMP_OUTPUT"
   echo "✅  Minikube started successfully!"
 
+  # Enable registry addon for local image storage
+  minikube addons enable registry
+  echo "📦  Registry addon enabled"
+
   minikube mount .:/opensearch-migrations > /dev/null 2>&1 &
   
   # Mount AWS credentials for local development (host ~/.aws → VM /aws-credentials)
@@ -47,12 +51,6 @@ start() {
   else
     echo "⚠️  Warning: No ~/.aws directory found. AWS credentials will not be available in containers."
   fi
-  
-  if ! docker network inspect minikube --format '{{range .Containers}}{{.Name}} {{end}}' | grep -qw docker-registry; then
-    docker network connect minikube docker-registry 2>/dev/null || echo "⚠️  Warning: Could not connect docker-registry to minikube network"
-  else
-    echo "ℹ️  docker-registry is already connected to minikube network"
-  fi
 }
 
 pause() {
@@ -62,11 +60,6 @@ pause() {
 
 delete() {
   kill_minikube_processes
-  if docker network inspect minikube --format '{{range .Containers}}{{.Name}} {{end}}' | grep -qw docker-registry; then
-    docker network disconnect minikube docker-registry 2>/dev/null || echo "⚠️  Warning: Could not disconnect docker-registry from minikube network"
-  else
-    echo "ℹ️  docker-registry is not connected to minikube network"
-  fi
   minikube delete
 }
 

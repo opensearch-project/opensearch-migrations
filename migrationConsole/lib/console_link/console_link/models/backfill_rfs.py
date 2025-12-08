@@ -408,47 +408,50 @@ def _get_shard_setup_successor_items(cluster, index_name: str) -> Optional[str]:
     return None
 
 
+def _get_status_for_active_workers(active_workers: bool) -> StepStateWithPause:
+    """Return the appropriate status based on whether workers are active."""
+    return StepStateWithPause.RUNNING if active_workers else StepStateWithPause.PAUSED
+
+
+def _compute_in_progress_values(total: int, completed: int, started_epoch: Optional[int],
+                                active_workers: bool) -> tuple:
+    """Compute derived values for an in-progress migration."""
+    percentage_completed = (completed / total * 100.0) if total > 0 else 0.0
+    eta_ms = _estimate_eta_ms_from_shards(started_epoch, percentage_completed) if active_workers else None
+    status = _get_status_for_active_workers(active_workers)
+    return None, percentage_completed, eta_ms, status
+
+
+def _compute_completed_values(target_cluster, index_to_check: str) -> tuple:
+    """Compute derived values for a completed migration."""
+    max_completed_epoch = _get_max_completed_epoch(target_cluster, index_to_check)
+    finished_iso = (
+        datetime.fromtimestamp(max_completed_epoch, tz=timezone.utc).isoformat()
+        if max_completed_epoch
+        else datetime.now(timezone.utc).isoformat()
+    )
+    return finished_iso, 100.0, None, StepStateWithPause.COMPLETED
+
+
+def _is_migration_completed(total: int, completed: int) -> bool:
+    """Check if the migration is completed based on shard counts."""
+    return total == 0 or (total > 0 and completed >= total)
+
+
 def compute_dervived_values(target_cluster, index_to_check, total, completed, started_epoch, active_workers: bool):
-    # When total == 0, we need to check if shard_setup has successor_items
-    # If it does, the work items are still being created (race condition scenario)
+    # When total == 0, check if shard_setup has successor_items (race condition scenario)
     if total == 0:
         successor_items = _get_shard_setup_successor_items(target_cluster, index_to_check)
         if successor_items:
-            # shard_setup has successor_items but work items haven't been created yet
-            # This is the intermediate state - NOT completed
+            # Work items are still being created - NOT completed
             logger.info("shard_setup has successor_items but total=0, migration is still in progress")
-            finished_iso = None
-            percentage_completed = 0.0
-            if active_workers:
-                eta_ms = None  # Can't estimate ETA without knowing total
-                status = StepStateWithPause.RUNNING
-            else:
-                eta_ms = None
-                status = StepStateWithPause.PAUSED
-            return finished_iso, percentage_completed, eta_ms, status
+            status = _get_status_for_active_workers(active_workers)
+            return None, 0.0, None, status
 
-    # Consider it completed if there's nothing to do (total = 0 with no successor_items)
-    # or we've completed all shards
-    if total == 0 or (total > 0 and completed >= total):
-        max_completed_epoch = _get_max_completed_epoch(target_cluster, index_to_check)
-        finished_iso = (
-            datetime.fromtimestamp(max_completed_epoch, tz=timezone.utc).isoformat()
-            if max_completed_epoch
-            else datetime.now(timezone.utc).isoformat()
-        )
-        percentage_completed = 100.0
-        eta_ms = None
-        status = StepStateWithPause.COMPLETED
-    else:
-        finished_iso = None
-        percentage_completed = (completed / total * 100.0) if total > 0 else 0.0
-        if active_workers:
-            eta_ms = _estimate_eta_ms_from_shards(started_epoch, percentage_completed)
-            status = StepStateWithPause.RUNNING
-        else:
-            eta_ms = None
-            status = StepStateWithPause.PAUSED
-    return finished_iso, percentage_completed, eta_ms, status
+    if _is_migration_completed(total, completed):
+        return _compute_completed_values(target_cluster, index_to_check)
+
+    return _compute_in_progress_values(total, completed, started_epoch, active_workers)
 
 
 EXTRACT_UNIQUE_INDEX_SHARD_SCRIPT = (

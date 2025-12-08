@@ -39,6 +39,11 @@ echo "Using local registry at: ${LOCAL_REGISTRY}"
 # Optional toggle (you already had this) – default is false
 USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-false}"
 
+# New flag to use the default in-cluster registry with registryPrefix
+# This is simpler than USE_LOCAL_REGISTRY as it just prepends a registry to all images
+USE_DEFAULT_REGISTRY="${USE_DEFAULT_REGISTRY:-false}"
+DEFAULT_REGISTRY_PREFIX="registry.kube-system.svc.cluster.local/"
+
 ###############################################################################
 # Helm installs
 ###############################################################################
@@ -46,7 +51,18 @@ USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-false}"
 helm dependency build charts/aggregates/testClusters
 helm dependency build charts/aggregates/migrationAssistantWithArgo
 
-if [ "${USE_LOCAL_REGISTRY}" = "true" ]; then
+if [ "${USE_DEFAULT_REGISTRY}" = "true" ]; then
+  echo "Using DEFAULT_REGISTRY with prefix: ${DEFAULT_REGISTRY_PREFIX}"
+  helm install --create-namespace -n ma tc charts/aggregates/testClusters \
+      --wait --timeout 10m \
+      --set "source.image=${DEFAULT_REGISTRY_PREFIX}migrations/elasticsearch_searchguard"
+
+  helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
+    --wait --timeout 10m \
+    -f charts/aggregates/migrationAssistantWithArgo/valuesDev.yaml \
+    --set "images.registryPrefix=${DEFAULT_REGISTRY_PREFIX}"
+
+elif [ "${USE_LOCAL_REGISTRY}" = "true" ]; then
   echo "Using LOCAL_REGISTRY for images: ${LOCAL_REGISTRY}"
   helm install --create-namespace -n ma tc charts/aggregates/testClusters \
       --wait --timeout 10m \
@@ -71,7 +87,7 @@ if [ "${USE_LOCAL_REGISTRY}" = "true" ]; then
     --set "images.reindexFromSnapshot.tag=latest" \
     --set "images.reindexFromSnapshot.pullPolicy=Always"
 else
-  echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
+  echo "Using default image repositories (no registry override)."
   helm install --create-namespace -n ma tc charts/aggregates/testClusters \
     --wait --timeout 10m
 
