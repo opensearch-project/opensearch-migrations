@@ -50,12 +50,12 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
             )
         )
         .addRetryParameters({
-            limit: "10",          // ~72 hours (864 * 5min max backoff)
+            limit: "13",          // ~10 minutes
             retryPolicy: "Always",
             backoff: {
                 duration: "5",     // Start at 5 seconds
                 factor: "2",       // Exponential backoff  
-                cap: "300"         // Cap at 5 minutes
+                cap: "60"         // Cap at 1 minute
             }
         })
     )

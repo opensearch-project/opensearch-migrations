@@ -2355,11 +2355,11 @@ exit $EXIT_CODE
         },
         "retryStrategy": {
           "backoff": {
-            "cap": "300",
+            "cap": "60",
             "duration": "5",
             "factor": "2",
           },
-          "limit": "10",
+          "limit": "13",
           "retryPolicy": "Always",
         },
       },
