@@ -102,16 +102,28 @@ def call(Map config = [:]) {
                                 
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh """
-                                            set -euo pipefail
-                                            chmod +x awsRunEksValidation.sh
-                                            ./awsRunEksValidation.sh \
-                                              --stage "${stage}" \
-                                              --region "${params.REGION}" \
-                                              --stack-name "${env.STACK_NAME}" \
-                                              --build-images "${params.BUILD_IMAGES}" \
-                                              --branch "${params.GIT_BRANCH}"
-                                        """
+                                        if (params.BUILD_IMAGES) {
+                                            sh """
+                                                set -euo pipefail
+                                                chmod +x awsRunEksValidation.sh
+                                                ./awsRunEksValidation.sh \
+                                                  --stage "${stage}" \
+                                                  --region "${params.REGION}" \
+                                                  --stack-name "${env.STACK_NAME}" \
+                                                  --build-images true \
+                                                  --org-name opensearch-project \
+                                                  --branch "${params.GIT_BRANCH}"
+                                            """
+                                        } else {
+                                            sh """
+                                                set -euo pipefail
+                                                chmod +x awsRunEksValidation.sh
+                                                ./awsRunEksValidation.sh \
+                                                  --stage "${stage}" \
+                                                  --region "${params.REGION}" \
+                                                  --stack-name "${env.STACK_NAME}"
+                                            """
+                                        }
                                     }
                                 }
                                 echo "EKS deployment validation completed successfully"
@@ -147,7 +159,8 @@ def call(Map config = [:]) {
                         }
                         echo "CloudFormation cleanup completed"
                         
-                        // Clean up kubectl context if it exists
+                        // TODO (MIGRATIONS-2777): Run kubectl with an isolated KUBECONFIG per pipeline run
+                        // For now, do best effort cleanup of the migration EKS context created by aws-bootstrap.sh.
                         sh """
                             if command -v kubectl >/dev/null 2>&1; then
                                 kubectl config get-contexts 2>/dev/null | grep migration-eks-cluster-${stage}-${params.REGION} | awk '{print \$2}' | xargs -r kubectl config delete-context || echo "No kubectl context to clean up"

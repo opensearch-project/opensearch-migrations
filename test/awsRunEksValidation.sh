@@ -7,26 +7,28 @@ usage() {
   echo "Script to validate EKS Migration Assistant deployment"
   echo ""
   echo "Usage: "
-  echo "  ./awsRunEksValidation.sh [--stage] [--region] [--stack-name] [--build-images] [--branch]"
+  echo "./awsRunEksValidation.sh [--stage] [--region] [--stack-name] [additional aws-bootstrap.sh flags]"
   echo ""
   echo "Options:"
-  echo "  --stage                                     Deployment stage name, e.g. eks-integ"
-  echo "  --region                                    AWS region, e.g. us-east-1"
-  echo "  --stack-name                                CloudFormation stack name"
-  echo "  --build-images                              Whether to build images from source (true/false, default: false)"
-  echo "  --org-name                                  Org name when build-images=true (default: opensearch-project)"
-  echo "  --branch                                    Git branch to use when build-images=true (default: main)"
+  echo "--stage                                     Deployment stage name, e.g. eks-integ"
+  echo "--region                                    AWS region, e.g. us-east-1"
+  echo "--stack-name                                CloudFormation stack name"
+  echo ""
+  echo "All other flags are forwarded to aws-bootstrap.sh, for example:"
+  echo "--build-images true                         Build images from source"
+  echo "--org-name opensearch-project               Org name when building from source"
+  echo "--branch main                               Git branch when building from source"
   echo ""
   exit 1
 }
 
 # Default values
-STAGE="dev"
+STAGE=""
 REGION="us-east-1"
 STACK_NAME=""
-BUILD_IMAGES="false"
-BRANCH="main"
-ORG_NAME="opensearch-project"
+
+# Any extra args to forward to aws-bootstrap.sh
+BOOTSTRAP_ARGS=()
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -43,26 +45,11 @@ while [[ $# -gt 0 ]]; do
       STACK_NAME="$2"
       shift 2
       ;;
-    --build-images)
-      BUILD_IMAGES="$2"
-      shift 2
-      ;;
-    --branch)
-      BRANCH="$2"
-      shift 2
-      ;;
-    --org-name)
-      ORG_NAME="$2"
-      shift 2
-      ;;
     -h|--help)
       usage
       ;;
-    -*)
-      echo "Unknown option $1"
-      usage
-      ;;
     *)
+      BOOTSTRAP_ARGS+=("$1")
       shift
       ;;
   esac
@@ -83,9 +70,11 @@ echo "Starting EKS Migration Assistant deployment with :"
 echo "Stage: ${STAGE}"
 echo "Region: ${REGION}"
 echo "Stack Name: ${STACK_NAME}"
-echo "Boolean Build Images: ${BUILD_IMAGES}"
-echo "Org Name: ${ORG_NAME}"
-echo "Branch: ${BRANCH}"
+if [[ ${#BOOTSTRAP_ARGS[@]} -gt 0 ]]; then
+  echo "Extra aws-bootstrap.sh args: ${BOOTSTRAP_ARGS[*]}"
+else
+  echo "Extra aws-bootstrap.sh args: (none)"
+fi
 echo ""
 
 # Helper Function for failures
@@ -93,9 +82,6 @@ fail() {
   echo "ERROR: $*" >&2
   exit 1
 }
-
-# Normalize BUILD_IMAGES for safety
-BUILD_IMAGES_NORMALIZED="$(echo "${BUILD_IMAGES}" | tr '[:upper:]' '[:lower:]')"
 
 # Function to verify CFN stack exists and is CREATE_COMPLETE
 verify_cfn_stack() {
@@ -151,16 +137,13 @@ run_aws_bootstrap() {
 
   pushd "${BOOTSTRAP_DIR}" >/dev/null
 
-  # Ensure kubectl, git, jq are available; aws-bootstrap will check as well.
-  if [[ "${BUILD_IMAGES_NORMALIZED}" == "true" ]]; then
-    echo "Invoking aws-bootstrap.sh with image build enabled..."
+  if [[ ${#BOOTSTRAP_ARGS[@]} -gt 0 ]]; then
+    echo "Invoking aws-bootstrap.sh with extra args: ${BOOTSTRAP_ARGS[*]}"
     ./aws-bootstrap.sh \
       --skip-console-exec \
-      --build-images true \
-      --org-name "${ORG_NAME}" \
-      --branch "${BRANCH}"
+      "${BOOTSTRAP_ARGS[@]}"
   else
-    echo "Invoking aws-bootstrap.sh with public images..."
+    echo "Invoking aws-bootstrap.sh with default args (public images)."
     ./aws-bootstrap.sh \
       --skip-console-exec
   fi
@@ -187,7 +170,7 @@ wait_for_migration_console_pod() {
   echo "migration-console-0 pod is Ready."
   echo
 
-  echo "Validating migration console by running 'console --version' inside the pod..."
+  echo "Validating migration console by running 'console --version' inside the pod."
 
   if ! kubectl exec -n ma migration-console-0 -- /bin/bash -lc 'console --version'; then
     fail "console --version command failed inside migration-console-0."
