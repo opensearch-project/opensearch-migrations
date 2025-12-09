@@ -3,12 +3,9 @@ import {Application, AttributeGroup} from "@aws-cdk/aws-servicecatalogappregistr
 import {SolutionsInfrastructureStackProps} from "./solutions-stack";
 import {InterfaceVpcEndpointAwsService} from "aws-cdk-lib/aws-ec2";
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const pkg = require('../package.json');
-
 export const SOLUTION_ID = 'SO0290';
-export const SOLUTION_FRIENDLY_NAME: string = pkg.description as string; // "Migration Assistant for Amazon OpenSearch Service"
-export const SOLUTION_VERSION: string = pkg.version as string;
+export const SOLUTION_FRIENDLY_NAME = 'Migration Assistant for Amazon OpenSearch Service';
+export const SOLUTION_VERSION: string = process.env.CODE_VERSION || '2.0.0';
 
 export type TemplateKind =
   | 'ECS_VPC_CREATE'
