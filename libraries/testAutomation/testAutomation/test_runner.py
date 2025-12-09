@@ -232,7 +232,8 @@ class TestRunner:
                     chart_values.update({
                         "images.captureProxy.repository": f"{self.registry_prefix}migrations/capture_proxy",
                         "images.trafficReplayer.repository": f"{self.registry_prefix}migrations/traffic_replayer",
-                        "images.reindexFromSnapshot.repository": f"{self.registry_prefix}migrations/reindex_from_snapshot",
+                        "images.reindexFromSnapshot.repository":
+                            f"{self.registry_prefix}migrations/reindex_from_snapshot",
                         "images.migrationConsole.repository": f"{self.registry_prefix}migrations/migration_console",
                         "images.installer.repository": f"{self.registry_prefix}migrations/migration_console",
                     })
