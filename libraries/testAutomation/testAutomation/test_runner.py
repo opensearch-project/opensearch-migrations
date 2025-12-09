@@ -209,10 +209,13 @@ class TestRunner:
                 "../../migrationConsole/"
                 "workflows/templates/"
             )
-            self.k8s_service.run_command([
-                "kubectl", "apply", "-f", workflow_templates_dir, "-n", "ma"
-            ])
-            logger.info("Applied local workflow templates directory")
+            if os.path.isdir(workflow_templates_dir):
+                self.k8s_service.run_command([
+                    "kubectl", "apply", "-f", workflow_templates_dir, "-n", "ma"
+                ])
+                logger.info("Applied local workflow templates directory")
+            else:
+                logger.info(f"Workflow templates directory not found: {workflow_templates_dir}, skipping")
 
         combos_with_failures = []
         test_reports = []
@@ -227,7 +230,11 @@ class TestRunner:
                 if self.registry_prefix:
                     logger.info(f"Setting registry prefix to: {self.registry_prefix}")
                     chart_values.update({
-                        "images.registryPrefix": self.registry_prefix,
+                        "images.captureProxy.repository": f"{self.registry_prefix}migrations/capture_proxy",
+                        "images.trafficReplayer.repository": f"{self.registry_prefix}migrations/traffic_replayer",
+                        "images.reindexFromSnapshot.repository": f"{self.registry_prefix}migrations/reindex_from_snapshot",
+                        "images.migrationConsole.repository": f"{self.registry_prefix}migrations/migration_console",
+                        "images.installer.repository": f"{self.registry_prefix}migrations/migration_console",
                     })
                 if self.always_pull_images:
                     logger.info("Setting image pull policy to 'Always' for all images")

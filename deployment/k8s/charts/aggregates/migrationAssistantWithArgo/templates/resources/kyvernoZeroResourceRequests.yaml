@@ -1,108 +1,95 @@
-{{- if .Values.kyvernoPolicies.zeroResourceRequests }}
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
+{{- if and .Values.conditionalPackageInstalls.kyverno .Values.kyvernoPolicies.zeroResourceRequests }}
+apiVersion: v1
+kind: ConfigMap
 metadata:
-  name: zero-resource-requests
+  name: {{ .Release.Name }}-kyverno-zero-resources-policy
   annotations:
-    policies.kyverno.io/title: Zero Resource Requests for Dev
-    policies.kyverno.io/description: >-
-      Sets resource requests to 0 for dev environments. If limits are not set,
-      copies the original request values to limits before zeroing requests.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "9"
+    "helm.sh/hook-delete-policy": hook-succeeded
+data:
+  policy.yaml: |
+    apiVersion: kyverno.io/v1
+    kind: ClusterPolicy
+    metadata:
+      name: zero-resource-requests
+      annotations:
+        policies.kyverno.io/title: Zero Resource Requests for Dev
+        policies.kyverno.io/description: >-
+          Sets resource requests to 0 for dev environments.
+    spec:
+      rules:
+        - name: zero-container-resources
+          match:
+            any:
+              - resources:
+                  kinds:
+                    - Pod
+          mutate:
+            foreach:
+              - list: "request.object.spec.containers[]"
+                patchStrategicMerge:
+                  spec:
+                    containers:
+                      - name: "{{`{{ element.name }}`}}"
+                        resources:
+                          requests:
+                            cpu: "0"
+                            memory: "0"
+        - name: zero-init-container-resources
+          match:
+            any:
+              - resources:
+                  kinds:
+                    - Pod
+          preconditions:
+            all:
+              - key: "{{`{{ request.object.spec.initContainers || '' | length(@) }}`}}"
+                operator: GreaterThan
+                value: 0
+          mutate:
+            foreach:
+              - list: "request.object.spec.initContainers[]"
+                patchStrategicMerge:
+                  spec:
+                    initContainers:
+                      - name: "{{`{{ element.name }}`}}"
+                        resources:
+                          requests:
+                            cpu: "0"
+                            memory: "0"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-apply-kyverno-zero-resources
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": hook-succeeded
 spec:
-  rules:
-    - name: zero-container-resources
-      match:
-        any:
-          - resources:
-              kinds:
-                - Pod
-      mutate:
-        foreach:
-          - list: "request.object.spec.containers"
-            patchesJson6902: |-
-              {{`{{- $cpuReq := element.resources.requests.cpu || "" -}}`}}
-              {{`{{- $memReq := element.resources.requests.memory || "" -}}`}}
-              {{`{{- $cpuLim := element.resources.limits.cpu || "" -}}`}}
-              {{`{{- $memLim := element.resources.limits.memory || "" -}}`}}
-              {{`{{- if or (ne $cpuReq "") (ne $memReq "") }}`}}
-              - op: add
-                path: /metadata/annotations/kyverno.io~1original-requests-container-{{`{{ elementIndex }}`}}
-                value: "cpu={{`{{ $cpuReq || \"unset\" }}`}},memory={{`{{ $memReq || \"unset\" }}`}}"
-              {{`{{- end }}`}}
-              {{`{{- if and (ne $cpuReq "") (eq $cpuLim "") }}`}}
-              - op: add
-                path: /metadata/annotations/kyverno.io~1copied-to-limits-container-{{`{{ elementIndex }}`}}-cpu
-                value: "{{`{{ $cpuReq }}`}}"
-              - op: add
-                path: /spec/containers/{{`{{ elementIndex }}`}}/resources/limits/cpu
-                value: "{{`{{ $cpuReq }}`}}"
-              {{`{{- end }}`}}
-              {{`{{- if and (ne $memReq "") (eq $memLim "") }}`}}
-              - op: add
-                path: /metadata/annotations/kyverno.io~1copied-to-limits-container-{{`{{ elementIndex }}`}}-memory
-                value: "{{`{{ $memReq }}`}}"
-              - op: add
-                path: /spec/containers/{{`{{ elementIndex }}`}}/resources/limits/memory
-                value: "{{`{{ $memReq }}`}}"
-              {{`{{- end }}`}}
-              {{`{{- if ne $cpuReq "" }}`}}
-              - op: replace
-                path: /spec/containers/{{`{{ elementIndex }}`}}/resources/requests/cpu
-                value: "0"
-              {{`{{- end }}`}}
-              {{`{{- if ne $memReq "" }}`}}
-              - op: replace
-                path: /spec/containers/{{`{{ elementIndex }}`}}/resources/requests/memory
-                value: "0"
-              {{`{{- end }}`}}
-    - name: zero-init-container-resources
-      match:
-        any:
-          - resources:
-              kinds:
-                - Pod
-      preconditions:
-        all:
-          - key: "{{`{{ request.object.spec.initContainers || '' | length }}`}}"
-            operator: GreaterThan
-            value: 0
-      mutate:
-        foreach:
-          - list: "request.object.spec.initContainers"
-            patchesJson6902: |-
-              {{`{{- $cpuReq := element.resources.requests.cpu || "" -}}`}}
-              {{`{{- $memReq := element.resources.requests.memory || "" -}}`}}
-              {{`{{- $cpuLim := element.resources.limits.cpu || "" -}}`}}
-              {{`{{- $memLim := element.resources.limits.memory || "" -}}`}}
-              {{`{{- if or (ne $cpuReq "") (ne $memReq "") }}`}}
-              - op: add
-                path: /metadata/annotations/kyverno.io~1original-requests-init-{{`{{ elementIndex }}`}}
-                value: "cpu={{`{{ $cpuReq || \"unset\" }}`}},memory={{`{{ $memReq || \"unset\" }}`}}"
-              {{`{{- end }}`}}
-              {{`{{- if and (ne $cpuReq "") (eq $cpuLim "") }}`}}
-              - op: add
-                path: /metadata/annotations/kyverno.io~1copied-to-limits-init-{{`{{ elementIndex }}`}}-cpu
-                value: "{{`{{ $cpuReq }}`}}"
-              - op: add
-                path: /spec/initContainers/{{`{{ elementIndex }}`}}/resources/limits/cpu
-                value: "{{`{{ $cpuReq }}`}}"
-              {{`{{- end }}`}}
-              {{`{{- if and (ne $memReq "") (eq $memLim "") }}`}}
-              - op: add
-                path: /metadata/annotations/kyverno.io~1copied-to-limits-init-{{`{{ elementIndex }}`}}-memory
-                value: "{{`{{ $memReq }}`}}"
-              - op: add
-                path: /spec/initContainers/{{`{{ elementIndex }}`}}/resources/limits/memory
-                value: "{{`{{ $memReq }}`}}"
-              {{`{{- end }}`}}
-              {{`{{- if ne $cpuReq "" }}`}}
-              - op: replace
-                path: /spec/initContainers/{{`{{ elementIndex }}`}}/resources/requests/cpu
-                value: "0"
-              {{`{{- end }}`}}
-              {{`{{- if ne $memReq "" }}`}}
-              - op: replace
-                path: /spec/initContainers/{{`{{ elementIndex }}`}}/resources/requests/memory
-                value: "0"
-              {{`{{- end }}`}}
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 10
+  template:
+    spec:
+      serviceAccountName: {{ .Values.installer.serviceAccount.name }}
+      restartPolicy: OnFailure
+      containers:
+        - name: apply-policy
+          image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+          imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Waiting for Kyverno admission controller to be ready..."
+              kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=admission-controller -n {{ .Release.Namespace }} --timeout=120s
+              kubectl apply -f /policy/policy.yaml
+          volumeMounts:
+            - name: policy
+              mountPath: /policy
+      volumes:
+        - name: policy
+          configMap:
+            name: {{ .Release.Name }}-kyverno-zero-resources-policy
 {{- end }}
