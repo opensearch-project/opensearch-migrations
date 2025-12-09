@@ -4,7 +4,8 @@ OpenSearch Migration assistant is distributed in AWS Solutions Library, see the 
 
 ## Solutions Architecture (ECS)
 
-For the solutions project to allow customization of the feature used by Migration assistant first a bootstrap environment is deployed then a secondary step is used to deploy the configured version of Migration Assistant.  See more details about this configuration options from [options.md](../cdk/opensearch-service-migration/options.md).
+For the solutions project to allow customization of the feature used by Migration assistant first a bootstrap environment is deployed then a secondary step is used to deploy the configured version of Migration Assistant.  See more details about this configuration options from [options.md](../cdk/opensearch-service-migration/options.md).  More details about deploying the solution from a development environment can be found [here](../cdk/opensearch-service-migration/README.md).
+
 
 ```mermaid
 sequenceDiagram
@@ -34,7 +35,10 @@ The EKS solution has a simpler initial configuration surface.  A user deploys an
 EKS cluster via one of the vended CloudFormation templates.  Once deployed, the
 user runs the aws-bootstrap.sh script, which can be downloaded directly from
 github and run as-is.  Both of these commands can be run from an AWS CloudShell 
-or from anywhere else with credentials and network access.
+or from anywhere else with credentials and network access.  
+
+See [here](../k8s/aws/README.md) for a quick-start to setup and EKS cluster 
+and deploy the Migration Assistant to it.
 
 ```mermaid
 sequenceDiagram
@@ -47,13 +51,9 @@ sequenceDiagram
     User ->> MA: kubectl Logs into Migration Assistant Console
     User ->> MA: Migration Workflow Commands Perform Migration Tasks
 ```
-### Migration Assistant
-
-The full range of functionality offered by the migration assistant deployed through the opensearch-service-migration project, see its [README.MD](../cdk/opensearch-service-migration/README.md) for additon details.
-
 ## Development
 
-This project is writen in TypeScript and uses the cloud developer tookit (CDK) to produce its build artifacts, cloud formation templates that can be used to deploy onto Amazon Web Services.
+This CloudFormation projects for ECS and EKS are writen in TypeScript and uses the cloud developer tookit (CDK) to produce its build artifacts, CloudFormation templates that can be used to deploy onto Amazon Web Services.
 
 ### Hardcoded AMIs
 
@@ -66,3 +66,4 @@ While using EC2 in the ECS solution, we have run into issues with AMI's being re
 * Test the project `npm run build`
 * Create the deployment artifacts `npm run synth`
 * Deploy with the default AWS credentials to the default region `npm run deploy`
+* 

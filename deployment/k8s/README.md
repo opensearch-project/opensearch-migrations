@@ -81,7 +81,7 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
   
 echo "Get the exported values to set as environment variables, which should include the $MIGRATIONS_ECR_REGISTRY"
-eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`${MigrationsExportString}\`)].[Value]" --output text 
+eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`MigrationsExportString\`)].[Value]" --output text) 
 ```
 
 Once that cluster is up, you'll be able to deploy resources via kubectl.  A 

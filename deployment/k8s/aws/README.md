@@ -1,4 +1,7 @@
-# Deploying Migration Assistant into EKS
+# Quick-Start Deployment of the Migration Assistant into EKS
+
+For a more details about EKS and Kubernetes, see the [README](../README.md)
+for the overall K8s deployment project.
 
 The EKS solution requires less AWS resources and fewer upfront configuration
 options.  To get started with the EKS solution, install one of the 'eks'
@@ -27,6 +30,8 @@ eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`Mig
 
 echo "Updating kubectl to use the new EKS cluster"
 aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
+echo "For convenience, setting the default namespace for all kubectl commands to 'ma' (default for aws-bootstrap.sh)"
+kubectl config set-context --current --namespace=ma
 ```
 
 
@@ -37,6 +42,7 @@ developers from their own workspace with
 
 ```bash
 export PROJECT_DIR="${PWD}/../../.."
+echo "Running aws-bootstrap.sh.  You'll be prompted to install helm if it isn't found."
 ./deployment/k8s/aws/aws-bootstrap.sh --skip-git-pull --build-images-locally --base-dir "$PROJECT_DIR"
 ```
 

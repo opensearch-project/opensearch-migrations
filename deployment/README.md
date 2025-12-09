@@ -9,8 +9,9 @@ Detailed instructions for deploying the CDK and setting up its prerequisites can
 
 ### Deploying the Migration Assistant (EKS) Solution
 
-Current and future development of the Migration Assistant is built upon 
-Kubernetes (K8s).  See the [user guide](https://github.com/opensearch-project/opensearch-migrations/wiki) for instructions to install Migration Assistant into EKS.  
+Current and future development of the Migration Assistant is built upon Kubernetes (K8s).  
+See the [user guide](https://github.com/opensearch-project/opensearch-migrations/wiki) for instructions 
+to install Migration Assistant into EKS.  
 More information to deploy in a development environment can be found [here](./k8s/aws/README.md)
 
 ### Deploying Migration solution with Docker

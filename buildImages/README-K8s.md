@@ -146,6 +146,11 @@ To build and push images to localhost:5001, simply run the gradle target.
 To instead build and push to an ECR registry:
 
 ```bash
+echo "Confirm that AWS credentials and region are set..."
+export AWS_REGION=us-east-2
+echo "Get the exported values to set as environment variables, which should include the $MIGRATIONS_ECR_REGISTRY"
+eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`MigrationsExportString\`)].[Value]" --output text) 
+
 echo "Login to your remote registry first"
 aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-west-2.amazonaws.com
 
