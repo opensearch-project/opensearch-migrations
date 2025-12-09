@@ -4,9 +4,9 @@ def call(Map config = [:]) {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         parameters {
-            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
-            string(name: 'STAGE', defaultValue: "dev", description: 'Stage name for deployment environment')
+            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/jugal-chauhan/opensearch-migrations.git', description: 'Git repository url')
+            string(name: 'GIT_BRANCH', defaultValue: 'jenkins-eks-cfn-pipeline', description: 'Git branch to use for repository')
+            string(name: 'STAGE', defaultValue: "eks-cfn-deploy", description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: "us-east-1", description: 'AWS region for deployment')
             booleanParam(name: 'BUILD_IMAGES', defaultValue: false, description: 'Build container images from source instead of using public images')
         }
