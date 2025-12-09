@@ -1,0 +1,108 @@
+{{- if .Values.kyvernoPolicies.zeroResourceRequests }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: zero-resource-requests
+  annotations:
+    policies.kyverno.io/title: Zero Resource Requests for Dev
+    policies.kyverno.io/description: >-
+      Sets resource requests to 0 for dev environments. If limits are not set,
+      copies the original request values to limits before zeroing requests.
+spec:
+  rules:
+    - name: zero-container-resources
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      mutate:
+        foreach:
+          - list: "request.object.spec.containers"
+            patchesJson6902: |-
+              {{`{{- $cpuReq := element.resources.requests.cpu || "" -}}`}}
+              {{`{{- $memReq := element.resources.requests.memory || "" -}}`}}
+              {{`{{- $cpuLim := element.resources.limits.cpu || "" -}}`}}
+              {{`{{- $memLim := element.resources.limits.memory || "" -}}`}}
+              {{`{{- if or (ne $cpuReq "") (ne $memReq "") }}`}}
+              - op: add
+                path: /metadata/annotations/kyverno.io~1original-requests-container-{{`{{ elementIndex }}`}}
+                value: "cpu={{`{{ $cpuReq || \"unset\" }}`}},memory={{`{{ $memReq || \"unset\" }}`}}"
+              {{`{{- end }}`}}
+              {{`{{- if and (ne $cpuReq "") (eq $cpuLim "") }}`}}
+              - op: add
+                path: /metadata/annotations/kyverno.io~1copied-to-limits-container-{{`{{ elementIndex }}`}}-cpu
+                value: "{{`{{ $cpuReq }}`}}"
+              - op: add
+                path: /spec/containers/{{`{{ elementIndex }}`}}/resources/limits/cpu
+                value: "{{`{{ $cpuReq }}`}}"
+              {{`{{- end }}`}}
+              {{`{{- if and (ne $memReq "") (eq $memLim "") }}`}}
+              - op: add
+                path: /metadata/annotations/kyverno.io~1copied-to-limits-container-{{`{{ elementIndex }}`}}-memory
+                value: "{{`{{ $memReq }}`}}"
+              - op: add
+                path: /spec/containers/{{`{{ elementIndex }}`}}/resources/limits/memory
+                value: "{{`{{ $memReq }}`}}"
+              {{`{{- end }}`}}
+              {{`{{- if ne $cpuReq "" }}`}}
+              - op: replace
+                path: /spec/containers/{{`{{ elementIndex }}`}}/resources/requests/cpu
+                value: "0"
+              {{`{{- end }}`}}
+              {{`{{- if ne $memReq "" }}`}}
+              - op: replace
+                path: /spec/containers/{{`{{ elementIndex }}`}}/resources/requests/memory
+                value: "0"
+              {{`{{- end }}`}}
+    - name: zero-init-container-resources
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      preconditions:
+        all:
+          - key: "{{`{{ request.object.spec.initContainers || '' | length }}`}}"
+            operator: GreaterThan
+            value: 0
+      mutate:
+        foreach:
+          - list: "request.object.spec.initContainers"
+            patchesJson6902: |-
+              {{`{{- $cpuReq := element.resources.requests.cpu || "" -}}`}}
+              {{`{{- $memReq := element.resources.requests.memory || "" -}}`}}
+              {{`{{- $cpuLim := element.resources.limits.cpu || "" -}}`}}
+              {{`{{- $memLim := element.resources.limits.memory || "" -}}`}}
+              {{`{{- if or (ne $cpuReq "") (ne $memReq "") }}`}}
+              - op: add
+                path: /metadata/annotations/kyverno.io~1original-requests-init-{{`{{ elementIndex }}`}}
+                value: "cpu={{`{{ $cpuReq || \"unset\" }}`}},memory={{`{{ $memReq || \"unset\" }}`}}"
+              {{`{{- end }}`}}
+              {{`{{- if and (ne $cpuReq "") (eq $cpuLim "") }}`}}
+              - op: add
+                path: /metadata/annotations/kyverno.io~1copied-to-limits-init-{{`{{ elementIndex }}`}}-cpu
+                value: "{{`{{ $cpuReq }}`}}"
+              - op: add
+                path: /spec/initContainers/{{`{{ elementIndex }}`}}/resources/limits/cpu
+                value: "{{`{{ $cpuReq }}`}}"
+              {{`{{- end }}`}}
+              {{`{{- if and (ne $memReq "") (eq $memLim "") }}`}}
+              - op: add
+                path: /metadata/annotations/kyverno.io~1copied-to-limits-init-{{`{{ elementIndex }}`}}-memory
+                value: "{{`{{ $memReq }}`}}"
+              - op: add
+                path: /spec/initContainers/{{`{{ elementIndex }}`}}/resources/limits/memory
+                value: "{{`{{ $memReq }}`}}"
+              {{`{{- end }}`}}
+              {{`{{- if ne $cpuReq "" }}`}}
+              - op: replace
+                path: /spec/initContainers/{{`{{ elementIndex }}`}}/resources/requests/cpu
+                value: "0"
+              {{`{{- end }}`}}
+              {{`{{- if ne $memReq "" }}`}}
+              - op: replace
+                path: /spec/initContainers/{{`{{ elementIndex }}`}}/resources/requests/memory
+                value: "0"
+              {{`{{- end }}`}}
+{{- end }}

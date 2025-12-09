@@ -1,0 +1,46 @@
+{{- if .Values.kyvernoPolicies.mountLocalAwsCreds }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: mount-local-aws-creds
+  annotations:
+    policies.kyverno.io/title: Mount Local AWS Credentials
+    policies.kyverno.io/description: >-
+      Mounts local AWS credentials from host path into pods for local development.
+spec:
+  rules:
+    - name: inject-aws-creds-volume
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            annotations:
+              kyverno.io/aws-creds-mounted: "true"
+          spec:
+            volumes:
+              - name: aws-creds
+                hostPath:
+                  path: {{ .Values.kyvernoPolicies.mountLocalAwsCredsPath | default "~/.aws" }}
+                  type: DirectoryOrCreate
+    - name: inject-aws-creds-mount
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      mutate:
+        foreach:
+          - list: "request.object.spec.containers"
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - name: "{{`{{ element.name }}`}}"
+                    volumeMounts:
+                      - name: aws-creds
+                        mountPath: /root/.aws
+                        readOnly: true
+{{- end }}

@@ -1,14 +1,25 @@
 # Development-specific values for local kubernetes environments
 
 conditionalPackageInstalls:
-  localAwsCreds: true
   kyverno: true
 
-# Enable developer mode for additional debugging and local development features
-developerModeEnabled: false
+# Kyverno policy toggles (requires kyverno to be installed)
+kyvernoPolicies:
+  zeroResourceRequests: true
+  mountLocalAwsCreds: false
+  mountLocalAwsCredsPath: "~/.aws"
 
-# Kyverno chart configuration (only enabled in dev)
+# Kyverno chart configuration
 charts:
   kyverno:
-    version: "3.5.2"
+    version: "3.3.4"
     repository: "https://kyverno.github.io/kyverno/"
+    values:
+      admissionController:
+        replicas: 1
+      backgroundController:
+        replicas: 1
+      cleanupController:
+        replicas: 1
+      reportsController:
+        replicas: 1

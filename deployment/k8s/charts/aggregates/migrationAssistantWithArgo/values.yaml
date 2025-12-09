@@ -1,4 +1,5 @@
 conditionalPackageInstalls:
+  kyverno: false
   # Migration infrastructure components
   etcd: true                    # used by our Argo workflows for workflow coordination. May be used by strimzi clusters too
   cert-manager: true            # needed by the otel operator
@@ -24,6 +25,12 @@ conditionalPackageInstalls:
   gatekeeper: false
   grafana: false
   jaeger: true
+
+# Kyverno policy toggles (requires conditionalPackageInstalls.kyverno: true)
+kyvernoPolicies:
+  zeroResourceRequests: false
+  mountLocalAwsCreds: false
+  mountLocalAwsCredsPath: "~/.aws"
 
 images:
   # Optional registry prefix to prepend to all image repositories
