@@ -56,6 +56,21 @@ describe('Solutions stack', () => {
         });
     });
 
+    test('ECS stack with new VPC matches snapshot', () => {
+        const stack = new SolutionsInfrastructureStack(new App(), 'TestMigrationAssistantStack', defaultProperties);
+        const template = Template.fromStack(stack).toJSON();
+        expect(template).toMatchSnapshot();
+    });
+
+    test('ECS stack with import VPC matches snapshot', () => {
+        const stack = new SolutionsInfrastructureStack(new App(), 'TestMigrationAssistantStack', {
+            ...defaultProperties,
+            createVPC: false
+        });
+        const template = Template.fromStack(stack).toJSON();
+        expect(template).toMatchSnapshot();
+    });
+
     function verifyResources(template: Template, props: { vpcCount: number, vpcEndpointCount: number,
         subnetCount: number, natGatewayCount: number }) {
 
