@@ -3,6 +3,7 @@
 exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = `
 {
   "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "(SO0290) - Migration Assistant for Amazon OpenSearch Service - EKS VPC Import Template v2.0.0",
   "Mappings": {
     "Solution": {
       "Config": {
@@ -931,6 +932,7 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
 exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
 {
   "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "(SO0290) - Migration Assistant for Amazon OpenSearch Service - EKS VPC Create Template v2.0.0",
   "Mappings": {
     "Solution": {
       "Config": {
