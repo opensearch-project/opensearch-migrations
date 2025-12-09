@@ -115,12 +115,25 @@ verify_cfn_stack() {
 
   echo "Stack status: ${STACK_STATUS}"
 
-  if [[ "${STACK_STATUS}" != "CREATE_COMPLETE" ]]; then
-    fail "Expected stack status CREATE_COMPLETE, got '${STACK_STATUS}'."
-  fi
+  case "${STACK_STATUS}" in
+    CREATE_COMPLETE)
+      echo "CloudFormation stack is ready."
+      echo
+      ;;
 
-  echo "CloudFormation stack is ready."
-  echo
+    CREATE_IN_PROGRESS)
+      echo "Stack is in CREATE_IN_PROGRESS. Waiting for CREATE_COMPLETE."
+      aws cloudformation wait stack-create-complete \
+        --stack-name "${STACK_NAME}" \
+        --region "${REGION}"
+      echo "CloudFormation stack ${STACK_NAME} is now CREATE_COMPLETE."
+      echo
+      ;;
+
+    *)
+      fail "Expected stack CREATE_COMPLETE or CREATE_IN_PROGRESS, got '${STACK_STATUS}'."
+      ;;
+  esac
 }
 
 # Function to run aws-bootstrap.sh
@@ -139,7 +152,7 @@ run_aws_bootstrap() {
   pushd "${BOOTSTRAP_DIR}" >/dev/null
 
   # Ensure kubectl, git, jq are available; aws-bootstrap will check as well.
-  if [[ "${BUILD_IMAGES}" == "true" ]]; then
+  if [[ "${BUILD_IMAGES_NORMALIZED}" == "true" ]]; then
     echo "Invoking aws-bootstrap.sh with image build enabled..."
     ./aws-bootstrap.sh \
       --skip-console-exec \
