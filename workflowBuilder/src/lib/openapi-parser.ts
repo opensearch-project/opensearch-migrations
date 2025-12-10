@@ -10,6 +10,7 @@
  * - No predefined group metadata needed
  */
 
+import merge from 'deepmerge';
 import type {
     JSONSchema7,
     JSONSchema7TypeName,
@@ -478,36 +479,6 @@ export function buildArrayItemDefaults(itemSchema: JSONSchema7): Record<string, 
     return collectPropertyDefaults(itemSchema);
 }
 
-/**
- * Deep merge two objects, with source values taking precedence
- */
-function deepMergeDefaults(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
-    const result = { ...target };
-
-    for (const [key, sourceValue] of Object.entries(source)) {
-        const targetValue = result[key];
-
-        if (
-            sourceValue !== null &&
-            typeof sourceValue === 'object' &&
-            !Array.isArray(sourceValue) &&
-            targetValue !== null &&
-            typeof targetValue === 'object' &&
-            !Array.isArray(targetValue)
-        ) {
-            // Both are objects, merge recursively
-            result[key] = deepMergeDefaults(
-                targetValue as Record<string, unknown>,
-                sourceValue as Record<string, unknown>
-            );
-        } else if (sourceValue !== undefined) {
-            // Source value takes precedence
-            result[key] = sourceValue;
-        }
-    }
-
-    return result;
-}
 
 /**
  * Build default values from JSON Schema
@@ -527,7 +498,7 @@ export function buildDefaultValuesFromSchema(schema: JSONSchema7): Record<string
     // If there's a root-level default, merge it with property defaults
     // Root-level default takes precedence for any overlapping values
     if (schema.default !== undefined && typeof schema.default === 'object' && schema.default !== null) {
-        return deepMergeDefaults(propertyDefaults, schema.default as Record<string, unknown>);
+        return merge(propertyDefaults, schema.default as Record<string, unknown>);
     }
 
     return propertyDefaults;

@@ -217,98 +217,143 @@ function getPathAtPositionYaml(
   _column: number
 ): string | null {
   const lines = content.split('\n');
-  // pathStack tracks: key (or array index like "[0]"), indent level, and whether it's an array item
-  const pathStack: { key: string; indent: number; isArrayItem?: boolean }[] = [];
-  // Track array indices at each indent level
-  const arrayIndices: Map<number, number> = new Map();
   
-  const processLine = (lineNum: number) => {
+  // First, build a complete map of the YAML structure
+  const structure: Array<{
+    line: number;
+    indent: number;
+    effectiveIndent: number; // The indent level for path hierarchy purposes
+    key?: string;
+    isArrayItem: boolean;
+    arrayIndex?: number;
+    isInlineArrayKey?: boolean; // True if this is a key on the same line as array dash
+  }> = [];
+  
+  // Track array indices at each indent level
+  const arrayCounters: Map<number, number> = new Map();
+  
+  // Build the structure map
+  for (let lineNum = 0; lineNum < lines.length; lineNum++) {
     const line = lines[lineNum];
     const trimmed = line.trimStart();
     
     // Skip empty lines and comments
     if (!trimmed || trimmed.startsWith('#')) {
-      return;
+      continue;
     }
     
-    // Calculate indentation
     const indent = line.length - trimmed.length;
+    const isArrayItem = trimmed.startsWith('- ');
     
-    // Pop items from stack that are at same or greater indent
-    while (pathStack.length > 0 && pathStack[pathStack.length - 1].indent >= indent) {
-      const popped = pathStack.pop();
-      // Clear array indices for indents we're leaving
-      if (popped) {
-        arrayIndices.delete(popped.indent);
+    // Reset array counters for indents we've moved back from
+    for (const [indentLevel] of arrayCounters) {
+      if (indentLevel > indent) {
+        arrayCounters.delete(indentLevel);
       }
     }
     
-    // Check if this is an array item (starts with `- `)
-    const isArrayItem = trimmed.startsWith('- ');
-    
     if (isArrayItem) {
-      // Get or initialize array index for this indent level
-      const currentIndex = arrayIndices.get(indent) ?? 0;
+      // Get current array index for this indent level
+      const currentIndex = arrayCounters.get(indent) ?? 0;
       
-      // Check if there's content after the `- ` (could be a key or just a value)
+      // Increment for next array item at this level
+      arrayCounters.set(indent, currentIndex + 1);
+      
+      // Check if there's a key after the dash
       const afterDash = trimmed.substring(2).trim();
       const keyMatch = afterDash.match(/^([^:]+):/);
       
-      if (keyMatch) {
-        // Array item with a key, e.g., `- skipApprovals: true`
-        // This means the array contains objects
-        const key = keyMatch[1].trim();
-        
-        // Push the array index first
-        pathStack.push({ key: `[${currentIndex}]`, indent, isArrayItem: true });
-        // Then push the key at the SAME indent level (since it's on the same line)
-        pathStack.push({ key, indent });
-      } else {
-        // Array item without a key (simple value or start of nested object)
-        pathStack.push({ key: `[${currentIndex}]`, indent, isArrayItem: true });
-      }
+      // Always add the array item entry
+      structure.push({
+        line: lineNum + 1,
+        indent,
+        effectiveIndent: indent,
+        isArrayItem: true,
+        arrayIndex: currentIndex,
+      });
       
-      // Increment array index for next item at this indent
-      arrayIndices.set(indent, currentIndex + 1);
+      // If there's also a key on the same line, add it as a separate entry
+      // with an effective indent that's deeper than the array item
+      if (keyMatch) {
+        structure.push({
+          line: lineNum + 1,
+          indent, // Physical indent is the same
+          effectiveIndent: indent + 2, // But effective indent is deeper (child of array item)
+          key: keyMatch[1].trim(),
+          isArrayItem: false,
+          isInlineArrayKey: true,
+        });
+      }
     } else {
       // Regular key: value line
       const keyMatch = trimmed.match(/^([^:]+):/);
       if (keyMatch) {
-        const key = keyMatch[1].trim();
-        pathStack.push({ key, indent });
-        
-        // Reset array index tracking for child arrays at deeper indents
-        // (new array at this level should start at 0)
+        structure.push({
+          line: lineNum + 1,
+          indent,
+          effectiveIndent: indent,
+          key: keyMatch[1].trim(),
+          isArrayItem: false,
+        });
       }
     }
-  };
-  
-  // Process all lines up to (but not including) the target line
-  for (let lineNum = 0; lineNum < lines.length && lineNum < targetLine - 1; lineNum++) {
-    processLine(lineNum);
   }
   
-  // Process the target line itself
-  if (targetLine >= 1 && targetLine <= lines.length) {
-    processLine(targetLine - 1);
+  // Now find the path for the target line by walking the structure
+  const pathStack: string[] = [];
+  const indentStack: number[] = []; // Tracks effective indents
+  
+  for (const item of structure) {
+    if (item.line > targetLine) {
+      break;
+    }
+    
+    // Pop items from stack that are at same or greater effective indent
+    // For regular keys, we pop items at >= their effective indent
+    // For array items, we also need to handle the case where we're moving to a sibling
+    while (indentStack.length > 0 && indentStack[indentStack.length - 1] >= item.effectiveIndent) {
+      indentStack.pop();
+      pathStack.pop();
+    }
+    
+    if (item.isArrayItem) {
+      // This is an array item
+      pathStack.push(`[${item.arrayIndex}]`);
+      indentStack.push(item.effectiveIndent);
+    } else if (item.key) {
+      pathStack.push(item.key);
+      indentStack.push(item.effectiveIndent);
+    }
+    
+    // If this is the target line, we're done
+    // But we need to process all entries for this line (array item + inline key)
+    if (item.line === targetLine) {
+      // Check if there's another entry for the same line (inline key after array dash)
+      const nextIdx = structure.indexOf(item) + 1;
+      if (nextIdx < structure.length && structure[nextIdx].line === targetLine) {
+        // Continue to process the inline key
+        continue;
+      }
+      break;
+    }
   }
   
   if (pathStack.length === 0) {
     return null;
   }
   
-  // Build the path, handling array indices specially
+  // Build the final path
   let path = '';
-  for (const item of pathStack) {
-    if (item.key.startsWith('[')) {
+  for (const part of pathStack) {
+    if (part.startsWith('[')) {
       // Array index - append directly without dot
-      path += item.key;
+      path += part;
     } else if (path === '') {
       // First item
-      path = item.key;
+      path = part;
     } else {
       // Regular key - append with dot
-      path += '.' + item.key;
+      path += '.' + part;
     }
   }
   

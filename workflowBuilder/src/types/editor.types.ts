@@ -8,6 +8,11 @@
 export type CodeFormat = 'yaml' | 'json';
 
 /**
+ * Annotation type for code editor markers
+ */
+export type AnnotationType = 'error' | 'warning' | 'info';
+
+/**
  * Ace editor annotation for inline error display
  */
 export interface EditorAnnotation {
@@ -21,13 +26,22 @@ export interface EditorAnnotation {
   text: string;
   
   /** Annotation type */
-  type: 'error' | 'warning' | 'info';
+  type: AnnotationType;
+  
+  /** Optional end row for range annotations */
+  endRow?: number;
+  
+  /** Optional end column for range annotations */
+  endColumn?: number;
 }
 
 /**
  * Ace editor marker for highlighting
  */
 export interface EditorMarker {
+  /** Unique identifier for the marker */
+  id?: string;
+  
   /** Start row */
   startRow: number;
   
@@ -254,4 +268,22 @@ export interface FocusConfig {
   
   /** Whether focus feature is enabled (default: true) */
   enabled: boolean;
+}
+
+
+/**
+ * Synchronization status between form and editor
+ */
+export type SyncStatus = 'synced' | 'form-ahead' | 'editor-ahead' | 'conflict';
+
+/**
+ * Editor change event
+ */
+export interface EditorChangeEvent {
+  /** New content */
+  content: string;
+  /** Change delta from Ace */
+  delta?: unknown;
+  /** Whether change was from user input */
+  isUserInput: boolean;
 }

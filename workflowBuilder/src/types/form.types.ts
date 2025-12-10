@@ -1,10 +1,9 @@
 /**
  * Form state type definitions for the schema-driven form
  */
-import type { z } from 'zod';
 import type { FieldConfig } from './field.types';
 import type { FormConfig } from './group.types';
-import type { FieldError } from './validation.types';
+import type { ValidationError } from './validation';
 import type { CodeFormat, EditorAnnotation } from './editor.types';
 
 /**
@@ -15,10 +14,10 @@ export interface FormState<T = Record<string, unknown>> {
   values: T;
   
   /** Validation errors */
-  errors: FieldError[];
+  errors: ValidationError[];
   
   /** Map of path to error for quick lookup */
-  errorsByPath: Map<string, FieldError>;
+  errorsByPath: Map<string, ValidationError>;
   
   /** Set of touched field paths */
   touchedFields: Set<string>;
@@ -42,10 +41,10 @@ export interface UseSchemaFormReturn<T = Record<string, unknown>> {
   values: T;
   
   /** Validation errors */
-  errors: FieldError[];
+  errors: ValidationError[];
   
   /** Map of path to error */
-  errorsByPath: Map<string, FieldError>;
+  errorsByPath: Map<string, ValidationError>;
   
   /** Whether form is valid */
   isValid: boolean;
@@ -111,10 +110,6 @@ export interface UseSchemaFormReturn<T = Record<string, unknown>> {
   /** Get field config by path */
   getFieldConfig: (path: string) => FieldConfig | undefined;
   
-  // Advanced
-  /** Get the underlying Zod schema */
-  schema: z.ZodTypeAny;
-  
   /** Subscribe to value changes */
   subscribe: (callback: (values: T) => void) => () => void;
 }
@@ -123,8 +118,6 @@ export interface UseSchemaFormReturn<T = Record<string, unknown>> {
  * Props for SchemaForm component
  */
 export interface SchemaFormProps<T = Record<string, unknown>> {
-  /** Zod schema for the form */
-  schema: z.ZodType<T>;
   
   /** Initial values */
   initialValues?: Partial<T>;
@@ -136,7 +129,7 @@ export interface SchemaFormProps<T = Record<string, unknown>> {
   onSubmit?: (values: T) => void;
   
   /** Callback when validation errors occur */
-  onError?: (errors: FieldError[]) => void;
+  onError?: (errors: ValidationError[]) => void;
   
   /** Whether to show advanced fields */
   showAdvanced?: boolean;
@@ -200,7 +193,7 @@ export interface GroupRendererProps {
   onBlur?: ((path: string) => void) | undefined;
   
   /** Errors by path */
-  errorsByPath: Map<string, FieldError>;
+  errorsByPath: Map<string, ValidationError>;
   
   /** Whether group is disabled */
   disabled?: boolean | undefined;
@@ -223,7 +216,7 @@ export interface FormContextValue<T = Record<string, unknown>> {
   getValue: (path: string) => unknown;
   
   /** Errors by path */
-  errorsByPath: Map<string, FieldError>;
+  errorsByPath: Map<string, ValidationError>;
   
   /** Get error for path */
   getError: (path: string) => string | undefined;
@@ -250,7 +243,7 @@ export interface FormContextValue<T = Record<string, unknown>> {
 export type FormAction<T = Record<string, unknown>> =
   | { type: 'SET_VALUE'; path: string; value: unknown }
   | { type: 'SET_VALUES'; values: Partial<T> }
-  | { type: 'SET_ERRORS'; errors: FieldError[] }
+  | { type: 'SET_ERRORS'; errors: ValidationError[] }
   | { type: 'TOUCH_FIELD'; path: string }
   | { type: 'SET_DIRTY'; isDirty: boolean }
   | { type: 'RESET'; values: T }

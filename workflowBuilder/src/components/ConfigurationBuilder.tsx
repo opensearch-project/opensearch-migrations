@@ -8,11 +8,11 @@
  * source of truth for form generation and validation.
  */
 
-import React, { useCallback, useRef } from 'react';
-import { Grid, Box, Header, SpaceBetween } from '@cloudscape-design/components';
+import React, { useRef } from 'react';
+import { Grid, Box, SpaceBetween } from '@cloudscape-design/components';
 import { SchemaForm } from './schema-form';
 import { EditableCodePanel } from './code-panel';
-import { useJsonSchemaForm, useFocusSync } from '../hooks';
+import { useJsonSchemaForm } from '../hooks';
 import type { JSONSchema7 } from '../types';
 
 // Import the generated JSON Schema
@@ -46,47 +46,10 @@ export function ConfigurationBuilder(): React.ReactElement {
     validationDelay: 300,
   });
 
-  // Use focus synchronization hook
-  const {
-    focusedLine,
-    focusedPath,
-    setFocusFromForm,
-    setFocusFromEditor,
-  } = useFocusSync({
-    content,
-    format,
-    config: {
-      enabled: true,
-      highlightDuration: 2000,
-      autoScroll: true,
-      debounceDelay: 100,
-    },
-    formContainer: formContainerRef, // Pass the ref object, not .current
-  });
-
-  // Handle field focus from form (for focus sync)
-  const handleFieldFocus = useCallback((path: string, source: 'change' | 'focus' | 'blur') => {
-    if (source === 'change') {
-      setFocusFromForm(path);
-    }
-  }, [setFocusFromForm]);
-
-  // Handle cursor change from editor (for focus sync)
-  const handleEditorCursorChange = useCallback((line: number, column: number) => {
-    setFocusFromEditor(line, column);
-  }, [setFocusFromEditor]);
 
   return (
     <Box padding="l">
       <SpaceBetween size="l">
-        {/* Page Header */}
-        <Header
-          variant="h1"
-          description="Configure your migration settings using the form or edit the YAML/JSON directly"
-        >
-          Migration Configuration Builder
-        </Header>
-
         {/* Main Content Grid */}
         <Grid
           gridDefinition={[
@@ -103,8 +66,6 @@ export function ConfigurationBuilder(): React.ReactElement {
               onChange={setValue}
               disabled={false}
               loading={isValidating}
-              focusedPath={focusedPath}
-              onFieldFocus={handleFieldFocus}
             />
           </div>
 
@@ -120,8 +81,6 @@ export function ConfigurationBuilder(): React.ReactElement {
               isValidating={isValidating}
               title="Configuration Editor"
               description="Edit your configuration directly in YAML or JSON"
-              focusedLine={focusedLine}
-              onCursorChange={handleEditorCursorChange}
             />
           </div>
         </Grid>

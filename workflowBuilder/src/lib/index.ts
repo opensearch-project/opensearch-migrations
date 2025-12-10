@@ -4,25 +4,6 @@
  * Central export point for all library utilities.
  */
 
-// Schema Parser (legacy - Zod-based)
-export {
-  getSchemaMetadata,
-  isSchemaOptional,
-  hasSchemaDefault,
-  unwrapSchema,
-  getSchemaDefault,
-  inferFieldType,
-  extractSchemaTypeInfo,
-  extractFieldConfigs,
-  getAllFieldPaths,
-  findFieldByPath,
-  evaluateShowWhen,
-  getValueByPath as getValueByPathFromSchema,
-  setValueByPath,
-  buildDefaultValues,
-  buildFormConfig,
-} from './schema-parser';
-export type { BuildFormConfigOptions } from './schema-parser';
 
 // OpenAPI Parser (new - JSON Schema-based)
 export {
@@ -51,7 +32,6 @@ export {
 
 // Error Mapper
 export {
-  zodErrorToFieldErrors,
   mapErrorsToLines,
   createEditorAnnotations,
   getErrorForPath,
@@ -96,27 +76,6 @@ export {
 } from './bidirectional-sync';
 export type { SyncToFormResult, SyncToContentResult } from './bidirectional-sync';
 
-// Focus Utilities (for bidirectional focus sync between form and editor)
-export {
-  findLineForFieldPath,
-  findPathAtCursorPosition,
-  scrollToLine,
-  scrollToElement,
-  scrollToFieldWithRetry,
-  expandParentSections,
-  isElementVisible,
-  createFocusHighlightMarker,
-  calculateFieldElementId,
-  findFieldElement,
-  applyFieldHighlight,
-  isParentPath,
-  getParentPath,
-  normalizePath,
-  pathsEqual,
-  DEFAULT_FOCUS_CONFIG,
-  FOCUS_HIGHLIGHT_CLASS,
-  FIELD_FOCUS_HIGHLIGHT_CLASS,
-} from './focus-utils';
 
 // Debug Logger (for development-only logging)
 export {

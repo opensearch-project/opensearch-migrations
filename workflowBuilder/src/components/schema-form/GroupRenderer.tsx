@@ -13,19 +13,7 @@ import {
   ExpandableSection,
 } from '@cloudscape-design/components';
 import { FieldRenderer } from './FieldRenderer';
-import type { GroupConfig, FieldError } from '../../types';
-
-/**
- * Check if a field should be highlighted based on the focused path.
- * Only exact path matches are highlighted to avoid highlighting parent containers.
- */
-function isFieldFocused(focusedPath: string | null | undefined, fieldPath: string): boolean {
-  if (!focusedPath) {
-    return false;
-  }
-  // Only exact match - don't highlight parent containers or child fields
-  return focusedPath === fieldPath;
-}
+import type { GroupConfig, ValidationError } from '../../types';
 
 /**
  * Props for GroupRenderer
@@ -36,17 +24,13 @@ export interface GroupRendererProps {
   /** Current form values */
   values: Record<string, unknown>;
   /** Map of field path to error */
-  errorsByPath: Map<string, FieldError>;
+  errorsByPath: Map<string, ValidationError>;
   /** Callback when a field value changes */
   onChange: (path: string, value: unknown) => void;
   /** Callback when a field is blurred */
   onBlur?: (path: string) => void;
   /** Whether all fields are disabled */
   disabled?: boolean;
-  /** Currently focused field path (for focus sync highlighting) */
-  focusedPath?: string | null;
-  /** Callback when a field receives focus due to value change (for focus sync) */
-  onFieldFocus?: (path: string, source: 'change' | 'focus' | 'blur') => void;
 }
 
 /**
@@ -77,8 +61,6 @@ export function GroupRenderer({
   onChange,
   onBlur,
   disabled = false,
-  focusedPath,
-  onFieldFocus,
 }: GroupRendererProps): React.ReactElement {
   // Check if group has any errors
   const hasGroupErrors = group.fields.some(field => errorsByPath.has(field.path));
@@ -95,8 +77,6 @@ export function GroupRenderer({
           onChange={(value) => onChange(field.path, value)}
           onBlur={() => onBlur?.(field.path)}
           disabled={disabled}
-          isFocused={isFieldFocused(focusedPath, field.path)}
-          onFieldFocus={onFieldFocus}
         />
       ))}
     </SpaceBetween>
@@ -147,17 +127,13 @@ export interface GroupListProps {
   /** Current form values */
   values: Record<string, unknown>;
   /** Map of field path to error */
-  errorsByPath: Map<string, FieldError>;
+  errorsByPath: Map<string, ValidationError>;
   /** Callback when a field value changes */
   onChange: (path: string, value: unknown) => void;
   /** Callback when a field is blurred */
   onBlur?: (path: string) => void;
   /** Whether all fields are disabled */
   disabled?: boolean;
-  /** Currently focused field path (for focus sync highlighting) */
-  focusedPath?: string | null;
-  /** Callback when a field receives focus due to value change (for focus sync) */
-  onFieldFocus?: (path: string, source: 'change' | 'focus' | 'blur') => void;
 }
 
 /**
@@ -170,8 +146,6 @@ export function GroupList({
   onChange,
   onBlur,
   disabled,
-  focusedPath,
-  onFieldFocus,
 }: GroupListProps): React.ReactElement {
   return (
     <SpaceBetween size="l">
@@ -184,8 +158,6 @@ export function GroupList({
           onChange={onChange}
           onBlur={onBlur}
           disabled={disabled}
-          focusedPath={focusedPath}
-          onFieldFocus={onFieldFocus}
         />
       ))}
     </SpaceBetween>

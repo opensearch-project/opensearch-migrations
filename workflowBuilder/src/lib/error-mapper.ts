@@ -1,7 +1,7 @@
 /**
  * Error Mapper
  * 
- * Utilities for mapping Zod validation errors to field paths and
+ * Utilities for mapping validation errors to field paths and
  * line numbers in the code editor. This enables showing validation
  * errors as tooltips on form fields AND inline annotations in the
  * code editor.
@@ -12,28 +12,8 @@
  * a single source of truth for position tracking.
  */
 
-import { z } from 'zod';
-import type { FieldError, EditorAnnotation } from '../types';
+import type { ValidationError, EditorAnnotation } from '../types';
 import { getLineForPath } from './yaml-parser';
-
-/**
- * Convert a Zod error to an array of FieldError objects
- */
-export function zodErrorToFieldErrors(error: z.ZodError): FieldError[] {
-  const fieldErrors: FieldError[] = [];
-  
-  for (const issue of error.issues) {
-    const path = issue.path.join('.');
-    
-    fieldErrors.push({
-      path,
-      message: issue.message,
-      code: issue.code,
-    });
-  }
-  
-  return fieldErrors;
-}
 
 /**
  * Map field errors to line numbers in YAML/JSON content
@@ -42,10 +22,10 @@ export function zodErrorToFieldErrors(error: z.ZodError): FieldError[] {
  * consistent line number mapping across the application.
  */
 export function mapErrorsToLines(
-  errors: FieldError[],
+  errors: ValidationError[],
   content: string,
   format: 'yaml' | 'json'
-): FieldError[] {
+): ValidationError[] {
   return errors.map(error => {
     // Use shared getLineForPath utility for consistent line finding
     const line = getLineForPath(content, error.path, format);
@@ -63,7 +43,7 @@ export function mapErrorsToLines(
 /**
  * Create editor annotations from field errors
  */
-export function createEditorAnnotations(errors: FieldError[]): EditorAnnotation[] {
+export function createEditorAnnotations(errors: ValidationError[]): EditorAnnotation[] {
   return errors
     .filter(error => error.line !== undefined)
     .map(error => ({
@@ -78,9 +58,9 @@ export function createEditorAnnotations(errors: FieldError[]): EditorAnnotation[
  * Get the error for a specific field path
  */
 export function getErrorForPath(
-  errors: FieldError[],
+  errors: ValidationError[],
   path: string
-): FieldError | undefined {
+): ValidationError | undefined {
   return errors.find(e => e.path === path);
 }
 
@@ -88,9 +68,9 @@ export function getErrorForPath(
  * Get all errors for paths that start with a prefix
  */
 export function getErrorsForPrefix(
-  errors: FieldError[],
+  errors: ValidationError[],
   prefix: string
-): FieldError[] {
+): ValidationError[] {
   return errors.filter(e => 
     e.path === prefix || e.path.startsWith(prefix + '.')
   );
@@ -99,8 +79,8 @@ export function getErrorsForPrefix(
 /**
  * Build a map of errors by path for quick lookup
  */
-export function buildErrorMap(errors: FieldError[]): Map<string, FieldError> {
-  const map = new Map<string, FieldError>();
+export function buildErrorMap(errors: ValidationError[]): Map<string, ValidationError> {
+  const map = new Map<string, ValidationError>();
   
   for (const error of errors) {
     // Only keep the first error for each path
@@ -115,8 +95,8 @@ export function buildErrorMap(errors: FieldError[]): Map<string, FieldError> {
 /**
  * Build a map of errors by line number for code editor
  */
-export function buildErrorsByLine(errors: FieldError[]): Map<number, FieldError[]> {
-  const map = new Map<number, FieldError[]>();
+export function buildErrorsByLine(errors: ValidationError[]): Map<number, ValidationError[]> {
+  const map = new Map<number, ValidationError[]>();
   
   for (const error of errors) {
     if (error.line !== undefined) {
@@ -133,7 +113,7 @@ export function buildErrorsByLine(errors: FieldError[]): Map<number, FieldError[
 /**
  * Format a field error for display
  */
-export function formatFieldError(error: FieldError): string {
+export function formatFieldError(error: ValidationError): string {
   if (error.path) {
     return `${error.path}: ${error.message}`;
   }
@@ -157,30 +137,30 @@ export function getFieldNameFromPath(path: string): string {
 /**
  * Check if there are any errors
  */
-export function hasErrors(errors: FieldError[]): boolean {
+export function hasErrors(errors: ValidationError[]): boolean {
   return errors.length > 0;
 }
 
 /**
  * Count total errors
  */
-export function countErrors(errors: FieldError[]): number {
+export function countErrors(errors: ValidationError[]): number {
   return errors.length;
 }
 
 /**
  * Get the first error message (useful for summary display)
  */
-export function getFirstErrorMessage(errors: FieldError[]): string | undefined {
+export function getFirstErrorMessage(errors: ValidationError[]): string | undefined {
   return errors[0]?.message;
 }
 
 /**
  * Merge multiple error arrays, deduplicating by path
  */
-export function mergeErrors(...errorArrays: FieldError[][]): FieldError[] {
+export function mergeErrors(...errorArrays: ValidationError[][]): ValidationError[] {
   const seen = new Set<string>();
-  const merged: FieldError[] = [];
+  const merged: ValidationError[] = [];
   
   for (const errors of errorArrays) {
     for (const error of errors) {

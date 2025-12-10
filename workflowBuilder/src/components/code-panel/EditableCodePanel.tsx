@@ -48,6 +48,8 @@ export interface EditableCodePanelProps {
   highlightLine?: number;
   /** Line to highlight for focus sync (separate from error highlighting) */
   focusedLine?: number | null;
+  /** Source of the focus event - only scroll when 'form' */
+  focusSource?: 'form' | 'editor' | null;
   /** Callback when cursor position changes */
   onCursorChange?: (line: number, column: number) => void;
   /** Whether the editor is read-only */
@@ -72,6 +74,7 @@ export function EditableCodePanel({
   parseError,
   highlightLine,
   focusedLine,
+  focusSource,
   onCursorChange,
   readOnly = false,
   isValidating = false,
@@ -256,7 +259,7 @@ export function EditableCodePanel({
     if (aceEditorRef.current) {
       const editor = aceEditorRef.current;
       
-      log.debug('Focus line effect triggered', { focusedLine });
+      log.debug('Focus line effect triggered', { focusedLine, focusSource });
       
       // Clear previous focus markers
       const markers = editor.session.getMarkers(false);
@@ -286,14 +289,18 @@ export function EditableCodePanel({
           markerId,
         });
 
-        // Scroll to the focused line (center it in view)
-        editor.scrollToLine(aceRow, true, true, () => {});
-        log.debug('Scrolled to focused line', { aceRow });
+        // Only scroll when focus comes from form, not when user clicks in editor
+        if (focusSource === 'form') {
+          editor.scrollToLine(aceRow, true, true, () => {});
+          log.debug('Scrolled to focused line', { aceRow });
+        } else {
+          log.debug('Skipping scroll - focus source is editor', { focusSource });
+        }
       } else {
         log.debug('No focus line to highlight', { focusedLine });
       }
     }
-  }, [focusedLine]);
+  }, [focusedLine, focusSource]);
 
   // Status indicator
   const statusIndicator = useMemo(() => {

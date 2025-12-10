@@ -51,6 +51,7 @@ task npmDev(type: NpmTask) {
     args = ['run', 'dev']
 }
 
+
 build.dependsOn npmBuild
 check.dependsOn npmTest
 

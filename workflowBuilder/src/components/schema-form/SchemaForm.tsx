@@ -13,7 +13,7 @@ import {
 } from '@cloudscape-design/components';
 import { GroupList } from './GroupRenderer';
 import { FieldList } from './FieldRenderer';
-import type { FormConfig, FieldError, FieldConfig } from '../../types';
+import type { FormConfig, ValidationError, FieldConfig } from '../../types';
 
 /**
  * Props for SchemaForm
@@ -24,7 +24,7 @@ export interface SchemaFormProps {
   /** Current form values */
   values: Record<string, unknown>;
   /** Map of field path to error */
-  errorsByPath: Map<string, FieldError>;
+  errorsByPath: Map<string, ValidationError>;
   /** Callback when a field value changes */
   onChange: (path: string, value: unknown) => void;
   /** Callback when a field is blurred */
@@ -41,10 +41,6 @@ export interface SchemaFormProps {
   actions?: React.ReactNode;
   /** Additional form variant */
   variant?: 'full-page' | 'embedded';
-  /** Currently focused field path (for focus sync highlighting) */
-  focusedPath?: string | null;
-  /** Callback when a field receives focus due to value change (for focus sync) */
-  onFieldFocus?: (path: string, source: 'change' | 'focus' | 'blur') => void;
 }
 
 /**
@@ -62,8 +58,6 @@ export function SchemaForm({
   header,
   actions,
   variant = 'embedded',
-  focusedPath,
-  onFieldFocus,
 }: SchemaFormProps): React.ReactElement {
   const { groups, allFields } = formConfig;
   
@@ -79,7 +73,7 @@ export function SchemaForm({
     return allFields.filter(field => !groupedPaths.has(field.path));
   }, [groups, allFields]);
   
-  // Convert FieldError map to string map for FieldList
+  // Convert ValidationError map to string map for FieldList
   const errorsAsStrings = useMemo(() => {
     const map = new Map<string, string>();
     errorsByPath.forEach((error, path) => {
@@ -112,8 +106,6 @@ export function SchemaForm({
             onChange={onChange}
             onBlur={onBlur}
             disabled={disabled || loading}
-            focusedPath={focusedPath}
-            onFieldFocus={onFieldFocus}
           />
         )}
         
@@ -126,8 +118,6 @@ export function SchemaForm({
             onChange={onChange}
             onBlur={onBlur}
             disabled={disabled || loading}
-            focusedPath={focusedPath}
-            onFieldFocus={onFieldFocus}
           />
         )}
       </SpaceBetween>

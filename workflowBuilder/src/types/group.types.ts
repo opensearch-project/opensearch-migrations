@@ -1,7 +1,6 @@
 /**
  * Group type definitions for organizing form fields into sections
  */
-import type { z } from 'zod';
 import type { FieldConfig } from './field.types';
 import type { JSONSchema7 } from './json-schema.types';
 
@@ -62,12 +61,6 @@ export interface GroupMeta {
  * Complete form configuration built from schema
  */
 export interface FormConfig {
-  /** 
-   * Original Zod schema (legacy - used by schema-parser.ts)
-   * @deprecated Use jsonSchema instead for new code
-   */
-  schema?: z.ZodTypeAny;
-  
   /** JSON Schema (used by openapi-parser.ts) */
   jsonSchema?: JSONSchema7;
   

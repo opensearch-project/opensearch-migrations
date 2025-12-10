@@ -1,17 +1,16 @@
 /**
  * Bidirectional Sync
  * 
- * Core sync logic between form state and code content.
+ * Simplified sync logic between form state and code content.
  * Handles converting form values to YAML/JSON and parsing
  * code content back to form state.
  */
 
-import { z } from 'zod';
 import get from 'lodash.get';
 import set from 'lodash.set';
 import { parseContent, serializeContent } from './yaml-parser';
-import { zodErrorToFieldErrors, mapErrorsToLines } from './error-mapper';
-import type { CodeFormat, FieldError, ParseError } from '../types';
+import { validateWithJsonSchema } from './json-schema-validator';
+import type { CodeFormat, ValidationError, ParseError, JSONSchema7 } from '../types';
 
 /**
  * Result of syncing content to form state
@@ -20,7 +19,7 @@ export interface SyncToFormResult<T = unknown> {
   success: boolean;
   data?: T;
   parseError?: ParseError;
-  validationErrors: FieldError[];
+  validationErrors: ValidationError[];
 }
 
 /**
@@ -61,7 +60,7 @@ export function formStateToContent<T extends Record<string, unknown>>(
 export function contentToFormState<T>(
   content: string,
   format: CodeFormat,
-  schema: z.ZodType<T>
+  schema: JSONSchema7
 ): SyncToFormResult<T> {
   // First, parse the content
   const parseResult = parseContent<unknown>(content, format);
@@ -74,23 +73,22 @@ export function contentToFormState<T>(
     };
   }
   
-  // Then validate against schema
-  const validationResult = schema.safeParse(parseResult.data);
+  // Then validate against JSON schema
+  const validationResult = validateWithJsonSchema(schema, parseResult.data);
   
   if (!validationResult.success) {
-    const errors = zodErrorToFieldErrors(validationResult.error);
-    const errorsWithLines = mapErrorsToLines(errors, content, format);
+    const errors = validationResult.errors || [];
     
     return {
       success: false,
       data: parseResult.data as T, // Return parsed data even if invalid
-      validationErrors: errorsWithLines,
+      validationErrors: errors,
     };
   }
   
   return {
     success: true,
-    data: validationResult.data,
+    data: validationResult.data as T,
     validationErrors: [],
   };
 }
@@ -227,7 +225,7 @@ export function getChangedPaths<T extends Record<string, unknown>>(
  * Create a sync handler that manages bidirectional updates
  */
 export function createSyncHandler<T extends Record<string, unknown>>(
-  schema: z.ZodType<T>,
+  schema: JSONSchema7,
   initialState: T,
   format: CodeFormat
 ) {
@@ -270,7 +268,7 @@ export function createSyncHandler<T extends Record<string, unknown>>(
      * Update from editor content change
      */
     updateFromEditor: (content: string): SyncToFormResult<T> => {
-      const result = contentToFormState(content, format, schema);
+      const result = contentToFormState<T>(content, format, schema);
       
       if (result.success && result.data) {
         currentState = result.data;
@@ -311,13 +309,13 @@ export function createSyncHandler<T extends Record<string, unknown>>(
 }
 
 /**
- * Validate content against schema and return errors with line numbers
+ * Validate content against schema and return errors
  */
-export function validateContent<T>(
+export function validateContent(
   content: string,
   format: CodeFormat,
-  schema: z.ZodType<T>
-): FieldError[] {
+  schema: JSONSchema7
+): ValidationError[] {
   const parseResult = parseContent<unknown>(content, format);
   
   if (!parseResult.success) {
@@ -331,11 +329,10 @@ export function validateContent<T>(
     }];
   }
   
-  const validationResult = schema.safeParse(parseResult.data);
+  const validationResult = validateWithJsonSchema(schema, parseResult.data);
   
   if (!validationResult.success) {
-    const errors = zodErrorToFieldErrors(validationResult.error);
-    return mapErrorsToLines(errors, content, format);
+    return validationResult.errors || [];
   }
   
   return [];

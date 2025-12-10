@@ -38,7 +38,7 @@ import {
 import type { OpenAPIFormConfig } from '../lib/openapi-parser';
 import type {
     JSONSchema7,
-    FieldError,
+    ValidationError,
     EditorAnnotation,
     CodeFormat,
 } from '../types';
@@ -58,7 +58,7 @@ export interface UseJsonSchemaFormOptions<T> {
     /** Callback when form values change */
     onChange?: (values: T) => void;
     /** Callback when validation errors change */
-    onValidationChange?: (errors: FieldError[]) => void;
+    onValidationChange?: (errors: ValidationError[]) => void;
     /** Whether to include advanced fields */
     includeAdvanced?: boolean;
 }
@@ -69,8 +69,8 @@ export interface UseJsonSchemaFormOptions<T> {
 export interface UseJsonSchemaFormReturn<T> {
     // Form state
     values: T;
-    errors: FieldError[];
-    errorsByPath: Map<string, FieldError>;
+    errors: ValidationError[];
+    errorsByPath: Map<string, ValidationError>;
     isValid: boolean;
     isDirty: boolean;
     isValidating: boolean;
@@ -98,7 +98,7 @@ export interface UseJsonSchemaFormReturn<T> {
     // Sync state
     lastChangeSource: 'form' | 'editor' | null;
 
-    // Schema access (kept for backward compatibility, but not used internally)
+    // Schema access
     jsonSchema: JSONSchema7;
 }
 
@@ -136,7 +136,7 @@ export function useJsonSchemaForm<T extends Record<string, unknown>>(
 
     // Form state
     const [values, setValuesState] = useState<T>(effectiveInitialValues);
-    const [errors, setErrors] = useState<FieldError[]>([]);
+    const [errors, setErrors] = useState<ValidationError[]>([]);
     const [isDirty, setIsDirty] = useState(false);
     const [isValidating, setIsValidating] = useState(false);
     const [, setTouchedFields] = useState<Set<string>>(new Set());

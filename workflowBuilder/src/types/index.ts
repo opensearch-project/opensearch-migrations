@@ -3,9 +3,6 @@
  * Re-exports all types from the types directory
  */
 
-// Zod meta augmentation (side-effect import)
-import './zod-meta.d.ts';
-
 // JSON Schema types
 export type {
   JSONSchema7,
@@ -48,16 +45,18 @@ export { PREDEFINED_GROUPS } from './group.types';
 
 // Validation types
 export type {
-  ValidationSeverity,
-  FieldError,
+  ValidationError,
   ValidationResult,
   ParseError,
   ParseAndValidateResult,
   ValidationOptions,
   ValidationState,
   CrossFieldRule,
-  ZodErrorCode,
-} from './validation.types';
+  ErrorSeverity,
+  ExtendedFieldError,
+  AjvFieldError,
+  JsonSchemaValidationResult,
+} from './validation';
 
 // Editor types
 export type {

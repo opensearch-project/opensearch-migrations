@@ -13,7 +13,7 @@
  * - Better performance with schema compilation
  */
 
-import Ajv, { type ErrorObject, type ValidateFunction } from 'ajv';
+import Ajv, { type ErrorObject } from 'ajv';
 import addFormats from 'ajv-formats';
 import type { JSONSchema7 } from '../types/json-schema.types';
 import type { AjvFieldError, JsonSchemaValidationResult } from '../types/validation';

@@ -18,8 +18,8 @@ import {
 } from '@cloudscape-design/components';
 import { SchemaForm } from './schema-form';
 import { EditableCodePanel } from './code-panel';
-import { useJsonSchemaForm, useFocusSync } from '../hooks';
-import type { JSONSchema7, FocusConfig } from '../types';
+import { useJsonSchemaForm } from '../hooks';
+import type { JSONSchema7 } from '../types';
 
 /**
  * Props for WorkflowBuilder
@@ -43,10 +43,6 @@ export interface WorkflowBuilderProps {
   showCodePanel?: boolean;
   /** Test ID for testing */
   testId?: string;
-  /** Whether to enable focus synchronization between form and editor */
-  enableFocusSync?: boolean;
-  /** Configuration for focus synchronization */
-  focusSyncConfig?: Partial<FocusConfig>;
 }
 
 /**
@@ -62,8 +58,6 @@ export function WorkflowBuilder({
   description,
   showCodePanel = true,
   testId = 'workflow-builder',
-  enableFocusSync = true,
-  focusSyncConfig,
 }: WorkflowBuilderProps): React.ReactElement {
   // Ref for the form container (for scrolling to focused fields)
   const formContainerRef = useRef<HTMLDivElement>(null);
@@ -92,22 +86,6 @@ export function WorkflowBuilder({
     onChange,
   });
 
-  // Use focus synchronization hook
-  const {
-    focusedLine,
-    focusedPath,
-    setFocusFromForm,
-    setFocusFromEditor,
-  } = useFocusSync({
-    content,
-    format,
-    config: {
-      ...focusSyncConfig,
-      enabled: enableFocusSync && showCodePanel,
-    },
-    formContainer: formContainerRef.current,
-  });
-
   // Handle form submission
   const handleSubmit = useCallback(() => {
     if (validate()) {
@@ -119,20 +97,6 @@ export function WorkflowBuilder({
   const handleReset = useCallback(() => {
     reset();
   }, [reset]);
-
-  // Handle field focus from form (for focus sync)
-  const handleFieldFocus = useCallback((path: string, source: 'change' | 'focus' | 'blur') => {
-    if (enableFocusSync && showCodePanel && source === 'change') {
-      setFocusFromForm(path);
-    }
-  }, [enableFocusSync, showCodePanel, setFocusFromForm]);
-
-  // Handle cursor change from editor (for focus sync)
-  const handleEditorCursorChange = useCallback((line: number, column: number) => {
-    if (enableFocusSync && showCodePanel) {
-      setFocusFromEditor(line, column);
-    }
-  }, [enableFocusSync, showCodePanel, setFocusFromEditor]);
 
   // Convert OpenAPIFormConfig to FormConfig for SchemaForm
   const formConfigForSchemaForm = {
@@ -199,8 +163,6 @@ export function WorkflowBuilder({
                 values={values}
                 errorsByPath={errorsByPath}
                 onChange={setValue}
-                focusedPath={enableFocusSync ? focusedPath : undefined}
-                onFieldFocus={enableFocusSync ? handleFieldFocus : undefined}
               />
             </div>
           </Container>
@@ -215,8 +177,6 @@ export function WorkflowBuilder({
                 parseError={parseError}
                 onContentChange={setContent}
                 onFormatChange={setFormat}
-                focusedLine={enableFocusSync ? focusedLine : undefined}
-                onCursorChange={enableFocusSync ? handleEditorCursorChange : undefined}
               />
             </div>
           )}

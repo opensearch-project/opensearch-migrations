@@ -6,15 +6,18 @@
  */
 
 /**
- * A single field validation error
+ * Unified validation error interface
+ * Consolidates FieldError, AjvFieldError, and ExtendedFieldError
  */
-export interface FieldError {
+export interface ValidationError {
   /** Dot-notation path to the field (e.g., "source.endpoint") */
   path: string;
   /** Human-readable error message */
   message: string;
-  /** Zod error code (e.g., "invalid_type", "too_small") */
+  /** Error code (e.g., "invalid_type", "too_small", "required") */
   code: string;
+  /** Error severity level (defaults to 'error' if not specified) */
+  severity?: 'error' | 'warning' | 'info';
   /** Line number in code editor (1-indexed) */
   line?: number;
   /** Column number in code editor (1-indexed) */
@@ -23,7 +26,12 @@ export interface FieldError {
   endLine?: number;
   /** End column for multi-line errors */
   endColumn?: number;
+  /** Ajv error keyword (e.g., 'required', 'type', 'minLength') */
+  keyword?: string;
+  /** Ajv error params for additional context */
+  params?: Record<string, unknown>;
 }
+
 
 /**
  * Result of validating data against a schema
@@ -34,11 +42,11 @@ export interface ValidationResult<T = unknown> {
   /** Validated and transformed data (if successful) */
   data?: T;
   /** Array of all validation errors */
-  errors: FieldError[];
+  errors: ValidationError[];
   /** Quick lookup map from path to error */
-  errorsByPath: Map<string, FieldError>;
+  errorsByPath: Map<string, ValidationError>;
   /** Quick lookup map from line number to errors */
-  errorsByLine: Map<number, FieldError[]>;
+  errorsByLine: Map<number, ValidationError[]>;
 }
 
 /**
@@ -66,9 +74,9 @@ export interface ParseAndValidateResult<T = unknown> {
   /** Parse error (if parsing failed) */
   parseError?: ParseError;
   /** Validation errors (if validation failed) */
-  validationErrors: FieldError[];
+  validationErrors: ValidationError[];
   /** All errors combined for display */
-  allErrors: FieldError[];
+  allErrors: ValidationError[];
 }
 
 /**
@@ -92,9 +100,9 @@ export interface ValidationState {
   /** Whether the form is valid */
   isValid: boolean;
   /** Current validation errors */
-  errors: FieldError[];
+  errors: ValidationError[];
   /** Errors indexed by field path */
-  errorsByPath: Map<string, FieldError>;
+  errorsByPath: Map<string, ValidationError>;
   /** Last validation timestamp */
   lastValidated?: number;
 }
@@ -107,15 +115,15 @@ export type ErrorSeverity = 'error' | 'warning' | 'info';
 /**
  * Extended error with severity
  */
-export interface ExtendedFieldError extends FieldError {
+export interface ExtendedFieldError extends ValidationError {
   /** Severity level of the error */
   severity: ErrorSeverity;
 }
 
 /**
- * Ajv validation error mapped to our FieldError format
+ * Ajv validation error mapped to our ValidationError format
  */
-export interface AjvFieldError extends FieldError {
+export interface AjvFieldError extends ValidationError {
   /** Ajv error keyword (e.g., 'required', 'type', 'minLength') */
   keyword?: string;
   /** Ajv error params for additional context */
@@ -131,9 +139,6 @@ export interface JsonSchemaValidationResult<T = unknown> {
   errors?: AjvFieldError[];
 }
 
-// Legacy type aliases for backward compatibility
-export type ValidationSeverity = ErrorSeverity;
-export type ZodErrorCode = string;
 
 /**
  * Cross-field validation rule
