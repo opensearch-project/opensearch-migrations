@@ -1,7 +1,7 @@
 import logging
 from ..common_utils import convert_to_b64
 from ..cluster_version import ElasticsearchV5_X, OpensearchV1_X, OpensearchV2_X
-from .ma_argo_test_base import MATestBase, MATestUserArguments, OTEL_COLLECTOR_ENDPOINT
+from .ma_argo_test_base import MATestBase, MATestUserArguments
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,6 @@ class Test0004MultiTypeUnionMigration(MATestBase):
         snapshot_and_migration_configs = [{
             "migrations": [{
                 "metadataMigrationConfig": {
-                    "otelCollectorEndpoint": OTEL_COLLECTOR_ENDPOINT,
                     "transformerConfigBase64": transformation_b64
                 },
                 "documentBackfillConfig": {
@@ -121,7 +120,6 @@ class Test0005MultiTypeSplitMigration(MATestBase):
         snapshot_and_migration_configs = [{
             "migrations": [{
                 "metadataMigrationConfig": {
-                    "otelCollectorEndpoint": OTEL_COLLECTOR_ENDPOINT,
                     "transformerConfigBase64": transformation_b64
                 },
                 "documentBackfillConfig": {

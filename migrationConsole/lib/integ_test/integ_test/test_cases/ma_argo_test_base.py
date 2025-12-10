@@ -11,7 +11,6 @@ from console_link.middleware.clusters import cat_indices, connection_check, clea
 logger = logging.getLogger(__name__)
 
 MigrationType = Enum("MigrationType", ["METADATA", "BACKFILL", "CAPTURE_AND_REPLAY"])
-OTEL_COLLECTOR_ENDPOINT = "http://otel-collector:4317"
 
 
 class ClusterVersionCombinationUnsupported(Exception):
@@ -120,9 +119,7 @@ class MATestBase:
         """
         snapshot_and_migration_configs = [{
             "migrations": [{
-                "metadataMigrationConfig": {
-                    "otelCollectorEndpoint": OTEL_COLLECTOR_ENDPOINT
-                },
+                "metadataMigrationConfig": {},
                 "documentBackfillConfig": {}
             }]
         }]

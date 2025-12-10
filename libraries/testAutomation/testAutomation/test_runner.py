@@ -204,17 +204,17 @@ class TestRunner:
             reuse_clusters: bool = False, test_reports_dir: str = None, copy_logs: bool = False) -> None:
         self.k8s_service.create_namespace(self.k8s_service.namespace)
         if developer_mode:
-            workflow_templates_dir = (
-                "../../migrationConsole/"
-                "workflows/templates/"
+            integ_test_workflows_dir = (
+                "../../../migrationConsole/"
+                "lib/integ_test/testWorkflows/"
             )
-            if os.path.isdir(workflow_templates_dir):
+            if os.path.isdir(integ_test_workflows_dir):
                 self.k8s_service.run_command([
-                    "kubectl", "apply", "-f", workflow_templates_dir, "-n", "ma"
+                    "kubectl", "apply", "-f", integ_test_workflows_dir, "-n", "ma"
                 ])
-                logger.info("Applied local workflow templates directory")
+                logger.info("Applied local integ test workflows directory")
             else:
-                logger.info(f"Workflow templates directory not found: {workflow_templates_dir}, skipping")
+                logger.info(f"Integ test workflows directory not found: {integ_test_workflows_dir}, skipping")
 
         combos_with_failures = []
         test_reports = []
@@ -235,6 +235,13 @@ class TestRunner:
                             f"{self.registry_prefix}migrations/reindex_from_snapshot",
                         "images.migrationConsole.repository": f"{self.registry_prefix}migrations/migration_console",
                         "images.installer.repository": f"{self.registry_prefix}migrations/migration_console",
+                        # Kyverno image overrides (uses migration_console image)
+                        "charts.kyverno.values.cleanupJobs.admissionReports.image.repository":
+                            f"{self.registry_prefix}migrations/migration_console",
+                        "charts.kyverno.values.cleanupJobs.clusterAdmissionReports.image.repository":
+                            f"{self.registry_prefix}migrations/migration_console",
+                        "charts.kyverno.values.webhooksCleanup.image.repository":
+                            f"{self.registry_prefix}migrations/migration_console",
                     })
                 if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME,
                                                      values_file=self.values_file,
@@ -404,7 +411,7 @@ def main() -> None:
     logger.info("Detected the following version combinations to test:\n" +
                 "\n".join([f"- {src} → {tgt}" for src, tgt in combinations]))
 
-    dev_values_file = f"{ma_chart_path}/valuesDev.yaml"
+    dev_values_file = f"{ma_chart_path}/valuesForLocalK8s.yaml"
     test_runner = TestRunner(k8s_service=k8s_service,
                              unique_id=args.unique_id,
                              test_ids=args.test_ids,

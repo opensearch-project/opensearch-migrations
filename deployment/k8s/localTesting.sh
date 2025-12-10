@@ -54,7 +54,7 @@ if [ "${USE_LOCAL_REGISTRY}" = "true" ]; then
 
   helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
     --wait --timeout 10m \
-    -f charts/aggregates/migrationAssistantWithArgo/valuesDev.yaml \
+    -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml \
     --set "images.captureProxy.repository=${LOCAL_REGISTRY}/migrations/capture_proxy" \
     --set "images.captureProxy.tag=latest" \
     --set "images.captureProxy.pullPolicy=Always" \
@@ -77,7 +77,7 @@ else
 
   helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
     --wait --timeout 10m \
-    -f charts/aggregates/migrationAssistantWithArgo/valuesDev.yaml
+    -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
 fi
 
 ###############################################################################

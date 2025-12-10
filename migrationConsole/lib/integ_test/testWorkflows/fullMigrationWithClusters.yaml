@@ -20,9 +20,7 @@ spec:
         value: |
           [{
             "migrations": [{
-              "metadataMigrationConfig": {
-                "otelCollectorEndpoint": "http://otel-collector:4317"
-              },
+              "metadataMigrationConfig": {},
               "documentBackfillConfig": {}
             }]
           }]
@@ -42,6 +40,16 @@ spec:
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
+      - name: migration-console-image
+        valueFrom:
+          configMapKeyRef:
+            name: "{{workflow.parameters.migration-image-configmap}}"
+            key: migrationConsoleImage
+      - name: migration-console-pull-policy
+        valueFrom:
+          configMapKeyRef:
+            name: "{{workflow.parameters.migration-image-configmap}}"
+            key: migrationConsolePullPolicy
       - name: otel-collector-endpoint
         value: "http://otel-collector:4317"
 
@@ -139,7 +147,8 @@ spec:
     # Template to generate unique cluster names based on template types
     - name: generate-cluster-names
       container:
-        image: alpine:latest
+        image: "{{workflow.parameters.migration-console-image}}"
+        imagePullPolicy: "{{workflow.parameters.migration-console-pull-policy}}"
         command: [sh, -c]
         args:
           - |
@@ -227,12 +236,11 @@ spec:
           - name: snapshot-and-migration-configs
           - name: replayer-config
       container:
-        image: alpine:latest
+        image: "{{workflow.parameters.migration-console-image}}"
+        imagePullPolicy: "{{workflow.parameters.migration-console-pull-policy}}"
         command: [sh, -c]
         args:
           - |
-            apk add --no-cache jq > /dev/null 2>&1
-            
             # Parse inputs
             SOURCE_CONFIG='{{inputs.parameters.source-config}}'
             TARGET_CONFIG='{{inputs.parameters.target-config}}'

@@ -398,17 +398,11 @@ class ArgoService:
         """
         Convert workflow cluster config schema to Python Cluster schema.
 
-        Workflow schema uses:
-          - allowInsecure -> allow_insecure
-          - authConfig.basic.secretName -> basic_auth.k8s_secret_name
-          - authConfig.noAuth -> no_auth
-          - authConfig.sigv4 -> sigv4
-
-        Python Cluster schema expects:
-          - allow_insecure (boolean)
-          - basic_auth (dict with username/password or k8s_secret_name or user_secret_arn)
-          - no_auth (nullable)
-          - sigv4 (dict with region/service)
+        Field mappings (Workflow -> Python):
+          - allowInsecure         -> allow_insecure (boolean)
+          - authConfig.basic      -> basic_auth (dict with username/password, k8s_secret_name, or user_secret_arn)
+          - authConfig.noAuth     -> no_auth (nullable)
+          - authConfig.sigv4      -> sigv4 (dict with region/service)
         """
         converted: Dict[str, Any] = {"endpoint": workflow_config.get("endpoint")}
 
