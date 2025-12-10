@@ -84,7 +84,11 @@ spec:
         {{- else }}
               echo "Preparing chart: {{ $name }}"
 
-          {{- if $chart.values }}
+          {{- if eq $name "kyverno" }}
+              VALUES_B64="{{ include "migrationAssistant.kyvernoValues" $ | b64enc }}"
+              echo "$VALUES_B64" | base64 -d > /tmp/values-{{ $name }}.yaml
+              VALUE_PARAM="--values /tmp/values-{{ $name }}.yaml"
+          {{- else if $chart.values }}
               VALUES_B64="{{ $chart.values | toYaml | b64enc }}"
               echo "$VALUES_B64" | base64 -d > /tmp/values-{{ $name }}.yaml
               VALUE_PARAM="--values /tmp/values-{{ $name }}.yaml"

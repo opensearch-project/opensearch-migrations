@@ -23,16 +23,3 @@ charts:
         replicas: 1
       reportsController:
         replicas: 1
-      cleanupJobs:
-        admissionReports:
-          image:
-            repository: migrations/migration_console
-            tag: latest
-        clusterAdmissionReports:
-          image:
-            repository: migrations/migration_console
-            tag: latest
-      webhooksCleanup:
-        image:
-          repository: migrations/migration_console
-          tag: latest
