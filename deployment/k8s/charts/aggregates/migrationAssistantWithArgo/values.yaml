@@ -112,14 +112,14 @@ otelConfiguration:
       prometheus:
         config:
           scrape_configs:
-            - job_name: 'cadvisor'
+            - job_name: 'kubelet-cadvisor'
               scrape_interval: 5s
               scheme: https
-              authorization:
+              authorization: # Use the ServiceAccount token for authorization
                 credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
               tls_config:
                 ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-                insecure_skip_verify: true  # Minikube uses self-signed certs
+                insecure_skip_verify: true # Minikube uses self-signed certs
               kubernetes_sd_configs:
                 - role: node
               relabel_configs:
