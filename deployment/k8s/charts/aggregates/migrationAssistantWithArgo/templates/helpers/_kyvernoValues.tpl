@@ -13,14 +13,17 @@ reportsController:
 cleanupJobs:
   admissionReports:
     image:
+      registry: ""
       repository: {{ .Values.images.migrationConsole.repository }}
       tag: {{ .Values.images.migrationConsole.tag }}
   clusterAdmissionReports:
     image:
+      registry: ""
       repository: {{ .Values.images.migrationConsole.repository }}
       tag: {{ .Values.images.migrationConsole.tag }}
 webhooksCleanup:
   image:
+    registry: ""
     repository: {{ .Values.images.migrationConsole.repository }}
     tag: {{ .Values.images.migrationConsole.tag }}
 {{- end -}}
