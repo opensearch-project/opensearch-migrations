@@ -107,6 +107,7 @@ def call(Map config = [:]) {
                             script {
                                 sh "pipenv install --deploy"
                                 sh "kubectl config use-context minikube"
+                                sh "kubectl delete namespace ma --ignore-not-found"
                                 sh "pipenv run app --delete-only"
                             }
                         }
