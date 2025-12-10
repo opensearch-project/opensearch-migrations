@@ -29,6 +29,11 @@ data:
             foreach:
               - list: "request.object.spec.containers[]"
                 patchStrategicMerge:
+                  metadata:
+                    annotations:
+                      kyverno.io/mutated-by: "zero-resource-requests"
+                      kyverno.io/original-cpu-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.cpu || 'none' }}`}}"
+                      kyverno.io/original-memory-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.memory || 'none' }}`}}"
                   spec:
                     containers:
                       - name: "{{`{{ element.name }}`}}"
@@ -51,6 +56,11 @@ data:
             foreach:
               - list: "request.object.spec.initContainers[]"
                 patchStrategicMerge:
+                  metadata:
+                    annotations:
+                      kyverno.io/mutated-by: "zero-resource-requests"
+                      kyverno.io/original-init-cpu-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.cpu || 'none' }}`}}"
+                      kyverno.io/original-init-memory-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.memory || 'none' }}`}}"
                   spec:
                     initContainers:
                       - name: "{{`{{ element.name }}`}}"
