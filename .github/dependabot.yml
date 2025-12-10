@@ -30,7 +30,11 @@ updates:
       - dependency-name: "com.avast.gradle.docker-compose"
       - dependency-name: "io.netty:*"
       - dependency-name: "io.projectreactor.netty:*"
+        update-types:
+          - "version-update:semver-major"
       - dependency-name: "io.projectreactor:reactor-test"
+        update-types:
+          - "version-update:semver-major"
       - dependency-name: "io.opentelemetry.semconv:*"
       - dependency-name: "org.apache.commons:commons-compress"
       - dependency-name: "org.apache.lucene:*"
