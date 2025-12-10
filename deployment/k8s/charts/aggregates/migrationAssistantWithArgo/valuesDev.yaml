@@ -12,7 +12,7 @@ kyvernoPolicies:
 # Kyverno chart configuration
 charts:
   kyverno:
-    version: "3.3.4"
+    version: "3.5.2"
     repository: "https://kyverno.github.io/kyverno/"
     values:
       admissionController:
