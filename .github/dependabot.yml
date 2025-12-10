@@ -36,6 +36,7 @@ updates:
         update-types:
           - "version-update:semver-minor"  # Minor versions may require newer Netty
       - dependency-name: "io.opentelemetry.semconv:*"
+      - dependency-name: "software.amazon.msk:aws-msk-iam-auth"  # 2.3.5+ requires Java 17
       - dependency-name: "org.apache.commons:commons-compress"
       - dependency-name: "org.apache.lucene:*"
       - dependency-name: "org.gradle.toolchains.foojay-resolver-convention"
