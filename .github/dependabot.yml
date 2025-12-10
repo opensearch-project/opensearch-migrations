@@ -29,6 +29,8 @@ updates:
     ignore:
       - dependency-name: "com.avast.gradle.docker-compose"
       - dependency-name: "io.netty:*"
+      - dependency-name: "io.projectreactor.netty:*"
+      - dependency-name: "io.projectreactor:reactor-test"
       - dependency-name: "io.opentelemetry.semconv:*"
       - dependency-name: "org.apache.commons:commons-compress"
       - dependency-name: "org.apache.lucene:*"
