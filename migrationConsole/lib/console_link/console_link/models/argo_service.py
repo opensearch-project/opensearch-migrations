@@ -421,7 +421,12 @@ class ArgoService:
             converted.update(self._convert_auth_config(auth_config))
         else:
             # Fall back to legacy/direct auth fields
-            converted.update(self._get_legacy_auth_fields(workflow_config))
+            legacy_auth = self._get_legacy_auth_fields(workflow_config)
+            if legacy_auth:
+                converted.update(legacy_auth)
+            else:
+                # Default to no_auth if no authentication is specified
+                converted["no_auth"] = None
 
         return converted
 
