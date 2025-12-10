@@ -103,13 +103,9 @@ def call(Map config = [:]) {
             stage('Cleanup Previous MA Deployment') {
                 steps {
                     timeout(time: 10, unit: 'MINUTES') {
-                        dir('libraries/testAutomation') {
-                            script {
-                                sh "pipenv install --deploy"
-                                sh "kubectl config use-context minikube"
-                                sh "kubectl delete namespace ma --ignore-not-found"
-                                sh "pipenv run app --delete-only"
-                            }
+                        script {
+                            sh "kubectl config use-context minikube"
+                            sh "kubectl delete namespace ma --ignore-not-found"
                         }
                     }
                 }
