@@ -50,7 +50,7 @@ The migration console CLI provides users with a centralized interface to execute
 - Controlling traffic replay
 - Monitoring migration progress through metrics
 - Handling snapshots and metadata
-- Integrating with various deployment environments (Docker locally and AWS ECS)
+- Integrating with various deployment environments (Docker locally, AWS ECS, EKS, K8s)
 
 Users can interact with the migration process through the CLI, which orchestrates the different components of the migration toolkit to perform a seamless migration between Elasticsearch and OpenSearch clusters.
 

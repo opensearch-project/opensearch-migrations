@@ -1,4 +1,4 @@
-# OpenSearch Service Migration CDK
+# OpenSearch Service Migration CDK for ECS Deployments
 
 This directory contains the infrastructure-as-code CDK solution for deploying an OpenSearch Domain as well as the infrastructure for the Migration solution. Users have the ability to easily deploy their infrastructure using default values or provide [configuration options](./options.md) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users- rather, this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
 
@@ -22,7 +22,7 @@ Java is used by the opensearch-migrations repo and Gradle, its associated build 
 
 1- It is necessary to run `npm install` within this current directory to install required packages that this app and CDK need for operation.
 
-2- Creating Dockerfiles, this project needs to build the required Dockerfiles that the CDK will use in its services. These Dockerfiles can be built by running the below script which is located in the same directory as this README
+2- Creating Docker Images: This project needs to build the required Docker images that the CDK will use in its services. These images can be built by running the below script which is located in the same directory as this README
 ```shell
 ./buildDockerImages.sh
 ```

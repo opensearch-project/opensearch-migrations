@@ -152,7 +152,7 @@ echo "Get the exported values to set as environment variables, which should incl
 eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`MigrationsExportString\`)].[Value]" --output text) 
 
 echo "Login to your remote registry first"
-aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-west-2.amazonaws.com
+aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-2.amazonaws.com
 
 echo "Build with custom registry endpoint and architecture"
 ./gradlew buildImagesToRegistry \
