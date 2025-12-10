@@ -9,6 +9,19 @@ kyvernoPolicies:
   mountLocalAwsCreds: false
   mountLocalAwsCredsPath: "~/.aws"
 
+# Override image pull policy for dev - always pull latest
+images:
+  captureProxy:
+    pullPolicy: Always
+  trafficReplayer:
+    pullPolicy: Always
+  reindexFromSnapshot:
+    pullPolicy: Always
+  migrationConsole:
+    pullPolicy: Always
+  installer:
+    pullPolicy: Always
+
 # Kyverno chart configuration
 charts:
   kyverno:
