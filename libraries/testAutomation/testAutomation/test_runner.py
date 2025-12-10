@@ -200,21 +200,9 @@ class TestRunner:
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
 
-    def run(self, skip_delete: bool = False, keep_workflows: bool = False, developer_mode: bool = False,
+    def run(self, skip_delete: bool = False, keep_workflows: bool = False,
             reuse_clusters: bool = False, test_reports_dir: str = None, copy_logs: bool = False) -> None:
         self.k8s_service.create_namespace(self.k8s_service.namespace)
-        if developer_mode:
-            integ_test_workflows_dir = (
-                "../../../migrationConsole/"
-                "lib/integ_test/testWorkflows/"
-            )
-            if os.path.isdir(integ_test_workflows_dir):
-                self.k8s_service.run_command([
-                    "kubectl", "apply", "-f", integ_test_workflows_dir, "-n", "ma"
-                ])
-                logger.info("Applied local integ test workflows directory")
-            else:
-                logger.info(f"Integ test workflows directory not found: {integ_test_workflows_dir}, skipping")
 
         combos_with_failures = []
         test_reports = []
@@ -225,7 +213,7 @@ class TestRunner:
                 logger.info(f"Performing helm deployment for migration testing environment "
                             f"from {source_version} to {target_version}")
 
-                chart_values = {"developerModeEnabled": "true"} if developer_mode else {}
+                chart_values = {}
                 if self.registry_prefix:
                     logger.info(f"Setting registry prefix to: {self.registry_prefix}")
                     chart_values.update({
@@ -355,11 +343,6 @@ def parse_args() -> argparse.Namespace:
         help="If set, will not delete argo workflows created by integration tests"
     )
     parser.add_argument(
-        "--developer-mode",
-        action="store_true",
-        help="If set, will enable the developer mode flag for the Migration Assistant helm chart"
-    )
-    parser.add_argument(
         "--reuse-clusters",
         action="store_true",
         help="If set, the integration tests will reuse existing clusters that match the naming pattern "
@@ -371,7 +354,7 @@ def parse_args() -> argparse.Namespace:
         "--dev",
         action="store_true",
         help="An aggregate flag to apply developer settings for "
-             "testing [--skip-delete, --reuse-clusters, --keep-workflows, --developer-mode]"
+             "testing [--skip-delete, --reuse-clusters, --keep-workflows]"
     )
     parser.add_argument(
         "--test-reports-dir",
@@ -430,12 +413,10 @@ def main() -> None:
         return test_runner.collect_reports_and_print_summary(reports_dir=args.test_reports_dir)
     skip_delete = args.skip_delete
     keep_workflows = args.keep_workflows
-    developer_mode = args.developer_mode
     reuse_clusters = args.reuse_clusters
     if args.dev:
         skip_delete = True
         keep_workflows = True
-        developer_mode = True
         reuse_clusters = True
     if len(combinations) > 1 and (skip_delete or reuse_clusters):
         logger.warning("Disabling the --skip-delete and --reuse-clusters options, as they cannot be used with more "
@@ -444,7 +425,6 @@ def main() -> None:
         reuse_clusters = False
     test_runner.run(skip_delete=skip_delete,
                     keep_workflows=keep_workflows,
-                    developer_mode=developer_mode,
                     reuse_clusters=reuse_clusters,
                     test_reports_dir=args.test_reports_dir,
                     copy_logs=args.copy_logs)

@@ -61,7 +61,6 @@ aws:
   account: "123456789012"
 
 stageName: dev
-developerModeEnabled: false
 
 defaultBucketConfiguration:
   create: true

@@ -401,7 +401,7 @@ class ArgoService:
         Field mappings (Workflow -> Python):
           - allowInsecure         -> allow_insecure (boolean)
           - authConfig.basic      -> basic_auth (dict with username/password, k8s_secret_name, or user_secret_arn)
-          - authConfig.noAuth     -> no_auth (nullable)
+          - null                 -> no_auth (true)
           - authConfig.sigv4      -> sigv4 (dict with region/service)
         """
         converted: Dict[str, Any] = {"endpoint": workflow_config.get("endpoint")}
