@@ -124,7 +124,9 @@ def call(Map config = [:]) {
                                 if (testIdsResolved != "" && testIdsResolved != "all") {
                                     testIdsArg = "--test-ids='$testIdsResolved'"
                                 }
+                                sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
+                                sh "kubectl config use-context minikube"
                                 def registryIp = sh(script: "kubectl get svc -n kube-system registry -o jsonpath='{.spec.clusterIP}'", returnStdout: true).trim()
                                 sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='${registryIp}:80/'"
                             }
