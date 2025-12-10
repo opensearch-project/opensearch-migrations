@@ -1,8 +1,8 @@
 /**
  * Zod GlobalMeta Type Extension
  * 
- * This module extends Zod's GlobalMeta interface to define UI metadata
- * that flows through to OpenAPI/JSON Schema via @asteasolutions/zod-to-openapi.
+ * This module extends Zod's GlobalMeta interface to define semantic metadata
+ * that provides value beyond just UI presentation.
  * 
  * Usage:
  * ```typescript
@@ -11,9 +11,7 @@
  * 
  * const schema = z.string().meta({
  *   title: "Field Title",
- *   placeholder: "Enter value...",
- *   group: "my-group",
- *   order: 1
+ *   group: "connection-settings"
  * });
  * ```
  */
@@ -23,154 +21,79 @@ import 'zod';
 declare module 'zod' {
     interface GlobalMeta {
         // ============================================
-        // UI Presentation
+        // Semantic Metadata (Schema-level concerns)
         // ============================================
         
-        /** Display title for the field (overrides auto-generated label) */
+        /** 
+         * Human-readable title for the field.
+         * Provides semantic meaning beyond the field name.
+         */
         title?: string;
         
-        /** Placeholder text for input fields */
-        placeholder?: string;
-        
-        /** Constraint text shown below the field (e.g., "Must be at least 8 characters") */
-        constraintText?: string;
-        
-        /** Help text shown in a tooltip or info icon */
-        helpText?: string;
-        
-        // ============================================
-        // Field Configuration
-        // ============================================
-        
         /** 
-         * Explicit field type override.
-         * If not specified, the type is inferred from the Zod schema.
-         */
-        fieldType?: 
-            | 'text' 
-            | 'number' 
-            | 'select' 
-            | 'multiselect' 
-            | 'checkbox' 
-            | 'toggle' 
-            | 'textarea' 
-            | 'password' 
-            | 'url' 
-            | 'email'
-            | 'radio'
-            | 'tiles'
-            | 'slider'
-            | 'tags'      // For string arrays
-            | 'record'    // For z.record() fields
-            | 'array'     // For z.array() fields
-            | 'object'    // For nested objects
-            | 'union';    // For z.union() fields
-        
-        /** 
-         * Options for select/multiselect/radio/tiles fields.
-         * If not provided, options are inferred from z.enum() or z.union() of literals.
-         */
-        options?: Array<{
-            label: string;
-            value: string;
-            description?: string;
-            disabled?: boolean;
-            iconName?: string;
-            tags?: string[];
-        }>;
-        
-        /** Whether the field is disabled */
-        disabled?: boolean;
-        
-        /** Whether the field is read-only */
-        readOnly?: boolean;
-        
-        // ============================================
-        // Layout & Visibility
-        // ============================================
-        
-        /** 
-         * Sort order within a group.
-         * Lower numbers appear first. Default is 999.
-         */
-        order?: number;
-        
-        /** 
-         * Group ID for organizing fields into sections.
-         * Fields with the same group are rendered together.
+         * Logical grouping for related fields.
+         * Groups fields by functional relationship, not UI layout.
          */
         group?: string;
         
-        /** Whether the field is hidden from the UI */
-        hidden?: boolean;
+        /** 
+         * Logical ordering within a group.
+         * Represents conceptual importance/sequence, not UI positioning.
+         */
+        priority?: number;
         
         /** 
-         * Whether the field is considered "advanced".
-         * Advanced fields may be hidden by default or shown in a separate section.
+         * Whether this field represents advanced/expert configuration.
+         * Semantic distinction between basic and advanced concepts.
          */
-        advanced?: boolean;
+        isAdvanced?: boolean;
         
         /** 
-         * Column span for grid layouts.
-         * 1 = half width, 2 = full width.
+         * Whether this field should be read-only in certain contexts.
+         * Represents data constraints, not UI state.
          */
-        colSpan?: 1 | 2;
+        readOnly?: boolean;
         
         // ============================================
-        // Validation Display
-        // ============================================
-        
-        /** 
-         * Custom error messages keyed by Zod error code.
-         * Overrides default Zod error messages.
-         */
-        errorMessages?: Record<string, string>;
-        
-        // ============================================
-        // Conditional Rendering
+        // Validation Enhancement
         // ============================================
         
         /** 
-         * Condition for showing/hiding the field based on other field values.
+         * Human-readable constraint description.
+         * Explains validation rules in user terms.
          */
-        showWhen?: {
-            /** Path to the field to check */
-            field: string;
-            /** Value to compare against */
-            value: unknown;
-            /** Comparison operator (default: 'eq') */
-            operator?: 'eq' | 'neq' | 'in' | 'notIn';
-        };
+        constraintDescription?: string;
+        
+        /** 
+         * Custom validation error messages.
+         * Provides better user experience for validation failures.
+         */
+        validationMessages?: Record<string, string>;
         
         // ============================================
-        // Record/Array Specific
+        // Collection Metadata
         // ============================================
         
-        /** Title for individual items in a record or array */
-        itemTitle?: string;
+        /** 
+         * Semantic label for items in arrays/records.
+         * Describes what each item represents conceptually.
+         */
+        itemLabel?: string;
         
-        /** Text for the "Add" button in records/arrays */
-        addButtonText?: string;
-        
-        /** Minimum number of items (for arrays) */
+        /** 
+         * Minimum/maximum constraints for collections.
+         * Represents business rules, not UI limits.
+         */
         minItems?: number;
-        
-        /** Maximum number of items (for arrays) */
         maxItems?: number;
         
         // ============================================
-        // Union Specific
+        // Union/Variant Metadata
         // ============================================
         
         /** 
-         * Discriminator value for this variant in a union.
-         * Used to identify which variant is selected.
-         */
-        discriminator?: string;
-        
-        /** 
-         * Labels for union variants, keyed by discriminator value.
-         * Used at the union level to provide human-readable labels.
+         * Labels for union variants.
+         * Maps discriminator values to human-readable names.
          */
         variantLabels?: Record<string, string>;
     }
