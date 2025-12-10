@@ -1,7 +1,6 @@
 package org.opensearch.migrations.common
 
 import org.gradle.api.GradleException
-import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.Sync
 import org.gradle.api.Project
 import com.bmuschko.gradle.docker.tasks.image.Dockerfile
@@ -32,7 +31,8 @@ class CommonUtils {
                                                               String destProjectName, String destDir) {
         // Sync performs a copy, while also deleting items from the destination directory that are not in the source directory
         // In our case, jars of old versions were getting "stuck" and causing conflicts when the program was run
-        var dstCopyTask = dockerBuildProject.task("copyArtifact_${destProjectName}", type: Sync) {
+        // Using tasks.register() for lazy task configuration (configuration avoidance)
+        return dockerBuildProject.tasks.register("copyArtifact_${destProjectName}", Sync) {
             into destDir
             duplicatesStrategy = 'WARN'
 
@@ -41,7 +41,7 @@ class CommonUtils {
 
             // Copy jars
             // Lazily evaluate this runtimeClasspath
-            from(project.provider { sourceArtifactProject.configurations.runtimeClasspath }) {
+            from(dockerBuildProject.provider { sourceArtifactProject.configurations.runtimeClasspath }) {
                 include "*.jar"
                 into("jars")
             }
@@ -49,15 +49,26 @@ class CommonUtils {
                 include "*.jar"
                 into("jars")
             }
+            
+            // Explicit inputs/outputs for incremental build support
+            inputs.file(dockerBuildProject.rootProject.layout.projectDirectory.file("VERSION"))
+            inputs.files(dockerBuildProject.provider { sourceArtifactProject.configurations.runtimeClasspath })
+            inputs.files(sourceArtifactProject.tasks.named('jar'))
+            outputs.dir(destDir)
+            
+            dependsOn(sourceArtifactProject.tasks.named("assemble"))
+            dependsOn(sourceArtifactProject.tasks.named("build"))
         }
-        dstCopyTask.dependsOn(sourceArtifactProject.tasks.named("assemble"))
-        dstCopyTask.dependsOn(sourceArtifactProject.tasks.named("build"))
     }
 
     static def copyVersionFileToDockerStaging(Project project, String destProjectName, String destDir) {
-        return project.tasks.register("copyVersionFile_${destProjectName}", Copy) {
+        return project.tasks.register("copyVersionFile_${destProjectName}", Sync) {
             from(project.rootProject.layout.projectDirectory.file("VERSION"))
             into(project.layout.projectDirectory.dir(destDir))
+            
+            // Explicit inputs/outputs for incremental build support
+            inputs.file(project.rootProject.layout.projectDirectory.file("VERSION"))
+            outputs.dir(project.layout.projectDirectory.dir(destDir))
         }
     }
 
@@ -71,7 +82,8 @@ class CommonUtils {
                                 String dockerImageName) {
         def projectName = sourceArtifactProject.name;
         def dockerBuildDir = "build/"+getDockerBuildDirName(dockerImageName, projectName);
-        dockerBuildProject.task("createDockerfile_${dockerImageName}", type: Dockerfile) {
+        // Using tasks.register() for lazy task configuration (configuration avoidance)
+        return dockerBuildProject.tasks.register("createDockerfile_${dockerImageName}", Dockerfile) {
             destFile = dockerBuildProject.file("${dockerBuildDir}/Dockerfile")
             dependsOn "copyArtifact_${dockerImageName}"
             if (baseImageProjectOverride) {
@@ -133,4 +145,3 @@ class CommonConfigurations {
         }
     }
 }
-

@@ -18,28 +18,28 @@ configurations {
     lucene9
 }
 
-task shadowLucene5(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+tasks.register('shadowLucene5', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
     mergeServiceFiles()
     configurations = [project.configurations.lucene5]
     archiveClassifier.set('lucene5-shadow')
     relocate 'org.apache.lucene', 'shadow.lucene5.org.apache.lucene'
 }
 
-task shadowLucene6(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+tasks.register('shadowLucene6', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
     mergeServiceFiles()
     configurations = [project.configurations.lucene6]
     archiveClassifier.set('lucene6-shadow')
     relocate 'org.apache.lucene', 'shadow.lucene6.org.apache.lucene'
 }
 
-task shadowLucene7(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+tasks.register('shadowLucene7', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
     mergeServiceFiles()
     configurations = [project.configurations.lucene7]
     archiveClassifier.set('lucene7-shadow')
     relocate 'org.apache.lucene', 'shadow.lucene7.org.apache.lucene'
 }
 
-task shadowLucene9(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+tasks.register('shadowLucene9', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
     mergeServiceFiles()
     archiveClassifier.set('lucene9-shadow')
     configurations = [project.configurations.lucene9]

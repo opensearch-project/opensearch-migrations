@@ -108,9 +108,25 @@ static TaskProvider<Sync> getMigrationConsoleSyncTask(Project project, String do
         from (project.rootProject.layout.projectDirectory.file("VERSION"))
 
         def sourceDirName = sourceDirectoryOverrides.get(projectName, projectName)
-        from(project.layout.projectDirectory.dir("src/main/docker/${sourceDirName}").asFileTree.matching {
+        def sourceDir = project.layout.projectDirectory.dir("src/main/docker/${sourceDirName}")
+        from(sourceDir.asFileTree.matching {
             exclude("**/build/**", "**/.venv/**")
         })
+
+        // Explicit inputs for incremental build support
+        // Track the source Dockerfile and related files
+        inputs.dir(sourceDir)
+        inputs.file(project.rootProject.layout.projectDirectory.file("VERSION"))
+        // Track library and application JARs
+        (libraries + applications).each { lib ->
+            inputs.files(lib.configurations.runtimeClasspath)
+            inputs.files(lib.tasks.named('jar'))
+        }
+        // Track application start scripts
+        applications.each { app ->
+            inputs.files(app.tasks.named('startScripts').get().outputs.files)
+        }
+        outputs.dir(destDir)
 
         // Collect assemble tasks from libraries and applications
         def assembleTasks = (libraries + applications).collect { it.tasks.named("assemble") }
@@ -142,7 +158,7 @@ javaContainerServices.each { dockerImageName, projectName ->
 javaContainerServices.forEach { dockerImageName, gradleProjectName ->
     def projectName = project(gradleProjectName).name;
     def dockerBuildDir = "build/docker/${dockerImageName}_${projectName}"
-    task "buildDockerImage_${dockerImageName}"(type: DockerBuildImage) {
+    tasks.register("buildDockerImage_${dockerImageName}", DockerBuildImage) {
         dependsOn "createDockerfile_${dockerImageName}"
         inputDir = project.file("${dockerBuildDir}")
         images.add("migrations/${dockerImageName}:${version}".toString())
@@ -161,7 +177,7 @@ dockerCompose {
             ]
 }
 
-task buildDockerImages {
+tasks.register('buildDockerImages') {
     dependsOn tasks.named('buildDockerImage_k8s_config_map_util_scripts')
     dependsOn tasks.named('buildDockerImage_elasticsearch_searchguard')
     dependsOn tasks.named('buildDockerImage_migration_console')
