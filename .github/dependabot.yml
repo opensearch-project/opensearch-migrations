@@ -32,9 +32,9 @@ updates:
       - dependency-name: "io.projectreactor.netty:*"
         update-types:
           - "version-update:semver-major"  # 1.3+ requires Netty 4.2
-      - dependency-name: "io.projectreactor:reactor-test"
+      - dependency-name: "io.projectreactor:*"
         update-types:
-          - "version-update:semver-major"
+          - "version-update:semver-major"  # Major versions may require newer Netty
       - dependency-name: "io.opentelemetry.semconv:*"
       - dependency-name: "org.apache.commons:commons-compress"
       - dependency-name: "org.apache.lucene:*"
