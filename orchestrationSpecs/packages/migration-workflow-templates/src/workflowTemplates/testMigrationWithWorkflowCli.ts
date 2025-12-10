@@ -60,7 +60,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             )
         )
         .addRetryParameters({
-            limit: "13",          // ~10 minutes
+            limit: "33",          // ~30 minutes
             retryPolicy: "Always",
             backoff: {
                 duration: "5",     // Start at 5 seconds
@@ -68,6 +68,39 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
                 cap: "60"         // Cap at 1 minute
             }
         })
+    )
+
+    .addTemplate("handleWorkflowSuccess", t => t
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+
+        .addContainer(cb => cb
+            .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
+            .addCommand(["/bin/bash", "-c"])
+            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addArgs(["echo 'Migration workflow completed successfully'"])
+        )
+    )
+
+    .addTemplate("handleWorkflowFailure", t => t
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+
+        .addContainer(cb => cb
+            .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
+            .addCommand(["/bin/bash", "-c"])
+            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addArgs(["echo 'Migration workflow failed'"])
+        )
+    )
+
+    .addTemplate("handleWorkflowError", t => t
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+
+        .addContainer(cb => cb
+            .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
+            .addCommand(["/bin/bash", "-c"])
+            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addArgs(["echo 'Migration workflow encountered an error'"])
+        )
     )
 
     .addTemplate("deleteMigrationWorkflow", t => t
@@ -108,7 +141,31 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
                 })
             )
 
-            // Step 3: Delete the migration workflow
+            // Step 3: Handle workflow success (conditional on monitor result)
+            .addStep("handleSuccess", INTERNAL, "handleWorkflowSuccess", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                }),
+                { when: steps => expr.equals(steps.monitorWorkflow.outputs.monitorResult, expr.literal("SUCCEEDED")) }
+            )
+
+            // Step 4: Handle workflow failure (conditional on monitor result)
+            .addStep("handleFailure", INTERNAL, "handleWorkflowFailure", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                }),
+                { when: steps => expr.equals(steps.monitorWorkflow.outputs.monitorResult, expr.literal("FAILED")) }
+            )
+
+            // Step 5: Handle workflow error (conditional on monitor result)
+            .addStep("handleError", INTERNAL, "handleWorkflowError", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                }),
+                { when: steps => expr.equals(steps.monitorWorkflow.outputs.monitorResult, expr.literal("ERROR")) }
+            )
+
+            // Step 4: Delete the migration workflow (always executes)
             .addStep("deleteMigrationWorkflow", INTERNAL, "deleteMigrationWorkflow")
         )
     )

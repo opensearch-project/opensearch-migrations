@@ -2190,7 +2190,22 @@ exports[`test workflow template renderings full-migration-with-workflow-cli 1`] 
       {
         "container": {
           "args": [
-            "set -e -x
+            "#!/bin/bash
+#
+# ============================================================================
+# WARNING: TEST HELPER SCRIPT - SHOULD BE MOVED TO SEPARATE PACKAGE
+# ============================================================================
+# This script is part of the test workflow infrastructure and creates a
+# logical dependency cycle:
+# - migration-workflow-templates package provides workflow templates
+# - workflow CLI (in migration console) depends on migration-workflow-templates
+# - This test script depends on workflow CLI
+#
+# TODO: Move test workflows and helpers to a separate package (e.g.,
+# migration-workflow-templates-test) to break this dependency cycle.
+# ============================================================================
+
+set -e -x
 
 # Activate the Python virtual environment to get access to workflow CLI
 . /etc/profile.d/venv.sh
@@ -2257,7 +2272,22 @@ echo "Workflow submit output: $WORKFLOW_OUTPUT"
       {
         "container": {
           "args": [
-            "set -e -x
+            "#!/bin/bash
+#
+# ============================================================================
+# WARNING: TEST HELPER SCRIPT - SHOULD BE MOVED TO SEPARATE PACKAGE
+# ============================================================================
+# This script is part of the test workflow infrastructure and creates a
+# logical dependency cycle:
+# - migration-workflow-templates package provides workflow templates
+# - workflow CLI (in migration console) depends on migration-workflow-templates
+# - This test script depends on workflow CLI
+#
+# TODO: Move test workflows and helpers to a separate package (e.g.,
+# migration-workflow-templates-test) to break this dependency cycle.
+# ============================================================================
+
+set -e -x
 
 echo "Checking workflow status"
 . /etc/profile.d/venv.sh
@@ -2359,8 +2389,122 @@ exit $EXIT_CODE
             "duration": "5",
             "factor": "2",
           },
-          "limit": "13",
+          "limit": "33",
           "retryPolicy": "Always",
+        },
+      },
+      {
+        "container": {
+          "args": [
+            "echo 'Migration workflow completed successfully'",
+          ],
+          "command": [
+            "/bin/bash",
+            "-c",
+          ],
+          "env": [],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "1000m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "handleworkflowsuccess",
+        "outputs": {
+          "parameters": [],
+        },
+      },
+      {
+        "container": {
+          "args": [
+            "echo 'Migration workflow failed'",
+          ],
+          "command": [
+            "/bin/bash",
+            "-c",
+          ],
+          "env": [],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "1000m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "handleworkflowfailure",
+        "outputs": {
+          "parameters": [],
+        },
+      },
+      {
+        "container": {
+          "args": [
+            "echo 'Migration workflow encountered an error'",
+          ],
+          "command": [
+            "/bin/bash",
+            "-c",
+          ],
+          "env": [],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "1000m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "handleworkflowerror",
+        "outputs": {
+          "parameters": [],
         },
       },
       {
@@ -2440,6 +2584,63 @@ metadata:
               },
               "name": "monitorWorkflow",
               "template": "monitorworkflow",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                ],
+              },
+              "name": "handleSuccess",
+              "template": "handleworkflowsuccess",
+              "when": "{{steps.monitorWorkflow.outputs.parameters.monitorResult}} == 'SUCCEEDED",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                ],
+              },
+              "name": "handleFailure",
+              "template": "handleworkflowfailure",
+              "when": "{{steps.monitorWorkflow.outputs.parameters.monitorResult}} == 'FAILED",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                ],
+              },
+              "name": "handleError",
+              "template": "handleworkflowerror",
+              "when": "{{steps.monitorWorkflow.outputs.parameters.monitorResult}} == 'ERROR",
             },
           ],
           [
