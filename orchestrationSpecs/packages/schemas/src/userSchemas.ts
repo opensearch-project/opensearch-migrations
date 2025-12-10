@@ -540,13 +540,12 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                 itemTitle: "Target Cluster",
                 addButtonText: "Add Target Cluster"
             }),
-        migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG).min(1).default([{
-            skipApprovals: false,
-            fromSource: "source1",
-            toTarget: "target1",
-            snapshotExtractAndLoadConfigs: [NORMALIZED_SNAPSHOT_MIGRATION_CONFIG.parse({})],
-            replayerConfig: REPLAYER_OPTIONS.parse({})
-        }])
+        migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG).min(1).default([
+            NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG.parse({
+                fromSource: "source1",
+                toTarget: "target1"
+            })
+        ])
             .meta({
                 title: "Migration Configurations",
                 description: "Define the migration workflows between source and target clusters",
