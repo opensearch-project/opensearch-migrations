@@ -100,6 +100,20 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Cleanup Previous MA Deployment') {
+                steps {
+                    timeout(time: 10, unit: 'MINUTES') {
+                        dir('libraries/testAutomation') {
+                            script {
+                                sh "pipenv install --deploy"
+                                sh "kubectl config use-context minikube"
+                                sh "pipenv run app --delete-only"
+                            }
+                        }
+                    }
+                }
+            }
+
             stage('Perform Python E2E Tests') {
                 steps {
                     timeout(time: 2, unit: 'HOURS') {
@@ -113,9 +127,7 @@ def call(Map config = [:]) {
                                 if (testIdsResolved != "" && testIdsResolved != "all") {
                                     testIdsArg = "--test-ids='$testIdsResolved'"
                                 }
-                                sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
-                                sh "kubectl config use-context minikube"
                                 def registryIp = sh(script: "kubectl get svc -n kube-system registry -o jsonpath='{.spec.clusterIP}'", returnStdout: true).trim()
                                 sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='${registryIp}:80/'"
                             }
