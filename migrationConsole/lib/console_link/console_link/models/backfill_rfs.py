@@ -391,67 +391,28 @@ def get_detailed_status_obj(target_cluster,
     )
 
 
-def _get_shard_setup_successor_items(cluster, index_name: str) -> Optional[str]:
-    """
-    Try to read the special shard_setup doc and return its successor_items field.
-    Returns None if not present or if the field doesn't exist.
-    """
-    try:
-        resp = cluster.call_api(f"/{index_name}/_doc/shard_setup")
-        body = resp.json()
-        src = body.get("_source") or {}
-        return src.get("successor_items")
-    except requests.exceptions.RequestException as e:
-        logger.debug(f"shard_setup doc not available: {e}")
-    except Exception as e:
-        logger.debug(f"Failed to parse shard_setup doc: {e}")
-    return None
-
-
-def _get_status_for_active_workers(active_workers: bool) -> StepStateWithPause:
-    """Return the appropriate status based on whether workers are active."""
-    return StepStateWithPause.RUNNING if active_workers else StepStateWithPause.PAUSED
-
-
-def _compute_in_progress_values(total: int, completed: int, started_epoch: Optional[int],
-                                active_workers: bool) -> tuple:
-    """Compute derived values for an in-progress migration."""
-    percentage_completed = (completed / total * 100.0) if total > 0 else 0.0
-    eta_ms = _estimate_eta_ms_from_shards(started_epoch, percentage_completed) if active_workers else None
-    status = _get_status_for_active_workers(active_workers)
-    return None, percentage_completed, eta_ms, status
-
-
-def _compute_completed_values(target_cluster, index_to_check: str) -> tuple:
-    """Compute derived values for a completed migration."""
-    max_completed_epoch = _get_max_completed_epoch(target_cluster, index_to_check)
-    finished_iso = (
-        datetime.fromtimestamp(max_completed_epoch, tz=timezone.utc).isoformat()
-        if max_completed_epoch
-        else datetime.now(timezone.utc).isoformat()
-    )
-    return finished_iso, 100.0, None, StepStateWithPause.COMPLETED
-
-
-def _is_migration_completed(total: int, completed: int) -> bool:
-    """Check if the migration is completed based on shard counts."""
-    return total == 0 or (total > 0 and completed >= total)
-
-
 def compute_dervived_values(target_cluster, index_to_check, total, completed, started_epoch, active_workers: bool):
-    # When total == 0, check if shard_setup has successor_items (race condition scenario)
-    if total == 0:
-        successor_items = _get_shard_setup_successor_items(target_cluster, index_to_check)
-        if successor_items:
-            # Work items are still being created - NOT completed
-            logger.info("shard_setup has successor_items but total=0, migration is still in progress")
-            status = _get_status_for_active_workers(active_workers)
-            return None, 0.0, None, status
-
-    if _is_migration_completed(total, completed):
-        return _compute_completed_values(target_cluster, index_to_check)
-
-    return _compute_in_progress_values(total, completed, started_epoch, active_workers)
+    # Consider it completed if there's nothing to do (total = 0) or we've completed all shards
+    if total == 0 or (total > 0 and completed >= total):
+        max_completed_epoch = _get_max_completed_epoch(target_cluster, index_to_check)
+        finished_iso = (
+            datetime.fromtimestamp(max_completed_epoch, tz=timezone.utc).isoformat()
+            if max_completed_epoch
+            else datetime.now(timezone.utc).isoformat()
+        )
+        percentage_completed = 100.0
+        eta_ms = None
+        status = StepStateWithPause.COMPLETED
+    else:
+        finished_iso = None
+        percentage_completed = (completed / total * 100.0) if total > 0 else 0.0
+        if active_workers:
+            eta_ms = _estimate_eta_ms_from_shards(started_epoch, percentage_completed)
+            status = StepStateWithPause.RUNNING
+        else:
+            eta_ms = None
+            status = StepStateWithPause.PAUSED
+    return finished_iso, percentage_completed, eta_ms, status
 
 
 EXTRACT_UNIQUE_INDEX_SHARD_SCRIPT = (
