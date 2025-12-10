@@ -13,7 +13,7 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {configureAndSubmitScript, monitorScript} from "../resourceLoader";
 
-export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
+export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
     k8sResourceName: "full-migration-with-workflow-cli",
     parallelism: 1,
     serviceAccountName: "argo-workflow-executor"
@@ -22,6 +22,9 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
 
     .addTemplate("configureAndSubmitWorkflow", t => t
+        // TODO: Remove base64 encoding to maintain strong typing throughout workflows
+        // Currently using base64 as a workaround for passing complex JSON through Argo workflow parameters.
+        // Consider using ConfigMaps or a dedicated typed parameter passing mechanism instead.
         .addRequiredInput("migrationConfigBase64", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
@@ -42,6 +45,13 @@ export const testMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addCommand(["/bin/bash", "-c"])
             .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
             .addArgs([monitorScript])
+            // monitorResult output values:
+            // - "SUCCEEDED": Migration completed successfully (exit code 0)
+            // - "FAILED": Migration failed permanently (exit code 0, but marks failure)
+            // - "RETRY": Migration still in progress, retry monitoring (exit code 1, triggers retry)
+            // - "ERROR": Unexpected error occurred (exit code 2, fails the step)
+            // The retry policy only retries on exit code 1 (RETRY case).
+            // Exit codes 0 and 2 are terminal and cause the step to succeed or fail respectively.
             .addPathOutput(
                 "monitorResult",
                 "/tmp/outputs/monitorResult",

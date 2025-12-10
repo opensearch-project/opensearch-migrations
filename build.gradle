@@ -507,7 +507,7 @@ tasks.register('gatherJacocoExecForMerging', Sync) {
         fileTree(dir: proj.buildDir, include: 'jacoco/*.exec')
     }
     into "$buildDir/jacocoMerged"
-    
+
     // Explicit outputs for incremental build support
     outputs.dir("$buildDir/jacocoMerged")
 }

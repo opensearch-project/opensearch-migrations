@@ -4,7 +4,7 @@ import {CreateOrGetSnapshot} from "./createOrGetSnapshot";
 import {CreateSnapshot} from "./createSnapshot";
 import {DocumentBulkLoad} from "./documentBulkLoad";
 import {FullMigration} from "./fullMigration";
-import {testMigrationWithWorkflowCli} from "./testMigrationWithWorkflowCli";
+import {TestMigrationWithWorkflowCli} from "./testMigrationWithWorkflowCli";
 import {MetadataMigration} from "./metadataMigration";
 import {MigrationConsole} from "./migrationConsole";
 import {Replayer} from "./replayer";
@@ -23,5 +23,5 @@ export const AllWorkflowTemplates = [
     Replayer,
     SetupKafka,
     ConfigManagementHelpers,
-    testMigrationWithWorkflowCli,
+    TestMigrationWithWorkflowCli,
 ];

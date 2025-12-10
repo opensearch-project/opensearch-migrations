@@ -120,6 +120,8 @@ if ! minikube addons list | grep -q "registry.*enabled"; then
   echo "✅  Registry addon enabled"
   
   # Wait for registry pod to be ready
+  # Note: The 'actual-registry=true' label is set by Minikube's registry addon to distinguish
+  # the actual registry pod from the registry proxy/daemonset pods
   echo "⏳  Waiting for registry pod to be ready..."
   kubectl wait --for=condition=ready pod -l actual-registry=true -n kube-system --timeout=120s || \
     kubectl wait --for=condition=ready pod -l kubernetes.io/minikube-addons=registry -n kube-system --timeout=120s || \
