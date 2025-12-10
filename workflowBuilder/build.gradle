@@ -1,0 +1,59 @@
+plugins {
+    id 'com.github.node-gradle.node' version '7.1.0'
+    id 'base'
+}
+
+node {
+    version = '22.12.0'
+    download = true
+}
+
+def schemaOutputFile = file("${projectDir}/generated/schemas/workflow-schema.json")
+def orchestrationSpecsDir = rootProject.projectDir.toPath().resolve('orchestrationSpecs').toFile()
+def schemasPackageDir = rootProject.projectDir.toPath().resolve('orchestrationSpecs/packages/schemas').toFile()
+
+task generateSchema {
+    inputs.dir(file("${schemasPackageDir}/src"))
+    inputs.file(file("${schemasPackageDir}/package.json"))
+    inputs.file(file("${orchestrationSpecsDir}/package.json"))
+    outputs.file schemaOutputFile
+    
+    doLast {
+        schemaOutputFile.parentFile.mkdirs()
+        def process = new ProcessBuilder('npm', 'run', 'dev-schema')
+            .directory(orchestrationSpecsDir)
+            .redirectErrorStream(true)
+            .start()
+        def output = process.inputStream.text
+        def exitCode = process.waitFor()
+        if (exitCode != 0) {
+            throw new GradleException("generateSchema failed with exit code ${exitCode}:\n${output}")
+        }
+        def jsonStart = output.indexOf('{')
+        if (jsonStart >= 0) {
+            schemaOutputFile.text = output.substring(jsonStart)
+        }
+    }
+}
+
+task npmBuild(type: NpmTask) {
+    dependsOn npmInstall, generateSchema
+    args = ['run', 'build']
+}
+
+task npmTest(type: NpmTask) {
+    dependsOn npmInstall
+    args = ['run', 'test:run']
+}
+
+task npmDev(type: NpmTask) {
+    dependsOn npmInstall, generateSchema
+    args = ['run', 'dev']
+}
+
+build.dependsOn npmBuild
+check.dependsOn npmTest
+
+clean {
+    delete "${projectDir}/generated"
+}

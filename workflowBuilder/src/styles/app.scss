@@ -1,0 +1,323 @@
+// Global styles for Migration Configuration Builder
+// Schema-driven form with bidirectional YAML/JSON sync
+
+// ============================================
+// BASE STYLES
+// ============================================
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+// ============================================
+// FORM PANEL
+// ============================================
+
+.form-panel-container {
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+  padding-right: 8px;
+  
+  // Custom scrollbar
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 4px;
+    
+    &:hover {
+      background: #a1a1a1;
+    }
+  }
+}
+
+// ============================================
+// CODE PANEL
+// ============================================
+
+.code-panel-container {
+  position: sticky;
+  top: 20px;
+  align-self: flex-start;
+  
+  // Monaco editor container
+  .monaco-editor-container {
+    border: 1px solid #d5dbdb;
+    border-radius: 8px;
+    overflow: hidden;
+    
+    &:focus-within {
+      border-color: #0972d3;
+      box-shadow: 0 0 0 1px #0972d3;
+    }
+  }
+}
+
+// ============================================
+// VALIDATION STATUS
+// ============================================
+
+.validation-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+  
+  &--valid {
+    background-color: #f2fcf3;
+    color: #037f0c;
+    border: 1px solid #29a32a;
+  }
+  
+  &--invalid {
+    background-color: #fff7f7;
+    color: #d91515;
+    border: 1px solid #d91515;
+  }
+  
+  &--validating {
+    background-color: #f2f8fd;
+    color: #0972d3;
+    border: 1px solid #0972d3;
+  }
+}
+
+// ============================================
+// FORM GROUPS
+// ============================================
+
+.schema-form-group {
+  margin-bottom: 16px;
+  
+  &:last-child {
+    margin-bottom: 0;
+  }
+  
+  // Collapsible group header
+  &__header {
+    cursor: pointer;
+    user-select: none;
+    
+    &:hover {
+      background-color: #fafafa;
+    }
+  }
+  
+  // Group content
+  &__content {
+    padding-top: 16px;
+  }
+}
+
+// ============================================
+// FIELD STYLES
+// ============================================
+
+.schema-field {
+  margin-bottom: 16px;
+  
+  &:last-child {
+    margin-bottom: 0;
+  }
+  
+  // Error state
+  &--error {
+    .awsui-input,
+    .awsui-select,
+    .awsui-textarea {
+      border-color: #d91515;
+    }
+  }
+  
+  // Focused state
+  &--focused {
+    background-color: #f2f8fd;
+    border-radius: 4px;
+    padding: 8px;
+    margin: -8px;
+    margin-bottom: 8px;
+  }
+}
+
+// ============================================
+// FORMAT TOGGLE
+// ============================================
+
+.format-toggle {
+  display: inline-flex;
+  border: 1px solid #d5dbdb;
+  border-radius: 4px;
+  overflow: hidden;
+  
+  &__button {
+    padding: 6px 16px;
+    border: none;
+    background: #fff;
+    cursor: pointer;
+    font-size: 14px;
+    color: #545b64;
+    transition: all 0.15s ease;
+    
+    &:hover:not(&--active) {
+      background-color: #fafafa;
+    }
+    
+    &--active {
+      background-color: #0972d3;
+      color: #fff;
+    }
+    
+    &:first-child {
+      border-right: 1px solid #d5dbdb;
+    }
+  }
+}
+
+// ============================================
+// EDITOR ANNOTATIONS
+// ============================================
+
+.monaco-editor {
+  // Error annotation
+  .error-annotation {
+    background-color: rgba(217, 21, 21, 0.1);
+    border-left: 3px solid #d91515;
+  }
+  
+  // Warning annotation
+  .warning-annotation {
+    background-color: rgba(255, 153, 0, 0.1);
+    border-left: 3px solid #ff9900;
+  }
+  
+  // Info annotation
+  .info-annotation {
+    background-color: rgba(9, 114, 211, 0.1);
+    border-left: 3px solid #0972d3;
+  }
+}
+
+// Highlight line for field focus
+.ace-highlight-line {
+  background-color: #fff3cd !important;
+  position: absolute;
+  z-index: 1;
+}
+
+// Focus highlight for form fields (used by focus sync)
+.field-focus-highlight {
+  background-color: #e6f7ff !important;
+  border-left: 3px solid #0972d3 !important;
+  padding-left: 12px;
+  margin-left: -15px;
+  border-radius: 4px;
+  transition: background-color 0.3s ease-out, border-left 0.3s ease-out;
+  animation: focus-pulse 0.5s ease-out;
+}
+
+@keyframes focus-pulse {
+  0% {
+    background-color: #b3e0ff;
+  }
+  100% {
+    background-color: #e6f7ff;
+  }
+}
+
+// ============================================
+// CLOUDSCAPE OVERRIDES
+// ============================================
+
+// Better spacing for containers
+.awsui-context-content-header {
+  padding-bottom: 0;
+}
+
+[class*="awsui_container"] {
+  margin-bottom: 0;
+}
+
+[class*="awsui_form-field"] {
+  margin-bottom: 0;
+}
+
+// Improve select dropdown appearance
+[class*="awsui_dropdown"] {
+  max-height: 300px;
+}
+
+// ============================================
+// LOADING STATES
+// ============================================
+
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+// ============================================
+// RESPONSIVE STYLES
+// ============================================
+
+@media (max-width: 991px) {
+  .form-panel-container {
+    max-height: none;
+    overflow-y: visible;
+    margin-bottom: 24px;
+  }
+  
+  .code-panel-container {
+    position: relative;
+    top: 0;
+  }
+}
+
+// ============================================
+// PRINT STYLES
+// ============================================
+
+@media print {
+  .form-panel-container {
+    display: none;
+  }
+  
+  .code-panel-container {
+    width: 100%;
+    position: relative;
+  }
+  
+  .format-toggle,
+  .validation-status {
+    display: none;
+  }
+}
+
+// ============================================
+// DARK MODE SUPPORT (future)
+// ============================================
+
+@media (prefers-color-scheme: dark) {
+  // Dark mode styles can be added here
+  // Currently using Cloudscape's built-in dark mode support
+}

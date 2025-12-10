@@ -1,0 +1,221 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Test Workflow Configuration",
+  "description": "A simple schema demonstrating all field types for testing",
+  "type": "object",
+  "required": ["name", "enabled", "priority"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "title": "Workflow Name",
+      "description": "A unique name for this workflow",
+      "placeholder": "Enter workflow name",
+      "minLength": 1,
+      "maxLength": 100,
+      "order": 1,
+      "group": "general"
+    },
+    "description": {
+      "type": "string",
+      "title": "Description",
+      "description": "Optional description of the workflow",
+      "placeholder": "Describe what this workflow does",
+      "fieldType": "textarea",
+      "maxLength": 500,
+      "order": 2,
+      "group": "general"
+    },
+    "enabled": {
+      "type": "boolean",
+      "title": "Enabled",
+      "description": "Whether this workflow is active",
+      "default": true,
+      "order": 3,
+      "group": "general"
+    },
+    "priority": {
+      "type": "integer",
+      "title": "Priority",
+      "description": "Execution priority (1-10)",
+      "minimum": 1,
+      "maximum": 10,
+      "default": 5,
+      "order": 4,
+      "group": "general"
+    },
+    "environment": {
+      "type": "string",
+      "title": "Environment",
+      "description": "Target environment for this workflow",
+      "enum": ["development", "staging", "production"],
+      "default": "development",
+      "order": 5,
+      "group": "settings"
+    },
+    "tags": {
+      "type": "array",
+      "title": "Tags",
+      "description": "Labels for categorizing this workflow",
+      "fieldType": "tags",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "order": 6,
+      "group": "settings"
+    },
+    "config": {
+      "type": "object",
+      "title": "Configuration",
+      "description": "Workflow configuration settings",
+      "order": 7,
+      "group": "settings",
+      "properties": {
+        "timeout": {
+          "type": "integer",
+          "title": "Timeout (seconds)",
+          "description": "Maximum execution time",
+          "minimum": 1,
+          "maximum": 3600,
+          "default": 300
+        },
+        "retries": {
+          "type": "integer",
+          "title": "Retry Count",
+          "description": "Number of retry attempts on failure",
+          "minimum": 0,
+          "maximum": 5,
+          "default": 3
+        },
+        "notifyOnComplete": {
+          "type": "boolean",
+          "title": "Notify on Complete",
+          "description": "Send notification when workflow completes",
+          "default": false
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "title": "Workflow Steps",
+      "description": "List of steps to execute",
+      "order": 8,
+      "group": "steps",
+      "itemTitle": "Step",
+      "addButtonText": "Add Step",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "action"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Step Name",
+            "placeholder": "Enter step name"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action",
+            "enum": ["run", "wait", "notify", "transform"]
+          },
+          "parameters": {
+            "type": "object",
+            "title": "Parameters",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "source": {
+      "title": "Data Source",
+      "description": "Source of data for this workflow",
+      "order": 9,
+      "group": "source",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "HTTP Source",
+          "discriminator": "http",
+          "required": ["url"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "http"
+            },
+            "url": {
+              "type": "string",
+              "title": "URL",
+              "format": "uri",
+              "placeholder": "https://api.example.com/data"
+            },
+            "method": {
+              "type": "string",
+              "title": "HTTP Method",
+              "enum": ["GET", "POST", "PUT"],
+              "default": "GET"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "title": "File Source",
+          "discriminator": "file",
+          "required": ["path"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "file"
+            },
+            "path": {
+              "type": "string",
+              "title": "File Path",
+              "placeholder": "/path/to/file.json"
+            },
+            "format": {
+              "type": "string",
+              "title": "File Format",
+              "enum": ["json", "csv", "xml"],
+              "default": "json"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "title": "Database Source",
+          "discriminator": "database",
+          "required": ["connectionString", "query"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "database"
+            },
+            "connectionString": {
+              "type": "string",
+              "title": "Connection String",
+              "placeholder": "postgresql://localhost:5432/db"
+            },
+            "query": {
+              "type": "string",
+              "title": "Query",
+              "fieldType": "textarea",
+              "placeholder": "SELECT * FROM table"
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "title": "Custom Metadata",
+      "description": "Additional key-value metadata",
+      "order": 10,
+      "group": "advanced",
+      "advanced": true,
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -61,6 +61,7 @@ include 'TrafficCapture:nettyWireLogging'
 include 'TrafficCapture:trafficCaptureProxyServer'
 include 'TrafficCapture:trafficReplayer'
 include 'frontend'
+include 'workflowBuilder'
 include 'buildImages'
 include ':console_link'
 

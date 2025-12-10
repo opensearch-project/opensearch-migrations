@@ -99,12 +99,40 @@ export const KAFKA_SERVICES_CONFIG = z.object({
 });
 
 export const S3_REPO_CONFIG = z.object({
-    awsRegion: z.string().describe("The AWS region that the bucket reside in (us-east-2, etc)"),
+    awsRegion: z.string()
+        .meta({
+            title: "AWS Region",
+            description: "The AWS region that the bucket resides in (us-east-2, etc)",
+            placeholder: "us-east-2",
+            order: 1
+        }),
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)/).default("").optional()
-        .describe("Override the default S3 endpoint for clients to connect to.  " +
-            "Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"),
-    s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/).describe("s3://BUCKETNAME/PATH"),
+        .meta({
+            title: "S3 Endpoint Override",
+            description: "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint",
+            placeholder: "https://s3.us-east-2.amazonaws.com",
+            fieldType: "url",
+            order: 2,
+            advanced: true
+        }),
+    s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/)
+        .meta({
+            title: "S3 Repository Path",
+            description: "S3 URI for the snapshot repository",
+            placeholder: "s3://my-bucket/snapshots",
+            constraintText: "Must be in format s3://BUCKETNAME/PATH",
+            order: 3
+        }),
     repoName: z.string().default("migration_assistant_repo").optional()
+        .meta({
+            title: "Repository Name",
+            description: "Name for the Elasticsearch/OpenSearch snapshot repository",
+            placeholder: "migration_assistant_repo",
+            order: 4
+        })
+}).meta({
+    title: "Snapshot Repository",
+    description: "S3 repository configuration for storing snapshots"
 });
 
 export const CPU_QUANTITY = z.string()
@@ -143,15 +171,47 @@ export const PROXY_OPTIONS = z.object({
 });
 
 export const REPLAYER_OPTIONS = z.object({
-    speedupFactor: z.number().default(1.1).optional(),
-    podReplicas: z.number().default(1).optional(),
-    authHeaderOverride: z.string().default("").optional(),
-    loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
+    speedupFactor: z.number().default(1.1).optional()
+        .meta({
+            title: "Speedup Factor",
+            description: "Factor to speed up or slow down traffic replay (1.0 = real-time)",
+            placeholder: "1.1",
+            order: 1
+        }),
+    podReplicas: z.number().default(1).optional()
+        .meta({
+            title: "Pod Replicas",
+            description: "Number of replayer pod replicas to run",
+            placeholder: "1",
+            order: 2
+        }),
+    authHeaderOverride: z.string().default("").optional()
+        .meta({
+            title: "Auth Header Override",
+            description: "Override the authorization header for replayed requests",
+            placeholder: "Bearer token...",
+            order: 3,
+            advanced: true
+        }),
+    loggingConfigurationOverrideConfigMap: z.string().default("").optional()
+        .meta({
+            title: "Logging Config Override",
+            description: "ConfigMap name for custom logging configuration",
+            order: 4,
+            advanced: true
+        }),
     resources: RESOURCE_REQUIREMENTS
         .describe("Resource limits and requests for replayer container.")
-        .default(DEFAULT_RESOURCES.REPLAYER).optional(),
-    // docTransformerBase64: z.string().default("").optional(),
-    // otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
+        .default(DEFAULT_RESOURCES.REPLAYER).optional()
+        .meta({
+            title: "Resource Requirements",
+            description: "CPU and memory limits/requests for the replayer container",
+            order: 5,
+            advanced: true
+        }),
+}).meta({
+    title: "Replayer Options",
+    description: "Configuration for the traffic replayer component"
 });
 
 export const CREATE_SNAPSHOT_OPTIONS = z.object({
@@ -270,19 +330,67 @@ export const HTTP_AUTH_MTLS = z.object({
 export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123])(?:\.[0-9]+)+$/);
 
 export const CLUSTER_CONFIG = z.object({
-    endpoint:  z.string().regex(/^(?:https?:\/\/[^:\/\s]+(:\d+)?(\/)?)?$/).default("").optional(),
-    allowInsecure: z.boolean().default(false).optional(),
-    version: CLUSTER_VERSION_STRING,
-    authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
+    endpoint: z.string().regex(/^(?:https?:\/\/[^:\/\s]+(:\d+)?(\/)?)?$/).default("").optional()
+        .meta({
+            title: "Cluster Endpoint",
+            description: "URL of the cluster (e.g., https://cluster.example.com:9200)",
+            placeholder: "https://cluster.example.com:9200",
+            fieldType: "url",
+            order: 1
+        }),
+    allowInsecure: z.boolean().default(false).optional()
+        .meta({
+            title: "Allow Insecure Connection",
+            description: "Allow connections to clusters with self-signed or invalid SSL certificates",
+            order: 2,
+            advanced: true
+        }),
+    version: CLUSTER_VERSION_STRING
+        .meta({
+            title: "Cluster Version",
+            description: "Version of the Elasticsearch/OpenSearch cluster",
+            placeholder: "ES 7.10.2 or OS 2.11.0",
+            constraintText: "Format: ES [1|2|5|6|7|8].x.x or OS [1|2|3].x.x",
+            order: 3
+        }),
+    authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional()
+        .meta({
+            title: "Authentication",
+            description: "Authentication configuration for connecting to the cluster",
+            order: 4,
+            variantLabels: {
+                basic: "Basic Auth",
+                sigv4: "AWS SigV4",
+                mtls: "Mutual TLS"
+            }
+        }),
 });
 
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
-    endpoint:  z.string().regex(/^https?:\/\/[^:\/\s]+(:\d+)?(\/)?$/), // override to required
+    endpoint: z.string().regex(/^https?:\/\/[^:\/\s]+(:\d+)?(\/)?$/)
+        .meta({
+            title: "Cluster Endpoint",
+            description: "URL of the target cluster (required)",
+            placeholder: "https://target-cluster.example.com:9200",
+            fieldType: "url",
+            order: 1
+        }),
 });
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
-    snapshotRepo: S3_REPO_CONFIG.optional(),
+    snapshotRepo: S3_REPO_CONFIG.optional()
+        .meta({
+            title: "Snapshot Repository",
+            description: "S3 repository configuration for storing snapshots",
+            order: 5
+        }),
     proxy: PROXY_OPTIONS.optional()
+        .meta({
+            title: "Capture Proxy",
+            description: "Configuration for the traffic capture proxy",
+            order: 6,
+            advanced: true
+        })
 });
 
 export const EXTERNALLY_MANAGED_SNAPSHOT = z.object({
@@ -326,26 +434,151 @@ export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
     {message: "names of migration items must be unique when they are provided"});
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
-    skipApprovals : z.boolean().default(false).optional(), // TODO - format
-    fromSource: z.string(),
-    toTarget: z.string(),
-    snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).min(1).optional(),
+    skipApprovals: z.boolean().default(false).optional()
+        .meta({
+            title: "Skip Approvals",
+            description: "Skip approval steps for this migration configuration",
+            order: 0,
+            advanced: true
+        }),
+    fromSource: z.string()
+        .meta({
+            title: "Source Cluster",
+            description: "Name of the source cluster (must match a key in sourceClusters)",
+            placeholder: "source-cluster-name",
+            order: 1
+        }),
+    toTarget: z.string()
+        .meta({
+            title: "Target Cluster",
+            description: "Name of the target cluster (must match a key in targetClusters)",
+            placeholder: "target-cluster-name",
+            order: 2
+        }),
+    snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).min(1).optional()
+        .meta({
+            title: "Snapshot Migrations",
+            description: "Configure snapshot-based data migration (metadata and/or documents)",
+            order: 3,
+            itemTitle: "Snapshot Migration",
+            addButtonText: "Add Snapshot Migration"
+        }),
     replayerConfig: REPLAYER_OPTIONS.optional()
+        .meta({
+            title: "Traffic Replayer",
+            description: "Configure live traffic replay from source to target",
+            order: 4
+        })
+}).meta({
+    title: "Migration Configuration",
+    description: "Configuration for migrating data from a source to target cluster"
 }).refine(data => {
         const names = data.snapshotExtractAndLoadConfigs?.map(m => m.name).filter(s => s);
         return names ? names.length == new Set(names).size : true;
     },
     {message: "names of snapshotExtractAndLoadConfigs items must be unique when they are provided"});
 
-export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
-export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);
+export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG)
+    .meta({
+        title: "Source Clusters",
+        description: "Define the source Elasticsearch/OpenSearch clusters to migrate from",
+        itemTitle: "Source Cluster",
+        addButtonText: "Add Source Cluster"
+    });
+
+export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG)
+    .meta({
+        title: "Target Clusters",
+        description: "Define the target OpenSearch clusters to migrate to",
+        itemTitle: "Target Cluster",
+        addButtonText: "Add Target Cluster"
+    });
 
 export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 (
     z.object({
-        skipApprovals : z.boolean().default(false).optional(), // TODO - format
-        sourceClusters: SOURCE_CLUSTERS_MAP,
-        targetClusters: TARGET_CLUSTERS_MAP,
+        skipApprovals: z.boolean().default(false).optional()
+            .meta({
+                title: "Skip All Approvals",
+                description: "Skip all approval steps during migration (use with caution)",
+                order: 0,
+                advanced: true
+            }),
+        sourceClusters: SOURCE_CLUSTERS_MAP
+            .meta({
+                title: "Source Clusters",
+                description: "Define the source Elasticsearch/OpenSearch clusters to migrate from",
+                order: 1,
+                itemTitle: "Source Cluster",
+                addButtonText: "Add Source Cluster"
+            }),
+        targetClusters: TARGET_CLUSTERS_MAP
+            .meta({
+                title: "Target Clusters",
+                description: "Define the target OpenSearch clusters to migrate to",
+                order: 2,
+                itemTitle: "Target Cluster",
+                addButtonText: "Add Target Cluster"
+            }),
         migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG).min(1)
+            .meta({
+                title: "Migration Configurations",
+                description: "Define the migration workflows between source and target clusters",
+                order: 3,
+                itemTitle: "Migration Configuration",
+                addButtonText: "Add Migration"
+            })
+    }).meta({
+        title: "Migration Configuration",
+        description: "Complete configuration for migrating data between Elasticsearch/OpenSearch clusters"
+    }).default({
+        skipApprovals: false,
+        sourceClusters: {
+            source1: {
+                endpoint: "",
+                version: "ES 7.10.2",
+                allowInsecure: false,
+                authConfig: {
+                    basic: {
+                        secretName: "source-secret"
+                    }
+                }
+            }
+        },
+        targetClusters: {
+            target1: {
+                endpoint: "",
+                version: "OS 2.11.0",
+                allowInsecure: false,
+                authConfig: {
+                    basic: {
+                        secretName: "target-secret"
+                    }
+                }
+            }
+        },
+        migrationConfigs: [
+            {
+                skipApprovals: false,
+                fromSource: "source1",
+                toTarget: "target1",
+                replayerConfig: {
+                    speedupFactor: 1.1,
+                    podReplicas: 1,
+                    authHeaderOverride: "",
+                    loggingConfigurationOverrideConfigMap: "",
+                    resources: {
+                        limits: {
+                            cpu: "2000m",
+                            memory: "4000Mi"
+                        },
+                        requests: {
+                            cpu: "2000m",
+                            memory: "4000Mi"
+                        }
+                    }
+                }
+            }
+        ]
     })
 );
