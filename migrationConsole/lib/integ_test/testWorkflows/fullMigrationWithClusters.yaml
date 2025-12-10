@@ -40,16 +40,6 @@ spec:
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
-      - name: migration-console-image
-        valueFrom:
-          configMapKeyRef:
-            name: "{{workflow.parameters.migration-image-configmap}}"
-            key: migrationConsoleImage
-      - name: migration-console-pull-policy
-        valueFrom:
-          configMapKeyRef:
-            name: "{{workflow.parameters.migration-image-configmap}}"
-            key: migrationConsolePullPolicy
       - name: otel-collector-endpoint
         value: "http://otel-collector:4317"
 
@@ -59,6 +49,18 @@ spec:
       steps:
         - - name: generate-cluster-names
             template: generate-cluster-names
+            arguments:
+              parameters:
+                - name: imageMigrationConsoleLocation
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: imageMigrationConsolePullPolicy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
 
         - - name: create-source-cluster
             templateRef:
@@ -121,6 +123,16 @@ spec:
                   value: "{{workflow.parameters.snapshot-and-migration-configs}}"
                 - name: replayer-config
                   value: "{{workflow.parameters.replayer-config}}"
+                - name: imageMigrationConsoleLocation
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: imageMigrationConsolePullPolicy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
 
         # Run the full migration
         - - name: run-full-migration-with-workflow-cli
@@ -146,9 +158,13 @@ spec:
 
     # Template to generate unique cluster names based on template types
     - name: generate-cluster-names
+      inputs:
+        parameters:
+          - name: imageMigrationConsoleLocation
+          - name: imageMigrationConsolePullPolicy
       container:
-        image: "{{workflow.parameters.migration-console-image}}"
-        imagePullPolicy: "{{workflow.parameters.migration-console-pull-policy}}"
+        image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+        imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
         command: [sh, -c]
         args:
           - |
@@ -235,9 +251,11 @@ spec:
           - name: target-config
           - name: snapshot-and-migration-configs
           - name: replayer-config
+          - name: imageMigrationConsoleLocation
+          - name: imageMigrationConsolePullPolicy
       container:
-        image: "{{workflow.parameters.migration-console-image}}"
-        imagePullPolicy: "{{workflow.parameters.migration-console-pull-policy}}"
+        image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+        imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
         command: [sh, -c]
         args:
           - |
