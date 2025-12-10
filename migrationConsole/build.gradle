@@ -27,7 +27,7 @@ def workflowTemplatesStagingP =
 tasks.register('installDependencies', NpmTask) {
     description = 'Install npm dependencies for orchestrationSpecs'
     workingDir = orchestrationSpecsDirP.asFile
-    args = ['ci', '--force', '--omit=optional']
+    args = ['ci', '--force']
 
     inputs.file(orchestrationSpecsDirP.file("package.json"))
     inputs.file(orchestrationSpecsDirP.file("package-lock.json"))
