@@ -30,14 +30,20 @@ images:
 # Kyverno chart configuration
 charts:
   kyverno:
-    version: "3.5.2"
-    repository: "https://kyverno.github.io/kyverno/"
     values:
-      admissionController:
-        replicas: 1
-      backgroundController:
-        replicas: 1
-      cleanupController:
-        replicas: 1
-      reportsController:
-        replicas: 1
+      cleanupJobs:
+        admissionReports:
+          image:
+            registry: ""
+            repository: localhost:5000/migrations/migration_console
+            tag: latest
+        clusterAdmissionReports:
+          image:
+            registry: ""
+            repository: localhost:5000/migrations/migration_console
+            tag: latest
+      webhooksCleanup:
+        image:
+          registry: ""
+          repository: localhost:5000/migrations/migration_console
+          tag: latest

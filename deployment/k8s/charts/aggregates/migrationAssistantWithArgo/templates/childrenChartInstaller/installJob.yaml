@@ -10,7 +10,7 @@ metadata:
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "0"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 1
   ttlSecondsAfterFinished: 600
@@ -84,11 +84,7 @@ spec:
         {{- else }}
               echo "Preparing chart: {{ $name }}"
 
-          {{- if eq $name "kyverno" }}
-              VALUES_B64="{{ include "migrationAssistant.kyvernoValues" $ | b64enc }}"
-              echo "$VALUES_B64" | base64 -d > /tmp/values-{{ $name }}.yaml
-              VALUE_PARAM="--values /tmp/values-{{ $name }}.yaml"
-          {{- else if $chart.values }}
+          {{- if $chart.values }}
               VALUES_B64="{{ $chart.values | toYaml | b64enc }}"
               echo "$VALUES_B64" | base64 -d > /tmp/values-{{ $name }}.yaml
               VALUE_PARAM="--values /tmp/values-{{ $name }}.yaml"

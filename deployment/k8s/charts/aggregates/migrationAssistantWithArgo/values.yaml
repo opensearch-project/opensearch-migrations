@@ -591,3 +591,16 @@ charts:
         enabled: false
       query:
         enabled: false
+
+  kyverno:
+    version: "3.5.2"
+    repository: "https://kyverno.github.io/kyverno/"
+    values:
+      admissionController:
+        replicas: 1
+      backgroundController:
+        replicas: 1
+      cleanupController:
+        replicas: 1
+      reportsController:
+        replicas: 1
