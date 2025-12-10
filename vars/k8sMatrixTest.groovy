@@ -208,7 +208,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 sh "kubectl config use-context minikube"
                                 def registryIp = sh(script: "kubectl get svc -n kube-system registry -o jsonpath='{.spec.clusterIP}'", returnStdout: true).trim()
-                                sh "pipenv run app --test-reports-dir='./reports' --output-reports-summary-only --always-pull-images --registry-prefix='${registryIp}:80/'"
+                                sh "pipenv run app --test-reports-dir='./reports' --output-reports-summary-only --registry-prefix='${registryIp}:80/'"
                             }
                         }
                     }
