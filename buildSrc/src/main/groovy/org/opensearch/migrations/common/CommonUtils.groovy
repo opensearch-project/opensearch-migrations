@@ -45,7 +45,8 @@ class CommonUtils {
                 include "*.jar"
                 into("jars")
             }
-            from(sourceArtifactProject.tasks.named('jar')) {
+            // Use map to get output files instead of task reference for configuration cache compatibility
+            from(sourceArtifactProject.tasks.named('jar').map { it.outputs.files }) {
                 include "*.jar"
                 into("jars")
             }
@@ -53,7 +54,8 @@ class CommonUtils {
             // Explicit inputs/outputs for incremental build support
             inputs.file(dockerBuildProject.rootProject.layout.projectDirectory.file("VERSION"))
             inputs.files(dockerBuildProject.provider { sourceArtifactProject.configurations.runtimeClasspath })
-            inputs.files(sourceArtifactProject.tasks.named('jar'))
+            // Use map to get output files instead of task reference for configuration cache compatibility
+            inputs.files(sourceArtifactProject.tasks.named('jar').map { it.outputs.files })
             outputs.dir(destDir)
             
             dependsOn(sourceArtifactProject.tasks.named("assemble"))

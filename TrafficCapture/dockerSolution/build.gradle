@@ -91,7 +91,8 @@ static TaskProvider<Sync> getMigrationConsoleSyncTask(Project project, String do
             from (lib.files { lib.configurations.runtimeClasspath }) {
                 into "${applicationDestDir}/lib"
             }
-            from (lib.tasks.named('jar')) {
+            // Use map to get output files instead of task reference for configuration cache compatibility
+            from (lib.tasks.named('jar').map { it.outputs.files }) {
                 into "${applicationDestDir}/lib"
             }
         }
@@ -99,7 +100,8 @@ static TaskProvider<Sync> getMigrationConsoleSyncTask(Project project, String do
         // Sync application start scripts
         applications.each { app ->
             def applicationDestDir = "staging/${app.name}/"
-            from (app.tasks.named('startScripts').get().outputs.files) {
+            // Use map to get output files instead of task reference for configuration cache compatibility
+            from (app.tasks.named('startScripts').map { it.outputs.files }) {
                 into "${applicationDestDir}/bin"
             }
         }
@@ -118,13 +120,15 @@ static TaskProvider<Sync> getMigrationConsoleSyncTask(Project project, String do
         inputs.dir(sourceDir)
         inputs.file(project.rootProject.layout.projectDirectory.file("VERSION"))
         // Track library and application JARs
+        // Use map to get output files instead of task reference for configuration cache compatibility
         (libraries + applications).each { lib ->
             inputs.files(lib.configurations.runtimeClasspath)
-            inputs.files(lib.tasks.named('jar'))
+            inputs.files(lib.tasks.named('jar').map { it.outputs.files })
         }
         // Track application start scripts
+        // Use map to get output files instead of task reference for configuration cache compatibility
         applications.each { app ->
-            inputs.files(app.tasks.named('startScripts').get().outputs.files)
+            inputs.files(app.tasks.named('startScripts').map { it.outputs.files })
         }
         outputs.dir(destDir)
 
