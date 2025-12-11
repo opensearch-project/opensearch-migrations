@@ -4,18 +4,53 @@ Audience: This document is meant for **DEVELOPERS** looking to build/maintain a 
 
 This README focuses on the helm installation of the [Migration Assistant](charts/aggregates/migrationAssistantWithArgo) chart, which will install the migration console and resources required for it to perform migrations (e.g. Argo Workflows, metrics collectors, etc). 
 
+
+## Quick Start
+
+### EKS
+
+If you're looking to use EKS as your Kubernetes cluster, follow the
+[instructions here](aws/README.md).
+
+### Minikube
+
+Install prerequisites (see below).
+
+This script will start minikube, build the images from source, and will install
+the Migration Assistant Helm chart alongside a test chart that creates a source
+and target cluster.
+
+```bash
+export BUILD_IMAGES_WITHOUT_DOCKER=false
+echo "Will build images without docker=${BUILD_IMAGES_WITHOUT_DOCKER}"
+$(git rev-parse --show-toplevel)/deployment/k8s/localTesting.sh
+```
+
+Run this to open the migration-console terminal so that you can run 
+`workflow commands`
+
+```bash
+kubectl -n ma exec --stdin --tty migration-console-0 -- /bin/bash
+```
+
+To forward deployed services' ports from minikube to your localhost.  
+E.g. so that http://localhost:2746/ will load the argo web-ui, etc, run
+
+```bash
+$(git rev-parse --show-toplevel)/deployment/k8s/forwardAllServicePorts.sh
+```
+
 ## Prerequisites 
 
-### Install kubectl
-Follow instructions [here](https://kubernetes.io/docs/tasks/tools/) to install the Kubernetes command-line tool. This will be the go-to tool for interacting with the Kubernetes cluster
+As a developer, you'll need to install
+* Java Development Kit (JDK) 11-17
+* [kubectl](https://kubernetes.io/docs/tasks/tools/)
+* [helm](https://helm.sh/docs/intro/install/)
 
-### Install helm
-Follow instructions [here](https://helm.sh/docs/intro/install/) to install helm. helm will be used for to deploy the Migration Assistant components to the Kubernetes cluster.  It is generally only used to install/patch the Migration Assistant.
-
-#### Install docker (for minikube and legacy docker builds)
+### Install docker (for minikube and legacy docker builds)
 Follow instructions [here](https://docs.docker.com/engine/install/) to set up Docker. Docker can be used to build Docker images as well as run a local Kubernetes cluster. 
 
-Notice that there are two different gradle tasks to build targets:
+Notice that there are two different gradle tasks to build images:
 * [:TrafficCapture:dockerSolution:buildDockerImages](../../TrafficCapture/dockerSolution/README.md) builds all the images for the ECS solution and can also bring up a docker compose environment to demonstrate capture and replay.
 * [:buildImagesToRegistry](../../buildImages/README.md) builds the same set of images using jib and buildkit.  These to not require docker and can be run from a container.  In a fully-containerized K8s environment, these are necessary to complete builds.  CI pipelines are beginnning to use this project rather than the dockerSolution one.
 
@@ -23,18 +58,14 @@ Notice that there are two different gradle tasks to build targets:
 
 We test our solution with minikube and Amazon EKS.  See below for more information to set these up.
 
-## Setup local Kubernetes Cluster
+## Setup a Local Kubernetes Cluster
 Creating a local Kubernetes cluster is useful for testing and developing a given deployment. There are a few different tools for running a Kubernetes cluster locally. This documentation focuses on using [Minikube](https://github.com/kubernetes/minikube) to run the local Kubernetes cluster.
 
 ### Install Minikube
 
 Follow instructions [here](https://minikube.sigs.k8s.io/docs/start/?arch=%2Fmacos%2Fx86-64%2Fstable%2Fbinary+download) to install Minikube
 
-The default number of CPUs and Memory settings for Minikube can sometimes be relatively low compared to your machine's resources. The default resources allocated are printed out on minikube startup, similar to:
-```shell
-🔥  Creating docker container (CPUs=2, Memory=7788MB) ...
-```
-To increase these resources, make sure your Docker environment has enough allocated resources respectively, and execute commands similar to below:
+The default number of CPUs and Memory settings for Minikube can sometimes be relatively low compared to your machine's resources. To increase these resources, make sure your Docker environment has enough allocated resources respectively, and execute commands similar to below:
 ```shell
 minikube config set cpus 8
 minikube config set memory 12000
@@ -47,66 +78,6 @@ A convenience script `minikubeLocal.sh` is located in this directory which wraps
 ./miniKubeLocal.sh --pause
 ./miniKubeLocal.sh --delete
 ```
-
-#### Loading Docker images into Minikube
-Since Minikube uses a different Docker registry than the normal host machine, the Docker images shown will differ from that on the host machine. The script `buildDockerImagesMini.sh` in this directory will configure the environment to use the Minikube Docker registry and build the Docker images into Minikube
-
-Show Docker images available to Minikube
-```shell
-minikube image ls
-```
-Build Docker images into Minikube
-```shell
-./buildDockerImagesMini.sh
-```
-
-### Deploying an EKS cluster
-
-The Migration Assistant includes templates to deploy an EKS cluster that the
-solution can be installed into.  These commands will deploy a stack that creates
-and EKS cluster that can be used with kubectl just like how kubectl works with
-minikube. Notice that if credentials expires, so to will access through kubectl.
-
-```bash
-echo "Build the CloudFormation templates"
-gradlew :deployment:migration-assistant-solution:cdkSynth
-
-echo "Confirm that AWS Credentials are resolvable by the aws cli."
-export AWS_REGION=us-east-2
-export CFN_STACK_NAME=MA-EKS-DEV-TEST
-aws cloudformation deploy \
-  --template-file ../migration-assistant-solution/cdk.out/Migration-Assistant-Infra-Create-VPC-eks.template.json \
-  --stack-name "$CFN_STACK_NAME" \
-  --parameter-overrides Stage=devtest \
-  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
-  
-echo "Get the exported values to set as environment variables, which should include the $MIGRATIONS_ECR_REGISTRY"
-eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`MigrationsExportString\`)].[Value]" --output text) 
-```
-
-Once that cluster is up, you'll be able to deploy resources via kubectl.  A 
-private ECR repository is created so that users can deploy images and load those
-into their EKS cluster.
-
-#### Building images to ECR
-
-```bash
-echo "Build the migration assistant images and deploy them to $MIGRATIONS_ECR_REGISTRY"
-gradlew :buildImages:buildImagesToRegistry -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -PimageArch=amd64 -x test
-```
-
-To use those images from ECR within the Migration Assistant, use image overrides
-in the helm deployment (see below) such as this...
-```
-helm install "$namespace" "${ma_chart_dir}" \
-    --set images.captureProxy.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.captureProxy.tag=migrations_capture_proxy_latest \
-    --set images.trafficReplayer.repository=${MIGRATIONS_ECR_REGISTRY} 
-    ...
-```
-
-[See here](../migration-assistant-solution/README.md) for more details on 
-deploying the entire solution to EKS.
 
 ## Deploying
 

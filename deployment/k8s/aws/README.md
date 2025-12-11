@@ -1,11 +1,34 @@
-# Quick-Start Deployment of the Migration Assistant into EKS
+# Deployment of the Migration Assistant into EKS
 
-For a more details about EKS and Kubernetes, see the [README](../README.md)
+This guide is for developers that are interested in building everything and
+deploying those artifacts directly to EKS themselves.
+
+For a more details about Kubernetes, see the [README](../README.md)
 for the overall K8s deployment project.
 
+See the [project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki)
+for instructions of how to deploy directly from AWS without installing anything.
+
+
+## Difference from the ECS version
+
 The EKS solution requires less AWS resources and fewer upfront configuration
-options.  To get started with the EKS solution, install one of the 'eks'
-CloudFormation templates produced by `gradlew cdkSynth`
+options than the previous release build upon ECS.  You'll need some permissions,
+but the CloudFormation should deploy in < 15 minutes.  Once that succeeds, you
+should have all the permissions that you need to deploy and run the 
+Migration Assistant on Kubernetes. 
+
+
+# Quick Start for EKS
+
+## Prerequisites
+
+As a developer, you'll need to install
+* Java Development Kit (JDK) 11-17
+* [kubectl](https://kubernetes.io/docs/tasks/tools/) 
+* [helm](https://helm.sh/docs/intro/install/)
+* [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and an AWS Account.
+
 
 ## Deploying an EKS Cluster with CloudFormation
 
@@ -14,7 +37,8 @@ sure that up-to-date AWS credentials are available.
 
 ```bash
 echo "Build the CloudFormation templates"
-gradlew :deployment:migration-assistant-solution:cdkSynth
+pushd $(git rev-parse --show-toplevel)
+./gradlew :deployment:migration-assistant-solution:cdkSynth
 
 echo "Confirm that AWS Credentials are resolvable by the aws cli."
 export AWS_REGION=us-east-2
@@ -24,6 +48,9 @@ aws cloudformation deploy \
   --stack-name "$CFN_STACK_NAME" \
   --parameter-overrides Stage=devtest \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
+
+aws cloudformation wait stack-create-complete \
+  --stack-name "${$CFN_STACK_NAME}" --region "${AWS_REGION}"
 
 echo "Get the exported values to set as environment variables, which should include the $MIGRATIONS_ECR_REGISTRY"
 eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`MigrationsExportString\`)].[Value]" --output text) 
@@ -41,15 +68,17 @@ The user-facing script to provision the Migration Assistant can be run by
 developers from their own workspace with
 
 ```bash
-export PROJECT_DIR="${PWD}/../../.."
-echo "Running aws-bootstrap.sh.  You'll be prompted to install helm if it isn't found."
-./deployment/k8s/aws/aws-bootstrap.sh --skip-git-pull --build-images-locally --base-dir "$PROJECT_DIR"
+pushd $(git rev-parse --show-toplevel)
+echo "Setting up buildkit to perform builds but should use ECR for image pushes"
+export USE_LOCAL_REGISTRY=false
+./buildImages/setUpK8sImageBuildServices.sh
+./deployment/k8s/aws/aws-bootstrap.sh --skip-git-pull --build-images-locally --base-dir "$(git rev-parse --show-toplevel)"
 ```
 
-Notice that the script normally clones the git repo and uses public ECR images.
-These flags build the code from the current code (assuming that the script is
-run from the location of this README) but otherwise performs the same 
-initialization actions as users perform.  
+Notice that the `aws-bootstrap.sh` script normally clones the git repo and uses
+public ECR images. These flags build the code from the current code 
+(assuming that the script is run from the location of this README) but 
+otherwise performs the same initialization actions as users perform.  
 To update images see [buildImages](../../../buildImages/README.md).
 To update the K8s deployment (other than images, configmaps, workflow templates,
 resource settings, etc.) see the [k8s README](../README.md).

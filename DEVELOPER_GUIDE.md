@@ -1,28 +1,35 @@
 # Development Guide
 
 ## Table of Contents
-- [Development Guide](#development-guide)
-  - [Table of Contents](#table-of-contents)
-  - [Prerequisites](#prerequisites)
-  - [Project Structure](#project-structure)
-  - [Building the Project](#building-the-project)
-  - [Running Tests](#running-tests)
-  - [Code Style](#code-style)
-  - [Pre-Commit Hooks](#pre-commit-hooks)
-  - [Publishing](#publishing)
-  - [Development Environments](#development-environments)
-    - [VSCode](#vscode)
-      - [Python](#python)
+- [Table of Contents](#table-of-contents)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#kubernetes-quick-start)
+- [Project Structure](#project-structure)
+- [Building the Project](#building-the-project)
+- [Running Tests](#running-tests)
+- [Code Style](#code-style)
+- [Pre-Commit Hooks](#pre-commit-hooks)
+- [Publishing](#publishing)
+- [Development Environments](#development-environments)
+  - [VSCode](#vscode)
+    - [Python](#python)
 
 ## Prerequisites
 
 - Java Development Kit (JDK) 11-17
 - Python3
 - Docker/Minikube/K3s/etc (for local deployment)
-- Node.js v22 (downloaded automatically by Gradle)
 - [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html#getting-started-install-instructions) (for AWS deployment)
-- [AWS Cloud Development Kit (CDK)](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html) (for AWS deployment)
+- Node.js v22 (downloaded automatically by Gradle)
+- [AWS Cloud Development Kit (CDK)](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html) (for AWS deployment, downloaded automatically by Gradle)
 
+## Kubernetes Quick Start
+
+* This [Kubernetes Guide](deployment/k8s/README.md) shows you how to create a minikube cluster locally and deploy the Migration Assistant to it.
+* This [AWS EKS Guide](deployment/k8s/aws/README.md) shows you how to deploy an EKS cluster and deploy the Migration Assistant to it.
+
+See the [project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki)
+to learn more about how to use the migration console and its workflow commands.
 
 ## Project Structure
 
