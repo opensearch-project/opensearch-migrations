@@ -60,7 +60,7 @@ EOF
 
 cat /config/migration_services.yaml_ | 
 jq 'def normalizeAuthConfig:
-  if has("authConfig") then
+  (if has("authConfig") then
     if (.authConfig | has("basic")) then
       .basic_auth = (.authConfig.basic | 
         if has("secretName") then
@@ -75,10 +75,10 @@ jq 'def normalizeAuthConfig:
     else
       .
     end
-    | del(.authConfig, .name, .proxy, .snapshotRepo)
   else
     .
-  end;
+  end)
+  | del(.authConfig, .name, .proxy, .snapshotRepo);
 
 def normalizeAllowInsecure:
   if has("allowInsecure") then
