@@ -243,7 +243,12 @@ function renderUnionField(
     return json;
 }
 
-function renderArrayElement(elementSchema: z.ZodTypeAny, indent: Indentation, ctx: RenderContext): string {
+function renderArrayElement(
+    elementSchema: z.ZodTypeAny,
+    indent: Indentation,
+    ctx: RenderContext,
+    comma: string): string
+{
     const unwrapped = unwrapSchema(elementSchema);
     const elementConstructor = unwrapped.constructor.name;
     const arrayCtx = extendPathForArray(ctx);
@@ -251,7 +256,7 @@ function renderArrayElement(elementSchema: z.ZodTypeAny, indent: Indentation, ct
     if (elementConstructor === 'ZodObject') {
         let json = `\n${makeHeader(indent)}[\n`;
         json += schemaToJsonWithComments(elementSchema, indent, true, arrayCtx);
-        json += `${makeHeader(indent)}]`;
+        json += `${makeHeader(indent)}]${comma}`;
         return json;
     } else if (elementConstructor === 'ZodUnion') {
         // Handle union types in arrays
@@ -264,7 +269,7 @@ function renderArrayElement(elementSchema: z.ZodTypeAny, indent: Indentation, ct
         });
 
         if (hasComplexType) {
-            let json = ` []  # array of union types\n`;
+            let json = ` []${comma}  # array of union types\n`;
             // Show each union option as a commented example
             options.forEach((option: z.ZodTypeAny, idx: number) => {
                 const optionConstructor = unwrapSchema(option).constructor.name;
@@ -282,12 +287,12 @@ function renderArrayElement(elementSchema: z.ZodTypeAny, indent: Indentation, ct
         } else {
             // All scalar types - show as inline array with type info
             const scalarTypes = options.map((option: z.ZodTypeAny) => getTypeName(option)).join(' | ');
-            return ` []  # (${scalarTypes})[]\n`;
+            return ` []${comma}  # (${scalarTypes})[]\n`;
         }
     } else {
         // Scalar types use empty array notation
         const typeName = getTypeName(elementSchema);
-        return ` []  # ${typeName}[]\n`;
+        return ` []${comma}  # ${typeName}[]\n`;
     }
 }
 
@@ -349,13 +354,7 @@ function schemaToJsonWithComments(
                         json += `${makeHeader(nextIndent)}]${comma}\n`;
                     } else {
                         json += `${makeHeader(nextIndent)}${jsonEscape(key)}:`;
-                        const arrayContent = renderArrayElement(elementSchema, nextIndent, fieldCtx);
-                        // Need to handle comma for inline array notation
-                        if (arrayContent.trim().startsWith('[')) {
-                            json += arrayContent.replace(/\n$/, `${comma}\n`);
-                        } else {
-                            json += arrayContent.replace(/\n$/, `${comma}\n`).replace(/\[\]/, `[]`);
-                        }
+                        json += renderArrayElement(elementSchema, nextIndent, fieldCtx, comma);
                     }
                 }
             } else if (fieldConstructor === 'ZodUnion') {
