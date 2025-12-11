@@ -38,13 +38,13 @@ sure that up-to-date AWS credentials are available.
 ```bash
 echo "Build the CloudFormation templates"
 pushd $(git rev-parse --show-toplevel)
-./gradlew :deployment:migration-assistant-solution:cdkSynth
+./gradlew :deployment:migration-assistant-solution:cdkSynthMinified
 
 echo "Confirm that AWS Credentials are resolvable by the aws cli."
 export AWS_REGION=us-east-2
 export CFN_STACK_NAME=MA-EKS-DEV-TEST
 aws cloudformation deploy \
-  --template-file ../../migration-assistant-solution/cdk.out/Migration-Assistant-Infra-Create-VPC-eks.template.json \
+  --template-file deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json \
   --stack-name "$CFN_STACK_NAME" \
   --parameter-overrides Stage=devtest \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
