@@ -212,6 +212,43 @@ deploy_dashboard() {
   rm -f "$tmp_json"
 }
 
+check_existing_ma_release() {
+  local release_name="$1"
+  local release_namespace="$2"
+
+  if helm status "$release_name" -n "$release_namespace" >/dev/null 2>&1; then
+    echo
+    echo "A Migration Assistant Helm release named '$release_name' already exists in namespace '$release_namespace'."
+    echo "This usually means Migration Assistant is already installed on this cluster."
+    echo
+
+    while true; do
+      read -rp "Would you like to uninstall the existing release so that we can reinstall it? (y/n): " answer
+      case "$answer" in
+        [Yy]*)
+          echo "Uninstalling existing Migration Assistant Helm release '$release_name' from namespace '$release_namespace'..."
+          if ! helm uninstall "$release_name" -n "$release_namespace"; then
+            echo "Failed to uninstall the existing Migration Assistant release."
+            echo "Please resolve manually with:"
+            echo "  helm uninstall $release_name -n $release_namespace"
+            exit 1
+          fi
+          echo "Existing Migration Assistant release removed. Continuing with fresh install..."
+          echo
+          break
+          ;;
+        [Nn]*)
+          echo "Existing installation detected. Bootstrap aborted."
+          exit 1
+          ;;
+        *)
+          echo "Please answer 'y' or 'n'."
+          ;;
+      esac
+    done
+  fi
+}
+
 # Check required tools
 missing=0
 for cmd in git jq kubectl; do
@@ -362,6 +399,8 @@ else
     --set images.installer.repository=public.ecr.aws/opensearchproject/opensearch-migrations-console \
     --set images.installer.tag=$RELEASE_VERSION"
 fi
+
+check_existing_ma_release "$namespace" "$namespace"
 
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
 helm install "$namespace" "${ma_chart_dir}" \
