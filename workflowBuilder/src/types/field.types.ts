@@ -88,6 +88,10 @@ export interface FieldMeta {
   // Union specific
   discriminator?: string;
   variantLabels?: Record<string, string>;
+
+  // Form initialization
+  /** Example value for form initialization (from Zod .meta()) */
+  exampleValue?: unknown;
 }
 
 /**

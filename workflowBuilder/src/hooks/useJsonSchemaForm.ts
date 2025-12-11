@@ -121,7 +121,19 @@ export function useJsonSchemaForm<T extends Record<string, unknown>>(
 
     // Build form config from JSON Schema
     const formConfig = useMemo(() => {
-        return buildFormConfigFromSchema(jsonSchema, { includeAdvanced });
+        console.log('[useJsonSchemaForm] Building form config from schema:', {
+            schemaType: jsonSchema?.type,
+            schemaKeys: jsonSchema ? Object.keys(jsonSchema) : [],
+            hasProperties: !!(jsonSchema as any)?.properties,
+            propertiesKeys: (jsonSchema as any)?.properties ? Object.keys((jsonSchema as any).properties) : [],
+        });
+        const config = buildFormConfigFromSchema(jsonSchema, { includeAdvanced });
+        console.log('[useJsonSchemaForm] Form config built:', {
+            allFieldsCount: config.allFields?.length ?? 0,
+            groupsCount: config.groups?.length ?? 0,
+            defaultValuesKeys: config.defaultValues ? Object.keys(config.defaultValues) : [],
+        });
+        return config;
     }, [jsonSchema, includeAdvanced]);
 
     // Compute effective initial values: use schema defaults if initialValues is empty
@@ -157,12 +169,18 @@ export function useJsonSchemaForm<T extends Record<string, unknown>>(
     const annotations = useMemo(() => createEditorAnnotations(errors), [errors]);
 
     // Initialize content from effective initial values (schema defaults or provided values)
+    // Re-run when effectiveInitialValues changes (e.g., when schema loads)
     useEffect(() => {
+        console.log('[useJsonSchemaForm] Initializing content from effectiveInitialValues:', {
+            keys: Object.keys(effectiveInitialValues),
+            hasValues: Object.keys(effectiveInitialValues).length > 0,
+        });
         const result = formStateToContent(effectiveInitialValues, format);
         if (result.success) {
             setContentState(result.content);
+            setValuesState(effectiveInitialValues);
         }
-    }, []); // Only on mount
+    }, [effectiveInitialValues, format]);
 
     // Debounced validation using Ajv
     const debouncedValidate = useMemo(

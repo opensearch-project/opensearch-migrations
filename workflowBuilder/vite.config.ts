@@ -3,12 +3,38 @@ import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { copyFileSync, mkdirSync, existsSync } from 'node:fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+/**
+ * Custom Vite plugin to copy the generated schema file to the dist folder.
+ * This ensures the schema is available at ./workflow-schema.json in production.
+ */
+function copySchemaPlugin() {
+  return {
+    name: 'copy-schema',
+    writeBundle() {
+      const srcPath = resolve(__dirname, 'generated/schemas/workflow-schema.json');
+      const destDir = resolve(__dirname, 'dist');
+      const destPath = resolve(destDir, 'workflow-schema.json');
+      
+      if (existsSync(srcPath)) {
+        if (!existsSync(destDir)) {
+          mkdirSync(destDir, { recursive: true });
+        }
+        copyFileSync(srcPath, destPath);
+        console.log('✓ Copied workflow-schema.json to dist/');
+      } else {
+        console.warn('⚠ Warning: workflow-schema.json not found at', srcPath);
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), copySchemaPlugin()],
   base: './',
   root: '.',
   resolve: {
@@ -23,6 +49,7 @@ export default defineConfig({
       input: resolve(__dirname, 'index.html'),
     },
   },
+  publicDir: 'public',
   server: {
     port: 3000,
     open: true,

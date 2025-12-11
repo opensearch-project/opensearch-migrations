@@ -275,6 +275,9 @@ export interface JSONSchema7 {
     /** Labels for union variants */
     variantLabels?: Record<string, string>;
 
+    /** Example value for form initialization (from Zod .meta()) */
+    exampleValue?: unknown;
+
     // ============================================
     // Index Signature for Additional Properties
     // ============================================

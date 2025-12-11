@@ -4,10 +4,31 @@ import {
   ContentLayout,
   Header,
   Link,
+  Box,
+  SpaceBetween,
 } from "@cloudscape-design/components";
 import { ConfigurationBuilder } from "./components/ConfigurationBuilder";
+import { SchemaSelector } from "./components/SchemaSelector";
+import { useSchemaSelection, useSchemaLoader } from "./hooks";
 
 export const App: React.FC = () => {
+  // Schema selection state with localStorage persistence
+  const {
+    sourceType,
+    customUrl,
+    resolvedUrl,
+    setSourceType,
+    setCustomUrl,
+  } = useSchemaSelection();
+
+  // Schema loading with caching
+  const {
+    schema,
+    isLoading,
+    error,
+    reload,
+  } = useSchemaLoader(resolvedUrl);
+
   return (
     <AppLayout
       content={
@@ -26,7 +47,30 @@ export const App: React.FC = () => {
             </Header>
           }
         >
-          <ConfigurationBuilder />
+          <SpaceBetween size="l">
+            {/* Schema Selector */}
+            <Box>
+              <SchemaSelector
+                sourceType={sourceType}
+                customUrl={customUrl}
+                resolvedUrl={resolvedUrl}
+                isLoading={isLoading}
+                error={error}
+                onSourceTypeChange={setSourceType}
+                onCustomUrlChange={setCustomUrl}
+                onReload={reload}
+              />
+            </Box>
+
+            {/* Configuration Builder */}
+            {/* Key forces re-mount when schema URL changes to reinitialize form state */}
+            <ConfigurationBuilder
+              key={resolvedUrl}
+              jsonSchema={schema}
+              isLoading={isLoading}
+              loadError={error}
+            />
+          </SpaceBetween>
         </ContentLayout>
       }
       navigationHide

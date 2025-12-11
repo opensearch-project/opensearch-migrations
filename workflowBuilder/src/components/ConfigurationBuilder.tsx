@@ -4,28 +4,50 @@
  * Main component that integrates the schema-driven form with the
  * editable code panel for bidirectional configuration editing.
  * 
- * Uses the generated JSON Schema from orchestrationSpecs as the single
- * source of truth for form generation and validation.
+ * Accepts a JSON Schema as a prop for form generation and validation.
  */
 
 import React, { useRef } from 'react';
-import { Grid, Box, SpaceBetween } from '@cloudscape-design/components';
+import { Grid, Box, SpaceBetween, Spinner, Alert } from '@cloudscape-design/components';
 import { SchemaForm } from './schema-form';
 import { EditableCodePanel } from './code-panel';
 import { useJsonSchemaForm } from '../hooks';
 import type { JSONSchema7 } from '../types';
 
-// Import the generated JSON Schema
-import workflowSchema from '../../generated/schemas/workflow-schema.json';
+/**
+ * Props for ConfigurationBuilder component
+ */
+export interface ConfigurationBuilderProps {
+  /** The JSON Schema to use for form generation */
+  jsonSchema: JSONSchema7 | null;
+  /** Whether the schema is currently being loaded */
+  isLoading?: boolean;
+  /** Error message if schema loading failed */
+  loadError?: string | null;
+}
 
 /**
  * Main configuration builder with bidirectional editing
  */
-export function ConfigurationBuilder(): React.ReactElement {
+export function ConfigurationBuilder({
+  jsonSchema,
+  isLoading = false,
+  loadError = null,
+}: ConfigurationBuilderProps): React.ReactElement {
+  // Debug logging
+  console.log('[ConfigurationBuilder] render:', { 
+    hasSchema: !!jsonSchema, 
+    schemaKeys: jsonSchema ? Object.keys(jsonSchema) : [],
+    schemaType: jsonSchema?.type,
+    isLoading, 
+    loadError 
+  });
+
   // Ref for the form container (for scrolling to focused fields)
   const formContainerRef = useRef<HTMLDivElement>(null);
 
   // Use the JSON Schema-driven form hook
+  // Only initialize when we have a valid schema
   const {
     values,
     errorsByPath,
@@ -39,12 +61,48 @@ export function ConfigurationBuilder(): React.ReactElement {
     setContent,
     setFormat,
   } = useJsonSchemaForm({
-    jsonSchema: workflowSchema as unknown as JSONSchema7,
+    jsonSchema: jsonSchema ?? { type: 'object' as const },
     initialValues: {},
     initialFormat: 'yaml',
     includeAdvanced: true,
     validationDelay: 300,
   });
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <Box padding="l" textAlign="center">
+        <SpaceBetween size="m" direction="vertical" alignItems="center">
+          <Spinner size="large" />
+          <Box variant="p" color="text-body-secondary">
+            Loading schema...
+          </Box>
+        </SpaceBetween>
+      </Box>
+    );
+  }
+
+  // Show error state
+  if (loadError) {
+    return (
+      <Box padding="l">
+        <Alert type="error" header="Failed to load schema">
+          {loadError}
+        </Alert>
+      </Box>
+    );
+  }
+
+  // Show message when no schema is available
+  if (!jsonSchema) {
+    return (
+      <Box padding="l">
+        <Alert type="info" header="No schema loaded">
+          Please select a schema source to begin configuring your migration.
+        </Alert>
+      </Box>
+    );
+  }
 
 
   return (

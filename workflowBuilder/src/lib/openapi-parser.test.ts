@@ -434,6 +434,229 @@ describe('buildDefaultValuesFromSchema', () => {
 
         expect(defaults.clusters).toEqual({});
     });
+
+    it('should merge exampleValue with nested property defaults', () => {
+        // This tests the main bug fix: when root-level exampleValue is partial,
+        // nested defaults should still be included
+        const schema: JSONSchema7 = {
+            type: 'object',
+            exampleValue: {
+                skipApprovals: false,
+                sourceClusters: { source1: { endpoint: 'https://source:9200' } },
+            },
+            properties: {
+                skipApprovals: { type: 'boolean' },
+                sourceClusters: {
+                    type: 'object',
+                    additionalProperties: {
+                        type: 'object',
+                        properties: {
+                            endpoint: { type: 'string' },
+                        },
+                    },
+                },
+                snapshotConfig: {
+                    type: 'object',
+                    properties: {
+                        snapshotNameConfig: {
+                            type: 'object',
+                            properties: {
+                                snapshotNamePrefix: { type: 'string', default: 'migration-snapshot' },
+                            },
+                        },
+                    },
+                },
+            },
+        };
+
+        const defaults = buildDefaultValuesFromSchema(schema);
+
+        // exampleValue fields should be present
+        expect(defaults.skipApprovals).toBe(false);
+        expect(defaults.sourceClusters).toEqual({ source1: { endpoint: 'https://source:9200' } });
+        
+        // Nested defaults NOT in exampleValue should also be present
+        expect((defaults.snapshotConfig as Record<string, unknown>)).toBeDefined();
+        const snapshotConfig = defaults.snapshotConfig as Record<string, unknown>;
+        const snapshotNameConfig = snapshotConfig.snapshotNameConfig as Record<string, unknown>;
+        expect(snapshotNameConfig.snapshotNamePrefix).toBe('migration-snapshot');
+    });
+
+    it('should preserve exampleValue when it conflicts with defaults', () => {
+        const schema: JSONSchema7 = {
+            type: 'object',
+            exampleValue: {
+                name: 'example-name',
+            },
+            properties: {
+                name: { type: 'string', default: 'default-name' },
+            },
+        };
+
+        const defaults = buildDefaultValuesFromSchema(schema);
+
+        // exampleValue should take precedence over default
+        expect(defaults.name).toBe('example-name');
+    });
+
+    it('should deeply merge nested objects from exampleValue and defaults', () => {
+        const schema: JSONSchema7 = {
+            type: 'object',
+            exampleValue: {
+                level1: {
+                    level2a: {
+                        valueFromExample: 'example',
+                    },
+                },
+            },
+            properties: {
+                level1: {
+                    type: 'object',
+                    properties: {
+                        level2a: {
+                            type: 'object',
+                            properties: {
+                                valueFromExample: { type: 'string' },
+                                valueFromDefault: { type: 'string', default: 'default' },
+                            },
+                        },
+                        level2b: {
+                            type: 'object',
+                            properties: {
+                                onlyDefault: { type: 'string', default: 'only-default' },
+                            },
+                        },
+                    },
+                },
+            },
+        };
+
+        const defaults = buildDefaultValuesFromSchema(schema);
+
+        const level1 = defaults.level1 as Record<string, unknown>;
+        const level2a = level1.level2a as Record<string, unknown>;
+        const level2b = level1.level2b as Record<string, unknown>;
+
+        // exampleValue should be preserved
+        expect(level2a.valueFromExample).toBe('example');
+        // Default at same level should be filled in
+        expect(level2a.valueFromDefault).toBe('default');
+        // Default at different path should be filled in
+        expect(level2b.onlyDefault).toBe('only-default');
+    });
+
+    it('should handle arrays in exampleValue correctly', () => {
+        const schema: JSONSchema7 = {
+            type: 'object',
+            exampleValue: {
+                items: ['item1', 'item2'],
+            },
+            properties: {
+                items: { type: 'array', items: { type: 'string' } },
+                otherItems: { type: 'array', items: { type: 'string' } },
+            },
+        };
+
+        const defaults = buildDefaultValuesFromSchema(schema);
+
+        // Array from exampleValue should be preserved
+        expect(defaults.items).toEqual(['item1', 'item2']);
+        // Array not in exampleValue should default to empty
+        expect(defaults.otherItems).toEqual([]);
+    });
+
+    it('should handle empty exampleValue objects', () => {
+        const schema: JSONSchema7 = {
+            type: 'object',
+            exampleValue: {},
+            properties: {
+                name: { type: 'string', default: 'default-name' },
+                count: { type: 'number', default: 42 },
+            },
+        };
+
+        const defaults = buildDefaultValuesFromSchema(schema);
+
+        // Defaults should be used since exampleValue is empty
+        expect(defaults.name).toBe('default-name');
+        expect(defaults.count).toBe(42);
+    });
+
+    it('should prefer exampleValue over default at property level', () => {
+        const schema: JSONSchema7 = {
+            type: 'object',
+            properties: {
+                config: {
+                    type: 'object',
+                    exampleValue: { setting: 'from-example' },
+                    default: { setting: 'from-default' },
+                    properties: {
+                        setting: { type: 'string' },
+                    },
+                },
+            },
+        };
+
+        const defaults = buildDefaultValuesFromSchema(schema);
+
+        // exampleValue should take precedence over default
+        expect((defaults.config as Record<string, unknown>).setting).toBe('from-example');
+    });
+
+    it('should handle property-level exampleValue with nested defaults', () => {
+        const schema: JSONSchema7 = {
+            type: 'object',
+            properties: {
+                config: {
+                    type: 'object',
+                    exampleValue: { 
+                        partialSetting: 'from-example' 
+                    },
+                    properties: {
+                        partialSetting: { type: 'string' },
+                        nestedConfig: {
+                            type: 'object',
+                            properties: {
+                                deepDefault: { type: 'string', default: 'deep-value' },
+                            },
+                        },
+                    },
+                },
+            },
+        };
+
+        const defaults = buildDefaultValuesFromSchema(schema);
+
+        const config = defaults.config as Record<string, unknown>;
+        // exampleValue field should be present
+        expect(config.partialSetting).toBe('from-example');
+        // Nested default should also be present
+        const nestedConfig = config.nestedConfig as Record<string, unknown>;
+        expect(nestedConfig.deepDefault).toBe('deep-value');
+    });
+
+    it('should preserve explicit false and 0 values from exampleValue', () => {
+        const schema: JSONSchema7 = {
+            type: 'object',
+            exampleValue: {
+                enabled: false,
+                count: 0,
+                name: '',
+            },
+            properties: {
+                enabled: { type: 'boolean', default: true },
+                count: { type: 'number', default: 100 },
+                name: { type: 'string', default: 'default' },
+            },
+        };
+
+        const defaults = buildDefaultValuesFromSchema(schema);
+
+        // Explicit false, 0, and empty string should be preserved
+        expect(defaults.enabled).toBe(false);
+        expect(defaults.count).toBe(0);
+        expect(defaults.name).toBe('');
+    });
 });
 
 describe('buildFormConfigFromSchema', () => {

@@ -17,6 +17,7 @@
  */
 
 import 'zod';
+import type { $input } from 'zod';
 
 declare module 'zod' {
     interface GlobalMeta {
@@ -96,6 +97,26 @@ declare module 'zod' {
          * Maps discriminator values to human-readable names.
          */
         variantLabels?: Record<string, string>;
+        
+        // ============================================
+        // Form Initialization
+        // ============================================
+        
+        /** 
+         * Example value for UI initialization.
+         * Unlike `default`, this value is NOT used during schema parsing/validation.
+         * Used by form builders to provide initial example values without affecting
+         * the schema's validation behavior.
+         * 
+         * The type is automatically inferred from the schema it's attached to
+         * using Zod's $input type, providing compile-time type safety.
+         * This uses $input (not $output) because form initialization values
+         * should match what users would provide, not the transformed output.
+         * 
+         * Note: This is different from `placeholder` which is used for string input hints.
+         * `exampleValue` stores complete object structures for form initialization.
+         */
+        exampleValue?: $input;
     }
 }
 

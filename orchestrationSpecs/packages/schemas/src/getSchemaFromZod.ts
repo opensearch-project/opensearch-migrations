@@ -28,6 +28,11 @@ export function zodSchemaToJsonSchema(
         innerSchema = schema;
     }
 
+    // Extract exampleValue from schema meta (works on both wrapped and unwrapped schemas)
+    // In Zod v4, meta() is a method that returns the meta object when called without arguments
+    const schemaMeta = typeof schema.meta === 'function' ? schema.meta() : undefined;
+    const exampleValue = schemaMeta?.exampleValue;
+
     // Wrap arrays in an object for registration
     const schemaToRegister = innerSchema instanceof z.ZodArray
         ? z.object({ items: innerSchema })
@@ -43,6 +48,12 @@ export function zodSchemaToJsonSchema(
     // Add the default value to the JSON Schema if present
     if (jsonSchema && defaultValue !== undefined) {
         jsonSchema.default = defaultValue;
+    }
+    
+    // Add the exampleValue to the JSON Schema if present
+    // This is used by form builders for initialization without affecting validation
+    if (jsonSchema && exampleValue !== undefined) {
+        jsonSchema.exampleValue = exampleValue;
     }
     
     return jsonSchema;

@@ -86,3 +86,20 @@ export type {
   FormContextValue,
   FormAction,
 } from './form.types';
+
+// Schema selector types
+export type {
+  SchemaSourceType,
+  SchemaOption,
+  SchemaSelectionState,
+  SchemaLoadingState,
+  UseSchemaSelectionReturn,
+  UseSchemaLoaderReturn,
+  SchemaSelectorProps,
+} from './schema-selector.types';
+
+export {
+  SCHEMA_SELECTION_STORAGE_KEY,
+  DEFAULT_SCHEMA_PATH,
+  SCHEMA_OPTIONS,
+} from './schema-selector.types';

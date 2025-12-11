@@ -2,6 +2,23 @@
 // Schema-driven form with bidirectional YAML/JSON sync
 
 // ============================================
+// SCHEMA SELECTOR
+// ============================================
+
+.schema-selector {
+  padding: 16px;
+  background-color: #fafafa;
+  border: 1px solid #e9ebed;
+  border-radius: 8px;
+  
+  // URL input field should grow to fill available space
+  &__url-field {
+    flex: 1;
+    min-width: 300px;
+  }
+}
+
+// ============================================
 // BASE STYLES
 // ============================================
 

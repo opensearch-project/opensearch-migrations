@@ -10,7 +10,6 @@
  * - No predefined group metadata needed
  */
 
-import merge from 'deepmerge';
 import type {
     JSONSchema7,
     JSONSchema7TypeName,
@@ -265,6 +264,7 @@ export function extractFieldMeta(schema: JSONSchema7): FieldMeta {
         maxItems: schema.maxItems,
         discriminator: schema.discriminator,
         variantLabels: schema.variantLabels,
+        exampleValue: schema.exampleValue,
     };
 }
 
@@ -430,9 +430,95 @@ export function extractFieldConfigsFromSchema(
 }
 
 /**
+ * Check if a value is a plain object (not an array, null, or other type)
+ */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Merge two objects where the primary object's values take precedence,
+ * and the secondary object's values fill in any missing keys.
+ * 
+ * This is a "fill-missing" merge strategy:
+ * - If primary has a value for a key (including false, 0, empty string), keep it
+ * - If primary doesn't have a key, use the value from secondary
+ * - For nested objects, recursively apply the same logic
+ * - For arrays, recursively merge each item if both arrays have items at that index
+ * 
+ * @param primary - The object whose values take precedence
+ * @param secondary - The object that fills in missing values
+ * @returns A new object with merged values
+ */
+function fillMissingValues(
+    primary: Record<string, unknown>,
+    secondary: Record<string, unknown>
+): Record<string, unknown> {
+    const result: Record<string, unknown> = { ...primary };
+    
+    for (const key of Object.keys(secondary)) {
+        const primaryValue = primary[key];
+        const secondaryValue = secondary[key];
+        
+        if (primaryValue === undefined) {
+            // Primary doesn't have this key, use secondary's value
+            result[key] = secondaryValue;
+        } else if (isPlainObject(primaryValue) && isPlainObject(secondaryValue)) {
+            // Both are objects, recursively merge to fill in nested missing values
+            result[key] = fillMissingValues(primaryValue, secondaryValue);
+        } else if (Array.isArray(primaryValue) && Array.isArray(secondaryValue)) {
+            // Both are arrays - merge items at each index
+            // Primary array items take precedence, but we fill in missing values within each item
+            result[key] = fillMissingArrayValues(primaryValue, secondaryValue);
+        }
+        // Otherwise, keep primary's value (already in result from spread)
+    }
+    
+    return result;
+}
+
+/**
+ * Merge two arrays where primary array items take precedence,
+ * but nested objects within array items have their missing values filled in from secondary.
+ * 
+ * @param primary - The array whose items take precedence
+ * @param secondary - The array that provides default values for item properties
+ * @returns A new array with merged values
+ */
+function fillMissingArrayValues(
+    primary: unknown[],
+    secondary: unknown[]
+): unknown[] {
+    // If primary array is empty, return it as-is (don't auto-populate from secondary)
+    if (primary.length === 0) {
+        return [];
+    }
+    
+    // For each item in primary, if there's a corresponding item in secondary
+    // and both are objects, merge them
+    return primary.map((primaryItem) => {
+        // Use the first item of secondary as a template for all primary items
+        // This handles the case where secondary has default values for array item properties
+        const secondaryItem = secondary[0]; // Use first item as template
+        
+        if (isPlainObject(primaryItem) && isPlainObject(secondaryItem)) {
+            return fillMissingValues(primaryItem, secondaryItem);
+        }
+        
+        return primaryItem;
+    });
+}
+
+/**
  * Recursively collect default values from individual property defaults
  * This function traverses the schema structure to find all defaults,
  * including those nested in objects, arrays, and records.
+ * 
+ * Priority: exampleValue > default (exampleValue is preferred for form initialization)
+ * 
+ * IMPORTANT: Even when a property has an exampleValue or default, we still recurse
+ * into nested objects to collect their defaults. This allows nested defaults to be
+ * merged with partial exampleValues later.
  */
 function collectPropertyDefaults(schema: JSONSchema7): Record<string, unknown> {
     const result: Record<string, unknown> = {};
@@ -442,26 +528,53 @@ function collectPropertyDefaults(schema: JSONSchema7): Record<string, unknown> {
     }
 
     for (const [key, propSchema] of Object.entries(schema.properties)) {
-        if (propSchema.default !== undefined) {
-            // Property has an explicit default - use it
-            result[key] = propSchema.default;
-        } else {
-            const propType = getPrimaryType(propSchema);
-            if (propType === 'object' && propSchema.properties) {
-                // Nested object - recursively collect defaults
-                const nestedDefaults = collectPropertyDefaults(propSchema);
-                // Only include nested defaults if they have values
+        // Check exampleValue first, then fall back to default
+        const effectiveDefault = propSchema.exampleValue !== undefined 
+            ? propSchema.exampleValue 
+            : propSchema.default;
+        
+        const propType = getPrimaryType(propSchema);
+        
+        if (propType === 'object' && propSchema.properties) {
+            // Nested object - always recursively collect defaults
+            const nestedDefaults = collectPropertyDefaults(propSchema);
+            
+            if (effectiveDefault !== undefined && isPlainObject(effectiveDefault)) {
+                // Merge: effectiveDefault takes precedence, nestedDefaults fill in missing values
+                // Use the fill-missing strategy so effectiveDefault values are preserved
                 if (Object.keys(nestedDefaults).length > 0) {
-                    result[key] = nestedDefaults;
+                    result[key] = fillMissingValues(effectiveDefault as Record<string, unknown>, nestedDefaults);
+                } else {
+                    result[key] = effectiveDefault;
                 }
-            } else if (propType === 'object' && propSchema.additionalProperties) {
-                // For records, we can't generate defaults for unknown keys
-                result[key] = {};
-            } else if (propType === 'array') {
-                // Arrays default to empty - we don't auto-populate array items
-                // because we don't know how many items the user wants
+            } else if (Object.keys(nestedDefaults).length > 0) {
+                // No effectiveDefault, just use nested defaults
+                result[key] = nestedDefaults;
+            }
+        } else if (propType === 'array' && propSchema.items && !Array.isArray(propSchema.items)) {
+            // Array with item schema - collect defaults from item schema
+            const itemSchema = propSchema.items as JSONSchema7;
+            if (getPrimaryType(itemSchema) === 'object' && itemSchema.properties) {
+                const itemDefaults = collectPropertyDefaults(itemSchema);
+                // Store as an array with one default item that can be used as a template
+                if (Object.keys(itemDefaults).length > 0) {
+                    result[key] = [itemDefaults];
+                } else {
+                    result[key] = [];
+                }
+            } else {
                 result[key] = [];
             }
+        } else if (effectiveDefault !== undefined) {
+            // Property has an explicit default or exampleValue - use it
+            result[key] = effectiveDefault;
+        } else if (propType === 'object' && propSchema.additionalProperties) {
+            // For records, we can't generate defaults for unknown keys
+            result[key] = {};
+        } else if (propType === 'array') {
+            // Arrays default to empty - we don't auto-populate array items
+            // because we don't know how many items the user wants
+            result[key] = [];
         }
     }
 
@@ -485,20 +598,27 @@ export function buildArrayItemDefaults(itemSchema: JSONSchema7): Record<string, 
  * 
  * This function extracts default values from a JSON Schema by:
  * 1. Recursively collecting defaults from individual property definitions
- * 2. If the schema has a root-level `default` property, merge it with collected defaults
- *    (root-level default takes precedence for any overlapping values)
+ * 2. If the schema has a root-level `exampleValue` or `default` property, merge it with collected defaults
+ *    using a "fill-missing" strategy where:
+ *    - Root-level value (exampleValue/default) takes precedence for any fields it specifies
+ *    - Property defaults fill in any fields NOT present in the root-level value
  * 
- * This ensures that both explicitly defined root defaults AND individual property
+ * Priority: exampleValue > default (exampleValue is preferred for form initialization)
+ * 
+ * This ensures that both explicitly defined root values AND individual property
  * defaults are included in the final default values object.
  */
 export function buildDefaultValuesFromSchema(schema: JSONSchema7): Record<string, unknown> {
     // First, recursively collect defaults from individual properties
     const propertyDefaults = collectPropertyDefaults(schema);
 
-    // If there's a root-level default, merge it with property defaults
-    // Root-level default takes precedence for any overlapping values
-    if (schema.default !== undefined && typeof schema.default === 'object' && schema.default !== null) {
-        return merge(propertyDefaults, schema.default as Record<string, unknown>);
+    // Check for root-level exampleValue first, then fall back to default
+    // Root-level value takes precedence for any overlapping values
+    const rootValue = schema.exampleValue !== undefined ? schema.exampleValue : schema.default;
+    
+    if (rootValue !== undefined && typeof rootValue === 'object' && rootValue !== null) {
+        // Use fill-missing merge: rootValue takes precedence, propertyDefaults fill in missing values
+        return fillMissingValues(rootValue as Record<string, unknown>, propertyDefaults);
     }
 
     return propertyDefaults;
