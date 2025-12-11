@@ -834,6 +834,37 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
       },
       "Type": "AWS::IAM::Policy",
     },
+    "EKSInfraOtelCollectorPodIdentityAssociation523BA208": {
+      "DependsOn": [
+        "EKSInfraMigrationsEKSCluster4497841A",
+      ],
+      "Properties": {
+        "ClusterName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Namespace": "ma",
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsPodIdentityRole873942CE",
+            "Arn",
+          ],
+        },
+        "ServiceAccount": "otel-collector",
+      },
+      "Type": "AWS::EKS::PodIdentityAssociation",
+    },
     "SnapshotRole53D7C789": {
       "Properties": {
         "AssumeRolePolicyDocument": {
@@ -1743,6 +1774,37 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
         ],
       },
       "Type": "AWS::IAM::Policy",
+    },
+    "EKSInfraOtelCollectorPodIdentityAssociation523BA208": {
+      "DependsOn": [
+        "EKSInfraMigrationsEKSCluster4497841A",
+      ],
+      "Properties": {
+        "ClusterName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Namespace": "ma",
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsPodIdentityRole873942CE",
+            "Arn",
+          ],
+        },
+        "ServiceAccount": "otel-collector",
+      },
+      "Type": "AWS::EKS::PodIdentityAssociation",
     },
     "S3VpcEndpoint1F0CDE18": {
       "Properties": {

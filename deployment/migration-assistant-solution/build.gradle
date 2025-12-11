@@ -68,16 +68,15 @@ tasks.register('cdkSynth', CdkSynthTask) {
     cdkOutDir.set(layout.projectDirectory.dir('cdk.out'))
     nodeModulesDir.set(layout.projectDirectory.dir('node_modules'))
 
-    // Assume your CDK app lives under deployment/migration-assistant-solution
     def cdkAppDir = layout.projectDirectory.dir('deployment/migration-assistant-solution')
-
-    sourceFiles = cdkAppDir.asFileTree.matching {
+    def libDir = layout.projectDirectory.dir('lib')
+    sourceFiles = project.files(cdkAppDir.asFileTree, libDir.asFileTree).getAsFileTree().matching {
         include '**/*.ts', '**/*.js', '**/*.json'
         exclude 'cdk.out/**',
                 'build/**',
                 'node_modules/**',
-                'cdk.context.json',       // <- important
-                '.cdk.staging/**'         // other CDK internals if present
+                'cdk.context.json',
+                '.cdk.staging/**'
     }
 }
 
