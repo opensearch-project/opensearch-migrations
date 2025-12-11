@@ -99,13 +99,16 @@ export const KAFKA_SERVICES_CONFIG = z.object({
 });
 
 export const S3_REPO_CONFIG = z.object({
-    awsRegion: z.string().describe("The AWS region that the bucket reside in (us-east-2, etc)"),
+    awsRegion: z.string()
+        .describe("The AWS region that the bucket resides in (us-east-2, etc)"),
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)/).default("").optional()
-        .describe("Override the default S3 endpoint for clients to connect to.  " +
-            "Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"),
-    s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/).describe("s3://BUCKETNAME/PATH"),
+        .describe("Override the default S3 endpoint for clients to connect to")
+        .meta({ isAdvanced: true }),
+    s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/)
+        .describe("S3 URI for the snapshot repository (format: s3://BUCKETNAME/PATH)"),
     repoName: z.string().default("migration_assistant_repo").optional()
-});
+        .describe("Name for the snapshot repository")
+}).describe("S3 repository configuration for storing snapshots");
 
 export const CPU_QUANTITY = z.string()
     .regex(/^[0-9]+m$/)
@@ -143,16 +146,21 @@ export const PROXY_OPTIONS = z.object({
 });
 
 export const REPLAYER_OPTIONS = z.object({
-    speedupFactor: z.number().default(1.1).optional(),
-    podReplicas: z.number().default(1).optional(),
-    authHeaderOverride: z.string().default("").optional(),
-    loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
+    speedupFactor: z.number().default(1.1).optional()
+        .describe("Factor to speed up or slow down traffic replay (1.0 = real-time)"),
+    podReplicas: z.number().default(1).optional()
+        .describe("Number of replayer pod replicas to run"),
+    authHeaderOverride: z.string().default("").optional()
+        .describe("Override the authorization header for replayed requests")
+        .meta({ isAdvanced: true }),
+    loggingConfigurationOverrideConfigMap: z.string().default("").optional()
+        .describe("ConfigMap name for custom logging configuration")
+        .meta({ isAdvanced: true }),
     resources: RESOURCE_REQUIREMENTS
-        .describe("Resource limits and requests for replayer container.")
-        .default(DEFAULT_RESOURCES.REPLAYER).optional(),
-    // docTransformerBase64: z.string().default("").optional(),
-    // otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
-});
+        .describe("Resource limits and requests for replayer container")
+        .default(DEFAULT_RESOURCES.REPLAYER).optional()
+        .meta({ isAdvanced: true }),
+}).describe("Configuration for the traffic replayer component");
 
 export const CREATE_SNAPSHOT_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional(),
@@ -270,19 +278,28 @@ export const HTTP_AUTH_MTLS = z.object({
 export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123])(?:\.[0-9]+)+$/);
 
 export const CLUSTER_CONFIG = z.object({
-    endpoint:  z.string().regex(/^(?:https?:\/\/[^:\/\s]+(:\d+)?(\/)?)?$/).default("").optional(),
-    allowInsecure: z.boolean().default(false).optional(),
-    version: CLUSTER_VERSION_STRING,
-    authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
+    endpoint: z.string().regex(/^(?:https?:\/\/[^:\/\s]+(:\d+)?(\/)?)?$/).default("").optional()
+        .describe("URL of the cluster (e.g., https://cluster.example.com:9200)"),
+    allowInsecure: z.boolean().default(false).optional()
+        .describe("Allow connections to clusters with self-signed or invalid SSL certificates")
+        .meta({ isAdvanced: true }),
+    version: CLUSTER_VERSION_STRING
+        .describe("Version of the cluster (format: ES [1|2|5|6|7|8].x.x or OS [1|2|3].x.x)"),
+    authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional()
+        .describe("Authentication configuration for connecting to the cluster"),
 });
 
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
-    endpoint:  z.string().regex(/^https?:\/\/[^:\/\s]+(:\d+)?(\/)?$/), // override to required
+    endpoint: z.string().regex(/^https?:\/\/[^:\/\s]+(:\d+)?(\/)?$/)
+        .describe("URL of the target cluster (required)"),
 });
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
-    snapshotRepo: S3_REPO_CONFIG.optional(),
+    snapshotRepo: S3_REPO_CONFIG.optional()
+        .describe("S3 repository configuration for storing snapshots"),
     proxy: PROXY_OPTIONS.optional()
+        .describe("Configuration for the traffic capture proxy")
+        .meta({ isAdvanced: true })
 });
 
 export const EXTERNALLY_MANAGED_SNAPSHOT = z.object({
@@ -306,18 +323,22 @@ export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
 });
 
 export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    name: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional(),
-    metadataMigrationConfig: USER_METADATA_OPTIONS.optional(),
-    documentBackfillConfig: USER_RFS_OPTIONS.optional(),
+    name: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).optional(),
+    metadataMigrationConfig: USER_METADATA_OPTIONS.default(USER_METADATA_OPTIONS.parse({})).optional(),
+    documentBackfillConfig: USER_RFS_OPTIONS.default(USER_RFS_OPTIONS.parse({})).optional(),
 }).refine(data =>
         data.metadataMigrationConfig !== undefined ||
         data.documentBackfillConfig !== undefined,
     {message: "At least one of metadataMigrationConfig or documentBackfillConfig must be provided"});
 
 export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    name: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional(),
+    name: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).optional(),
     createSnapshotConfig: CREATE_SNAPSHOT_OPTIONS.optional(),
-    snapshotConfig: NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
+    snapshotConfig: NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG.default({
+        snapshotNameConfig: {
+            snapshotNamePrefix: "migration-snapshot"
+        }
+    }),
     migrations: z.array(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
 }).refine(data => {
     const names = data.migrations.map(m => m.name).filter(s => s);
@@ -326,26 +347,82 @@ export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
     {message: "names of migration items must be unique when they are provided"});
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
-    skipApprovals : z.boolean().default(false).optional(), // TODO - format
-    fromSource: z.string(),
-    toTarget: z.string(),
-    snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).min(1).optional(),
+    skipApprovals: z.boolean().default(false).optional()
+        .describe("Skip approval steps for this migration configuration")
+        .meta({ isAdvanced: true }),
+    fromSource: z.string()
+        .describe("Name of the source cluster (must match a key in sourceClusters)"),
+    toTarget: z.string()
+        .describe("Name of the target cluster (must match a key in targetClusters)"),
+    snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).min(1).optional()
+        .describe("Configure snapshot-based data migration (metadata and/or documents)"),
     replayerConfig: REPLAYER_OPTIONS.optional()
-}).refine(data => {
+        .describe("Configure live traffic replay from source to target")
+}).describe("Configuration for migrating data from a source to target cluster")
+.refine(data => {
         const names = data.snapshotExtractAndLoadConfigs?.map(m => m.name).filter(s => s);
         return names ? names.length == new Set(names).size : true;
     },
     {message: "names of snapshotExtractAndLoadConfigs items must be unique when they are provided"});
 
-export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
-export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);
+export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG)
+    .describe("Define the source Elasticsearch/OpenSearch clusters to migrate from");
+
+export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG)
+    .describe("Define the target OpenSearch clusters to migrate to");
 
 export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 (
     z.object({
-        skipApprovals : z.boolean().default(false).optional(), // TODO - format
-        sourceClusters: SOURCE_CLUSTERS_MAP,
-        targetClusters: TARGET_CLUSTERS_MAP,
+        skipApprovals: z.boolean().default(false).optional()
+            .describe("Skip all approval steps during migration (use with caution)")
+            .meta({ isAdvanced: true }),
+        sourceClusters: SOURCE_CLUSTERS_MAP
+            .describe("Define the source Elasticsearch/OpenSearch clusters to migrate from"),
+        targetClusters: TARGET_CLUSTERS_MAP
+            .describe("Define the target OpenSearch clusters to migrate to"),
         migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG).min(1)
+            .describe("Define the migration workflows between source and target clusters")
+    }).describe("Complete configuration for migrating data between Elasticsearch/OpenSearch clusters")
+    .meta({
+        exampleValue: {
+            skipApprovals: false,
+            sourceClusters: {
+                source1: {
+                    endpoint: "https://source:9200",
+                    version: "ES 7.10.2",
+                    allowInsecure: false
+                }
+            },
+            targetClusters: {
+                target1: {
+                    endpoint: "https://target:9200",
+                    version: "OS 2.11.0",
+                    allowInsecure: false
+                }
+            },
+            migrationConfigs: [
+                {
+                    fromSource: "source1",
+                    toTarget: "target1",
+                    snapshotExtractAndLoadConfigs: [
+                        {
+                            name: "snapshot1",
+                            snapshotConfig: {
+                                snapshotNameConfig: {
+                                    snapshotNamePrefix: "migration-snapshot"
+                                }
+                            },
+                            migrations: [
+                                {
+                                    name: "migration1",
+                                    metadataMigrationConfig: {}
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
     })
 );

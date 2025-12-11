@@ -5,7 +5,6 @@
     "packages/*"
   ],
   "dependencies": {
-    "ci": "^2.3.0",
     "zod": "^4.0.5"
   },
   "devDependencies": {
