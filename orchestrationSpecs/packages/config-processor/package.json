@@ -28,12 +28,6 @@
     "@types/node": "^24.0.13",
     "@types/jest": "*",
     "tsx": "^4.20.5",
-    "typescript": "^5.9.3",
-    "@typescript/native-preview": "*"
-  },
-  "optionalDependencies": {
-    "@typescript/native-preview-linux-x64": "*",
-    "@typescript/native-preview-darwin-arm64": "*",
-    "@typescript/native-preview-darwin-x64": "*"
+    "typescript": "^5.9.3"
   }
 }

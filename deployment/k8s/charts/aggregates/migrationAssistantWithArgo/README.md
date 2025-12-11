@@ -27,119 +27,55 @@ helm install migration-assistant ./deployment/k8s/charts/aggregates/migrationAss
 
 See `values.yaml` for the full list of configurable parameters.
 
----
+### Key Configuration Options
 
-## ⚠️ Security Considerations
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `conditionalPackageInstalls.kyverno` | Enable Kyverno installation | `false` |
+| `kyvernoPolicies.mountLocalAwsCreds` | Enable AWS credentials mounting policy (local dev only) | `false` |
+| `kyvernoPolicies.mountLocalAwsCredsPath` | Host path to AWS credentials | `~/.aws` |
+| `kyvernoPolicies.zeroResourceRequests` | Enable zero resource requests policy | `false` |
 
-### Kyverno Policies
+## Kyverno Policies
 
-This chart includes optional Kyverno policies that can significantly impact cluster security. These policies are **disabled by default** and require explicit opt-in.
-
-#### Prerequisites for Kyverno Policies
-
-To use any Kyverno policies, you must first enable Kyverno installation:
+This chart includes optional Kyverno policies for local development environments. Kyverno must be enabled first:
 
 ```yaml
 conditionalPackageInstalls:
   kyverno: true
 ```
 
----
+### Available Policies
 
-### 🚨 CRITICAL SECURITY WARNING: Local AWS Credentials Mounting Policy
+**Mount Local AWS Credentials** (`kyvernoPolicies.mountLocalAwsCreds`)
+- Automatically mounts host AWS credentials (`~/.aws`) to pods using the `migration-console-access-role` service account
+- **⚠️ LOCAL DEVELOPMENT ONLY** - Never enable in production or shared clusters
+- Only applies to pods using the `migration-console-access-role` service account
+- More secure than mounting to all pods, but still requires caution in local development
 
-> **⚠️ WARNING: This policy exposes host filesystem credentials to ALL pods in the cluster. Only enable this in isolated local development environments. NEVER enable this in production or shared clusters.**
+**Zero Resource Requests** (`kyvernoPolicies.zeroResourceRequests`)
+- Sets resource requests to zero for pods
+- Useful for local development with limited resources
+- Not recommended for production use
 
-#### What This Policy Does
-
-When enabled, the `mountLocalAwsCreds` Kyverno policy creates a **ClusterPolicy** that automatically mutates **ALL pods** in the cluster to:
-
-1. **Add a hostPath volume** that mounts the host machine's AWS credentials directory (default: `~/.aws`)
-2. **Inject a volumeMount** into **every container** of every pod, mounting the credentials at `/root/.aws` (read-only)
-3. **Add an annotation** `kyverno.io/aws-creds-mounted: "true"` to mark affected pods
-
-#### Which Pods Receive Credentials
-
-**ALL pods in the entire cluster** will receive the mounted AWS credentials. This includes:
-
-- Migration Assistant pods (migration-console, reindex-from-snapshot, traffic-replayer, etc.)
-- Argo Workflow pods
-- Infrastructure pods (etcd, Kafka, Prometheus, etc.)
-- System pods (kube-system namespace pods)
-- Any other workloads running in the cluster
-
-The policy uses a broad match rule:
-```yaml
-match:
-  any:
-    - resources:
-        kinds:
-          - Pod
-```
-
-This means there is **no namespace restriction** and **no label selector** - every pod created after the policy is applied will be mutated.
-
-#### Security Implications
-
-| Risk | Description |
-|------|-------------|
-| **Credential Exposure** | Your personal/machine AWS credentials become accessible to every container in the cluster |
-| **Privilege Escalation** | Any compromised container can use your AWS credentials to access AWS resources |
-| **Lateral Movement** | Attackers gaining access to any pod can immediately access AWS APIs with your permissions |
-| **Audit Trail Pollution** | All AWS API calls will appear to come from your credentials, making incident investigation difficult |
-| **Blast Radius** | A single container compromise affects your entire AWS account access |
-
-#### How to Enable (Local Development Only)
+### Enabling Policies (Local Development)
 
 ```yaml
 conditionalPackageInstalls:
   kyverno: true
 
 kyvernoPolicies:
-  mountLocalAwsCreds: true
-  mountLocalAwsCredsPath: "~/.aws"  # Optional: customize the host path
+  mountLocalAwsCreds: true  # Use with caution
+  zeroResourceRequests: true
 ```
 
-#### How to Control/Restrict the Policy
+### Production Alternatives
 
-Currently, the policy applies cluster-wide without restrictions. To limit exposure, consider:
-
-1. **Use a dedicated AWS profile** with minimal permissions for local development
-2. **Use temporary credentials** that expire quickly
-3. **Run in an isolated cluster** (e.g., local minikube/kind) that has no other workloads
-4. **Disable the policy** immediately after testing by setting `mountLocalAwsCreds: false`
-
-#### Recommended Alternatives for Production
-
-Instead of mounting host credentials, use proper Kubernetes-native AWS authentication:
-
-| Method | Description |
-|--------|-------------|
-| **IAM Roles for Service Accounts (IRSA)** | Associate Kubernetes service accounts with IAM roles (EKS) |
-| **Pod Identity** | Use EKS Pod Identity for simplified IAM integration |
-| **Secrets Manager** | Store credentials in AWS Secrets Manager and inject via CSI driver |
-| **Instance Profiles** | Use EC2 instance profiles for node-level credentials |
-
----
-
-### Other Kyverno Policies
-
-#### Zero Resource Requests Policy
-
-When enabled (`kyvernoPolicies.zeroResourceRequests: true`), this policy sets resource requests to zero for pods, which can be useful for local development but should not be used in production.
-
----
-
-## Values Reference
-
-### Kyverno Policy Configuration
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `conditionalPackageInstalls.kyverno` | Enable Kyverno installation | `false` |
-| `kyvernoPolicies.mountLocalAwsCreds` | Enable AWS credentials mounting policy | `false` |
-| `kyvernoPolicies.mountLocalAwsCredsPath` | Host path to AWS credentials | `~/.aws` |
-| `kyvernoPolicies.zeroResourceRequests` | Enable zero resource requests policy | `false` |
+For production environments, use proper Kubernetes-native AWS authentication instead of mounting credentials:
+- **IAM Roles for Service Accounts (IRSA)** - EKS native IAM integration
+- **EKS Pod Identity** - Simplified IAM for pods
+- **AWS Secrets Manager** - Store credentials securely with CSI driver
+- **EC2 Instance Profiles** - Node-level credentials
 
 ## Additional Documentation
 

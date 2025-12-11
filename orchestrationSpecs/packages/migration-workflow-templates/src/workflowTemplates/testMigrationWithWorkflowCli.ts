@@ -11,7 +11,7 @@ import {
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {configureAndSubmitScript, monitorScript} from "../resourceLoader";
+import {configureAndSubmitScript, monitorScript} from "../testResourceLoader";
 
 export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
     k8sResourceName: "full-migration-with-workflow-cli",
@@ -45,18 +45,14 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addCommand(["/bin/bash", "-c"])
             .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
             .addArgs([monitorScript])
-            // monitorResult output values:
-            // - "SUCCEEDED": Migration completed successfully (exit code 0)
-            // - "FAILED": Migration failed permanently (exit code 0, but marks failure)
-            // - "RETRY": Migration still in progress, retry monitoring (exit code 1, triggers retry)
-            // - "ERROR": Unexpected error occurred (exit code 2, fails the step)
-            // The retry policy only retries on exit code 1 (RETRY case).
-            // Exit codes 0 and 2 are terminal and cause the step to succeed or fail respectively.
+            // Monitor script exit codes:
+            // - Exit 0: Workflow is in terminal state (Succeeded or Failed) - stop retrying
+            // - Exit 1: Workflow still running - retry monitoring
             .addPathOutput(
                 "monitorResult",
                 "/tmp/outputs/monitorResult",
                 typeToken<string>(),
-                "Result of monitoring (SUCCEEDED, FAILED, RETRY, ERROR)"
+                "Workflow status output from monitor script"
             )
         )
         .addRetryParameters({
@@ -70,36 +66,29 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
         })
     )
 
-    .addTemplate("handleWorkflowSuccess", t => t
+    .addTemplate("evaluateWorkflowResult", t => t
+        .addRequiredInput("monitorResult", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/bash", "-c"])
             .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
-            .addArgs(["echo 'Migration workflow completed successfully'"])
-        )
-    )
+            .addEnvVar("MONITOR_RESULT", cb.inputs.monitorResult)
+            .addArgs([`
+set -e
+echo "Evaluating workflow result..."
+echo "Monitor output: $MONITOR_RESULT"
 
-    .addTemplate("handleWorkflowFailure", t => t
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-
-        .addContainer(cb => cb
-            .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
-            .addCommand(["/bin/bash", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
-            .addArgs(["echo 'Migration workflow failed'"])
-        )
-    )
-
-    .addTemplate("handleWorkflowError", t => t
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-
-        .addContainer(cb => cb
-            .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
-            .addCommand(["/bin/bash", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
-            .addArgs(["echo 'Migration workflow encountered an error'"])
+# Check if the output contains "Phase: Succeeded"
+if echo "$MONITOR_RESULT" | grep -q "Phase: Succeeded"; then
+    echo "Migration workflow completed successfully"
+    exit 0
+else
+    echo "Migration workflow did not succeed"
+    exit 1
+fi
+            `])
         )
     )
 
@@ -134,35 +123,19 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
                 })
             )
 
-            // Step 2: Monitor workflow to completion
+            // Step 2: Monitor workflow to completion (with retry on exit code 1)
             .addStep("monitorWorkflow", INTERNAL, "monitorWorkflow", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                 })
             )
 
-            // Step 3: Handle workflow success (conditional on monitor result)
-            .addStep("handleSuccess", INTERNAL, "handleWorkflowSuccess", c =>
+            // Step 3: Evaluate workflow result (check for SUCCESS in output)
+            .addStep("evaluateWorkflowResult", INTERNAL, "evaluateWorkflowResult", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                }),
-                { when: steps => expr.equals(steps.monitorWorkflow.outputs.monitorResult, expr.literal("SUCCEEDED")) }
-            )
-
-            // Step 4: Handle workflow failure (conditional on monitor result)
-            .addStep("handleFailure", INTERNAL, "handleWorkflowFailure", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                }),
-                { when: steps => expr.equals(steps.monitorWorkflow.outputs.monitorResult, expr.literal("FAILED")) }
-            )
-
-            // Step 5: Handle workflow error (conditional on monitor result)
-            .addStep("handleError", INTERNAL, "handleWorkflowError", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                }),
-                { when: steps => expr.equals(steps.monitorWorkflow.outputs.monitorResult, expr.literal("ERROR")) }
+                    monitorResult: c.steps.monitorWorkflow.outputs.monitorResult,
+                })
             )
 
             // Step 4: Delete the migration workflow (always executes)

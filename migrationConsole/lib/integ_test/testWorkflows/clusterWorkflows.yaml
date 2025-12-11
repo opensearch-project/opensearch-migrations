@@ -20,45 +20,37 @@ spec:
             CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
             NAMESPACE='{{inputs.parameters.namespace}}'
 
-            # 1) Create/update the ConfigMap with ES 1.5 config
-            kubectl apply -f - <<EOF
-            apiVersion: v1
-            kind: ConfigMap
-            metadata:
-              name: ${CLUSTER_NAME}-config
-              namespace: ${NAMESPACE}
-              labels:
-                migration-test: "true"
-                cluster-name: ${CLUSTER_NAME}
-            data:
-              elasticsearch.yml: |
-                cluster.name: ${CLUSTER_NAME}
-                network.host: 0.0.0.0
-                http.host: 0.0.0.0
-                transport.host: 0.0.0.0
-                discovery.zen.minimum_master_nodes: 1
-                discovery.zen.ping.multicast.enabled: false
-                bootstrap.system_call_filter: false
-                cloud.aws.region: us-east-2
-                cloud.aws.protocol: http
-                cloud.aws.s3.endpoint: http://localstack:4566
-            EOF
+            # 1) Write ES 1.5 config to a file, then create/update the ConfigMap idempotently
+            cat > /tmp/elasticsearch.yml <<'ESCFG'
+            cluster.name: __CLUSTER_NAME__
+            network.host: 0.0.0.0
+            http.host: 0.0.0.0
+            transport.host: 0.0.0.0
+            discovery.zen.minimum_master_nodes: 1
+            discovery.zen.ping.multicast.enabled: false
+            bootstrap.system_call_filter: false
+            cloud.aws.region: us-east-2
+            cloud.aws.protocol: http
+            cloud.aws.s3.endpoint: http://localstack:4566
+            ESCFG
+            # inject cluster name into the file
+            sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME}/g" /tmp/elasticsearch.yml
+
+            kubectl create configmap "${CLUSTER_NAME}-config" \
+              --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
 
             # 2) Create/update AWS creds secret (for the ES 1.5 cloud-aws plugin to pick up)
-            kubectl apply -f - <<EOF
-            apiVersion: v1
-            kind: Secret
-            metadata:
-              name: ${CLUSTER_NAME}-aws
-              namespace: ${NAMESPACE}
-              labels:
-                migration-test: "true"
-                cluster-name: ${CLUSTER_NAME}
-            type: Opaque
-            stringData:
-              AWS_ACCESS_KEY_ID: test
-              AWS_SECRET_ACCESS_KEY: test
-            EOF
+            kubectl create secret generic "${CLUSTER_NAME}-aws" \
+              --from-literal=AWS_ACCESS_KEY_ID=test \
+              --from-literal=AWS_SECRET_ACCESS_KEY=test \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
 
             # 3) Apply the Deployment + Service with PATHS for carlchinatomby/elasticsearch:1.5.2-arm64
             cat <<EOF | kubectl apply -f -
@@ -215,20 +207,10 @@ spec:
             }
             EOF
 
-            kubectl apply -f - <<EOF
-            apiVersion: v1
-            kind: ConfigMap
-            metadata:
-              name: ${CLUSTER_NAME}-migration-config
-              namespace: ${NAMESPACE}
-            data:
-              cluster-config: |
-                {
-                  "endpoint": "http://${CLUSTER_NAME}:9200",
-                  "allowInsecure": true,
-                  "version": "ES 1.5"
-                }
-            EOF
+            kubectl create configmap ${CLUSTER_NAME}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              -n ${NAMESPACE} \
+              --dry-run=client -o yaml | kubectl apply -f -
 
             echo "Elasticsearch 1.5 cluster created successfully (ARM-compatible with correct paths)."
             echo "Cluster config:"
@@ -254,44 +236,36 @@ spec:
             CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
             NAMESPACE='{{inputs.parameters.namespace}}'
 
-            # 1) Create/update the ConfigMap with ES 2.4 config
-            kubectl apply -f - <<EOF
-            apiVersion: v1
-            kind: ConfigMap
-            metadata:
-              name: ${CLUSTER_NAME}-config
-              namespace: ${NAMESPACE}
-              labels:
-                migration-test: "true"
-                cluster-name: ${CLUSTER_NAME}
-            data:
-              elasticsearch.yml: |
-                cluster.name: ${CLUSTER_NAME}
-                network.host: 0.0.0.0
-                http.host: 0.0.0.0
-                transport.host: 0.0.0.0
-                discovery.zen.minimum_master_nodes: 1
-                bootstrap.system_call_filter: false
-                cloud.aws.region: us-east-2
-                cloud.aws.protocol: http
-                cloud.aws.s3.endpoint: http://localstack:4566
-            EOF
+            # 1) Write ES 2.4 config to a file, then create/update the ConfigMap idempotently
+            cat > /tmp/elasticsearch.yml <<'ESCFG'
+            cluster.name: __CLUSTER_NAME__
+            network.host: 0.0.0.0
+            http.host: 0.0.0.0
+            transport.host: 0.0.0.0
+            discovery.zen.minimum_master_nodes: 1
+            bootstrap.system_call_filter: false
+            cloud.aws.region: us-east-2
+            cloud.aws.protocol: http
+            cloud.aws.s3.endpoint: http://localstack:4566
+            ESCFG
+            # inject cluster name into the file
+            sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME}/g" /tmp/elasticsearch.yml
+
+            kubectl create configmap "${CLUSTER_NAME}-config" \
+              --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
 
             # 2) Create/update AWS creds secret (for the ES 2.4 cloud-aws plugin to pick up)
-            kubectl apply -f - <<EOF
-            apiVersion: v1
-            kind: Secret
-            metadata:
-              name: ${CLUSTER_NAME}-aws
-              namespace: ${NAMESPACE}
-              labels:
-                migration-test: "true"
-                cluster-name: ${CLUSTER_NAME}
-            type: Opaque
-            stringData:
-              AWS_ACCESS_KEY_ID: test
-              AWS_SECRET_ACCESS_KEY: test
-            EOF
+            kubectl create secret generic "${CLUSTER_NAME}-aws" \
+              --from-literal=AWS_ACCESS_KEY_ID=test \
+              --from-literal=AWS_SECRET_ACCESS_KEY=test \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
 
             # 3) Apply the Deployment + Service that mirror our proven setup
             cat <<EOF | kubectl apply -f -
@@ -424,20 +398,10 @@ spec:
             }
             EOF
 
-            kubectl apply -f - <<EOF
-            apiVersion: v1
-            kind: ConfigMap
-            metadata:
-              name: ${CLUSTER_NAME}-migration-config
-              namespace: ${NAMESPACE}
-            data:
-              cluster-config: |
-                {
-                  "endpoint": "http://${CLUSTER_NAME}:9200",
-                  "allowInsecure": true,
-                  "version": "ES 2.4"
-                }
-            EOF
+            kubectl create configmap ${CLUSTER_NAME}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              -n ${NAMESPACE} \
+              --dry-run=client -o yaml | kubectl apply -f -
 
             echo "Elasticsearch 2.4 cluster created successfully (manifests inline)."
             echo "Cluster config:"
@@ -838,20 +802,13 @@ spec:
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
             
             # Create cluster credentials secret (OpenSearch 1.3 default: admin/admin)
-            kubectl apply -f - <<EOF
-            apiVersion: v1
-            kind: Secret
-            metadata:
-              name: {{inputs.parameters.cluster-name}}-creds
-              namespace: {{inputs.parameters.namespace}}
-              labels:
-                migration-test: "true"
-                cluster-name: {{inputs.parameters.cluster-name}}
-            type: Opaque
-            stringData:
-              username: admin
-              password: admin
-            EOF
+            kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
+              --from-literal=username=admin \
+              --from-literal=password=admin \
+              -n "{{inputs.parameters.namespace}}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name={{inputs.parameters.cluster-name}} -o yaml | \
+              kubectl apply -f -
             
             # Generate cluster configuration output
             cat > /tmp/cluster-config.json << EOF
@@ -937,20 +894,13 @@ spec:
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
             
             # Create cluster credentials secret (OpenSearch 2.19 password set via OPENSEARCH_INITIAL_ADMIN_PASSWORD)
-            kubectl apply -f - <<EOF
-            apiVersion: v1
-            kind: Secret
-            metadata:
-              name: {{inputs.parameters.cluster-name}}-creds
-              namespace: {{inputs.parameters.namespace}}
-              labels:
-                migration-test: "true"
-                cluster-name: {{inputs.parameters.cluster-name}}
-            type: Opaque
-            stringData:
-              username: admin
-              password: "myStrongPassword123!"
-            EOF
+            kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
+              --from-literal=username=admin \
+              --from-literal=password="myStrongPassword123!" \
+              -n "{{inputs.parameters.namespace}}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name={{inputs.parameters.cluster-name}} -o yaml | \
+              kubectl apply -f -
             
             # Generate cluster configuration output
             cat > /tmp/cluster-config.json << EOF
@@ -1032,20 +982,13 @@ spec:
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
             
             # Create cluster credentials secret (OpenSearch 3.1 password set via OPENSEARCH_INITIAL_ADMIN_PASSWORD)
-            kubectl apply -f - <<EOF
-            apiVersion: v1
-            kind: Secret
-            metadata:
-              name: {{inputs.parameters.cluster-name}}-creds
-              namespace: {{inputs.parameters.namespace}}
-              labels:
-                migration-test: "true"
-                cluster-name: {{inputs.parameters.cluster-name}}
-            type: Opaque
-            stringData:
-              username: admin
-              password: "MyStr0ngPassw0rd!"
-            EOF
+            kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
+              --from-literal=username=admin \
+              --from-literal=password="MyStr0ngPassw0rd!" \
+              -n "{{inputs.parameters.namespace}}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name={{inputs.parameters.cluster-name}} -o yaml | \
+              kubectl apply -f -
             
             cat > /tmp/cluster-config.json << EOF
             {

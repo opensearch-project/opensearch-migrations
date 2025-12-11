@@ -25,6 +25,12 @@ data:
               - resources:
                   kinds:
                     - Pod
+                  selector:
+                    matchExpressions:
+                      - key: serviceAccountName
+                        operator: In
+                        values:
+                          - migration-console-access-role
           mutate:
             patchStrategicMerge:
               metadata:
@@ -42,6 +48,12 @@ data:
               - resources:
                   kinds:
                     - Pod
+                  selector:
+                    matchExpressions:
+                      - key: serviceAccountName
+                        operator: In
+                        values:
+                          - migration-console-access-role
           mutate:
             foreach:
               - list: "request.object.spec.containers"
