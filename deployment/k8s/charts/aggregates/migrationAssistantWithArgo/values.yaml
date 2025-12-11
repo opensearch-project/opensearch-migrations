@@ -1,4 +1,5 @@
 conditionalPackageInstalls:
+  kyverno: false
   # Migration infrastructure components
   etcd: true                    # used by our Argo workflows for workflow coordination. May be used by strimzi clusters too
   cert-manager: true            # needed by the otel operator
@@ -24,6 +25,12 @@ conditionalPackageInstalls:
   gatekeeper: false
   grafana: false
   jaeger: true
+
+# Kyverno policy toggles (requires conditionalPackageInstalls.kyverno: true)
+kyvernoPolicies:
+  zeroResourceRequests: false
+  mountLocalAwsCreds: false
+  mountLocalAwsCredsPath: "~/.aws"
 
 images:
   captureProxy:
@@ -54,7 +61,6 @@ aws:
   account: "123456789012"
 
 stageName: dev
-developerModeEnabled: false
 
 defaultBucketConfiguration:
   create: true
@@ -105,14 +111,14 @@ otelConfiguration:
       prometheus:
         config:
           scrape_configs:
-            - job_name: 'cadvisor'
+            - job_name: 'kubelet-cadvisor'
               scrape_interval: 5s
               scheme: https
-              authorization:
+              authorization: # Use the ServiceAccount token for authorization
                 credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
               tls_config:
                 ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-                insecure_skip_verify: true  # Minikube uses self-signed certs
+                insecure_skip_verify: true # Minikube uses self-signed certs
               kubernetes_sd_configs:
                 - role: node
               relabel_configs:
@@ -584,3 +590,16 @@ charts:
         enabled: false
       query:
         enabled: false
+
+  kyverno:
+    version: "3.5.2"
+    repository: "https://kyverno.github.io/kyverno/"
+    values:
+      admissionController:
+        replicas: 1
+      backgroundController:
+        replicas: 1
+      cleanupController:
+        replicas: 1
+      reportsController:
+        replicas: 1

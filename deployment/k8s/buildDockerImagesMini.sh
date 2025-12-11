@@ -113,11 +113,36 @@ cd "$script_dir_abs_path" || exit
 
 cd ../.. || exit
 
+# Check if registry addon is enabled, enable it if not
+if ! minikube addons list | grep -q "registry.*enabled"; then
+  echo "⚠️  Minikube registry addon not enabled. Enabling it now..."
+  minikube addons enable registry
+  echo "✅  Registry addon enabled"
+  
+  # Wait for registry pod to be ready
+  # Note: The 'actual-registry=true' label is set by Minikube's registry addon to distinguish
+  # the actual registry pod from the registry proxy/daemonset pods
+  echo "⏳  Waiting for registry pod to be ready..."
+  kubectl wait --for=condition=ready pod -l actual-registry=true -n kube-system --timeout=120s || \
+    kubectl wait --for=condition=ready pod -l kubernetes.io/minikube-addons=registry -n kube-system --timeout=120s || \
+    echo "⚠️  Could not verify registry pod readiness, proceeding anyway..."
+fi
+
 eval $(minikube docker-env)
 
 if [ "$SKIP_BUILD" = "false" ]; then
   ./gradlew :buildDockerImages -x test
 fi
+
+# Push images to minikube registry addon
+# Inside minikube's docker context, registry is at localhost:5000
+echo "📦  Pushing images to minikube registry"
+for image in $(docker images --format "{{.Repository}}:{{.Tag}}" | grep "^migrations.*:latest$"); do
+  image_name=$(echo "$image" | sed 's/:latest$//')
+  docker tag "$image" "localhost:5000/$image_name:latest"
+  docker push "localhost:5000/$image_name:latest"
+  echo "✅  Pushed $image_name"
+done
 
 if [ "$SYNC_ECR" = "true" ]; then
   sync_ecr_repo

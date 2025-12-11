@@ -36,7 +36,8 @@ import {
     applyAppRegistry,
     generateExportString,
     getVpcEndpointForEFS,
-    ParameterLabel
+    ParameterLabel,
+    buildTemplateDescription
 } from "./common-utils";
 
 export interface SolutionsInfrastructureStackProps extends StackProps {
@@ -63,6 +64,12 @@ export class SolutionsInfrastructureStack extends Stack {
     constructor(scope: Construct, id: string, props: SolutionsInfrastructureStackProps) {
         const finalId = props.stackNameSuffix ? `${id}-${props.stackNameSuffix}` : id
         super(scope, finalId, props);
+
+        // Distinct description for ECS create vs import
+        this.templateOptions.description = buildTemplateDescription(
+            props.createVPC ? 'ECS_VPC_CREATE' : 'ECS_VPC_IMPORT'
+        );
+
         this.templateOptions.templateFormatVersion = '2010-09-09';
         new CfnMapping(this, 'Solution', {
             mapping: {
@@ -82,7 +89,8 @@ export class SolutionsInfrastructureStack extends Stack {
         const parameterLabels: Record<string, ParameterLabel> = {};
         const stageParameter = new CfnParameter(this, 'Stage', {
             type: 'String',
-            description: 'Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1',
+            description: 'Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1.  ' +
+                'This name should be unique for the all deployments in the region.',
             default: 'dev',
         });
         additionalParameters.push(stageParameter.logicalId)

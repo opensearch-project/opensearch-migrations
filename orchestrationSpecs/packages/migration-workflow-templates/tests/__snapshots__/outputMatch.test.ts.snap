@@ -689,7 +689,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
         "container": {
           "args": [
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceAwsServiceSigningName", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], "sourceAwsRegion", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceCaCert", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict("sourceHost", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : ({}))), sprig.dict("sourceInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.omit(fromJSON(inputs.parameters.createSnapshotConfig), 'loggingConfigurationOverrideConfigMap')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "snapshotRepoName", sprig.dig('repoConfig', 'repoName', 'migration_assistant_repo', fromJSON(inputs.parameters.snapshotConfig))), sprig.merge((('endpoint' in fromJSON(inputs.parameters.snapshotConfig)['repoConfig']) ? (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'])) : (sprig.dict())), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'])))))}}",
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceAwsServiceSigningName", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], "sourceAwsRegion", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceCaCert", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict("sourceHost", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : ({}))), sprig.dict("sourceInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.omit(fromJSON(inputs.parameters.createSnapshotConfig), 'loggingConfigurationOverrideConfigMap')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "snapshotRepoName", sprig.dig('repoConfig', 'repoName', 'migration_assistant_repo', fromJSON(inputs.parameters.snapshotConfig))), sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'])))))}}",
           ],
           "command": [
             "/root/createSnapshot/bin/CreateSnapshot",
@@ -1152,7 +1152,7 @@ spec:
             - name: JAVA_OPTS
               value: "{{=' ' + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}"
             - name: AWS_SHARED_CREDENTIALS_FILE
-              value: "{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('/config/credentials') : (''))}}"
+              value: "{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('/config/credentials/configuration') : (''))}}"
           volumeMounts:
             - name: log4j-configuration
               mountPath: /config/logConfiguration
@@ -1238,7 +1238,7 @@ spec:
                   },
                   {
                     "name": "rfsJsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp', "cleanLocalDirs", true), sprig.merge((('endpoint' in fromJSON(inputs.parameters.snapshotConfig)['repoConfig']) ? (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'])) : (sprig.dict())), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp')))))}}",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp', "cleanLocalDirs", true), sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp')))))}}",
                   },
                   {
                     "name": "resources",
@@ -2147,6 +2147,395 @@ exports[`test workflow template renderings full-migration 1`] = `
 }
 `;
 
+exports[`test workflow template renderings full-migration-with-workflow-cli 1`] = `
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "full-migration-with-workflow-cli",
+  },
+  "spec": {
+    "arguments": {
+      "parameters": [
+        {
+          "name": "etcdEndpoints",
+          "value": "http://etcd.ma.svc.cluster.local:2379",
+        },
+        {
+          "name": "etcdUser",
+          "value": "root",
+        },
+        {
+          "name": "etcdPassword",
+          "value": "password",
+        },
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config",
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config",
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config",
+        },
+      ],
+    },
+    "entrypoint": "main",
+    "parallelism": 100,
+    "serviceAccountName": "argo-workflow-executor",
+    "templates": [
+      {
+        "container": {
+          "args": [
+            "#!/bin/bash
+#
+# ============================================================================
+# WARNING: TEST HELPER SCRIPT - SHOULD BE MOVED TO SEPARATE PACKAGE
+# ============================================================================
+# This script is part of the test workflow infrastructure and creates a
+# logical dependency cycle:
+# - migration-workflow-templates package provides workflow templates
+# - workflow CLI (in migration console) depends on migration-workflow-templates
+# - This test script depends on workflow CLI
+#
+# TODO: Move test workflows and helpers to a separate package (e.g.,
+# migration-workflow-templates-test) to break this dependency cycle.
+# ============================================================================
+
+set -e -x
+
+# Activate the Python virtual environment to get access to workflow CLI
+. /etc/profile.d/venv.sh
+source /.venv/bin/activate
+
+echo "Building and submitting migration workflow..."
+
+# Decode base64 migration config from environment variable and write to file
+echo "$MIGRATION_CONFIG_BASE64" | base64 -d > /tmp/migration_config.json
+
+echo "Migration config contents:"
+cat /tmp/migration_config.json
+
+echo "Loading configuration from JSON..."
+cat /tmp/migration_config.json | workflow configure edit --stdin
+
+# Submit workflow
+echo "Submitting workflow..."
+WORKFLOW_OUTPUT=$(workflow submit 2>&1)
+echo "Workflow submit output: $WORKFLOW_OUTPUT"
+",
+          ],
+          "command": [
+            "/bin/bash",
+            "-c",
+          ],
+          "env": [
+            {
+              "name": "MIGRATION_CONFIG_BASE64",
+              "value": "{{inputs.parameters.migrationConfigBase64}}",
+            },
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "1000m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "migrationConfigBase64",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "configureandsubmitworkflow",
+        "outputs": {
+          "parameters": [],
+        },
+      },
+      {
+        "container": {
+          "args": [
+            "#!/bin/bash
+#
+# ============================================================================
+# WARNING: TEST HELPER SCRIPT - SHOULD BE MOVED TO SEPARATE PACKAGE
+# ============================================================================
+# This script is part of the test workflow infrastructure and creates a
+# logical dependency cycle:
+# - migration-workflow-templates package provides workflow templates
+# - workflow CLI (in migration console) depends on migration-workflow-templates
+# - This test script depends on workflow CLI
+#
+# TODO: Move test workflows and helpers to a separate package (e.g.,
+# migration-workflow-templates-test) to break this dependency cycle.
+# ============================================================================
+
+set -e -x
+
+echo "Checking workflow status"
+. /etc/profile.d/venv.sh
+source /.venv/bin/activate
+
+STATUS_OUTPUT=$(workflow status migration-workflow 2>&1 || true)
+echo "Status output:"
+echo "$STATUS_OUTPUT"
+
+# Check if workflow is running or pending - retry
+if echo "$STATUS_OUTPUT" | grep -q "Phase: Running\\|Phase: Pending"; then
+    echo "Workflow still running or pending, will retry..."
+    exit 1
+fi
+
+# All other states are terminal (Succeeded, Failed, Suspended, Error, etc.)
+echo "Workflow is in terminal state"
+mkdir -p /tmp/outputs
+echo "$STATUS_OUTPUT" > /tmp/outputs/monitorResult
+exit 0
+",
+          ],
+          "command": [
+            "/bin/bash",
+            "-c",
+          ],
+          "env": [],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "1000m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "monitorworkflow",
+        "outputs": {
+          "parameters": [
+            {
+              "description": "Workflow status output from monitor script",
+              "name": "monitorResult",
+              "valueFrom": {
+                "path": "/tmp/outputs/monitorResult",
+              },
+            },
+          ],
+        },
+        "retryStrategy": {
+          "backoff": {
+            "cap": "60",
+            "duration": "5",
+            "factor": "2",
+          },
+          "limit": "33",
+          "retryPolicy": "Always",
+        },
+      },
+      {
+        "container": {
+          "args": [
+            "
+set -e
+echo "Evaluating workflow result..."
+echo "Monitor output: $MONITOR_RESULT"
+
+# Check if the output contains "Phase: Succeeded"
+if echo "$MONITOR_RESULT" | grep -q "Phase: Succeeded"; then
+    echo "Migration workflow completed successfully"
+    exit 0
+else
+    echo "Migration workflow did not succeed"
+    exit 1
+fi
+            ",
+          ],
+          "command": [
+            "/bin/bash",
+            "-c",
+          ],
+          "env": [
+            {
+              "name": "MONITOR_RESULT",
+              "value": "{{inputs.parameters.monitorResult}}",
+            },
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "1000m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "monitorResult",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "evaluateworkflowresult",
+        "outputs": {
+          "parameters": [],
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [],
+        },
+        "name": "deletemigrationworkflow",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found",
+          ],
+          "manifest": "apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: migration-workflow
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "migrationConfigBase64",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "main",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "migrationConfigBase64",
+                    "value": "{{inputs.parameters.migrationConfigBase64}}",
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                ],
+              },
+              "name": "configureAndSubmitWorkflow",
+              "template": "configureandsubmitworkflow",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                ],
+              },
+              "name": "monitorWorkflow",
+              "template": "monitorworkflow",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "monitorResult",
+                    "value": "{{steps.monitorWorkflow.outputs.parameters.monitorResult}}",
+                  },
+                ],
+              },
+              "name": "evaluateWorkflowResult",
+              "template": "evaluateworkflowresult",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [],
+              },
+              "name": "deleteMigrationWorkflow",
+              "template": "deletemigrationworkflow",
+            },
+          ],
+        ],
+      },
+    ],
+  },
+}
+`;
+
 exports[`test workflow template renderings metadata-migration 1`] = `
 {
   "apiVersion": "argoproj.io/v1alpha1",
@@ -2192,7 +2581,7 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           "args": [
             "{{inputs.parameters.commandMode}}",
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'loggingConfigurationOverrideConfigMap')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", fromJSON(inputs.parameters.sourceConfig)['version']), sprig.merge((('endpoint' in fromJSON(inputs.parameters.snapshotConfig)['repoConfig']) ? (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint'])) : (sprig.dict())), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp')))))}}",
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'loggingConfigurationOverrideConfigMap')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", fromJSON(inputs.parameters.sourceConfig)['version']), sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp')))))}}",
           ],
           "command": [
             "/root/metadataMigration/bin/MetadataMigration",
@@ -2545,11 +2934,13 @@ base64 -d > /config/migration_services.yaml_ << EOF
 {{=toBase64(inputs.parameters.configContents)}}
 EOF
 
-cat /config/migration_services.yaml_ | 
-jq 'def normalizeAuthConfig:
+cat /config/migration_services.yaml_ |
+jq '
+# Normalize auth config for cluster objects (source_cluster, target_cluster)
+def normalizeClusterAuthConfig:
   if has("authConfig") then
-    if (.authConfig | has("basic")) then
-      .basic_auth = (.authConfig.basic | 
+    (if (.authConfig | has("basic")) then
+      .basic_auth = (.authConfig.basic |
         if has("secretName") then
           .k8s_secret_name = .secretName | del(.secretName)
         else
@@ -2560,23 +2951,17 @@ jq 'def normalizeAuthConfig:
     elif (.authConfig | has("mtls")) then
       .mtls_auth = .authConfig.mtls
     else
-      .
-    end
-    | del(.authConfig, .name, .proxy, .snapshotRepo)
+      .no_auth = {}
+    end)
+    | del(.authConfig)
   else
-    .
-  end;
+    .no_auth = {}
+  end
+  | del(.name, .proxy, .snapshotRepo);
 
 def normalizeAllowInsecure:
   if has("allowInsecure") then
     .allow_insecure = .allowInsecure | del(.allowInsecure)
-  else
-    .
-  end;
-
-def normalizeRepoPath:
-  if has("s3RepoPathUri") then
-    .repo_uri = .s3RepoPathUri | del(.s3RepoPathUri) | del(.repoName)
   else
     .
   end;
@@ -2588,6 +2973,15 @@ def normalizeSnapshotName:
     .
   end;
 
+# Normalize S3 config inside snapshot
+def normalizeS3Config:
+  (if has("s3RepoPathUri") then
+    .repo_uri = .s3RepoPathUri | del(.s3RepoPathUri)
+  else
+    .
+  end)
+  | del(.repoName, .useLocalStack);
+
 def normalizeRepoConfig:
   if has("repoConfig") then
     .s3 = (.repoConfig | 
@@ -2595,26 +2989,27 @@ def normalizeRepoConfig:
         .aws_region = .awsRegion | del(.awsRegion)
       else
         .
-      end)
+      end
+      | normalizeS3Config)
     | del(.repoConfig)
+  elif has("s3") then
+    .s3 |= normalizeS3Config
   else
     .
   end;
 
-def removeUseLocalStack:
-  del(.useLocalStack);
+# Normalize cluster config (only for source_cluster and target_cluster)
+def normalizeCluster:
+  normalizeClusterAuthConfig | normalizeAllowInsecure;
 
-# Apply recursively to catch nested objects
-def recurseNormalize:
-  (normalizeAuthConfig
-   | normalizeAllowInsecure
-   | normalizeRepoPath
-   | normalizeSnapshotName
-   | normalizeRepoConfig
-   | removeUseLocalStack)
-  | with_entries(.value |= (if type=="object" then (.|recurseNormalize) else . end));
+# Normalize snapshot config
+def normalizeSnapshot:
+  normalizeSnapshotName | normalizeRepoConfig;
 
-. | recurseNormalize
+# Apply transformations to specific top-level keys
+(if has("source_cluster") then .source_cluster |= normalizeCluster else . end)
+| (if has("target_cluster") then .target_cluster |= normalizeCluster else . end)
+| (if has("snapshot") then .snapshot |= normalizeSnapshot else . end)
 ' > /config/migration_services.yaml
 
 . /etc/profile.d/venv.sh

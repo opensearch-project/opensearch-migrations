@@ -46,9 +46,9 @@ export function makeRepoParamDict(
     includes3LocalDir: boolean) {
     return expr.mergeDicts(
         expr.ternary(
-            expr.hasKey(repoConfig, "endpoint"),
-            expr.makeDict({"s3Endpoint": expr.getLoose(repoConfig, "endpoint")}),
-            expr.makeDict({})),
+            expr.isEmpty(expr.dig(repoConfig, ["endpoint"], (""))),
+            expr.makeDict({}),
+            expr.makeDict({"s3Endpoint": expr.getLoose(repoConfig, "endpoint")})),
         expr.makeDict({
             "s3RepoUri": expr.get(repoConfig, "s3RepoPathUri"),
             "s3Region": expr.get(repoConfig, "awsRegion"),

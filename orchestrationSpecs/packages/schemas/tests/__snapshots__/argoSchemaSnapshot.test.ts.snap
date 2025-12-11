@@ -104,9 +104,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   },
                   "endpoint": {
                     "type": "string",
-                    "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)",
+                    "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
                     "default": "",
-                    "description": "Override the default S3 endpoint for clients to connect to.  Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
+                    "description": "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
                   },
                   "s3RepoPathUri": {
                     "type": "string",
@@ -318,7 +318,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         },
                         "endpoint": {
                           "type": "string",
-                          "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)",
+                          "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
                           "default": ""
                         },
                         "s3RepoPathUri": {
@@ -774,9 +774,9 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               },
               "endpoint": {
                 "type": "string",
-                "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)",
+                "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
                 "default": "",
-                "description": "Override the default S3 endpoint for clients to connect to.  Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
+                "description": "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
               },
               "s3RepoPathUri": {
                 "type": "string",
