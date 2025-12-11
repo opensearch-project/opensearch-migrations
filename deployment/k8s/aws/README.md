@@ -30,7 +30,7 @@ As a developer, you'll need to install
 * [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and an AWS Account.
 
 
-## Deploying an EKS Cluster with CloudFormation
+## Step 1: Deploying an EKS Cluster with CloudFormation
 
 Create the CloudFormation template for EKS from source and deploy it.  Make 
 sure that up-to-date AWS credentials are available. 
@@ -62,7 +62,7 @@ kubectl config set-context --current --namespace=ma
 ```
 
 
-## Configuring the EKS Cluster with the Migration Assistant
+## Step 2: Deploying the Migration Assistant onto the EKS Cluster
 
 The user-facing script to provision the Migration Assistant can be run by 
 developers from their own workspace with

@@ -56,7 +56,7 @@ Notice that there are two different gradle tasks to build images:
 
 ### Setup a Kubernetes cluster
 
-We test our solution with minikube and Amazon EKS.  See below for more information to set these up.
+We test our solution with minikube and Amazon EKS.  See [below](#install-minikube) for more how to install minikube and [here](aws/README.md) for how to deploy an EKS cluster.
 
 ## Setup a Local Kubernetes Cluster
 Creating a local Kubernetes cluster is useful for testing and developing a given deployment. There are a few different tools for running a Kubernetes cluster locally. This documentation focuses on using [Minikube](https://github.com/kubernetes/minikube) to run the local Kubernetes cluster.
