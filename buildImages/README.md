@@ -36,9 +36,9 @@ The following gradle command can be used after setting up the previous steps to 
 
 Or customized to use a specific registry endpoint and architecture
 ```shell
-./gradlew buildImagesToRegistry -PregistryEndpoint=123456789012.dkr.ecr.us-west-2.amazonaws.com/my-ecr-repo -PimageArch=amd64
+./gradlew buildImagesToRegistry -PregistryEndpoint=123456789012.dkr.ecr.us-east-2.amazonaws.com/my-ecr-repo -PimageArch=amd64
 ```
 
-## Using Minikube (buildkit container matches aws-bootstrap.sh script)
+## Using Minikube or EKS (using the buildkit container that aws-bootstrap.sh uses)
 
-[README-Minikube.sh](README-Minikube.md)
+[README-K8s.sh](README-K8s.md)

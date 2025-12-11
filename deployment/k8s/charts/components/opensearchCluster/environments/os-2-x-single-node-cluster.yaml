@@ -1,7 +1,0 @@
-opensearch:
-  extraEnvs:
-    - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
-      value: myStrongPassword123!
-  singleNode: true
-  persistence:
-    enabled: false

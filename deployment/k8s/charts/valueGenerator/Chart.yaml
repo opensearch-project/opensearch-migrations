@@ -1,4 +1,0 @@
-apiVersion: v2
-description: "This chart deploys nothing and is only meant to be used to consume fragments of yaml and root them into an aggregated file"
-name: valueGenerator
-version: 0.1.0

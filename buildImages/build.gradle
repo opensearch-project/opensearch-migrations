@@ -127,7 +127,7 @@ tasks.register("buildKitAll") {
 }
 
 tasks.register("buildImagesToRegistry") {
-    println "Will build images to registry: ${registryEndpoint} (${imageArch}) with buildKit container using registry: ${buildKitRegistryEndpoint}"
+    println "buildImagesToRegistry will build images to registry: ${registryEndpoint} (${imageArch}) with buildKit container using registry: ${buildKitRegistryEndpoint}"
     dependsOn("buildKitAll")
     dependsOn("jibAll")
 }

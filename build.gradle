@@ -126,7 +126,7 @@ subprojects {
     spotless {
         java {
             target "**/*.java"
-            targetExclude '**/build/**', ".gradle/**"
+            targetExclude '**/build/**', ".gradle/**", "**/node_modules/**"
             importOrder(
                     'javax',
                     'java',

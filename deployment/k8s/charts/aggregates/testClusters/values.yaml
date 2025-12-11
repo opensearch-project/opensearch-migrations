@@ -1,12 +1,6 @@
 conditionalPackageInstalls:
-  proxy: false
   source: true
   target: true
-
-proxy:
-  parameters:
-    destinationUri:
-      value: "http://elasticsearch:9200"
 
 source:
   http:
