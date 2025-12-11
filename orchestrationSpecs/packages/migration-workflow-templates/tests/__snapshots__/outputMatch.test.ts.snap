@@ -2297,50 +2297,17 @@ STATUS_OUTPUT=$(workflow status migration-workflow 2>&1 || true)
 echo "Status output:"
 echo "$STATUS_OUTPUT"
 
-RESULT="ERROR"
-EXIT_CODE=2
-
-# 1) Terminal success: stop monitoring, proceed, mark success
-if echo "$STATUS_OUTPUT" | grep -q "Phase: Succeeded"; then
-    echo "Workflow completed successfully"
-    RESULT="SUCCEEDED"
-    EXIT_CODE=0
-
-# 2) Terminal failure: stop monitoring, proceed, mark failure
-elif echo "$STATUS_OUTPUT" | grep -q "Phase: Failed"; then
-    echo "Workflow failed permanently"
-    RESULT="FAILED"
-    EXIT_CODE=0
-
-# 3) Suspended / waiting for approval: try to approve once, then retry
-elif echo "$STATUS_OUTPUT" | grep -q "Suspended\\|Waiting"; then
-    echo "Workflow is suspended or waiting for approval, attempting to approve..."
-    APPROVE_OUTPUT=$(workflow approve 2>&1 || true)
-    echo "Approve output:"
-    echo "$APPROVE_OUTPUT"
-    # Regardless of approve result, tell Argo to check again
-    RESULT="RETRY"
-    EXIT_CODE=1
-
-# 4) Still running: keep checking
-elif echo "$STATUS_OUTPUT" | grep -q "Phase: Running\\|Phase: Pending"; then
-    echo "⏳ Workflow still running, will retry..."
-    RESULT="RETRY"
-    EXIT_CODE=1
-
-# 5) Anything else is treated as an error (e.g. CLI failure, unknown output)
-else
-    echo "Unknown or error status from 'workflow status'"
-    RESULT="ERROR"
-    EXIT_CODE=2
+# Check if workflow is running or pending - retry
+if echo "$STATUS_OUTPUT" | grep -q "Phase: Running\\|Phase: Pending"; then
+    echo "Workflow still running or pending, will retry..."
+    exit 1
 fi
 
+# All other states are terminal (Succeeded, Failed, Suspended, Error, etc.)
+echo "Workflow is in terminal state"
 mkdir -p /tmp/outputs
-echo "$RESULT" > /tmp/outputs/monitorResult
-sync
-
-echo "Monitor result: $RESULT (exit code: $EXIT_CODE)"
-exit $EXIT_CODE
+echo "$STATUS_OUTPUT" > /tmp/outputs/monitorResult
+exit 0
 ",
           ],
           "command": [
@@ -2375,7 +2342,7 @@ exit $EXIT_CODE
         "outputs": {
           "parameters": [
             {
-              "description": "Result of monitoring (SUCCEEDED, FAILED, RETRY, ERROR)",
+              "description": "Workflow status output from monitor script",
               "name": "monitorResult",
               "valueFrom": {
                 "path": "/tmp/outputs/monitorResult",
@@ -2396,13 +2363,31 @@ exit $EXIT_CODE
       {
         "container": {
           "args": [
-            "echo 'Migration workflow completed successfully'",
+            "
+set -e
+echo "Evaluating workflow result..."
+echo "Monitor output: $MONITOR_RESULT"
+
+# Check if the output contains "Phase: Succeeded"
+if echo "$MONITOR_RESULT" | grep -q "Phase: Succeeded"; then
+    echo "Migration workflow completed successfully"
+    exit 0
+else
+    echo "Migration workflow did not succeed"
+    exit 1
+fi
+            ",
           ],
           "command": [
             "/bin/bash",
             "-c",
           ],
-          "env": [],
+          "env": [
+            {
+              "name": "MONITOR_RESULT",
+              "value": "{{inputs.parameters.monitorResult}}",
+            },
+          ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
@@ -2419,43 +2404,8 @@ exit $EXIT_CODE
         "inputs": {
           "parameters": [
             {
-              "name": "imageMigrationConsoleLocation",
+              "name": "monitorResult",
             },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "handleworkflowsuccess",
-        "outputs": {
-          "parameters": [],
-        },
-      },
-      {
-        "container": {
-          "args": [
-            "echo 'Migration workflow failed'",
-          ],
-          "command": [
-            "/bin/bash",
-            "-c",
-          ],
-          "env": [],
-          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-          "resources": {
-            "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
-            },
-            "requests": {
-              "cpu": "500m",
-              "memory": "2000Mi",
-            },
-          },
-        },
-        "inputs": {
-          "parameters": [
             {
               "name": "imageMigrationConsoleLocation",
             },
@@ -2464,45 +2414,7 @@ exit $EXIT_CODE
             },
           ],
         },
-        "name": "handleworkflowfailure",
-        "outputs": {
-          "parameters": [],
-        },
-      },
-      {
-        "container": {
-          "args": [
-            "echo 'Migration workflow encountered an error'",
-          ],
-          "command": [
-            "/bin/bash",
-            "-c",
-          ],
-          "env": [],
-          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-          "resources": {
-            "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
-            },
-            "requests": {
-              "cpu": "500m",
-              "memory": "2000Mi",
-            },
-          },
-        },
-        "inputs": {
-          "parameters": [
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "handleworkflowerror",
+        "name": "evaluateworkflowresult",
         "outputs": {
           "parameters": [],
         },
@@ -2598,49 +2510,14 @@ metadata:
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
-                ],
-              },
-              "name": "handleSuccess",
-              "template": "handleworkflowsuccess",
-              "when": "{{steps.monitorWorkflow.outputs.parameters.monitorResult}} == 'SUCCEEDED",
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
                   {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                    "name": "monitorResult",
+                    "value": "{{steps.monitorWorkflow.outputs.parameters.monitorResult}}",
                   },
                 ],
               },
-              "name": "handleFailure",
-              "template": "handleworkflowfailure",
-              "when": "{{steps.monitorWorkflow.outputs.parameters.monitorResult}} == 'FAILED",
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                ],
-              },
-              "name": "handleError",
-              "template": "handleworkflowerror",
-              "when": "{{steps.monitorWorkflow.outputs.parameters.monitorResult}} == 'ERROR",
+              "name": "evaluateWorkflowResult",
+              "template": "evaluateworkflowresult",
             },
           ],
           [

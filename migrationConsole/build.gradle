@@ -27,7 +27,7 @@ def workflowTemplatesStagingP =
 tasks.register('installDependencies', NpmTask) {
     description = 'Install npm dependencies for orchestrationSpecs'
     workingDir = orchestrationSpecsDirP.asFile
-    args = ['ci', '--force', '--omit=optional']
+    args = ['ci', '--force']
 
     inputs.file(orchestrationSpecsDirP.file("package.json"))
     inputs.file(orchestrationSpecsDirP.file("package-lock.json"))
@@ -174,8 +174,7 @@ tasks.register('syncDockerBuildContext', Sync) {
 
 // Build the base migration console image with Python libraries and scripts
 tasks.register('buildDockerImage_migrationConsoleBase', DockerBuildImage) {
-    // Depend on the elasticsearch test console base image
-    dependsOn ":TrafficCapture:dockerSolution:buildDockerImage_elasticsearch_client_test_console"
+    CommonUtils.dependOnDockerImage(delegate, ":TrafficCapture:dockerSolution:buildDockerImage_elasticsearch_client_test_console")
     // Depend on console_link's generated OpenAPI spec (copied into Docker image)
     dependsOn ":console_link:generateOpenApiSpec"
     dependsOn syncDockerBuildContext

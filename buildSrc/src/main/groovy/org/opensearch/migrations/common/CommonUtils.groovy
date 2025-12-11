@@ -1,11 +1,68 @@
 package org.opensearch.migrations.common
 
 import org.gradle.api.GradleException
+import org.gradle.api.Task
 import org.gradle.api.tasks.Sync
+import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.Project
 import com.bmuschko.gradle.docker.tasks.image.Dockerfile
+import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 
 class CommonUtils {
+
+    /**
+     * Adds a dependency on a DockerBuildImage task and tracks its imageIdFile as an input.
+     * This ensures that when the base image is rebuilt, the dependent task will also rebuild.
+     * The input property name is auto-generated from the base image task name.
+     *
+     * @param task The task that depends on the Docker image
+     * @param baseImageTaskPath The full task path (e.g., ":TrafficCapture:dockerSolution:buildDockerImage_elasticsearch_client_test_console")
+     */
+    static void dependOnDockerImage(Task task, String baseImageTaskPath) {
+        def rootProject = task.project.rootProject
+        // Parse the task path to get project path and task name
+        def lastColonIndex = baseImageTaskPath.lastIndexOf(':')
+        def projectPath = baseImageTaskPath.substring(0, lastColonIndex)
+        def taskName = baseImageTaskPath.substring(lastColonIndex + 1)
+        def targetProject = projectPath.isEmpty() ? rootProject : rootProject.project(projectPath)
+        def baseImageTaskProvider = targetProject.tasks.named(taskName, DockerBuildImage)
+        dependOnDockerImage(task, baseImageTaskProvider)
+    }
+
+    /**
+     * Adds a dependency on a DockerBuildImage task and tracks its imageIdFile as an input.
+     * This ensures that when the base image is rebuilt, the dependent task will also rebuild.
+     *
+     * @param task The task that depends on the Docker image
+     * @param baseImageTaskProvider The TaskProvider for the DockerBuildImage task to depend on
+     */
+    static void dependOnDockerImage(Task task, TaskProvider<DockerBuildImage> baseImageTaskProvider) {
+        def logger = task.project.logger
+        def baseTaskName = baseImageTaskProvider.name
+
+        task.dependsOn(baseImageTaskProvider)
+        // Use map to get the imageIdFile Provider for configuration cache compatibility
+        def imageIdFileProvider = baseImageTaskProvider.map { it.imageIdFile.get().asFile }
+        task.inputs.file(imageIdFileProvider).withPropertyName(baseTaskName)
+
+        // Add doFirst action to log the actual image ID at execution time
+        // Capture only serializable values (not the TaskProvider) for configuration cache compatibility
+        def taskPath = task.path
+        task.doFirst {
+            // Access the imageIdFile through the task's inputs to avoid capturing the TaskProvider
+            def imageIdFile = imageIdFileProvider.get()
+            if (imageIdFile.exists()) {
+                def imageId = imageIdFile.text.trim()
+                logger.lifecycle("Docker image dependency: {} depends on {} with imageId: {}",
+                        taskPath, baseTaskName, imageId)
+                logger.debug("  imageIdFile path: {}", imageIdFile.absolutePath)
+            } else {
+                logger.warn("Docker image dependency: {} depends on {} but imageIdFile does not exist: {}",
+                        taskPath, baseTaskName, imageIdFile.absolutePath)
+            }
+        }
+    }
+
     static def calculateDockerHash(def files) {
         def MessageDigest = java.security.MessageDigest
         def digest = MessageDigest.getInstance('SHA-256')

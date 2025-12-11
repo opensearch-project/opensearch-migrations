@@ -27,7 +27,7 @@ helm install migration-assistant ./deployment/k8s/charts/aggregates/migrationAss
 
 See `values.yaml` for the full list of configurable parameters.
 
-### Key Configuration Options
+### Kyverno Configuration Options
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
@@ -50,8 +50,6 @@ conditionalPackageInstalls:
 **Mount Local AWS Credentials** (`kyvernoPolicies.mountLocalAwsCreds`)
 - Automatically mounts host AWS credentials (`~/.aws`) to pods using the `migration-console-access-role` service account
 - **⚠️ LOCAL DEVELOPMENT ONLY** - Never enable in production or shared clusters
-- Only applies to pods using the `migration-console-access-role` service account
-- More secure than mounting to all pods, but still requires caution in local development
 
 **Zero Resource Requests** (`kyvernoPolicies.zeroResourceRequests`)
 - Sets resource requests to zero for pods
@@ -65,7 +63,7 @@ conditionalPackageInstalls:
   kyverno: true
 
 kyvernoPolicies:
-  mountLocalAwsCreds: true  # Use with caution
+  mountLocalAwsCreds: true
   zeroResourceRequests: true
 ```
 

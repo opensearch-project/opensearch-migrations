@@ -47,8 +47,7 @@ dockerFilesForExternalServices.each { dockerImageName, projectName ->
     // Now register the docker build task
     tasks.register("buildDockerImage_${dockerImageName}", DockerBuildImage) {
         if (projectName == migrationConsoleStagingDirName) {
-            // Depend on the base image from migrationConsole project
-            dependsOn ":migrationConsole:buildDockerImage_migrationConsoleBase"
+            CommonUtils.dependOnDockerImage(delegate, ":migrationConsole:buildDockerImage_migrationConsoleBase")
             dependsOn syncTaskProvider
 
             // Realize the task to get directory

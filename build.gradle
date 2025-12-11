@@ -145,6 +145,14 @@ subprojects {
         }
     }
 
+    plugins.withId('com.bmuschko.docker-remote-api') {
+        tasks.withType(com.bmuschko.gradle.docker.tasks.image.DockerBuildImage).configureEach {
+            // Declare the imageIdFile as an output so dependent tasks can track it as an input
+            // This enables proper UP_TO_DATE checking when using CommonUtils.dependOnDockerImage()
+            outputs.file(imageIdFile)
+        }
+    }
+
     tasks.withType(Javadoc).configureEach {
         options.addStringOption('Xdoclint:none', '-quiet')
     }
