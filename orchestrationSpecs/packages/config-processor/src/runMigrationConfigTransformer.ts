@@ -1,6 +1,7 @@
 import { Readable } from 'stream';
 import { z } from 'zod';
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
+import {formatInputValidationError, InputValidationError} from "./streamSchemaTransformer";
 
 async function main() {
     const args = process.argv.slice(2);
@@ -38,8 +39,12 @@ Arguments:
         console.log(JSON.stringify(result, null, 2));
         process.exit(0);
     } catch (error) {
-        if (error instanceof z.ZodError) {
+        if (error instanceof InputValidationError) {
             console.error('Validation error:');
+            console.error(formatInputValidationError(error));
+            process.exit(1);
+        } else if (error instanceof z.ZodError) {
+            console.error('Unknown zod validation error:');
             console.error(JSON.stringify(error.issues, null, 2));
             process.exit(1);
         } else if (error instanceof Error) {
