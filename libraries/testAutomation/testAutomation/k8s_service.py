@@ -275,3 +275,10 @@ class K8sService:
         logger.info(f"Deleting ConfigMap '{configmap_name}' from namespace '{target_namespace}'...")
         delete_command = ["kubectl", "delete", "configmap", configmap_name, "-n", target_namespace]
         return self.run_command(delete_command)
+
+    def delete_all_argo_templates(self) -> None:
+        """Deletes all Argo WorkflowTemplates from all namespaces."""
+        logger.info("Deleting all Argo WorkflowTemplates from all namespaces")
+        self.run_command([
+            "kubectl", "delete", "workflowtemplates", "--all-namespaces", "--all", "--ignore-not-found"
+        ], ignore_errors=True)
