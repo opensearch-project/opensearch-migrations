@@ -225,7 +225,10 @@ class ArgoService:
             try:
                 parsed_contents = json.loads(config_contents)
                 logger.info(f"Successfully retrieved cluster configuration from ConfigMap '{configmap_name}'")
-                return Cluster(config=parsed_contents)
+                # Convert workflow schema to Python Cluster schema if needed
+                converted_config = self._convert_workflow_config_to_cluster_config(parsed_contents)
+                logger.info(f"Converted cluster config from ConfigMap: {converted_config}")
+                return Cluster(config=converted_config)
             except json.JSONDecodeError as jsonDecodeError:
                 raise ValueError(f"Failed to parse ConfigMap '{configmap_name}' key '{config_key}' "
                                  f"as JSON: {jsonDecodeError}")
@@ -355,6 +358,78 @@ class ArgoService:
             raise
         return data
 
+    def _convert_basic_auth(self, basic: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert workflow basic auth config to Python schema."""
+        if "secretName" in basic:
+            return {"k8s_secret_name": basic["secretName"]}
+        if "username" in basic and "password" in basic:
+            return {"username": basic["username"], "password": basic["password"]}
+        if "secretArn" in basic:
+            return {"user_secret_arn": basic["secretArn"]}
+        return {}
+
+    def _convert_sigv4_auth(self, sigv4: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Convert workflow sigv4 auth config to Python schema."""
+        if not sigv4:
+            return None
+        return {"region": sigv4.get("region"), "service": sigv4.get("service", "es")}
+
+    def _convert_auth_config(self, auth_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert workflow authConfig to Python auth fields."""
+        if "basic" in auth_config:
+            return {"basic_auth": self._convert_basic_auth(auth_config["basic"])}
+        if "noAuth" in auth_config:
+            return {"no_auth": None}
+        if "sigv4" in auth_config:
+            return {"sigv4": self._convert_sigv4_auth(auth_config["sigv4"])}
+        return {}
+
+    def _get_legacy_auth_fields(self, workflow_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract auth fields if workflow config already uses Python schema."""
+        if "basic_auth" in workflow_config:
+            return {"basic_auth": workflow_config["basic_auth"]}
+        if "no_auth" in workflow_config:
+            return {"no_auth": workflow_config["no_auth"]}
+        if "sigv4" in workflow_config and "authConfig" not in workflow_config:
+            return {"sigv4": workflow_config["sigv4"]}
+        return {}
+
+    def _convert_workflow_config_to_cluster_config(self, workflow_config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert workflow cluster config schema to Python Cluster schema.
+
+        Field mappings (Workflow -> Python):
+          - allowInsecure         -> allow_insecure (boolean)
+          - authConfig.basic      -> basic_auth (dict with username/password, k8s_secret_name, or user_secret_arn)
+          - null                 -> no_auth (true)
+          - authConfig.sigv4      -> sigv4 (dict with region/service)
+        """
+        converted: Dict[str, Any] = {"endpoint": workflow_config.get("endpoint")}
+
+        # Convert allowInsecure -> allow_insecure
+        allow_insecure = workflow_config.get("allowInsecure", workflow_config.get("allow_insecure"))
+        if allow_insecure is not None:
+            converted["allow_insecure"] = allow_insecure
+
+        # Copy version if present
+        if "version" in workflow_config:
+            converted["version"] = workflow_config["version"]
+
+        # Convert auth config (workflow schema takes precedence)
+        auth_config = workflow_config.get("authConfig", {})
+        if auth_config:
+            converted.update(self._convert_auth_config(auth_config))
+        else:
+            # Fall back to legacy/direct auth fields
+            legacy_auth = self._get_legacy_auth_fields(workflow_config)
+            if legacy_auth:
+                converted.update(legacy_auth)
+            else:
+                # Default to no_auth if no authentication is specified
+                converted["no_auth"] = None
+
+        return converted
+
     def _get_cluster_config_from_workflow(self, workflow_name: str, cluster_type: str) -> Cluster:
         workflow_data = self._get_workflow_status_json(workflow_name)
         nodes = workflow_data.get("status", {}).get("nodes", {})
@@ -382,5 +457,10 @@ class ArgoService:
             logger.error(f"Failed to parse {cluster_type} cluster config JSON: {e}")
             raise
 
-        logger.info(f"Found {cluster_type} cluster config: {cfg}")
-        return Cluster(config=cfg)
+        logger.info(f"Found {cluster_type} cluster config from workflow: {cfg}")
+
+        # Convert workflow schema to Python Cluster schema
+        converted_cfg = self._convert_workflow_config_to_cluster_config(cfg)
+        logger.info(f"Converted {cluster_type} cluster config: {converted_cfg}")
+
+        return Cluster(config=converted_cfg)

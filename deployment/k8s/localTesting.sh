@@ -49,10 +49,12 @@ helm dependency build charts/aggregates/migrationAssistantWithArgo
 if [ "${USE_LOCAL_REGISTRY}" = "true" ]; then
   echo "Using LOCAL_REGISTRY for images: ${LOCAL_REGISTRY}"
   helm install --create-namespace -n ma tc charts/aggregates/testClusters \
+      --wait --timeout 10m \
       --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard"
 
   helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
-    -f charts/aggregates/migrationAssistantWithArgo/valuesDev.yaml \
+    --wait --timeout 10m \
+    -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml \
     --set "images.captureProxy.repository=${LOCAL_REGISTRY}/migrations/capture_proxy" \
     --set "images.captureProxy.tag=latest" \
     --set "images.captureProxy.pullPolicy=Always" \
@@ -70,10 +72,12 @@ if [ "${USE_LOCAL_REGISTRY}" = "true" ]; then
     --set "images.reindexFromSnapshot.pullPolicy=Always"
 else
   echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
-  helm install --create-namespace -n ma tc charts/aggregates/testClusters
+  helm install --create-namespace -n ma tc charts/aggregates/testClusters \
+    --wait --timeout 10m
 
   helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
-    -f charts/aggregates/migrationAssistantWithArgo/valuesDev.yaml
+    --wait --timeout 10m \
+    -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
 fi
 
 ###############################################################################

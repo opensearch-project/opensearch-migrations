@@ -34,10 +34,14 @@ tasks.register('lint', NpmTask) {
     dependsOn installDependencies
 }
 
-tasks.register('packageJs', Copy) {
+tasks.register('packageJs', Sync) {
     description = "Package JavaScript files for distribution"
     from jsSrcDir
     into jsDistDir
+
+    // Explicit inputs/outputs for incremental build support
+    inputs.dir(jsSrcDir)
+    outputs.dir(jsDistDir)
 }
 
 tasks.register('createNpmPackage', NpmTask) {

@@ -74,7 +74,7 @@ allprojects {
     }
 }
 
-task buildDockerImages() {
+tasks.register('buildDockerImages') {
     dependsOn(':frontend:buildDockerImage')
     dependsOn(':TrafficCapture:dockerSolution:buildDockerImages')
     dependsOn(':DocumentsFromSnapshotMigration:buildDockerImages')
@@ -142,6 +142,14 @@ subprojects {
     plugins.withId('com.google.cloud.tools.jib') {
         tasks.withType(JibTask).configureEach {
             notCompatibleWithConfigurationCache("because https://github.com/GoogleContainerTools/jib/issues/3132")
+        }
+    }
+
+    plugins.withId('com.bmuschko.docker-remote-api') {
+        tasks.withType(com.bmuschko.gradle.docker.tasks.image.DockerBuildImage).configureEach {
+            // Declare the imageIdFile as an output so dependent tasks can track it as an input
+            // This enables proper UP_TO_DATE checking when using CommonUtils.dependOnDockerImage()
+            outputs.file(imageIdFile)
         }
     }
 
@@ -248,12 +256,13 @@ subprojects {
             }
         }
 
-        task javadocJar(type: Jar, dependsOn: javadoc) {
+        tasks.register('javadocJar', Jar) {
+            dependsOn javadoc
             archiveClassifier.set('javadoc')
             from javadoc.destinationDir
         }
 
-        task sourcesJar(type: Jar) {
+        tasks.register('sourcesJar', Jar) {
             archiveClassifier.set('sources')
             from sourceSets.main.allSource
             duplicatesStrategy = DuplicatesStrategy.WARN
@@ -499,13 +508,16 @@ def syncJacocoExecFiles = tasks.register("syncJacocoExecFiles", Sync) {
     dependsOn jacocoTestTasksProvider
 }
 
-tasks.register('gatherJacocoExecForMerging', Copy) {
+tasks.register('gatherJacocoExecForMerging', Sync) {
     description = 'Local troubleshooting, gathers coverage all exec files in build/jacocoMerged/*.exec into to be consumed by jacocoAggregateReport'
 
     from subprojects.collect { proj ->
         fileTree(dir: proj.buildDir, include: 'jacoco/*.exec')
     }
     into "$buildDir/jacocoMerged"
+
+    // Explicit outputs for incremental build support
+    outputs.dir("$buildDir/jacocoMerged")
 }
 
 tasks.register('mergeJacocoReports') {
