@@ -23,6 +23,7 @@ export interface EKSInfraProps {
     argoWorkflowServiceAccountName?: string;
     migrationsServiceAccountName?: string;
     migrationConsoleServiceAccountName?: string;
+    otelCollectorServiceAccountName?: string;
 }
 
 export class EKSInfra extends Construct {
@@ -38,6 +39,7 @@ export class EKSInfra extends Construct {
         const argoWorkflowServiceAccountName = props.argoWorkflowServiceAccountName ?? 'argo-workflow-executor';
         const migrationsServiceAccountName = props.migrationsServiceAccountName ?? 'migrations-service-account';
         const migrationConsoleServiceAccountName = props.migrationConsoleServiceAccountName ?? 'migration-console-access-role';
+        const otelCollectorServiceAccountName = props.otelCollectorServiceAccountName ?? 'otel-collector';
 
         this.ecrRepo = new Repository(this, 'MigrationsECRRepository', {
             repositoryName: props.ecrRepoName,
@@ -157,10 +159,17 @@ export class EKSInfra extends Construct {
             serviceAccount: migrationConsoleServiceAccountName,
             roleArn: podIdentityRole.roleArn,
         });
+        const otelCollectorPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'OtelCollectorPodIdentityAssociation', {
+            clusterName: props.clusterName,
+            namespace: namespace,
+            serviceAccount: otelCollectorServiceAccountName,
+            roleArn: podIdentityRole.roleArn,
+        });
         buildImagesPodIdentityAssociation.node.addDependency(this.cluster)
         argoWorkflowIdentityAssociation.node.addDependency(this.cluster)
         migrationsPodIdentityAssociation.node.addDependency(this.cluster)
         migrationConsolePodIdentityAssociation.node.addDependency(this.cluster)
+        otelCollectorPodIdentityAssociation.node.addDependency(this.cluster)
     }
 
     createDefaultPodIdentityRole(clusterName: string) {
