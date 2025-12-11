@@ -48,6 +48,7 @@ data:
                           requests:
                             cpu: "0"
                             memory: "0"
+                            ephemeral-storage: "0"
         - name: zero-init-container-resources
           match:
             any:
@@ -82,6 +83,7 @@ data:
                           requests:
                             cpu: "0"
                             memory: "0"
+                            ephemeral-storage: "0"
 ---
 apiVersion: batch/v1
 kind: Job
