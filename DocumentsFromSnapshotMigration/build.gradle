@@ -72,7 +72,7 @@ clean.doFirst {
     delete dockerBuildDir
 }
 
-task copyDockerRuntimeJars (type: Sync) {
+tasks.register('copyDockerRuntimeJars', Sync) {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     description = 'Copy runtime JARs and app jar to docker build directory'
 
@@ -84,6 +84,11 @@ task copyDockerRuntimeJars (type: Sync) {
     from configurations.runtimeClasspath
     from tasks.named('jar')
     include '*.jar'
+
+    // Explicit inputs for incremental build support
+    inputs.files(configurations.runtimeClasspath)
+    inputs.files(tasks.named('jar'))
+    outputs.dir(buildDir)
 }
 
 DockerServiceProps[] dockerServices = [
@@ -94,7 +99,7 @@ DockerServiceProps[] dockerServices = [
 ] as DockerServiceProps[]
 
 for (dockerService in dockerServices) {
-    task "buildDockerImage_${dockerService.projectName}" (type: DockerBuildImage) {
+    tasks.register("buildDockerImage_${dockerService.projectName}", DockerBuildImage) {
         def hash = CommonUtils.calculateDockerHash(project.fileTree("docker/${dockerService.projectName}"))
         for (dep in dockerService.taskDependencies) {
             dependsOn dep
@@ -108,7 +113,7 @@ for (dockerService in dockerServices) {
     }
 }
 
-task buildDockerImages {
+tasks.register('buildDockerImages') {
     for (dockerService in dockerServices) {
         dependsOn "buildDockerImage_${dockerService.projectName}"
     }

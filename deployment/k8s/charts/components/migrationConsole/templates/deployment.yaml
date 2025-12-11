@@ -2,7 +2,6 @@
 {{ $envVarMountName := "env-vars" }}
 {{ $sharedLogsVolumeEnabled := .Values.sharedLogsVolumeEnabled }}
 {{ $snapshotVolumeEnabled := .Values.snapshotVolumeEnabled }}
-{{ $developerModeEnabled := .Values.developerModeEnabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -40,9 +39,6 @@ spec:
             - "-c"
             - |
               source /shared/vars.sh
-              {{- if .Values.developerModeEnabled }}
-              source /.venv/bin/activate && pipenv install -e ~/lib/console_link
-              {{- end }}
               /root/start-console.sh
           volumeMounts:
             {{- if $sharedLogsVolumeEnabled }}
@@ -53,10 +49,6 @@ spec:
               mountPath: /config
             - name: {{ $envVarMountName }}
               mountPath: /shared
-            {{- if $developerModeEnabled }}
-            - name: local-console-libs
-              mountPath: /root/lib
-            {{- end }}
             {{- if $snapshotVolumeEnabled }}
             - name: snapshot-volume
               mountPath: /snapshot
@@ -66,12 +58,6 @@ spec:
           emptyDir: { }
         - name: merged-config
           emptyDir: { }
-        {{- if $developerModeEnabled  }}
-        - name: local-console-libs
-          hostPath:
-            path: /opensearch-migrations/migrationConsole/lib
-            type: Directory
-        {{- end }}
         {{- if $sharedLogsVolumeEnabled  }}
         - name: shared-logs
           persistentVolumeClaim:

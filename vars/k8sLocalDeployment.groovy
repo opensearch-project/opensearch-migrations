@@ -100,6 +100,17 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Cleanup Previous MA Deployment') {
+                steps {
+                    timeout(time: 10, unit: 'MINUTES') {
+                        script {
+                            sh "kubectl config use-context minikube"
+                            sh "kubectl delete namespace ma --ignore-not-found"
+                        }
+                    }
+                }
+            }
+
             stage('Perform Python E2E Tests') {
                 steps {
                     timeout(time: 2, unit: 'HOURS') {
@@ -116,7 +127,8 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "kubectl config use-context minikube"
-                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs"
+                                def registryIp = sh(script: "kubectl get svc -n kube-system registry -o jsonpath='{.spec.clusterIP}'", returnStdout: true).trim()
+                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='${registryIp}:80/'"
                             }
                         }
                     }

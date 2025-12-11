@@ -202,9 +202,8 @@ spec:
             cat > /tmp/cluster-config.json <<EOF
             {
               "endpoint": "http://${CLUSTER_NAME}:9200",
-              "allow_insecure": true,
-              "no_auth": null,
-              "version": "ES_1.5"
+              "allowInsecure": true,
+              "version": "ES 1.5"
             }
             EOF
 
@@ -390,13 +389,12 @@ spec:
                   targetPort: 9300
             EOF
 
-            # 4) Emit cluster config as output
+            # 4) Emit cluster config as output (no authConfig since our default use of ES 2.4 has no auth)
             cat > /tmp/cluster-config.json <<EOF
             {
               "endpoint": "http://${CLUSTER_NAME}:9200",
-              "allow_insecure": true,
-              "no_auth": null,
-              "version": "ES_2.4"
+              "allowInsecure": true,
+              "version": "ES 2.4"
             }
             EOF
 
@@ -489,9 +487,8 @@ spec:
             cat > /tmp/cluster-config.json << EOF
             {
               "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
-              "allow_insecure": true,
-              "no_auth": null,
-              "version": "ES_5.6"
+              "allowInsecure": true,
+              "version": "ES 5.6"
             }
             EOF
 
@@ -620,9 +617,8 @@ spec:
             cat > /tmp/cluster-config.json << EOF
             {
               "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
-              "allow_insecure": true,
-              "no_auth": true,
-              "version": "ES_6.8"
+              "allowInsecure": true,
+              "version": "ES 6.8"
             }
             EOF
 
@@ -734,9 +730,8 @@ spec:
             cat > /tmp/cluster-config.json << EOF
             {
               "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
-              "allow_insecure": true,
-              "no_auth": null,
-              "version": "ES_7.10"
+              "allowInsecure": true,
+              "version": "ES 7.10"
             }
             EOF
 
@@ -806,15 +801,25 @@ spec:
               --values /tmp/opensearch-values.yaml \
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
             
+            # Create cluster credentials secret (OpenSearch 1.3 default: admin/admin)
+            kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
+              --from-literal=username=admin \
+              --from-literal=password=admin \
+              -n "{{inputs.parameters.namespace}}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name={{inputs.parameters.cluster-name}} -o yaml | \
+              kubectl apply -f -
+            
             # Generate cluster configuration output
             cat > /tmp/cluster-config.json << EOF
             {
               "endpoint": "https://{{inputs.parameters.cluster-name}}:9200",
-              "allow_insecure": true,
-              "version": "OS_1.3",
-              "basic_auth": {
-                "username": "admin",
-                "password": "admin"
+              "allowInsecure": true,
+              "version": "OS 1.3",
+              "authConfig": {
+                "basic": {
+                  "secretName": "{{inputs.parameters.cluster-name}}-creds"
+                }
               }
             }
             EOF
@@ -888,15 +893,25 @@ spec:
               --values /tmp/opensearch-values.yaml \
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
             
+            # Create cluster credentials secret (OpenSearch 2.19 password set via OPENSEARCH_INITIAL_ADMIN_PASSWORD)
+            kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
+              --from-literal=username=admin \
+              --from-literal=password="myStrongPassword123!" \
+              -n "{{inputs.parameters.namespace}}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name={{inputs.parameters.cluster-name}} -o yaml | \
+              kubectl apply -f -
+            
             # Generate cluster configuration output
             cat > /tmp/cluster-config.json << EOF
             {
               "endpoint": "https://{{inputs.parameters.cluster-name}}:9200",
-              "allow_insecure": true,
-              "version": "OS_2.19",
-              "basic_auth": {
-                "username": "admin",
-                "password": "myStrongPassword123!"
+              "allowInsecure": true,
+              "version": "OS 2.19",
+              "authConfig": {
+                "basic": {
+                  "secretName": "{{inputs.parameters.cluster-name}}-creds"
+                }
               }
             }
             EOF
@@ -966,14 +981,24 @@ spec:
               --values /tmp/opensearch-values.yaml \
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
             
+            # Create cluster credentials secret (OpenSearch 3.1 password set via OPENSEARCH_INITIAL_ADMIN_PASSWORD)
+            kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
+              --from-literal=username=admin \
+              --from-literal=password="MyStr0ngPassw0rd!" \
+              -n "{{inputs.parameters.namespace}}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name={{inputs.parameters.cluster-name}} -o yaml | \
+              kubectl apply -f -
+            
             cat > /tmp/cluster-config.json << EOF
             {
               "endpoint": "https://{{inputs.parameters.cluster-name}}:9200",
-              "allow_insecure": true,
-              "version": "OS_3.1",
-              "basic_auth": {
-                "username": "admin",
-                "password": "MyStr0ngPassw0rd!"
+              "allowInsecure": true,
+              "version": "OS 3.1",
+              "authConfig": {
+                "basic": {
+                  "secretName": "{{inputs.parameters.cluster-name}}-creds"
+                }
               }
             }
             EOF

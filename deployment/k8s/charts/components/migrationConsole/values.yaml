@@ -1,4 +1,3 @@
-developerModeEnabled: false
 sharedLogsVolumeEnabled: false
 sharedLogsPvc: ""
 snapshotVolumeEnabled: false

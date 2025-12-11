@@ -38,7 +38,6 @@ roleRef:
 
 ---
 {{ $sharedLogsVolumeEnabled := .Values.logs.sharedLogsVolume.enabled }}
-{{ $developerModeEnabled := .Values.developerModeEnabled }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -67,32 +66,13 @@ spec:
             - "/bin/sh"
             - "-c"
             - |
-    {{- if .Values.developerModeEnabled }}
-              source /.venv/bin/activate && pipenv install -e ~/lib/console_link
-    {{- end }}
               /root/start-console.sh
           volumeMounts:
     {{- if $sharedLogsVolumeEnabled }}
             - name: shared-logs
               mountPath: /shared-logs-output
     {{- end }}
-    {{- if $developerModeEnabled }}
-            - name: local-console-libs
-              mountPath: /root/lib
-            - name: local-test-config-processor
-              mountPath: /root/testConfigProcessor
-    {{- end }}
       volumes:
-    {{- if $developerModeEnabled  }}
-        - name: local-console-libs
-          hostPath:
-            path: /opensearch-migrations/migrationConsole/lib
-            type: Directory
-        - name: local-test-config-processor
-          hostPath:
-            path: /opensearch-migrations/migrationConsole/lib/console_link/tests/workflow-tests/resources/scripts
-            type: Directory
-    {{- end }}
     {{- if $sharedLogsVolumeEnabled  }}
         - name: shared-logs
           persistentVolumeClaim:

@@ -52,12 +52,15 @@ class TestsFailed(Exception):
 class TestRunner:
 
     def __init__(self, k8s_service: K8sService, unique_id: str, test_ids: List[str], ma_chart_path: str,
-                 combinations: List[Tuple[str, str]]) -> None:
+                 combinations: List[Tuple[str, str]],
+                 registry_prefix: str = "", values_file: str = None) -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
         self.ma_chart_path = ma_chart_path
         self.combinations = combinations
+        self.registry_prefix = registry_prefix
+        self.values_file = values_file
 
     def _print_test_stats(self, report: TestReport) -> None:
         for test in report.tests:
@@ -197,18 +200,9 @@ class TestRunner:
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
 
-    def run(self, skip_delete: bool = False, keep_workflows: bool = False, developer_mode: bool = False,
+    def run(self, skip_delete: bool = False, keep_workflows: bool = False,
             reuse_clusters: bool = False, test_reports_dir: str = None, copy_logs: bool = False) -> None:
         self.k8s_service.create_namespace(self.k8s_service.namespace)
-        if developer_mode:
-            workflow_templates_dir = (
-                "../../migrationConsole/"
-                "workflows/templates/"
-            )
-            self.k8s_service.run_command([
-                "kubectl", "apply", "-f", workflow_templates_dir, "-n", "ma"
-            ])
-            logger.info("Applied local workflow templates directory")
 
         combos_with_failures = []
         test_reports = []
@@ -219,9 +213,27 @@ class TestRunner:
                 logger.info(f"Performing helm deployment for migration testing environment "
                             f"from {source_version} to {target_version}")
 
-                chart_values = {"developerModeEnabled": "true"} if developer_mode else None
+                chart_values = {}
+                if self.registry_prefix:
+                    logger.info(f"Setting registry prefix to: {self.registry_prefix}")
+                    chart_values.update({
+                        "images.captureProxy.repository": f"{self.registry_prefix}migrations/capture_proxy",
+                        "images.trafficReplayer.repository": f"{self.registry_prefix}migrations/traffic_replayer",
+                        "images.reindexFromSnapshot.repository":
+                            f"{self.registry_prefix}migrations/reindex_from_snapshot",
+                        "images.migrationConsole.repository": f"{self.registry_prefix}migrations/migration_console",
+                        "images.installer.repository": f"{self.registry_prefix}migrations/migration_console",
+                        # Kyverno image overrides (uses migration_console image)
+                        "charts.kyverno.values.cleanupJobs.admissionReports.image.repository":
+                            f"{self.registry_prefix}migrations/migration_console",
+                        "charts.kyverno.values.cleanupJobs.clusterAdmissionReports.image.repository":
+                            f"{self.registry_prefix}migrations/migration_console",
+                        "charts.kyverno.values.webhooksCleanup.image.repository":
+                            f"{self.registry_prefix}migrations/migration_console",
+                    })
                 if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME,
-                                                     values=chart_values):
+                                                     values_file=self.values_file,
+                                                     values=chart_values if chart_values else None):
                     raise HelmCommandFailed("Helm install of Migrations Assistant chart failed")
 
                 self.k8s_service.wait_for_all_healthy_pods()
@@ -331,11 +343,6 @@ def parse_args() -> argparse.Namespace:
         help="If set, will not delete argo workflows created by integration tests"
     )
     parser.add_argument(
-        "--developer-mode",
-        action="store_true",
-        help="If set, will enable the developer mode flag for the Migration Assistant helm chart"
-    )
-    parser.add_argument(
         "--reuse-clusters",
         action="store_true",
         help="If set, the integration tests will reuse existing clusters that match the naming pattern "
@@ -347,7 +354,7 @@ def parse_args() -> argparse.Namespace:
         "--dev",
         action="store_true",
         help="An aggregate flag to apply developer settings for "
-             "testing [--skip-delete, --reuse-clusters, --keep-workflows, --developer-mode]"
+             "testing [--skip-delete, --reuse-clusters, --keep-workflows]"
     )
     parser.add_argument(
         "--test-reports-dir",
@@ -365,6 +372,14 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Comma-separated list of test IDs to run (e.g. 0001,0003)"
     )
+    parser.add_argument(
+        "--registry-prefix",
+        type=str,
+        default="",
+        help="Optional registry prefix to prepend to all image repositories. "
+             "Example: 'registry.kube-system.svc.cluster.local/' or 'myregistry.com/'. "
+             "Leave empty to use image repositories as-is."
+    )
     return parser.parse_args()
 
 
@@ -378,11 +393,15 @@ def main() -> None:
     combinations = get_version_combinations(source_version=args.source_version, target_version=args.target_version)
     logger.info("Detected the following version combinations to test:\n" +
                 "\n".join([f"- {src} → {tgt}" for src, tgt in combinations]))
+
+    dev_values_file = f"{ma_chart_path}/valuesForLocalK8s.yaml"
     test_runner = TestRunner(k8s_service=k8s_service,
                              unique_id=args.unique_id,
                              test_ids=args.test_ids,
                              ma_chart_path=ma_chart_path,
-                             combinations=combinations)
+                             combinations=combinations,
+                             registry_prefix=args.registry_prefix,
+                             values_file=dev_values_file)
 
     if args.delete_only:
         return test_runner.cleanup_deployment()
@@ -394,12 +413,10 @@ def main() -> None:
         return test_runner.collect_reports_and_print_summary(reports_dir=args.test_reports_dir)
     skip_delete = args.skip_delete
     keep_workflows = args.keep_workflows
-    developer_mode = args.developer_mode
     reuse_clusters = args.reuse_clusters
     if args.dev:
         skip_delete = True
         keep_workflows = True
-        developer_mode = True
         reuse_clusters = True
     if len(combinations) > 1 and (skip_delete or reuse_clusters):
         logger.warning("Disabling the --skip-delete and --reuse-clusters options, as they cannot be used with more "
@@ -408,7 +425,6 @@ def main() -> None:
         reuse_clusters = False
     test_runner.run(skip_delete=skip_delete,
                     keep_workflows=keep_workflows,
-                    developer_mode=developer_mode,
                     reuse_clusters=reuse_clusters,
                     test_reports_dir=args.test_reports_dir,
                     copy_logs=args.copy_logs)

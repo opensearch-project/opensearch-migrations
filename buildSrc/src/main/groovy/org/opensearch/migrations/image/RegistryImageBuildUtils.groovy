@@ -117,7 +117,8 @@ class RegistryImageBuildUtils {
         def imageTag = cfg.get("imageTag", "latest").toString()
         def contextDir = cfg.get("contextDir", ".")
         def serviceName = cfg.get("serviceName")
-        def contextPath = project.file(contextDir).path
+        def contextFile = project.file(contextDir)
+        def contextPath = contextFile.path
         def formatter = ImageRegistryFormatterFactory.getFormatter(registryEndpoint)
         def (registryDestination, cacheDestination) = formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag)
 
@@ -125,6 +126,13 @@ class RegistryImageBuildUtils {
         project.tasks.register(buildTaskName, Exec) {
             group = "docker"
             description = "Build and push ${registryDestination} with caching"
+
+            // Add inputs for the Docker context directory to track file changes
+            inputs.dir(contextFile)
+            
+            // Since outputs are pushed to a remote registry, we cannot track them locally.
+            // Always run this task to ensure the image is up-to-date with the registry.
+            outputs.upToDateWhen { false }
 
             cfg.get("requiredDependencies", []).each {
                 dependsOn it

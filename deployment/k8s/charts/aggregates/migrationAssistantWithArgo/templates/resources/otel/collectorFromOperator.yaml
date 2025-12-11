@@ -7,7 +7,7 @@ metadata:
   annotations:
     "helm.sh/hook": post-install,post-upgrade,pre-delete
     "helm.sh/hook-weight": "-20"  # Run early during pre-delete
-    "helm.sh/hook-delete-policy": hook-succeeded
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   mode: daemonset
   serviceAccount: otel-collector

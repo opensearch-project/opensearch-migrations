@@ -42,7 +42,9 @@ tasks.register('syncBackendClientDefinition', Sync) {
     from backendApiProject.layout.buildDirectory.file('openapi.json')
     into layout.buildDirectory.dir('openapi')
 
-    outputs.file(layout.buildDirectory.file('openapi/openapi.json'))
+    // Explicit inputs/outputs for incremental build support
+    inputs.file(backendApiProject.layout.buildDirectory.file('openapi.json'))
+    outputs.dir(layout.buildDirectory.dir('openapi'))
 }
 
 tasks.register('generateBackendClient', NpmTask) {
