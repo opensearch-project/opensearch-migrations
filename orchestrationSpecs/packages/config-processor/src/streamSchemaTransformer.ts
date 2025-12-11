@@ -1,6 +1,29 @@
 import {Readable} from 'stream';
-import {z} from 'zod';
+import {z, ZodError} from 'zod';
 import {parse} from "yaml";
+
+export class InputValidationElememnt {
+    constructor(
+        public readonly path: PropertyKey[],
+        public readonly message: string
+    ) {}
+}
+
+export class InputValidationError extends Error {
+    constructor(
+        public readonly errors: InputValidationElememnt[]
+    ) {
+        super(`Found ${errors.length} errors`);
+        this.name = 'InputValidationError';
+        Error.captureStackTrace?.(this, this.constructor);
+    }
+}
+
+export function formatInputValidationError(e: InputValidationError): string {
+    return e.errors
+        .map(i=> [i.message, i.path.map(pk=> pk.toString()).join(".")])
+        .map(([k,v],idx) => `${k}... at:\n  ${v}`).join("\n");
+}
 
 export function deepStrict<T extends z.ZodTypeAny>(schema: T): T {
     if (schema instanceof z.ZodObject) {
@@ -82,7 +105,17 @@ export class StreamSchemaParser<TInput extends z.ZodSchema> {
      */
     validateInput(data: unknown): z.infer<TInput> {
         const strippedData = stripComments(data);
-        return this.inputStrictSchema.parse(strippedData);
+        try {
+            return this.inputStrictSchema.parse(strippedData);
+        } catch (e) {
+            if (e instanceof ZodError) {
+                throw new InputValidationError(e.issues.map(errItem=>
+                    new InputValidationElememnt(errItem.path, errItem.message)));
+                // throw new InputValidationError([]);
+            } else {
+                throw e;
+            }
+        }
     }
 }
 
