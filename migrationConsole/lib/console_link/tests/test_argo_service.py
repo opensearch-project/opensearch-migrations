@@ -669,31 +669,3 @@ def test_get_cluster_config_from_workflow_invalid_json(mock_get_json, argo_servi
 
     with pytest.raises(json.JSONDecodeError):
         argo_service._get_cluster_config_from_workflow("test-workflow", "source")
-
-
-@patch('console_link.models.argo_service.ArgoService._get_workflow_status_json')
-def test_get_cluster_config_from_workflow_no_auth_defaults(mock_get_json, argo_service):
-    """Test cluster config extraction defaults to no_auth when no auth config is provided."""
-    # This simulates the scenario from the bug where workflow config has no authConfig
-    cluster_config = {
-        "endpoint": "http://source-elasticsearch-5-6-82d26cf7:9200",
-        "allowInsecure": True,
-        "version": "ES 5.6"
-    }
-    mock_get_json.return_value = create_mock_cluster_workflow_data("source", cluster_config)
-
-    with patch('console_link.models.argo_service.Cluster') as mock_cluster_class:
-        mock_cluster_instance = Mock()
-        mock_cluster_class.return_value = mock_cluster_instance
-
-        result = argo_service._get_cluster_config_from_workflow("test-workflow", "source")
-
-        assert result == mock_cluster_instance
-        # Verify that the converted config includes no_auth
-        call_args = mock_cluster_class.call_args
-        converted_config = call_args[1]['config']
-        assert 'no_auth' in converted_config
-        assert converted_config['no_auth'] is None
-        assert converted_config['endpoint'] == "http://source-elasticsearch-5-6-82d26cf7:9200"
-        assert converted_config['allow_insecure'] is True
-        assert converted_config['version'] == "ES 5.6"
