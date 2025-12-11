@@ -36,10 +36,32 @@ cp "cdk.out/Migration-Assistant-Infra-Import-VPC-eks.template.json" "${TEMP_DIR}
 
 echo "Copying solution-manifest.yaml..."
 cp "${SCRIPT_DIR}/solution-manifest.yaml" "${TEMP_DIR}/solution-manifest.yaml"
-sed -i "s/version: .*/version: ${CODE_VERSION}/" "${TEMP_DIR}/solution-manifest.yaml"
+# Use cross-platform sed in-place editing (macOS requires '' after -i, Linux doesn't)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' "s/version: .*/version: ${CODE_VERSION}/" "${TEMP_DIR}/solution-manifest.yaml"
+else
+    sed -i "s/version: .*/version: ${CODE_VERSION}/" "${TEMP_DIR}/solution-manifest.yaml"
+fi
 
 touch "${TEMP_DIR}/deployment/regional-s3-assets/test.txt"
 touch "${TEMP_DIR}/deployment/open-source/test.txt"
+
+# Build workflowBuilder using Gradle
+echo "Building workflowBuilder..."
+WORKFLOW_BUILDER_DIR="${PROJECT_ROOT}/workflowBuilder"
+
+# Use Gradle to build workflowBuilder (handles schema generation, npm install, and build)
+# Using npmBuild task directly to skip tests during artifact packaging
+cd "${PROJECT_ROOT}"
+./gradlew :workflowBuilder:npmBuild
+
+# Copy workflowBuilder dist to artifact
+echo "Copying workflowBuilder to artifact..."
+mkdir -p "${TEMP_DIR}/workflowBuilder"
+cp -r "${WORKFLOW_BUILDER_DIR}/dist/"* "${TEMP_DIR}/workflowBuilder/"
+
+# Return to script directory
+cd "${SCRIPT_DIR}"
 
 cat > "${TEMP_DIR}/CHANGELOG.md" << EOF
 # Changelog
