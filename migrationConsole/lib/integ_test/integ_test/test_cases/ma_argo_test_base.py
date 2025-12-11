@@ -11,7 +11,6 @@ from console_link.middleware.clusters import cat_indices, connection_check, clea
 logger = logging.getLogger(__name__)
 
 MigrationType = Enum("MigrationType", ["METADATA", "BACKFILL", "CAPTURE_AND_REPLAY"])
-OTEL_COLLECTOR_ENDPOINT = "http://otel-collector:4317"
 
 
 class ClusterVersionCombinationUnsupported(Exception):
@@ -102,15 +101,26 @@ class MATestBase:
                 self.target_operations.clear_index_templates(cluster=target_cluster)
 
     def prepare_workflow_snapshot_and_migration_config(self):
+        """
+        Prepare the snapshot and migration configuration.
+
+        The structure follows the NORMALIZED_SNAPSHOT_MIGRATION_CONFIG schema:
+        [{
+            "snapshotConfig": { ... },  # Optional, added by workflow
+            "createSnapshotConfig": { ... },  # Optional
+            "migrations": [{
+                "metadataMigrationConfig": { ... },  # Optional
+                "documentBackfillConfig": { ... }  # Optional
+            }]
+        }]
+
+        Subclasses can override this to provide custom configurations,
+        especially for transformer configs.
+        """
         snapshot_and_migration_configs = [{
             "migrations": [{
-                "metadata": {
-                    "from_snapshot": None,
-                    "otel_endpoint": OTEL_COLLECTOR_ENDPOINT
-                },
-                "documentBackfillConfigs": [{
-                    "test": None
-                }]
+                "metadataMigrationConfig": {},
+                "documentBackfillConfig": {}
             }]
         }]
         self.workflow_snapshot_and_migration_config = snapshot_and_migration_configs
@@ -143,14 +153,14 @@ class MATestBase:
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         if not self.imported_clusters:
-            self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=300)
+            self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=1000)
             self.source_cluster = self.argo_service.get_source_cluster_from_workflow(workflow_name=self.workflow_name)
             self.target_cluster = self.argo_service.get_target_cluster_from_workflow(workflow_name=self.workflow_name)
 
     def prepare_clusters(self):
         pass
 
-    def workflow_perform_migrations(self, timeout_seconds: int = 240):
+    def workflow_perform_migrations(self, timeout_seconds: int = 1000):
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         if self.imported_clusters:
@@ -160,8 +170,8 @@ class MATestBase:
             self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=timeout_seconds)
 
     def display_final_cluster_state(self):
-        source_response = cat_indices(cluster=self.source_cluster).decode("utf-8")
-        target_response = cat_indices(cluster=self.target_cluster).decode("utf-8")
+        source_response = cat_indices(cluster=self.source_cluster, refresh=True).decode("utf-8")
+        target_response = cat_indices(cluster=self.target_cluster, refresh=True).decode("utf-8")
         logger.info("Printing document counts for source and target clusters:")
         print("SOURCE CLUSTER")
         print(source_response)
