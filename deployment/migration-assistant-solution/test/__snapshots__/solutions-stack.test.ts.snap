@@ -58,7 +58,7 @@ exports[`Solutions stack ECS stack with import VPC matches snapshot 1`] = `
     },
     "Stage": {
       "Default": "dev",
-      "Description": "Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1",
+      "Description": "Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1.  This name should be unique for the all deployments in the region.",
       "Type": "String",
     },
     "VPCAvailabilityZones": {
@@ -641,7 +641,7 @@ exports[`Solutions stack ECS stack with new VPC matches snapshot 1`] = `
     },
     "Stage": {
       "Default": "dev",
-      "Description": "Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1",
+      "Description": "Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1.  This name should be unique for the all deployments in the region.",
       "Type": "String",
     },
   },
