@@ -8,18 +8,26 @@ import org.opensearch.migrations.common.CommonUtils
 class RegistryImageBuildUtils {
 
     def configureJibFor = { Project project, String baseImageRegistryEndpoint, String baseImageGroup, String baseImageName,
-                            String baseImageTag, String imageName, String imageTag, Map<String, List<String>> requiredDependencies ->
+        String baseImageTag, String imageName, String imageTag, String repoName,
+        Map<String, List<String>> requiredDependencies ->
         def registryEndpoint = project.rootProject.ext.registryEndpoint.toString()
         def baseFormatter = ImageRegistryFormatterFactory.getFormatter(baseImageRegistryEndpoint)
         def targetFormatter = ImageRegistryFormatterFactory.getFormatter(registryEndpoint)
         def baseImage = baseFormatter.getFullBaseImageIdentifier(baseImageRegistryEndpoint, baseImageGroup, baseImageName, baseImageTag)
-        def registryDestination= targetFormatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag)[0]
+        def registryDestination = targetFormatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag, repoName)[0]
         CommonUtils.copyVersionFileToDockerStaging(project, imageName, "build/versionDir")
         requiredDependencies.each { projectPath, taskNames ->
             def targetProject = projectPath ? project.rootProject.project(projectPath) : project.rootProject
             taskNames.each { taskName ->
                 project.tasks.named("jib").configure {
                     dependsOn(targetProject.tasks.named(taskName))
+                    inputs.property("registryEndpoint", registryEndpoint)
+                    inputs.property("imageName", imageName)
+                    inputs.property("imageTag", imageTag)
+                    inputs.property("repoName", (repoName ?: "").toString())
+                    inputs.property("imageArch", project.rootProject.ext.imageArch?.toString())
+                    inputs.property("imageVersion", (project.rootProject.findProperty("imageVersion") ?: "").toString())
+                    inputs.property("publishStyle", (project.rootProject.findProperty("publishStyle") ?: "").toString())
                 }
             }
         }
@@ -36,6 +44,10 @@ class RegistryImageBuildUtils {
                 }
                 to {
                     image = registryDestination
+                    def versionTag = project.rootProject.findProperty("imageVersion")
+                    if (versionTag) {
+                        tags = [versionTag.toString()]
+                    }
                 }
                 extraDirectories {
                     paths {
@@ -71,6 +83,7 @@ class RegistryImageBuildUtils {
                         config.baseImageTag.toString(),
                         config.imageName.toString(),
                         config.imageTag.toString(),
+                        config.get("repoName", null)?.toString(),
                         (Map<String, List<String>>) config.get("requiredDependencies", [])
                 )
             }
@@ -111,6 +124,7 @@ class RegistryImageBuildUtils {
     }
 
     void registerBuildKitTask(Project project, Map cfg) {
+        def versionTag = project.findProperty("imageVersion")?.toString()
         def registryEndpoint = project.ext.buildKitRegistryEndpoint.toString()
         def builder = project.findProperty("builder") ?: "local-remote-builder"
         def imageName = cfg.get("imageName").toString()
@@ -120,16 +134,35 @@ class RegistryImageBuildUtils {
         def contextFile = project.file(contextDir)
         def contextPath = contextFile.path
         def formatter = ImageRegistryFormatterFactory.getFormatter(registryEndpoint)
-        def (registryDestination, cacheDestination) = formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag)
+        def repoName = cfg.get("repoName")?.toString()
+        def (primaryDest, cacheDestination) =
+            formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag, repoName)
+
+        def tagFlags = ["-t ${primaryDest}"]
+        if (repoName && versionTag) {
+            def sanitizedVersion = versionTag.replaceAll('[^A-Za-z0-9_.-]', '-')
+            def versionedDest = primaryDest.replace(":${imageTag}", ":${sanitizedVersion}")
+            tagFlags.add("-t ${versionedDest}")
+        }
 
         def buildTaskName = "buildKit_${serviceName}"
         project.tasks.register(buildTaskName, Exec) {
             group = "docker"
-            description = "Build and push ${registryDestination} with caching"
+            description = "Build and push ${primaryDest} with caching"
 
             // Add inputs for the Docker context directory to track file changes
             inputs.dir(contextFile)
-            
+            inputs.property("registryEndpoint", registryEndpoint)
+            inputs.property("imageArch", project.ext.imageArch?.toString())
+            inputs.property("repoName", (repoName ?: "").toString())
+            inputs.property("imageName", imageName)
+            inputs.property("imageTag", imageTag)
+            inputs.property("imageVersion", (project.findProperty("imageVersion") ?: "").toString())
+            inputs.property("publishStyle", (project.findProperty("publishStyle") ?: "").toString())
+
+            // your existing "always run" line (optional if you use inputs properly)
+            outputs.upToDateWhen { false }
+
             // Since outputs are pushed to a remote registry, we cannot track them locally.
             // Always run this task to ensure the image is up-to-date with the registry.
             outputs.upToDateWhen { false }
@@ -146,7 +179,7 @@ class RegistryImageBuildUtils {
                     "docker buildx build",
                     "--platform linux/${project.ext.imageArch}",
                     "--builder ${builder}",
-                    "-t ${registryDestination}",
+                    *tagFlags,
                     "--push",
                     "--cache-to=type=registry,ref=${cacheDestination},mode=max",
                     "--cache-from=type=registry,ref=${cacheDestination}"
