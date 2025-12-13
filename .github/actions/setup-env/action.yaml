@@ -8,10 +8,6 @@ runs:
         java-version: 17
         distribution: "corretto"
 
-    - uses: gradle/actions/setup-gradle@v4
-      with:
-        gradle-version: 8.12.1
-
     - uses: actions/setup-python@v5
       with:
         python-version: 3.11
@@ -23,7 +19,7 @@ runs:
 
     - uses: actions/setup-node@v4
       with:
-        node-version: 18.x
+        node-version: 22.x
 
     - name: Aggressive disk cleanup
       shell: bash
