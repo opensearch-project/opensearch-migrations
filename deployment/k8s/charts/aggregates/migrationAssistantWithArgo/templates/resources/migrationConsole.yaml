@@ -35,8 +35,41 @@ roleRef:
   kind: Role
   name: migration-console-access-role
   apiGroup: rbac.authorization.k8s.io
-
 ---
+{{- if and .Values.cluster.isEKS .Values.migrationConsole.eksNodeTypes (gt (len .Values.migrationConsole.eksNodeTypes) 0) }}
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: dedicated-small-instance-migration-console-pool
+spec:
+  limits:
+    cpu: 4000m
+    memory: 4Gi
+{{/*    {{ .Values.migrationConsole.resources.limits | toJson }}*/}}
+  disruption:
+    consolidateAfter: 30s
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: default
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: {{ .Values.migrationConsole.eksNodeTypes | toJson }}
+{{/*      taints:*/}}
+{{/*        - key: "migration-console" # Taint to ensure only migration console pods land here*/}}
+{{/*          value: "dedicated"*/}}
+{{/*          effect: NoSchedule*/}}
+    disruption:
+      consolidationPolicy: WhenEmpty
+      consolidateAfter: 30m  # Wait 30 minutes before consolidating empty nodes
+---
+{{- end }}
 {{ $sharedLogsVolumeEnabled := .Values.logs.sharedLogsVolume.enabled }}
 apiVersion: apps/v1
 kind: StatefulSet
@@ -55,10 +88,43 @@ spec:
         env: v1
     spec:
       serviceAccountName: migration-console-access-role
+      {{- if and .Values.cluster.isEKS .Values.migrationConsole.eksNodeTypes (gt (len .Values.migrationConsole.eksNodeTypes) 0) }}
+      # Prefer dedicated small nodes, but allow fallback to any node
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100  # Highest preference
+              preference:
+                matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: In
+                    values: ["dedicated-small-instance-migration-console-pool"]
+{{/*            - weight: 50   # Lower preference fallback*/}}
+{{/*              preference:*/}}
+{{/*                matchExpressions:*/}}
+{{/*                  - key: karpenter.sh/nodepool*/}}
+{{/*                    operator: In*/}}
+{{/*                    values: ["general-purpose"]*/}}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: In
+                    values:  # REQUIRED: Must be one of these pools
+                      - "dedicated-small-instance-migration-console-pool"
+{{/*                      - "general-purpose"*/}}
+      {{- end }}
       containers:
         - name: console
           image: {{ .Values.images.migrationConsole.repository}}:{{ .Values.images.migrationConsole.tag }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
+          resources:
+            requests:
+              cpu: {{ .Values.migrationConsole.resources.requests.cpu | quote }}
+              memory: {{ .Values.migrationConsole.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.migrationConsole.resources.limits.cpu | quote }}
+              memory: {{ .Values.migrationConsole.resources.limits.memory | quote }}
           env:
             - name: MIGRATIONS_CLI_CONSOLE_DISABLE_LEGACY_COMMANDS
               value: "true"
@@ -78,3 +144,6 @@ spec:
           persistentVolumeClaim:
             claimName: {{ .Values.logs.sharedLogsVolume.name }}
     {{- end }}
+
+
+

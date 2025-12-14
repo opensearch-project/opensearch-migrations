@@ -54,11 +54,40 @@ images:
     tag: latest
     pullPolicy: IfNotPresent
 
+migrationConsole:
+  # Since the console may be used interactively, try to keep the migration
+  # console on the same node so that it can be stable.  Keep the requests
+  # and limits values the same to have k8s treat the pod as "Guranteed",
+  # which will make it the least likely to pod to face eviction.
+  #
+  # See https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#guaranteed
+  resources:
+    requests:
+      cpu: 1500m
+      memory: 2.5Gi
+    limits:
+      cpu: 1500m
+      memory: 2.5Gi
+
+  # List of EC2 instance types that the migration console pod can be assigned
+  # Leave this as an empty list to omit the entire nodeAffinity block from the
+  # specification
+  # Example small instance types for cost-effective persistent workloads:
+  # eksNodeTypes: ["t3.small", "t3.medium", "t3a.small", "t3a.medium"]
+  eksNodeTypes: []
+
 # Default AWS values are dummy values for LocalStack usage
 aws:
   configureAwsEksResources: false
   region: us-east-2
   account: "123456789012"
+
+# EKS cluster configuration for Karpenter NodeClass
+cluster:
+  # Set to true for EKS clusters with Karpenter, false for other cluster types
+  isEKS: false
+  name: ""  # Set this to your EKS cluster name (required when isEKS: true)
+  nodeInstanceProfile: "KarpenterNodeInstanceProfile"  # Default Karpenter node instance profile
 
 stageName: dev
 

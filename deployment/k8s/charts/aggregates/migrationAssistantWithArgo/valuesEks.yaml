@@ -7,6 +7,17 @@ aws:
   region: ""
   account: ""
 
+cluster:
+  isEKS: true
+
+migrationConsole:
+  # Specific instance types in order of preference (smallest first)
+  # if one of these cannot be found, the migration console pod will fall
+  # back to the general pool where it may be more volatile
+  eksNodeTypes:
+    - "t3.medium"
+    - "t3a.medium"
+
 defaultBucketConfiguration:
   useLocalStack: false
   deleteOnUninstall: true
