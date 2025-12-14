@@ -61,13 +61,13 @@ spec:
         - key: node.kubernetes.io/instance-type
           operator: In
           values: {{ .Values.migrationConsole.eksNodeTypes | toJson }}
-{{/*      taints:*/}}
-{{/*        - key: "migration-console" # Taint to ensure only migration console pods land here*/}}
-{{/*          value: "dedicated"*/}}
-{{/*          effect: NoSchedule*/}}
+      taints:
+        - key: "migration-console" # Taint to ensure only migration console pods land here
+          value: "dedicated"
+          effect: NoSchedule
     disruption:
       consolidationPolicy: WhenEmpty
-      consolidateAfter: 30m  # Wait 30 minutes before consolidating empty nodes
+      consolidateAfter: 5m  # No reason to wait long if the console exits
 ---
 {{- end }}
 {{ $sharedLogsVolumeEnabled := .Values.logs.sharedLogsVolume.enabled }}
@@ -89,6 +89,11 @@ spec:
     spec:
       serviceAccountName: migration-console-access-role
       {{- if and .Values.cluster.isEKS .Values.migrationConsole.eksNodeTypes (gt (len .Values.migrationConsole.eksNodeTypes) 0) }}
+      tolerations: # Set the metadata so that the dedicated nodepool will let this pod schedule to it
+        - key: "migration-console"
+          operator: "Equal"
+          value: "dedicated"
+          effect: "NoSchedule"
       # Prefer dedicated small nodes, but allow fallback to any node
       affinity:
         nodeAffinity:
@@ -112,7 +117,7 @@ spec:
                     operator: In
                     values:  # REQUIRED: Must be one of these pools
                       - "dedicated-small-instance-migration-console-pool"
-{{/*                      - "general-purpose"*/}}
+                      - "general-purpose"
       {{- end }}
       containers:
         - name: console

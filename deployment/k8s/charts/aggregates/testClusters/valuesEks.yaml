@@ -1,0 +1,36 @@
+useDedicatedKarpenterPool: true
+
+source:
+  image: "MUST_BE_OVERRIDDEN_WITH_A_PUBLISHED_SEARCHGUARD_IMAGE_THAT_HAS_S3"
+  imageTag: migrations_elasticsearch_searchguard_latest
+
+  tolerations:
+    - key: dedicated-search
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+
+  # elastic/elasticsearch chart expects nodeAffinity here (not affinity.nodeAffinity)
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: karpenter.sh/nodepool
+              operator: In
+              values: ["dedicated-search-pool"]
+
+target:
+  tolerations:
+    - key: dedicated-search
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+
+  # opensearch-project chart expects nodeAffinity here (not affinity.nodeAffinity)
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: karpenter.sh/nodepool
+              operator: In
+              values: ["dedicated-search-pool"]
