@@ -99,12 +99,12 @@ spec:
                   - key: karpenter.sh/nodepool
                     operator: In
                     values: ["dedicated-small-instance-migration-console-pool"]
-{{/*            - weight: 50   # Lower preference fallback*/}}
-{{/*              preference:*/}}
-{{/*                matchExpressions:*/}}
-{{/*                  - key: karpenter.sh/nodepool*/}}
-{{/*                    operator: In*/}}
-{{/*                    values: ["general-purpose"]*/}}
+            - weight: 50   # Lower preference fallback
+              preference:
+                matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: In
+                    values: ["general-purpose"]
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
