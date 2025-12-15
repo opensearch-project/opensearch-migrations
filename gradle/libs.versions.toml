@@ -38,8 +38,8 @@ opensearch-testcontainers = "2.0.1"
 opentelemetry = "1.57.0"
 opentelemetry-semconv = "1.23.1-alpha"
 protobuf = "4.33.2"
-reactor-netty = "1.3.1"
-reactor-test = "3.8.1"
+reactor-netty = "1.2.11"
+reactor-test = "3.7.12"
 semver4j = "6.0.0"
 slf4j = "2.0.17"
 testcontainers = "1.21.3"
@@ -179,10 +179,10 @@ boms-opentelemetry    = { module = "io.opentelemetry:opentelemetry-bom", version
 
 # Transitive dependencies to force based on CVEs
 transitive-apache-httpclient = { module = "org.apache.httpcomponents:httpclient",    version = "4.5.14"   }
-transitive-commons-lang3     = { module = "org.apache.commons:commons-lang3",        version = "3.20.0"   }
+transitive-commons-lang3     = { module = "org.apache.commons:commons-lang3",        version = "3.19.0"   }
 transitive-commons-net       = { module = "commons-net:commons-net",                 version = "3.12.0"   }
 transitive-dnsjava           = { module = "dnsjava:dnsjava",                         version = "3.6.3"    }
-transitive-jersey-common     = { module = "org.glassfish.jersey.core:jersey-common", version = "4.0.0"   }
+transitive-jersey-common     = { module = "org.glassfish.jersey.core:jersey-common", version = "3.1.11"   }
 transitive-json-path         = { module = "com.jayway.jsonpath:json-path",           version = "2.10.0"    }
 transitive-json-smart        = { module = "net.minidev:json-smart",                  version = "2.6.0"    }
 transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.21.2"   }
