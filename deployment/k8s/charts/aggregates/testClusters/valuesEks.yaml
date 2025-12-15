@@ -27,9 +27,37 @@ source:
               operator: In
               values: ["dedicated-search-pool"]
 
+  esConfig:
+    elasticsearch.yml: |
+      cluster.name: "test-cluster"
+      network.host: 0.0.0.0
+
+      ######## Start Search Guard Demo Configuration ########
+      # WARNING: revise all the lines below before you go into production
+      searchguard.ssl.transport.pemcert_filepath: esnode.pem
+      searchguard.ssl.transport.pemkey_filepath: esnode-key.pem
+      searchguard.ssl.transport.pemtrustedcas_filepath: root-ca.pem
+      searchguard.ssl.transport.enforce_hostname_verification: false
+      searchguard.ssl.http.enabled: true
+      searchguard.ssl.http.pemcert_filepath: esnode.pem
+      searchguard.ssl.http.pemkey_filepath: esnode-key.pem
+      searchguard.ssl.http.pemtrustedcas_filepath: root-ca.pem
+      searchguard.allow_unsafe_democertificates: true
+      searchguard.allow_default_init_sgindex: true
+      searchguard.authcz.admin_dn:
+        - CN=kirk,OU=client,O=client,L=test, C=de
+
+      searchguard.audit.type: internal_elasticsearch
+      searchguard.enable_snapshot_restore_privilege: true
+      searchguard.check_snapshot_restore_write_privileges: true
+      searchguard.restapi.roles_enabled: ["SGS_ALL_ACCESS"]
+      cluster.routing.allocation.disk.threshold_enabled: false
+      node.max_local_storage_nodes: 3
+      ######## End Search Guard Demo Configuration ########
+      discovery.type: single-node
+
   # The values below are to set up a key store that is periodically refreshed
   # with credentials vended via PodIdentity
-
   extraVolumes:
     - name: es-keystore
       emptyDir: {}
