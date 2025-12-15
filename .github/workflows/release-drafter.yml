@@ -83,14 +83,6 @@ jobs:
           # Preface Traffic Capture version with 0. to signal interface immaturity
           ./gradlew :buildImages:buildImagesToRegistry \
             -PregistryEndpoint=opensearchstaging \
-            -PimageArch=amd64 \
-            -PimageVersion=${{ steps.get_data.outputs.version }} \
-            -PpublishStyle='separateRepos' \
-            -Dbuild.snapshot=false \
-            -Dbuild.version=0.${{ steps.get_data.outputs.version }}
-          ./gradlew :buildImages:buildImagesToRegistry \
-            -PregistryEndpoint=opensearchstaging \
-            -PimageArch=arm64 \
             -PimageVersion=${{ steps.get_data.outputs.version }} \
             -PpublishStyle='separateRepos' \
             -Dbuild.snapshot=false \

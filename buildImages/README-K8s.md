@@ -154,10 +154,9 @@ eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`Mig
 echo "Login to your remote registry first"
 aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-2.amazonaws.com
 
-echo "Build with custom registry endpoint and architecture"
+echo "Build with custom registry endpoint (for both amd64 and arm64)"
 ./gradlew buildImagesToRegistry \
-  -PregistryEndpoint=$MIGRATIONS_ECR_REGISTRY \
-  -PimageArch=amd64
+  -PregistryEndpoint=$MIGRATIONS_ECR_REGISTRY
 ```
 
 This is how the production build job works - it uses the same BuildKit setup but pushes to ECR instead of a local registry.
