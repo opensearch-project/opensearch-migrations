@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.CaptureProxyContainer;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.HttpdContainerTestBase;
@@ -24,7 +25,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class CaptureProxyConfigurationTest {
 
     private static final HttpdContainerTestBase httpdTestBase = new HttpdContainerTestBase();
-    private static final String HTTPD_GET_EXPECTED_RESPONSE = "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\">\n<html>\n<head>\n<title>It works! Apache httpd</title>\n</head>\n<body>\n<p>It works!</p>\n</body>\n</html>\n";
     private static final int DEFAULT_NUMBER_OF_CALLS = 3;
     private static final long PROXY_EXPECTED_MAX_LATENCY_MS = Duration.ofSeconds(1).toMillis();
 
@@ -74,7 +74,7 @@ public class CaptureProxyConfigurationTest {
             long endTimeNanos = System.nanoTime();
 
             var responseBody = new String(response.payloadBytes);
-            assertEquals(HTTPD_GET_EXPECTED_RESPONSE, responseBody);
+            assertEquals(SharedDockerImageNames.HTTPD_EXPECTED_RESPONSE, responseBody);
             return Duration.ofNanos(endTimeNanos - startTimeNanos);
         } catch (IOException e) {
             throw new RuntimeException(e);
