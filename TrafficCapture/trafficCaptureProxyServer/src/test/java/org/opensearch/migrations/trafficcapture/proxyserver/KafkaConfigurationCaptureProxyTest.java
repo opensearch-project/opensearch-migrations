@@ -41,7 +41,7 @@ public class KafkaConfigurationCaptureProxyTest {
     private static final KafkaContainerTestBase kafkaTestBase = new KafkaContainerTestBase();
     private static final HttpdContainerTestBase httpdTestBase = new HttpdContainerTestBase();
     private static final ToxiproxyContainerTestBase toxiproxyTestBase = new ToxiproxyContainerTestBase();
-    private static final String HTTPD_GET_EXPECTED_RESPONSE = "<html><body><h1>It works!</h1></body></html>\n";
+    private static final String HTTPD_GET_EXPECTED_RESPONSE = "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\">\n<html>\n<head>\n<title>It works! Apache httpd</title>\n</head>\n<body>\n<p>It works!</p>\n</body>\n</html>\n";
     private static final int DEFAULT_NUMBER_OF_CALLS = 3;
     private static final long PROXY_EXPECTED_MAX_LATENCY_MS = Duration.ofSeconds(1).toMillis();
     private Proxy kafkaProxy;

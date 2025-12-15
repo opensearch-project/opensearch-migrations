@@ -64,9 +64,8 @@ dependencies {
 
     testImplementation libs.httpclient5
     testImplementation libs.junit.jupiter.api
-    testImplementation libs.testcontainers.junit.jupiter
-    testImplementation libs.testcontainers.kafka
     testImplementation libs.testcontainers
+    testImplementation libs.toxiproxy
 
     testImplementation libs.mockito.core
     testImplementation libs.mockito.junit.jupiter

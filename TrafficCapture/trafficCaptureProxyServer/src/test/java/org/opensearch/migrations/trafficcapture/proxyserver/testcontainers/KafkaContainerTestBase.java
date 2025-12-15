@@ -2,14 +2,14 @@ package org.opensearch.migrations.trafficcapture.proxyserver.testcontainers;
 
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
 
-import org.testcontainers.kafka.ConfluentKafkaContainer;
+import org.testcontainers.kafka.KafkaContainer;
 
 
-public class KafkaContainerTestBase extends TestContainerTestBase<ConfluentKafkaContainer> {
+public class KafkaContainerTestBase extends TestContainerTestBase<KafkaContainer> {
 
-    private static final ConfluentKafkaContainer kafka = new ConfluentKafkaContainer(SharedDockerImageNames.KAFKA);
+    private static final KafkaContainer kafka = new KafkaContainer(SharedDockerImageNames.KAFKA);
 
-    public ConfluentKafkaContainer getContainer() {
+    public KafkaContainer getContainer() {
         return kafka;
     }
 }

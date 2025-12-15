@@ -30,7 +30,6 @@ dependencies {
     testFixturesImplementation libs.hamcrest
     testFixturesImplementation libs.slf4j.api
     testFixturesApi libs.testcontainers
-    testFixturesApi libs.testcontainers.toxiproxy
 
     testImplementation libs.log4j.api
     testImplementation libs.log4j.core
