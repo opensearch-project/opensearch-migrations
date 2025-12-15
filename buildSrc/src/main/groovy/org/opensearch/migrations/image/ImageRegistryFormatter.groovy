@@ -2,7 +2,7 @@ package org.opensearch.migrations.image
 
 interface ImageRegistryFormatter {
     String getFullBaseImageIdentifier(String baseImageRegistryEndpoint, String baseImageGroup, String baseImageName, String baseImageTag)
-    List<String> getFullTargetImageIdentifier(String registryEndpoint, String imageName, String imageTag)
+    List<String> getFullTargetImageIdentifier(String registryEndpoint, String imageName, String imageTag, String repoName)
 }
 
 class DefaultRegistryFormatter implements ImageRegistryFormatter {
@@ -19,9 +19,11 @@ class DefaultRegistryFormatter implements ImageRegistryFormatter {
     }
 
     @Override
-    List<String> getFullTargetImageIdentifier(String endpoint, String name, String tag) {
-        def registryDestination = "${endpoint}/migrations/${name}:${tag}"
-        def cacheDestination = "${endpoint}/migrations/${name}:cache"
+    List<String> getFullTargetImageIdentifier(String endpoint, String name, String tag, String repoName = null) {
+        def repoPath = repoName ?: "migrations/${name}"   // <= keeps old behavior
+        def registryDestination = "${endpoint}/${repoPath}:${tag}"
+        def cacheDestination = "${endpoint}/${repoPath}:cache"
+        println("Returning registryDestination=" + registryDestination + " cacheDestination=" + cacheDestination)
         return [registryDestination, cacheDestination]
     }
 }
@@ -40,7 +42,7 @@ class ECRRegistryFormatter implements ImageRegistryFormatter {
     }
 
     @Override
-    List<String> getFullTargetImageIdentifier(String endpoint, String name, String tag) {
+    List<String> getFullTargetImageIdentifier(String endpoint, String name, String tag, String repoName = null) {
         def registryDestination = "${endpoint}:migrations_${name}_${tag}"
         def cacheDestination = "${endpoint}:migrations_${name}_cache"
         return [registryDestination, cacheDestination]
