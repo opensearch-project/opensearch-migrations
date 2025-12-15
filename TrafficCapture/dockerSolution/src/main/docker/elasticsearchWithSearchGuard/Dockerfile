@@ -36,4 +36,14 @@ RUN sed -i '/^-Xms/i # Increase default heap to 80% RAM, Requires JDK >= 10' $EL
 
 
 #CMD tail -f /dev/null
-CMD ["/usr/local/bin/docker-entrypoint.sh", "eswrapper"]
+RUN cat >/usr/local/bin/unset-aws-pod-identity-env.sh <<'EOF' \
+ && chmod +x /usr/local/bin/unset-aws-pod-identity-env.sh
+#!/bin/sh
+echo "Unsetting AWS_CONTAINER_CREDENTIALS_FULL_URI because the version of the AWS SDK doesn't properly support it"
+unset AWS_CONTAINER_CREDENTIALS_FULL_URI AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
+exec /usr/local/bin/docker-entrypoint.sh "$@"
+EOF
+
+# Keep CMD as-is; just interpose wrapper as entrypoint
+ENTRYPOINT ["/usr/local/bin/unset-aws-pod-identity-env.sh"]
+CMD ["eswrapper"]
