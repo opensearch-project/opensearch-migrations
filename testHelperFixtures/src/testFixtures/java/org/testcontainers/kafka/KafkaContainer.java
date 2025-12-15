@@ -1,15 +1,15 @@
 package org.testcontainers.kafka;
 
-import com.github.dockerjava.api.command.InspectContainerResponse;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.images.builder.Transferable;
-import org.testcontainers.utility.DockerImageName;
-
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
+
+import com.github.dockerjava.api.command.InspectContainerResponse;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.images.builder.Transferable;
+import org.testcontainers.utility.DockerImageName;
 
 /**
  * Local copy since org.testcontainers:kafka is not published for 2.0.x.

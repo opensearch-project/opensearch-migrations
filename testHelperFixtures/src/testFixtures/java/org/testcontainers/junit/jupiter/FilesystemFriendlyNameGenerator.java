@@ -1,10 +1,10 @@
 package org.testcontainers.junit.jupiter;
 
-import org.junit.jupiter.api.extension.ExtensionContext;
-
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+
+import org.junit.jupiter.api.extension.ExtensionContext;
 
 class FilesystemFriendlyNameGenerator {
 
