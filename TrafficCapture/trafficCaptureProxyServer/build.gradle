@@ -49,7 +49,10 @@ dependencies {
     testImplementation testFixtures(project(path: ':TrafficCapture:captureOffloader'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation libs.toxiproxy
+    testImplementation libs.testcontainers.junit.jupiter
+    testImplementation libs.testcontainers.kafka
     testImplementation libs.testcontainers
+    testImplementation libs.testcontainers.toxiproxy
 }
 
 tasks.withType(Tar){
