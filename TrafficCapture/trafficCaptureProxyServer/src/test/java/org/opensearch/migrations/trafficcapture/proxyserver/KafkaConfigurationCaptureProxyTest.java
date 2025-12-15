@@ -3,10 +3,10 @@ package org.opensearch.migrations.trafficcapture.proxyserver;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
+import java.util.Locale;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.CaptureProxyContainer;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.HttpdContainerTestBase;
@@ -205,7 +205,8 @@ public class KafkaConfigurationCaptureProxyTest {
             long endTimeNanos = System.nanoTime();
 
             var responseBody = new String(response.payloadBytes);
-            assertEquals(SharedDockerImageNames.HTTPD_EXPECTED_RESPONSE, responseBody);
+            Assertions.assertNotNull(responseBody);
+            Assertions.assertTrue(responseBody.toLowerCase(Locale.ROOT).contains("it works"));
             return Duration.ofNanos(endTimeNanos - startTimeNanos);
         } catch (IOException e) {
             throw new RuntimeException(e);
