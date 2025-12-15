@@ -339,7 +339,7 @@ if [[ "$build_images" == "true" ]]; then
     echo "Building amd64 images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"
 
     pushd $base_dir || exit
-    ./gradlew :buildImages:buildImagesToRegistry -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -PimageArch=amd64 -x test || exit
+    ./gradlew :buildImages:buildImagesToRegistry -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
     popd > /dev/null || exit
   else
     if helm status build-images -n "$namespace" >/dev/null 2>&1; then

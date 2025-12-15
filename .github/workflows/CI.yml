@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
       - name: Run Gradle Build
-        run: gradle ${{matrix.tasks}}
+        run: ./gradlew ${{matrix.tasks}}
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
@@ -149,7 +149,7 @@ jobs:
       - name: Run Gradle tests with striping
         run: |
           MAX_WORKERS=$(( $(nproc) - 1 ))
-          gradle allTests mergeJacocoReports \
+          ./gradlew allTests mergeJacocoReports \
           --max-workers $MAX_WORKERS \
           -Dtest.striping.total=${{ env.gradle-test-parallelization }} \
           -Dtest.striping.index=${{ matrix.index }} \
@@ -211,7 +211,7 @@ jobs:
           # Only save cache on push events
           read-only: ${{ github.event_name != 'push' }}
       - name: Start Docker Solution
-        run: gradle -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
+        run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
       - name: Run E2E test script
@@ -256,6 +256,11 @@ jobs:
           - ./deployment/cdk/opensearch-service-migration
           - ./deployment/migration-assistant-solution
           - ./frontend
+          # TODO - get these enabled
+#          - ./orchestrationSpecs/packages/argo-workflow-builders
+#          - ./orchestrationSpecs/packages/config-processor
+#          - ./orchestrationSpecs/packages/migration-workflow-templates
+#          - ./orchestrationSpecs/packages/schemas
     defaults:
       run:
         working-directory: ${{ matrix.npm-project }}
