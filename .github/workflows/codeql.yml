@@ -1,7 +1,6 @@
 name: "CodeQL Advanced"
 
 on:
-  push:
   pull_request:
   schedule:
     - cron: '25 22 * * 0'
