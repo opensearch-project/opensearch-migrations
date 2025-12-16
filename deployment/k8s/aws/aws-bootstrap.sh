@@ -386,7 +386,12 @@ if [[ "$build_images" == "true" ]]; then
   fi
 fi
 
-RELEASE_VERSION=$(<"$base_dir/VERSION")
+# Get latest release version from GitHub releases API
+RELEASE_VERSION=$(curl -s https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+if [[ -z "$RELEASE_VERSION" ]]; then
+  echo "Warning: Could not fetch latest release from GitHub, falling back to VERSION file"
+  RELEASE_VERSION=$(<"$base_dir/VERSION")
+fi
 RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
 echo "Using RELEASE_VERSION=$RELEASE_VERSION"
 
