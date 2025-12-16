@@ -30,7 +30,7 @@ jobs:
     - uses: actions/checkout@v6
     - uses: ./.github/actions/setup-env
     - name: Cache SonarQube Scanner
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ~/.sonar/cache
         key: sonar-cache
@@ -89,7 +89,7 @@ jobs:
         fi
     - name: Upload SonarQube Artifacts
       if: always()
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: sonar-reports
         path: issues.json

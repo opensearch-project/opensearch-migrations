@@ -15,6 +15,7 @@ dependencies {
     testImplementation testFixtures(project(":coreUtilities"))
     testImplementation testFixtures(project(":testHelperFixtures"))
     testImplementation libs.testcontainers.junit.jupiter
+    testImplementation libs.hamcrest
     testImplementation libs.netty.all
     testImplementation libs.jackson.databind
 }
