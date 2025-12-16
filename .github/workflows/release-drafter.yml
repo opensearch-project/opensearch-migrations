@@ -73,6 +73,9 @@ jobs:
           git archive --format=tar.gz \
             -o opensearch-migrations-${{ steps.get_data.outputs.version_safe }}-source.tar.gz \
             HEAD
+      - name: Create Kiro assistant archive
+        run: |
+          ./gradlew :kiro-cli:packageKiro
       - name: Build and Publish to Maven
         if: ${{ !github.event.act }}
         run: |
@@ -177,4 +180,5 @@ jobs:
             deployment/migration-assistant-solution/build/temp/global-s3-assets/*.template
             artifacts.tar.gz
             traffic-capture-artifacts.tar.gz
+            kiro-cli/build/kiro-assistant.tar.gz
             **/*.spdx.json
