@@ -86,7 +86,12 @@ jobs:
             -PimageVersion=${{ steps.get_data.outputs.version }} \
             -PpublishStyle='separateRepos' \
             -Dbuild.snapshot=false \
-            -Dbuild.version=0.${{ steps.get_data.outputs.version }}
+            -Dbuild.version=0.${{ steps.get_data.outputs.version }} \
+            --no-build-cache \
+            --no-configuration-cache \
+            --no-daemon \
+            --no-continue \
+            --info
       - name: Logout to DockerHub
         if: always()
         run: docker logout
