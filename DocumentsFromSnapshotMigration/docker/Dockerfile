@@ -8,7 +8,7 @@ RUN dnf install -y procps && \
 
 # Requires Gradle to genearte runtime jars initially
 COPY ./build/runtimeJars /rfs-app/jars
-COPY ./build/VERSION /rfs-app/VERSION
+COPY ./build/version/VERSION /rfs-app/VERSION
 WORKDIR /rfs-app
 
 # Copy the Java runner scripts into the container

@@ -203,8 +203,8 @@ subprojects {
                 def index = System.getProperty("test.striping.index")
 
                 // Register striping params as inputs so tests rerun when striping changes
-                inputs.property("test.striping.total", total)
-                inputs.property("test.striping.index", index)
+                inputs.property("test.striping.total", total).optional(true)
+                inputs.property("test.striping.index", index).optional(true)
 
                 if (total != null) {
                     systemProperty "test.striping.total", total
