@@ -29,9 +29,10 @@ After discovering your domains, I'll ask:
 4. **Get S3/snapshot config** - From EKS configmap
 5. **Check target state** - Show existing indices, ask before proceeding
 6. **Calculate sizing** - Estimate podReplicas and migration time
-7. **Generate config** - Create workflow configuration
-8. **Submit & monitor** - Run migration with progress updates
-9. **Verify completion** - Compare doc counts source vs target
+7. **PRESENT ESTIMATE** - Show snapshot time + backfill time, ask user to confirm before proceeding
+8. **Generate config** - Create workflow configuration
+9. **Submit & monitor** - Run migration with progress updates
+10. **Verify completion** - Compare doc counts source vs target
 
 ## Pre-Flight Checklist (I'll handle this)
 

@@ -118,6 +118,43 @@ kubectl logs -n ma -l workflows.argoproj.io/workflow=migration-workflow --tail=2
    kubectl exec migration-console-0 -n ma -- bash -c "source /.venv/bin/activate && workflow status"
    ```
 
+## Pre-Migration Estimation (REQUIRED)
+
+**ALWAYS calculate and present estimates BEFORE starting migration:**
+
+### 1. Get Source Data Size
+```bash
+console clusters curl source_cluster /_cluster/stats | jq '.indices.store.size_in_bytes / 1073741824' # GB with replicas
+console clusters curl source_cluster /_cat/nodes?v  # Check node count for snapshot parallelism
+```
+
+### 2. Check Snapshot Speed Settings (for fresh repos)
+```bash
+# Check cluster-level recovery speed limit
+console clusters curl source_cluster '/_cluster/settings?include_defaults=true' | jq '.defaults.indices.recovery.max_bytes_per_sec'
+# Default is often 40mb - consider increasing for large datasets
+```
+
+### 3. Calculate Migration Time Estimate
+```
+Snapshot creation: data_size_gb / (40 MB/s × source_data_nodes) 
+Transfer rate: xlarge_equivalents × 15.1 MB/s
+Backfill time: primary_data_size / transfer_rate
+Total: snapshot_time + metadata (~2 min) + backfill_time
+```
+
+### 4. Present to User and Confirm
+```
+**Migration Estimate:**
+- Source data: X GB (Y GB primary)
+- Target: N × instance_type = Z xlarge equivalents
+- Estimated snapshot time: ~X minutes
+- Estimated backfill time: ~Y minutes  
+- Total estimated time: ~Z minutes
+
+Does this timeline work, or should we scale up the target cluster first?
+```
+
 ## Pre-Migration Checklist
 
 **ALWAYS show target indices and ask user before starting migration:**
