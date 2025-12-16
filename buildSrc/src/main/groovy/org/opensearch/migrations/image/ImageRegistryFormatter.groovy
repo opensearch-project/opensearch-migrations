@@ -23,7 +23,6 @@ class DefaultRegistryFormatter implements ImageRegistryFormatter {
         def repoPath = repoName ?: "migrations/${name}"   // <= keeps old behavior
         def registryDestination = "${endpoint}/${repoPath}:${tag}"
         def cacheDestination = "${endpoint}/${repoPath}:cache"
-        println("Returning registryDestination=" + registryDestination + " cacheDestination=" + cacheDestination)
         return [registryDestination, cacheDestination]
     }
 }

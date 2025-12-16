@@ -21,6 +21,11 @@ jobs:
     name: Draft a release
     if: ${{ github.event.act || github.repository == 'opensearch-project/opensearch-migrations' }}
     runs-on: ubuntu-22.04
+    services:
+      registry:
+        image: registry:2 # Ephemeral registry for intermediate (base) images. Final ones only go to opensearchstaging.
+        ports:
+          - 5000:5000
     outputs:
       dockerhub-password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
     steps:
@@ -46,10 +51,18 @@ jobs:
         uses: docker/setup-buildx-action@v3
         with:
           driver: docker-container
+          # Keep debug on while we troubleshoot this new registry setup
           buildkitd-flags: --debug
-          # This has to match the -Pbuilder flag for buildImages/build.gradle (default of local-remote-builder)
+          # This has to match the -Pbuilder flag for buildImages/build.gradle
           name: local-remote-builder
           install: true
+          # ALLOW ACCESS TO HOST NETWORK (Required to see localhost:5000)
+          driver-opts: network=host
+          # CONFIGURE INSECURE REGISTRY (Required for HTTP)
+          config-inline: |
+            [registry."localhost:5000"]
+              http = true
+              insecure = true
       - name: Create source archive
         run: |
           git archive --format=tar.gz \
@@ -82,6 +95,7 @@ jobs:
         run: |
           # Preface Traffic Capture version with 0. to signal interface immaturity
           ./gradlew :buildImages:buildImagesToRegistry \
+            -PintermediateRegistry=localhost:5000 \
             -PregistryEndpoint=opensearchstaging \
             -PimageVersion=${{ steps.get_data.outputs.version }} \
             -PpublishStyle='separateRepos' \
