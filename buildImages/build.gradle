@@ -1,12 +1,12 @@
 import org.opensearch.migrations.image.RegistryImageBuildUtils
-import org.opensearch.migrations.image.ImageRegistryFormatterFactory
+import org.opensearch.migrations.image.RegistryImageBuildUtils.Registry
 
-def registryEndpoint = rootProject.hasProperty('registryEndpoint') ? rootProject.property('registryEndpoint') : 'localhost:5001'
-rootProject.ext.registryEndpoint = registryEndpoint
-// buildkit names will be resolved from within the container, so localhost needs to be mapped to whatever this
-// is for that container.  This is a hack and should be parameterized.
-def buildKitRegistryEndpoint = registryEndpoint == "localhost:5001" ? 'docker-registry:5000' : registryEndpoint
-rootProject.ext.buildKitRegistryEndpoint = buildKitRegistryEndpoint
+def publishedUrl = rootProject.findProperty('registryEndpoint') ?: 'localhost:5001'
+def intermediateUrl = rootProject.findProperty('intermediateRegistry') ?: publishedUrl
+
+def publishedRegistry = new Registry(publishedUrl.toString())
+def intermediateRegistry = new Registry(intermediateUrl.toString())
+
 def publishStyle = (rootProject.findProperty("publishStyle") ?: "paths").toString()
 def publishedRepoByImageName = [
         migration_console     : "opensearch-migrations-console",
@@ -33,7 +33,7 @@ def jibProjects = [
                 ]
         ],
         "TrafficCapture:trafficCaptureProxyServer": [
-                baseImageRegistryEndpoint: rootProject.ext.registryEndpoint,
+                baseImageRegistryEndpoint: intermediateRegistry.hostUrl,
                 baseImageGroup : "migrations",
                 baseImageName  : "capture_proxy_base",
                 baseImageTag   : "latest",
@@ -49,7 +49,6 @@ jibProjects.values().each { cfg ->
     cfg.repoName = getRepoNameIfPublishing(cfg)
 }
 
-def formatter = ImageRegistryFormatterFactory.getFormatter(rootProject.ext.buildKitRegistryEndpoint)
 def buildKitProjects = [
         [
                 serviceName: "elasticsearchTestConsole",
@@ -77,10 +76,9 @@ def buildKitProjects = [
                 serviceName: "migrationConsoleBase",
                 contextDir: "migrationConsole/build/dockerContext",
                 imageName:  "migration_console_base",
-                imageTag:   "latest",
                 buildArgs: [
-                        BASE_IMAGE: formatter.getFullBaseImageIdentifier(rootProject.ext.buildKitRegistryEndpoint,
-                                "migrations", "elasticsearch_test_console", "latest")
+                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImage(
+                                intermediateRegistry, "migrations", "elasticsearch_test_console", "latest")
                 ],
                 requiredDependencies: [
                         ":migrationConsole:syncDockerBuildContext",
@@ -93,8 +91,8 @@ def buildKitProjects = [
                 imageName:  "migration_console",
                 imageTag:   "latest",
                 buildArgs: [
-                        BASE_IMAGE: formatter.getFullBaseImageIdentifier(rootProject.ext.buildKitRegistryEndpoint,
-                                "migrations", "migration_console_base", "latest")
+                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImage(
+                                intermediateRegistry, "migrations", "migration_console_base", "latest")
                 ],
                 requiredDependencies: [
                         ":TrafficCapture:dockerSolution:syncArtifact_migration_console_staging_noDockerBuild",
@@ -105,8 +103,7 @@ def buildKitProjects = [
         [
                 serviceName: "elasticsearchWithSearchGuard",
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard",
-                imageName:  "elasticsearch_searchguard",
-                imageTag:   "latest"
+                imageName:  "elasticsearch_searchguard"
         ]
 ]
 
@@ -116,9 +113,21 @@ buildKitProjects.each { cfg ->
 
 gradle.projectsEvaluated {
     def imageHelper = new RegistryImageBuildUtils()
-    imageHelper.registerLoginTask(rootProject)
-    imageHelper.applyJibConfigurations(rootProject, jibProjects)
-    imageHelper.applyBuildKitConfigurations(rootProject, buildKitProjects)
+
+    imageHelper.registerLoginTask(rootProject, publishedRegistry)
+
+    imageHelper.applyBuildKitConfigurations(
+            rootProject,
+            buildKitProjects,
+            publishedRegistry,
+            intermediateRegistry
+    )
+    imageHelper.applyJibConfigurations(
+            rootProject,
+            jibProjects,
+            publishedRegistry,
+            intermediateRegistry
+    )
 }
 
 tasks.register("jibAll") {
@@ -173,24 +182,24 @@ tasks.register("buildKitAll_arm64") {
 
 tasks.register("buildImagesToRegistry") {
     group = "build"
-    description = "Build all multi-arch images to registry: ${registryEndpoint}"
-    println "buildImagesToRegistry will build images to registry: ${registryEndpoint} with buildKit container using registry: ${buildKitRegistryEndpoint}"
+    description = "Build all multi-arch images to registry: ${publishedRegistry}"
+    println "buildImagesToRegistry will build images to registry: ${publishedRegistry}"
     dependsOn("buildKitAll")
     dependsOn("jibAll")
 }
 
 tasks.register("buildImagesToRegistry_amd64") {
     group = "build"
-    description = "Build all amd64 images to registry: ${registryEndpoint}"
-    println "buildImagesToRegistry_amd64 will build amd64 images to registry: ${registryEndpoint} with buildKit container using registry: ${buildKitRegistryEndpoint}"
+    description = "Build all amd64 images to registry: ${publishedRegistry}"
+    println "buildImagesToRegistry_amd64 will build amd64 images to registry: ${publishedRegistry}"
     dependsOn("buildKitAll_amd64")
     dependsOn("jibAll_amd64")
 }
 
 tasks.register("buildImagesToRegistry_arm64") {
     group = "build"
-    description = "Build all arm64 images to registry: ${registryEndpoint}"
-    println "buildImagesToRegistry_arm64 will build arm64 images to registry: ${registryEndpoint} with buildKit container using registry: ${buildKitRegistryEndpoint}"
+    description = "Build all arm64 images to registry: ${publishedRegistry}"
+    println "buildImagesToRegistry_arm64 will build arm64 images to registry: ${publishedRegistry}"
     dependsOn("buildKitAll_arm64")
     dependsOn("jibAll_arm64")
 }
