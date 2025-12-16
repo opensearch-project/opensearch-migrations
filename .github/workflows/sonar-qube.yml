@@ -29,6 +29,8 @@ jobs:
     steps:
     - uses: actions/checkout@v6
     - uses: ./.github/actions/setup-env
+      with:
+        gradle-cache-enabled: true
     - name: Cache SonarQube Scanner
       uses: actions/cache@v5
       with:
