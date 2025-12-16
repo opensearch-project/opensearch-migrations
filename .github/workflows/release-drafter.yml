@@ -21,6 +21,11 @@ jobs:
     name: Draft a release
     if: ${{ github.event.act || github.repository == 'opensearch-project/opensearch-migrations' }}
     runs-on: ubuntu-22.04
+    services:
+      registry:
+        image: registry:2 # Ephemeral registry for intermediate (base) images. Final ones only go to opensearchstaging.
+        ports:
+          - 5000:5000
     outputs:
       dockerhub-password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
     steps:
@@ -46,10 +51,18 @@ jobs:
         uses: docker/setup-buildx-action@v3
         with:
           driver: docker-container
+          # Keep debug on while we troubleshoot this new registry setup
           buildkitd-flags: --debug
-          # This has to match the -Pbuilder flag for buildImages/build.gradle (default of local-remote-builder)
+          # This has to match the -Pbuilder flag for buildImages/build.gradle
           name: local-remote-builder
           install: true
+          # ALLOW ACCESS TO HOST NETWORK (Required to see localhost:5000)
+          driver-opts: network=host
+          # CONFIGURE INSECURE REGISTRY (Required for HTTP)
+          config-inline: |
+            [registry."localhost:5000"]
+              http = true
+              insecure = true
       - name: Create source archive
         run: |
           git archive --format=tar.gz \
@@ -82,6 +95,7 @@ jobs:
         run: |
           # Preface Traffic Capture version with 0. to signal interface immaturity
           ./gradlew :buildImages:buildImagesToRegistry \
+            -PintermediateRegistry=localhost:5000 \
             -PregistryEndpoint=opensearchstaging \
             -PimageVersion=${{ steps.get_data.outputs.version }} \
             -PpublishStyle='separateRepos' \
@@ -94,27 +108,27 @@ jobs:
         run: |
           ./deployment/migration-assistant-solution/package-artifacts.sh
       - name: Generate SBOM for migration_console
-        uses: anchore/sbom-action@v0.20.10
+        uses: anchore/sbom-action@v0.20.11
         with:
           image: migrations/migration_console:latest
           output-file: opensearch-migrations-console-sbom.spdx.json
       - name: Generate SBOM for traffic_replayer
-        uses: anchore/sbom-action@v0.20.10
+        uses: anchore/sbom-action@v0.20.11
         with:
           image: migrations/traffic_replayer:latest
           output-file: opensearch-migrations-traffic-replayer-sbom.spdx.json
       - name: Generate SBOM for capture_proxy
-        uses: anchore/sbom-action@v0.20.10
+        uses: anchore/sbom-action@v0.20.11
         with:
           image: migrations/capture_proxy:latest
           output-file: opensearch-migrations-traffic-capture-proxy-sbom.spdx.json
       - name: Generate SBOM for reindex_from_snapshot
-        uses: anchore/sbom-action@v0.20.10
+        uses: anchore/sbom-action@v0.20.11
         with:
           image: migrations/reindex_from_snapshot:latest
           output-file: opensearch-migrations-reindex-from-snapshot-sbom.spdx.json
       - name: Generate SBOM for artifacts
-        uses: anchore/sbom-action@v0.20.10
+        uses: anchore/sbom-action@v0.20.11
         with:
           file: artifacts.tar.gz
           output-file: artifacts-sbom.spdx.json

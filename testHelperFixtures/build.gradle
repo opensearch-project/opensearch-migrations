@@ -30,6 +30,8 @@ dependencies {
     testFixturesImplementation libs.hamcrest
     testFixturesImplementation libs.slf4j.api
     testFixturesApi libs.testcontainers
+    testFixturesApi libs.testcontainers.junit.jupiter
+    testFixturesApi libs.testcontainers.kafka
     testFixturesApi libs.testcontainers.toxiproxy
 
     testImplementation libs.log4j.api

@@ -7,57 +7,46 @@ import org.opensearch.migrations.common.CommonUtils
 
 class RegistryImageBuildUtils {
 
+    static class Registry { // Helper object
+        final String hostUrl      // For Jib, which runs in the JVM directly (e.g., localhost:5001)
+        final String containerUrl // For BuildKit, which runs in a container (e.g., docker-registry:5000)
+
+        Registry(String rawUrl) {
+            this.hostUrl = rawUrl
+            // Assume that to the container that anything on localhost should map to docker-registry:5000
+            if (rawUrl.startsWith("localhost:")) {
+                this.containerUrl = "docker-registry:5000"
+            } else {
+                this.containerUrl = rawUrl
+            }
+        }
+    }
+
+    static String resolveBaseImage(Registry registry, String group, String image, String tag) {
+        def formatter = ImageRegistryFormatterFactory.getFormatter(registry.containerUrl)
+        return formatter.getFullBaseImageIdentifier(registry.containerUrl, group, image, tag)
+    }
+
     // Determine the build mode based on the tasks requested in the CLI, throwing if multiple variants are configured
     private String detectArchitecture(Project rootProject) {
         def startTasks = rootProject.gradle.startParameter.taskNames
-
-        boolean requestingAmd = false
-        boolean requestingArm = false
-        boolean requestingMulti = false
-
-        startTasks.each { taskPath ->
-            // We care about the task name, which is the last part of a path like :project:task
-            def taskName = taskPath.split(':').last().toLowerCase()
-
-            // Only analyze tasks relevant to image building
-            // We skip generic tasks like 'clean', 'test', 'classes', etc.
-            boolean isImageTask = taskName.contains("jib") ||
-                    taskName.contains("buildkit") ||
-                    taskName.contains("buildimages")
-
-            if (isImageTask) {
-                if (taskName.endsWith("amd64")) {
-                    requestingAmd = true
-                } else if (taskName.endsWith("arm64")) {
-                    requestingArm = true
-                } else {
-                    // It is an image task but lacks a specific architecture suffix
-                    // Therefore, it implies a multi-arch intent (e.g., 'jib', 'jibAll')
-                    requestingMulti = true
-                }
-            }
+        boolean requestingAmd = startTasks.any { it.toLowerCase().endsWith("_amd64") }
+        boolean requestingArm = startTasks.any { it.toLowerCase().endsWith("_arm64") }
+        boolean requestingMulti = startTasks.any {
+            def lower = it.toLowerCase()
+            (lower.contains("jib") || lower.contains("buildkit") || lower.contains("buildimages")) &&
+                    !lower.endsWith("_amd64") && !lower.endsWith("_arm64")
         }
 
-        if (requestingAmd && requestingArm) {
-            throw new GradleException(
-                    "CONFLICT: You cannot run both 'amd64' and 'arm64' tasks in the same build.\n" +
-                            "Please run them separately or use a multi-arch task (e.g., 'jibAll')."
-            )
-        } else if ((requestingAmd || requestingArm) && requestingMulti) {
-            throw new GradleException(
-                    "CONFLICT: You cannot mix specific architecture tasks (ending in _amd64/_arm64) " +
-                            "with generic multi-arch tasks (like 'jib', 'jibAll', or 'buildImagesToRegistry') in the same run.\n" +
-                            "This prevents accidental publishing of single-arch images to multi-arch tags."
-            )
-        }
+        if (requestingAmd && requestingArm) throw new GradleException("CONFLICT: Cannot run amd64 and arm64 tasks together.")
+        if ((requestingAmd || requestingArm) && requestingMulti) throw new GradleException("CONFLICT: Cannot mix single-arch and multi-arch tasks.")
 
         if (requestingAmd) return "amd64"
         if (requestingArm) return "arm64"
-
-        return "multi" // Default
+        return "multi"
     }
 
-    void applyJibConfigurations(Project rootProject, Map<String, Map> projectsToConfigure) {
+    void applyJibConfigurations(Project rootProject, Map<String, Map> projectsToConfigure, Registry finalRegistry, Registry intermediateRegistry) {
         // Notice that the jib tasks don't exist yet! BUT - the command line options do, so we can use them
         // to help guide how tasks should be constructed.  jib* tasks are created below, but cannot coexist
         // within a single run!  With multi-architecture support, there would never be a reason to do that.
@@ -74,9 +63,9 @@ class RegistryImageBuildUtils {
                 }
 
                 project.plugins.withId('com.google.cloud.tools.jib') {
-                    def registryEndpoint = rootProject.ext.registryEndpoint.toString()
+                    Registry targetReg = config.get("repoName", null) ? finalRegistry : intermediateRegistry
                     def baseFormatter = ImageRegistryFormatterFactory.getFormatter(config.get("baseImageRegistryEndpoint", "").toString())
-                    def targetFormatter = ImageRegistryFormatterFactory.getFormatter(registryEndpoint)
+                    def targetFormatter = ImageRegistryFormatterFactory.getFormatter(targetReg.hostUrl)
 
                     def baseImage = baseFormatter.getFullBaseImageIdentifier(
                             config.get("baseImageRegistryEndpoint", "").toString(),
@@ -86,33 +75,26 @@ class RegistryImageBuildUtils {
                     )
 
                     def (registryDestination, _) = targetFormatter.getFullTargetImageIdentifier(
-                            registryEndpoint,
+                            targetReg.hostUrl,
                             config.imageName.toString(),
                             config.imageTag.toString(),
                             config.get("repoName", null)?.toString()
                     )
 
-                    // Configure the ONE standard 'jib' extension based on our detected mode
                     project.jib {
                         from {
                             image = baseImage
                             platforms {
                                 // If multi, add both. If single, add only that one.
-                                if (targetArch == "multi" || targetArch == "amd64") {
-                                    platform { architecture = 'amd64'; os = 'linux' }
-                                }
-                                if (targetArch == "multi" || targetArch == "arm64") {
-                                    platform { architecture = 'arm64'; os = 'linux' }
-                                }
+                                if (targetArch == "multi" || targetArch == "amd64") platform { architecture = 'amd64'; os = 'linux' }
+                                if (targetArch == "multi" || targetArch == "arm64") platform { architecture = 'arm64'; os = 'linux' }
                             }
                         }
                         to {
                             // If single arch, append suffix to image name (e.g. image_amd64:tag)
                             // If multi arch, use base name (e.g. image:tag)
                             def dest = registryDestination
-                            if (targetArch != "multi") {
-                                dest = "${registryDestination}_${targetArch}"
-                            }
+                            if (targetArch != "multi") dest = "${registryDestination}_${targetArch}"
                             image = dest
 
                             def versionTag = rootProject.findProperty("imageVersion")
@@ -129,9 +111,7 @@ class RegistryImageBuildUtils {
                             permissions = ['/runJavaWithClasspath.sh': '755']
                         }
                         allowInsecureRegistries = true
-                        container {
-                            entrypoint = ['tail', '-f', '/dev/null']
-                        }
+                        container { entrypoint = ['tail', '-f', '/dev/null'] }
                     }
 
                     // Handle Dependencies
@@ -139,7 +119,6 @@ class RegistryImageBuildUtils {
                     requiredDeps.each { projectPathStr, taskNames ->
                         def targetProject = projectPathStr ? rootProject.project(projectPathStr) : rootProject
                         taskNames.each { depName ->
-                            // If dependency is BuildKit, append suffix if we are in single-arch mode
                             def resolvedDepName = depName
                             if (depName.startsWith("buildKit_") && targetArch != "multi") {
                                 resolvedDepName = "${depName}_${targetArch}"
@@ -152,18 +131,13 @@ class RegistryImageBuildUtils {
 
                     // Create Alias Tasks - We've already used the task name to deduce the configuration
                     // that we're running with - but we still need to provide both
-                    if (!project.tasks.findByName("jib_amd64")) {
-                        project.tasks.register("jib_amd64") {
-                            group = "docker"
-                            description = "Alias for jib (configured via start param)"
-                            dependsOn "jib"
-                        }
-                    }
-                    if (!project.tasks.findByName("jib_arm64")) {
-                        project.tasks.register("jib_arm64") {
-                            group = "docker"
-                            description = "Alias for jib (configured via start param)"
-                            dependsOn "jib"
+                    ['amd64', 'arm64'].each { arch ->
+                        if (!project.tasks.findByName("jib_${arch}")) {
+                            project.tasks.register("jib_${arch}") {
+                                group = "docker"
+                                description = "Alias for jib (configured via start param)"
+                                dependsOn "jib"
+                            }
                         }
                     }
                 }
@@ -171,58 +145,39 @@ class RegistryImageBuildUtils {
         }
     }
 
-    void registerLoginTask(Project project) {
-        def registryEndpoint = project.ext.registryEndpoint.toString()
-        def registryDomain = registryEndpoint.split("/")[0]
+    void registerLoginTask(Project project, Registry registry) {
+        def registryDomain = registry.hostUrl.split("/")[0]
         def isEcr = registryDomain.contains(".ecr.") && registryDomain.contains(".amazonaws.com")
-        if (isEcr) {
-            def region
-            def matcher = (registryDomain =~ /^(\d+)\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com$/)
-            if (matcher.matches()) {
-                region = matcher[0][2]
-            } else {
-                throw new GradleException("Could not extract region from ECR registry endpoint: ${registryDomain}")
-            }
 
+        if (isEcr) {
+            def region = (registryDomain =~ /^(\d+)\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com$/)[0][2]
             project.tasks.register("loginToECR", Exec) {
                 group = "docker"
                 description = "Login to ECR registry ${registryDomain}"
-                commandLine 'sh', '-c', """
-                    aws ecr get-login-password --region ${region} | \
-                    docker login --username AWS --password-stdin ${registryDomain}
-                """.stripIndent()
+                commandLine 'sh', '-c', "aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${registryDomain}"
             }
-
-            project.tasks.matching { it.name.startsWith("buildKit") }.configureEach {
-                dependsOn project.tasks.named("loginToECR")
-            }
-            project.subprojects { subproject ->
-                subproject.tasks.matching { it.name.endsWith("jib") }.configureEach {
-                    dependsOn project.tasks.named("loginToECR")
-                }
-            }
+            // Bind dependencies...
+            project.tasks.matching { it.name.startsWith("buildKit") }.configureEach { dependsOn project.tasks.named("loginToECR") }
+            project.subprojects { s -> s.tasks.matching { it.name.endsWith("jib") }.configureEach { dependsOn project.tasks.named("loginToECR") } }
         }
     }
 
-    void registerBuildKitTasks(Project project, Map cfg) {
+    private void registerBuildKitTasks(Project project, Map cfg, Registry finalRegistry, Registry intermediateRegistry) {
         def versionTag = project.findProperty("imageVersion")?.toString()
-        def registryEndpoint = project.ext.buildKitRegistryEndpoint.toString()
+        def repoName = cfg.get("repoName")?.toString()
+
+        Registry targetReg = repoName ? finalRegistry : intermediateRegistry
+        def registryEndpoint = targetReg.containerUrl
+
         def builder = project.findProperty("builder") ?: "local-remote-builder"
         def imageName = cfg.get("imageName").toString()
         def imageTag = cfg.get("imageTag", "latest").toString()
-        def contextDir = cfg.get("contextDir", ".")
-        def serviceName = cfg.get("serviceName")
-        def contextFile = project.file(contextDir)
-        def contextPath = contextFile.path
+        def contextPath = project.file(cfg.get("contextDir", ".")).path
         def formatter = ImageRegistryFormatterFactory.getFormatter(registryEndpoint)
-        def repoName = cfg.get("repoName")?.toString()
 
-        def (primaryDest, cacheDestination) =
-        formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag, repoName)
+        def (primaryDest, cacheDestination) = formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag, repoName)
 
-        def buildArgFlags = cfg.get("buildArgs", [:]).collect { key, value ->
-            "--build-arg ${key}=${value}"
-        }
+        def buildArgFlags = cfg.get("buildArgs", [:]).collect { key, value -> "--build-arg ${key}=${value}" }
 
         // Helper to resolve dependencies with architecture suffix
         // archSuffix is empty for multi-arch task, non-empty for single-arch tasks
@@ -241,7 +196,7 @@ class RegistryImageBuildUtils {
         }
 
         def commonInputs = { task, String archSuffix = "" ->
-            task.inputs.dir(contextFile)
+            task.inputs.dir(project.file(cfg.get("contextDir", ".")))
             task.inputs.property("registryEndpoint", registryEndpoint)
             task.inputs.property("repoName", (repoName ?: "").toString())
             task.inputs.property("imageName", imageName)
@@ -254,7 +209,7 @@ class RegistryImageBuildUtils {
         }
 
         def createPlatformTask = { String platform, String suffix ->
-            def taskName = "buildKit_${serviceName}${suffix}"
+            def taskName = "buildKit_${cfg.serviceName}${suffix}"
             if (!project.tasks.findByName(taskName)) {
                 project.tasks.register(taskName, Exec) {
                     group = "docker"
@@ -263,62 +218,35 @@ class RegistryImageBuildUtils {
                     commonInputs(it, suffix)
                     inputs.property("platform", platform)
 
-                    def tagFlags = ["-t ${primaryDest}${suffix}"]
-                    if (repoName && versionTag) {
-                        def sanitizedVersion = versionTag.replaceAll('[^A-Za-z0-9_.-]', '-')
-                        def versionedDest = primaryDest.replace(":${imageTag}", ":${sanitizedVersion}${suffix}")
-                        tagFlags.add("-t ${versionedDest}")
-                    }
-
+                    // Use primaryDest and cacheDestination which were calculated using registryEndpoint (Container View)
                     def fullArgs = [
                             "docker buildx build",
                             "--platform ${platform}",
                             "--builder ${builder}",
-                            *tagFlags,
+                            "-t ${primaryDest}${suffix}",
                             "--push",
                             "--cache-to=type=registry,ref=${cacheDestination}${suffix},mode=max",
                             "--cache-from=type=registry,ref=${cacheDestination}${suffix}"
                     ]
                     buildArgFlags.each { fullArgs.add(it) }
                     fullArgs.add(contextPath)
-                    def buildCommand = fullArgs.join(" ")
-
-                    doFirst {
-                        println "Building ${platform} image"
-                        println "Executing buildx command: ${buildCommand}"
-                    }
-
-                    commandLine 'sh', '-c', buildCommand
+                    commandLine 'sh', '-c', fullArgs.join(" ")
                 }
             }
         }
 
-        // Create platform-specific tasks
         createPlatformTask("linux/amd64", "_amd64")
         createPlatformTask("linux/arm64", "_arm64")
 
-        // Create multi-arch task
-        def multiArchTaskName = "buildKit_${serviceName}"
+        def multiArchTaskName = "buildKit_${cfg.serviceName}"
         if (!project.tasks.findByName(multiArchTaskName)) {
             project.tasks.register(multiArchTaskName, Exec) {
-                group = "docker"
-                description = "Build and push multi-arch ${primaryDest} (amd64 + arm64)"
-
-                // Pass empty string for archSuffix - this means dependencies won't get suffixes
                 commonInputs(it, "")
-
-                def tagFlags = ["-t ${primaryDest}"]
-                if (repoName && versionTag) {
-                    def sanitizedVersion = versionTag.replaceAll('[^A-Za-z0-9_.-]', '-')
-                    def versionedDest = primaryDest.replace(":${imageTag}", ":${sanitizedVersion}")
-                    tagFlags.add("-t ${versionedDest}")
-                }
-
                 def fullArgs = [
                         "docker buildx build",
                         "--platform linux/amd64,linux/arm64",
                         "--builder ${builder}",
-                        *tagFlags,
+                        "-t ${primaryDest}",
                         "--push",
                         "--cache-to=type=registry,ref=${cacheDestination},mode=max",
                         "--cache-from=type=registry,ref=${cacheDestination}",
@@ -327,21 +255,14 @@ class RegistryImageBuildUtils {
                 ]
                 buildArgFlags.each { fullArgs.add(it) }
                 fullArgs.add(contextPath)
-                def buildCommand = fullArgs.join(" ")
-
-                doFirst {
-                    println "Building multi-arch image for linux/amd64,linux/arm64"
-                    println "Executing buildx command: ${buildCommand}"
-                }
-
-                commandLine 'sh', '-c', buildCommand
+                commandLine 'sh', '-c', fullArgs.join(" ")
             }
         }
     }
 
-    void applyBuildKitConfigurations(Project rootProject, List<Map> projects) {
+    void applyBuildKitConfigurations(Project rootProject, List<Map> projects, Registry finalRegistry, Registry intermediateRegistry) {
         projects.each { cfg ->
-            registerBuildKitTasks(rootProject, cfg)
+            registerBuildKitTasks(rootProject, cfg, finalRegistry, intermediateRegistry)
         }
     }
 }
