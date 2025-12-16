@@ -55,11 +55,13 @@ jobs:
             [registry."docker-registry:5000"]
               http = true
               insecure = true
-      - name: Build Docker Images (local only, skip push)
+      - name: Build Docker Images to local registry
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
         run: |
-          ./gradlew :buildImages:buildDockerImages \
+          ./gradlew :buildImages:buildImagesToRegistry_amd64 \
+            -PintermediateRegistry=docker-registry:5000 \
+            -PregistryEndpoint=docker-registry:5000 \
             -Dbuild.snapshot=false \
             -Dbuild.version=0.${{ steps.get_data.outputs.version }} \
             --no-build-cache \
@@ -67,6 +69,17 @@ jobs:
             --no-daemon \
             --no-continue \
             --info
+      - name: Pull images from local registry for SBOM scanning
+        run: |
+          docker pull docker-registry:5000/migrations/migration_console:latest
+          docker pull docker-registry:5000/migrations/traffic_replayer:latest
+          docker pull docker-registry:5000/migrations/capture_proxy:latest
+          docker pull docker-registry:5000/migrations/reindex_from_snapshot:latest
+          # Tag them for SBOM scanning
+          docker tag docker-registry:5000/migrations/migration_console:latest migrations/migration_console:latest
+          docker tag docker-registry:5000/migrations/traffic_replayer:latest migrations/traffic_replayer:latest
+          docker tag docker-registry:5000/migrations/capture_proxy:latest migrations/capture_proxy:latest
+          docker tag docker-registry:5000/migrations/reindex_from_snapshot:latest migrations/reindex_from_snapshot:latest
       - name: List Docker Images
         run: docker images
       - name: Generate SBOM for migration_console
