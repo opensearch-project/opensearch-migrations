@@ -120,14 +120,10 @@ class CommonUtils {
         }
     }
 
-    static def copyVersionFileToDockerStaging(Project project, String destProjectName, String destDir) {
-        return project.tasks.register("copyVersionFile_${destProjectName}", Sync) {
+    static def syncVersionFileToDockerStaging(Project project, String destProjectName, String destDir) {
+        return project.tasks.register("syncVersionFile_${destProjectName}", Sync) {
             from(project.rootProject.layout.projectDirectory.file("VERSION"))
             into(project.layout.projectDirectory.dir(destDir))
-            
-            // Explicit inputs/outputs for incremental build support
-            inputs.file(project.rootProject.layout.projectDirectory.file("VERSION"))
-            outputs.dir(project.layout.projectDirectory.dir(destDir))
         }
     }
 

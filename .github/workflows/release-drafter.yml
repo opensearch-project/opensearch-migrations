@@ -75,6 +75,8 @@ jobs:
             HEAD
       - name: Build and Publish to Maven
         if: ${{ !github.event.act }}
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
         run: |
           ./gradlew publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }} && tar -C build -cvf opensearch-migrations-artifacts.tar.gz repository
       - name: Configure AWS Credentials
@@ -97,6 +99,8 @@ jobs:
           username: ${{ secrets.MIGRATIONS_DOCKER_USERNAME }}
           password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
       - name: Build and Push Docker Images
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
         run: |
           # Preface Traffic Capture version with 0. to signal interface immaturity
           ./gradlew :buildImages:buildImagesToRegistry \

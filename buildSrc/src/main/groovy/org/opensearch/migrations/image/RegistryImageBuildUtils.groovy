@@ -58,8 +58,8 @@ class RegistryImageBuildUtils {
                 def imageName = config.imageName.toString()
 
                 // Create version file task ONCE per project, not per architecture
-                if (!project.tasks.findByName("copyVersionFile_${imageName}")) {
-                    CommonUtils.copyVersionFileToDockerStaging(project, imageName, "build/versionDir")
+                if (!project.tasks.findByName("syncVersionFile_${imageName}")) {
+                    CommonUtils.syncVersionFileToDockerStaging(project, imageName, "build/versionDir")
                 }
 
                 project.plugins.withId('com.google.cloud.tools.jib') {
