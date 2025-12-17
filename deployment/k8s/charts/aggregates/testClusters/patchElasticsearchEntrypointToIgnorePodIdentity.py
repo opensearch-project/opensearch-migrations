@@ -8,10 +8,12 @@ import subprocess
 import tempfile
 import re
 
+
 def is_target_statefulset(doc):
     """Quick check if this is the elasticsearch-master StatefulSet"""
     return ('kind: StatefulSet' in doc and
             'name: elasticsearch-master' in doc)
+
 
 def main():
     # Read input from stdin
@@ -71,10 +73,10 @@ def main():
                 if 'args' in container and container['args']:
                     original_script = container['args'][0]
                     patched_script = (
-                            "unset AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE\n"
-                            "unset AWS_CONTAINER_CREDENTIALS_FULL_URI\n"
-                            "\n" +
-                            original_script
+                        "unset AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE\n"
+                        "unset AWS_CONTAINER_CREDENTIALS_FULL_URI\n"
+                        "\n" +
+                        original_script
                     )
                     container['args'][0] = patched_script
 
@@ -103,6 +105,7 @@ def main():
         else:
             # Not our target - just pass through as-is
             print(doc)
+
 
 if __name__ == '__main__':
     main()
