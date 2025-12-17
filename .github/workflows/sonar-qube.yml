@@ -1,6 +1,7 @@
 name: SonarQube Analysis
 
 on:
+  push:
   pull_request:
 
 env:
