@@ -62,11 +62,11 @@ jobs:
           # ALLOW ACCESS TO HOST NETWORK (Required to see localhost:5000 for docker registry)
           driver-opts: network=host
           # CONFIGURE INSECURE REGISTRY (Required for HTTP for docker registry)
-          config-inline: |
+          buildkitd-config-inline: |
             [registry."docker-registry:5000"]
               http = true
               insecure = true
-          - name: Create source archive and build and publish to Maven
+      - name: Create source archive and build and publish to Maven
         # Preface Traffic Capture version with 0. to signal interface immaturity
         run: |
           wget https://github.com/opensearch-project/opensearch-migrations/archive/refs/tags/${{ steps.get_data.outputs.version }}.tar.gz -O artifacts.tar.gz
@@ -91,6 +91,8 @@ jobs:
           username: ${{ secrets.MIGRATIONS_DOCKER_USERNAME }}
           password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
       - name: Build and Push Docker Images
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
         run: |
           # Preface Traffic Capture version with 0. to signal interface immaturity
           ./gradlew :buildImages:buildImagesToRegistry \

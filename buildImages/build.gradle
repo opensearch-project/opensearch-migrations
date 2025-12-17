@@ -29,7 +29,7 @@ def jibProjects = [
                 imageName     : "traffic_replayer",
                 imageTag      : "latest",
                 requiredDependencies: [
-                    ":TrafficCapture:trafficReplayer": ["copyVersionFile_traffic_replayer"]
+                    ":TrafficCapture:trafficReplayer": ["syncVersionFile_traffic_replayer"]
                 ]
         ],
         "TrafficCapture:trafficCaptureProxyServer": [
@@ -41,7 +41,7 @@ def jibProjects = [
                 imageTag       : "latest",
                 requiredDependencies: [
                     "": ["buildKit_captureProxyBase"],
-                    ":TrafficCapture:trafficCaptureProxyServer": ["copyVersionFile_capture_proxy"]
+                    ":TrafficCapture:trafficCaptureProxyServer": ["syncVersionFile_capture_proxy"]
                 ]
         ]
 ]
@@ -69,7 +69,7 @@ def buildKitProjects = [
                 imageTag:   "latest",
                 requiredDependencies: [
                         ":DocumentsFromSnapshotMigration:copyDockerRuntimeJars",
-                        ":DocumentsFromSnapshotMigration:copyVersionFile_reindexFromSnapshot"
+                        ":DocumentsFromSnapshotMigration:syncVersionFile_reindexFromSnapshot"
                 ]
         ],
         [
