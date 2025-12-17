@@ -59,6 +59,10 @@ function makeParamsDict(
     );
 }
 
+function getRfsReplicasetName(sessionName: BaseExpression<string>) {
+    return expr.concat(sessionName, expr.literal("-reindex-from-snapshot"));
+}
+
 function getRfsReplicasetManifest
 (args: {
     workflowName: BaseExpression<string>,
@@ -149,7 +153,7 @@ function getRfsReplicasetManifest
         apiVersion: "apps/v1",
         kind: "ReplicaSet",
         metadata: {
-            name: makeStringTypeProxy(expr.concat(args.sessionName, expr.literal("-reindex-from-snapshot"))),
+            name: makeStringTypeProxy(getRfsReplicasetName(args.sessionName)),
             labels: {
                 "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName)
             },
@@ -179,7 +183,7 @@ function getRfsReplicasetManifest
 }
 
 
-function getCheckRfsCompletionScript(sessionName: BaseExpression<string>) {
+function getCheckHistoricalBackfillCompletionScript(sessionName: BaseExpression<string>) {
     const template = `
 set -e && 
 python -c '
@@ -206,8 +210,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
 
 
-    .addTemplate("deleteReplicaSet", t => t
-        .addRequiredInput("name", typeToken<string>())
+    .addTemplate("stopHistoricalBackfill", t => t
+        .addRequiredInput("sessionName", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "delete", flags: ["--ignore-not-found"],
@@ -215,7 +219,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     "apiVersion": "apps/v1",
                     "kind": "ReplicaSet",
                     "metadata": {
-                        "name": expr.concat(expr.literal("bulk-loader-"), b.inputs.name)
+                        "name": getRfsReplicasetName(b.inputs.sessionName)
                     }
                 }
             })
@@ -227,10 +231,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("sessionName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
-            .addStep("checkRfsCompletion", MigrationConsole, "runMigrationCommand", c =>
+            .addStep("checkHistoricalBackfillCompletion", MigrationConsole, "runMigrationCommand", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    command: getCheckRfsCompletionScript(b.inputs.sessionName)
+                    command: getCheckHistoricalBackfillCompletionScript(b.inputs.sessionName)
                 }))
         )
         .addRetryParameters({
@@ -241,7 +245,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("createReplicaset", t => t
+    .addTemplate("startHistoricalBackfill", t => t
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("rfsJsonConfig", typeToken<string>())
         .addRequiredInput("basicCredsSecretNameOrEmpty", typeToken<string>())
@@ -271,7 +275,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("createReplicasetFromConfig", t => t
+    .addTemplate("startHistoricalBackfillFromConfig", t => t
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
 
@@ -281,7 +285,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addSteps(b => b
-            .addStep("createReplicaset", INTERNAL, "createReplicaset", c =>
+            .addStep("startHistoricalBackfill", INTERNAL, "startHistoricalBackfill", c =>
                 c.register({
                     ...selectInputsForRegister(b,c),
                     podReplicas: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["podReplicas"], 1),
@@ -312,7 +316,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
 
         .addSteps(b => b
-            .addStep("createReplicasetFromConfig", INTERNAL, "createReplicasetFromConfig", c =>
+            .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c)
                 }))
@@ -323,8 +327,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c),
                     configContents: c.steps.setupWaitForCompletion.outputs.configContents
                 }))
-            .addStep("deleteReplicaSet", INTERNAL, "deleteReplicaSet", c =>
-                c.register({name: b.inputs.sessionName}))
+            .addStep("stopHistoricalBackfill", INTERNAL, "stopHistoricalBackfill", c =>
+                c.register({sessionName: b.inputs.sessionName}))
         )
     )
 

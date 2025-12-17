@@ -968,11 +968,11 @@ exports[`test workflow template renderings document-bulk-load 1`] = `
         "inputs": {
           "parameters": [
             {
-              "name": "name",
+              "name": "sessionName",
             },
           ],
         },
-        "name": "deletereplicaset",
+        "name": "stophistoricalbackfill",
         "outputs": {
           "parameters": [],
         },
@@ -984,7 +984,7 @@ exports[`test workflow template renderings document-bulk-load 1`] = `
           "manifest": "apiVersion: apps/v1
 kind: ReplicaSet
 metadata:
-  name: "{{='bulk-loader-'+inputs.parameters.name}}"
+  name: "{{=inputs.parameters.sessionName+'-reindex-from-snapshot'}}"
 ",
         },
       },
@@ -1055,7 +1055,7 @@ sys.exit(0 if all_finished else 1)'",
                   },
                 ],
               },
-              "name": "checkRfsCompletion",
+              "name": "checkHistoricalBackfillCompletion",
               "templateRef": {
                 "name": "migration-console",
                 "template": "runmigrationcommand",
@@ -1097,7 +1097,7 @@ sys.exit(0 if all_finished else 1)'",
             },
           ],
         },
-        "name": "createreplicaset",
+        "name": "starthistoricalbackfill",
         "outputs": {
           "parameters": [],
         },
@@ -1199,7 +1199,7 @@ spec:
             },
           ],
         },
-        "name": "createreplicasetfromconfig",
+        "name": "starthistoricalbackfillfromconfig",
         "outputs": {
           "parameters": [],
         },
@@ -1246,8 +1246,8 @@ spec:
                   },
                 ],
               },
-              "name": "createReplicaset",
-              "template": "createreplicaset",
+              "name": "startHistoricalBackfill",
+              "template": "starthistoricalbackfill",
             },
           ],
         ],
@@ -1327,8 +1327,8 @@ spec:
                   },
                 ],
               },
-              "name": "createReplicasetFromConfig",
-              "template": "createreplicasetfromconfig",
+              "name": "startHistoricalBackfillFromConfig",
+              "template": "starthistoricalbackfillfromconfig",
             },
           ],
           [
@@ -1383,13 +1383,13 @@ spec:
               "arguments": {
                 "parameters": [
                   {
-                    "name": "name",
+                    "name": "sessionName",
                     "value": "{{inputs.parameters.sessionName}}",
                   },
                 ],
               },
-              "name": "deleteReplicaSet",
-              "template": "deletereplicaset",
+              "name": "stopHistoricalBackfill",
+              "template": "stophistoricalbackfill",
             },
           ],
         ],
