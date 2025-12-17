@@ -1,7 +1,10 @@
 name: Release drafter
 
+# Push events to every tag not containing "/"
 on:
   push:
+    tags:
+      - "*"
     branches:
       - fix-release-sbom-workflow
   workflow_dispatch:
@@ -18,12 +21,15 @@ permissions:
 jobs:
   draft-a-release:
     name: Draft a release
+    if: ${{ github.event.act || github.repository == 'opensearch-project/opensearch-migrations' || github.repository == 'AndreKurait/opensearch-migrations' }}
     runs-on: ubuntu-22.04
     services:
       registry:
-        image: registry:2
+        image: registry:2 # Ephemeral registry for intermediate (base) images. Final ones only go to opensearchstaging.
         ports:
           - 5000:5000
+    outputs:
+      dockerhub-password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
     steps:
       - name: Alias docker-registry to 127.0.0.1
         run: |
@@ -41,28 +47,71 @@ jobs:
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "version_safe=$(echo "$VERSION" | tr '/:@' '---')" >> $GITHUB_OUTPUT
+      - uses: trstringer/manual-approval@v1
+        if: ${{ !github.event.act && github.repository == 'opensearch-project/opensearch-migrations' }}
+        with:
+          secret: ${{ github.TOKEN }}
+          approvers: ${{ steps.get_data.outputs.approvers }}
+          minimum-approvals: 0
+          issue-title: 'Release opensearch-migrations version ${{ steps.get_data.outputs.version }}'
+          issue-body: "This release requires approval from at least one reviewer. Please approve or deny the release of opensearch-migrations **TAG**: ${{ github.ref_name }}  **COMMIT**: ${{ github.sha }} **VERSION**: ${{ steps.get_data.outputs.version }}. The published TrafficCapture version will be 0.${{ steps.get_data.outputs.version }}."
+          exclude-workflow-initiator-as-approver: false
       - name: Set up QEMU (for arm64 emulation)
         uses: docker/setup-qemu-action@v3
       - name: Set up Buildx builder (BuildKit)
         uses: docker/setup-buildx-action@v3
         with:
           driver: docker-container
+          # Keep debug on while we troubleshoot this new registry setup
           buildkitd-flags: --debug
+          # This has to match the -Pbuilder flag for buildImages/build.gradle
           name: local-remote-builder
           install: true
+          # ALLOW ACCESS TO HOST NETWORK (Required to see localhost:5000 for docker registry)
           driver-opts: network=host
+          # CONFIGURE INSECURE REGISTRY (Required for HTTP for docker registry)
           buildkitd-config-inline: |
             [registry."docker-registry:5000"]
               http = true
               insecure = true
-      - name: Build Docker Images to local registry
+      - name: Create source archive
+        run: |
+          git archive --format=tar.gz \
+            -o opensearch-migrations-${{ steps.get_data.outputs.version_safe }}-source.tar.gz \
+            HEAD
+      - name: Build and Publish to Maven
+        if: ${{ !github.event.act && github.repository == 'opensearch-project/opensearch-migrations' }}
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+        run: |
+          ./gradlew publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }} && tar -C build -cvf opensearch-migrations-artifacts.tar.gz repository
+      - name: Configure AWS Credentials
+        if: ${{ !github.event.act && github.repository == 'opensearch-project/opensearch-migrations' }}
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.MIGRATIONS_DOCKER_ROLE }}
+          aws-region: us-east-1
+      - name: Retrieve Values
+        if: ${{ !github.event.act && github.repository == 'opensearch-project/opensearch-migrations' }}
+        id: retrieve-values
+        run: |
+          DOCKERHUB_PASSWORD=`aws secretsmanager get-secret-value --secret-id jenkins-staging-dockerhub-credential --query SecretString --output text`
+          echo "::add-mask::$DOCKERHUB_PASSWORD"
+          echo "dockerhub-password=$DOCKERHUB_PASSWORD" >> $GITHUB_OUTPUT
+      - name: Login to DockerHub
+        if: ${{ !github.event.act && github.repository == 'opensearch-project/opensearch-migrations' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.MIGRATIONS_DOCKER_USERNAME }}
+          password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
+      - name: Build Docker Images to local registry (for testing)
+        if: ${{ github.repository != 'opensearch-project/opensearch-migrations' }}
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
         run: |
           ./gradlew :buildImages:buildImagesToRegistry_amd64 \
             -PintermediateRegistry=docker-registry:5000 \
             -PregistryEndpoint=docker-registry:5000 \
-            -Pbuilder=local-remote-builder \
             -Dbuild.snapshot=false \
             -Dbuild.version=0.${{ steps.get_data.outputs.version }} \
             --no-build-cache \
@@ -70,21 +119,54 @@ jobs:
             --no-daemon \
             --no-continue \
             --info
-      - name: List images in local registry
+      - name: Build and Push Docker Images (production)
+        if: ${{ github.repository == 'opensearch-project/opensearch-migrations' }}
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
         run: |
-          curl -sS http://docker-registry:5000/v2/_catalog || true
-          curl -sS http://docker-registry:5000/v2/migrations/migration_console/tags/list || true
-      - name: Pull images from local registry for SBOM scanning
+          # Preface Traffic Capture version with 0. to signal interface immaturity
+          ./gradlew :buildImages:buildImagesToRegistry \
+            -PintermediateRegistry=localhost:5000 \
+            -PregistryEndpoint=opensearchstaging \
+            -PimageVersion=${{ steps.get_data.outputs.version }} \
+            -PpublishStyle='separateRepos' \
+            -Dbuild.snapshot=false \
+            -Dbuild.version=0.${{ steps.get_data.outputs.version }} \
+            --no-build-cache \
+            --no-configuration-cache \
+            --no-daemon \
+            --no-continue \
+            --info
+      - name: Logout to DockerHub
+        if: always()
+        run: docker logout
+      - name: Generate Solutions Artifact
         run: |
-          docker pull docker-registry:5000/migrations/migration_console:latest || echo "Failed to pull migration_console"
-          docker pull docker-registry:5000/migrations/traffic_replayer:latest || echo "Failed to pull traffic_replayer"
-          docker pull docker-registry:5000/migrations/capture_proxy:latest || echo "Failed to pull capture_proxy"
-          docker pull docker-registry:5000/migrations/reindex_from_snapshot:latest || echo "Failed to pull reindex_from_snapshot"
-          # Tag them for SBOM scanning
-          docker tag docker-registry:5000/migrations/migration_console:latest migrations/migration_console:latest || true
-          docker tag docker-registry:5000/migrations/traffic_replayer:latest migrations/traffic_replayer:latest || true
-          docker tag docker-registry:5000/migrations/capture_proxy:latest migrations/capture_proxy:latest || true
-          docker tag docker-registry:5000/migrations/reindex_from_snapshot:latest migrations/reindex_from_snapshot:latest || true
+          ./deployment/migration-assistant-solution/package-artifacts.sh
+      - name: Pull images from DockerHub for SBOM scanning (production)
+        if: ${{ !github.event.act && github.repository == 'opensearch-project/opensearch-migrations' }}
+        run: |
+          docker pull opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }}
+          docker pull opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }}
+          docker pull opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }}
+          docker pull opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
+          # Tag them with the expected names for SBOM scanning
+          docker tag opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }} migrations/migration_console:latest
+          docker tag opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }} migrations/traffic_replayer:latest
+          docker tag opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }} migrations/capture_proxy:latest
+          docker tag opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }} migrations/reindex_from_snapshot:latest
+      - name: Pull images from local registry for SBOM scanning (testing)
+        if: ${{ github.repository != 'opensearch-project/opensearch-migrations' }}
+        run: |
+          docker pull docker-registry:5000/migrations/migration_console:latest
+          docker pull docker-registry:5000/migrations/traffic_replayer:latest
+          docker pull docker-registry:5000/migrations/capture_proxy:latest
+          docker pull docker-registry:5000/migrations/reindex_from_snapshot:latest
+          # Tag them with the expected names for SBOM scanning
+          docker tag docker-registry:5000/migrations/migration_console:latest migrations/migration_console:latest
+          docker tag docker-registry:5000/migrations/traffic_replayer:latest migrations/traffic_replayer:latest
+          docker tag docker-registry:5000/migrations/capture_proxy:latest migrations/capture_proxy:latest
+          docker tag docker-registry:5000/migrations/reindex_from_snapshot:latest migrations/reindex_from_snapshot:latest
       - name: List Docker Images
         run: docker images
       - name: Generate SBOM for migration_console
@@ -107,3 +189,49 @@ jobs:
         with:
           image: migrations/reindex_from_snapshot:latest
           output-file: opensearch-migrations-reindex-from-snapshot-sbom.spdx.json
+      - name: Generate SBOM for artifacts
+        uses: anchore/sbom-action@v0.20.11
+        with:
+          file: artifacts.tar.gz
+          output-file: artifacts-sbom.spdx.json
+      - name: Configure AWS Credentials for Solutions Credentials
+        if: ${{ !github.event.act && github.repository == 'opensearch-project/opensearch-migrations' }}
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.SOLUTIONS_CREDENTIALS_ROLE }}
+          aws-region: us-east-1
+      - name: Assume second role for Solutions Upload
+        if: ${{ !github.event.act && github.repository == 'opensearch-project/opensearch-migrations' }}
+        run: |
+          CREDS=$(aws sts assume-role --role-arn ${{ secrets.SOLUTIONS_UPLOAD_ROLE }} --role-session-name github-actions)
+          echo "AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(echo $CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
+      - name: Upload Solutions Artifact to S3
+        if: ${{ !github.event.act && github.repository == 'opensearch-project/opensearch-migrations' }}
+        run: |
+          aws s3 cp deployment/migration-assistant-solution/build/artifact.zip \
+            s3://cornerstone-amazonaws/SO0290/${{ steps.get_data.outputs.version }}/${{ github.sha }}/artifact.zip \
+            --content-type application/zip \
+            --metadata branch=${{ github.ref_name }},\
+          commitauthor="$(git log -1 --format='%an' | sed 's/"//g')",\
+          commitid=${{ github.sha }},\
+          commitmessage="Release opensearch-migrations version ${{ steps.get_data.outputs.version }}",\
+          committimestamp=$(git log -1 --format='%cI'),\
+          enablequicksight=No,\
+          package=https://github.com/${{ github.repository }},\
+          publishpublicecrimage=false,\
+          solutionid=SO0290,\
+          solutionname="migration-assistant-for-amazon-opensearch-service",\
+          solutionversion=${{ steps.get_data.outputs.version }}
+      - name: Draft a release
+        if: ${{ !github.event.act && github.repository == 'opensearch-project/opensearch-migrations' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            deployment/migration-assistant-solution/build/temp/global-s3-assets/*.template
+            artifacts.tar.gz
+            traffic-capture-artifacts.tar.gz
+            **/*.spdx.json
