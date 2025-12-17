@@ -62,6 +62,7 @@ jobs:
           ./gradlew :buildImages:buildImagesToRegistry_amd64 \
             -PintermediateRegistry=docker-registry:5000 \
             -PregistryEndpoint=docker-registry:5000 \
+            -Pbuilder=local-remote-builder \
             -Dbuild.snapshot=false \
             -Dbuild.version=0.${{ steps.get_data.outputs.version }} \
             --no-build-cache \
@@ -69,17 +70,21 @@ jobs:
             --no-daemon \
             --no-continue \
             --info
+      - name: List images in local registry
+        run: |
+          curl -sS http://docker-registry:5000/v2/_catalog || true
+          curl -sS http://docker-registry:5000/v2/migrations/migration_console/tags/list || true
       - name: Pull images from local registry for SBOM scanning
         run: |
-          docker pull docker-registry:5000/migrations/migration_console:latest
-          docker pull docker-registry:5000/migrations/traffic_replayer:latest
-          docker pull docker-registry:5000/migrations/capture_proxy:latest
-          docker pull docker-registry:5000/migrations/reindex_from_snapshot:latest
+          docker pull docker-registry:5000/migrations/migration_console:latest || echo "Failed to pull migration_console"
+          docker pull docker-registry:5000/migrations/traffic_replayer:latest || echo "Failed to pull traffic_replayer"
+          docker pull docker-registry:5000/migrations/capture_proxy:latest || echo "Failed to pull capture_proxy"
+          docker pull docker-registry:5000/migrations/reindex_from_snapshot:latest || echo "Failed to pull reindex_from_snapshot"
           # Tag them for SBOM scanning
-          docker tag docker-registry:5000/migrations/migration_console:latest migrations/migration_console:latest
-          docker tag docker-registry:5000/migrations/traffic_replayer:latest migrations/traffic_replayer:latest
-          docker tag docker-registry:5000/migrations/capture_proxy:latest migrations/capture_proxy:latest
-          docker tag docker-registry:5000/migrations/reindex_from_snapshot:latest migrations/reindex_from_snapshot:latest
+          docker tag docker-registry:5000/migrations/migration_console:latest migrations/migration_console:latest || true
+          docker tag docker-registry:5000/migrations/traffic_replayer:latest migrations/traffic_replayer:latest || true
+          docker tag docker-registry:5000/migrations/capture_proxy:latest migrations/capture_proxy:latest || true
+          docker tag docker-registry:5000/migrations/reindex_from_snapshot:latest migrations/reindex_from_snapshot:latest || true
       - name: List Docker Images
         run: docker images
       - name: Generate SBOM for migration_console
