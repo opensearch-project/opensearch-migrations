@@ -1,5 +1,14 @@
 name: Setup CI Environment
 description: Sets up all required runtimes and environment versions
+inputs:
+  gradle-cache-enabled:
+    description: 'Enable Gradle cache restore'
+    required: false
+    default: 'false'
+  gradle-cache-read-only:
+    description: 'Gradle cache read-only mode (no save)'
+    required: false
+    default: 'true'
 runs:
   using: "composite"
   steps:
@@ -7,6 +16,11 @@ runs:
       with:
         java-version: 17
         distribution: "corretto"
+
+    - uses: gradle/actions/setup-gradle@v4
+      with:
+        cache-disabled: ${{ inputs.gradle-cache-enabled != 'true' }}
+        cache-read-only: ${{ inputs.gradle-cache-read-only }}
 
     - uses: actions/setup-python@v5
       with:

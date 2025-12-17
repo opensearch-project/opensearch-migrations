@@ -264,12 +264,15 @@ spec:
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
             SNAPSHOT_MIGRATION_CONFIGS='{{inputs.parameters.snapshot-and-migration-configs}}'
             
-            # Add snapshot repo config to source cluster
-            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq '. + {
+            # Generate unique suffix from workflow UID for S3 path isolation
+            SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+            
+            # Add snapshot repo config to source cluster with unique path
+            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --arg suffix "$SUFFIX" '. + {
               "snapshotRepo": {
                 "awsRegion": "us-east-2",
                 "endpoint": "localstack://localstack.ma.svc.cluster.local:4566",
-                "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2"
+                "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2/\($suffix)"
               }
             }')
             

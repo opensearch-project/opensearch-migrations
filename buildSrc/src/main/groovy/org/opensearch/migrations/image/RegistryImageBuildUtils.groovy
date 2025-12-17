@@ -58,8 +58,8 @@ class RegistryImageBuildUtils {
                 def imageName = config.imageName.toString()
 
                 // Create version file task ONCE per project, not per architecture
-                if (!project.tasks.findByName("copyVersionFile_${imageName}")) {
-                    CommonUtils.copyVersionFileToDockerStaging(project, imageName, "build/versionDir")
+                if (!project.tasks.findByName("syncVersionFile_${imageName}")) {
+                    CommonUtils.syncVersionFileToDockerStaging(project, imageName, "build/versionDir")
                 }
 
                 project.plugins.withId('com.google.cloud.tools.jib') {
@@ -176,6 +176,7 @@ class RegistryImageBuildUtils {
         def formatter = ImageRegistryFormatterFactory.getFormatter(registryEndpoint)
 
         def (primaryDest, cacheDestination) = formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag, repoName)
+        def versionTaggedDest = versionTag ? formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, versionTag, repoName)[0] : null
 
         def buildArgFlags = cfg.get("buildArgs", [:]).collect { key, value -> "--build-arg ${key}=${value}" }
 
@@ -223,7 +224,11 @@ class RegistryImageBuildUtils {
                             "docker buildx build",
                             "--platform ${platform}",
                             "--builder ${builder}",
-                            "-t ${primaryDest}${suffix}",
+                            // don't include the suffix - this is dangerous, but single-platform builds are supported
+                            // as a convenience to developers that are purposefully ONLY supporting PART of the
+                            // potential architectures
+                            "-t ${primaryDest}",
+                            *(versionTaggedDest ? ["-t", "${versionTaggedDest}"] : []),
                             "--push",
                             "--cache-to=type=registry,ref=${cacheDestination}${suffix},mode=max",
                             "--cache-from=type=registry,ref=${cacheDestination}${suffix}"
@@ -247,6 +252,7 @@ class RegistryImageBuildUtils {
                         "--platform linux/amd64,linux/arm64",
                         "--builder ${builder}",
                         "-t ${primaryDest}",
+                        *(versionTaggedDest ? ["-t", "${versionTaggedDest}"] : []),
                         "--push",
                         "--cache-to=type=registry,ref=${cacheDestination},mode=max",
                         "--cache-from=type=registry,ref=${cacheDestination}",

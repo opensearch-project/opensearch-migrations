@@ -110,7 +110,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   },
                   "s3RepoPathUri": {
                     "type": "string",
-                    "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
+                    "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
                     "description": "s3://BUCKETNAME/PATH"
                   },
                   "repoName": {
@@ -323,7 +323,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         },
                         "s3RepoPathUri": {
                           "type": "string",
-                          "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
+                          "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
                           "description": "s3://BUCKETNAME/PATH"
                         },
                         "repoName": {
@@ -780,7 +780,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               },
               "s3RepoPathUri": {
                 "type": "string",
-                "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
+                "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
                 "description": "s3://BUCKETNAME/PATH"
               },
               "repoName": {
