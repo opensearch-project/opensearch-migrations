@@ -107,9 +107,8 @@ source:
           value: "admin"
         - name: ES_PASSWORD
           value: "admin"
-        # Refresh cadence: 10 minutes
         - name: REFRESH_SECONDS
-          value: "600"
+          value: "60"
 
       args:
         - |
@@ -154,7 +153,8 @@ source:
             echo "Connection established to {$ES_URL}.  Refreshing secure settings"
             curl -k -sS -u "$ES_USERNAME:$ES_PASSWORD" \
               -X POST "$ES_URL/_nodes/reload_secure_settings" >/dev/null || true
-
+            echo "Finished reloading credentials"
+          
             sleep "$REFRESH_SECONDS"
           done
       volumeMounts:

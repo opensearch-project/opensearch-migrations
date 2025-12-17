@@ -18,19 +18,8 @@ def main():
     input_yaml = sys.stdin.read()
 
     # Split by lines starting with ---
-    documents = []
-    current_doc = []
-
-    for line in input_yaml.splitlines():
-        if line.startswith('---'):
-            if current_doc:
-                documents.append('\n'.join(current_doc))
-                current_doc = []
-        else:
-            current_doc.append(line)
-
-    if current_doc:
-        documents.append('\n'.join(current_doc))
+    raw_docs = re.split(r'^---[ \t]*$', input_yaml, flags=re.MULTILINE)
+    documents = [doc for doc in raw_docs if doc.strip()]
 
     # Process each document
     first = True
@@ -53,7 +42,7 @@ def main():
                     temp_file = f.name
 
                 result = subprocess.run(
-                    ['kubectl', 'apply', '--dry-run=client', '-f', temp_file, '-o', 'json'],
+                    ['kubectl', 'create', '--dry-run=client', '-f', temp_file, '-o', 'json'],
                     capture_output=True,
                     text=True,
                     check=True
