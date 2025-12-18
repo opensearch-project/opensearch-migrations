@@ -720,7 +720,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -968,11 +968,11 @@ exports[`test workflow template renderings document-bulk-load 1`] = `
         "inputs": {
           "parameters": [
             {
-              "name": "name",
+              "name": "sessionName",
             },
           ],
         },
-        "name": "deletereplicaset",
+        "name": "stophistoricalbackfill",
         "outputs": {
           "parameters": [],
         },
@@ -984,7 +984,7 @@ exports[`test workflow template renderings document-bulk-load 1`] = `
           "manifest": "apiVersion: apps/v1
 kind: ReplicaSet
 metadata:
-  name: "{{='bulk-loader-'+inputs.parameters.name}}"
+  name: "{{=inputs.parameters.sessionName+'-reindex-from-snapshot'}}"
 ",
         },
       },
@@ -1055,7 +1055,7 @@ sys.exit(0 if all_finished else 1)'",
                   },
                 ],
               },
-              "name": "checkRfsCompletion",
+              "name": "checkHistoricalBackfillCompletion",
               "templateRef": {
                 "name": "migration-console",
                 "template": "runmigrationcommand",
@@ -1097,7 +1097,7 @@ sys.exit(0 if all_finished else 1)'",
             },
           ],
         },
-        "name": "createreplicaset",
+        "name": "starthistoricalbackfill",
         "outputs": {
           "parameters": [],
         },
@@ -1199,7 +1199,7 @@ spec:
             },
           ],
         },
-        "name": "createreplicasetfromconfig",
+        "name": "starthistoricalbackfillfromconfig",
         "outputs": {
           "parameters": [],
         },
@@ -1246,8 +1246,8 @@ spec:
                   },
                 ],
               },
-              "name": "createReplicaset",
-              "template": "createreplicaset",
+              "name": "startHistoricalBackfill",
+              "template": "starthistoricalbackfill",
             },
           ],
         ],
@@ -1327,8 +1327,8 @@ spec:
                   },
                 ],
               },
-              "name": "createReplicasetFromConfig",
-              "template": "createreplicasetfromconfig",
+              "name": "startHistoricalBackfillFromConfig",
+              "template": "starthistoricalbackfillfromconfig",
             },
           ],
           [
@@ -1383,13 +1383,13 @@ spec:
               "arguments": {
                 "parameters": [
                   {
-                    "name": "name",
+                    "name": "sessionName",
                     "value": "{{inputs.parameters.sessionName}}",
                   },
                 ],
               },
-              "name": "deleteReplicaSet",
-              "template": "deletereplicaset",
+              "name": "stopHistoricalBackfill",
+              "template": "stophistoricalbackfill",
             },
           ],
         ],
@@ -1465,7 +1465,7 @@ exports[`test workflow template renderings full-migration 1`] = `
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -2242,7 +2242,7 @@ echo "Workflow submit output: $WORKFLOW_OUTPUT"
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -2319,7 +2319,7 @@ exit 0
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -2392,7 +2392,7 @@ fi
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -2616,7 +2616,7 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -3074,7 +3074,7 @@ echo ---
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -3909,7 +3909,7 @@ echo $SHOULD_FINALIZE",
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -4050,7 +4050,7 @@ echo "Cleanup complete. Workflow stats preserved under /$STATS_KEY/"",
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {

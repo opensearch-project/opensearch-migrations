@@ -42,6 +42,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
+        with:
+          gradle-cache-enabled: true
       - name: Run Gradle Build
         run: ./gradlew ${{matrix.tasks}}
         env:
@@ -139,6 +141,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
+        with:
+          gradle-cache-enabled: true
+          gradle-cache-read-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
       - name: Restore Docker Cache
         uses: AndreKurait/docker-cache@0.6.0
         with:
@@ -204,6 +209,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
+        with:
+          gradle-cache-enabled: true
       - name: Cache Docker Images
         uses: AndreKurait/docker-cache@0.6.0
         with:
