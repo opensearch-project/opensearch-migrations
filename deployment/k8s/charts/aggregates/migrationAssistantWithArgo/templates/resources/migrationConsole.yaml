@@ -36,7 +36,7 @@ roleRef:
   name: migration-console-access-role
   apiGroup: rbac.authorization.k8s.io
 ---
-{{- if and .Values.cluster.isEKS .Values.migrationConsole.eksNodeTypes (gt (len .Values.migrationConsole.eksNodeTypes) 0) }}
+{{- if .Values.cluster.isEKS }}
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
@@ -45,7 +45,6 @@ spec:
   limits:
     cpu: 4000m
     memory: 4Gi
-{{/*    {{ .Values.migrationConsole.resources.limits | toJson }}*/}}
   disruption:
     consolidateAfter: 30s
   template:
@@ -58,9 +57,12 @@ spec:
         - key: karpenter.sh/capacity-type
           operator: In
           values: ["on-demand"]
-        - key: node.kubernetes.io/instance-type
+        - key: node.kubernetes.io/instance-category
           operator: In
-          values: {{ .Values.migrationConsole.eksNodeTypes | toJson }}
+          values: ["t"]
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
       taints:
         - key: "migration-console" # Taint to ensure only migration console pods land here
           value: "dedicated"
@@ -88,7 +90,7 @@ spec:
         env: v1
     spec:
       serviceAccountName: migration-console-access-role
-      {{- if and .Values.cluster.isEKS .Values.migrationConsole.eksNodeTypes (gt (len .Values.migrationConsole.eksNodeTypes) 0) }}
+      {{- if .Values.cluster.isEKS }}
       tolerations: # Set the metadata so that the dedicated nodepool will let this pod schedule to it
         - key: "migration-console"
           operator: "Equal"
@@ -123,13 +125,20 @@ spec:
         - name: console
           image: {{ .Values.images.migrationConsole.repository}}:{{ .Values.images.migrationConsole.tag }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
+          # Since the console may be used interactively, try to keep the migration
+          # console on the same node so that it can be stable.  Keep the requests
+          # and limits values the same to have k8s treat the pod as "Guranteed",
+          # which will make it the least likely to pod to face eviction.
+          #
+          # See https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#guaranteed
           resources:
             requests:
-              cpu: {{ .Values.migrationConsole.resources.requests.cpu | quote }}
-              memory: {{ .Values.migrationConsole.resources.requests.memory | quote }}
+              cpu: 1500m
+              memory: 2.5Gi
             limits:
-              cpu: {{ .Values.migrationConsole.resources.limits.cpu | quote }}
-              memory: {{ .Values.migrationConsole.resources.limits.memory | quote }}
+              cpu: 1500m
+              memory:
+                2.5Gi
           env:
             - name: MIGRATIONS_CLI_CONSOLE_DISABLE_LEGACY_COMMANDS
               value: "true"

@@ -128,7 +128,9 @@ export const CONTAINER_RESOURCES = {
 export const RESOURCE_REQUIREMENTS = z.object({
     limits: z.object(CONTAINER_RESOURCES).describe("Resource upper bound for a container"),
     requests: z.object(CONTAINER_RESOURCES).describe("Resource lower bound for a container")
-}).describe("Compute resource requirements for a container");
+}).describe("Compute resource requirements for a container." +
+    "There are implications to how a task will be evicted if the resources and limits are different.  " +
+    "See https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#guaranteed for more information.");
 
 export type ResourceRequirementsType = z.infer<typeof RESOURCE_REQUIREMENTS>;
 
