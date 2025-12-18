@@ -7,6 +7,9 @@ aws:
   region: ""
   account: ""
 
+cluster:
+  isEKS: true
+
 defaultBucketConfiguration:
   useLocalStack: false
   deleteOnUninstall: true

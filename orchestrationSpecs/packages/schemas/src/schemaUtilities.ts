@@ -6,6 +6,8 @@
  */
 import {z} from "zod";
 
+// See https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#guaranteed for details
+// about how these values effect eviction priorities of pods.
 export const DEFAULT_RESOURCES = {
     REPLAYER: {
         limits: {
@@ -20,7 +22,7 @@ export const DEFAULT_RESOURCES = {
 
     MIGRATION_CONSOLE_CLI: {
         limits: {
-            cpu: "1000m",
+            cpu: "500m",
             memory: "2000Mi",
         },
         requests: {

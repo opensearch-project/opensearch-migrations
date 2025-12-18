@@ -60,6 +60,13 @@ aws:
   region: us-east-2
   account: "123456789012"
 
+# EKS cluster configuration for Karpenter NodeClass
+cluster:
+  # Set to true for EKS clusters with Karpenter, false for other cluster types
+  isEKS: false
+  name: ""  # Set this to your EKS cluster name (required when isEKS: true)
+  nodeInstanceProfile: "KarpenterNodeInstanceProfile"  # Default Karpenter node instance profile
+
 stageName: dev
 
 defaultBucketConfiguration:
