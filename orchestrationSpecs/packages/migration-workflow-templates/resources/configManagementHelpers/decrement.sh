@@ -1,7 +1,13 @@
+#!/bin/bash
+
 set -x -e
+
+# 1. IMPORT THE LIBRARY
+# Adjust path as necessary
+source ./etcdClientHelper.sh
+
 PROCESSOR_ID="$PROCESSOR_ID"
 TARGET_NAME="$TARGET_NAME"
-ETCD_ENDPOINT=$ETCD_ENDPOINTS
 PREFIX="$WORKFLOW_PREFIX"
 
 normalize_endpoint() {
@@ -9,49 +15,63 @@ normalize_endpoint() {
 }
 
 NORMALIZED_TARGET=$(normalize_endpoint "$TARGET_NAME")
-
-USERNAME=$ETCD_USER
-PASSWORD=$ETCD_PASSWORD
 LATCH_KEY_NAME=/$PREFIX/workflow/targets/$NORMALIZED_TARGET/latch
-
 FRIENDLY_NAME="${NORMALIZED_TARGET}-${PROCESSOR_ID}"
 
-export ETCDCTL_API=3
-
-# Run etcdctl with configured endpoints
-etcdctl_cmd="etcdctl --endpoints=$ETCD_ENDPOINT --user $USERNAME:$PASSWORD"
-
 # Record this processor as finished
-$etcdctl_cmd put /$PREFIX/workflow/targets/$NORMALIZED_TARGET/finishedSubFlows/$FRIENDLY_NAME "completed"
+etcd_safe_run put "/$PREFIX/workflow/targets/$NORMALIZED_TARGET/finishedSubFlows/$FRIENDLY_NAME" "completed"
 
 execute_transaction() {
-local current_value="$1"
-local next_value="$2"
+  local current_value="$1"
+  local next_value="$2"
 
-echo "LATCH_KEY_NAME=$LATCH_KEY_NAME"
-echo "current_value=$current_value"
-echo "next_value=$next_value"
-echo "etcdctl_cmd=$etcdctl_cmd"
+  echo "Attempting Transaction (LATCH_KEY_NAME={$LATCH_KEY_NAME}): $current_value -> $next_value"
 
-# be very mindful of the empty lines in the file being sent to the transaction command!
-$etcdctl_cmd txn  --write-out=json << EOF | jq -e '.succeeded == true'
+  # We cannot easily wrap the heredoc in a function, so we use the
+  # raw $ETCD_CMD variable exported by the library.
+
+  # IMPORTANT: We use 'set +e' logic here implicitly because if this pipe chain fails,
+  # the 'if' condition in the loop catches it.
+
+  # 1. Run the transaction
+  # 2. Use jq to check logical success
+  # 3. Ensure we don't crash if etcd is totally down (handle pipe status)
+
+  set +e
+  $ETCD_CMD txn --write-out=json << EOF | jq -e '.succeeded == true' > /dev/null
 val("$LATCH_KEY_NAME") = "$current_value"
 
 put $LATCH_KEY_NAME "$next_value"
 
 
 EOF
+  local status=$?
+  set -e
+
+  return $status
 }
 
 # Transaction retry loop
 while true; do
-  CURRENT_COUNT=$($etcdctl_cmd get  $LATCH_KEY_NAME --print-value-only)
+  # retry for transient service errors is already built into safe get.
+  # Our loop deals with the content of the key OR (later) a transient error while running the transaction
+  CURRENT_COUNT=$(etcd_safe_get "$LATCH_KEY_NAME")
+
+  # Handle case where key doesn't exist yet (empty string)
+  if [ -z "$CURRENT_COUNT" ]; then
+    CURRENT_COUNT=0 # Or handle error depending on your logic
+  fi
+
   NEW_COUNT=$((CURRENT_COUNT - 1))
+
   if execute_transaction "$CURRENT_COUNT" "$NEW_COUNT"; then
     echo "Transaction succeeded"
     break
   else
-    echo "Transaction failed, retrying..."
+    # This catches both:
+    # A. Logical failure (value changed by someone else)
+    # B. Network failure (etcd command failed)
+    echo "Transaction failed (Network or compare-and-swap mismatch), retrying..."
     sleep 1
   fi
 done

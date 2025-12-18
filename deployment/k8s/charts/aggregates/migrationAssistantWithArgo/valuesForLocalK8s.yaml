@@ -47,3 +47,13 @@ charts:
           registry: ""
           repository: localhost:5000/migrations/migration_console
           tag: latest
+  argo-workflows:
+    values:
+      controller:
+        replicas: 1
+        pdb:
+          enabled: false
+      server:
+        replicas: 1
+        pdb:
+          enabled: false
