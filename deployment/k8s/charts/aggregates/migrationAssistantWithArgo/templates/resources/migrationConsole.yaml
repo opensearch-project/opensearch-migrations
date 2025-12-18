@@ -45,8 +45,6 @@ spec:
   limits:
     cpu: 4000m
     memory: 4Gi
-  disruption:
-    consolidateAfter: 30s
   template:
     spec:
       nodeClassRef:
@@ -58,6 +56,11 @@ spec:
           operator: In
           values: ["on-demand"]
         - key: node.kubernetes.io/instance-category
+          # This pool is for a control plane with few network calls at low bandwidth
+          # and shouldn't require much compute.  If we do find that users would like
+          # to run heavier log dives, validations, comparison jobs, or significant
+          # Kafka work, we should offload those tasks to pods that run with higher
+          # specifications in the general pool
           operator: In
           values: ["t"]
         - key: kubernetes.io/os
