@@ -1,0 +1,40 @@
+plugins {
+    id 'base'
+}
+
+def kiroBuildDir = layout.buildDirectory.dir('.kiro')
+
+tasks.register('setupKiro', Copy) {
+    description = 'Copies kiro-cli-config to build/.kiro'
+    from 'kiro-cli-config'
+    into kiroBuildDir
+}
+
+tasks.register('kiroChat', Exec) {
+    description = 'Run kiro-cli chat from build directory'
+    dependsOn setupKiro
+    workingDir layout.buildDirectory
+    commandLine 'kiro-cli', 'chat'
+}
+
+tasks.register('kiroAgent', Exec) {
+    description = 'Run kiro-cli chat with opensearch-migration agent'
+    dependsOn setupKiro
+    workingDir layout.buildDirectory
+    commandLine 'kiro-cli', 'chat', '--agent', 'opensearch-migration'
+}
+
+tasks.register('packageKiro', Tar) {
+    description = 'Create kiro-assistant.tar.gz for release'
+    dependsOn setupKiro
+    archiveFileName = 'kiro-assistant.tar.gz'
+    destinationDirectory = layout.buildDirectory
+    compression = Compression.GZIP
+    from(kiroBuildDir) {
+        into '.kiro'
+    }
+}
+
+clean {
+    delete kiroBuildDir
+}

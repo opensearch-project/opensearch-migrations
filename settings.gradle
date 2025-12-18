@@ -63,6 +63,7 @@ include 'TrafficCapture:trafficCaptureProxyServer'
 include 'TrafficCapture:trafficReplayer'
 include 'frontend'
 include 'buildImages'
+include 'kiro-cli'
 include ':console_link'
 
 project(':console_link').projectDir = file('migrationConsole/lib/console_link')
