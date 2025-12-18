@@ -161,6 +161,3 @@ spec:
           persistentVolumeClaim:
             claimName: {{ .Values.logs.sharedLogsVolume.name }}
     {{- end }}
-
-
-
