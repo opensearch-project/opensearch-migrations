@@ -720,7 +720,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -1465,7 +1465,7 @@ exports[`test workflow template renderings full-migration 1`] = `
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -2242,7 +2242,7 @@ echo "Workflow submit output: $WORKFLOW_OUTPUT"
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -2319,7 +2319,7 @@ exit 0
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -2392,7 +2392,7 @@ fi
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -2616,7 +2616,7 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -3074,7 +3074,7 @@ echo ---
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -3909,7 +3909,7 @@ echo $SHOULD_FINALIZE",
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
@@ -4050,7 +4050,7 @@ echo "Cleanup complete. Workflow stats preserved under /$STATS_KEY/"",
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
+              "cpu": "500m",
               "memory": "2000Mi",
             },
             "requests": {
