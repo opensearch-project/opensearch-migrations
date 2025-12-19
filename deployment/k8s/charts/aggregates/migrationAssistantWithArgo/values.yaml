@@ -191,7 +191,7 @@ charts:
     values:
       preUpgrade:
         enabled: false
-      replicaCount: 1
+      replicas: 3  # Changed from replicaCount: 1 to replicas: 3 for HA
       auth:
         rbac:
           rootPassword: password
@@ -203,15 +203,29 @@ charts:
           cpu: 2
           memory: 4Gi
       persistence:
-        enabled: false
-      #    storageClass: "standard"
-      #    size: 10Gi
+        enabled: true
+        storage:
+          requestedSize: 10Gi
       service:
         type: ClusterIP
       metrics:
         enabled: true
         serviceMonitor:
           enabled: true
+      # Pod Disruption Budget for resilience
+      podDisruptionBudget:
+        enabled: true
+        minAvailable: 2  # Ensure at least 2 of 3 replicas stay available
+      # Anti-affinity to spread pods across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: etcd
+              topologyKey: kubernetes.io/hostname
       extraEnvVars:
         - name: ETCD_AUTO_COMPACTION_RETENTION
           value: "1"

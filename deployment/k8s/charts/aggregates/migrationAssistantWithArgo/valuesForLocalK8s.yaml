@@ -57,3 +57,16 @@ charts:
         replicas: 1
         pdb:
           enabled: false
+  # Lightweight etcd configuration for local development
+  etcd:
+    values:
+      replicas: 1  # Single replica for dev
+      persistence:
+        enabled: false  # No persistence needed for dev
+      resources:
+        requests:
+          cpu: 100m  # Minimal resources for dev
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi

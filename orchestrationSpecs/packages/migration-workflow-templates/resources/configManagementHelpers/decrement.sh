@@ -1,9 +1,7 @@
 #!/bin/bash
+set -e
 
-set -x -e
-
-# 1. IMPORT THE LIBRARY
-# Adjust path as necessary
+# Import Library
 source ./etcdClientHelper.sh
 
 PROCESSOR_ID="$PROCESSOR_ID"
@@ -18,7 +16,7 @@ NORMALIZED_TARGET=$(normalize_endpoint "$TARGET_NAME")
 LATCH_KEY_NAME=/$PREFIX/workflow/targets/$NORMALIZED_TARGET/latch
 FRIENDLY_NAME="${NORMALIZED_TARGET}-${PROCESSOR_ID}"
 
-# Record this processor as finished
+# Record processor completion
 etcd_safe_run put "/$PREFIX/workflow/targets/$NORMALIZED_TARGET/finishedSubFlows/$FRIENDLY_NAME" "completed"
 
 execute_transaction() {
@@ -27,16 +25,7 @@ execute_transaction() {
 
   echo "Attempting Transaction (LATCH_KEY_NAME={$LATCH_KEY_NAME}): $current_value -> $next_value"
 
-  # We cannot easily wrap the heredoc in a function, so we use the
-  # raw $ETCD_CMD variable exported by the library.
-
-  # IMPORTANT: We use 'set +e' logic here implicitly because if this pipe chain fails,
-  # the 'if' condition in the loop catches it.
-
-  # 1. Run the transaction
-  # 2. Use jq to check logical success
-  # 3. Ensure we don't crash if etcd is totally down (handle pipe status)
-
+  # We use raw $ETCD_CMD here because heredocs don't play nice with wrapper functions
   set +e
   $ETCD_CMD txn --write-out=json << EOF | jq -e '.succeeded == true' > /dev/null
 val("$LATCH_KEY_NAME") = "$current_value"
