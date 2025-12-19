@@ -162,7 +162,7 @@ source:
           mountPath: /usr/share/elasticsearch/config/elasticsearch.keystore
           subPath: elasticsearch.keystore
 
--target:
+target:
   tolerations:
     - key: dedicated-search
       operator: Equal

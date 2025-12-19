@@ -8,7 +8,6 @@ import {
 } from '@opensearch-migrations/schemas'
 import {TemplateBuilder, typeToken, WorkflowBuilder} from "@opensearch-migrations/argo-workflow-builders";
 
-import {initTlhScript} from "../resourceLoader";
 import {decrementTlhScript} from "../resourceLoader";
 import {cleanupTlhScript} from "../resourceLoader";
 
