@@ -24,7 +24,7 @@ gradlew() {
     "${MIGRATIONS_REPO_ROOT_DIR}/gradlew" "$@"
 }
 
-if [ "${BUILD_IMAGES_WITHOUT_DOCKER:-false}" = "true" ]; then
+if [ "${BUILD_IMAGES_WITHOUT_DOCKER:-true}" = "true" ]; then
     export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-true}"
     "${MIGRATIONS_REPO_ROOT_DIR}"/buildImages/setUpK8sImageBuildServices.sh
 
@@ -36,7 +36,7 @@ if [ "${BUILD_IMAGES_WITHOUT_DOCKER:-false}" = "true" ]; then
 
     gradlew :buildImages:buildImagesToRegistry
 else
-    echo "Configuring Docker environment variables to point to minikube"
+    echo "Configuring Docker environment variables to point to minikube - legacy/not supported"
     eval "$(minikube docker-env)"
     gradlew :TrafficCapture:dockerSolution:buildImages
 fi

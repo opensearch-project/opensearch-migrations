@@ -3,6 +3,7 @@ import {MigrationInitializer} from "./migrationInitializer";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {parse} from "yaml";
 import {Console} from "console";
+import {formatInputValidationError, InputValidationError} from "./streamSchemaTransformer";
 
 global.console = new Console({
     stdout: process.stderr,
@@ -160,7 +161,11 @@ export async function main() {
             process.stdout.write(JSON.stringify(workflows, null, 2));
         }
     } catch (error) {
-        if (error instanceof SyntaxError) {
+        if (error instanceof InputValidationError) {
+            console.error('Validation error:');
+            console.error(formatInputValidationError(error));
+            process.exit(1);
+        } else if (error instanceof SyntaxError) {
             console.error('JSON parsing error:', error.message);
             process.exit(1);
         } else if (error instanceof Error) {
