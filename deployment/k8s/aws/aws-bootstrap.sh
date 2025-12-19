@@ -298,18 +298,6 @@ aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_
 kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace "$namespace"
 kubectl config set-context --current --namespace="$namespace" >/dev/null 2>&1
 
-if ! helm status aws-efs-csi-driver -n kube-system >/dev/null 2>&1; then
-  echo "Installing aws-efs-csi-driver Helm chart..."
-  helm repo add aws-efs-csi-driver https://kubernetes-sigs.github.io/aws-efs-csi-driver
-  helm repo update
-  helm upgrade --install aws-efs-csi-driver aws-efs-csi-driver/aws-efs-csi-driver \
-    --namespace kube-system \
-    --set image.repository=602401143452.dkr.ecr.us-west-1.amazonaws.com/eks/aws-efs-csi-driver \
-    --set image.tag=v2.1.8
-else
-  echo "aws-efs-csi-driver Helm release already exists. Skipping install."
-fi
-
 if [[ "$skip_git_pull" == "false" ]]; then
   echo "Preparing opensearch-migrations repo..."
   mkdir -p $base_dir
