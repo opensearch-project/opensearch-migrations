@@ -5,6 +5,8 @@ import os
 import click
 from rich.console import Console
 from rich.tree import Tree
+from pprint import pprint
+import json
 
 from ..models.utils import ExitCode
 from ..services.workflow_service import WorkflowService
@@ -369,6 +371,9 @@ def _display_workflow_status(result: dict, show_output_hint: bool = True):
         result: WorkflowStatusResult dict from get_workflow_status
         show_output_hint: Whether to show the hint about viewing step outputs (default: True)
     """
+
+    print(json.dumps(result))
+
     name = result['workflow_name']
     phase = result['phase']
     started_at = result['started_at']

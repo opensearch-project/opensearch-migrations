@@ -90,16 +90,17 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
-            .addStep("checkSnapshotCompletion", MigrationConsole, "runMigrationCommand", c =>
+            .addStep("checkSnapshotCompletion", MigrationConsole, "runMigrationCommandForStatus", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    command: "set -e && [ \"$(console --config-file=/config/migration_services.yaml snapshot status)\" = \"SUCCESS\" ] && exit 0 || exit 1"
+                    command: "set -e && touch /tmp/status-output.txt && [ \"$(console --config-file=/config/migration_services.yaml snapshot status)\" = \"SUCCESS\" ] && exit 0 || (console --config-file=/config/migration_services.yaml snapshot status --deep-check > /tmp/status-output.txt && exit 1)"
                 }))
         )
         .addRetryParameters({
             limit: "200", retryPolicy: "Always",
             backoff: {duration: "5", factor: "2", cap: "300"}
         })
+        .addExpressionOutput("statusOutput", b => b.steps.checkSnapshotCompletion.outputs.statusOutput)
     )
 
 

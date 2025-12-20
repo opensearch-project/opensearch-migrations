@@ -34,7 +34,21 @@ if [ "${BUILD_IMAGES_WITHOUT_DOCKER:-true}" = "true" ]; then
     export LOCAL_REGISTRY
     echo "Using local registry at: ${LOCAL_REGISTRY}"
 
-    gradlew :buildImages:buildImagesToRegistry
+    ARCH=$(uname -m)
+    case "$ARCH" in
+      x86_64)
+        PLATFORM="amd64"
+        ;;
+      arm64|aarch64)
+        PLATFORM="arm64"
+        ;;
+      *)
+        echo "Unsupported architecture: $ARCH"
+        exit 1
+        ;;
+    esac
+
+    gradlew :buildImages:buildImagesToRegistry_$PLATFORM
 else
     echo "Configuring Docker environment variables to point to minikube - legacy/not supported"
     eval "$(minikube docker-env)"
