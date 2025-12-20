@@ -41,7 +41,15 @@ function makeParamsDict(
     return expr.mergeDicts(
         expr.mergeDicts(
             makeSourceParamDict(sourceConfig),
-            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap")
+            expr.mergeDicts(
+                expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap"),
+                // noWait is essential for workflow logic - the workflow handles polling for snapshot
+                // completion separately via checkSnapshotStatus, so the CreateSnapshot command must
+                // return immediately to allow the workflow to manage the wait/retry behavior
+                expr.makeDict({
+                    "noWait": expr.literal(true)
+                })
+            )
         ),
         expr.mergeDicts(
             expr.makeDict({
@@ -131,3 +139,4 @@ export const CreateSnapshot = WorkflowBuilder.create({
 
 
     .getFullScope();
+
