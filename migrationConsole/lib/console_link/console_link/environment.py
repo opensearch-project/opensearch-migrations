@@ -72,6 +72,7 @@ class Environment:
                 if allow_empty:
                     self.config = {}  # or {} or whatever default you want
                 else:
+                    logger.exception("Got an error while loading or parsing the config file")
                     raise
         elif isinstance(config, Dict):
             self.config = config

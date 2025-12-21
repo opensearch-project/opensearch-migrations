@@ -806,7 +806,36 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                   },
                   {
                     "name": "command",
-                    "value": "set -e && [ "$(console --config-file=/config/migration_services.yaml snapshot status)" = "SUCCESS" ] && exit 0 || (console --config-file=/config/migration_services.yaml snapshot status --deep-check > /tmp/status-output.txt && exit 1)",
+                    "value": "set -e
+  touch /tmp/status-output.txt
+  
+  # Quick status check
+  if [ "$(console --config-file=/config/migration_services.yaml snapshot status)" = "SUCCESS" ]; then
+    exit 0
+  fi
+  
+  # Deep check with formatted output
+  console --config-file=/config/migration_services.yaml snapshot status --deep-check | \\
+    awk '
+      /Total shards:/ { total = $3 }
+      /Successful shards:/ { successful = $3 }
+      /Data processed:/ { data = $3; unit = $4 }
+      /Estimated time to completion:/ { 
+        sub(/.*: /, "");
+        eta = $0
+      }
+      END {
+        if (total) {
+          output = "Shards: " successful "/" total " | Data: " data " " unit
+          if (eta != "0h 0m 0s") {
+            output = output " | ETA: " eta
+          }
+          print output
+        }
+      }
+    ' > /tmp/status-output.txt
+  
+  exit 1",
                   },
                 ],
               },
