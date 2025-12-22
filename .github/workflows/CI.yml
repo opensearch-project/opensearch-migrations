@@ -300,6 +300,7 @@ jobs:
           args: --verbose --accept=200,403,429  "**/*.html" "**/*.md" "**/*.txt" "**/*.json"
             --offline
             --exclude "file:///github/workspace/*"
+            --exclude "file://.kiro/*"
             --exclude "http://localhost*"
             --exclude "https://localhost*"
             --exclude "http://capture-proxy*"

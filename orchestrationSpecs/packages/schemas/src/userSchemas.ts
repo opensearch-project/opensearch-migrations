@@ -156,6 +156,8 @@ export const REPLAYER_OPTIONS = z.object({
     // otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
 });
 
+// Note: noWait is not included here as it is hardcoded to true in the workflow.
+// The workflow manages snapshot completion polling separately via checkSnapshotStatus.
 export const CREATE_SNAPSHOT_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional(),
     maxSnapshotRateMbPerNode: z.number().default(0).optional(),
