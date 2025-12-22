@@ -19,6 +19,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from ..models.utils import ExitCode
 from ..services.workflow_service import WorkflowService
+from ..tree_utils import (
+    build_nested_workflow_tree, 
+    filter_tree_nodes, 
+    display_workflow_tree
+)
 from console_link.environment import Environment
 from console_link.middleware import snapshot as snapshot_middleware
 from console_link.middleware import backfill as backfill_middleware
@@ -156,43 +161,7 @@ def _check_backfill_status(env):
         return {"error": str(e)}
 
 
-def _build_nested_workflow_tree(workflow_data):
-    """Build a properly nested tree structure from workflow nodes."""
-    nodes = workflow_data.get("status", {}).get("nodes", {})
-
-    # Build parent-child relationships
-    tree_nodes = {}
-    root_nodes = []
-    
-    # First pass: create all nodes
-    for node_id, node in nodes.items():
-        tree_nodes[node_id] = {
-            'id': node_id,
-            'display_name': node.get('displayName', ''),
-            'phase': node.get('phase', 'Unknown'),
-            'type': node.get('type', ''),
-            'boundary_id': node.get('boundaryID'),
-            'children': [],
-            'inputs': node.get('inputs', {}),
-            'outputs': node.get('outputs', {}),
-            'started_at': node.get('startedAt'),
-            'finished_at': node.get('finishedAt')
-        }
-    
-    # Second pass: establish parent-child relationships
-    for node_id, tree_node in tree_nodes.items():
-        boundary_id = tree_node['boundary_id']
-        if boundary_id and boundary_id in tree_nodes:
-            # This node is a child of boundary_id
-            tree_nodes[boundary_id]['children'].append(tree_node)
-        else:
-            # This is a root node
-            root_nodes.append(tree_node)
-    
-    return root_nodes
-
-
-def _filter_tree_nodes(tree_nodes, keep_patterns=None):
+def _walk_up_for_config(nodes, start_node_id, param_name):
     """Smart filter: show Pod/Suspend/Skipped nodes, and containers only when they have parallel work."""
     
     def should_keep_by_type(node):
@@ -250,114 +219,7 @@ def _filter_tree_nodes(tree_nodes, keep_patterns=None):
     return filter_recursive(tree_nodes)
 
 
-def _display_nested_tree(tree_nodes, deep_check_data=None, depth=0, workflow_data=None, show_deep_check=False):
-    """Display workflow tree with proper nesting and deep check results."""
-    # Sort nodes chronologically by startedAt time (ascending - earliest first)
-    sorted_nodes = sorted(tree_nodes, key=lambda n: n.get('started_at') or '9999-12-31T23:59:59Z')
-    
-    # Find the last failed node with deep check data
-    last_failed_node_id = None
-    if deep_check_data:
-        failed_nodes = []
-        for node in sorted_nodes:
-            if node['phase'] == 'Failed' and node['id'] in deep_check_data:
-                failed_nodes.append(node)
-        
-        if failed_nodes:
-            last_failed_node_id = failed_nodes[-1]['id']  # Get the last one
-            logger.info(f"Last failed node for deep check: {last_failed_node_id}")
-    
-    for node in sorted_nodes:
-        indent = "  " * depth
-        symbol = _get_node_symbol(node['phase'], node['type'])
-        display_name = node['display_name']
-        
-        # Get the appropriate status display
-        status_display = _get_display_status(node, deep_check_data)
-        
-        # For failed status checks, always show statusOutput from the workflow task
-        if node['phase'] == 'Failed' and workflow_data and ('checkSnapshotCompletion' in node['display_name'] or 'waitForCompletion' in node['display_name']):
-            status_output = _get_step_status_output(workflow_data, node['id'])
-            if status_output:
-                # Show statusOutput on the same line as the node
-                click.echo(f"{indent}{symbol} {display_name}: {status_output}")
-                logger.info(f"Showed statusOutput for {node['display_name']}: {status_output}")
-            else:
-                click.echo(f"{indent}{symbol} {display_name}{status_display}")
-                logger.warning(f"No statusOutput found for {node['display_name']}")
-        else:
-            click.echo(f"{indent}{symbol} {display_name}{status_display}")
-        
-        # Show deep check status ONLY for the last failed node AND only if show_deep_check is True
-        if show_deep_check and deep_check_data and node['id'] == last_failed_node_id:
-            logger.info(f"Showing deep check for last failed node: {node['display_name']}")
-            check_data = deep_check_data[node['id']]
-            status_results = check_data['status']
-            
-            # Show live status from API calls
-            if 'snapshot' in status_results:
-                snap_result = status_results['snapshot']
-                logger.info(f"Deep check snapshot result: {snap_result}")
-                if snap_result.get('success'):
-                    # Indent multi-line output properly
-                    value = snap_result['value']
-                    lines = value.split('\n')
-                    click.echo(f"{indent}  ⚡ {lines[0]}")  # First line with bolt
-                    for line in lines[1:]:  # Remaining lines aligned with first line content
-                        if line.strip():  # Skip empty lines
-                            click.echo(f"{indent}    {line}")
-                else:
-                    # Show the actual error or result
-                    error_msg = snap_result.get('error', 'Unknown error')
-                    click.echo(f"{indent}  ⚡ Error: {error_msg}")
-            
-            if 'backfill' in status_results:
-                backfill_result = status_results['backfill']
-                logger.info(f"Deep check backfill result: {backfill_result}")
-                if backfill_result.get('success'):
-                    click.echo(f"{indent}  ⚡ Backfill: {backfill_result['status']}")
-                else:
-                    # Show the actual error or result
-                    error_msg = backfill_result.get('error', 'Unknown error')
-                    click.echo(f"{indent}  ⚡ Error: {error_msg}")
-        elif deep_check_data and node['id'] in deep_check_data:
-            logger.info(f"Skipping deep check for non-last failed node: {node['display_name']}")
-        
-        # Recursively display children
-        if node['children']:
-            _display_nested_tree(node['children'], deep_check_data, depth + 1, workflow_data, show_deep_check)
-
-
-def _get_node_symbol(phase, node_type):
-    """Get symbol for workflow node."""
-    if phase == 'Succeeded':
-        return "✓"
-    elif phase in ('Failed', 'Error'):
-        return "✗"
-    elif phase == 'Running':
-        return "⟳" if node_type == 'Suspend' else "▶"
-    elif phase == 'Pending':
-        return "○"
-    elif phase == 'Skipped':
-        return "~"
-    else:
-        return "?"
-
-
-def _get_display_status(node, deep_check_data):
-    """Get the display status for a node, using deep check data if available."""
-    node_id = node['id']
-    phase = node['phase']
-    
-    # For failed status checks, don't show "(Failed)" - we'll show statusOutput instead
-    if phase == 'Failed' and ('checkSnapshotCompletion' in node['display_name'] or 'waitForCompletion' in node['display_name']):
-        return ""  # Don't show "(Failed)" for status check tasks
-    
-    # Default: show phase for other nodes
-    return f" ({phase})" if phase != 'Succeeded' else " (Succeeded)"
-
-
-def _get_deep_check_data(workflow_data, deep_check):
+def _walk_up_for_config(nodes, start_node_id, param_name):
     """Get deep check data for relevant steps using proper tree walking."""
     if not deep_check:
         logger.info("Deep check disabled, skipping")
@@ -919,13 +781,13 @@ def _display_workflow_status(result: dict, show_output_hint: bool = True, deep_c
 
     # Build and display nested tree
     if workflow_data:
-        tree_nodes = _build_nested_workflow_tree(workflow_data)
+        tree_nodes = build_nested_workflow_tree(workflow_data)
         
         # Apply smart filtering (keeps parallel work, flattens linear chains)
-        tree_nodes = _filter_tree_nodes(tree_nodes)
+        tree_nodes = filter_tree_nodes(tree_nodes)
         
-        click.echo("\nWorkflow Steps:")
-        _display_nested_tree(tree_nodes, deep_check_data, workflow_data=workflow_data, show_deep_check=show_deep_check)
+        click.echo("")
+        display_workflow_tree(tree_nodes, deep_check_data, workflow_data, show_deep_check)
     else:
         # Fallback to old flat display - but this shouldn't happen anymore
         step_tree = result.get('step_tree', [])
@@ -935,3 +797,101 @@ def _display_workflow_status(result: dict, show_output_hint: bool = True, deep_c
     if show_output_hint and phase in ('Running', 'Pending'):
         click.echo("")
         click.echo(f"To view step outputs, run: workflow output {name}")
+
+
+def _get_deep_check_data(workflow_data, deep_check):
+    """Get deep check data for relevant steps using proper tree walking."""
+    if not deep_check:
+        logger.info("Deep check disabled, skipping")
+        return {}
+    
+    logger.info("Starting deep check data collection with tree walking")
+    nodes = workflow_data.get("status", {}).get("nodes", {})
+    check_tasks = []
+    
+    # Find checkSnapshotCompletion and waitForCompletion nodes
+    status_check_nodes = []
+    for node_id, node in nodes.items():
+        display_name = node.get("displayName", "")
+        phase = node.get("phase", "")
+        node_type = node.get("type", "")
+        started_at = node.get("startedAt", "")
+        
+        # Look for status check nodes
+        if (("checkSnapshotCompletion" in display_name or "waitForCompletion" in display_name) 
+            and node_type == "Pod"):
+            status_check_nodes.append({
+                'node_id': node_id,
+                'display_name': display_name,
+                'phase': phase,
+                'started_at': started_at,
+                'type': 'snapshot' if 'checkSnapshotCompletion' in display_name else 'backfill'
+            })
+    
+    # Sort by start time to find the chronologically last one
+    if status_check_nodes:
+        status_check_nodes.sort(key=lambda n: n['started_at'] or '0000-00-00T00:00:00Z')
+        last_check = status_check_nodes[-1]
+        
+        logger.info(f"Last status check: {last_check['display_name']} ({last_check['phase']})")
+        
+        # Only run deep check if the last status check was not successful
+        if last_check['phase'] != 'Succeeded':
+            logger.info(f"Last status check failed, running deep check for: {last_check['display_name']}")
+            
+            # Walk up the tree to find config
+            config_contents = _walk_up_for_config(nodes, last_check['node_id'], "configContents")
+            if config_contents:
+                logger.info("Found config contents, converting with jq")
+                services_config = _convert_config_with_jq(config_contents)
+                if services_config:
+                    config_dict = yaml.safe_load(services_config)
+                    check_tasks.append({
+                        'node_id': last_check['node_id'],
+                        'step_name': last_check['display_name'],
+                        'type': last_check['type'],
+                        'env': Environment(config=config_dict)
+                    })
+        else:
+            logger.info("Last status check succeeded, skipping deep check")
+    else:
+        logger.info("No status check nodes found")
+    
+    logger.info(f"Found {len(check_tasks)} tasks for deep checking")
+    
+    # Run all checks in parallel
+    deep_check_results = {}
+    
+    if check_tasks:
+        with ThreadPoolExecutor(max_workers=len(check_tasks) * 2) as executor:
+            futures = {}
+            
+            for task in check_tasks:
+                node_id = task['node_id']
+                check_type = task['type']
+                env = task['env']
+                
+                if check_type == 'snapshot':
+                    futures[(node_id, 'snapshot')] = executor.submit(_check_snapshot_status, env)
+                elif check_type == 'backfill':
+                    futures[(node_id, 'backfill')] = executor.submit(_check_backfill_status, env)
+            
+            # Collect results
+            for (node_id, check_type), future in futures.items():
+                task = next(t for t in check_tasks if t['node_id'] == node_id)
+                
+                if node_id not in deep_check_results:
+                    deep_check_results[node_id] = {
+                        'step_name': task['step_name'],
+                        'type': task['type'],
+                        'status': {}
+                    }
+                
+                try:
+                    result = future.result()
+                    deep_check_results[node_id]['status'][check_type] = result
+                except Exception as e:
+                    logger.error(f"Error getting result for {check_type} check: {e}")
+                    deep_check_results[node_id]['status'][check_type] = {"error": str(e)}
+    
+    return deep_check_results
