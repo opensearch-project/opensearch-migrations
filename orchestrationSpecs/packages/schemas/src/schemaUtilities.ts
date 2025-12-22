@@ -48,11 +48,11 @@ export const DEFAULT_RESOURCES = {
 
     RFS: {
         limits: {
-            cpu: "2000m",
+            cpu: "3300m",
             memory: "7000Mi",
         },
         requests: {
-            cpu: "1000m",
+            cpu: "3300m",
             memory: "7000Mi",
         }
     },
