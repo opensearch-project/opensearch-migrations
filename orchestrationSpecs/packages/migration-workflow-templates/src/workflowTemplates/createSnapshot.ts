@@ -29,6 +29,39 @@ import {extractSourceKeysToExpressionMap, makeClusterParamDict} from "./commonUt
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 
+const checkScript = `
+  set -e
+  touch /tmp/status-output.txt
+  
+  # Quick status check
+  if [ "$(console --config-file=/config/migration_services.yaml snapshot status)" = "SUCCESS" ]; then
+    exit 0
+  fi
+  
+  # Deep check with formatted output
+  console --config-file=/config/migration_services.yaml snapshot status --deep-check | \\
+    awk '
+      /Total shards:/ { total = $3 }
+      /Successful shards:/ { successful = $3 }
+      /Data processed:/ { data = $3; unit = $4 }
+      /Estimated time to completion:/ { 
+        sub(/.*: /, "");
+        eta = $0
+      }
+      END {
+        if (total) {
+          output = "Shards: " successful "/" total " | Data: " data " " unit
+          if (eta != "0h 0m 0s") {
+            output = output " | ETA: " eta
+          }
+          print output
+        }
+      }
+    ' > /tmp/status-output.txt
+  
+  exit 1
+`.trim();
+
 export function makeSourceParamDict(sourceConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
     return makeClusterParamDict("source", sourceConfig);
 }
@@ -98,16 +131,17 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
-            .addStep("checkSnapshotCompletion", MigrationConsole, "runMigrationCommand", c =>
+            .addStep("checkSnapshotCompletion", MigrationConsole, "runMigrationCommandForStatus", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    command: "set -e && [ \"$(console --config-file=/config/migration_services.yaml snapshot status)\" = \"SUCCESS\" ] && exit 0 || exit 1"
+                    command: checkScript
                 }))
         )
         .addRetryParameters({
             limit: "200", retryPolicy: "Always",
             backoff: {duration: "5", factor: "2", cap: "300"}
         })
+        .addExpressionOutput("statusOutput", b => b.steps.checkSnapshotCompletion.outputs.statusOutput)
     )
 
 
