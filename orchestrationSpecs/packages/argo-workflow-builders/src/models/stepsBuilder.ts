@@ -33,6 +33,7 @@ import {
     TaskRebinder
 } from "./taskBuilder";
 import {NamedTask} from "./sharedTypes";
+import {SynchronizationConfig} from "./synchronization";
 
 export interface StepGroup {
     steps: NamedTask[];
@@ -91,7 +92,8 @@ export class StepsBuilder<
         public readonly bodyScope: StepsScope,
         readonly stepGroups: StepGroup[],
         public readonly outputsScope: OutputParamsScope,
-        protected readonly retryParameters: GenericScope
+        protected readonly retryParameters: GenericScope,
+        synchronization?: SynchronizationConfig
     ) {
         const rebind = <
             NewBodyScope extends TasksOutputsScope,
@@ -107,7 +109,7 @@ export class StepsBuilder<
             return new StepsBuilder(ctx, inputs, body, this.stepGroups, outputs, retry) as any;
         };
 
-        super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, rebind);
+        super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, rebind);
     }
 
     protected getExpressionBuilderContext(): StepsExpressionContext<InputParamsScope, StepsScope> {

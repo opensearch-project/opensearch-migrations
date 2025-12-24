@@ -14,6 +14,7 @@ import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./p
 import {PlainObject} from "./plainObject";
 import {AllowLiteralOrExpression, toExpression} from "./expression";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
+import {SynchronizationConfig} from "./synchronization";
 
 export type RetryParameters = GenericScope;
 
@@ -40,7 +41,8 @@ export type TemplateRebinder<
     inputs: InputParamsScope,
     body: NewBodyScope,
     outputs: NewOutputScope,
-    retryParameters: RetryParameters
+    retryParameters: RetryParameters,
+    synchronization: SynchronizationConfig | undefined
 ) => Self;
 
 type ReplaceOutputTypedMembers<
@@ -86,6 +88,7 @@ export abstract class TemplateBodyBuilder<
         protected readonly bodyScope: BodyScope,
         public readonly outputsScope: OutputParamsScope,
         protected readonly retryParameters: GenericScope,
+        protected readonly synchronization: SynchronizationConfig | undefined,
         protected readonly rebind: TemplateRebinder<ContextualScope, InputParamsScope, BodyBound, ExpressionBuilderContext>
     ) {}
 
@@ -116,7 +119,19 @@ export abstract class TemplateBodyBuilder<
             this.inputsScope,
             this.bodyScope,
             this.outputsScope,
-            retryParameters
+            retryParameters,
+            this.synchronization
+        );
+    }
+
+    public addSynchronization(synchronization: SynchronizationConfig) {
+        return this.rebind(
+            this.contextualScope,
+            this.inputsScope,
+            this.bodyScope,
+            this.outputsScope,
+            this.retryParameters,
+            synchronization
         );
     }
 
@@ -160,7 +175,8 @@ export abstract class TemplateBodyBuilder<
             this.inputsScope,
             this.bodyScope,
             newOutputs,
-            this.retryParameters
+            this.retryParameters,
+            this.synchronization
         ) as unknown as ReplaceOutputTypedMembers<
             ContextualScope,
             InputParamsScope,

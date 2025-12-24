@@ -26,6 +26,7 @@ import {PlainObject} from "./plainObject";
 import {AllowLiteralOrExpression, BaseExpression, expr, toExpression} from "./expression";
 import {TypeToken} from "./sharedTypes";
 import { DEFAULT_RESOURCES } from "@opensearch-migrations/schemas";
+import {SynchronizationConfig} from "./synchronization";
 
 export type IMAGE_PULL_POLICY = "Always" | "Never" | "IfNotPresent";
 
@@ -51,7 +52,8 @@ export class ContainerBuilder<
         public readonly volumeScope: VolumeScope,
         public readonly envScope: EnvScope,
         outputsScope: OutputParamsScope,
-        retryParameters: RetryParameters
+        retryParameters: RetryParameters,
+        synchronization?: SynchronizationConfig
     ) {
         // REBINDER: must accept any NewBodyScope extends GenericScope and return ContainerBuilder
         const rebind: TemplateRebinder<
@@ -74,7 +76,8 @@ export class ContainerBuilder<
             inputs: InputParamsScope,
             body: NewBodyScope,
             outputs: NewOutputScope,
-            retry: RetryParameters
+            retry: RetryParameters,
+            synchronization: SynchronizationConfig | undefined
         ) =>
             new ContainerBuilder<
                 ContextualScope,
@@ -83,9 +86,9 @@ export class ContainerBuilder<
                 VolumeScope,
                 EnvScope,
                 NewOutputScope
-            >(ctx, inputs, body, this.volumeScope, this.envScope, outputs, retry) as unknown as Self;
+            >(ctx, inputs, body, this.volumeScope, this.envScope, outputs, retry, synchronization) as unknown as Self;
 
-        super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, rebind);
+        super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, rebind);
     }
 
     protected getBody() {

@@ -42,14 +42,14 @@ if [ -z "$FORMAT_APPROVALS_OUTPUT" ]; then
     echo "Warning: formatApprovals command produced no output"
 fi
 
-if kubectl get configmap "$CONFIGMAP_NAME" &>/dev/null; then
-    echo "Updating existing ConfigMap '$CONFIGMAP_NAME'"
-    kubectl patch configmap "$CONFIGMAP_NAME" \
+if kubectl get configmap "$APPROVAL_CONFIGMAP_NAME" &>/dev/null; then
+    echo "Updating existing ConfigMap '$APPROVAL_CONFIGMAP_NAME'"
+    kubectl patch configmap "$APPROVAL_CONFIGMAP_NAME" \
         --type merge \
         -p "{\"data\":{\"$KEY\":$(echo "$FORMAT_APPROVALS_OUTPUT" | jq -Rs .)}}"
 else
-    echo "Creating new ConfigMap '$CONFIGMAP_NAME'"
-    kubectl create configmap "$CONFIGMAP_NAME" \
+    echo "Creating new ConfigMap '$APPROVAL_CONFIGMAP_NAME'"
+    kubectl create configmap "$APPROVAL_CONFIGMAP_NAME" \
         --from-file="$KEY"=<(echo "$FORMAT_APPROVALS_OUTPUT") \
         --dry-run=client -o yaml | \
         kubectl label -f - --local -o yaml \
@@ -81,7 +81,7 @@ spec:
       - name: uniqueRunNonce
         value: "$UUID"
       - name: approval-config
-        value: "$CONFIGMAP_NAME"
+        value: "$APPROVAL_CONFIGMAP_NAME"
       - name: migrationConfigs
         value: |
 $(sed 's/^/          /' "$TEMPORARY_FILE")

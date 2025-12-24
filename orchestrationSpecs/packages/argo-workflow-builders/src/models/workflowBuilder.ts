@@ -22,12 +22,14 @@ import {TypescriptError} from "../utils";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {TemplateBuilder} from "./templateBuilder";
 import {PlainObject} from "./plainObject";
+import {SynchronizationConfig} from "./synchronization";
 
 type MetadataScopeBase = {
     k8sMetadata: { name: string } & GenericScope,
     entrypoint?: string,
     serviceAccountName?: string,
-    parallelism?: number
+    parallelism?: number,
+    synchronization?: SynchronizationConfig
 };
 
 type SuspendTemplateBodyT = { body: { suspend: {} }, inputs: [], outputs?: [] };
@@ -73,6 +75,22 @@ export class WorkflowBuilder<
     ) {
         return new WorkflowBuilder(
             {...this.metadataScope, entrypoint: name},
+            this.inputsScope,
+            this.templateSigScope,
+            this.templateFullScope
+        );
+    }
+
+    addSynchronization(
+        synchronization: SynchronizationConfig
+    ): WorkflowBuilder<
+        ExtendScope<MetadataScope, { synchronization: SynchronizationConfig }>,
+        WorkflowInputsScope,
+        TemplateSigScope,
+        TemplateFullScope
+    > {
+        return new WorkflowBuilder(
+            {...this.metadataScope, synchronization},
             this.inputsScope,
             this.templateSigScope,
             this.templateFullScope

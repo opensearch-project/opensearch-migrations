@@ -17,6 +17,7 @@ import {PlainObject} from "./plainObject";
 import {UniqueNameConstraintAtDeclaration} from "./scopeConstraints";
 import {AllowLiteralOrExpression} from "./expression";
 import {TypeToken} from "./sharedTypes";
+import {SynchronizationConfig} from "./synchronization";
 
 export type K8sActionVerb = "create" | "get" | "apply" | "delete" | "replace" | "patch";
 
@@ -49,7 +50,8 @@ export class K8sResourceBuilder<
         inputsScope: InputParamsScope,
         bodyScope: ResourceScope,
         outputsScope: OutputParamsScope,
-        retryParameters: RetryParameters
+        retryParameters: RetryParameters,
+        synchronization?: SynchronizationConfig
     ) {
         const templateRebind: TemplateRebinder<
             ContextualScope,
@@ -80,7 +82,7 @@ export class K8sResourceBuilder<
                 NewOutputScope
             >(ctx, inputs, body, outputs, retry) as unknown as Self;
 
-        super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, templateRebind);
+        super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, templateRebind);
     }
 
     protected getBody() {

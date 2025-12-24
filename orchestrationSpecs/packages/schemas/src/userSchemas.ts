@@ -103,8 +103,7 @@ export const S3_REPO_CONFIG = z.object({
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
         .describe("Override the default S3 endpoint for clients to connect to. " +
             "Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"),
-    s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\/[a-zA-Z0-9!\-_.*'()/]*)?$/).describe("s3://BUCKETNAME/PATH"),
-    repoName: z.string().default("migration_assistant_repo").optional()
+    s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\/[a-zA-Z0-9!\-_.*'()/]*)?$/).describe("s3://BUCKETNAME/PATH")
 });
 
 export const CPU_QUANTITY = z.string()
@@ -284,8 +283,11 @@ export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     endpoint:  z.string().regex(/^https?:\/\/[^:\/\s]+(:\d+)?(\/)?$/), // override to required
 });
 
+export const SOURCE_CLUSTER_REPOS_RECORD = z.record(z.string(), S3_REPO_CONFIG)
+    .describe("Keys are the repository names that are managed by the source cluster");
+
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
-    snapshotRepo: S3_REPO_CONFIG.optional(),
+    snapshotRepos: SOURCE_CLUSTER_REPOS_RECORD.optional(),
     proxy: PROXY_OPTIONS.optional()
 });
 
@@ -302,7 +304,8 @@ export const SNAPSHOT_NAME_CONFIG = z.union([
 ]);
 
 export const NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG = z.object({
-    snapshotNameConfig: SNAPSHOT_NAME_CONFIG
+    snapshotNameConfig: SNAPSHOT_NAME_CONFIG,
+    repoName: z.string()
 });
 
 export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
@@ -351,5 +354,34 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
         sourceClusters: SOURCE_CLUSTERS_MAP,
         targetClusters: TARGET_CLUSTERS_MAP,
         migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG).min(1)
+    }).superRefine((data, ctx) => {
+        for (const migrationConfig of data.migrationConfigs) {
+            const sourceCluster = data.sourceClusters[migrationConfig.fromSource];
+            if (!sourceCluster) continue;
+
+            const snapshotRepos = sourceCluster.snapshotRepos;
+            const snapshotConfigs = migrationConfig.snapshotExtractAndLoadConfigs ?? [];
+
+            for (let i = 0; i < snapshotConfigs.length; i++) {
+                const snapshotConfig = snapshotConfigs[i];
+                const repoName = snapshotConfig.snapshotConfig.repoName;
+
+                if (repoName) {
+                    if (!snapshotRepos) {
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: `snapshotExtractAndLoadConfig[${i}] references repoName '${repoName}' but source cluster '${migrationConfig.fromSource}' has no snapshotRepos defined`,
+                            path: ['migrationConfigs', data.migrationConfigs.indexOf(migrationConfig), 'snapshotExtractAndLoadConfigs', i, 'snapshotConfig', 'repoName']
+                        });
+                    } else if (!(repoName in snapshotRepos)) {
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: `repoName '${repoName}' does not exist in source cluster '${migrationConfig.fromSource}'. Available repos: ${Object.keys(snapshotRepos).join(', ')}`,
+                            path: ['migrationConfigs', data.migrationConfigs.indexOf(migrationConfig), 'snapshotExtractAndLoadConfigs', i, 'snapshotConfig', 'repoName']
+                        });
+                    }
+                }
+            }
+        }
     })
 );

@@ -32,6 +32,7 @@ import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "./template
 import {NonSerializedPlainObject, PlainObject} from "./plainObject";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {NamedTask} from "./sharedTypes";
+import {SynchronizationConfig} from "./synchronization";
 
 export type DagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends NonSerializedPlainObject> =
     TaskOpts<TasksOutputsScope, "tasks", LoopT> & { dependencies?: ReadonlyArray<Extract<keyof TaskScope, string>> };
@@ -95,7 +96,8 @@ export class DagBuilder<
         bodyScope: TaskScope,
         orderedTasks: NamedTask[],
         outputs: OutputParamsScope,
-        retryParameters: RetryParameters
+        retryParameters: RetryParameters,
+        synchronization?: SynchronizationConfig
     ) {
         // Trick: capture a mutable selfRef within a closure for use inside the rebinder
         let selfRef: DagBuilder<ContextualScope, InputParamsScope, any, any> | undefined;
@@ -113,7 +115,7 @@ export class DagBuilder<
             ) as any;
         };
 
-        super(contextualScope, inputs, bodyScope, outputs, retryParameters, templateRebind);
+        super(contextualScope, inputs, bodyScope, outputs, retryParameters, synchronization, templateRebind);
 
         // This rebinder produces a NEW DagBuilder with the NEW task scope when tasks change
         const tasksRebind: TaskRebinder<ContextualScope> =

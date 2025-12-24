@@ -12,6 +12,7 @@ import {BaseExpression, makeDirectTypeProxy, UnquotedTypeWrapper} from "../model
 import {NamedTask} from "../models/sharedTypes";
 import { omit } from 'lodash';
 import {toSafeYamlOutput} from "../utils";
+import {SynchronizationConfig} from "../models/synchronization";
 
 function isDefault<T extends PlainObject>(
     p: InputParamDef<T, boolean>
@@ -20,6 +21,9 @@ function isDefault<T extends PlainObject>(
 }
 
 export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder<any, any, any>["getFullScope"]>>(wf: WF) {
+    // Validate synchronization before rendering
+    validateSynchronizationUniqueness(wf);
+    
     return {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "WorkflowTemplate",
@@ -30,6 +34,7 @@ export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder<any
             entrypoint: wf.metadata.entrypoint,
             parallelism: 100,
             ...(wf.workflowParameters != null && {arguments: formatParameters(wf.workflowParameters)}),
+            ...(wf.metadata.synchronization && {synchronization: formatSynchronization(wf.metadata.synchronization)}),
             templates: (() => {
                 const list = [];
                 for (const k in wf.templates) {
@@ -229,6 +234,36 @@ function convertTemplateName(n: string) {
     return n.toLowerCase();
 }
 
+function formatSynchronization(sync: SynchronizationConfig) {
+    const result: any = {};
+    
+    if (sync.semaphores && sync.semaphores.length > 0) {
+        result.semaphores = sync.semaphores.map(sem => {
+            if ('configMapKeyRef' in sem) {
+                return {
+                    configMapKeyRef: sem.configMapKeyRef,
+                    ...(sem.namespace && { namespace: sem.namespace })
+                };
+            } else {
+                return {
+                    database: sem.database,
+                    ...(sem.namespace && { namespace: sem.namespace })
+                };
+            }
+        });
+    }
+    
+    if (sync.mutexes && sync.mutexes.length > 0) {
+        result.mutexes = sync.mutexes.map(mutex => ({
+            name: mutex.name,
+            ...(mutex.database && { database: mutex.database }),
+            ...(mutex.namespace && { namespace: mutex.namespace })
+        }));
+    }
+    
+    return result;
+}
+
 function formatTemplate(templates: GenericScope, templateName: string) {
     const template = templates[templateName];
     return {
@@ -237,6 +272,7 @@ function formatTemplate(templates: GenericScope, templateName: string) {
         ...formatBody(template.body),
         ...(template.retryStrategy && Object.keys(template.retryStrategy).length > 0 ?
             {retryStrategy: template.retryStrategy} : {}),
+        ...(template.synchronization && {synchronization: formatSynchronization(template.synchronization)}),
         outputs: formatOutputParameters(template.outputs)
     }
 }
@@ -288,4 +324,34 @@ export function transformExpressionsDeep<T>(input: T) {
     }
 
     return visit(input);
+}
+
+function validateSynchronizationUniqueness<WF extends ReturnType<WorkflowBuilder<any, any, any>["getFullScope"]>>(wf: WF) {
+    const configMapRefs = new Set<string>();
+    
+    // Check workflow-level synchronization
+    if (wf.metadata.synchronization) {
+        collectConfigMapRefs(wf.metadata.synchronization, configMapRefs, 'workflow');
+    }
+    
+    // Check template-level synchronization
+    for (const [templateName, template] of Object.entries(wf.templates)) {
+        if (template.synchronization) {
+            collectConfigMapRefs(template.synchronization, configMapRefs, `template '${templateName}'`);
+        }
+    }
+}
+
+function collectConfigMapRefs(sync: SynchronizationConfig, refs: Set<string>, location: string) {
+    if (sync.semaphores) {
+        for (const sem of sync.semaphores) {
+            if ('configMapKeyRef' in sem) {
+                const refKey = `${sem.namespace || 'default'}/${sem.configMapKeyRef.name}/${sem.configMapKeyRef.key}`;
+                if (refs.has(refKey)) {
+                    throw new Error(`Duplicate ConfigMap reference found: ${refKey} in ${location}`);
+                }
+                refs.add(refKey);
+            }
+        }
+    }
 }

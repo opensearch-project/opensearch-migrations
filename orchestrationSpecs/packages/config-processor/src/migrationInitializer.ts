@@ -1,4 +1,4 @@
-import {deepStrict, StreamSchemaParser} from "./streamSchemaTransformer";
+import {StreamSchemaParser} from "./streamSchemaTransformer";
 import {
     ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN,
     PARAMETERIZED_MIGRATION_CONFIG,
@@ -28,7 +28,7 @@ export class MigrationInitializer {
             hosts: etcdSettings.endpoints,
             auth: etcdSettings.auth
         });
-        this.loader = new StreamSchemaParser(deepStrict(PARAMETERIZED_MIGRATION_CONFIG_ARRAYS));
+        this.loader = new StreamSchemaParser(PARAMETERIZED_MIGRATION_CONFIG_ARRAYS);
     }
 
     private calculateProcessorCount(targetMigrations: z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG>[]): number {

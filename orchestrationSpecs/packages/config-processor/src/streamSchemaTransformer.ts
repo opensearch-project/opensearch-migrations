@@ -25,41 +25,6 @@ export function formatInputValidationError(e: InputValidationError): string {
         .map(([k,v],idx) => `${k}... at:\n  ${v}`).join("\n");
 }
 
-export function deepStrict<T extends z.ZodTypeAny>(schema: T): T {
-    if (schema instanceof z.ZodObject) {
-        const shape = schema.shape;
-        const strictShape: any = {};
-
-        for (const key in shape) {
-            strictShape[key] = deepStrict(shape[key]);
-        }
-
-        return z.object(strictShape).strict() as unknown as T;
-    }
-
-    if (schema instanceof z.ZodArray) {
-        const elementSchema = schema.element as z.ZodTypeAny;
-        return z.array(deepStrict(elementSchema)) as unknown as T;
-    }
-
-    if (schema instanceof z.ZodRecord) {
-        return z.record(
-            schema._def.keyType,  // Don't deepStrict the key
-            deepStrict(schema._def.valueType as z.ZodTypeAny)
-        ) as unknown as T;
-    }
-
-    if (schema instanceof z.ZodOptional) {
-        return deepStrict(schema.unwrap() as z.ZodTypeAny).optional() as unknown as T;
-    }
-
-    if (schema instanceof z.ZodNullable) {
-        return deepStrict(schema.unwrap() as z.ZodTypeAny).nullable() as unknown as T;
-    }
-
-    return schema;
-}
-
 export function stripComments<T>(obj: T): T {
     if (obj === null || typeof obj !== 'object') {
         return obj;
@@ -105,17 +70,17 @@ export class StreamSchemaParser<TInput extends z.ZodSchema> {
      */
     validateInput(data: unknown): z.infer<TInput> {
         const strippedData = stripComments(data);
-        try {
-            return this.inputStrictSchema.parse(strippedData);
-        } catch (e) {
-            if (e instanceof ZodError) {
-                throw new InputValidationError(e.issues.map(errItem=>
-                    new InputValidationElement(errItem.path, errItem.message)));
-                // throw new InputValidationError([]);
-            } else {
-                throw e;
-            }
+        const result = this.inputStrictSchema.safeParse(strippedData);
+
+        if (!result.success) {
+            throw new InputValidationError(
+                result.error.issues.map(errItem =>
+                    new InputValidationElement(errItem.path, errItem.message)
+                )
+            );
         }
+
+        return result.data;
     }
 }
 

@@ -79,7 +79,8 @@ export const NAMED_TARGET_CLUSTER_CONFIG =
 
 export const DENORMALIZED_S3_REPO_CONFIG =
     makeOptionalDefaultedFieldsRequired(S3_REPO_CONFIG.extend({
-        useLocalStack: z.boolean().default(false)
+        useLocalStack: z.boolean().default(false),
+        repoName: z.string(),
     }));
 
 export const COMPLETE_SNAPSHOT_CONFIG =
@@ -88,8 +89,10 @@ export const COMPLETE_SNAPSHOT_CONFIG =
     }));
 
 export const DYNAMIC_SNAPSHOT_CONFIG =
-    makeOptionalDefaultedFieldsRequired(NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG.extend({
-        repoConfig: DENORMALIZED_S3_REPO_CONFIG  // Replace string reference with actual config
+    makeOptionalDefaultedFieldsRequired(NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG
+        .omit({repoName: true})
+        .extend({
+            repoConfig: DENORMALIZED_S3_REPO_CONFIG  // Replace string reference with actual config
     }));
 
 export const METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(

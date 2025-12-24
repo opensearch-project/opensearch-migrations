@@ -5,7 +5,7 @@ import {
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
     CREATE_SNAPSHOT_OPTIONS,
-    DEFAULT_RESOURCES,
+    DEFAULT_RESOURCES, DENORMALIZED_S3_REPO_CONFIG,
     METADATA_OPTIONS,
     NAMED_SOURCE_CLUSTER_CONFIG,
     NAMED_TARGET_CLUSTER_CONFIG,
@@ -17,6 +17,7 @@ import {
     BaseExpression,
     expr,
     INTERNAL,
+    localSemaphore,
     selectInputsForRegister, Serialized,
     typeToken,
     WorkflowBuilder
@@ -66,6 +67,26 @@ export function makeSourceParamDict(sourceConfig: BaseExpression<Serialized<z.in
     return makeClusterParamDict("source", sourceConfig);
 }
 
+// Helper function to determine semaphore key based on source cluster version
+function getSemaphoreKeyExpression(
+    sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
+    snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>
+) {
+    const sourceVersion = expr.get(expr.deserializeRecord(sourceConfig), "version");
+    const sourceName = expr.get(expr.deserializeRecord(sourceConfig), "name");
+    const snapshotName = expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName");
+    
+    // For ES 7/OS 1 and earlier, use shared semaphore per source cluster
+    // For later versions, use unique key per snapshot (no effective limiting)
+    return expr.ternary(
+        expr.regexMatch(sourceVersion, expr.literal("^(?:ES [1-7]|OS 1)(?:\\.[0-9]+)*$")),
+        // Legacy versions: shared semaphore per source cluster
+        expr.concat(expr.literal("snapshot-legacy-"), sourceName),
+        // Modern versions: unique key per snapshot (no limiting)
+        expr.concat(expr.literal("snapshot-modern-"), sourceName, expr.literal("-"), snapshotName)
+    );
+}
+
 function makeParamsDict(
     sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
@@ -87,8 +108,7 @@ function makeParamsDict(
         expr.mergeDicts(
             expr.makeDict({
                 "snapshotName": expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
-                "snapshotRepoName": expr.dig(expr.deserializeRecord(snapshotConfig), ["repoConfig", "repoName"],
-                    S3_REPO_CONFIG.shape.repoName.unwrap().parse(undefined))
+                "snapshotRepoName": expr.jsonPathStrict(snapshotConfig, "repoConfig", "repoName")
             }),
             makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), false)
         )
@@ -167,6 +187,11 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     configContents: c.steps.getConsoleConfig.outputs.configContents
                 }))
         )
+        .addSynchronization({
+            semaphores: [
+                localSemaphore("migration-semaphores", "snapshot-semaphore")
+            ]
+        })
         .addExpressionOutput("snapshotConfig", b => b.inputs.snapshotConfig)
     )
 
