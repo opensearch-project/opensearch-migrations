@@ -25,8 +25,8 @@ def call(Map config = [:]) {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         parameters {
-            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/lewijacn/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'eks-pipeline', description: 'Git branch to use for repository')
+            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
+            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             choice(
                     name: 'SOURCE_VERSION',
@@ -288,6 +288,9 @@ def call(Map config = [:]) {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    // Install QEMU for cross-architecture builds (arm64 on x86_64 host)
+                                    sh "docker run --privileged --rm tonistiigi/binfmt --install all"
+
                                     def builderExists = sh(
                                             script: "docker buildx ls | grep -q '^ecr-builder'",
                                             returnStatus: true
