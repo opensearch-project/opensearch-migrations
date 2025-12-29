@@ -26,6 +26,7 @@ build_images_locally=false
 keep_build_images_job_alive=false
 use_public_images=true
 skip_console_exec=false
+stage_filter=""
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -44,6 +45,7 @@ while [[ $# -gt 0 ]]; do
     --use-public-images) use_public_images="$2"; shift 2 ;;
     --keep-build-images-job-alive) keep_build_images_job_alive=true; shift 1 ;;
     --skip-console-exec) skip_console_exec=true; shift 1 ;;
+    --stage) stage_filter="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo "Options:"
@@ -61,6 +63,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --use-public-images <true|false>          (default: $use_public_images)"
       echo "  --keep-build-images-job-alive             (default: $keep_build_images_job_alive)"
       echo "  --skip-console-exec                       (default: $skip_console_exec)"
+      echo "  --stage <val>                             Filter CFN exports by stage name"
       exit 0
       ;;
     *)
@@ -115,6 +118,10 @@ get_cfn_export() {
   # Example CFN stack output value will look like: export MIGRATIONS_EKS_CLUSTER_NAME=migration-eks-cluster-dev-us-east-2;
   # export MIGRATIONS_ECR_REGISTRY=123456789012.dkr.ecr.us-east-2.amazonaws.com/migration-ecr-dev-us-east-2;...
   while read -r name value; do
+    # If stage_filter is set, only include exports that contain the stage name
+    if [[ -n "$stage_filter" && ! "$name" =~ $stage_filter ]]; then
+      continue
+    fi
     names+=("$name")
     values+=("$value")
   done < <(aws cloudformation list-exports \
@@ -122,7 +129,7 @@ get_cfn_export() {
     --output text)
 
   if [ ${#names[@]} -eq 0 ]; then
-    echo "Error: No exports found starting with '$prefix'" >&2
+    echo "Error: No exports found starting with '$prefix'${stage_filter:+ matching stage '$stage_filter'}" >&2
     return 1
   elif [ ${#names[@]} -eq 1 ]; then
     echo "${values[0]}"
