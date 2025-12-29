@@ -361,7 +361,7 @@ def call(Map config = [:]) {
                                         sh "kubectl -n ma get pods"
                                         sh "pipenv run app --delete-only"
                                         echo "List resources not removed by helm uninstall:"
-                                        sh "kubectl get all,pvc,configmap,secret,servicemonitor,workflow -n ma -o wide"
+                                        sh "kubectl get all,pvc,configmap,secret,workflow -n ma -o wide || true"
                                         sh "kubectl -n ma delete namespace ma"
                                         // Remove added security group rule to allow proper cleanup of stacks
                                         sh """
