@@ -1,5 +1,6 @@
 import {z} from 'zod';
 import {
+    ARGO_CREATE_SNAPSHOT_OPTIONS,
     COMPLETE_SNAPSHOT_CONFIG,
     CREATE_SNAPSHOT_OPTIONS,
     DEFAULT_RESOURCES,
@@ -142,7 +143,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("migrations", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['migrations']>())
         .addRequiredInput("name", typeToken<string>())
         .addOptionalInput("createSnapshotConfig",
-                c=> expr.empty<z.infer<typeof CREATE_SNAPSHOT_OPTIONS>>())
+                c=> expr.empty<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
 
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(ImageParameters)

@@ -6,6 +6,10 @@ import {
 } from "@opensearch-migrations/schemas";
 import {Etcd3} from "etcd3";
 import {z} from "zod";
+import {stringify} from "yaml";
+import * as fs from "fs/promises";
+import * as path from "path";
+import {scrapeApprovals} from "./formatApprovals";
 
 /** etcd connection options */
 export interface EtcdOptions {
@@ -83,5 +87,131 @@ export class MigrationInitializer {
      */
     async close(): Promise<void> {
         await this.client.close();
+    }
+
+    /**
+     * Generate output files including workflow config, approval ConfigMaps, and concurrency ConfigMaps with semaphores
+     */
+    async generateOutputFiles(workflows: ARGO_WORKFLOW_SCHEMA, outputDir: string, userConfig: any): Promise<void> {
+        await fs.mkdir(outputDir, { recursive: true });
+
+        // 1. Write workflow configuration (semaphores already added during transformation)
+        const workflowPath = path.join(outputDir, 'workflowMigration.config.yaml');
+        await fs.writeFile(workflowPath, JSON.stringify(workflows, null, 2));
+
+        // 2. Write approval config maps
+        const approvalConfigMaps = this.generateApprovalConfigMaps(userConfig);
+        const approvalPath = path.join(outputDir, 'approvalConfigMaps.yaml');
+        await fs.writeFile(approvalPath, stringify(approvalConfigMaps));
+
+        // 3. Write concurrency config maps (includes semaphores)
+        const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
+        const concurrencyPath = path.join(outputDir, 'concurrencyConfigMaps.yaml');
+        await fs.writeFile(concurrencyPath, stringify(concurrencyConfigMaps));
+    }
+
+    private generateApprovalConfigMaps(userConfig: any) {
+        if (!userConfig) {
+            return { 
+                apiVersion: 'v1',
+                kind: 'List',
+                items: [] 
+            };
+        }
+
+        const approvals = scrapeApprovals(userConfig);
+        
+        return {
+            apiVersion: 'v1',
+            kind: 'List',
+            items: [{
+                apiVersion: 'v1',
+                kind: 'ConfigMap',
+                metadata: {
+                    name: 'approval-config-0',
+                    namespace: 'default',
+                    labels: {
+                        'workflows.argoproj.io/configmap-type': 'Parameter'
+                    }
+                },
+                data: {
+                    'autoApprove': stringify(approvals)
+                }
+            }]
+        };
+    }
+
+    private generateConcurrencyConfigMaps(userConfig: any) {
+        const semaphoreKeys = this.generateSemaphoreKeys(userConfig);
+        const semaphoreData: Record<string, string> = {};
+        
+        // Add each semaphore key with count=1
+        semaphoreKeys.forEach(key => {
+            semaphoreData[key] = "1";
+        });
+
+        return {
+            apiVersion: 'v1',
+            kind: 'List',
+            items: [{
+                apiVersion: 'v1',
+                kind: 'ConfigMap',
+                metadata: {
+                    name: 'concurrency-config',
+                    namespace: 'default'
+                },
+                data: {
+                    // General concurrency settings
+                    'concurrency.yaml': stringify({
+                        maxConcurrentWorkflows: 5,
+                        maxConcurrentSnapshots: 2,
+                        maxConcurrentMigrations: 3
+                    }),
+                    // Semaphore keys with count=1
+                    ...semaphoreData
+                }
+            }]
+        };
+    }
+
+    private generateSemaphoreKeys(userConfig: any): string[] {
+        if (!userConfig?.migrationConfigs) {
+            return [];
+        }
+
+        const semaphoreKeys: string[] = [];
+
+        for (const migrationConfig of userConfig.migrationConfigs) {
+            const sourceName = migrationConfig.fromSource;
+            const sourceCluster = userConfig.sourceClusters?.[sourceName];
+            
+            if (!sourceCluster || !migrationConfig.snapshotExtractAndLoadConfigs) {
+                continue;
+            }
+
+            const sourceVersion = sourceCluster.version || "";
+            
+            for (const snapshotConfig of migrationConfig.snapshotExtractAndLoadConfigs) {
+                // Apply same logic as generateSemaphoreConfig
+                const isLegacyVersion = /^(?:ES [1-7]|OS 1)(?:\.[0-9]+)*$/.test(sourceVersion);
+                
+                if (isLegacyVersion) {
+                    // Legacy versions: shared semaphore per source cluster
+                    const key = `snapshot-legacy-${sourceName}`;
+                    if (!semaphoreKeys.includes(key)) {
+                        semaphoreKeys.push(key);
+                    }
+                } else {
+                    // Modern versions: unique key per snapshot (no effective limiting)
+                    const snapshotName = snapshotConfig.snapshotConfig?.snapshotNameConfig?.snapshotNamePrefix || 
+                                       snapshotConfig.snapshotConfig?.snapshotNameConfig?.externallyManagedSnapshot || 
+                                       'unknown';
+                    const key = `snapshot-modern-${sourceName}-${snapshotName}`;
+                    semaphoreKeys.push(key);
+                }
+            }
+        }
+
+        return semaphoreKeys;
     }
 }

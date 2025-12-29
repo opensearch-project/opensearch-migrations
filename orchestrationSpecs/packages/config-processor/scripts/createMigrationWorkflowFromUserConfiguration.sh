@@ -19,42 +19,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Default command, can be overridden by setting INITIALIZE_CMD environment variable
 : ${INITIALIZE_CMD:="$NODEJS $SCRIPT_DIR/index.js initialize"}
 
-# Create a temporary file
-TEMPORARY_FILE=$(mktemp)
+# Create a temporary directory for output files
+TEMP_DIR=$(mktemp -d)
 
 # Ensure cleanup on exit
-trap "rm -f $TEMPORARY_FILE" EXIT
+trap "rm -rf $TEMP_DIR" EXIT
 
 UUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 echo "Generated unique uniqueRunNonce: $UUID"
 
 echo "Running configuration conversion..."
-$INITIALIZE_CMD --user-config $CONFIG_FILENAME --unique-run-nonce $UUID $@ > "$TEMPORARY_FILE"
+$INITIALIZE_CMD --user-config $CONFIG_FILENAME --unique-run-nonce $UUID --output-dir $TEMP_DIR $@
 
-echo "Configuring approval skips..."
-CONFIGMAP_NAME="approval-config"
-KEY="autoApprove"
+echo "Applying Kubernetes resources..."
 
-: ${FORMAT_APPROVALS_CMD:="$NODEJS $SCRIPT_DIR/index.js formatApprovals"}
-FORMAT_APPROVALS_OUTPUT=$($FORMAT_APPROVALS_CMD $CONFIG_FILENAME)
-
-if [ -z "$FORMAT_APPROVALS_OUTPUT" ]; then
-    echo "Warning: formatApprovals command produced no output"
+# Apply approval config maps
+if [ -f "$TEMP_DIR/approvalConfigMaps.yaml" ]; then
+    echo "Applying approval config maps..."
+    kubectl apply -f "$TEMP_DIR/approvalConfigMaps.yaml"
 fi
 
-if kubectl get configmap "$APPROVAL_CONFIGMAP_NAME" &>/dev/null; then
-    echo "Updating existing ConfigMap '$APPROVAL_CONFIGMAP_NAME'"
-    kubectl patch configmap "$APPROVAL_CONFIGMAP_NAME" \
-        --type merge \
-        -p "{\"data\":{\"$KEY\":$(echo "$FORMAT_APPROVALS_OUTPUT" | jq -Rs .)}}"
-else
-    echo "Creating new ConfigMap '$APPROVAL_CONFIGMAP_NAME'"
-    kubectl create configmap "$APPROVAL_CONFIGMAP_NAME" \
-        --from-file="$KEY"=<(echo "$FORMAT_APPROVALS_OUTPUT") \
-        --dry-run=client -o yaml | \
-        kubectl label -f - --local -o yaml \
-            "workflows.argoproj.io/configmap-type=Parameter" | \
-        kubectl apply -f -
+# Apply concurrency config maps  
+if [ -f "$TEMP_DIR/concurrencyConfigMaps.yaml" ]; then
+    echo "Applying concurrency config maps..."
+    kubectl apply -f "$TEMP_DIR/concurrencyConfigMaps.yaml"
 fi
 
 # Set the name field based on environment variable
@@ -81,10 +69,10 @@ spec:
       - name: uniqueRunNonce
         value: "$UUID"
       - name: approval-config
-        value: "$APPROVAL_CONFIGMAP_NAME"
+        value: "approval-config-0"
       - name: migrationConfigs
         value: |
-$(sed 's/^/          /' "$TEMPORARY_FILE")
+$(sed 's/^/          /' "$TEMP_DIR/workflowMigration.config.yaml")
 EOF
 
 echo "Done! Workflow submitted successfully."

@@ -1,6 +1,7 @@
 
 import {z} from "zod";
 import {
+    ARGO_CREATE_SNAPSHOT_OPTIONS,
     CLUSTER_CONFIG,
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
@@ -17,7 +18,6 @@ import {
     BaseExpression,
     expr,
     INTERNAL,
-    localSemaphore,
     selectInputsForRegister, Serialized,
     typeToken,
     WorkflowBuilder
@@ -67,36 +67,17 @@ export function makeSourceParamDict(sourceConfig: BaseExpression<Serialized<z.in
     return makeClusterParamDict("source", sourceConfig);
 }
 
-// Helper function to determine semaphore key based on source cluster version
-function getSemaphoreKeyExpression(
-    sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
-    snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>
-) {
-    const sourceVersion = expr.get(expr.deserializeRecord(sourceConfig), "version");
-    const sourceName = expr.get(expr.deserializeRecord(sourceConfig), "name");
-    const snapshotName = expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName");
-    
-    // For ES 7/OS 1 and earlier, use shared semaphore per source cluster
-    // For later versions, use unique key per snapshot (no effective limiting)
-    return expr.ternary(
-        expr.regexMatch(sourceVersion, expr.literal("^(?:ES [1-7]|OS 1)(?:\\.[0-9]+)*$")),
-        // Legacy versions: shared semaphore per source cluster
-        expr.concat(expr.literal("snapshot-legacy-"), sourceName),
-        // Modern versions: unique key per snapshot (no limiting)
-        expr.concat(expr.literal("snapshot-modern-"), sourceName, expr.literal("-"), snapshotName)
-    );
-}
-
 function makeParamsDict(
     sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
-    options: BaseExpression<Serialized<z.infer<typeof CREATE_SNAPSHOT_OPTIONS>>>
+    options: BaseExpression<Serialized<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>>
 ) {
     return expr.mergeDicts(
         expr.mergeDicts(
             makeSourceParamDict(sourceConfig),
             expr.mergeDicts(
-                expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap"),
+                expr.omit(expr.deserializeRecord(options),
+                    "loggingConfigurationOverrideConfigMap", "semaphoreConfigMapName", "semaphoreKey"),
                 // noWait is essential for workflow logic - the workflow handles polling for snapshot
                 // completion separately via checkSnapshotStatus, so the CreateSnapshot command must
                 // return immediately to allow the workflow to manage the wait/retry behavior
@@ -128,7 +109,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
     .addTemplate("runCreateSnapshot", t => t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
-        .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof CREATE_SNAPSHOT_OPTIONS>>())
+        .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
@@ -168,11 +149,10 @@ export const CreateSnapshot = WorkflowBuilder.create({
     .addTemplate("snapshotWorkflow", t => t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
-        .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof CREATE_SNAPSHOT_OPTIONS>>())
+        .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
-
             .addStep("createSnapshot", INTERNAL, "runCreateSnapshot", c =>
                 c.register(selectInputsForRegister(b, c)))
 
@@ -187,11 +167,14 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     configContents: c.steps.getConsoleConfig.outputs.configContents
                 }))
         )
-        .addSynchronization({
-            semaphores: [
-                localSemaphore("migration-semaphores", "snapshot-semaphore")
-            ]
-        })
+        .addSynchronization(c => ({
+            semaphores: [{
+                configMapKeyRef: {
+                    name: expr.get(expr.deserializeRecord(c.inputs.createSnapshotConfig), "semaphoreConfigMapName"),
+                    key: expr.get(expr.deserializeRecord(c.inputs.createSnapshotConfig), "semaphoreKey")
+                }
+            }]
+        }))
         .addExpressionOutput("snapshotConfig", b => b.inputs.snapshotConfig)
     )
 

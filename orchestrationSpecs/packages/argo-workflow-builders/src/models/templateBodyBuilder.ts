@@ -124,14 +124,14 @@ export abstract class TemplateBodyBuilder<
         );
     }
 
-    public addSynchronization(synchronization: SynchronizationConfig) {
+    public addSynchronization(synchronizationBuilderFn: (b: ExpressionBuilderContext) => SynchronizationConfig) {
         return this.rebind(
             this.contextualScope,
             this.inputsScope,
             this.bodyScope,
             this.outputsScope,
             this.retryParameters,
-            synchronization
+            synchronizationBuilderFn(this.getExpressionBuilderContext())
         );
     }
 

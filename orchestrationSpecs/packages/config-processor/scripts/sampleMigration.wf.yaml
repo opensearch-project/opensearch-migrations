@@ -1,13 +1,13 @@
 {
   skipApprovals : false,
   sourceClusters: {
-    "source1": {
+    "source": {
       "endpoint": "https://elasticsearch-master-headless:9200",
       "allowInsecure": true,
       "version": "ES 7.10",
       "authConfig": {
         "basic": {
-          "secretName": "source1-creds"
+          "secretName": "source-creds"
         }
       },
       "snapshotRepos": {
@@ -24,21 +24,21 @@
     }
   },
   targetClusters: {
-    "target1": {
+    "target": {
       "endpoint": "https://opensearch-cluster-master-headless:9200",
       "allowInsecure": true,
       "version": "OS 2.11",
       "authConfig": {
         "basic": {
-          "secretName": "target1-creds"
+          "secretName": "target-creds"
         }
       }
     }
   },
   migrationConfigs: [
     {
-      "fromSource": "source1",
-      "toTarget": "target1",
+      "fromSource": "source",
+      "toTarget": "target",
       "skipApprovals": false,
 
       "snapshotExtractAndLoadConfigs": [
@@ -46,8 +46,8 @@
           "snapshotConfig": {
             "repoName": "default",
             "snapshotNameConfig": {
-#              "externallyManagedSnapshot": "source1_source1snapshot1_88a9f10c-207e-4c04-b6c6-fbc058501131",
-              "snapshotNamePrefix": "source1snapshot1"
+#              "externallyManagedSnapshot": "source_sourcesnapshot1_88a9f10c-207e-4c04-b6c6-fbc058501131",
+              "snapshotNamePrefix": "sourcesnapshot1"
             },
           },
           "createSnapshotConfig": {

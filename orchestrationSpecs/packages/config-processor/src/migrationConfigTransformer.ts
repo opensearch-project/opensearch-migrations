@@ -229,10 +229,19 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
             const newSnapshotConfig = snapshotExtractAndLoadConfigs === undefined ? undefined :
                 snapshotExtractAndLoadConfigs.map((sc, idx) => {
-                    const {snapshotConfig, ...rest} = sc;
+                    const {snapshotConfig, createSnapshotConfig, ...rest} = sc;
                     if (sourceCluster.snapshotRepos === undefined) {
                         throw Error(`Configured a snapshot repo with ${snapshotConfig}, for ${fromSource}. but the source cluster definition does not define a repo.`);
                     }
+                    
+                    let enhancedCreateSnapshotConfig = createSnapshotConfig;
+                    if (createSnapshotConfig && snapshotConfig) {
+                        enhancedCreateSnapshotConfig = {
+                            ...createSnapshotConfig,
+                            ...this.generateSemaphoreConfig(sourceCluster.version || "", fromSource, snapshotConfig)
+                        };
+                    }
+                    
                     return {
                         ...rest,
                         ...(snapshotConfig !== undefined && {
@@ -240,6 +249,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                                 snapshotNameConfig: snapshotConfig.snapshotNameConfig,
                                 repoConfig: sourceCluster.snapshotRepos[snapshotConfig.repoName] ?? {}
                             }
+                        }),
+                        ...(enhancedCreateSnapshotConfig !== undefined && {
+                            createSnapshotConfig: enhancedCreateSnapshotConfig
                         })
                     }// as z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>;
                 });
@@ -265,5 +277,26 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             throw new Error("Error while safely parsing the transformed workflow " +
                 "as a configuration for the argo workflow.", { cause: error} );
         }
+    }
+
+    private generateSemaphoreConfig(sourceVersion: string, sourceName: string, snapshotConfig: any) {
+        const isLegacyVersion = /^(?:ES [1-7]|OS 1)(?:\.[0-9]+)*$/.test(sourceVersion);
+        
+        let semaphoreKey: string;
+        if (isLegacyVersion) {
+            // Legacy versions: shared semaphore per source cluster
+            semaphoreKey = `snapshot-legacy-${sourceName}`;
+        } else {
+            // Modern versions: unique key per snapshot (no effective limiting)
+            const snapshotName = snapshotConfig?.snapshotNameConfig?.snapshotNamePrefix || 
+                               snapshotConfig?.snapshotNameConfig?.externallyManagedSnapshot || 
+                               'unknown';
+            semaphoreKey = `snapshot-modern-${sourceName}-${snapshotName}`;
+        }
+
+        return {
+            semaphoreConfigMapName: 'concurrency-config',
+            semaphoreKey: semaphoreKey
+        };
     }
 }
