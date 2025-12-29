@@ -95,7 +95,8 @@ class ArgoService:
         """Print workflow details for debugging failed workflows."""
         try:
             workflow_data = self._get_workflow_status_json(workflow_name)
-            logger.info(f"Workflow {workflow_name} full status:\n{json.dumps(workflow_data.get('status', {}), indent=2)}")
+            logger.info(
+                f"Workflow {workflow_name} full status:\n{json.dumps(workflow_data.get('status', {}), indent=2)}")
         except Exception as e:
             logger.error(f"Failed to get workflow details: {e}")
 
