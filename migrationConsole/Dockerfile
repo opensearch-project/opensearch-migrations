@@ -126,7 +126,8 @@ RUN "$NODEJS" "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME" &
     "$NODEJS" "$CONFIG_PROCESSOR_DIR" makeSample >> "${CONFIG_PROCESSOR_DIR}/sample.yaml"
 
 COPY nodeStaging/workflowTemplates /root/workflows
-
+COPY workflowConfigToServicesConfig.jq /root/
+ENV WORKFLOW_CONFIG_JQ_SCRIPT=/root/workflowConfigToServicesConfig.jq
 
 # Console setup bash completion and venv for interactive access
 RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh && \

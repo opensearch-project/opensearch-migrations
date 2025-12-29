@@ -231,7 +231,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("sessionName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
-            .addStep("checkHistoricalBackfillCompletion", MigrationConsole, "runMigrationCommand", c =>
+            .addStep("checkHistoricalBackfillCompletion", MigrationConsole, "runMigrationCommandForStatus", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     command: getCheckHistoricalBackfillCompletionScript(b.inputs.sessionName)

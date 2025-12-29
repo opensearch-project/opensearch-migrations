@@ -2,7 +2,7 @@ import {Readable} from 'stream';
 import {z, ZodError} from 'zod';
 import {parse} from "yaml";
 
-export class InputValidationElememnt {
+export class InputValidationElement {
     constructor(
         public readonly path: PropertyKey[],
         public readonly message: string
@@ -11,7 +11,7 @@ export class InputValidationElememnt {
 
 export class InputValidationError extends Error {
     constructor(
-        public readonly errors: InputValidationElememnt[]
+        public readonly errors: InputValidationElement[]
     ) {
         super(`Found ${errors.length} errors`);
         this.name = 'InputValidationError';
@@ -110,7 +110,7 @@ export class StreamSchemaParser<TInput extends z.ZodSchema> {
         } catch (e) {
             if (e instanceof ZodError) {
                 throw new InputValidationError(e.issues.map(errItem=>
-                    new InputValidationElememnt(errItem.path, errItem.message)));
+                    new InputValidationElement(errItem.path, errItem.message)));
                 // throw new InputValidationError([]);
             } else {
                 throw e;
