@@ -9,21 +9,10 @@ spec:
 
   arguments:
     parameters:
-      - name: etcd-endpoints
-        value: "http://etcd.ma.svc.cluster.local:2379"
-      - name: etcd-user
-        value: "root"
-      - name: etcd-password
-        value: "password"
       - name: s3-snapshot-configmap
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
-      # Required by full-migration template when called via templateRef
-      - name: imageConfigMapName
-        value: "migration-image-config"
-      - name: otel-collector-endpoint
-        value: "http://otel-collector:4317"
 
   templates:
     - name: main
@@ -44,7 +33,6 @@ spec:
                 name: "{{workflow.parameters.migration-image-configmap}}"
                 key: migrationConsolePullPolicy
       steps:
-        # Generate migration configs from imported cluster configs
         - - name: generate-migration-configs
             template: generate-migration-configs
             arguments:
@@ -58,17 +46,18 @@ spec:
                 - name: imageMigrationConsolePullPolicy
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
 
-        # Run the full migration using the generated configs
-        - - name: run-full-migration
+        - - name: run-full-migration-with-workflow-cli
             templateRef:
-              name: full-migration
+              name: full-migration-with-workflow-cli
               template: main
             arguments:
               parameters:
-                - name: migrationConfigs
-                  value: "{{steps.generate-migration-configs.outputs.parameters.migrationConfigs}}"
-                - name: uniqueRunNonce
-                  value: "{{workflow.uid}}"
+                - name: migrationConfigBase64
+                  value: "{{steps.generate-migration-configs.outputs.parameters.migrationConfigBase64}}"
+                - name: imageMigrationConsoleLocation
+                  value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                - name: imageMigrationConsolePullPolicy
+                  value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
 
     - name: generate-migration-configs
       inputs:
@@ -83,20 +72,24 @@ spec:
                 name: "{{workflow.parameters.s3-snapshot-configmap}}"
                 key: AWS_REGION
           - name: s3Endpoint
+            default: ""
             valueFrom:
               configMapKeyRef:
                 name: "{{workflow.parameters.s3-snapshot-configmap}}"
                 key: ENDPOINT
+                optional: true
           - name: s3BucketName
             valueFrom:
               configMapKeyRef:
                 name: "{{workflow.parameters.s3-snapshot-configmap}}"
                 key: BUCKET_NAME
           - name: snapshotRoleArn
+            default: ""
             valueFrom:
               configMapKeyRef:
                 name: "{{workflow.parameters.s3-snapshot-configmap}}"
                 key: SNAPSHOT_ROLE_ARN
+                optional: true
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
         imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
@@ -105,7 +98,6 @@ spec:
           - |
             set -e
             
-            # Parse inputs - source-configs is array of {source: {...}, snapshot-and-migration-configs: [...]}
             SOURCE_CONFIGS='{{inputs.parameters.source-configs}}'
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
             S3_REGION='{{inputs.parameters.s3Region}}'
@@ -113,12 +105,10 @@ spec:
             S3_BUCKET='{{inputs.parameters.s3BucketName}}'
             SNAPSHOT_ROLE_ARN='{{inputs.parameters.snapshotRoleArn}}'
             
-            # Generate unique suffix from workflow UID for S3 path isolation
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
             
-            # Build snapshot repo config based on whether we have localstack endpoint or real S3
+            # Build snapshot repo config
             if [ -n "$S3_ENDPOINT" ]; then
-              # Localstack - use endpoint URL
               SNAPSHOT_REPO=$(jq -n \
                 --arg region "$S3_REGION" \
                 --arg endpoint "$S3_ENDPOINT" \
@@ -129,61 +119,76 @@ spec:
                   "endpoint": ("localstack://" + $endpoint),
                   "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
                 }')
+            elif [ -n "$SNAPSHOT_ROLE_ARN" ]; then
+              SNAPSHOT_REPO=$(jq -n \
+                --arg region "$S3_REGION" \
+                --arg bucket "$S3_BUCKET" \
+                --arg suffix "$SUFFIX" \
+                --arg roleArn "$SNAPSHOT_ROLE_ARN" \
+                '{
+                  "awsRegion": $region,
+                  "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix),
+                  "snapshotRoleArn": $roleArn
+                }')
             else
-              # Real S3 - include role ARN if provided
-              if [ -n "$SNAPSHOT_ROLE_ARN" ]; then
-                SNAPSHOT_REPO=$(jq -n \
-                  --arg region "$S3_REGION" \
-                  --arg bucket "$S3_BUCKET" \
-                  --arg suffix "$SUFFIX" \
-                  --arg roleArn "$SNAPSHOT_ROLE_ARN" \
-                  '{
-                    "awsRegion": $region,
-                    "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix),
-                    "snapshotRoleArn": $roleArn
-                  }')
-              else
-                SNAPSHOT_REPO=$(jq -n \
-                  --arg region "$S3_REGION" \
-                  --arg bucket "$S3_BUCKET" \
-                  --arg suffix "$SUFFIX" \
-                  '{
-                    "awsRegion": $region,
-                    "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
-                  }')
-              fi
+              SNAPSHOT_REPO=$(jq -n \
+                --arg region "$S3_REGION" \
+                --arg bucket "$S3_BUCKET" \
+                --arg suffix "$SUFFIX" \
+                '{
+                  "awsRegion": $region,
+                  "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
+                }')
             fi
             
-            echo "Using snapshot repo config:"
-            echo "$SNAPSHOT_REPO" | jq .
+            # Build sourceClusters map from source-configs array
+            SOURCE_CLUSTERS=$(echo "$SOURCE_CONFIGS" | jq --argjson repo "$SNAPSHOT_REPO" '
+              reduce to_entries[] as $e ({}; 
+                .["source\($e.key + 1)"] = ($e.value.source + {"snapshotRepo": $repo})
+              )')
             
-            # Build migrationConfigs array for full-migration template
-            MIGRATION_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq \
-              --argjson snapshotRepo "$SNAPSHOT_REPO" \
-              --argjson target "$TARGET_CONFIG" \
-              '[.[] | {
-                "sourceConfig": (.source + {"snapshotRepo": $snapshotRepo}),
-                "targetConfig": $target,
-                "snapshotExtractAndLoadConfigArray": [
-                  .["snapshot-and-migration-configs"][] | {
-                    "snapshotConfig": {
-                      "snapshotNameConfig": {
-                        "snapshotNamePrefix": "testsnapshot"
-                      }
-                    },
-                    "createSnapshotConfig": {},
-                    "migrations": .migrations
+            # Build snapshotExtractAndLoadConfigs from snapshot-and-migration-configs
+            SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '[
+              .[0]["snapshot-and-migration-configs"][] | {
+                "snapshotConfig": {
+                  "snapshotNameConfig": {
+                    "snapshotNamePrefix": "testsnapshot"
                   }
-                ],
-                "replayerConfig": ""
-              }]')
+                },
+                "createSnapshotConfig": {},
+                "migrations": .migrations
+              }
+            ]')
             
-            echo "Generated migration configs:"
-            echo "$MIGRATION_CONFIGS" | jq .
+            # Build the complete OVERALL_MIGRATION_CONFIG
+            MIGRATION_CONFIG=$(jq -n \
+              --argjson sources "$SOURCE_CLUSTERS" \
+              --argjson target "$TARGET_CONFIG" \
+              --argjson snapshotConfigs "$SNAPSHOT_CONFIGS" \
+              '{
+                "skipApprovals": true,
+                "sourceClusters": $sources,
+                "targetClusters": {
+                  "target1": $target
+                },
+                "migrationConfigs": [{
+                  "fromSource": "source1",
+                  "toTarget": "target1",
+                  "snapshotExtractAndLoadConfigs": $snapshotConfigs,
+                  "replayerConfig": {
+                    "podReplicas": 0
+                  }
+                }]
+              }')
             
-            echo "$MIGRATION_CONFIGS" > /tmp/migration-configs.json
+            MIGRATION_CONFIG_BASE64=$(echo "$MIGRATION_CONFIG" | base64 | tr -d '\n')
+            
+            echo "Generated migration config:"
+            echo "$MIGRATION_CONFIG" | jq .
+            
+            echo "$MIGRATION_CONFIG_BASE64" > /tmp/migration-config-base64
       outputs:
         parameters:
-          - name: migrationConfigs
+          - name: migrationConfigBase64
             valueFrom:
-              path: /tmp/migration-configs.json
+              path: /tmp/migration-config-base64
