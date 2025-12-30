@@ -35,6 +35,13 @@ def normalizeSnapshotName:
     .
   end;
 
+def normalizeSnapshotRepo:
+  if has("repoConfig") and (.repoConfig | has("repoName")) then
+    .snapshot_repo_name = .repoConfig.repoName
+  else
+    .
+  end;
+
 # Normalize S3 config inside snapshot
 def normalizeS3Config:
   (if has("s3RepoPathUri") then
@@ -66,7 +73,7 @@ def normalizeCluster:
 
 # Normalize snapshot config
 def normalizeSnapshot:
-  normalizeSnapshotName | normalizeRepoConfig;
+  normalizeSnapshotName | normalizeSnapshotRepo | normalizeRepoConfig;
 
 # Apply transformations to specific top-level keys
 (if has("source_cluster") then .source_cluster |= normalizeCluster else . end)

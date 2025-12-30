@@ -274,76 +274,17 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                       "default": ""
-                    }
-                  }
-                },
-                "name": {
-                  "type": "string"
-                },
-                "snapshotConfig": {
-                  "type": "object",
-                  "properties": {
-                    "snapshotNameConfig": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "externallyManagedSnapshot": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "externallyManagedSnapshot"
-                          ]
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "snapshotNamePrefix": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "snapshotNamePrefix"
-                          ]
-                        }
-                      ]
                     },
-                    "repoConfig": {
-                      "type": "object",
-                      "properties": {
-                        "awsRegion": {
-                          "type": "string",
-                          "description": "The AWS region that the bucket reside in (us-east-2, etc)"
-                        },
-                        "endpoint": {
-                          "type": "string",
-                          "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
-                          "default": ""
-                        },
-                        "s3RepoPathUri": {
-                          "type": "string",
-                          "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "s3://BUCKETNAME/PATH"
-                        },
-                        "useLocalStack": {
-                          "type": "boolean",
-                          "default": false
-                        },
-                        "repoName": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "awsRegion",
-                        "s3RepoPathUri",
-                        "repoName"
-                      ]
+                    "semaphoreConfigMapName": {
+                      "type": "string"
+                    },
+                    "semaphoreKey": {
+                      "type": "string"
                     }
                   },
                   "required": [
-                    "snapshotNameConfig",
-                    "repoConfig"
+                    "semaphoreConfigMapName",
+                    "semaphoreKey"
                   ]
                 },
                 "migrations": {
@@ -555,12 +496,82 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "name"
                     ]
                   }
+                },
+                "name": {
+                  "type": "string"
+                },
+                "snapshotConfig": {
+                  "type": "object",
+                  "properties": {
+                    "snapshotNameConfig": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "externallyManagedSnapshot": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "externallyManagedSnapshot"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "snapshotNamePrefix": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "snapshotNamePrefix"
+                          ]
+                        }
+                      ]
+                    },
+                    "repoConfig": {
+                      "type": "object",
+                      "properties": {
+                        "awsRegion": {
+                          "type": "string",
+                          "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                        },
+                        "endpoint": {
+                          "type": "string",
+                          "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                          "default": ""
+                        },
+                        "s3RepoPathUri": {
+                          "type": "string",
+                          "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "s3://BUCKETNAME/PATH"
+                        },
+                        "useLocalStack": {
+                          "type": "boolean",
+                          "default": false
+                        },
+                        "repoName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "awsRegion",
+                        "s3RepoPathUri",
+                        "repoName"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "snapshotNameConfig",
+                    "repoConfig"
+                  ]
                 }
               },
               "required": [
+                "createSnapshotConfig",
+                "migrations",
                 "name",
-                "snapshotConfig",
-                "migrations"
+                "snapshotConfig"
               ]
             }
           },

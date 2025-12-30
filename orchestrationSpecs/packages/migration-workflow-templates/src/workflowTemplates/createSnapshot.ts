@@ -34,31 +34,41 @@ const checkScript = `
   set -e
   touch /tmp/status-output.txt
   
-  # Quick status check
-  if [ "$(console --config-file=/config/migration_services.yaml snapshot status)" = "SUCCESS" ]; then
+  # Quick status check - if SUCCESS, we're done
+  status=$(console --config-file=/config/migration_services.yaml snapshot status)
+  if [ "$status" = "SUCCESS" ]; then
+    echo "Snapshot completed successfully" > /tmp/status-output.txt
     exit 0
   fi
   
-  # Deep check with formatted output
-  console --config-file=/config/migration_services.yaml snapshot status --deep-check | \\
-    awk '
-      /Total shards:/ { total = $3 }
-      /Successful shards:/ { successful = $3 }
-      /Data processed:/ { data = $3; unit = $4 }
-      /Estimated time to completion:/ { 
-        sub(/.*: /, "");
-        eta = $0
-      }
-      END {
-        if (total) {
-          output = "Shards: " successful "/" total " | Data: " data " " unit
-          if (eta != "0h 0m 0s") {
-            output = output " | ETA: " eta
-          }
-          print output
+  # Deep check and save output in case there was a race condition
+  deep_output=$(console --config-file=/config/migration_services.yaml snapshot status --deep-check)
+  
+  # Check if deep check also returned SUCCESS (snapshot completed during execution)
+  if [ "$deep_output" = "SUCCESS" ]; then
+    echo "Snapshot completed successfully" > /tmp/status-output.txt
+    exit 0
+  fi
+  
+  # Process deep check output with awk for in-progress snapshots
+  echo "$deep_output" | awk '
+    /Total shards:/ { total = $3 }
+    /Successful shards:/ { successful = $3 }
+    /Data processed:/ { data = $3; unit = $4 }
+    /Estimated time to completion:/ { 
+      sub(/.*: /, "");
+      eta = $0
+    }
+    END {
+      if (total) {
+        output = "Shards: " successful "/" total " | Data: " data " " unit
+        if (eta != "0h 0m 0s") {
+          output = output " | ETA: " eta
         }
+        print output
       }
-    ' > /tmp/status-output.txt
+    }
+  ' > /tmp/status-output.txt
   
   exit 1
 `.trim();

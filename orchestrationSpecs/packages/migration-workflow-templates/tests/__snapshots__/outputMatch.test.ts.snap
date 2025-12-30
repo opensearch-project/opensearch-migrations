@@ -689,7 +689,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
         "container": {
           "args": [
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceAwsServiceSigningName", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], "sourceAwsRegion", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceCaCert", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict("sourceHost", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : ({}))), sprig.dict("sourceInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.merge(sprig.omit(fromJSON(inputs.parameters.createSnapshotConfig), 'loggingConfigurationOverrideConfigMap'), sprig.dict("noWait", true))), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "snapshotRepoName", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig.repoName')), sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'])))))}}",
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceAwsServiceSigningName", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], "sourceAwsRegion", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceCaCert", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict("sourceHost", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : ({}))), sprig.dict("sourceInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.merge(sprig.omit(fromJSON(inputs.parameters.createSnapshotConfig), 'loggingConfigurationOverrideConfigMap', 'semaphoreConfigMapName', 'semaphoreKey'), sprig.dict("noWait", true))), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "snapshotRepoName", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig.repoName')), sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'])))))}}",
           ],
           "command": [
             "/root/createSnapshot/bin/CreateSnapshot",
@@ -809,31 +809,41 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                     "value": "set -e
   touch /tmp/status-output.txt
   
-  # Quick status check
-  if [ "$(console --config-file=/config/migration_services.yaml snapshot status)" = "SUCCESS" ]; then
+  # Quick status check - if SUCCESS, we're done
+  status=$(console --config-file=/config/migration_services.yaml snapshot status)
+  if [ "$status" = "SUCCESS" ]; then
+    echo "Snapshot completed successfully" > /tmp/status-output.txt
     exit 0
   fi
   
-  # Deep check with formatted output
-  console --config-file=/config/migration_services.yaml snapshot status --deep-check | \\
-    awk '
-      /Total shards:/ { total = $3 }
-      /Successful shards:/ { successful = $3 }
-      /Data processed:/ { data = $3; unit = $4 }
-      /Estimated time to completion:/ { 
-        sub(/.*: /, "");
-        eta = $0
-      }
-      END {
-        if (total) {
-          output = "Shards: " successful "/" total " | Data: " data " " unit
-          if (eta != "0h 0m 0s") {
-            output = output " | ETA: " eta
-          }
-          print output
+  # Deep check and save output in case there was a race condition
+  deep_output=$(console --config-file=/config/migration_services.yaml snapshot status --deep-check)
+  
+  # Check if deep check also returned SUCCESS (snapshot completed during execution)
+  if [ "$deep_output" = "SUCCESS" ]; then
+    echo "Snapshot completed successfully" > /tmp/status-output.txt
+    exit 0
+  fi
+  
+  # Process deep check output with awk for in-progress snapshots
+  echo "$deep_output" | awk '
+    /Total shards:/ { total = $3 }
+    /Successful shards:/ { successful = $3 }
+    /Data processed:/ { data = $3; unit = $4 }
+    /Estimated time to completion:/ { 
+      sub(/.*: /, "");
+      eta = $0
+    }
+    END {
+      if (total) {
+        output = "Shards: " successful "/" total " | Data: " data " " unit
+        if (eta != "0h 0m 0s") {
+          output = output " | ETA: " eta
         }
+        print output
       }
-    ' > /tmp/status-output.txt
+    }
+  ' > /tmp/status-output.txt
   
   exit 1",
                   },
@@ -1970,16 +1980,16 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{=sprig.dig('createSnapshotConfig', '', item)}}",
                   },
                   {
+                    "name": "migrations",
+                    "value": "{{=jsonpath(toJSON(item), '$.migrations')}}",
+                  },
+                  {
                     "name": "name",
                     "value": "{{=jsonpath(toJSON(item), '$.name')}}",
                   },
                   {
                     "name": "snapshotConfig",
                     "value": "{{=jsonpath(toJSON(item), '$.snapshotConfig')}}",
-                  },
-                  {
-                    "name": "migrations",
-                    "value": "{{=jsonpath(toJSON(item), '$.migrations')}}",
                   },
                 ],
               },
