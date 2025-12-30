@@ -107,7 +107,7 @@ spec:
             
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
             
-            # Build snapshot repo config
+            # Build snapshot repo config (without snapshotRoleArn - that goes in createSnapshotConfig)
             if [ -n "$S3_ENDPOINT" ]; then
               SNAPSHOT_REPO=$(jq -n \
                 --arg region "$S3_REGION" \
@@ -118,17 +118,6 @@ spec:
                   "awsRegion": $region,
                   "endpoint": ("localstack://" + $endpoint),
                   "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
-                }')
-            elif [ -n "$SNAPSHOT_ROLE_ARN" ]; then
-              SNAPSHOT_REPO=$(jq -n \
-                --arg region "$S3_REGION" \
-                --arg bucket "$S3_BUCKET" \
-                --arg suffix "$SUFFIX" \
-                --arg roleArn "$SNAPSHOT_ROLE_ARN" \
-                '{
-                  "awsRegion": $region,
-                  "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix),
-                  "snapshotRoleArn": $roleArn
                 }')
             else
               SNAPSHOT_REPO=$(jq -n \
@@ -141,21 +130,63 @@ spec:
                 }')
             fi
             
-            # Build sourceClusters map from source-configs array
+            # Build createSnapshotConfig with s3RoleArn if provided
+            if [ -n "$SNAPSHOT_ROLE_ARN" ]; then
+              CREATE_SNAPSHOT_CONFIG=$(jq -n --arg roleArn "$SNAPSHOT_ROLE_ARN" '{"s3RoleArn": $roleArn}')
+            else
+              CREATE_SNAPSHOT_CONFIG='{}'
+            fi
+            
+            # Function to transform cluster config to match workflow schema
+            # - version: ES_7.10 -> ES 7.10 (replace underscore with space)
+            # - allow_insecure -> allowInsecure
+            # - sigv4 at top level -> authConfig.sigv4
+            transform_cluster_config() {
+              echo "$1" | jq '
+                # Transform version format: ES_7.10 -> ES 7.10
+                .version = (.version | gsub("_"; " "))
+                # Rename allow_insecure to allowInsecure
+                | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+                # Move sigv4 under authConfig
+                | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+              '
+            }
+            
+            # Build sourceClusters map from source-configs array with schema transformation
             SOURCE_CLUSTERS=$(echo "$SOURCE_CONFIGS" | jq --argjson repo "$SNAPSHOT_REPO" '
               reduce to_entries[] as $e ({}; 
-                .["source\($e.key + 1)"] = ($e.value.source + {"snapshotRepo": $repo})
+                .["source\($e.key + 1)"] = (
+                  $e.value.source
+                  # Transform version format: ES_7.10 -> ES 7.10
+                  | .version = (.version | gsub("_"; " "))
+                  # Rename allow_insecure to allowInsecure
+                  | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+                  # Move sigv4 under authConfig
+                  | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+                  # Add snapshot repo
+                  | . + {"snapshotRepo": $repo}
+                )
               )')
             
+            # Transform target config to match schema
+            TARGET_TRANSFORMED=$(echo "$TARGET_CONFIG" | jq '
+              # Transform version format: OS_1.3 -> OS 1.3
+              .version = (.version | gsub("_"; " "))
+              # Rename allow_insecure to allowInsecure
+              | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+              # Move sigv4 under authConfig
+              | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+            ')
+            
             # Build snapshotExtractAndLoadConfigs from snapshot-and-migration-configs
-            SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '[
+            SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq --argjson createConfig "$CREATE_SNAPSHOT_CONFIG" '[
               .[0]["snapshot-and-migration-configs"][] | {
                 "snapshotConfig": {
                   "snapshotNameConfig": {
                     "snapshotNamePrefix": "testsnapshot"
                   }
                 },
-                "createSnapshotConfig": {},
+                "createSnapshotConfig": $createConfig,
                 "migrations": .migrations
               }
             ]')
@@ -163,7 +194,7 @@ spec:
             # Build the complete OVERALL_MIGRATION_CONFIG
             MIGRATION_CONFIG=$(jq -n \
               --argjson sources "$SOURCE_CLUSTERS" \
-              --argjson target "$TARGET_CONFIG" \
+              --argjson target "$TARGET_TRANSFORMED" \
               --argjson snapshotConfigs "$SNAPSHOT_CONFIGS" \
               '{
                 "skipApprovals": true,
