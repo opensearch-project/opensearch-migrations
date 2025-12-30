@@ -10,6 +10,7 @@ import {stringify} from "yaml";
 import * as fs from "fs/promises";
 import * as path from "path";
 import {scrapeApprovals} from "./formatApprovals";
+import {setNamesInUserConfig} from "./migrationConfigTransformer";
 
 /** etcd connection options */
 export interface EtcdOptions {
@@ -119,7 +120,7 @@ export class MigrationInitializer {
             };
         }
 
-        const approvals = scrapeApprovals(userConfig);
+        const approvals = scrapeApprovals(setNamesInUserConfig(userConfig));
         
         return {
             apiVersion: 'v1',
@@ -128,14 +129,13 @@ export class MigrationInitializer {
                 apiVersion: 'v1',
                 kind: 'ConfigMap',
                 metadata: {
-                    name: 'approval-config-0',
-                    namespace: 'default',
+                    name: 'approval-config',
                     labels: {
                         'workflows.argoproj.io/configmap-type': 'Parameter'
                     }
                 },
                 data: {
-                    'autoApprove': stringify(approvals)
+                    'autoApprove': JSON.stringify(approvals)
                 }
             }]
         };
@@ -157,8 +157,7 @@ export class MigrationInitializer {
                 apiVersion: 'v1',
                 kind: 'ConfigMap',
                 metadata: {
-                    name: 'concurrency-config',
-                    namespace: 'default'
+                    name: 'concurrency-config'
                 },
                 data: {
                     // General concurrency settings

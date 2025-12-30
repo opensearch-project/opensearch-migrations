@@ -818,8 +818,9 @@ def _get_deep_check_data(workflow_data, deep_check):
         started_at = node.get("startedAt", "")
         
         # Look for status check nodes
-        if (("checkSnapshotCompletion" in display_name or "waitForCompletion" in display_name) 
+        if (("checkSnapshotCompletion" in display_name or "checkHistoricalBackfillCompletion" in display_name)
             and node_type == "Pod"):
+            logger.info(f"Found status check node: {display_name} (phase: {phase}, started: {started_at})")
             status_check_nodes.append({
                 'node_id': node_id,
                 'display_name': display_name,
@@ -830,6 +831,7 @@ def _get_deep_check_data(workflow_data, deep_check):
     
     # Sort by start time to find the chronologically last one
     if status_check_nodes:
+        logger.info(f"Found {len(status_check_nodes)} total status check nodes")
         status_check_nodes.sort(key=lambda n: n['started_at'] or '0000-00-00T00:00:00Z')
         last_check = status_check_nodes[-1]
         
@@ -853,7 +855,7 @@ def _get_deep_check_data(workflow_data, deep_check):
                         'env': Environment(config=config_dict)
                     })
         else:
-            logger.info("Last status check succeeded, skipping deep check")
+            logger.info(f"Last status check succeeded, skipping deep check for {last_check['display_name']} (type: {last_check['type']})")
     else:
         logger.info("No status check nodes found")
     

@@ -355,9 +355,6 @@ def get_detailed_status_obj(target_cluster,
     if None in values.values():
         logger.warning(f"Failed to get values for some queries: {values}")
 
-    import json
-    logger.error(f"query response {json.dumps(values)}")
-
     counts = ShardStatusCounts(
         total=values.get(total_key, 0) or 0,
         completed=values.get(completed_key, 0) or 0,

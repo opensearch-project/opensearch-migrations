@@ -186,6 +186,8 @@ function getRfsReplicasetManifest
 function getCheckHistoricalBackfillCompletionScript(sessionName: BaseExpression<string>) {
     const template = `
 set -e && 
+touch /tmp/status-output.txt
+
 python -c '
 import sys
 from lib.console_link.console_link.environment import Environment
@@ -198,7 +200,7 @@ status = get_detailed_status_obj(Environment(config_file="/config/migration_serv
 print(status)
 all_finished = all_shards_finished_processing(Environment(config_file="/config/migration_services.yaml").target_cluster,
                                               "{{SESSION_NAME}}")
-sys.exit(0 if all_finished else 1)'`;
+sys.exit(0 if all_finished else 1)' >  /tmp/status-output.txt`;
     return expr.fillTemplate(template, {"SESSION_NAME": sessionName});
 }
 
