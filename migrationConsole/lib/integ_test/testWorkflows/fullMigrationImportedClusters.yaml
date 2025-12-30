@@ -108,10 +108,12 @@ spec:
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
             
             # Build snapshot repo config (without snapshotRoleArn - that goes in createSnapshotConfig)
+            # Strip http:// prefix from endpoint if present (ConfigMap has full URL for AWS CLI)
+            S3_ENDPOINT_STRIPPED=$(echo "$S3_ENDPOINT" | sed 's|^http://||')
             if [ -n "$S3_ENDPOINT" ]; then
               SNAPSHOT_REPO=$(jq -n \
                 --arg region "$S3_REGION" \
-                --arg endpoint "$S3_ENDPOINT" \
+                --arg endpoint "$S3_ENDPOINT_STRIPPED" \
                 --arg bucket "$S3_BUCKET" \
                 --arg suffix "$SUFFIX" \
                 '{
