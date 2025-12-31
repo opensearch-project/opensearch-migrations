@@ -229,7 +229,7 @@ def _walk_up_for_config(nodes, start_node_id, param_name):
     nodes = workflow_data.get("status", {}).get("nodes", {})
     check_tasks = []
     
-    # Find checkSnapshotCompletion and waitForCompletion nodes
+    # Find checkSnapshotCompletion and checkHistoricalBackfillCompletion nodes
     for node_id, node in nodes.items():
         display_name = node.get("displayName", "")
         phase = node.get("phase", "")
@@ -257,8 +257,8 @@ def _walk_up_for_config(nodes, start_node_id, param_name):
                         'env': Environment(config=config_dict)
                     })
         
-        elif "waitForCompletion" in display_name and node_type == "Pod":
-            logger.info(f"Found waitForCompletion node: {display_name}")
+        elif "checkHistoricalBackfillCompletion" in display_name and node_type == "Pod":
+            logger.info(f"Found checkHistoricalBackfillCompletion node: {display_name}")
             
             # Walk up the tree to find config
             config_contents = _walk_up_for_config(nodes, node_id, "configContents")
@@ -809,7 +809,7 @@ def _get_deep_check_data(workflow_data, deep_check):
     nodes = workflow_data.get("status", {}).get("nodes", {})
     check_tasks = []
     
-    # Find checkSnapshotCompletion and waitForCompletion nodes
+    # Find checkSnapshotCompletion and checkHistoricalBackfillCompletion nodes
     status_check_nodes = []
     for node_id, node in nodes.items():
         display_name = node.get("displayName", "")

@@ -196,7 +196,7 @@ function formatOutputSource(def: OutputParamDef<any>) {
                 case "path":
                     return {path: def.path};
                 case "expression":
-                    return {expression: toArgoExpressionString(def.expression, "None")};
+                    return {expression: toArgoExpressionString(def.expression, "None", "Expression")};
                 case "parameter":
                     return {parameter: toArgoExpressionString(def.parameter)};
                 case "jsonPath":

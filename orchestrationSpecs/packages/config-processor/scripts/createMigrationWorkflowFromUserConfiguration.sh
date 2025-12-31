@@ -25,7 +25,7 @@ TEMP_DIR=$(mktemp -d)
 # Ensure cleanup on exit
 trap "rm -rf $TEMP_DIR" EXIT
 
-UUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+UUID=$(printf '%x' $(date +%s))$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 4)
 echo "Generated unique uniqueRunNonce: $UUID"
 
 echo "Running configuration conversion..."

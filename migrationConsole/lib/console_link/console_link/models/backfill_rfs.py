@@ -60,6 +60,7 @@ RFS_BACKFILL_SCHEMA = {
             "snapshot_name": {"type": "string", "required": False},
             "snapshot_repo": {"type": "string", "required": False},
             "session_name": {"type": "string", "required": False},
+            "backfill_session_name": {"type": "string", "required": False},
             "scale": {"type": "integer", "required": False, "min": 1}
         },
         "check_with": contains_one_of({'docker', 'ecs', 'k8s'}),
@@ -163,15 +164,22 @@ class K8sRFSBackfill(RFSBackfill):
         deployment_status = self.kubectl_runner.retrieve_deployment_status()
         if not deployment_status:
             return CommandResult(False, "Failed to get deployment status for RFS backfill")
-        status_str = str(deployment_status)
+        status_str = None;
         if deep_check:
             try:
-                shard_status = get_detailed_status(target_cluster=self.target_cluster)
+                # Get backfill_session_name from config
+                session_name = self.config["reindex_from_snapshot"].get("backfill_session_name", "")
+                logger.info(f"Using backfill_session_name for deep check: '{session_name}'")
+                shard_status = get_detailed_status(target_cluster=self.target_cluster, session_name=session_name)
             except Exception as e:
-                logger.error(f"Failed to get detailed status: {e}")
+                logger.exception(f"Failed to get detailed status")
                 shard_status = None
             if shard_status:
-                status_str += f"\n{shard_status}"
+                status_str = f"\n{shard_status}"
+
+        if not status_str:
+            status_str = str(deployment_status)
+
         if deployment_status.terminating > 0 and deployment_status.desired == 0:
             return CommandResult(True, (BackfillStatus.TERMINATING, status_str))
         if deployment_status.running > 0:
@@ -185,7 +193,11 @@ class K8sRFSBackfill(RFSBackfill):
         active_workers = True  # Assume there are active workers if we cannot lookup the deployment status
         if deployment_status is not None:
             active_workers = deployment_status.desired != 0
-        return get_detailed_status_obj(self.target_cluster, active_workers)
+        # Get backfill_session_name from config
+        session_name = self.config["reindex_from_snapshot"].get("backfill_session_name", "")
+        return get_detailed_status_obj(target_cluster=self.target_cluster,
+                                       session_name=session_name,
+                                       active_workers=active_workers)
 
 
 class ECSRFSBackfill(RFSBackfill):
@@ -233,7 +245,8 @@ class ECSRFSBackfill(RFSBackfill):
         status_string = str(instance_statuses)
         if deep_check:
             try:
-                shard_status = get_detailed_status(target_cluster=self.target_cluster)
+                session_name = self.config["reindex_from_snapshot"].get("backfill_session_name", "")
+                shard_status = get_detailed_status(target_cluster=self.target_cluster, session_name=session_name)
             except Exception as e:
                 logger.error(f"Failed to get detailed status: {e}")
                 shard_status = None
@@ -252,13 +265,16 @@ class ECSRFSBackfill(RFSBackfill):
         if deployment_status is not None:
             active_workers = deployment_status.desired != 0
 
-        return get_detailed_status_obj(self.target_cluster, active_workers)
+        session_name = self.config["reindex_from_snapshot"].get("backfill_session_name", "")
+        return get_detailed_status_obj(target_cluster=self.target_cluster,
+                                       session_name=session_name,
+                                       active_workers=active_workers)
 
 
-def get_detailed_status(target_cluster: Cluster, session_name: str = "") -> Optional[str]:
-    values = get_detailed_status_obj(target_cluster,
-                                     True,  # Assume active workers
-                                     session_name)
+def get_detailed_status(target_cluster: Cluster, session_name: str) -> Optional[str]:
+    values = get_detailed_status_obj(target_cluster=target_cluster,
+                                     session_name=session_name,
+                                     active_workers=True) # Assume active workers
     return "\n".join([f"Backfill {key}: {value}" for key, value in values.__dict__.items() if value is not None])
 
 
@@ -332,11 +348,11 @@ class ShardStatusCounts:
     unclaimed: int = 0
 
 
-def get_detailed_status_obj(target_cluster,
-                            active_workers: bool = True,
-                            session_name: str = "") -> BackfillOverallStatus:
+def get_detailed_status_obj(target_cluster: Cluster,
+                            session_name: str,
+                            active_workers: bool = True) -> BackfillOverallStatus:
     # Check whether the working state index exists. If not, we can't run queries.
-    index_to_check = ".migrations_working_state" + ("_" + session_name if session_name else "")
+    index_to_check = ".migrations_working_state" + (("_" + session_name) if session_name else "")
     logger.info("Checking status for index: " + index_to_check)
     try:
         target_cluster.call_api("/" + index_to_check)
@@ -459,11 +475,6 @@ def generate_status_queries():
     }
 
     return queries
-
-
-def all_shards_finished_processing(target_cluster: Cluster, session_name: str = "") -> bool:
-    d = get_detailed_status_obj(target_cluster, session_name=session_name)
-    return d.shard_total == d.shard_complete and d.shard_in_progress == 0 and d.shard_waiting == 0
 
 
 def perform_archive(target_cluster: Cluster,

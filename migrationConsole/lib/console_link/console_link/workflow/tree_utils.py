@@ -206,17 +206,15 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
             # Build the node label
             node_label = f"{symbol} {display_name}"
             
-            # Add statusOutput for failed status checks
-            if (node['phase'] == 'Failed' and workflow_data and 
-                ('checkSnapshotCompletion' in display_name or 'waitForCompletion' in display_name)):
+            # Add statusOutput for any failed node that has it
+            if node['phase'] == 'Failed' and workflow_data:
                 status_output = get_step_status_output(workflow_data, node['id'])
                 if status_output:
                     node_label += f": {status_output}"
                     logger.info(f"Added statusOutput for {display_name}: {status_output}")
                 else:
                     # Show phase for nodes without statusOutput
-                    if node['phase'] != 'Succeeded':
-                        node_label += f" ({node['phase']})"
+                    node_label += f" ({node['phase']})"
             else:
                 # Show phase for other nodes
                 if node['phase'] != 'Succeeded':

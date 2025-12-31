@@ -1028,9 +1028,9 @@ exports[`test workflow template renderings document-bulk-load 1`] = `
             "--ignore-not-found",
           ],
           "manifest": "apiVersion: apps/v1
-kind: ReplicaSet
+kind: Deployment
 metadata:
-  name: "{{=inputs.parameters.sessionName+'-reindex-from-snapshot'}}"
+  name: "{{=inputs.parameters.sessionName+'-rfs'}}"
 ",
         },
       },
@@ -1085,6 +1085,8 @@ metadata:
                     "name": "command",
                     "value": "
 set -e && 
+touch /tmp/status-output.txt
+
 python -c '
 import sys
 from lib.console_link.console_link.environment import Environment
@@ -1097,7 +1099,25 @@ status = get_detailed_status_obj(Environment(config_file="/config/migration_serv
 print(status)
 all_finished = all_shards_finished_processing(Environment(config_file="/config/migration_services.yaml").target_cluster,
                                               "{{inputs.parameters.sessionName}}")
-sys.exit(0 if all_finished else 1)'",
+sys.exit(0 if all_finished else 1)' >  /tmp/unprocessed_output.txt
+
+cat /tmp/unprocessed_output.txt | awk '
+{
+    match($0, /status=<[^:]+: '([^']+)'/, status)
+    match($0, /percentage_completed=([0-9.]+)/, pct)
+    match($0, /eta_ms=([^[:space:]]+)/, eta)
+    match($0, /shard_total=([0-9]+)/, total)
+    match($0, /shard_complete=([0-9]+)/, complete)
+    match($0, /shard_in_progress=([0-9]+)/, progress)
+    match($0, /shard_waiting=([0-9]+)/, waiting)
+    
+    eta_str = (eta[1] == "None") ? "unknown" : (eta[1]/1000 "s")
+    
+    printf "%s| complete: %.2f%%, ETA: %s; shards in-progress/waiting: %d/%d; shards complete/total: %d/%d", 
+           status[1], pct[1], eta_str, progress[1], waiting[1], complete[1], total[1]
+}
+' > /tmp/status-output.txt
+",
                   },
                 ],
               },
@@ -1150,16 +1170,22 @@ sys.exit(0 if all_finished else 1)'",
         "resource": {
           "action": "create",
           "manifest": "apiVersion: apps/v1
-kind: ReplicaSet
+kind: Deployment
 metadata:
-  name: "{{=inputs.parameters.sessionName+'-reindex-from-snapshot'}}"
+  name: "{{=inputs.parameters.sessionName+'-rfs'}}"
   labels:
     workflows.argoproj.io/workflow: "{{workflow.name}}"
 spec:
   replicas: {{=fromJSON(inputs.parameters.podReplicas)}}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
   selector:
     matchLabels:
       app: bulk-loader
+      deployment-name: "{{=inputs.parameters.sessionName+'-rfs'}}"
   template:
     metadata:
       labels:
@@ -1382,12 +1408,16 @@ spec:
               "arguments": {
                 "parameters": [
                   {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}",
+                  },
+                  {
                     "name": "targetConfig",
                     "value": "{{inputs.parameters.targetConfig}}",
                   },
                   {
-                    "name": "snapshotConfig",
-                    "value": "{{inputs.parameters.snapshotConfig}}",
+                    "name": "backfillSession",
+                    "value": "{{=toJSON(sprig.dict("sessionName", inputs.parameters.sessionName, "deploymentName", inputs.parameters.sessionName+'-rfs'))}}",
                   },
                 ],
               },
@@ -2929,6 +2959,11 @@ exports[`test workflow template renderings migration-console 1`] = `
         "inputs": {
           "parameters": [
             {
+              "description": "The metadata about the deployment performing the RFS backfill",
+              "name": "backfillSession",
+              "value": "",
+            },
+            {
               "description": "Snapshot configuration information (JSON)",
               "name": "kafkaInfo",
               "value": "",
@@ -2939,13 +2974,13 @@ exports[`test workflow template renderings migration-console 1`] = `
               "value": "",
             },
             {
-              "description": "Target cluster configuration (JSON)",
-              "name": "targetConfig",
+              "description": "Snapshot configuration information (JSON)",
+              "name": "snapshotConfig",
               "value": "",
             },
             {
-              "description": "Snapshot configuration information (JSON)",
-              "name": "snapshotConfig",
+              "description": "Target cluster configuration (JSON)",
+              "name": "targetConfig",
               "value": "",
             },
           ],
@@ -2956,7 +2991,7 @@ exports[`test workflow template renderings migration-console 1`] = `
             {
               "name": "configContents",
               "valueFrom": {
-                "expression": "toJSON(sprig.merge(sprig.merge(((0 == len(inputs.parameters.kafkaInfo)) ? ({}) : (sprig.dict("kafka", fromJSON(inputs.parameters.kafkaInfo)))), ((0 == len(inputs.parameters.sourceConfig)) ? ({}) : (sprig.dict("source_cluster", fromJSON(inputs.parameters.sourceConfig))))), sprig.merge(((0 == len(inputs.parameters.targetConfig)) ? ({}) : (sprig.dict("target_cluster", fromJSON(inputs.parameters.targetConfig)))), ((0 == len(inputs.parameters.snapshotConfig)) ? ({}) : (sprig.dict("snapshot", fromJSON(inputs.parameters.snapshotConfig)))))))",
+                "expression": "toJSON(sprig.merge(sprig.merge(sprig.merge(((0 == len(inputs.parameters.kafkaInfo)) ? ({}) : (sprig.dict("kafka", fromJSON(inputs.parameters.kafkaInfo)))), ((0 == len(inputs.parameters.sourceConfig)) ? ({}) : (sprig.dict("source_cluster", fromJSON(inputs.parameters.sourceConfig))))), sprig.merge(((0 == len(inputs.parameters.targetConfig)) ? ({}) : (sprig.dict("target_cluster", fromJSON(inputs.parameters.targetConfig)))), ((0 == len(inputs.parameters.snapshotConfig)) ? ({}) : (sprig.dict("snapshot", fromJSON(inputs.parameters.snapshotConfig)))))), ((0 == len(inputs.parameters.backfillSession)) ? ({}) : (sprig.dict("backfill", sprig.dict("reindex_from_snapshot", sprig.dict("k8s", sprig.dict("namespace", "{{workflow.namespace}}", "deployment_name", fromJSON(inputs.parameters.backfillSession)['deploymentName']), "backfill_session_name", fromJSON(inputs.parameters.backfillSession)['sessionName'])))))))",
               },
             },
           ],
@@ -3089,6 +3124,11 @@ echo ---
               "name": "command",
             },
             {
+              "description": "The metadata about the deployment performing the RFS backfill",
+              "name": "backfillSession",
+              "value": "",
+            },
+            {
               "description": "Snapshot configuration information (JSON)",
               "name": "kafkaInfo",
               "value": "",
@@ -3099,13 +3139,13 @@ echo ---
               "value": "",
             },
             {
-              "description": "Target cluster configuration (JSON)",
-              "name": "targetConfig",
+              "description": "Snapshot configuration information (JSON)",
+              "name": "snapshotConfig",
               "value": "",
             },
             {
-              "description": "Snapshot configuration information (JSON)",
-              "name": "snapshotConfig",
+              "description": "Target cluster configuration (JSON)",
+              "name": "targetConfig",
               "value": "",
             },
             {
@@ -3126,6 +3166,10 @@ echo ---
               "arguments": {
                 "parameters": [
                   {
+                    "name": "backfillSession",
+                    "value": "{{inputs.parameters.backfillSession}}",
+                  },
+                  {
                     "name": "kafkaInfo",
                     "value": "{{inputs.parameters.kafkaInfo}}",
                   },
@@ -3134,12 +3178,12 @@ echo ---
                     "value": "{{inputs.parameters.sourceConfig}}",
                   },
                   {
-                    "name": "targetConfig",
-                    "value": "{{inputs.parameters.targetConfig}}",
-                  },
-                  {
                     "name": "snapshotConfig",
                     "value": "{{inputs.parameters.snapshotConfig}}",
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}",
                   },
                 ],
               },

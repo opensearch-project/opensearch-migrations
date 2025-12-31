@@ -28,20 +28,27 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 
-const KafkaServicesConfig = z.object({
+export const CONSOLE_KAFKA_SERVICES_CONFIG = z.object({
     broker_endpoints: z.string(),
     standard: z.string()
-})
+});
+
+export const CONSOLE_BACKFILL_INFO = z.object({
+    sessionName: z.string(),
+    deploymentName: z.string()
+});
 
 export const configComponentParameters = {
-    kafkaInfo: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof KafkaServicesConfig>>(),
+    backfillSession: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof CONSOLE_BACKFILL_INFO>>(),
+        description: "The metadata about the deployment performing the RFS backfill"}),
+    kafkaInfo: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof CONSOLE_KAFKA_SERVICES_CONFIG>>(),
         description: "Snapshot configuration information (JSON)"}),
     sourceConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof CLUSTER_CONFIG>>(),
         description: "Source cluster configuration (JSON)"}),
-    targetConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof TARGET_CLUSTER_CONFIG>>(),
-        description: "Target cluster configuration (JSON)"}),
     snapshotConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
-        description: "Snapshot configuration information (JSON)"})
+        description: "Snapshot configuration information (JSON)"}),
+    targetConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof TARGET_CLUSTER_CONFIG>>(),
+        description: "Target cluster configuration (JSON)"})
 };
 
 // TODO - once the migration console can load secrets from env variables,
@@ -95,15 +102,28 @@ export const MigrationConsole = WorkflowBuilder.create({
             .addStepGroup(c => c))
         .addExpressionOutput("configContents", c =>
             expr.recordToString(expr.mergeDicts(
-                expr.mergeDicts(
-                    makeOptionalDict("kafka", expr.asString(c.inputs.kafkaInfo), typeToken<z.infer<typeof KAFKA_SERVICES_CONFIG>>()),
-                    makeOptionalDict("source_cluster", expr.asString(c.inputs.sourceConfig), typeToken<z.infer<typeof CLUSTER_CONFIG>>())
-                ),
-                expr.mergeDicts(
-                    makeOptionalDict("target_cluster", expr.asString(c.inputs.targetConfig), typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>()),
-                    makeOptionalDict("snapshot", expr.asString(c.inputs.snapshotConfig), typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
+                    expr.mergeDicts(
+                        expr.mergeDicts(
+                            makeOptionalDict("kafka", expr.asString(c.inputs.kafkaInfo), typeToken<z.infer<typeof KAFKA_SERVICES_CONFIG>>()),
+                            makeOptionalDict("source_cluster", expr.asString(c.inputs.sourceConfig), typeToken<z.infer<typeof CLUSTER_CONFIG>>())
+                        ),
+                        expr.mergeDicts(
+                            makeOptionalDict("target_cluster", expr.asString(c.inputs.targetConfig), typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>()),
+                            makeOptionalDict("snapshot", expr.asString(c.inputs.snapshotConfig), typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
+                        )
+                    ),
+                    expr.ternary(expr.isEmpty(c.inputs.backfillSession), expr.literal({}), expr.makeDict({
+                        "backfill": expr.makeDict({
+                            "reindex_from_snapshot": expr.makeDict({
+                                "k8s": expr.makeDict({
+                                    "namespace": expr.getWorkflowValue("namespace"),
+                                    "deployment_name": expr.get(expr.deserializeRecord(c.inputs.backfillSession), "deploymentName")
+                                }),
+                                "backfill_session_name": expr.get(expr.deserializeRecord(c.inputs.backfillSession), "sessionName")
+                            })
+                        })}))
                 )
-            ))
+            )
         )
     )
 
