@@ -417,11 +417,19 @@ class SnapshotStatus(BaseModel):
 
         if stats := snapshot_info.get("stats"):
             # OpenSearch: byte-level stats
-            total_units = total_bytes = stats.get("total", {}).get("size_in_bytes", 0)
-            processed_units = processed_bytes = (
-                stats.get("processed", {}).get("size_in_bytes", 0) +
-                stats.get("incremental", {}).get("size_in_bytes", 0)
-            )
+            # For incremental snapshots, use incremental as the work to be done
+            incremental_bytes = stats.get("incremental", {}).get("size_in_bytes", 0)
+            total_stat_bytes = stats.get("total", {}).get("size_in_bytes", 0)
+            processed_stat_bytes = stats.get("processed", {}).get("size_in_bytes", 0)
+
+            # Use incremental as total for progress (actual work for this snapshot)
+            # Fall back to total if incremental is 0 (first snapshot or legacy format)
+            total_bytes = incremental_bytes if incremental_bytes > 0 else total_stat_bytes
+            # For completed snapshots, processed may be 0/missing - use incremental as processed
+            processed_bytes = processed_stat_bytes if processed_stat_bytes > 0 else incremental_bytes
+            total_units = total_bytes
+            processed_units = processed_bytes
+
             start_ms = stats.get("start_time_in_millis", 0)
             elapsed_ms = stats.get("time_in_millis", 0)
             duration_ms = stats.get("time_in_millis", 0)
