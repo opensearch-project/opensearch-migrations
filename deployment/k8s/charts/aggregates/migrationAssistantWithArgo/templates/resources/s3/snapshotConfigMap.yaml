@@ -9,7 +9,7 @@ metadata:
 data:
   AWS_REGION: {{ .Values.aws.region }}
   {{- if .Values.defaultBucketConfiguration.useLocalStack }}
-  ENDPOINT: "http://{{ .Values.defaultBucketConfiguration.endpoint }}:4566"
+  ENDPOINT: "localstack://{{ .Values.defaultBucketConfiguration.endpoint }}:4566"
   {{- else }}
   ENDPOINT: ""
   {{- end }}

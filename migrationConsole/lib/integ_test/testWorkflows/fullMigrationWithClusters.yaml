@@ -296,40 +296,18 @@ spec:
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
             
             # Build snapshot repo config
-            # Strip http:// prefix from endpoint if present (ConfigMap has full URL for AWS CLI)
-            S3_ENDPOINT_STRIPPED=$(echo "$S3_ENDPOINT" | sed 's|^http://||')
-            if [ -n "$S3_ENDPOINT" ]; then
-              SNAPSHOT_REPO=$(jq -n \
-                --arg region "$S3_REGION" \
-                --arg endpoint "$S3_ENDPOINT_STRIPPED" \
-                --arg bucket "$S3_BUCKET" \
-                --arg suffix "$SUFFIX" \
-                '{
-                  "awsRegion": $region,
-                  "endpoint": ("localstack://" + $endpoint),
-                  "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
-                }')
-            elif [ -n "$SNAPSHOT_ROLE_ARN" ]; then
-              SNAPSHOT_REPO=$(jq -n \
-                --arg region "$S3_REGION" \
-                --arg bucket "$S3_BUCKET" \
-                --arg suffix "$SUFFIX" \
-                --arg roleArn "$SNAPSHOT_ROLE_ARN" \
-                '{
-                  "awsRegion": $region,
-                  "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix),
-                  "snapshotRoleArn": $roleArn
-                }')
-            else
-              SNAPSHOT_REPO=$(jq -n \
-                --arg region "$S3_REGION" \
-                --arg bucket "$S3_BUCKET" \
-                --arg suffix "$SUFFIX" \
-                '{
-                  "awsRegion": $region,
-                  "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
-                }')
-            fi
+            SNAPSHOT_REPO=$(jq -n \
+              --arg region "$S3_REGION" \
+              --arg endpoint "$S3_ENDPOINT" \
+              --arg bucket "$S3_BUCKET" \
+              --arg suffix "$SUFFIX" \
+              --arg roleArn "$SNAPSHOT_ROLE_ARN" \
+              '{
+                "awsRegion": $region,
+                "endpoint": $endpoint,
+                "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix),
+                "snapshotRoleArn": $roleArn
+              }')
             
             SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" '. + {"snapshotRepo": $repo}')
             
