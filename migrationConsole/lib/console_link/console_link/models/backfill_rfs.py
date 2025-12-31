@@ -159,26 +159,27 @@ class K8sRFSBackfill(RFSBackfill):
                                archive_dir_path=archive_dir_path,
                                archive_file_name=archive_file_name)
 
-    def get_status(self, deep_check=False, *args, **kwargs) -> CommandResult:
+    def get_status(self, *args, **kwargs) -> CommandResult:
         logger.info("Getting status of RFS backfill")
         deployment_status = self.kubectl_runner.retrieve_deployment_status()
         if not deployment_status:
             return CommandResult(False, "Failed to get deployment status for RFS backfill")
-        status_str = None;
-        if deep_check:
-            try:
-                # Get backfill_session_name from config
-                session_name = self.config["reindex_from_snapshot"].get("backfill_session_name", "")
-                logger.info(f"Using backfill_session_name for deep check: '{session_name}'")
-                shard_status = get_detailed_status(target_cluster=self.target_cluster, session_name=session_name)
-            except Exception as e:
-                logger.exception(f"Failed to get detailed status")
-                shard_status = None
-            if shard_status:
-                status_str = f"\n{shard_status}"
-
-        if not status_str:
-            status_str = str(deployment_status)
+        
+        # Always perform deep check for K8s
+        try:
+            session_name = self.config["reindex_from_snapshot"].get("backfill_session_name", "")
+            logger.info(f"Using backfill_session_name for deep check: '{session_name}'")
+            shard_status = get_detailed_status(target_cluster=self.target_cluster, session_name=session_name)
+        except Exception as e:
+            logger.exception(f"Failed to get detailed status")
+            shard_status = None
+        
+        # Include pod/worker counts and shard status
+        status_parts = [f"Pods - Running: {deployment_status.running}, Pending: {deployment_status.pending}, Desired: {deployment_status.desired}"]
+        if shard_status:
+            status_parts.append(shard_status)
+        
+        status_str = "\n".join(status_parts)
 
         if deployment_status.terminating > 0 and deployment_status.desired == 0:
             return CommandResult(True, (BackfillStatus.TERMINATING, status_str))
@@ -275,6 +276,12 @@ def get_detailed_status(target_cluster: Cluster, session_name: str) -> Optional[
     values = get_detailed_status_obj(target_cluster=target_cluster,
                                      session_name=session_name,
                                      active_workers=True) # Assume active workers
+    
+    # Check if shards are initializing
+    if (values.shard_total is None and values.shard_complete is None and 
+        values.shard_in_progress is None and values.shard_waiting is None):
+        return "Shards are initializing"
+    
     return "\n".join([f"Backfill {key}: {value}" for key, value in values.__dict__.items() if value is not None])
 
 
@@ -360,14 +367,34 @@ def get_detailed_status_obj(target_cluster: Cluster,
         logger.debug(f"Working state index does not yet exist, deep status checks can't be performed. {e}")
         raise DeepStatusNotYetAvailable
 
+    # Check shard_setup separately
+    shard_setup_query = generate_shard_setup_query()
+    shard_setup_completed = parse_shard_setup_response(shard_setup_query, target_cluster, index_to_check)
+    
+    if not shard_setup_completed:
+        # Shards are still initializing, return minimal status
+        return BackfillOverallStatus(
+            status=StepStateWithPause.RUNNING,
+            percentage_completed=0.0,
+            eta_ms=None,
+            started=None,
+            finished=None,
+            shard_total=None,
+            shard_complete=None,
+            shard_in_progress=None,
+            shard_waiting=None
+        )
+
     total_key = "total"
     completed_key = "completed"
     incomplete_key = "incomplete"
     unclaimed_key = "unclaimed"
     in_progress_key = "in progress"
 
-    queries = generate_status_queries()
-    values = {key: parse_query_response(queries[key], target_cluster, index_to_check, key) for key in queries.keys()}
+    # Get progress queries and run them
+    progress_queries = generate_progress_queries()
+    values = {key: parse_query_response(progress_queries[key], target_cluster, index_to_check, key) 
+              for key in progress_queries.keys()}
     if None in values.values():
         logger.warning(f"Failed to get values for some queries: {values}")
 
@@ -447,7 +474,7 @@ def with_uniques(filter_query):
     }
 
 
-def generate_status_queries():
+def generate_progress_queries():
     current_epoch_seconds = int(datetime.now(timezone.utc).timestamp())
     total_query = with_uniques({"bool": {"must_not": [{"match": {"_id": "shard_setup"}},
                                                       {"exists": {"field": "successor_items"}}]}})
@@ -466,7 +493,7 @@ def generate_status_queries():
         {"bool": {"must_not": [{"exists": {"field": "completedAt"}},
                                {"match": {"_id": "shard_setup"}}]}}
     ]}})
-    queries = {
+    return {
         "total": total_query,
         "completed": complete_query,
         "incomplete": incomplete_query,
@@ -474,7 +501,9 @@ def generate_status_queries():
         "unclaimed": unclaimed_query
     }
 
-    return queries
+
+def generate_shard_setup_query():
+    return {"query": {"match": {"_id": "shard_setup"}}}
 
 
 def perform_archive(target_cluster: Cluster,
@@ -561,3 +590,19 @@ def parse_query_response(query: dict, cluster: Cluster, index_name: str, label: 
         return int(body['hits']['total']['value'])
     logger.warning(f"No hits on {label} query, migration_working_state index may not exist or be populated")
     return None
+
+
+def parse_shard_setup_response(query: dict, cluster: Cluster, index_name: str) -> bool:
+    """Check if shard_setup document has completedAt field set"""
+    try:
+        response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
+                                    headers={'Content-Type': 'application/json'})
+        body = response.json()
+        hits = body.get('hits', {}).get('hits', [])
+        if hits:
+            source = hits[0].get('_source', {})
+            return 'completedAt' in source
+        return False
+    except Exception as e:
+        logger.error(f"Failed to check shard_setup document: {e}")
+        return False

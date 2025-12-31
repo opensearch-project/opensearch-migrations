@@ -195,45 +195,45 @@ function getRfsDeploymentManifest
 
 function getCheckHistoricalBackfillCompletionScript(sessionName: BaseExpression<string>) {
     const template = `
-set -e && 
+set -e
 touch /tmp/status-output.txt
 
 status=$(console --config-file=/config/migration_services.yaml backfill status --deep-check)
 
-echo $status |  awk '
+# Check if initializing
+if [[ "$status" == "Shards are initializing" ]]; then
+    echo "Shards are initializing" > /tmp/status-output.txt
+else
+    # Format detailed status
+    echo "$status" | awk '
+    /^Backfill status:/ { status = $3 }
+    /^Backfill percentage_completed:/ { pct = $3 }
+    /^Backfill eta_ms:/ { eta = $3 }
+    /^Backfill shard_total:/ { total = $3 }
+    /^Backfill shard_complete:/ { complete = $3 }
+    /^Backfill shard_in_progress:/ { progress = $3 }
+    /^Backfill shard_waiting:/ { waiting = $3 }
+
+    END {
+        gsub(/^[^.]+\\./, "", status)
+        eta_str = (eta == "" || eta == "None") ? "unknown" : int(eta/1000) "s"
+        printf "%s| complete: %.2f%%, ETA: %s; shards in-progress/waiting: %d/%d; shards complete/total: %d/%d\\n", 
+               status, pct, eta_str, progress, waiting, complete, total
+    }
+    ' > /tmp/status-output.txt
+fi
+
+# Check completion status - exit 0 only if complete, otherwise exit 1
+echo "$status" | awk '
 /^Backfill shard_total:/ {total=$3} 
 /^Backfill shard_complete:/ {complete=$3} 
 END {
-  if(total==complete) {
-    printf "COMPLETE: %d/%d shards\\n",complete,total; exit 0
+  if(total > 0 && total==complete) {
+    exit 0
   } else {
-    printf "IN PROGRESS: %d/%d shards\\n",complete,total; exit 1
+    exit 1
   }
-}
-'
-
-
-echo $status | awk '
-/^Backfill status:/ { status = $3 }
-/^Backfill percentage_completed:/ { pct = $3 }
-/^Backfill eta_ms:/ { eta = $3 }
-/^Backfill shard_total:/ { total = $3 }
-/^Backfill shard_complete:/ { complete = $3 }
-/^Backfill shard_in_progress:/ { progress = $3 }
-/^Backfill shard_waiting:/ { waiting = $3 }
-
-END {
-    # Extract status name from StepStateWithPause.RUNNING
-    gsub(/^[^.]+\\./, "", status)
-    
-    # Format ETA
-    eta_str = (eta == "" || eta == "None") ? "unknown" : int(eta/1000) "s"
-    
-    # Print formatted output
-    printf "%s| complete: %.2f%%, ETA: %s; shards in-progress/waiting: %d/%d; shards complete/total: %d/%d\\n", 
-           status, pct, eta_str, progress, waiting, complete, total
-}
-' > /tmp/status-output.txt
+}' || exit 1
 `;
     return expr.fillTemplate(template, {"SESSION_NAME": sessionName});
 }
