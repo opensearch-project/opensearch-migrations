@@ -263,7 +263,7 @@ spec:
             valueFrom:
               configMapKeyRef:
                 name: "{{workflow.parameters.s3-snapshot-configmap}}"
-                key: ENDPOINT_LOCALSTACK
+                key: ENDPOINT
                 optional: true
           - name: s3BucketName
             valueFrom:

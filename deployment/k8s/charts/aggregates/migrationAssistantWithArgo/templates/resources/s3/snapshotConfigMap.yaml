@@ -9,11 +9,9 @@ metadata:
 data:
   AWS_REGION: {{ .Values.aws.region }}
   {{- if .Values.defaultBucketConfiguration.useLocalStack }}
-  ENDPOINT: "http://{{ .Values.defaultBucketConfiguration.endpoint }}:4566"
-  ENDPOINT_LOCALSTACK: "localstack://{{ .Values.defaultBucketConfiguration.endpoint }}:4566"
+  ENDPOINT: "localstack://{{ .Values.defaultBucketConfiguration.endpoint }}.{{ .Release.Namespace }}.svc.cluster.local:4566"
   {{- else }}
   ENDPOINT: ""
-  ENDPOINT_LOCALSTACK: ""
   {{- end }}
   {{- if .Values.defaultBucketConfiguration.snapshotRoleArn }}
   SNAPSHOT_ROLE_ARN: "{{ .Values.defaultBucketConfiguration.snapshotRoleArn }}"
