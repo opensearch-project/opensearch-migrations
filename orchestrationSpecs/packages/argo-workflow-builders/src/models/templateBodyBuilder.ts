@@ -208,7 +208,8 @@ export abstract class TemplateBodyBuilder<
             inputs: this.inputsScope,
             outputs: this.outputsScope,
             retryStrategy: this.retryParameters,
-            body: this.getBody()
+            body: this.getBody(),
+            synchronization: this.synchronization
         };
     }
 }

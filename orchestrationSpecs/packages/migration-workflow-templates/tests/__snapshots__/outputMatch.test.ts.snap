@@ -964,6 +964,16 @@ exports[`test workflow template renderings create-snapshot 1`] = `
             },
           ],
         ],
+        "synchronization": {
+          "semaphores": [
+            {
+              "configMapKeyRef": {
+                "key": "{{=fromJSON(inputs.parameters.createSnapshotConfig)['semaphoreKey']}}",
+                "name": "{{=fromJSON(inputs.parameters.createSnapshotConfig)['semaphoreConfigMapName']}}",
+              },
+            },
+          ],
+        },
       },
     ],
   },
@@ -1084,44 +1094,50 @@ metadata:
                   {
                     "name": "command",
                     "value": "
-set -e && 
+set -e -x
 touch /tmp/status-output.txt
 
-python -c '
-import sys
-from lib.console_link.console_link.environment import Environment
-from lib.console_link.console_link.models.backfill_rfs import get_detailed_status_obj
-from lib.console_link.console_link.models.backfill_rfs import all_shards_finished_processing
+status=$(console --config-file=/config/migration_services.yaml backfill status --deep-check)
 
-status = get_detailed_status_obj(Environment(config_file="/config/migration_services.yaml").target_cluster,
-                                 True,
-                                 "{{inputs.parameters.sessionName}}")
-print(status)
-all_finished = all_shards_finished_processing(Environment(config_file="/config/migration_services.yaml").target_cluster,
-                                              "{{inputs.parameters.sessionName}}")
-sys.exit(0 if all_finished else 1)' >  /tmp/unprocessed_output.txt
+# Check if initializing
+if [[ "$status" == "Shards are initializing" ]]; then
+    echo "Shards are initializing" > /tmp/status-output.txt
+else
+    # Format detailed status
+    echo "$status" | awk '
+    /^Backfill status:/ { status = $3 }
+    /^Backfill percentage_completed:/ { pct = $3 }
+    /^Backfill eta_ms:/ { eta = $3 }
+    /^Backfill shard_total:/ { total = $3 }
+    /^Backfill shard_complete:/ { complete = $3 }
+    /^Backfill shard_in_progress:/ { progress = $3 }
+    /^Backfill shard_waiting:/ { waiting = $3 }
 
-cat /tmp/unprocessed_output.txt | awk '
-{
-    match($0, /status=<[^:]+: '([^']+)'/, status)
-    match($0, /percentage_completed=([0-9.]+)/, pct)
-    match($0, /eta_ms=([^[:space:]]+)/, eta)
-    match($0, /shard_total=([0-9]+)/, total)
-    match($0, /shard_complete=([0-9]+)/, complete)
-    match($0, /shard_in_progress=([0-9]+)/, progress)
-    match($0, /shard_waiting=([0-9]+)/, waiting)
-    
-    eta_str = (eta[1] == "None") ? "unknown" : (eta[1]/1000 "s")
-    
-    printf "%s| complete: %.2f%%, ETA: %s; shards in-progress/waiting: %d/%d; shards complete/total: %d/%d", 
-           status[1], pct[1], eta_str, progress[1], waiting[1], complete[1], total[1]
-}
-' > /tmp/status-output.txt
+    END {
+        gsub(/^[^.]+\\./, "", status)
+        eta_str = (eta == "" || eta == "None") ? "unknown" : int(eta/1000) "s"
+        printf "%s| complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d\\n", 
+               status, pct, eta_str, progress, waiting, complete, total
+    }
+    ' > /tmp/status-output.txt
+fi
+
+# Check completion status - exit 0 only if complete, otherwise exit 1
+echo "$status" | awk '
+/^Backfill shard_total:/ {total=$3} 
+/^Backfill shard_complete:/ {complete=$3} 
+END {
+  if(total > 0 && total==complete) {
+    exit 0
+  } else {
+    exit 1
+  }
+}' || exit 1
 ",
                   },
                 ],
               },
-              "name": "checkHistoricalBackfillCompletion",
+              "name": "checkBackfillStatus",
               "templateRef": {
                 "name": "migration-console",
                 "template": "runmigrationcommandforstatus",
@@ -1190,6 +1206,7 @@ spec:
     metadata:
       labels:
         app: bulk-loader
+        deployment-name: "{{=inputs.parameters.sessionName+'-rfs'}}"
         workflows.argoproj.io/workflow: "{{workflow.name}}"
     spec:
       serviceAccountName: argo-workflow-executor

@@ -53,7 +53,7 @@ export class ContainerBuilder<
         public readonly envScope: EnvScope,
         outputsScope: OutputParamsScope,
         retryParameters: RetryParameters,
-        synchronization?: SynchronizationConfig
+        synchronization: SynchronizationConfig | undefined
     ) {
         // REBINDER: must accept any NewBodyScope extends GenericScope and return ContainerBuilder
         const rebind: TemplateRebinder<
@@ -133,7 +133,8 @@ export class ContainerBuilder<
             this.volumeScope,
             this.envScope,
             this.outputsScope,
-            this.retryParameters
+            this.retryParameters,
+            this.synchronization
         );
     }
 
@@ -153,7 +154,8 @@ export class ContainerBuilder<
             this.volumeScope,
             this.envScope,  // Preserve env scope
             this.outputsScope,
-            this.retryParameters
+            this.retryParameters,
+            this.synchronization
         );
     }
 
@@ -173,7 +175,8 @@ export class ContainerBuilder<
             this.volumeScope,
             this.envScope,  // Preserve env scope
             this.outputsScope,
-            this.retryParameters
+            this.retryParameters,
+            this.synchronization
         );
     }
 
@@ -212,7 +215,8 @@ export class ContainerBuilder<
             this.volumeScope,
             this.envScope,
             newOutputs,
-            this.retryParameters);
+            this.retryParameters,
+            this.synchronization);
     }
 
     addVolumesFromRecord<
@@ -234,7 +238,8 @@ export class ContainerBuilder<
             extendScope(this.volumeScope, () => volumes as R),
             this.envScope,
             this.outputsScope,
-            this.retryParameters);
+            this.retryParameters,
+            this.synchronization);
     }
 
     addEnvVar<Name extends string>(
@@ -274,7 +279,8 @@ export class ContainerBuilder<
             this.volumeScope,
             extendScope(this.envScope, () => envVars as R),
             this.outputsScope,
-            this.retryParameters);
+            this.retryParameters,
+            this.synchronization);
     }
 
     addEnvVars<NewEnvScope extends DataOrConfigMapScope>(
@@ -291,7 +297,8 @@ export class ContainerBuilder<
             this.volumeScope,
             {},
             this.outputsScope,
-            this.retryParameters
+            this.retryParameters,
+            this.synchronization
         );
         return builderFn(emptyEnvBuilder) as any;
     }
@@ -323,7 +330,8 @@ export class ContainerBuilder<
             this.volumeScope,
             newEnvScope,
             this.outputsScope,
-            this.retryParameters
+            this.retryParameters,
+            this.synchronization
         );
     }
 
@@ -361,7 +369,8 @@ export class ContainerBuilder<
             this.volumeScope,
             envVars,
             this.outputsScope,
-            this.retryParameters
+            this.retryParameters,
+            this.synchronization
         ) as any;
     }
 
@@ -397,7 +406,8 @@ export class ContainerBuilder<
             this.volumeScope,
             this.envScope,
             this.outputsScope,
-            this.retryParameters
+            this.retryParameters,
+            this.synchronization
         );
     }
 }

@@ -1,4 +1,5 @@
 import {StreamSchemaParser} from "./streamSchemaTransformer";
+import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {
     ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN,
     PARAMETERIZED_MIGRATION_CONFIG,
@@ -24,6 +25,7 @@ export interface EtcdOptions {
 export class MigrationInitializer {
     readonly client: Etcd3;
     readonly loader: StreamSchemaParser<typeof PARAMETERIZED_MIGRATION_CONFIG_ARRAYS>;
+    readonly transformer: MigrationConfigTransformer;
     constructor(etcdSettings: EtcdOptions, public readonly uniqueRunNonce: string) {
         if (!K8S_NAMING_PATTERN.test(uniqueRunNonce)) {
             throw new Error(`Illegal uniqueRunNonce argument.  Must match regex pattern ${K8S_NAMING_PATTERN}.`);
@@ -34,6 +36,7 @@ export class MigrationInitializer {
             auth: etcdSettings.auth
         });
         this.loader = new StreamSchemaParser(PARAMETERIZED_MIGRATION_CONFIG_ARRAYS);
+        this.transformer = new MigrationConfigTransformer();
     }
 
     private calculateProcessorCount(targetMigrations: z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG>[]): number {
@@ -94,21 +97,45 @@ export class MigrationInitializer {
      * Generate output files including workflow config, approval ConfigMaps, and concurrency ConfigMaps with semaphores
      */
     async generateOutputFiles(workflows: ARGO_WORKFLOW_SCHEMA, outputDir: string, userConfig: any): Promise<void> {
+        const bundle = await this.generateMigrationBundle(userConfig);
+        await this.writeBundleToFiles(bundle, outputDir);
+    }
+
+    /**
+     * Generate all migration artifacts from user config
+     */
+    async generateMigrationBundle(userConfig: any) {
+        // Transform user config to workflow config
+        const workflows = await this.transformer.processFromObject(userConfig);
+        
+        // Generate ConfigMaps
+        const approvalConfigMaps = this.generateApprovalConfigMaps(userConfig);
+        const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
+        
+        return {
+            workflows,
+            approvalConfigMaps,
+            concurrencyConfigMaps
+        };
+    }
+
+    /**
+     * Write bundle to output files
+     */
+    private async writeBundleToFiles(bundle: any, outputDir: string): Promise<void> {
         await fs.mkdir(outputDir, { recursive: true });
 
-        // 1. Write workflow configuration (semaphores already added during transformation)
+        // 1. Write workflow configuration
         const workflowPath = path.join(outputDir, 'workflowMigration.config.yaml');
-        await fs.writeFile(workflowPath, JSON.stringify(workflows, null, 2));
+        await fs.writeFile(workflowPath, JSON.stringify(bundle.workflows, null, 2));
 
         // 2. Write approval config maps
-        const approvalConfigMaps = this.generateApprovalConfigMaps(userConfig);
         const approvalPath = path.join(outputDir, 'approvalConfigMaps.yaml');
-        await fs.writeFile(approvalPath, stringify(approvalConfigMaps));
+        await fs.writeFile(approvalPath, stringify(bundle.approvalConfigMaps));
 
-        // 3. Write concurrency config maps (includes semaphores)
-        const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
+        // 3. Write concurrency config maps
         const concurrencyPath = path.join(outputDir, 'concurrencyConfigMaps.yaml');
-        await fs.writeFile(concurrencyPath, stringify(concurrencyConfigMaps));
+        await fs.writeFile(concurrencyPath, stringify(bundle.concurrencyConfigMaps));
     }
 
     private generateApprovalConfigMaps(userConfig: any) {
@@ -160,12 +187,6 @@ export class MigrationInitializer {
                     name: 'concurrency-config'
                 },
                 data: {
-                    // General concurrency settings
-                    'concurrency.yaml': stringify({
-                        maxConcurrentWorkflows: 5,
-                        maxConcurrentSnapshots: 2,
-                        maxConcurrentMigrations: 3
-                    }),
                     // Semaphore keys with count=1
                     ...semaphoreData
                 }

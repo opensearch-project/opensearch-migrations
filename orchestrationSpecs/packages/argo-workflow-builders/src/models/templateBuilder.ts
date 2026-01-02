@@ -224,7 +224,7 @@ export class TemplateBuilder<
     {
         const fn = builderFn as (b: StepsBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
-            ((c, i) => new StepsBuilder(c, i, {}, [], {}, {})))
+            ((c, i) => new StepsBuilder(c, i, {}, [], {}, {}, undefined)))
         (this.contextualScope, this.inputScope));
     }
 
@@ -238,7 +238,7 @@ export class TemplateBuilder<
     {
         const fn = builderFn as (b: DagBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
-            ((c, i) => new DagBuilder(c, this.inputScope, {}, [], {}, {})))
+            ((c, i) => new DagBuilder(c, this.inputScope, {}, [], {}, {}, undefined)))
         (this.contextualScope, this.inputScope));
     }
 
@@ -273,7 +273,7 @@ export class TemplateBuilder<
     {
         const fn = builderFn as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}, {}>) => FinalBuilder;
         const result = fn((factory ??
-            ((c, i) => new ContainerBuilder(c, i, {}, {}, {}, {}, {})))
+            ((c, i) => new ContainerBuilder(c, i, {}, {}, {}, {}, {}, undefined)))
         (this.contextualScope, this.inputScope));
         return result;
     }

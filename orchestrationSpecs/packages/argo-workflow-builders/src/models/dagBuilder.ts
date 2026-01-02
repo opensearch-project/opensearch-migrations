@@ -97,7 +97,7 @@ export class DagBuilder<
         orderedTasks: NamedTask[],
         outputs: OutputParamsScope,
         retryParameters: RetryParameters,
-        synchronization?: SynchronizationConfig
+        synchronization: SynchronizationConfig | undefined
     ) {
         // Trick: capture a mutable selfRef within a closure for use inside the rebinder
         let selfRef: DagBuilder<ContextualScope, InputParamsScope, any, any> | undefined;
@@ -107,11 +107,11 @@ export class DagBuilder<
             InputParamsScope,
             TasksOutputsScope,
             DagExpressionContext<InputParamsScope, any>
-        > = (ctx, inScope, body, outScope, retry: RetryParameters) => {
+        > = (ctx, inScope, body, outScope, retry: RetryParameters, synchronization?: SynchronizationConfig) => {
             const currentTasks =
                 selfRef ? selfRef.taskBuilder.getTasks().taskList : orderedTasks;
             return new DagBuilder(
-                ctx, inScope, body, currentTasks, outScope, retry
+                ctx, inScope, body, currentTasks, outScope, retry, synchronization
             ) as any;
         };
 
@@ -121,7 +121,7 @@ export class DagBuilder<
         const tasksRebind: TaskRebinder<ContextualScope> =
             <NS extends TasksOutputsScope>(ctx: ContextualScope, scope: NS, tasks: NamedTask[]) =>
                 new DagBuilder<ContextualScope, InputParamsScope, NS, OutputParamsScope>(
-                    ctx, this.inputsScope, scope, tasks, this.outputsScope, this.retryParameters
+                    ctx, this.inputsScope, scope, tasks, this.outputsScope, this.retryParameters, this.synchronization
                 );
 
         this.taskBuilder = new DagTaskBuilder(contextualScope, bodyScope, orderedTasks, tasksRebind);

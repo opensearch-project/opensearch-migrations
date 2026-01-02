@@ -241,7 +241,10 @@ function formatSynchronization(sync: SynchronizationConfig) {
         result.semaphores = sync.semaphores.map(sem => {
             if ('configMapKeyRef' in sem) {
                 return {
-                    configMapKeyRef: sem.configMapKeyRef,
+                    configMapKeyRef: {
+                        name: transformExpressionsDeep(sem.configMapKeyRef.name),
+                        key: transformExpressionsDeep(sem.configMapKeyRef.key)
+                    },
                     ...(sem.namespace && { namespace: sem.namespace })
                 };
             } else {
