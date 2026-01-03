@@ -91,6 +91,15 @@ class ArgoService:
         logger.info(f"Argo workflow '{workflow_name}' has been deleted")
         return result
 
+    def print_workflow_details(self, workflow_name: str) -> None:
+        """Print workflow details for debugging failed workflows."""
+        try:
+            workflow_data = self._get_workflow_status_json(workflow_name)
+            logger.info(
+                f"Workflow {workflow_name} full status:\n{json.dumps(workflow_data.get('status', {}), indent=2)}")
+        except Exception as e:
+            logger.error(f"Failed to get workflow details: {e}")
+
     def get_workflow_status(self, workflow_name: str) -> CommandResult:
         workflow_data = self._get_workflow_status_json(workflow_name)
         phase = workflow_data.get("status", {}).get("phase", "")

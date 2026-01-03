@@ -14,7 +14,7 @@ env:
 # Prevent multiple simultaneous runs except on main repo
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ !(github.event_name == 'push' && github.repository == 'opensearch-project/opensearch-migrations') }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.repository == 'opensearch-project/opensearch-migrations' && github.ref == 'refs/heads/main') }}
 
 jobs:
   generate-cache-key:

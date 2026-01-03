@@ -106,6 +106,8 @@ def pytest_runtest_makereport(item, call):
     # Hook invoked after each test phase, used to update test success/failure data
     outcome = yield
     rep = outcome.get_result()
+    # Store report on item for access in teardown
+    setattr(item, f"rep_{rep.when}", rep)
     if rep.when == "call":
         # Retrieve any custom data attached during the test, if available.
         test_data = getattr(item, "test_data", {})
