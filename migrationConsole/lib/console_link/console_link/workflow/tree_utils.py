@@ -188,6 +188,9 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
         if failed_nodes:
             last_failed_node_id = failed_nodes[-1]['id']
             logger.info(f"Last failed node for deep check: {last_failed_node_id}")
+        else:
+            logger.info(f"No failed nodes found in deep_check_data. Available deep check data for nodes: {list(deep_check_data.keys())}")
+            logger.info(f"Failed nodes without deep check data: {[n['id'] for n in sorted_nodes if n['phase'] == 'Failed']}")
     
     console = Console()
     tree = Tree("[bold]Workflow Steps[/bold]")
@@ -203,8 +206,19 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
             if node['type'] not in ['Pod', 'Suspend', 'Skipped']:
                 display_name = clean_display_name(display_name)
             
+            # Add timestamp - prefer finished_at, fallback to started_at
+            timestamp_str = ""
+            if node.get('finished_at'):
+                # Parse and format finished timestamp
+                timestamp = node['finished_at'][:19]  # Remove timezone info for cleaner display
+                timestamp_str = f" ({timestamp.replace('T', ' ')})"
+            elif node.get('started_at'):
+                # Parse and format started timestamp
+                timestamp = node['started_at'][:19]  # Remove timezone info for cleaner display
+                timestamp_str = f" ({timestamp.replace('T', ' ')})"
+            
             # Build the node label
-            node_label = f"{symbol} {display_name}"
+            node_label = f"{symbol} {display_name}{timestamp_str}"
             
             # Add statusOutput for any failed node that has it
             if node['phase'] == 'Failed' and workflow_data:
@@ -228,7 +242,8 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
                 logger.info(f"Adding deep check for last failed node: {display_name}")
                 check_data = deep_check_data[node['id']]
                 status_results = check_data['status']
-                
+
+                # TODO - this needs to be refactored to be polymorphic and injected
                 # Show live status from API calls
                 if 'snapshot' in status_results:
                     snap_result = status_results['snapshot']
@@ -247,7 +262,16 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
                 if 'backfill' in status_results:
                     backfill_result = status_results['backfill']
                     if backfill_result.get('success'):
-                        node_tree.add(f"⚡ Backfill: {backfill_result['status']}")
+                        # Handle multi-line output like snapshot
+                        message = backfill_result.get('message', '')
+                        if message:
+                            lines = message.split('\n')
+                            deep_check_tree = node_tree.add(f"⚡ {lines[0]}")
+                            for line in lines[1:]:
+                                if line.strip():
+                                    deep_check_tree.add(line)
+                        else:
+                            node_tree.add(f"⚡ Backfill: {backfill_result['status']}")
                     else:
                         error_msg = backfill_result.get('error', 'Unknown error')
                         node_tree.add(f"⚡ Error: {error_msg}")

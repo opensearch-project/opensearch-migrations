@@ -193,9 +193,9 @@ function getRfsDeploymentManifest
 }
 
 
-function getCheckHistoricalBackfillCompletionScript(sessionName: BaseExpression<string>) {
+function getCheckBackfillStatusScript(sessionName: BaseExpression<string>) {
     const template = `
-set -e
+set -e -x
 touch /tmp/status-output.txt
 
 status=$(console --config-file=/config/migration_services.yaml backfill status --deep-check)
@@ -217,7 +217,7 @@ else
     END {
         gsub(/^[^.]+\\./, "", status)
         eta_str = (eta == "" || eta == "None") ? "unknown" : int(eta/1000) "s"
-        printf "%s| complete: %.2f%%, ETA: %s; shards in-progress/waiting: %d/%d; shards complete/total: %d/%d\\n", 
+        printf "%s| complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d\\n", 
                status, pct, eta_str, progress, waiting, complete, total
     }
     ' > /tmp/status-output.txt
@@ -267,10 +267,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("sessionName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
-            .addStep("checkHistoricalBackfillCompletion", MigrationConsole, "runMigrationCommandForStatus", c =>
+            .addStep("checkBackfillStatus", MigrationConsole, "runMigrationCommandForStatus", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    command: getCheckHistoricalBackfillCompletionScript(b.inputs.sessionName)
+                    command: getCheckBackfillStatusScript(b.inputs.sessionName)
                 }))
         )
         .addRetryParameters({

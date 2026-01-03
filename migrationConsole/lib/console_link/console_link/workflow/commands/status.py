@@ -149,7 +149,7 @@ def _check_backfill_status(env):
     try:
         logger.info("Calling backfill middleware status")
         result = backfill_middleware.status(env.backfill, deep_check=True)
-        logger.info(f"Backfill status result: success={result.success}, value={result.value}")
+        logger.info(f"Backfill status result: {result}")
         
         if result.success:
             status_enum, message = result.value
@@ -833,29 +833,27 @@ def _get_deep_check_data(workflow_data, deep_check):
     if status_check_nodes:
         logger.info(f"Found {len(status_check_nodes)} total status check nodes")
         status_check_nodes.sort(key=lambda n: n['started_at'] or '0000-00-00T00:00:00Z')
-        last_check = status_check_nodes[-1]
         
-        logger.info(f"Last status check: {last_check['display_name']} ({last_check['phase']})")
-        
-        # Only run deep check if the last status check was not successful
-        if last_check['phase'] != 'Succeeded':
-            logger.info(f"Last status check failed, running deep check for: {last_check['display_name']}")
-            
-            # Walk up the tree to find config
-            config_contents = _walk_up_for_config(nodes, last_check['node_id'], "configContents")
-            if config_contents:
-                logger.info("Found config contents, converting with jq")
-                services_config = _convert_config_with_jq(config_contents)
-                if services_config:
-                    config_dict = yaml.safe_load(services_config)
-                    check_tasks.append({
-                        'node_id': last_check['node_id'],
-                        'step_name': last_check['display_name'],
-                        'type': last_check['type'],
-                        'env': Environment(config=config_dict)
-                    })
-        else:
-            logger.info(f"Last status check succeeded, skipping deep check for {last_check['display_name']} (type: {last_check['type']})")
+        # Run deep check for all non-succeeded status checks
+        for check_node in status_check_nodes:
+            if check_node['phase'] != 'Succeeded':
+                logger.info(f"Running deep check for non-succeeded status check: {check_node['display_name']} ({check_node['phase']})")
+                
+                # Walk up the tree to find config
+                config_contents = _walk_up_for_config(nodes, check_node['node_id'], "configContents")
+                if config_contents:
+                    logger.info("Found config contents, converting with jq")
+                    services_config = _convert_config_with_jq(config_contents)
+                    if services_config:
+                        config_dict = yaml.safe_load(services_config)
+                        check_tasks.append({
+                            'node_id': check_node['node_id'],
+                            'step_name': check_node['display_name'],
+                            'type': check_node['type'],
+                            'env': Environment(config=config_dict)
+                        })
+            else:
+                logger.info(f"Status check succeeded, skipping deep check for {check_node['display_name']} (type: {check_node['type']})")
     else:
         logger.info("No status check nodes found")
     
