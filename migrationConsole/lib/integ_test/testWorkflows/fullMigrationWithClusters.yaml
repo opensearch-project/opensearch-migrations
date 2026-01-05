@@ -306,7 +306,7 @@ spec:
                 "awsRegion": $region,
                 "endpoint": $endpoint,
                 "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix),
-                "snapshotRoleArn": $roleArn
+                "s3RoleArn": $roleArn
               }')
             
             SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" '. + {"snapshotRepo": $repo}')
