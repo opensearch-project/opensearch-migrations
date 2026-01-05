@@ -2,11 +2,10 @@ name: Jenkins
 
 on:
   push:
-    branches-ignore:
-      - 'backport/**'
-      - 'dependabot/**'
+    branches:
+      - main
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
@@ -54,7 +53,10 @@ jobs:
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }}"
 
   eks-integ-test:
-    if: github.event_name == 'push'
+    if: |
+      github.event_name == 'push' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'run-eks-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-eks-tests'))
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
