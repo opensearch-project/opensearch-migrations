@@ -10,7 +10,7 @@ plugins {
     id 'com.gradleup.shadow' version '8.3.8' apply false
     id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
     id 'com.github.node-gradle.node' version '7.1.0' apply false
-    id 'com.google.protobuf' version "0.9.5" apply false
+    id 'com.google.protobuf' version "0.9.6" apply false
     id 'com.google.cloud.tools.jib' apply false // version is set in buildSrc
 
     // Used in top level build.gradle

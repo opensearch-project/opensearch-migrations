@@ -689,7 +689,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
         "container": {
           "args": [
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceAwsServiceSigningName", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], "sourceAwsRegion", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceCaCert", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict("sourceHost", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : ({}))), sprig.dict("sourceInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.merge(sprig.omit(fromJSON(inputs.parameters.createSnapshotConfig), 'loggingConfigurationOverrideConfigMap', 'semaphoreConfigMapName', 'semaphoreKey'), sprig.dict("noWait", true))), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "snapshotRepoName", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig.repoName')), sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'])))))}}",
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceAwsServiceSigningName", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], "sourceAwsRegion", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceCaCert", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict("sourceHost", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : ({}))), sprig.dict("sourceInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.merge(sprig.omit(fromJSON(inputs.parameters.createSnapshotConfig), 'loggingConfigurationOverrideConfigMap', 'semaphoreConfigMapName', 'semaphoreKey'), sprig.dict("noWait", true))), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "snapshotRepoName", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig.repoName')), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3RoleArn", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RoleArn'])))), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'])))))}}",
           ],
           "command": [
             "/root/createSnapshot/bin/CreateSnapshot",
@@ -1327,7 +1327,7 @@ spec:
                   },
                   {
                     "name": "rfsJsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp', "cleanLocalDirs", true), sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp')))))}}",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp', "cleanLocalDirs", true), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict("s3RoleArn", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict("s3RepoUri", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], "s3Region", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], "s3LocalDir", '/tmp')))))}}",
                   },
                   {
                     "name": "resources",
@@ -1604,6 +1604,9 @@ exports[`test workflow template renderings full-migration 1`] = `
               "name": "name",
             },
             {
+              "name": "groupName",
+            },
+            {
               "name": "metadataMigrationConfig",
               "value": "",
             },
@@ -1641,7 +1644,7 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
           ],
         },
-        "name": "foreachsnapshotmigration",
+        "name": "migratefromsnapshot",
         "outputs": {
           "parameters": [],
         },
@@ -1772,6 +1775,9 @@ exports[`test workflow template renderings full-migration 1`] = `
               "name": "name",
             },
             {
+              "name": "groupName",
+            },
+            {
               "name": "createSnapshotConfig",
               "value": "",
             },
@@ -1804,7 +1810,7 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
           ],
         },
-        "name": "foreachsnapshotextraction",
+        "name": "getsnapshotthenmigratesnapshot",
         "outputs": {
           "parameters": [],
         },
@@ -1914,10 +1920,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "name": "perSnapshotName",
                     "value": "{{inputs.parameters.name}}",
                   },
+                  {
+                    "name": "groupName",
+                    "value": "{{=item['name']}}",
+                  },
                 ],
               },
-              "name": "foreachSnapshotMigration",
-              "template": "foreachsnapshotmigration",
+              "name": "migrateFromSnapshot",
+              "template": "migratefromsnapshot",
               "withParam": "{{inputs.parameters.migrations}}",
             },
           ],
@@ -1931,6 +1941,10 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
             {
               "name": "targetConfig",
+            },
+            {
+              "name": "groupName",
+              "value": "{{=fromJSON(inputs.parameters.sourceConfig)['name']+' to '+fromJSON(inputs.parameters.targetConfig)['name']}}",
             },
             {
               "name": "snapshotExtractAndLoadConfigArray",
@@ -1969,7 +1983,7 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
           ],
         },
-        "name": "foreachmigrationpair",
+        "name": "migration",
         "outputs": {
           "parameters": [],
         },
@@ -2038,10 +2052,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "name": "snapshotConfig",
                     "value": "{{=jsonpath(toJSON(item), '$.snapshotConfig')}}",
                   },
+                  {
+                    "name": "groupName",
+                    "value": "{{=item['name']}}",
+                  },
                 ],
               },
-              "name": "foreachSnapshotExtraction",
-              "template": "foreachsnapshotextraction",
+              "name": "getSnapshotThenMigrateSnapshot",
+              "template": "getsnapshotthenmigratesnapshot",
               "when": "{{=!(0 == len(inputs.parameters.snapshotExtractAndLoadConfigArray))}}",
               "withParam": "{{inputs.parameters.snapshotExtractAndLoadConfigArray}}",
             },
@@ -2203,8 +2221,8 @@ exports[`test workflow template renderings full-migration 1`] = `
                   },
                 ],
               },
-              "name": "foreachMigrationPair",
-              "template": "foreachmigrationpair",
+              "name": "migration",
+              "template": "migration",
               "withParam": "{{inputs.parameters.migrationConfigs}}",
             },
           ],
@@ -2386,9 +2404,16 @@ echo "Checking workflow status"
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
 
-STATUS_OUTPUT=$(workflow status migration-workflow 2>&1 || true)
+STATUS_OUTPUT=$(workflow status migration-workflow 2>&1)
+STATUS_EXIT_CODE=$?
 echo "Status output:"
 echo "$STATUS_OUTPUT"
+
+# If the command failed (e.g., connection error), retry
+if [ $STATUS_EXIT_CODE -ne 0 ]; then
+    echo "Failed to get workflow status (exit code: $STATUS_EXIT_CODE), will retry..."
+    exit 1
+fi
 
 # Check if workflow is running or pending - retry
 if echo "$STATUS_OUTPUT" | grep -q "Phase: Running\\|Phase: Pending"; then
@@ -2674,7 +2699,7 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           "args": [
             "{{inputs.parameters.commandMode}}",
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'loggingConfigurationOverrideConfigMap')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", fromJSON(inputs.parameters.sourceConfig)['version']), sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp')))))}}",
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'loggingConfigurationOverrideConfigMap')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", fromJSON(inputs.parameters.sourceConfig)['version']), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict("s3RoleArn", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict("s3RepoUri", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], "s3Region", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], "s3LocalDir", '/tmp')))))}}",
           ],
           "command": [
             "/root/metadataMigration/bin/MetadataMigration",
@@ -3833,60 +3858,166 @@ exports[`test workflow template renderings target-latch-helpers 1`] = `
       {
         "container": {
           "args": [
-            "set -x -e
-PROCESSOR_ID="$PROCESSOR_ID"
-TARGET_NAME="$TARGET_NAME"
-ETCD_ENDPOINT=$ETCD_ENDPOINTS
-PREFIX="$WORKFLOW_PREFIX"
+            "#!/bin/bash
+set -e
+
+# Import Library
+#!/bin/bash
+
+# Optional Parameters
+ETCD_RETRIES=\${ETCD_RETRIES:-5}
+ETCD_RETRY_DELAY=\${ETCD_RETRY_DELAY:-2}
+ETCD_DIAL_TIMEOUT=\${ETCD_DIAL_TIMEOUT:-"3s"}
+ETCD_CMD_TIMEOUT=\${ETCD_CMD_TIMEOUT:-"3s"}
+
+# Required Parameters
+if [ -z "$ETCD_ENDPOINTS" ]; then
+  echo "Error: ETCD_ENDPOINTS is not set." >&2
+  exit 1
+fi
+
+# Export the base command with timeouts so it fails fast rather than hanging
+export ETCDCTL_API=3
+export ETCD_CMD="etcdctl --endpoints=$ETCD_ENDPOINTS --user $ETCD_USER:$ETCD_PASSWORD --dial-timeout=$ETCD_DIAL_TIMEOUT --command-timeout=$ETCD_CMD_TIMEOUT"
+
+# Run an arbitrary command that doesn't need to return/handle stdout from etcdctl (like WRITE/DELETE)
+# Usage: etcd_safe_run put key value
+etcd_safe_run() {
+  local attempt=1
+  local cmd="$*"
+
+  while [ $attempt -le $ETCD_RETRIES ]; do
+    # We temporarily disable 'set -e' to catch the failure
+    set +e
+    $ETCD_CMD "$@" > /dev/null
+    local status=$?
+    set -e
+
+    if [ $status -eq 0 ]; then
+      return 0
+    fi
+
+    echo "[etcd_lib] Command failed (Attempt $attempt/$ETCD_RETRIES): $cmd" >&2
+    sleep $ETCD_RETRY_DELAY
+    attempt=$((attempt + 1))
+  done
+
+  echo "[etcd_lib] Critical: Max retries reached for operation." >&2
+  return 1
+}
+
+# Wrapper for getting values safely
+# This is separate from etcd_safe_run since the output for get needs to be captured
+# Usage: MY_VAR=$(etcd_safe_get "my/key")
+etcd_safe_get() {
+  local key="$1"
+  local attempt=1
+
+  while [ $attempt -le $ETCD_RETRIES ]; do
+    set +e
+    # Capture output and status separately, silence stderr
+    local output
+    output=$($ETCD_CMD get "$key" --print-value-only 2>/dev/null)
+    local status=$?
+    set -e
+
+    if [ $status -eq 0 ]; then
+      echo "$output"
+      return 0
+    fi
+
+    # Log to stderr so we don't pollute the captured variable
+    echo "[etcd_lib] Get failed (Attempt $attempt/$ETCD_RETRIES): $key" >&2
+    sleep $ETCD_RETRY_DELAY
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
+# Wrapper for getting just keys safely
+# Usage: MY_KEYS=$(etcd_safe_get_keys "my/prefix/")
+# Note: Automatically adds --prefix and --keys-only
+etcd_safe_get_keys() {
+  local prefix="$1"
+  local attempt=1
+
+  while [ $attempt -le $ETCD_RETRIES ]; do
+    set +e
+    local output
+    output=$($ETCD_CMD get "$prefix" --prefix --keys-only 2>/dev/null)
+    local status=$?
+    set -e
+
+    if [ $status -eq 0 ]; then
+      echo "$output"
+      return 0
+    fi
+
+    echo "[etcd_lib] Key list fetch failed (Attempt $attempt/$ETCD_RETRIES): $prefix" >&2
+    sleep $ETCD_RETRY_DELAY
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
+
+# PREFIX, PROCESSOR_ID, and TARGET_NAME env vars are set by the workflow template
 
 normalize_endpoint() {
   echo "$1" | base64
 }
 
 NORMALIZED_TARGET=$(normalize_endpoint "$TARGET_NAME")
-
-USERNAME=$ETCD_USER
-PASSWORD=$ETCD_PASSWORD
 LATCH_KEY_NAME=/$PREFIX/workflow/targets/$NORMALIZED_TARGET/latch
-
 FRIENDLY_NAME="\${NORMALIZED_TARGET}-\${PROCESSOR_ID}"
 
-export ETCDCTL_API=3
-
-# Run etcdctl with configured endpoints
-etcdctl_cmd="etcdctl --endpoints=$ETCD_ENDPOINT --user $USERNAME:$PASSWORD"
-
-# Record this processor as finished
-$etcdctl_cmd put /$PREFIX/workflow/targets/$NORMALIZED_TARGET/finishedSubFlows/$FRIENDLY_NAME "completed"
+# Record processor completion
+etcd_safe_run put "/$PREFIX/workflow/targets/$NORMALIZED_TARGET/finishedSubFlows/$FRIENDLY_NAME" "completed"
 
 execute_transaction() {
-local current_value="$1"
-local next_value="$2"
+  local current_value="$1"
+  local next_value="$2"
 
-echo "LATCH_KEY_NAME=$LATCH_KEY_NAME"
-echo "current_value=$current_value"
-echo "next_value=$next_value"
-echo "etcdctl_cmd=$etcdctl_cmd"
+  echo "Attempting Transaction (LATCH_KEY_NAME={$LATCH_KEY_NAME}): $current_value -> $next_value"
 
-# be very mindful of the empty lines in the file being sent to the transaction command!
-$etcdctl_cmd txn  --write-out=json << EOF | jq -e '.succeeded == true'
+  # We use raw $ETCD_CMD here because heredocs don't play nice with wrapper functions
+  set +e
+  $ETCD_CMD txn --write-out=json << EOF | jq -e '.succeeded == true' > /dev/null
 val("$LATCH_KEY_NAME") = "$current_value"
 
 put $LATCH_KEY_NAME "$next_value"
 
 
 EOF
+  local status=$?
+  set -e
+
+  return $status
 }
 
 # Transaction retry loop
 while true; do
-  CURRENT_COUNT=$($etcdctl_cmd get  $LATCH_KEY_NAME --print-value-only)
+  # retry for transient service errors is already built into safe get.
+  # Our loop deals with the content of the key OR (later) a transient error while running the transaction
+  CURRENT_COUNT=$(etcd_safe_get "$LATCH_KEY_NAME")
+
+  # Handle case where key doesn't exist yet (empty string)
+  if [ -z "$CURRENT_COUNT" ]; then
+    CURRENT_COUNT=0 # Or handle error depending on your logic
+  fi
+
   NEW_COUNT=$((CURRENT_COUNT - 1))
+
   if execute_transaction "$CURRENT_COUNT" "$NEW_COUNT"; then
     echo "Transaction succeeded"
     break
   else
-    echo "Transaction failed, retrying..."
+    # This catches both:
+    # A. Logical failure (value changed by someone else)
+    # B. Network failure (etcd command failed)
+    echo "Transaction failed (Network or compare-and-swap mismatch), retrying..."
     sleep 1
   fi
 done
@@ -4003,15 +4134,119 @@ echo $SHOULD_FINALIZE",
       {
         "container": {
           "args": [
-            "export ETCDCTL_API=3
-etcdctl_cmd="etcdctl --endpoints=$ETCD_ENDPOINTS --user $ETCD_USER:$ETCD_PASSWORD"
+            "#!/bin/bash
+set -e
 
-PREFIX="$WORKFLOW_PREFIX"
+# Import Library
+#!/bin/bash
+
+# Optional Parameters
+ETCD_RETRIES=\${ETCD_RETRIES:-5}
+ETCD_RETRY_DELAY=\${ETCD_RETRY_DELAY:-2}
+ETCD_DIAL_TIMEOUT=\${ETCD_DIAL_TIMEOUT:-"3s"}
+ETCD_CMD_TIMEOUT=\${ETCD_CMD_TIMEOUT:-"3s"}
+
+# Required Parameters
+if [ -z "$ETCD_ENDPOINTS" ]; then
+  echo "Error: ETCD_ENDPOINTS is not set." >&2
+  exit 1
+fi
+
+# Export the base command with timeouts so it fails fast rather than hanging
+export ETCDCTL_API=3
+export ETCD_CMD="etcdctl --endpoints=$ETCD_ENDPOINTS --user $ETCD_USER:$ETCD_PASSWORD --dial-timeout=$ETCD_DIAL_TIMEOUT --command-timeout=$ETCD_CMD_TIMEOUT"
+
+# Run an arbitrary command that doesn't need to return/handle stdout from etcdctl (like WRITE/DELETE)
+# Usage: etcd_safe_run put key value
+etcd_safe_run() {
+  local attempt=1
+  local cmd="$*"
+
+  while [ $attempt -le $ETCD_RETRIES ]; do
+    # We temporarily disable 'set -e' to catch the failure
+    set +e
+    $ETCD_CMD "$@" > /dev/null
+    local status=$?
+    set -e
+
+    if [ $status -eq 0 ]; then
+      return 0
+    fi
+
+    echo "[etcd_lib] Command failed (Attempt $attempt/$ETCD_RETRIES): $cmd" >&2
+    sleep $ETCD_RETRY_DELAY
+    attempt=$((attempt + 1))
+  done
+
+  echo "[etcd_lib] Critical: Max retries reached for operation." >&2
+  return 1
+}
+
+# Wrapper for getting values safely
+# This is separate from etcd_safe_run since the output for get needs to be captured
+# Usage: MY_VAR=$(etcd_safe_get "my/key")
+etcd_safe_get() {
+  local key="$1"
+  local attempt=1
+
+  while [ $attempt -le $ETCD_RETRIES ]; do
+    set +e
+    # Capture output and status separately, silence stderr
+    local output
+    output=$($ETCD_CMD get "$key" --print-value-only 2>/dev/null)
+    local status=$?
+    set -e
+
+    if [ $status -eq 0 ]; then
+      echo "$output"
+      return 0
+    fi
+
+    # Log to stderr so we don't pollute the captured variable
+    echo "[etcd_lib] Get failed (Attempt $attempt/$ETCD_RETRIES): $key" >&2
+    sleep $ETCD_RETRY_DELAY
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
+# Wrapper for getting just keys safely
+# Usage: MY_KEYS=$(etcd_safe_get_keys "my/prefix/")
+# Note: Automatically adds --prefix and --keys-only
+etcd_safe_get_keys() {
+  local prefix="$1"
+  local attempt=1
+
+  while [ $attempt -le $ETCD_RETRIES ]; do
+    set +e
+    local output
+    output=$($ETCD_CMD get "$prefix" --prefix --keys-only 2>/dev/null)
+    local status=$?
+    set -e
+
+    if [ $status -eq 0 ]; then
+      echo "$output"
+      return 0
+    fi
+
+    echo "[etcd_lib] Key list fetch failed (Attempt $attempt/$ETCD_RETRIES): $prefix" >&2
+    sleep $ETCD_RETRY_DELAY
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
+
+# PREFIX env var is set by the workflow template
 echo "===== CLEANING UP ETCD KEYS FOR PREFIX $PREFIX ====="
 
 # Record workflow completion time
-$etcdctl_cmd put /$PREFIX/workflow/info/completed "$(date +%s)"
-STARTED=$($etcdctl_cmd get /$PREFIX/workflow/info/started --print-value-only)
+etcd_safe_run put "/$PREFIX/workflow/info/completed" "$(date +%s)"
+
+STARTED=$(etcd_safe_get "/$PREFIX/workflow/info/started")
+if [ -z "$STARTED" ]; then STARTED=$(date +%s); fi
 COMPLETED=$(date +%s)
 DURATION=$((COMPLETED - STARTED))
 
@@ -4024,34 +4259,42 @@ echo "Workflow completion stats:"
 STATS_KEY="workflow-stats/runs/$PREFIX"
 
 # Save summarized workflow stats to a persistent key
-$etcdctl_cmd put /$STATS_KEY/started "$STARTED"
-$etcdctl_cmd put /$STATS_KEY/completed "$COMPLETED"
-$etcdctl_cmd put /$STATS_KEY/duration "$DURATION"
+etcd_safe_run put "/$STATS_KEY/started" "$STARTED"
+etcd_safe_run put "/$STATS_KEY/completed" "$COMPLETED"
+etcd_safe_run put "/$STATS_KEY/duration" "$DURATION"
 
 # For each target, save its finalized status and completed processors
-for TARGET_KEY in $($etcdctl_cmd get /$PREFIX/workflow/targets/ --prefix --keys-only | grep "/latch$" | sort); do
+TARGET_KEYS=$(etcd_safe_get_keys "/$PREFIX/workflow/targets/" | grep "/latch$" | sort)
+for TARGET_KEY in $TARGET_KEYS; do
   TARGET_PATH=$(echo "$TARGET_KEY" | sed "s|/$PREFIX/workflow/targets/||" | sed "s|/latch$||")
-  TARGET_ENDPOINT=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET_PATH/endpoint --print-value-only)
-  LATCH_VALUE=$($etcdctl_cmd get $TARGET_KEY --print-value-only)
+  TARGET_ENDPOINT=$(etcd_safe_get "/$PREFIX/workflow/targets/$TARGET_PATH/endpoint")
+  LATCH_VALUE=$(etcd_safe_get "$TARGET_KEY")
 
-  # Save the target stats
-  $etcdctl_cmd put /$STATS_KEY/targets/$TARGET_PATH/endpoint "$TARGET_ENDPOINT"
-  $etcdctl_cmd put /$STATS_KEY/targets/$TARGET_PATH/final_latch_value "$LATCH_VALUE"
+  # Save target stats
+  etcd_safe_run put "/$STATS_KEY/targets/$TARGET_PATH/endpoint" "$TARGET_ENDPOINT"
+  etcd_safe_run put "/$STATS_KEY/targets/$TARGET_PATH/final_latch_value" "$LATCH_VALUE"
 
   # Save the list of completed processor chains
-  COMPLETED_PROCESSORS=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET_PATH/finishedSubFlows/ --prefix --keys-only | wc -l)
-  $etcdctl_cmd put /$STATS_KEY/targets/$TARGET_PATH/completed_processors "$COMPLETED_PROCESSORS"
+  RAW_PROCESSOR_KEYS=$(etcd_safe_get_keys "/$PREFIX/workflow/targets/$TARGET_PATH/finishedSubFlows/")
 
-  # Save the list of processor chain names
-  PROCESSOR_CHAINS=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET_PATH/finishedSubFlows/ --prefix --keys-only | sort | tr '\\n' ',' | sed 's/,$//')
-  $etcdctl_cmd put /$STATS_KEY/targets/$TARGET_PATH/processor_chains "$PROCESSOR_CHAINS"
+  # Count Processors
+  if [ -z "$RAW_PROCESSOR_KEYS" ]; then
+    COMPLETED_PROCESSORS_COUNT=0
+    PROCESSOR_CHAINS=""
+  else
+    COMPLETED_PROCESSORS_COUNT=$(echo "$RAW_PROCESSOR_KEYS" | wc -l)
+    PROCESSOR_CHAINS=$(echo "$RAW_PROCESSOR_KEYS" | sort | tr '\\n' ',' | sed 's/,$//')
+  fi
 
-  echo "- Target $TARGET_ENDPOINT: Latch=$LATCH_VALUE, Completed Processors=$COMPLETED_PROCESSORS"
+  etcd_safe_run put "/$STATS_KEY/targets/$TARGET_PATH/completed_processors" "$COMPLETED_PROCESSORS_COUNT"
+  etcd_safe_run put "/$STATS_KEY/targets/$TARGET_PATH/processor_chains" "$PROCESSOR_CHAINS"
+
+  echo "- Target $TARGET_ENDPOINT: Latch=$LATCH_VALUE, Completed Processors=$COMPLETED_PROCESSORS_COUNT"
 done
 
 # Delete all workflow keys for this run (but keep the stats)
 echo "Deleting all workflow keys with prefix: /$PREFIX/workflow/"
-$etcdctl_cmd del /$PREFIX/workflow/ --prefix
+etcd_safe_run del "/$PREFIX/workflow/" --prefix
 
 echo "Cleanup complete. Workflow stats preserved under /$STATS_KEY/"",
           ],

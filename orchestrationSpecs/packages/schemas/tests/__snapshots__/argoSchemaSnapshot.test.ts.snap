@@ -114,6 +114,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
                       "description": "s3://BUCKETNAME/PATH"
+                    },
+                    "s3RoleArn": {
+                      "type": "string",
+                      "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                      "default": "",
+                      "description": "IAM role ARN to assume when accessing S3 for snapshot operations"
                     }
                   },
                   "required": [
@@ -268,11 +274,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
-                      "default": ""
-                    },
-                    "s3RoleArn": {
-                      "type": "string",
-                      "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                       "default": ""
                     },
                     "semaphoreConfigMapName": {
@@ -546,6 +547,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
                           "description": "s3://BUCKETNAME/PATH"
                         },
+                        "s3RoleArn": {
+                          "type": "string",
+                          "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "default": ""
+                        },
                         "useLocalStack": {
                           "type": "boolean",
                           "default": false
@@ -795,6 +801,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "type": "string",
                   "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
                   "description": "s3://BUCKETNAME/PATH"
+                },
+                "s3RoleArn": {
+                  "type": "string",
+                  "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                  "default": "",
+                  "description": "IAM role ARN to assume when accessing S3 for snapshot operations"
                 }
               },
               "required": [
@@ -964,11 +976,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
-                      "default": ""
-                    },
-                    "s3RoleArn": {
-                      "type": "string",
-                      "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                       "default": ""
                     }
                   }

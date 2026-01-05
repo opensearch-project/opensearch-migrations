@@ -5,7 +5,13 @@ import {
     PARAMETERIZED_MIGRATION_CONFIG,
     PARAMETERIZED_MIGRATION_CONFIG_ARRAYS
 } from "@opensearch-migrations/schemas";
-import {Etcd3} from "etcd3";
+import { Etcd3, isRecoverableError } from "etcd3";
+import {
+    handleWhen,
+    retry,
+    circuitBreaker,
+} from "cockatiel";
+import { ExponentialBackoff } from "cockatiel/dist/backoff/ExponentialBackoff"; // path may vary
 import {z} from "zod";
 import {stringify} from "yaml";
 import * as fs from "fs/promises";
@@ -31,9 +37,21 @@ export class MigrationInitializer {
             throw new Error(`Illegal uniqueRunNonce argument.  Must match regex pattern ${K8S_NAMING_PATTERN}.`);
         }
         console.log("Initializing with " + JSON.stringify(etcdSettings));
+        const recoverable = handleWhen((err) => isRecoverableError(err as any));
+        // this is an interactive process meant to be used at the beginning of a workflow -
+        // no reason to try excessively.  Modest retries and then the user can resubmit or investigate.
         this.client = new Etcd3({
             hosts: etcdSettings.endpoints,
-            auth: etcdSettings.auth
+            auth: etcdSettings.auth,
+            faultHandling: {
+                global: retry(recoverable, {
+                    maxAttempts: 4,
+                    backoff: new ExponentialBackoff({
+                        initialDelay: 100, // ms
+                        maxDelay: 2_000    // ms
+                    } as any),
+                })
+            }
         });
         this.loader = new StreamSchemaParser(PARAMETERIZED_MIGRATION_CONFIG_ARRAYS);
         this.transformer = new MigrationConfigTransformer();
