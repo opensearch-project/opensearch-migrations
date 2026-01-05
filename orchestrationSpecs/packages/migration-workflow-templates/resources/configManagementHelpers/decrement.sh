@@ -4,9 +4,7 @@ set -e
 # Import Library
 source ./etcdClientHelper.sh
 
-PROCESSOR_ID="$PROCESSOR_ID"
-TARGET_NAME="$TARGET_NAME"
-PREFIX="$WORKFLOW_PREFIX"
+# PREFIX, PROCESSOR_ID, and TARGET_NAME env vars are set by the workflow template
 
 normalize_endpoint() {
   echo "$1" | base64

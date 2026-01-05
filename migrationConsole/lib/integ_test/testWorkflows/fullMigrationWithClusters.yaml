@@ -301,13 +301,16 @@ spec:
               --arg endpoint "$S3_ENDPOINT" \
               --arg bucket "$S3_BUCKET" \
               --arg suffix "$SUFFIX" \
-              --arg roleArn "$SNAPSHOT_ROLE_ARN" \
               '{
                 "awsRegion": $region,
                 "endpoint": $endpoint,
-                "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix),
-                "snapshotRoleArn": $roleArn
+                "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
               }')
+            
+            # Add s3RoleArn only if provided
+            if [ -n "$SNAPSHOT_ROLE_ARN" ]; then
+              SNAPSHOT_REPO=$(echo "$SNAPSHOT_REPO" | jq --arg roleArn "$SNAPSHOT_ROLE_ARN" '. + {"s3RoleArn": $roleArn}')
+            fi
             
             SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" '. + {"snapshotRepo": $repo}')
             

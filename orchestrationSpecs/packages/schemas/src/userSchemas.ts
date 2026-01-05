@@ -104,7 +104,9 @@ export const S3_REPO_CONFIG = z.object({
         .describe("Override the default S3 endpoint for clients to connect to. " +
             "Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"),
     s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\/[a-zA-Z0-9!\-_.*'()/]*)?$/).describe("s3://BUCKETNAME/PATH"),
-    repoName: z.string().default("migration_assistant_repo").optional()
+    repoName: z.string().default("migration_assistant_repo").optional(),
+    s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
+        .describe("IAM role ARN to assume when accessing S3 for snapshot operations")
 });
 
 export const CPU_QUANTITY = z.string()
@@ -161,8 +163,7 @@ export const REPLAYER_OPTIONS = z.object({
 export const CREATE_SNAPSHOT_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional(),
     maxSnapshotRateMbPerNode: z.number().default(0).optional(),
-    loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
-    s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
+    loggingConfigurationOverrideConfigMap: z.string().default("").optional()
 });
 
 export const USER_METADATA_OPTIONS = z.object({

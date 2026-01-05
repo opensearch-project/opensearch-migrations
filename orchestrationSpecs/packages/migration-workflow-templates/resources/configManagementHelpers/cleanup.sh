@@ -4,7 +4,7 @@ set -e
 # Import Library
 source ./etcdClientHelper.sh
 
-PREFIX="$WORKFLOW_PREFIX"
+# PREFIX env var is set by the workflow template
 echo "===== CLEANING UP ETCD KEYS FOR PREFIX $PREFIX ====="
 
 # Record workflow completion time

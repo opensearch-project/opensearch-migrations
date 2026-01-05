@@ -104,6 +104,11 @@ def normalizeS3Config:
   else
     .
   end)
+  | (if has("s3RoleArn") then
+    .role = .s3RoleArn | del(.s3RoleArn)
+  else
+    .
+  end)
   | del(.repoName, .useLocalStack);
 
 def normalizeRepoConfig:

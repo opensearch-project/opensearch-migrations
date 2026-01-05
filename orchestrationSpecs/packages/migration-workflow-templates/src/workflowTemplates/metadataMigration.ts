@@ -45,10 +45,16 @@ export function makeRepoParamDict(
     repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>,
     includes3LocalDir: boolean) {
     return expr.mergeDicts(
-        expr.ternary(
-            expr.isEmpty(expr.dig(repoConfig, ["endpoint"], (""))),
-            expr.makeDict({}),
-            expr.makeDict({"s3Endpoint": expr.getLoose(repoConfig, "endpoint")})),
+        expr.mergeDicts(
+            expr.ternary(
+                expr.isEmpty(expr.dig(repoConfig, ["endpoint"], (""))),
+                expr.makeDict({}),
+                expr.makeDict({"s3Endpoint": expr.getLoose(repoConfig, "endpoint")})),
+            expr.ternary(
+                expr.isEmpty(expr.dig(repoConfig, ["s3RoleArn"], (""))),
+                expr.makeDict({}),
+                expr.makeDict({"s3RoleArn": expr.getLoose(repoConfig, "s3RoleArn")}))
+        ),
         expr.makeDict({
             "s3RepoUri": expr.get(repoConfig, "s3RepoPathUri"),
             "s3Region": expr.get(repoConfig, "awsRegion"),
@@ -74,7 +80,9 @@ function makeParamsDict(
                 "snapshotName": expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
                 "sourceVersion": expr.get(expr.deserializeRecord(sourceConfig), "version")
             }),
-            makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), true)
+            makeRepoParamDict(
+                expr.omit(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), "s3RoleArn"),
+                true)
         )
     );
 }
