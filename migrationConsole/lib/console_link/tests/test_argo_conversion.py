@@ -16,11 +16,11 @@ class TestArgoGraphConversion:
     
     @pytest.fixture
     def input_dir(self):
-        return Path(__file__).parent / 'argo_inputs'
+        return Path(__file__).parent / 'workflows' / 'testData' / 'argo_conversion' / 'inputs'
     
     @pytest.fixture
     def expected_dir(self):
-        return Path(__file__).parent / 'expected_outputs'
+        return Path(__file__).parent / 'workflows' / 'testData' / 'argo_conversion' / 'outputs'
     
     def test_simple_linear(self, input_dir, expected_dir):
         """Test simple linear structure conversion."""
