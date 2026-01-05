@@ -13,16 +13,30 @@ export class InputValidationError extends Error {
     constructor(
         public readonly errors: InputValidationElement[]
     ) {
-        super(`Found ${errors.length} errors`);
+        super();
         this.name = 'InputValidationError';
         Error.captureStackTrace?.(this, this.constructor);
     }
+
+    get message(): string {
+        return `Found ${this.errors.length} errors: ${formatInputValidationError(this, {singleLine: true})}`;
+    }
 }
 
-export function formatInputValidationError(e: InputValidationError): string {
+export function formatInputValidationError(
+    e: InputValidationError,
+    options?: { singleLine?: boolean }
+): string {
+    const singleLine = options?.singleLine ?? false;
+
     return e.errors
-        .map(i=> [i.message, i.path.map(pk=> pk.toString()).join(".")])
-        .map(([k,v],idx) => `${k}... at:\n  ${v}`).join("\n");
+        .map(i => [i.message, i.path.map(pk => pk.toString()).join(".")])
+        .map(([k, v]) =>
+            singleLine
+                ? `${k} at: ${v}`
+                : `${k}... at:\n  ${v}`
+        )
+        .join(singleLine ? "; " : "\n");
 }
 
 export function stripComments<T>(obj: T): T {
