@@ -161,66 +161,20 @@ def _check_backfill_status(env):
         return {"error": str(e)}
 
 
-def _walk_up_for_config(nodes, start_node_id, param_name):
-    """Smart filter: show Pod/Suspend/Skipped nodes, and containers only when they have parallel work."""
+def _calculate_deep_check_results(workflow_data, deep_check):
+    """
+    Calculate deep check results for currently active workflow nodes.
     
-    def should_keep_by_type(node):
-        # Original type-based filtering
-        return node['type'] in ["Pod", "Suspend", "Skipped"]
+    Returns a map of currently active nodes to their status text returned by the 
+    console steps (all calculated in parallel).
     
-    def has_parallel_children(node, filtered_children):
-        """Check if filtered children actually ran in parallel."""
-        if len(filtered_children) <= 1:
-            return False
+    Args:
+        workflow_data: The workflow data from Argo
+        deep_check: Whether deep checking is enabled
         
-        # Get start times of children
-        start_times = []
-        for child in filtered_children:
-            start_time = child.get('started_at')
-            if start_time:
-                start_times.append(start_time)
-        
-        if len(start_times) <= 1:
-            return False
-        
-        # Sort times and check if any overlap (started within same minute = parallel)
-        sorted_times = sorted(start_times)
-        for i in range(len(sorted_times) - 1):
-            time1 = sorted_times[i][:16]  # YYYY-MM-DDTHH:MM (minute precision)
-            time2 = sorted_times[i + 1][:16]
-            if time1 == time2:  # Started in same minute = parallel
-                return True
-        
-        return False
-    
-    def filter_recursive(nodes):
-        filtered = []
-        for node in nodes:
-            if should_keep_by_type(node):
-                # Keep leaf nodes (Pod, Suspend, Skipped)
-                filtered_node = node.copy()
-                filtered_node['children'] = filter_recursive(node['children'])
-                filtered.append(filtered_node)
-            else:
-                # For container nodes, check if they have parallel work
-                filtered_children = filter_recursive(node['children'])
-                
-                if has_parallel_children(node, filtered_children):
-                    # Has parallel work - keep the container to show structure
-                    filtered_node = node.copy()
-                    filtered_node['children'] = filtered_children
-                    filtered.append(filtered_node)
-                else:
-                    # Sequential work - flatten (lift children up)
-                    filtered.extend(filtered_children)
-        
-        return filtered
-    
-    return filter_recursive(tree_nodes)
-
-
-def _walk_up_for_config(nodes, start_node_id, param_name):
-    """Get deep check data for relevant steps using proper tree walking."""
+    Returns:
+        dict: Map of node_id -> status results for active nodes
+    """
     if not deep_check:
         logger.info("Deep check disabled, skipping")
         return {}
@@ -422,7 +376,7 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
             # Get deep check data if requested
             deep_check_data = {}
             if deep_check and workflow_data:
-                deep_check_data = _get_deep_check_data(workflow_data, deep_check)
+                deep_check_data = _calculate_deep_check_results(workflow_data, deep_check)
 
             _display_workflow_status(result, deep_check_data=deep_check_data, workflow_data=workflow_data, show_deep_check=deep_check)
         else:
@@ -492,7 +446,7 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
                             if response.status_code == 200:
                                 workflow_data = response.json()
                                 if deep_check:
-                                    deep_check_data = _get_deep_check_data(workflow_data, deep_check)
+                                    deep_check_data = _calculate_deep_check_results(workflow_data, deep_check)
                             
                             _display_workflow_status(latest_result, deep_check_data=deep_check_data, workflow_data=workflow_data, show_deep_check=deep_check)
                         elif completed_result['workflows']:
@@ -519,7 +473,7 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
                                 if response.status_code == 200:
                                     workflow_data = response.json()
                                     if deep_check:
-                                        deep_check_data = _get_deep_check_data(workflow_data, deep_check)
+                                        deep_check_data = _calculate_deep_check_results(workflow_data, deep_check)
                                 
                                 _display_workflow_status(result, deep_check_data=deep_check_data, workflow_data=workflow_data, show_deep_check=deep_check)
 
@@ -560,7 +514,7 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
                 if response.status_code == 200:
                     workflow_data = response.json()
                     if deep_check:
-                        deep_check_data = _get_deep_check_data(workflow_data, deep_check)
+                        deep_check_data = _calculate_deep_check_results(workflow_data, deep_check)
                 
                 _display_workflow_status(result, deep_check_data=deep_check_data, workflow_data=workflow_data, show_deep_check=deep_check)
 
@@ -631,95 +585,6 @@ def _display_workflow_header(name: str, phase: str, started_at: str, finished_at
         click.echo(f"  Finished: {finished_at}")
 
 
-def _get_step_rich_label(node: dict) -> str:
-    """Get rich-formatted label for a workflow step node.
-
-    Args:
-        node: WorkflowNode dictionary
-
-    Returns:
-        Rich-formatted string with color and styling
-    """
-    step_name = node['display_name']
-    step_phase = node['phase']
-    step_type = node['type']
-
-    # Color based on phase
-    if step_phase == 'Succeeded':
-        color = "green"
-        symbol = "✓"
-    elif step_phase == 'Running':
-        color = "yellow"
-        symbol = "⟳" if step_type == 'Suspend' else "▶"
-    elif step_phase in ('Failed', 'Error'):
-        color = "red"
-        symbol = "✗"
-    elif step_phase == 'Pending':
-        color = "cyan"
-        symbol = "○"
-    elif step_phase == 'Skipped':
-        color = "dim"
-        symbol = "~"
-    else:
-        color = "white"
-        symbol = "?"
-
-    # Special handling for Suspend steps
-    if step_type == 'Suspend':
-        if step_phase == 'Running':
-            return f"[{color}]{symbol} {step_name} - WAITING FOR APPROVAL[/{color}]"
-        elif step_phase == 'Succeeded':
-            return f"[{color}]{symbol} {step_name} (Approved)[/{color}]"
-        else:
-            return f"[{color}]{symbol} {step_name} ({step_phase})[/{color}]"
-    # Special handling for Skipped steps with approval-related names
-    elif step_phase == 'Skipped' and 'approval' in step_name.lower():
-        return f"[{color}]{symbol} {step_name} (Not Required)[/{color}]"
-    else:
-        return f"[{color}]{symbol} {step_name} ({step_phase})[/{color}]"
-
-
-def _display_workflow_tree(step_tree: list):
-    """Display workflow steps in tree format using Rich.
-
-    Args:
-        step_tree: List of WorkflowNode dictionaries with hierarchy
-    """
-    if not step_tree:
-        return
-
-    console = Console()
-    tree = Tree("[bold]Workflow Steps[/bold]")
-
-    # Group nodes by depth to build the tree structure
-    nodes_by_depth = {}
-    for node in step_tree:
-        depth = node['depth']
-        if depth not in nodes_by_depth:
-            nodes_by_depth[depth] = []
-        nodes_by_depth[depth].append(node)
-
-    # Build tree level by level
-    node_to_tree = {}
-
-    for depth in sorted(nodes_by_depth.keys()):
-        for node in nodes_by_depth[depth]:
-            label = _get_step_rich_label(node)
-
-            if depth == 0:
-                # Root level nodes
-                node_to_tree[node['id']] = tree.add(label)
-            else:
-                # Find parent and add as child
-                parent_id = node.get('parent')
-                if parent_id and parent_id in node_to_tree:
-                    node_to_tree[node['id']] = node_to_tree[parent_id].add(label)
-                else:
-                    # Fallback: add to root if parent not found
-                    node_to_tree[node['id']] = tree.add(label)
-
-    click.echo("")
-    console.print(tree)
 
 
 def _display_workflow_steps(steps: list, step_tree: list = None):
@@ -731,7 +596,7 @@ def _display_workflow_steps(steps: list, step_tree: list = None):
     """
     # Use tree display if available
     if step_tree:
-        _display_workflow_tree(step_tree)
+        display_workflow_tree(step_tree)
         return
 
     # Fallback to flat display
@@ -780,18 +645,15 @@ def _display_workflow_status(result: dict, show_output_hint: bool = True, deep_c
     _display_workflow_header(name, phase, started_at, finished_at)
 
     # Build and display nested tree
-    if workflow_data:
-        tree_nodes = build_nested_workflow_tree(workflow_data)
-        
-        # Apply smart filtering (keeps parallel work, flattens linear chains)
-        tree_nodes = filter_tree_nodes(tree_nodes)
-        
-        click.echo("")
-        display_workflow_tree(tree_nodes, deep_check_data, workflow_data, show_deep_check)
-    else:
-        # Fallback to old flat display - but this shouldn't happen anymore
-        step_tree = result.get('step_tree', [])
-        _display_workflow_steps(result.get('steps', []), step_tree)
+    if not workflow_data:
+        raise RuntimeError("No workflow_data found")
+    tree_nodes = build_nested_workflow_tree(workflow_data)
+
+    # Apply smart filtering (keeps parallel work, flattens linear chains)
+    tree_nodes = filter_tree_nodes(tree_nodes)
+
+    click.echo("")
+    display_workflow_tree(tree_nodes, deep_check_data, workflow_data, show_deep_check)
 
     # Add message about viewing step outputs for active workflows
     if show_output_hint and phase in ('Running', 'Pending'):
@@ -799,7 +661,7 @@ def _display_workflow_status(result: dict, show_output_hint: bool = True, deep_c
         click.echo(f"To view step outputs, run: workflow output {name}")
 
 
-def _get_deep_check_data(workflow_data, deep_check):
+def _calculate_deep_check_results(workflow_data, deep_check):
     """Get deep check data for relevant steps using proper tree walking."""
     if not deep_check:
         logger.info("Deep check disabled, skipping")

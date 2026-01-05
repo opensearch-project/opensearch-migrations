@@ -5,6 +5,14 @@
     "phase": "Running",
     "type": "Steps",
     "boundary_id": null,
+    "inputs": {
+      "parameters": [
+        {
+          "name": "workflowId",
+          "value": "simple_workflow"
+        }
+      ]
+    },
     "children": [
       {
         "id": "step1",

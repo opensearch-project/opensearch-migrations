@@ -12,6 +12,14 @@
         "phase": "Running",
         "type": "Steps",
         "boundary_id": "root",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "containerName",
+              "value": "main_container"
+            }
+          ]
+        },
         "children": [
           {
             "id": "pod1",

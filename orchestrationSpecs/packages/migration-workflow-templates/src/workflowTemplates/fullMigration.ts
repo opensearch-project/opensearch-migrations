@@ -94,6 +94,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("perSnapshotName", typeToken<string>())
         .addRequiredInput("name", typeToken<string>())
+        .addRequiredInput("groupName", typeToken<string>())
         .addOptionalInput("metadataMigrationConfig", c=>
             expr.empty<z.infer<typeof METADATA_OPTIONS>>())
         .addOptionalInput("documentBackfillConfig", c=>
@@ -142,6 +143,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['snapshotConfig']>())
         .addRequiredInput("migrations", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['migrations']>())
         .addRequiredInput("name", typeToken<string>())
+        .addRequiredInput("groupName", typeToken<string>())
         .addOptionalInput("createSnapshotConfig",
                 c=> expr.empty<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
 
@@ -157,13 +159,14 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("foreachSnapshotMigration", INTERNAL, "foreachSnapshotMigration", c=> {
                     return c.register({
                         ...(() => {
-                            const {snapshotConfig, ...rest} = selectInputsForRegister(b, c);
+                            const {snapshotConfig, groupName, ...rest} = selectInputsForRegister(b, c);
                             return rest;
                         })(),
                         ...selectInputsFieldsAsExpressionRecord(c.item, c,
                             getZodKeys(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)),
                         snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
-                        perSnapshotName: b.inputs.name
+                        perSnapshotName: b.inputs.name,
+                        groupName: expr.get(c.item, "name")
                     });
                 },
                 {loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.migrations))}
@@ -176,6 +179,11 @@ export const FullMigration = WorkflowBuilder.create({
     .addTemplate("foreachMigrationPair", t=>t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addOptionalInput("groupName", c => expr.concat(
+            expr.get(expr.deserializeRecord(c.inputParameters.sourceConfig), "name"),
+            expr.literal(" to "),
+            expr.get(expr.deserializeRecord(c.inputParameters.targetConfig), "name"),
+        ))
         .addOptionalInput("snapshotExtractAndLoadConfigArray",
             c => expr.empty<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>[]>())
         .addOptionalInput("replayerConfig",
@@ -185,11 +193,15 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b=>b
-            .addStep("foreachSnapshotExtraction", INTERNAL, "foreachSnapshotExtraction", c =>
-                    c.register({
-                        ...selectInputsForRegister(b, c),
-                        ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(SNAPSHOT_MIGRATION_CONFIG))
-                    }),
+            .addStep("foreachSnapshotExtraction", INTERNAL, "foreachSnapshotExtraction", c => {
+                    const {groupName, ...rest} = selectInputsForRegister(b, c);
+                    return c.register({
+                        ...rest,
+                        ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(SNAPSHOT_MIGRATION_CONFIG)),
+                        groupName: expr.get(c.item, "name")
+
+                    })
+                },
                 {
                     when: { templateExp: expr.not(expr.isEmpty(b.inputs.snapshotExtractAndLoadConfigArray)) },
                     loopWith: makeParameterLoop(

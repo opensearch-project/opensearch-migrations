@@ -18,9 +18,20 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
     
     # First pass: create all nodes
     for node_id, node in nodes.items():
+        # Extract groupName if available
+        inputs = node.get('inputs', {})
+        parameters = inputs.get('parameters', [])
+        group_name = None
+        
+        for param in parameters:
+            if param.get('name') == 'groupName':
+                group_name = param.get('value', '')
+                break
+        
         tree_nodes[node_id] = {
             'id': node_id,
             'display_name': node.get('displayName', ''),
+            'group_name': group_name,
             'phase': node.get('phase', 'Unknown'),
             'type': node.get('type', ''),
             'boundary_id': node.get('boundaryID'),
@@ -45,35 +56,17 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
 
 
 def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Smart filter: show Pod/Suspend/Skipped nodes, and containers only when they have parallel work."""
+    """Filter tree nodes: preserve Pod/Suspend/Skipped nodes and containers with groupName."""
     
     def should_keep_by_type(node):
-        # Original type-based filtering
+        # Keep leaf nodes (actual work)
         return node['type'] in ["Pod", "Suspend", "Skipped"]
     
-    def has_parallel_children(node, filtered_children):
-        """Check if filtered children actually ran in parallel."""
-        if len(filtered_children) <= 1:
-            return False
-        
-        # Get start times of children
-        start_times = []
-        for child in filtered_children:
-            start_time = child.get('started_at')
-            if start_time:
-                start_times.append(start_time)
-        
-        if len(start_times) <= 1:
-            return False
-        
-        # Sort times and check if any overlap (started within same minute = parallel)
-        sorted_times = sorted(start_times)
-        for i in range(len(sorted_times) - 1):
-            time1 = sorted_times[i][:16]  # YYYY-MM-DDTHH:MM (minute precision)
-            time2 = sorted_times[i + 1][:16]
-            if time1 == time2:  # Started in same minute = parallel
+    def has_group_name(node):
+        # Keep containers that have a groupName (meaningful grouping)
+        for param in node.get('inputs', {}).get('parameters', []):
+            if param.get('name') == 'groupName':
                 return True
-        
         return False
     
     def filter_recursive(nodes):
@@ -84,18 +77,14 @@ def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 filtered_node = node.copy()
                 filtered_node['children'] = filter_recursive(node['children'])
                 filtered.append(filtered_node)
+            elif has_group_name(node):
+                # Keep containers with groupName (meaningful grouping)
+                filtered_node = node.copy()
+                filtered_node['children'] = filter_recursive(node['children'])
+                filtered.append(filtered_node)
             else:
-                # For container nodes, check if they have parallel work
-                filtered_children = filter_recursive(node['children'])
-                
-                if has_parallel_children(node, filtered_children):
-                    # Has parallel work - keep the container to show structure
-                    filtered_node = node.copy()
-                    filtered_node['children'] = filtered_children
-                    filtered.append(filtered_node)
-                else:
-                    # Sequential work - flatten (lift children up)
-                    filtered.extend(filtered_children)
+                # Skip container, lift children up
+                filtered.extend(filter_recursive(node['children']))
         
         return filtered
     
@@ -168,7 +157,76 @@ def clean_display_name(display_name: str) -> str:
     return title_case
 
 
-def display_workflow_tree(tree_nodes: List[Dict[str, Any]], 
+def get_step_rich_label(node: dict) -> str:
+    """Get rich-formatted label for a workflow step node.
+
+    Args:
+        node: WorkflowNode dictionary
+
+    Returns:
+        Rich-formatted string with color and styling
+    """
+    step_name = node['display_name']
+    
+    # Clean up container node names (non-Pod types)
+    if node['type'] not in ['Pod', 'Suspend', 'Skipped']:
+        step_name = clean_display_name(step_name)
+    
+    if node.get('group_name'):
+        step_name = f"{step_name} ({node['group_name']})"
+    
+    # Add timestamp - prefer finished_at, fallback to started_at
+    timestamp_str = ""
+    if node.get('finished_at'):
+        timestamp = node['finished_at'][:19]  # Remove timezone info
+        timestamp_str = f" {timestamp.replace('T', ' ')}"
+    elif node.get('started_at'):
+        timestamp = node['started_at'][:19]  # Remove timezone info
+        timestamp_str = f" {timestamp.replace('T', ' ')}"
+    step_phase = node['phase']
+    step_type = node['type']
+
+    # Color based on phase
+    if step_phase == 'Succeeded':
+        color = "green"
+        symbol = "✓"
+    elif step_phase == 'Running':
+        color = "yellow"
+        symbol = "⟳" if step_type == 'Suspend' else "▶"
+    elif step_phase in ('Failed', 'Error'):
+        color = "red"
+        symbol = "✗"
+    elif step_phase == 'Pending':
+        color = "cyan"
+        symbol = "○"
+    elif step_phase == 'Skipped':
+        color = "dim"
+        symbol = "~"
+    else:
+        color = "white"
+        symbol = "?"
+
+    step_name_and_timestamp_str = f"{timestamp_str}: {step_name}"
+    full_unformatted_line = _construct_full_label_line(step_name, step_name_and_timestamp_str, step_phase, step_type)
+    return f"[{color}]{symbol} {full_unformatted_line} [/{color}]"
+
+
+def _construct_full_label_line(step_name, step_name_and_timestamp_str, step_phase, step_type):
+    if step_type == 'Suspend':
+        if step_phase == 'Running':
+            return f"{step_name_and_timestamp_str} - WAITING FOR APPROVAL"
+        elif step_phase == 'Succeeded':
+            return f"{step_name_and_timestamp_str} (Approved)"
+        else:
+            return f"{step_name_and_timestamp_str} ({step_phase})"
+    # Special handling for Skipped steps with approval-related names
+    elif step_phase == 'Skipped' and 'approval' in step_name.lower():
+        return f"{step_name_and_timestamp_str} (Not Required)"
+    else:
+        return f"{step_name_and_timestamp_str} ({step_phase})"
+
+
+def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
                          deep_check_data: Optional[Dict] = None,
                          workflow_data: Optional[Dict] = None,
                          show_deep_check: bool = False) -> None:
@@ -199,33 +257,15 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
         sorted_children = sorted(nodes, key=lambda n: n.get('started_at') or '9999-12-31T23:59:59Z')
         
         for node in sorted_children:
-            symbol = get_node_symbol(node['phase'], node['type'])
-            display_name = node['display_name']
-            
-            # Clean up container node names (non-Pod types)
-            if node['type'] not in ['Pod', 'Suspend', 'Skipped']:
-                display_name = clean_display_name(display_name)
-            
-            # Add timestamp - prefer finished_at, fallback to started_at
-            timestamp_str = ""
-            if node.get('finished_at'):
-                # Parse and format finished timestamp
-                timestamp = node['finished_at'][:19]  # Remove timezone info for cleaner display
-                timestamp_str = f" ({timestamp.replace('T', ' ')})"
-            elif node.get('started_at'):
-                # Parse and format started timestamp
-                timestamp = node['started_at'][:19]  # Remove timezone info for cleaner display
-                timestamp_str = f" ({timestamp.replace('T', ' ')})"
-            
-            # Build the node label
-            node_label = f"{symbol} {display_name}{timestamp_str}"
+            # Use Rich formatting for the label
+            node_label = get_step_rich_label(node)
             
             # Add statusOutput for any failed node that has it
             if node['phase'] == 'Failed' and workflow_data:
                 status_output = get_step_status_output(workflow_data, node['id'])
                 if status_output:
                     node_label += f": {status_output}"
-                    logger.info(f"Added statusOutput for {display_name}: {status_output}")
+                    logger.info(f"Added statusOutput for {node['display_name']}: {status_output}")
                 else:
                     # Show phase for nodes without statusOutput
                     node_label += f" ({node['phase']})"

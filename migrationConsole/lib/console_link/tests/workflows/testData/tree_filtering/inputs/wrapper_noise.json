@@ -12,6 +12,14 @@
         "phase": "Running",
         "type": "StepGroup",
         "boundary_id": "root",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "index",
+              "value": "0"
+            }
+          ]
+        },
         "children": [
           {
             "id": "pod",
