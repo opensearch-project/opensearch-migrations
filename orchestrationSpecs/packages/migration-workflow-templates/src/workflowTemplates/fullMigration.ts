@@ -88,7 +88,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addArgs(["echo runReplayerForTarget"])))
 
 
-    .addTemplate("foreachSnapshotMigration", t => t
+    .addTemplate("migrateFromSnapshot", t => t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
@@ -137,7 +137,7 @@ export const FullMigration = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("foreachSnapshotExtraction", t => t
+    .addTemplate("getSnapshotThenMigrateSnapshot", t => t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['snapshotConfig']>())
@@ -156,7 +156,7 @@ export const FullMigration = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c)
                 }))
 
-            .addStep("foreachSnapshotMigration", INTERNAL, "foreachSnapshotMigration", c=> {
+            .addStep("migrateFromSnapshot", INTERNAL, "migrateFromSnapshot", c=> {
                     return c.register({
                         ...(() => {
                             const {snapshotConfig, groupName, ...rest} = selectInputsForRegister(b, c);
@@ -176,7 +176,7 @@ export const FullMigration = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("foreachMigrationPair", t=>t
+    .addTemplate("migration", t=>t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addOptionalInput("groupName", c => expr.concat(
@@ -193,7 +193,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b=>b
-            .addStep("foreachSnapshotExtraction", INTERNAL, "foreachSnapshotExtraction", c => {
+            .addStep("getSnapshotThenMigrateSnapshot", INTERNAL, "getSnapshotThenMigrateSnapshot", c => {
                     const {groupName, ...rest} = selectInputsForRegister(b, c);
                     return c.register({
                         ...rest,
@@ -222,7 +222,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
 
         .addSteps(b => b
-            .addStep("foreachMigrationPair", INTERNAL, "foreachMigrationPair",
+            .addStep("migration", INTERNAL, "migration",
                 c => {
                     return c.register({
                         ...selectInputsForRegister(b, c),
