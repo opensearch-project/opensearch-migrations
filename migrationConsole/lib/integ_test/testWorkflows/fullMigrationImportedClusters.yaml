@@ -107,24 +107,18 @@ spec:
             
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
             
-            # Build snapshot repo config
+            # Build snapshot repo config (includes s3RoleArn if provided)
             SNAPSHOT_REPO=$(jq -n \
               --arg region "$S3_REGION" \
               --arg endpoint "$S3_ENDPOINT" \
               --arg bucket "$S3_BUCKET" \
               --arg suffix "$SUFFIX" \
+              --arg roleArn "$SNAPSHOT_ROLE_ARN" \
               '{
                 "awsRegion": $region,
                 "endpoint": $endpoint,
                 "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
-              }')
-            
-            # Build createSnapshotConfig with s3RoleArn if provided
-            if [ -n "$SNAPSHOT_ROLE_ARN" ]; then
-              CREATE_SNAPSHOT_CONFIG=$(jq -n --arg roleArn "$SNAPSHOT_ROLE_ARN" '{"s3RoleArn": $roleArn}')
-            else
-              CREATE_SNAPSHOT_CONFIG='{}'
-            fi
+              } + (if $roleArn != "" then {"s3RoleArn": $roleArn} else {} end)')
             
             # Function to transform cluster config to match workflow schema
             # - version: ES_7.10 -> ES 7.10 (replace underscore with space)
@@ -168,14 +162,14 @@ spec:
             ')
             
             # Build snapshotExtractAndLoadConfigs from snapshot-and-migration-configs
-            SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq --argjson createConfig "$CREATE_SNAPSHOT_CONFIG" '[
+            SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '[
               .[0]["snapshot-and-migration-configs"][] | {
                 "snapshotConfig": {
                   "snapshotNameConfig": {
                     "snapshotNamePrefix": "testsnapshot"
                   }
                 },
-                "createSnapshotConfig": $createConfig,
+                "createSnapshotConfig": {},
                 "migrations": .migrations
               }
             ]')
