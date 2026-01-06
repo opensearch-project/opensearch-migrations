@@ -42,25 +42,25 @@ class StatusCommandHandler:
         self.data_fetcher = WorkflowDataFetcher(service, token)
         self.sorter = WorkflowSorter()
         self.displayer = StatusWorkflowDisplayer()
-        self.deep_check_processor = DeepCheckProcessor(ConfigConverter())
+        self.live_check_processor = LiveCheckProcessor(ConfigConverter())
 
-    def handle_status_command(self, workflow_name: Optional[str], argo_server: str, 
-                            namespace: str, token: Optional[str], insecure: bool, 
-                            show_all: bool, deep_check: bool) -> None:
+    def handle_status_command(self, workflow_name: Optional[str], argo_server: str,
+                              namespace: str, insecure: bool,
+                              show_all: bool, live_check: bool) -> None:
         """Handle the main status command logic."""
         try:
             if workflow_name:
-                self._handle_single_workflow(workflow_name, argo_server, namespace, 
-                                           insecure, deep_check)
+                self._handle_single_workflow(workflow_name, argo_server, namespace,
+                                             insecure, live_check)
             else:
-                self._handle_workflow_list(show_all, argo_server, namespace, 
-                                         insecure, deep_check)
+                self._handle_workflow_list(show_all, argo_server, namespace,
+                                           insecure, live_check)
         except Exception as e:
             click.echo(f"Error: {str(e)}", err=True)
             raise click.Abort()
 
-    def _handle_single_workflow(self, workflow_name: str, argo_server: str, 
-                              namespace: str, insecure: bool, deep_check: bool) -> None:
+    def _handle_single_workflow(self, workflow_name: str, argo_server: str,
+                                namespace: str, insecure: bool, live_check: bool) -> None:
         """Handle status display for a specific workflow."""
         result, workflow_data = self.data_fetcher.get_workflow_data(
             workflow_name, argo_server, namespace, insecure)
@@ -69,16 +69,16 @@ class StatusCommandHandler:
             click.echo(f"Error: {result['error']}", err=True)
             raise click.Abort()
 
-        self._display_workflow_with_tree(result, workflow_data, deep_check)
+        self._display_workflow_with_tree(result, workflow_data, live_check)
 
-    def _handle_workflow_list(self, show_all: bool, argo_server: str, namespace: str, 
-                            insecure: bool, deep_check: bool) -> None:
+    def _handle_workflow_list(self, show_all: bool, argo_server: str, namespace: str,
+                              insecure: bool, live_check: bool) -> None:
         """Handle status display for workflow list."""
         workflow_statuses = self.data_fetcher.list_workflows_with_status(
             argo_server, namespace, insecure, exclude_completed=not show_all)
 
         if not workflow_statuses:
-            self._handle_no_workflows(show_all, argo_server, namespace, insecure, deep_check)
+            self._handle_no_workflows(show_all, argo_server, namespace, insecure, live_check)
             return
 
         click.echo(f"Found {len(workflow_statuses)} workflow(s) in namespace {namespace}:")
@@ -88,10 +88,10 @@ class StatusCommandHandler:
         for result in sorted_workflows:
             _, workflow_data = self.data_fetcher.get_workflow_data(
                 result['workflow_name'], argo_server, namespace, insecure)
-            self._display_workflow_with_tree(result, workflow_data, deep_check)
+            self._display_workflow_with_tree(result, workflow_data, live_check)
 
-    def _handle_no_workflows(self, show_all: bool, argo_server: str, namespace: str, 
-                           insecure: bool, deep_check: bool) -> None:
+    def _handle_no_workflows(self, show_all: bool, argo_server: str, namespace: str,
+                             insecure: bool, live_check: bool) -> None:
         """Handle case when no active workflows are found."""
         if show_all:
             click.echo(f"No workflows found in namespace {namespace}")
@@ -106,35 +106,24 @@ class StatusCommandHandler:
         if all_workflows:
             most_recent = self.sorter.find_most_recent_completed(all_workflows)
             if most_recent:
-                click.echo("\nShowing last completed workflow:")
-                click.echo("")
+                click.echo("\nShowing last completed workflow:\n")
                 _, workflow_data = self.data_fetcher.get_workflow_data(
                     most_recent['workflow_name'], argo_server, namespace, insecure)
-                self._display_workflow_with_tree(most_recent, workflow_data, deep_check)
+                self._display_workflow_with_tree(most_recent, workflow_data, live_check)
             
             click.echo("\nUse --all to see all completed workflows")
         else:
             click.echo("Use --all to see completed workflows")
 
-    def _display_workflow_with_tree(self, result: Dict[str, Any], workflow_data: Dict[str, Any], 
-                                  deep_check: bool) -> None:
-        """Display workflow using tree structure with optional deep checks."""
-        # Build tree
+    def _display_workflow_with_tree(self, result: Dict[str, Any], workflow_data: Dict[str, Any],
+                                    live_check: bool) -> None:
+        """Display workflow using tree structure with optional live status checks."""
         tree_nodes = build_nested_workflow_tree(workflow_data)
-        
-        # Run deep checks if requested
-        deep_check_data = {}
-        if deep_check:
-            deep_check_data = self.deep_check_processor.enrich_tree_with_deep_checks(
-                tree_nodes, workflow_data)
-        
-        # Filter tree for display
+        if live_check: self.live_check_processor.enrich_tree_with_live_checks(tree_nodes, workflow_data)
         filtered_tree = filter_tree_nodes(tree_nodes)
-        
-        # Display
         self.displayer.display_workflow_status(
             result['workflow_name'], result['phase'], result['started_at'], 
-            result['finished_at'], filtered_tree, deep_check_data, deep_check, workflow_data)
+            result['finished_at'], filtered_tree, workflow_data)
 
 
 class WorkflowDataFetcher:
@@ -209,41 +198,55 @@ class StatusCheckRunner:
     
     @staticmethod
     def run_status_check(env: Environment, node: Dict[str, Any]) -> Dict[str, Any]:
-        """Run appropriate status check based on node's displayName."""
-        display_name = node.get('display_name', '')
+        """Run appropriate status check based on check_type."""
+        check_type = node.get('check_type', '')
+        logger.info(f"Running {check_type} status check for node: {node.get('display_name')}")
         
-        if 'checkSnapshotCompletion' in display_name:
-            return StatusCheckRunners._check_snapshot_status(env)
-        elif 'checkHistoricalBackfillCompletion' in display_name:
-            return StatusCheckRunners._check_backfill_status(env)
+        if check_type == 'snapshot':
+            logger.info("Calling snapshot status middleware")
+            return StatusCheckRunner._check_snapshot_status(env)
+        elif check_type == 'backfill':
+            logger.info("Calling backfill status middleware")
+            return StatusCheckRunner._check_backfill_status(env)
         else:
-            return {"error": f"Unknown status check type for: {display_name}"}
+            logger.warning(f"Unknown check type: {check_type}")
+            return {"error": f"Unknown check type: {check_type}"}
 
     @staticmethod
     def _check_snapshot_status(env: Environment) -> Dict[str, Any]:
         """Check snapshot status for environment."""
+        logger.info("Starting snapshot status check")
         if not env.snapshot:
+            logger.warning("No snapshot configured in environment")
             return {"error": "No snapshot configured"}
         
         try:
+            logger.info("Calling snapshot_middleware.status() with deep_check=True")
             result = snapshot_middleware.status(env.snapshot, deep_check=True)
+            logger.info(f"Snapshot status result: success={result.success}")
             return {"success": result.success, "value": result.value}
         except Exception as e:
+            logger.error(f"Exception in snapshot status check: {e}")
             return {"error": str(e)}
 
     @staticmethod
     def _check_backfill_status(env: Environment) -> Dict[str, Any]:
         """Check backfill status for environment."""
+        logger.info("Starting backfill status check")
         if not env.backfill:
+            logger.warning("No backfill configured in environment")
             return {"error": "No backfill configured"}
         
         try:
+            logger.info("Calling backfill_middleware.status() with deep_check=True")
             result = backfill_middleware.status(env.backfill, deep_check=True)
+            logger.info(f"Backfill status result: success={result.success}")
             if result.success:
                 status_enum, message = result.value
                 return {"success": True, "status": str(status_enum), "message": message}
             return {"success": False, "error": str(result.value)}
         except Exception as e:
+            logger.error(f"Exception in backfill status check: {e}")
             return {"error": str(e)}
 
 
@@ -270,13 +273,12 @@ class StatusWorkflowDisplayer(WorkflowDisplayer):
     """Status-specific workflow display implementation."""
     
     def display_workflow_status(self, workflow_name: str, phase: str, started_at: str, 
-                              finished_at: str, tree_nodes: List[Dict[str, Any]], 
-                              deep_check_data: Dict[str, Any], show_deep_check: bool,
-                              workflow_data: Dict[str, Any] = None) -> None:
+                                finished_at: str, tree_nodes: List[Dict[str, Any]],
+                                workflow_data: Dict[str, Any] = None) -> None:
         """Display complete workflow status with tree."""
         self.display_workflow_header(workflow_name, phase, started_at, finished_at)
         click.echo("")
-        display_workflow_tree(tree_nodes, deep_check_data, workflow_data or {}, show_deep_check)
+        display_workflow_tree(tree_nodes, workflow_data or {})
         
         if phase in ('Running', 'Pending'):
             click.echo("")
@@ -315,99 +317,102 @@ class StatusWorkflowDisplayer(WorkflowDisplayer):
         return '  ?'
 
 
-class DeepCheckProcessor:
-    """Processes deep status checks for workflow nodes using injected status runner."""
+class LiveCheckProcessor:
+    """Processes live status checks for workflow nodes using injected status runner."""
     
     def __init__(self, config_converter: ConfigConverter, status_runner: StatusCheckRunner = None):
         self.config_converter = config_converter
         self.status_runner = status_runner or StatusCheckRunner()
 
-    def enrich_tree_with_deep_checks(self, tree_nodes: List[Dict[str, Any]], 
-                                   workflow_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Add deep check results to tree nodes."""
-        status_nodes = self._find_status_check_nodes(tree_nodes)
-        if not status_nodes:
-            return {}
-
-        failed_nodes = self._get_last_failed_per_group(status_nodes)
-        return self._run_deep_checks_parallel(failed_nodes)
-
-    def _find_status_check_nodes(self, tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Find nodes that need status checking."""
-        def find_nodes_recursive(nodes):
-            result = []
-            for node in nodes:
-                if self._is_status_check_node(node):
-                    result.append(node)
-                result.extend(find_nodes_recursive(node.get('children', [])))
-            return result
+    def enrich_tree_with_live_checks(self, tree_nodes: List[Dict[str, Any]],
+                                     workflow_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Add live check results to tree nodes."""
+        logger.info("Starting live check enrichment process")
         
-        return find_nodes_recursive(tree_nodes)
+        pending_groups = self._find_pending_nodes(tree_nodes)
+        logger.info(f"Found {len(pending_groups)} pending groups")
 
-    def _is_status_check_node(self, node: Dict[str, Any]) -> bool:
-        """Check if node is a status check node."""
-        display_name = node.get('display_name', '')
+        return self._run_live_checks_parallel(pending_groups)
+
+    def _find_pending_nodes(self, tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Find groups with no successful status checks yet, return last node per group."""
+
+        def find_intermediate_nodes(nodes):
+            """Find createSnapshot/bulkLoadDocuments nodes, don't descend into them."""
+            for node in nodes:
+                display_name = node.get('display_name', '')
+                node_name = display_name.split('(')[0] if '(' in display_name else display_name
+
+                if node_name in ('createSnapshot', 'bulkLoadDocuments'):
+                    yield node
+                else:
+                    yield from find_intermediate_nodes(node.get('children', []))
+
+        def find_most_recent_with_status(node):
+            def walk(n):
+                if self._has_status_output(n):
+                    yield n
+                for child in n.get('children', []):
+                    yield from walk(child)
+
+            return max(walk(node), key=lambda n: n.get('started_at', ''), default=None)
+
+        def annotate_node(intermediate_node, node):
+            """Add group metadata to status node."""
+            display_name = intermediate_node.get('display_name', '')
+            node_name = display_name.split('(')[0] if '(' in display_name else display_name
+
+            node['check_type'] = 'snapshot' if node_name == 'createSnapshot' else 'backfill'
+            node['check_group'] = get_node_input_parameter(intermediate_node, 'groupName') or 'default'
+            return node
+
+        # Pipeline: find intermediate -> map to most recent status -> filter/annotate
+        return [
+            annotate_node(intermediate, status)
+            for intermediate in find_intermediate_nodes(tree_nodes)
+            if (status := find_most_recent_with_status(intermediate)) is not None and status.get('phase') != 'Succeeded'
+        ]
+
+    def _has_status_output(self, node: Dict[str, Any]) -> bool:
+        """Check if node has statusOutput parameter and configContents."""
         has_config = get_node_input_parameter(node, 'configContents') is not None
-        return has_config and node.get('type') == 'Pod' and (
-            'checkSnapshotCompletion' in display_name or 
-            'checkHistoricalBackfillCompletion' in display_name
-        )
+        outputs = node.get('outputs', {}).get('parameters', [])
+        has_status_output = any(p.get('name') == 'statusOutput' for p in outputs)
+        return has_config and has_status_output and node.get('type') == 'Pod'
 
-    def _get_last_failed_per_group(self, status_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Get the last failed node per group."""
-        groups = {}
-        for node in status_nodes:
-            group_name = get_node_input_parameter(node, 'groupName') or 'default'
-            if group_name not in groups:
-                groups[group_name] = []
-            groups[group_name].append(node)
-
-        failed_nodes = []
-        for group_nodes in groups.values():
-            failed_in_group = [n for n in group_nodes if n.get('phase') != 'Succeeded']
-            if failed_in_group:
-                # Sort by start time and take the last one
-                failed_in_group.sort(key=lambda n: n.get('started_at', ''))
-                failed_nodes.append(failed_in_group[-1])
-
-        return failed_nodes
-
-    def _run_deep_checks_parallel(self, failed_nodes: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Run deep checks in parallel for failed nodes."""
-        if not failed_nodes:
+    def _run_live_checks_parallel(self, in_progress_nodes: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Run live checks in parallel for failed nodes."""
+        if not in_progress_nodes:
+            logger.info("No failed nodes to process for live checks")
             return {}
 
-        deep_check_results = {}
-        with ThreadPoolExecutor(max_workers=len(failed_nodes) * 2) as executor:
-            futures = {}
-            
-            for node in failed_nodes:
+        logger.info(f"Starting parallel live checks for {len(in_progress_nodes)} nodes")
+
+        with ThreadPoolExecutor(max_workers=len(in_progress_nodes) * 2) as executor:
+            futures = []
+            for node in in_progress_nodes:
                 config_contents = get_node_input_parameter(node, 'configContents')
+                if not config_contents:
+                    logger.warning(f"No configContents found for node {node['id']}")
+                    continue
+
+                logger.info(f"Converting config for node {node['id']} ({node.get('display_name')})")
                 services_config = self.config_converter.convert_with_jq(config_contents)
-                
+
                 if services_config:
                     env = Environment(config=yaml.safe_load(services_config))
-                    node_id = node['id']
-                    
-                    futures[node_id] = executor.submit(self.status_runner.run_status_check, env, node)
+                    logger.info(f"Submitting live check task for node {node['id']}")
+                    future = executor.submit(self.status_runner.run_status_check, env, node)
+                    futures.append((node, future))
+                else:
+                    logger.error(f"Failed to convert config for node {node['id']}")
 
-            # Collect results
-            for node_id, future in futures.items():
-                node = next(n for n in failed_nodes if n['id'] == node_id)
+            # All tasks are submitted, now collect results as they complete
+            for node, future in futures:
                 try:
-                    result = future.result()
-                    deep_check_results[node_id] = {
-                        'step_name': node.get('display_name', ''),
-                        'status': result
-                    }
+                    node['live_check'] = future.result()  # Blocks until this specific task completes
                 except Exception as e:
-                    logger.error(f"Error in deep check for {node_id}: {e}")
-                    deep_check_results[node_id] = {
-                        'step_name': node.get('display_name', ''),
-                        'status': {"error": str(e)}
-                    }
-
-        return deep_check_results
+                    logger.error(f"Live check failed for node {node['id']}: {e}")
 
 
 @click.command(name="status")
@@ -423,10 +428,10 @@ class DeepCheckProcessor:
 @click.option('--token', help='Bearer token for authentication')
 @click.option('--all', 'show_all', is_flag=True, default=False, 
               help='Show all workflows including completed ones (default: only running)')
-@click.option('--deep-check', is_flag=True, default=False, 
-              help='Run deep status checks for snapshot and backfill steps')
+@click.option('--live-status', is_flag=True, default=False,
+              help='Run a current status check for each snapshot and backfill still running')
 @click.pass_context
-def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, show_all, deep_check):
+def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, show_all, live_status):
     """Show detailed status of workflows.
 
     Displays workflow progress, completed steps, and approval status.
@@ -442,7 +447,7 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
         handler = StatusCommandHandler(service, token)
         
         handler.handle_status_command(
-            workflow_name, argo_server, namespace, token, insecure, show_all, deep_check)
+            workflow_name, argo_server, namespace, insecure, show_all, live_status)
             
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
@@ -450,8 +455,7 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
 
 
 # Compatibility function for output.py
-def _display_workflow_status(result: dict, show_output_hint: bool = True, deep_check_data: dict = None, 
-                           workflow_data: dict = None, show_deep_check: bool = False):
+def _display_workflow_status(result: dict, show_output_hint: bool = True, workflow_data: dict = None):
     """Compatibility function for output.py - displays workflow status using new classes."""
     displayer = StatusWorkflowDisplayer()
     
@@ -465,7 +469,7 @@ def _display_workflow_status(result: dict, show_output_hint: bool = True, deep_c
     
     displayer.display_workflow_status(
         result['workflow_name'], result['phase'], result['started_at'], 
-        result['finished_at'], tree_nodes, deep_check_data or {}, show_deep_check, workflow_data)
+        result['finished_at'], tree_nodes, workflow_data)
     
     if show_output_hint and result['phase'] in ('Running', 'Pending'):
         click.echo("")

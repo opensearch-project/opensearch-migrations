@@ -4,6 +4,7 @@ import logging
 from typing import Dict, List, Any, Optional
 from rich.console import Console
 from rich.tree import Tree
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -12,9 +13,8 @@ class WorkflowDisplayer:
     """Base class for workflow display implementations."""
     
     def display_workflow_status(self, workflow_name: str, phase: str, started_at: str, 
-                              finished_at: str, tree_nodes: List[Dict[str, Any]], 
-                              deep_check_data: Dict[str, Any], show_deep_check: bool,
-                              workflow_data: Dict[str, Any] = None) -> None:
+                                finished_at: str, tree_nodes: List[Dict[str, Any]],
+                                workflow_data: Dict[str, Any] = None) -> None:
         """Display complete workflow status. Must be implemented by subclasses."""
         raise NotImplementedError
     
@@ -126,7 +126,7 @@ def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def get_step_status_output(workflow_data: Dict[str, Any], node_id: str) -> Optional[str]:
     """Extract statusOutput from a workflow step or its children by node ID."""
-    logger.info(f"Looking for statusOutput in node: {node_id}")
+    logger.debug(f"Looking for statusOutput in node: {node_id}")
     nodes = workflow_data.get("status", {}).get("nodes", {})
     
     # Check the specific node and its children for statusOutput
@@ -276,29 +276,13 @@ def _construct_full_label_line(step_name, step_name_and_timestamp_str, step_phas
 
 
 def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
-                         deep_check_data: Optional[Dict] = None,
-                         workflow_data: Optional[Dict] = None,
-                         show_deep_check: bool = False) -> None:
-    """Display workflow tree using Rich with proper nesting and deep check results."""
+                         workflow_data: Optional[Dict] = None) -> None:
+    """Display workflow tree using Rich with proper nesting and live check results."""
     
     # Sort nodes chronologically by startedAt time (ascending - earliest first)
     sorted_nodes = sorted(tree_nodes, key=lambda n: n.get('started_at') or '9999-12-31T23:59:59Z')
-    
-    # Find the last failed node with deep check data
-    last_failed_node_id = None
-    if show_deep_check and deep_check_data:
-        failed_nodes = []
-        for node in sorted_nodes:
-            if node['phase'] == 'Failed' and node['id'] in deep_check_data:
-                failed_nodes.append(node)
-        
-        if failed_nodes:
-            last_failed_node_id = failed_nodes[-1]['id']
-            logger.info(f"Last failed node for deep check: {last_failed_node_id}")
-        else:
-            logger.info(f"No failed nodes found in deep_check_data. Available deep check data for nodes: {list(deep_check_data.keys())}")
-            logger.info(f"Failed nodes without deep check data: {[n['id'] for n in sorted_nodes if n['phase'] == 'Failed']}")
-    
+    logger.info("display_workflow_tree running ")
+
     console = Console()
     tree = Tree("[bold]Workflow Steps[/bold]")
     
@@ -314,46 +298,9 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
 
             # Add node to tree
             node_tree = parent_tree.add(node_label)
-            
-            # Add deep check info for the last failed node
-            if show_deep_check and deep_check_data and node['id'] == last_failed_node_id:
-                logger.info(f"Adding deep check for last failed node: {node['display_name']}")
-                check_data = deep_check_data[node['id']]
-                status_results = check_data['status']
+            if (live_check := node.get('live_check', None)):
+                parent_tree.add(json.dumps(live_check))
 
-                # TODO - this needs to be refactored to be polymorphic and injected
-                # Show live status from API calls
-                if 'snapshot' in status_results:
-                    snap_result = status_results['snapshot']
-                    if snap_result.get('success'):
-                        # Handle multi-line output
-                        value = snap_result['value']
-                        lines = value.split('\n')
-                        deep_check_tree = node_tree.add(f"⚡ {lines[0]}")
-                        for line in lines[1:]:
-                            if line.strip():
-                                deep_check_tree.add(line)
-                    else:
-                        error_msg = snap_result.get('error', 'Unknown error')
-                        node_tree.add(f"⚡ Error: {error_msg}")
-                
-                if 'backfill' in status_results:
-                    backfill_result = status_results['backfill']
-                    if backfill_result.get('success'):
-                        # Handle multi-line output like snapshot
-                        message = backfill_result.get('message', '')
-                        if message:
-                            lines = message.split('\n')
-                            deep_check_tree = node_tree.add(f"⚡ {lines[0]}")
-                            for line in lines[1:]:
-                                if line.strip():
-                                    deep_check_tree.add(line)
-                        else:
-                            node_tree.add(f"⚡ Backfill: {backfill_result['status']}")
-                    else:
-                        error_msg = backfill_result.get('error', 'Unknown error')
-                        node_tree.add(f"⚡ Error: {error_msg}")
-            
             # Recursively add children
             if node['children']:
                 add_nodes_to_tree(node['children'], node_tree)
