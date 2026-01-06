@@ -157,11 +157,24 @@ def clean_display_name(display_name: str) -> str:
     return title_case
 
 
-def get_step_rich_label(node: dict) -> str:
+def get_node_phase(node: dict) -> str:
+    """Get phase for a workflow node, preferring overriddenPhase output parameter."""
+    outputs = node.get('outputs', {})
+    parameters = outputs.get('parameters', [])
+    for param in parameters:
+        if param.get('name') == 'overriddenPhase':
+            custom_phase = param.get('value', '').strip()
+            if custom_phase:
+                return custom_phase
+    return node['phase']
+
+
+def get_step_rich_label(node: dict, status_output: str) -> str:
     """Get rich-formatted label for a workflow step node.
 
     Args:
         node: WorkflowNode dictionary
+        status_output: Additional status output to append
 
     Returns:
         Rich-formatted string with color and styling
@@ -183,7 +196,9 @@ def get_step_rich_label(node: dict) -> str:
     elif node.get('started_at'):
         timestamp = node['started_at'][:19]  # Remove timezone info
         timestamp_str = f" {timestamp.replace('T', ' ')}"
-    step_phase = node['phase']
+    # Determine phase - prefer overriddenPhase output parameter over argo phase
+    step_phase = get_node_phase(node)
+    
     step_type = node['type']
 
     # Color based on phase
@@ -207,8 +222,9 @@ def get_step_rich_label(node: dict) -> str:
         symbol = "?"
 
     step_name_and_timestamp_str = f"{timestamp_str}: {step_name}"
+    
     full_unformatted_line = _construct_full_label_line(step_name, step_name_and_timestamp_str, step_phase, step_type)
-    return f"[{color}]{symbol} {full_unformatted_line} [/{color}]"
+    return f"[{color}]{symbol} {full_unformatted_line}{': ' + status_output if status_output else ''} [/{color}]"
 
 
 def _construct_full_label_line(step_name, step_name_and_timestamp_str, step_phase, step_type):
@@ -257,29 +273,18 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
         sorted_children = sorted(nodes, key=lambda n: n.get('started_at') or '9999-12-31T23:59:59Z')
         
         for node in sorted_children:
+            # Add statusOutput for failed nodes
+            status_output = get_step_status_output(workflow_data, node['id']) if node['phase'] == 'Failed' and workflow_data else ""
+
             # Use Rich formatting for the label
-            node_label = get_step_rich_label(node)
-            
-            # Add statusOutput for any failed node that has it
-            if node['phase'] == 'Failed' and workflow_data:
-                status_output = get_step_status_output(workflow_data, node['id'])
-                if status_output:
-                    node_label += f": {status_output}"
-                    logger.info(f"Added statusOutput for {node['display_name']}: {status_output}")
-                else:
-                    # Show phase for nodes without statusOutput
-                    node_label += f" ({node['phase']})"
-            else:
-                # Show phase for other nodes
-                if node['phase'] != 'Succeeded':
-                    node_label += f" ({node['phase']})"
-            
+            node_label = get_step_rich_label(node, status_output)
+
             # Add node to tree
             node_tree = parent_tree.add(node_label)
             
             # Add deep check info for the last failed node
             if show_deep_check and deep_check_data and node['id'] == last_failed_node_id:
-                logger.info(f"Adding deep check for last failed node: {display_name}")
+                logger.info(f"Adding deep check for last failed node: {node['display_name']}")
                 check_data = deep_check_data[node['id']]
                 status_results = check_data['status']
 

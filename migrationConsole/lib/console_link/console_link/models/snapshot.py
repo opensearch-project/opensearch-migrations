@@ -539,6 +539,7 @@ class SnapshotStatus(BaseModel):
 def convert_snapshot_state_to_step_state(snapshot_state: str) -> StepState:
     state_mapping = {
         "FAILED": StepState.FAILED,
+        "STARTED": StepState.RUNNING,
         "IN_PROGRESS": StepState.RUNNING,
         "PARTIAL": StepState.FAILED,
         "SUCCESS": StepState.COMPLETED,

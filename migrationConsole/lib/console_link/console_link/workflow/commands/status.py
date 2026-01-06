@@ -31,65 +31,6 @@ from console_link.middleware import backfill as backfill_middleware
 logger = logging.getLogger(__name__)
 
 
-def _get_step_config_contents(workflow_data, step_name):
-    """Extract configContents from a workflow step's inputs."""
-    logger.info(f"Looking for configContents in step: {step_name}")
-    nodes = workflow_data.get("status", {}).get("nodes", {})
-    logger.debug(f"Found {len(nodes)} nodes in workflow")
-    
-    for node_id, node in nodes.items():
-        display_name = node.get("displayName", "")
-        if step_name in display_name:
-            logger.info(f"Found matching node {node_id} with display name: {display_name}")
-            inputs = node.get("inputs", {})
-            parameters = inputs.get("parameters", [])
-            logger.debug(f"Node has {len(parameters)} input parameters")
-            
-            for param in parameters:
-                param_name = param.get("name")
-                if param_name == "configContents":
-                    logger.info(f"Found configContents parameter in node {node_id}")
-                    return param.get("value")
-                logger.debug(f"Skipping parameter: {param_name}")
-    
-    logger.warning(f"No configContents found for step: {step_name}")
-    return None
-
-
-def _get_step_status_output(workflow_data, node_id):
-    """Extract statusOutput from a workflow step or its children by node ID."""
-    logger.info(f"Looking for statusOutput in node: {node_id}")
-    nodes = workflow_data.get("status", {}).get("nodes", {})
-    
-    # Check the specific node and its children for statusOutput
-    def check_node_for_status_output(current_node_id, depth=0):
-        logger.debug(f"{'  ' * depth}Checking node {current_node_id} for statusOutput")
-        node = nodes.get(current_node_id, {})
-        
-        # Check outputs first
-        outputs = node.get("outputs", {})
-        parameters = outputs.get("parameters", [])
-        for param in parameters:
-            if param.get("name") == "statusOutput":
-                logger.info(f"Found statusOutput in node {current_node_id}: {param.get('value')}")
-                return param.get("value")
-        
-        # Check children
-        children = node.get("children", [])
-        logger.debug(f"{'  ' * depth}Node {current_node_id} has {len(children)} children")
-        for child_id in children:
-            result = check_node_for_status_output(child_id, depth + 1)
-            if result:
-                return result
-        
-        return None
-    
-    result = check_node_for_status_output(node_id)
-    if not result:
-        logger.warning(f"No statusOutput found for node: {node_id}")
-    return result
-
-
 def _convert_config_with_jq(config_contents):
     """Convert workflow config to services config using jq."""
     logger.info("Converting config with jq")
@@ -161,136 +102,13 @@ def _check_backfill_status(env):
         return {"error": str(e)}
 
 
-def _calculate_deep_check_results(workflow_data, deep_check):
-    """
-    Calculate deep check results for currently active workflow nodes.
-    
-    Returns a map of currently active nodes to their status text returned by the 
-    console steps (all calculated in parallel).
-    
-    Args:
-        workflow_data: The workflow data from Argo
-        deep_check: Whether deep checking is enabled
-        
-    Returns:
-        dict: Map of node_id -> status results for active nodes
-    """
-    if not deep_check:
-        logger.info("Deep check disabled, skipping")
-        return {}
-    
-    logger.info("Starting deep check data collection with tree walking")
-    nodes = workflow_data.get("status", {}).get("nodes", {})
-    check_tasks = []
-    
-    # Find checkSnapshotCompletion and checkHistoricalBackfillCompletion nodes
-    for node_id, node in nodes.items():
-        display_name = node.get("displayName", "")
-        phase = node.get("phase", "")
-        node_type = node.get("type", "")
-        
-        # Skip completed steps
-        if phase == "Succeeded":
-            continue
-            
-        # Look for status check nodes
-        if "checkSnapshotCompletion" in display_name and node_type == "Pod":
-            logger.info(f"Found checkSnapshotCompletion node: {display_name}")
-            
-            # Walk up the tree to find config
-            config_contents = _walk_up_for_config(nodes, node_id, "configContents")
-            if config_contents:
-                logger.info("Found config contents, converting with jq")
-                services_config = _convert_config_with_jq(config_contents)
-                if services_config:
-                    config_dict = yaml.safe_load(services_config)
-                    check_tasks.append({
-                        'node_id': node_id,
-                        'step_name': display_name,
-                        'type': 'snapshot',
-                        'env': Environment(config=config_dict)
-                    })
-        
-        elif "checkHistoricalBackfillCompletion" in display_name and node_type == "Pod":
-            logger.info(f"Found checkHistoricalBackfillCompletion node: {display_name}")
-            
-            # Walk up the tree to find config
-            config_contents = _walk_up_for_config(nodes, node_id, "configContents")
-            if config_contents:
-                logger.info("Found config contents, converting with jq")
-                services_config = _convert_config_with_jq(config_contents)
-                if services_config:
-                    config_dict = yaml.safe_load(services_config)
-                    check_tasks.append({
-                        'node_id': node_id,
-                        'step_name': display_name,
-                        'type': 'backfill',
-                        'env': Environment(config=config_dict)
-                    })
-    
-    logger.info(f"Found {len(check_tasks)} tasks for deep checking")
-    
-    # Run all checks in parallel
-    deep_check_results = {}
-    
-    if check_tasks:
-        with ThreadPoolExecutor(max_workers=len(check_tasks) * 2) as executor:
-            futures = {}
-            
-            for task in check_tasks:
-                node_id = task['node_id']
-                check_type = task['type']
-                env = task['env']
-                
-                if check_type == 'snapshot':
-                    futures[(node_id, 'snapshot')] = executor.submit(_check_snapshot_status, env)
-                elif check_type == 'backfill':
-                    futures[(node_id, 'backfill')] = executor.submit(_check_backfill_status, env)
-            
-            # Collect results
-            for (node_id, check_type), future in futures.items():
-                task = next(t for t in check_tasks if t['node_id'] == node_id)
-                
-                if node_id not in deep_check_results:
-                    deep_check_results[node_id] = {
-                        'step_name': task['step_name'],
-                        'type': task['type'],
-                        'status': {}
-                    }
-                
-                try:
-                    result = future.result()
-                    deep_check_results[node_id]['status'][check_type] = result
-                except Exception as e:
-                    logger.error(f"Error getting result for {check_type} check: {e}")
-                    deep_check_results[node_id]['status'][check_type] = {"error": str(e)}
-    
-    return deep_check_results
-
-
-def _walk_up_for_config(nodes, start_node_id, param_name):
-    """Walk up the tree to find a parameter in parent nodes."""
-    current_id = start_node_id
-    visited = set()
-    
-    while current_id and current_id not in visited:
-        visited.add(current_id)
-        node = nodes.get(current_id)
-        if not node:
-            break
-            
-        # Check inputs for the parameter
-        inputs = node.get("inputs", {})
-        parameters = inputs.get("parameters", [])
-        for param in parameters:
-            if param.get("name") == param_name:
-                logger.info(f"Found {param_name} in node {current_id}")
-                return param.get("value")
-        
-        # Move to parent
-        current_id = node.get("boundaryID")
-    
-    logger.warning(f"No {param_name} found walking up from {start_node_id}")
+def _get_node_input_parameter(node, param_name):
+    """Get a parameter value from a node's inputs."""
+    inputs = node.get('inputs', {})
+    parameters = inputs.get('parameters', [])
+    for param in parameters:
+        if param.get('name') == param_name:
+            return param.get('value')
     return None
 
 
@@ -585,47 +403,6 @@ def _display_workflow_header(name: str, phase: str, started_at: str, finished_at
         click.echo(f"  Finished: {finished_at}")
 
 
-
-
-def _display_workflow_steps(steps: list, step_tree: list = None):
-    """Display workflow steps.
-
-    Args:
-        steps: List of step dictionaries (backward compatibility)
-        step_tree: Optional list of WorkflowNode dictionaries with hierarchy
-    """
-    # Use tree display if available
-    if step_tree:
-        display_workflow_tree(step_tree)
-        return
-
-    # Fallback to flat display
-    if not steps:
-        return
-
-    click.echo("\n  Steps:")
-    for step in steps:
-        step_name = step['name']
-        step_phase = step['phase']
-        step_type = step['type']
-
-        symbol = _get_step_symbol(step_phase, step_type)
-
-        # Special handling for Suspend steps
-        if step_type == 'Suspend':
-            if step_phase == 'Running':
-                click.echo(f"{symbol} {step_name} - WAITING FOR APPROVAL")
-            elif step_phase == 'Succeeded':
-                click.echo(f"{symbol} {step_name} (Approved)")
-            else:
-                click.echo(f"{symbol} {step_name} ({step_phase})")
-        # Special handling for Skipped steps with approval-related names
-        elif step_phase == 'Skipped' and 'approval' in step_name.lower():
-            click.echo(f"{symbol} {step_name} (Not Required)")
-        else:
-            click.echo(f"{symbol} {step_name} ({step_phase})")
-
-
 def _display_workflow_status(result: dict, show_output_hint: bool = True, deep_check_data: dict = None, workflow_data: dict = None, show_deep_check: bool = False):
     """Display formatted workflow status.
 
@@ -679,16 +456,20 @@ def _calculate_deep_check_results(workflow_data, deep_check):
         node_type = node.get("type", "")
         started_at = node.get("startedAt", "")
         
-        # Look for status check nodes
-        if (("checkSnapshotCompletion" in display_name or "checkHistoricalBackfillCompletion" in display_name)
-            and node_type == "Pod"):
-            logger.info(f"Found status check node: {display_name} (phase: {phase}, started: {started_at})")
+        # Look for nodes with configContents parameter
+        if _get_node_input_parameter(node, 'configContents') and node_type == "Pod":
+            config_contents = _get_node_input_parameter(node, 'configContents')
+            group_name = _get_node_input_parameter(node, 'groupName') or 'default'
+            
+            logger.info(f"Found status check node: {display_name} (phase: {phase}, started: {started_at}, group: {group_name})")
             status_check_nodes.append({
                 'node_id': node_id,
                 'display_name': display_name,
                 'phase': phase,
                 'started_at': started_at,
-                'type': 'snapshot' if 'checkSnapshotCompletion' in display_name else 'backfill'
+                'type': 'snapshot' if 'checkSnapshotCompletion' in display_name else 'backfill',
+                'group_name': group_name,
+                'config_contents': config_contents
             })
     
     # Sort by start time to find the chronologically last one
@@ -696,26 +477,39 @@ def _calculate_deep_check_results(workflow_data, deep_check):
         logger.info(f"Found {len(status_check_nodes)} total status check nodes")
         status_check_nodes.sort(key=lambda n: n['started_at'] or '0000-00-00T00:00:00Z')
         
-        # Run deep check for all non-succeeded status checks
+        # Group nodes by group name and find the last failed one in each group
+        groups = {}
         for check_node in status_check_nodes:
-            if check_node['phase'] != 'Succeeded':
-                logger.info(f"Running deep check for non-succeeded status check: {check_node['display_name']} ({check_node['phase']})")
+            group_name = check_node['group_name']
+            if group_name not in groups:
+                groups[group_name] = []
+            groups[group_name].append(check_node)
+        
+        # For each group, find the last failed node and run deep check only for that one
+        for group_name, group_nodes in groups.items():
+            # Find the last failed node in this group
+            failed_nodes = [n for n in group_nodes if n['phase'] != 'Succeeded']
+            if failed_nodes:
+                # Sort by start time and take the last one
+                failed_nodes.sort(key=lambda n: n['started_at'] or '0000-00-00T00:00:00Z')
+                last_failed = failed_nodes[-1]
                 
-                # Walk up the tree to find config
-                config_contents = _walk_up_for_config(nodes, check_node['node_id'], "configContents")
-                if config_contents:
-                    logger.info("Found config contents, converting with jq")
-                    services_config = _convert_config_with_jq(config_contents)
-                    if services_config:
-                        config_dict = yaml.safe_load(services_config)
-                        check_tasks.append({
-                            'node_id': check_node['node_id'],
-                            'step_name': check_node['display_name'],
-                            'type': check_node['type'],
-                            'env': Environment(config=config_dict)
-                        })
+                logger.info(f"Running deep check for last failed node in group {group_name}: {last_failed['display_name']} ({last_failed['phase']})")
+                
+                # Use config directly from the node (no tree walking needed)
+                config_contents = last_failed['config_contents']
+                logger.info("Found config contents, converting with jq")
+                services_config = _convert_config_with_jq(config_contents)
+                if services_config:
+                    config_dict = yaml.safe_load(services_config)
+                    check_tasks.append({
+                        'node_id': last_failed['node_id'],
+                        'step_name': last_failed['display_name'],
+                        'type': last_failed['type'],
+                        'env': Environment(config=config_dict)
+                    })
             else:
-                logger.info(f"Status check succeeded, skipping deep check for {check_node['display_name']} (type: {check_node['type']})")
+                logger.info(f"All status checks succeeded in group {group_name}, skipping deep check")
     else:
         logger.info("No status check nodes found")
     

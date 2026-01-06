@@ -28,6 +28,7 @@ import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basi
 const checkScript = `
   set -e
   touch /tmp/status-output.txt
+  touch /tmp/phase-output.txt
   
   # Quick status check - if SUCCESS, we're done
   status=$(console --config-file=/config/migration_services.yaml snapshot status)
@@ -64,6 +65,7 @@ const checkScript = `
       }
     }
   ' > /tmp/status-output.txt
+  echo Running > /tmp/phase-output.txt
   
   exit 1
 `.trim();
@@ -147,7 +149,8 @@ export const CreateSnapshot = WorkflowBuilder.create({
             limit: "200", retryPolicy: "Always",
             backoff: {duration: "5", factor: "2", cap: "300"}
         })
-        .addExpressionOutput("statusOutput", b => b.steps.checkSnapshotCompletion.outputs.statusOutput)
+        // .addExpressionOutput("statusOutput", b => b.steps.checkSnapshotCompletion.outputs.statusOutput)
+        // .addExpressionOutput("overriddenPhase", b => b.steps.checkSnapshotCompletion.outputs.overriddenPhase)
     )
 
 

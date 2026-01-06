@@ -199,6 +199,7 @@ function getCheckBackfillStatusScript(sessionName: BaseExpression<string>) {
     const template = `
 set -e -x
 touch /tmp/status-output.txt
+touch /tmp/phase-output.txt
 
 status=$(console --config-file=/config/migration_services.yaml backfill status --deep-check)
 
@@ -219,7 +220,7 @@ else
     END {
         gsub(/^[^.]+\\./, "", status)
         eta_str = (eta == "" || eta == "None") ? "unknown" : int(eta/1000) "s"
-        printf "%s| complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d\\n", 
+        printf "complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d\\n", 
                status, pct, eta_str, progress, waiting, complete, total
     }
     ' > /tmp/status-output.txt
@@ -235,7 +236,7 @@ END {
   } else {
     exit 1
   }
-}' || exit 1
+}' || (echo Running > /tmp/phase-output.txt && exit 1)
 `;
     return expr.fillTemplate(template, {"SESSION_NAME": sessionName});
 }

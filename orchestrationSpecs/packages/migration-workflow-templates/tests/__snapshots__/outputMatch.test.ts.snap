@@ -769,14 +769,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
         },
         "name": "checksnapshotstatus",
         "outputs": {
-          "parameters": [
-            {
-              "name": "statusOutput",
-              "valueFrom": {
-                "expression": "steps.checkSnapshotCompletion.outputs.parameters.statusOutput",
-              },
-            },
-          ],
+          "parameters": [],
         },
         "retryStrategy": {
           "backoff": {
@@ -808,6 +801,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                     "name": "command",
                     "value": "set -e
   touch /tmp/status-output.txt
+  touch /tmp/phase-output.txt
   
   # Quick status check - if SUCCESS, we're done
   status=$(console --config-file=/config/migration_services.yaml snapshot status)
@@ -844,6 +838,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
       }
     }
   ' > /tmp/status-output.txt
+  echo Running > /tmp/phase-output.txt
   
   exit 1",
                   },
@@ -1096,6 +1091,7 @@ metadata:
                     "value": "
 set -e -x
 touch /tmp/status-output.txt
+touch /tmp/phase-output.txt
 
 status=$(console --config-file=/config/migration_services.yaml backfill status --deep-check)
 
@@ -1116,7 +1112,7 @@ else
     END {
         gsub(/^[^.]+\\./, "", status)
         eta_str = (eta == "" || eta == "None") ? "unknown" : int(eta/1000) "s"
-        printf "%s| complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d\\n", 
+        printf "complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d\\n", 
                status, pct, eta_str, progress, waiting, complete, total
     }
     ' > /tmp/status-output.txt
@@ -1132,7 +1128,7 @@ END {
   } else {
     exit 1
   }
-}' || exit 1
+}' || (echo Running > /tmp/phase-output.txt && exit 1)
 ",
                   },
                 ],
@@ -3154,6 +3150,12 @@ echo ---
               "name": "statusOutput",
               "valueFrom": {
                 "path": "/tmp/status-output.txt",
+              },
+            },
+            {
+              "name": "overriddenPhase",
+              "valueFrom": {
+                "path": "/tmp/phase-output.txt",
               },
             },
           ],
