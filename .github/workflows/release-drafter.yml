@@ -163,8 +163,7 @@ jobs:
           output-file: opensearch-migrations-source-sbom.spdx.json
       - name: Install Helm
         uses: azure/setup-helm@v4
-        with:
-          version: v3.14.0
+        # Uses latest Helm version by default
       - name: Package Helm chart
         run: |
           helm package deployment/k8s/charts/aggregates/migrationAssistantWithArgo \
