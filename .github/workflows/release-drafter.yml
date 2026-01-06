@@ -161,6 +161,12 @@ jobs:
         with:
           file: opensearch-migrations-source.tar.gz
           output-file: opensearch-migrations-source-sbom.spdx.json
+      - name: Package Helm chart
+        run: |
+          helm package deployment/k8s/charts/aggregates/migrationAssistantWithArgo \
+            --version ${{ steps.get_data.outputs.version }} \
+            --app-version ${{ steps.get_data.outputs.version }}
+          mv migration-assistant-*.tgz migration-assistant-${{ steps.get_data.outputs.version }}.tgz
       - name: Configure AWS Credentials for Solutions Credentials
         if: ${{ !github.event.act }}
         uses: aws-actions/configure-aws-credentials@v5
@@ -202,4 +208,5 @@ jobs:
             opensearch-migrations-source.tar.gz
             opensearch-migrations-build.tar.gz
             kiro-cli/build/kiro-assistant.tar.gz
+            migration-assistant-${{ steps.get_data.outputs.version }}.tgz
             **/*.spdx.json
