@@ -1,0 +1,48 @@
+name: Package and Publish Helm Chart
+
+on:
+  release:
+    types: [published]
+
+env:
+  ECR_PUBLIC_REGISTRY: public.ecr.aws/opensearchproject
+  CHART_NAME: migration-assistant
+
+jobs:
+  package-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Package chart
+        run: |
+          helm package deployment/k8s/charts/aggregates/migrationAssistantWithArgo \
+            --version ${{ github.ref_name }} \
+            --app-version ${{ github.ref_name }}
+          mv migration-assistant-*.tgz ${{ env.CHART_NAME }}-${{ github.ref_name }}.tgz
+
+      - name: Upload to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.CHART_NAME }}-${{ github.ref_name }}.tgz
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.ECR_PUBLIC_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Login to ECR Public
+        run: aws ecr-public get-login-password --region us-east-1 | helm registry login --username AWS --password-stdin public.ecr.aws
+
+      - name: Push to ECR Public
+        run: |
+          helm push ${{ env.CHART_NAME }}-${{ github.ref_name }}.tgz oci://${{ env.ECR_PUBLIC_REGISTRY }}
