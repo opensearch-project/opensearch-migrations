@@ -8,6 +8,39 @@ from rich.tree import Tree
 logger = logging.getLogger(__name__)
 
 
+class WorkflowDisplayer:
+    """Base class for workflow display implementations."""
+    
+    def display_workflow_status(self, workflow_name: str, phase: str, started_at: str, 
+                              finished_at: str, tree_nodes: List[Dict[str, Any]], 
+                              deep_check_data: Dict[str, Any], show_deep_check: bool,
+                              workflow_data: Dict[str, Any] = None) -> None:
+        """Display complete workflow status. Must be implemented by subclasses."""
+        raise NotImplementedError
+    
+    def get_phase_symbol(self, phase: str) -> str:
+        """Get symbol for workflow phase. Must be implemented by subclasses."""
+        raise NotImplementedError
+    
+    def get_step_symbol(self, step_phase: str, step_type: str) -> str:
+        """Get symbol for workflow step. Must be implemented by subclasses."""
+        raise NotImplementedError
+    
+    def display_workflow_header(self, name: str, phase: str, started_at: str, finished_at: str) -> None:
+        """Display workflow header. Must be implemented by subclasses."""
+        raise NotImplementedError
+
+
+def get_node_input_parameter(node: Dict[str, Any], param_name: str) -> Optional[str]:
+    """Get a parameter value from a node's inputs."""
+    inputs = node.get('inputs', {})
+    parameters = inputs.get('parameters', [])
+    for param in parameters:
+        if param.get('name') == param_name:
+            return param.get('value')
+    return None
+
+
 def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Build a properly nested tree structure from workflow nodes."""
     nodes = workflow_data.get("status", {}).get("nodes", {})
@@ -121,7 +154,7 @@ def get_step_status_output(workflow_data: Dict[str, Any], node_id: str) -> Optio
     
     result = check_node_for_status_output(node_id)
     if not result:
-        logger.warning(f"No statusOutput found for node: {node_id}")
+        logger.debug(f"No statusOutput found for node: {node_id}")  # Changed from warning to debug
     return result
 
 
@@ -273,8 +306,8 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
         sorted_children = sorted(nodes, key=lambda n: n.get('started_at') or '9999-12-31T23:59:59Z')
         
         for node in sorted_children:
-            # Add statusOutput for failed nodes
-            status_output = get_step_status_output(workflow_data, node['id']) if node['phase'] == 'Failed' and workflow_data else ""
+            # Get statusOutput for all nodes that might have it
+            status_output = get_step_status_output(workflow_data, node['id']) if workflow_data else ""
 
             # Use Rich formatting for the label
             node_label = get_step_rich_label(node, status_output)
