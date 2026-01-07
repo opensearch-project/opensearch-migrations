@@ -44,6 +44,14 @@ spec:
               mkdir -p /tmp/helm-status
               echo "Starting Helm installation sequence..."
 
+      {{- if index $.Values.conditionalPackageInstalls "etcd-operator" }}
+              # Install Aenix etcd-operator via kubectl apply (not a helm chart)
+              echo "Installing Aenix etcd-operator..."
+              kubectl apply -f https://github.com/aenix-io/etcd-operator/releases/download/{{ $.Values.charts.etcd-operator.version }}/etcd-operator.yaml
+              touch /tmp/helm-status/etcd-operator.done
+              echo "Aenix etcd-operator installed successfully"
+      {{- end }}
+
       {{- range $name, $chart := .Values.charts }}
           {{- $repo := $chart.repository }}
           {{- if and (index $.Values.conditionalPackageInstalls $name) (ne (substr 0 6 $repo) "oci://") }}

@@ -193,8 +193,8 @@ class TestRunner:
 
     def cleanup_deployment(self) -> None:
         self.cleanup_clusters()
-        # Delete Etcd CRs before helm uninstall - operator must be running to remove finalizers
-        self.k8s_service.run_command(["kubectl", "delete", "etcds", "--all", "-n", self.k8s_service.namespace,
+        # Delete EtcdCluster CRs before helm uninstall - operator must be running to remove finalizers
+        self.k8s_service.run_command(["kubectl", "delete", "etcdclusters.etcd.aenix.io", "--all", "-n", self.k8s_service.namespace,
                                       "--ignore-not-found", "--timeout=60s"], ignore_errors=True)
         self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
         self.k8s_service.wait_for_all_healthy_pods()

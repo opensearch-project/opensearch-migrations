@@ -1,8 +1,8 @@
 conditionalPackageInstalls:
   kyverno: false
   # Migration infrastructure components
-  etcd-druid: true              # etcd operator for workflow coordination
-  cert-manager: true            # needed by the otel operator
+  etcd-operator: true           # Aenix etcd operator for workflow coordination
+  cert-manager: true            # needed by etcd-operator and otel operator
   kube-prometheus-stack: true   # will be needed for auto-scaling
   argo-workflows: true          # orchestrates the steps of a migration
   strimzi-kafka-operator: true  # Required by capture and replay
@@ -26,7 +26,7 @@ conditionalPackageInstalls:
   grafana: false
   jaeger: true
 
-# etcd cluster configuration (managed by etcd-druid operator)
+# etcd cluster configuration (managed by Aenix etcd-operator)
 etcdCluster:
   replicas: 3
   storageCapacity: 10Gi
@@ -192,15 +192,13 @@ otelConfiguration:
           exporters: [ debug ]
 
 charts:
-  # etcd-druid operator - production-ready etcd management from Gardener project
-  # Handles node drain gracefully via member API, includes backup/restore, defrag
-  # See: https://gardener.github.io/etcd-druid/deployment/production-setup-recommendations.html
-  etcd-druid:
-    version: "v0.34.0"
-    repository: "oci://europe-docker.pkg.dev/gardener-project/releases/charts/gardener/etcd-druid"
-    namespace: etcd-druid
-    values:
-      replicas: 1
+  # Aenix etcd-operator - simple and reliable etcd management
+  # Handles node drain gracefully, automatic PDB management
+  # See: https://etcd.aenix.io/docs/v0.4/
+  etcd-operator:
+    version: "v0.4.2"
+    # Installed via kubectl apply from GitHub releases
+    namespace: etcd-operator-system
 
 
   cert-manager:

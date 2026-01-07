@@ -59,10 +59,8 @@ charts:
           enabled: false
 
 
-  # Lightweight etcd-druid for local development
-  etcd-druid:
-    values:
-      replicas: 1
+  # Lightweight etcd-operator for local development
+  # (no additional values needed - installed via kubectl apply)
 
 # Lightweight etcd cluster for local development
 etcdCluster:
