@@ -50,6 +50,29 @@ logger.addHandler(file_handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False
 
+# Utility method that doesn't need to be within a class
+def copy_to_clipboard(text: str) -> bool:
+    """Copies text to the system clipboard using local CLI tools."""
+    import subprocess
+    import platform
+
+    try:
+        system = platform.system()
+        if system == "Darwin":  # macOS
+            process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
+            process.communicate(text.encode('utf-8'))
+        elif system == "Linux":
+            # Try Wayland first, then X11
+            try:
+                process = subprocess.Popen(['wl-copy'], stdin=subprocess.PIPE)
+                process.communicate(text.encode('utf-8'))
+            except FileNotFoundError:
+                process = subprocess.Popen(['xclip', '-selection', 'clipboard'], stdin=subprocess.PIPE)
+                process.communicate(text.encode('utf-8'))
+        return True
+    except Exception:
+        return False
+
 class ConfirmModal(ModalScreen[bool]):
     CSS = """
     ConfirmModal {
@@ -164,26 +187,28 @@ class WorkflowTreeApp(App):
         # Reset the internal BindingMap
         self._bindings = self._bindings.__class__()
 
-        # 1. Base (Permanent) Bindings
+        # 1. Restore the built-in Command Palette (Ctrl+P)
+        self.bind("ctrl+p", "command_palette", show=False)
+
+        # 2. Base (Permanent) Bindings
         self.bind("r", "refresh", description="Refresh", show=True)
         self.bind("q", "quit", description="Quit", show=True)
         self.bind("escape", "quit", show=False)
         self.bind("left", "collapse_node", show=False)
         self.bind("right", "expand_node", show=False)
 
-        # 2. Add Contextual Bindings
+        # 3. Contextual Bindings
         if self.current_node_data:
             node_type = self.current_node_data.get('type')
             node_phase = self.current_node_data.get('phase')
 
             if node_type == NODE_TYPE_POD:
                 self.bind("o", "view_logs", description="View Logs", show=True)
+                self.bind("c", "copy_pod_name", description="Copy Name", show=True)
 
             elif node_type == NODE_TYPE_SUSPEND and node_phase == PHASE_RUNNING:
                 self.bind("a", "approve_step", description="Approve", show=True)
 
-        # 3. CRITICAL: Notify widgets that bindings have changed
-        # This is the most reliable way in newer Textual versions to update the Footer
         self.refresh_bindings()
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
@@ -358,6 +383,30 @@ class WorkflowTreeApp(App):
             return "".join(output)
         except Exception as e:
             return f"Error: {str(e)}"
+
+    def action_copy_pod_name(self) -> None:
+        """Copies the actual Kubernetes Pod Name to the OS clipboard."""
+        if self.current_node_data and self.current_node_data.get('type') == NODE_TYPE_POD:
+            try:
+                node_id = self.current_node_data['id']
+
+                # Use the same discovery logic as the log viewer
+                pod_name = _find_pod_by_node_id(
+                    self.k8s_client,
+                    self.namespace,
+                    self.workflow_name,
+                    node_id,
+                    self.current_node_data,
+                    None
+                )
+
+                if pod_name and copy_to_clipboard(pod_name):
+                    self.notify(f"📋 Copied Pod: {pod_name}", timeout=2)
+                else:
+                    self.notify("❌ Could not resolve Pod name", severity="error")
+
+            except Exception as e:
+                self.notify(f"❌ Copy failed: {str(e)}", severity="error")
 
     def _execute_approval(self, node_data: Dict) -> None:
         try:
