@@ -36,35 +36,27 @@ spec:
             namespace: {{ .Release.Namespace }}
           spec:
             replicas: {{ .Values.etcdCluster.replicas }}
-            {{- if .Values.etcdCluster.storageClass }}
             storage:
               volumeClaimTemplate:
                 spec:
+                  {{- if .Values.etcdCluster.storageClass }}
                   storageClassName: {{ .Values.etcdCluster.storageClass }}
+                  {{- end }}
                   accessModes: ["ReadWriteOnce"]
                   resources:
                     requests:
-                      storage: {{ .Values.etcdCluster.storageCapacity | default "1Gi" }}
-            {{- else }}
-            storage:
-              volumeClaimTemplate:
-                spec:
-                  accessModes: ["ReadWriteOnce"]
-                  resources:
-                    requests:
-                      storage: {{ .Values.etcdCluster.storageCapacity | default "1Gi" }}
-            {{- end }}
+                      storage: {{ .Values.etcdCluster.storageCapacity }}
             podTemplate:
               spec:
                 containers:
                 - name: etcd
                   resources:
                     requests:
-                      cpu: {{ .Values.etcdCluster.cpu | default "100m" }}
-                      memory: {{ .Values.etcdCluster.memory | default "256Mi" }}
+                      cpu: {{ .Values.etcdCluster.cpu }}
+                      memory: {{ .Values.etcdCluster.memory }}
                     limits:
-                      cpu: {{ .Values.etcdCluster.cpu | default "100m" }}
-                      memory: {{ .Values.etcdCluster.memory | default "256Mi" }}
+                      cpu: {{ .Values.etcdCluster.cpu }}
+                      memory: {{ .Values.etcdCluster.memory }}
           EOF
           
           echo "EtcdCluster created successfully"
