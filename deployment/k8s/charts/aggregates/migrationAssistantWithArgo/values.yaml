@@ -616,31 +616,26 @@ charts:
         replicas: 1
         container:
           resources:
-            requests:
-              cpu: "0"
-              memory: "0"
+            requests: null
+            limits: null
         initContainer:
           resources:
-            requests:
-              cpu: "0"
-              memory: "0"
+            requests: null
+            limits: null
       backgroundController:
         replicas: 1
         resources:
-          requests:
-            cpu: "0"
-            memory: "0"
+          requests: null
+          limits: null
       cleanupController:
         replicas: 1
         resources:
-          requests:
-            cpu: "0"
-            memory: "0"
+          requests: null
+          limits: null
       reportsController:
         replicas: 1
         resources:
-          requests:
-            cpu: "0"
-            memory: "0"
+          requests: null
+          limits: null
       config:
         excludeKyvernoNamespace: false
