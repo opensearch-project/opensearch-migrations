@@ -200,10 +200,11 @@ class TestRunner:
                  "-n", self.k8s_service.namespace, "--ignore-not-found", "--timeout=30s"],
                 ignore_errors=True)
         # Force remove any stuck finalizers
+        crds = "etcdclusters.etcd.aenix.io,etcds.druid.gardener.cloud"
+        ns = self.k8s_service.namespace
         self.k8s_service.run_command(
-            ["bash", "-c", f"kubectl get {','.join(['etcdclusters.etcd.aenix.io', 'etcds.druid.gardener.cloud'])} "
-             f"-n {self.k8s_service.namespace} -o name 2>/dev/null | xargs -r -n1 "
-             f"kubectl patch -n {self.k8s_service.namespace} --type=merge -p '{{\"metadata\":{{\"finalizers\":null}}}}'"],
+            ["bash", "-c", f"kubectl get {crds} -n {ns} -o name 2>/dev/null | xargs -r -n1 "
+             f"kubectl patch -n {ns} --type=merge -p '{{\"metadata\":{{\"finalizers\":null}}}}'"],
             ignore_errors=True)
         self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
         self.k8s_service.wait_for_all_healthy_pods()
