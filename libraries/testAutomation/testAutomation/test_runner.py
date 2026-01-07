@@ -197,7 +197,7 @@ class TestRunner:
         for crd in ["etcdclusters.etcd.aenix.io", "etcds.druid.gardener.cloud"]:
             self.k8s_service.run_command(
                 ["kubectl", "delete", crd, "--all",
-                 "-n", self.k8s_service.namespace, "--ignore-not-found", "--timeout=30s"],
+                 "-n", self.k8s_service.namespace, "--ignore-not-found", "--timeout=300s"],
                 ignore_errors=True)
         # Force remove any stuck finalizers
         crds = "etcdclusters.etcd.aenix.io,etcds.druid.gardener.cloud"
