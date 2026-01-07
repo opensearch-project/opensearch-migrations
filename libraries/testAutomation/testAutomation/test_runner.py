@@ -207,6 +207,9 @@ class TestRunner:
              f"kubectl patch -n {ns} --type=merge -p '{{\"metadata\":{{\"finalizers\":null}}}}'"],
             ignore_errors=True)
         self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
+        self.k8s_service.run_command(
+            ["kubectl", "delete", "namespace", "kyverno", "--ignore-not-found"],
+            ignore_errors=True)
         self.k8s_service.wait_for_all_healthy_pods()
         self.k8s_service.delete_all_pvcs()
 
