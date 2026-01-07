@@ -24,13 +24,7 @@ spec:
         - -c
         - |
           set -e
-          echo "Waiting for etcd-operator CRD to be available..."
-          # kubectl wait doesn't work for CRDs that don't exist yet, so we poll
-          until kubectl get crd etcdclusters.etcd.aenix.io 2>/dev/null; do
-            echo "CRD not ready, waiting..."
-            sleep 5
-          done
-          echo "CRD is ready, waiting for etcd-operator..."
+          kubectl wait --for=condition=Established crd/etcdclusters.etcd.aenix.io --timeout=300s
           kubectl wait --for=condition=available deployment/etcd-operator-controller-manager -n {{ .Release.Namespace }} --timeout=300s
           
           echo "Creating EtcdCluster..."
