@@ -196,9 +196,16 @@ charts:
   # Handles node drain gracefully, automatic PDB management
   # See: https://etcd.aenix.io/docs/v0.4/
   etcd-operator:
-    version: "v0.4.2"
-    # Installed via kubectl apply from GitHub releases
+    version: "0.4.2"
+    repository: "oci://ghcr.io/aenix-io/charts/etcd-operator"
     namespace: etcd-operator-system
+    values:
+      etcdOperator:
+        vpa:
+          enabled: false
+      kubeRbacProxy:
+        vpa:
+          enabled: false
 
 
   cert-manager:
