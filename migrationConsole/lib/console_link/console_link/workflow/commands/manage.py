@@ -122,6 +122,7 @@ class ConfirmModal(ModalScreen[bool]):
 class WorkflowTreeApp(App):
     CSS = """
     Tree { scrollbar-gutter: stable; }
+    #pod-status { height: 1; padding: 0 1; }
     """
     BINDINGS = []
 
@@ -142,6 +143,7 @@ class WorkflowTreeApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Container(Tree("Workflow Steps", id="workflow-tree"), id="tree-container")
+        yield Static("", id="pod-status")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -157,6 +159,7 @@ class WorkflowTreeApp(App):
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
         self.current_node_data = event.node.data
+        self._update_pod_status()
         self._update_dynamic_bindings()
 
     def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
@@ -289,7 +292,23 @@ class WorkflowTreeApp(App):
             self.workflow_data = new_data
             self.tree_nodes = new_nodes
             self._update_dynamic_bindings()
+            self._update_pod_status()
         except Exception as e: logger.error(f"Update error: {e}")
+
+    def _update_pod_status(self) -> None:
+        status = self.query_one("#pod-status", Static)
+        node = self.current_node_data
+        if not node or node.get('type') != NODE_TYPE_POD:
+            status.update("")
+            return
+        try:
+            pod_name = node.get('pod_name')
+            if not pod_name:
+                pod_name = _find_pod_by_node_id(self.k8s_client, self.namespace, self.workflow_name, node['id'], node, None)
+                if pod_name: node['pod_name'] = pod_name
+            status.update(f"Pod: {pod_name or '(unknown)'}")
+        except Exception:
+            status.update("Pod: (error)")
 
     def _update_tree_recursive(self, parent_tree_node, new_nodes: List[Dict], workflow_data: Dict) -> None:
         existing_children = {child.data['id']: child for child in parent_tree_node.children if child.data}
