@@ -236,7 +236,7 @@ END {
   } else {
     exit 1
   }
-}' || (echo Running > /tmp/phase-output.txt && exit 1)
+}' || (echo Checked > /tmp/phase-output.txt && exit 1)
 `;
     return expr.fillTemplate(template, {"SESSION_NAME": sessionName});
 }

@@ -65,7 +65,7 @@ const checkScript = `
       }
     }
   ' > /tmp/status-output.txt
-  echo Running > /tmp/phase-output.txt
+  echo Checked > /tmp/phase-output.txt
   
   exit 1
 `.trim();

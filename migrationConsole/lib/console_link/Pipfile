@@ -19,7 +19,8 @@ gunicorn = "*"
 uvicorn = {extras = ["standard"], version = "*"}
 tinydb = "*"
 fastapi = {extras = ["standard"], version = ">=0.124.0"}
-rich = ">=14.0.0"
+rich = "==14.2.0"
+textual = "==7.0.0"
 
 [dev-packages]
 pytest = "*"
