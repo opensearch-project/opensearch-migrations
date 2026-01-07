@@ -238,7 +238,7 @@ def get_step_rich_label(node: dict, status_output: str) -> str:
     if step_phase == 'Succeeded':
         color = "green"
         symbol = "✓"
-    elif step_phase == 'Running':
+    elif step_phase == 'Running' or step_phase == 'Checked':
         color = "yellow"
         symbol = "⟳" if step_type == 'Suspend' else "▶"
     elif step_phase in ('Failed', 'Error'):

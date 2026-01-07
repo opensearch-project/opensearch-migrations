@@ -9,8 +9,9 @@ import tempfile
 from typing import Dict, List, Any, Optional
 
 from textual.app import App, ComposeResult
-from textual.widgets import Tree, Footer, Header
-from textual.containers import Container
+from textual.widgets import Tree, Footer, Header, Static, Button
+from textual.containers import Container, Horizontal
+from textual.screen import ModalScreen
 from textual.worker import get_current_worker
 
 from ..models.utils import ExitCode
@@ -22,14 +23,78 @@ from .status import ConfigConverter, StatusCheckRunner
 from console_link.environment import Environment
 
 # Set up file logging for debugging
-file_handler = logging.FileHandler('/tmp/workflow_manage.log')
+import datetime
+import tempfile
+log_dir = os.path.join(tempfile.gettempdir(), "workflow_manage")
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, f"manage_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+file_handler = logging.FileHandler(log_file)
 file_handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 file_handler.setFormatter(formatter)
 
 logger = logging.getLogger(__name__)
 logger.addHandler(file_handler)
 logger.setLevel(logging.INFO)
+logger.propagate = False  # Don't propagate to console
+
+
+class ConfirmModal(ModalScreen[bool]):
+    """Modal dialog for confirmation."""
+    
+    CSS = """
+    ConfirmModal {
+        align: center middle;
+        background: $background 60%;
+    }
+    #dialog {
+        width: 45;
+        height: auto;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #question {
+        text-align: center;
+        margin-bottom: 1;
+    }
+    #buttons {
+        align: center middle;
+        height: 3;
+    }
+    Button {
+        margin: 0 1;
+        min-width: 12;
+    }
+    Button:focus {
+        text-style: bold reverse;
+    }
+    """
+    
+    BINDINGS = [("y", "confirm", "Yes"), ("n", "cancel", "No"), ("escape", "cancel", "No")]
+    
+    def __init__(self, message: str):
+        super().__init__()
+        self.message = message
+    
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog"):
+            yield Static(self.message, id="question")
+            with Horizontal(id="buttons"):
+                yield Button("Yes (y)", id="yes", variant="success")
+                yield Button("No (n)", id="no", variant="error")
+    
+    def on_mount(self) -> None:
+        self.query_one("#yes", Button).focus()
+    
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+    
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+    
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "yes")
 
 
 class WorkflowTreeApp(App):
@@ -74,18 +139,17 @@ class WorkflowTreeApp(App):
         yield Footer()
     
     def on_mount(self) -> None:
+        # Redirect all logging to file during TUI
+        root_logger = logging.getLogger()
+        root_logger.handlers = [file_handler]
+        root_logger.setLevel(logging.INFO)
+        
         tree = self.query_one("#workflow-tree", Tree)
         self._populate_tree(tree, self.tree_nodes, tree.root)
         tree.root.expand_all()
         
         # Start live refresh timer (every 3 seconds)
         self.set_interval(3.0, self._start_background_refresh)
-    
-    def on_key(self, event) -> None:
-        """Handle key events including Ctrl+C."""
-        if event.key == "ctrl+c":
-            self.exit()
-            event.prevent_default()
     
     def _populate_tree(self, tree: Tree, nodes: List[Dict[str, Any]], parent_node) -> None:
         """Populate textual tree with workflow nodes."""
@@ -118,6 +182,12 @@ class WorkflowTreeApp(App):
             
             self._run_live_check_async(event.node, event.node.data)
     
+    def on_key(self, event) -> None:
+        """Handle Ctrl+C to exit."""
+        if event.key == "ctrl+c":
+            self.exit()
+            event.prevent_default()
+    
     def action_view_logs(self) -> None:
         """View logs for current selected Pod node in pager."""
         tree = self.query_one("#workflow-tree", Tree)
@@ -125,17 +195,23 @@ class WorkflowTreeApp(App):
             self._show_logs_in_pager(tree.cursor_node.data)
     
     def action_approve_step(self) -> None:
-        """Approve current selected Suspend node."""
+        """Approve current selected Suspend node - shows confirmation modal."""
         tree = self.query_one("#workflow-tree", Tree)
         if (tree.cursor_node and tree.cursor_node.data and 
             tree.cursor_node.data['type'] == 'Suspend' and 
             tree.cursor_node.data['phase'] == 'Running'):
-            self._approve_workflow_step(tree.cursor_node.data)
+            node_data = tree.cursor_node.data
+            step_name = node_data.get('display_name', 'Unknown Step')
+            
+            def handle_confirm(confirmed: bool) -> None:
+                if confirmed:
+                    self._execute_approval(node_data)
+            
+            self.push_screen(ConfirmModal(f"Approve '{step_name}'?"), handle_confirm)
     
     def action_refresh(self) -> None:
         """Manually refresh workflow data."""
         logger.info("Manual refresh triggered")
-        self.notify("Refreshing...", severity="information")
         self._start_background_refresh()
     
 
@@ -191,8 +267,7 @@ class WorkflowTreeApp(App):
             # Update stored data
             self.workflow_data = new_workflow_data
             self.tree_nodes = new_filtered_tree
-            
-            self.notify("Refreshed", severity="information")
+
             logger.info("Workflow updates applied successfully")
             
         except Exception as e:
@@ -292,34 +367,25 @@ class WorkflowTreeApp(App):
         except Exception as e:
             return f"Error retrieving logs: {str(e)}"
     
-    def _approve_workflow_step(self, node_data: Dict) -> None:
-        """Approve a suspended workflow step."""
+    def _execute_approval(self, node_data: Dict) -> None:
+        """Execute approval for a specific suspended workflow node."""
         try:
             service = WorkflowService()
-            
-            # Show confirmation
             step_name = node_data.get('display_name', 'Unknown Step')
+            node_id = node_data.get('id')
             
-            with self.suspend():
-                click.echo(f"\nApproving step: {step_name}")
-                click.echo("This will resume the workflow execution.")
-                
-                if not click.confirm("Continue with approval?", default=True):
-                    click.echo("Approval cancelled.")
-                    return
-            
-            # Approve the workflow
+            # Approve only the selected node using node field selector
             result = service.approve_workflow(
                 workflow_name=self.workflow_name,
                 namespace=self.namespace,
-                argo_server=f"http://localhost:2746",  # Use default for now
+                argo_server=f"http://localhost:2746",
                 token=None,
-                insecure=False
+                insecure=False,
+                node_field_selector=f"id={node_id}" if node_id else None
             )
             
             if result['success']:
                 self.notify(f"✅ Approved: {step_name}", severity="information")
-                # Refresh the tree
                 self._start_background_refresh()
             else:
                 self.notify(f"❌ Approval failed: {result.get('message', 'Unknown error')}", 
