@@ -150,3 +150,9 @@ charts:
         - name: lua-scripts
           mountPath: /fluentbit/scripts
           readOnly: true
+
+
+# Higher resources for EKS production
+etcdCluster:
+  cpu: 500m
+  memory: 1Gi
