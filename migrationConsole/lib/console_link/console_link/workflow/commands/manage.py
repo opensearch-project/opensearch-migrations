@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Optional
 
 from textual.app import App, ComposeResult
 from textual.widgets import Tree, Footer, Header, Static, Button
+from textual.binding import Binding
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
 from textual.worker import get_current_worker
@@ -183,6 +184,10 @@ class WorkflowTreeApp(App):
             event.node.data.get('id') not in self.nodes_with_live_checks):
             
             self._run_live_check_async(event.node, event.node.data)
+        
+        # Update contextual bindings
+        logger.info("Triggering contextual binding update from selection change")
+
     
     def on_key(self, event) -> None:
         """Handle Ctrl+C to exit."""
@@ -255,16 +260,43 @@ class WorkflowTreeApp(App):
             except Exception as e:
                 logger.error(f"Background refresh error: {e}")
     
+    def _get_workflow_start_time(self, workflow_data: Dict) -> Optional[str]:
+        """Get workflow start time from metadata."""
+        return workflow_data.get('status', {}).get('startedAt')
+    
     def _apply_workflow_updates(self, new_workflow_data: Dict) -> None:
         """Apply workflow updates using smart diffing (original approach)."""
         try:
             logger.info("Applying workflow updates")
+            tree = self.query_one("#workflow-tree", Tree)
+            
+            # Check if this is a different workflow (start time changed = new workflow)
+            old_start = self._get_workflow_start_time(self.workflow_data)
+            new_start = self._get_workflow_start_time(new_workflow_data)
+            is_new_workflow = old_start != new_start
+            
             # Build new tree structure
             new_tree_nodes = build_nested_workflow_tree(new_workflow_data)
             new_filtered_tree = filter_tree_nodes(new_tree_nodes)
             
-            # Update existing nodes and add new ones (original smart approach)
-            self._update_tree_nodes(new_filtered_tree, new_workflow_data)
+            if is_new_workflow:
+                # Different workflow - clear and rebuild entirely
+                logger.info(f"New workflow detected (start: {new_start}), rebuilding tree")
+                tree.clear()
+                tree.root.label = "Workflow Steps"
+                self.node_mapping.clear()
+                self.nodes_with_live_checks.clear()
+                self._populate_tree(tree, new_filtered_tree, tree.root)
+                tree.root.expand_all()
+            else:
+                # Same workflow - incremental update
+                # Clear any error message children from root (they have no data)
+                for child in list(tree.root.children):
+                    if not child.data:
+                        child.remove()
+                tree.root.label = "Workflow Steps"
+                
+                self._update_tree_nodes(new_filtered_tree, new_workflow_data)
             
             # Update stored data
             self.workflow_data = new_workflow_data
