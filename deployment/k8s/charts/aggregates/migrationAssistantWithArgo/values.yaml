@@ -614,11 +614,33 @@ charts:
     values:
       admissionController:
         replicas: 1
+        container:
+          resources:
+            requests:
+              cpu: "0"
+              memory: "0"
+        initContainer:
+          resources:
+            requests:
+              cpu: "0"
+              memory: "0"
       backgroundController:
         replicas: 1
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
       cleanupController:
         replicas: 1
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
       reportsController:
         replicas: 1
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
       config:
         excludeKyvernoNamespace: false
