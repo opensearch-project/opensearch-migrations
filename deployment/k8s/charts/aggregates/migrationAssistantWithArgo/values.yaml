@@ -198,7 +198,7 @@ charts:
   etcd-operator:
     version: "0.4.2"
     repository: "oci://ghcr.io/aenix-io/charts/etcd-operator"
-    namespace: etcd-operator-system
+    namespace: ma
     dependsOn: cert-manager
     waitForInstallation: true
     values:
