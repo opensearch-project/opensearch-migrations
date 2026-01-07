@@ -1,7 +1,7 @@
 conditionalPackageInstalls:
   kyverno: false
   # Migration infrastructure components
-  etcd: true                    # used by our Argo workflows for workflow coordination. May be used by strimzi clusters too
+  etcd-druid: true              # etcd operator for workflow coordination
   cert-manager: true            # needed by the otel operator
   kube-prometheus-stack: true   # will be needed for auto-scaling
   argo-workflows: true          # orchestrates the steps of a migration
@@ -25,6 +25,14 @@ conditionalPackageInstalls:
   gatekeeper: false
   grafana: false
   jaeger: true
+
+# etcd cluster configuration (managed by etcd-druid operator)
+etcdCluster:
+  replicas: 3
+  storageCapacity: 10Gi
+  storageClass: ""  # Use default storage class
+  cpu: 100m
+  memory: 256Mi
 
 # Kyverno policy toggles (requires conditionalPackageInstalls.kyverno: true)
 kyvernoPolicies:
@@ -184,64 +192,16 @@ otelConfiguration:
           exporters: [ debug ]
 
 charts:
-  # Coordinate workflows, maybe RFS, maybe more
-  etcd:
-    version: "1.1.2"
-    repository: "https://groundhog2k.github.io/helm-charts"
+  # etcd-druid operator - production-ready etcd management from Gardener project
+  # Handles node drain gracefully via member API, includes backup/restore, defrag
+  # See: https://gardener.github.io/etcd-druid/deployment/production-setup-recommendations.html
+  etcd-druid:
+    version: "v0.34.0"
+    repository: "oci://europe-docker.pkg.dev/gardener-project/releases/charts/gardener/etcd-druid"
+    namespace: etcd-druid
     values:
-      preUpgrade:
-        enabled: false
-      replicas: 3  # Changed from replicaCount: 1 to replicas: 3 for HA
-      auth:
-        rbac:
-          rootPassword: password
-      resources:
-        requests:
-          cpu: 1
-          memory: 2Gi
-        limits:
-          cpu: 2
-          memory: 4Gi
-      persistence:
-        enabled: true
-        storage:
-          requestedSize: 10Gi
-      service:
-        type: ClusterIP
-      metrics:
-        enabled: true
-        serviceMonitor:
-          enabled: true
-      # Pod Disruption Budget for resilience
-      podDisruptionBudget:
-        enabled: true
-        minAvailable: 2  # Ensure at least 2 of 3 replicas stay available
-      # Anti-affinity to spread pods across nodes
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchLabels:
-                  app.kubernetes.io/name: etcd
-              topologyKey: kubernetes.io/hostname
-      extraEnvVars:
-        - name: ETCD_AUTO_COMPACTION_RETENTION
-          value: "1"
-        - name: ETCD_QUOTA_BACKEND_BYTES
-          value: "8589934592" # 8GB
-        - name: ETCD_HEARTBEAT_INTERVAL
-          value: "100"
-        - name: ETCD_ELECTION_TIMEOUT
-          value: "1000"
-      startFromSnapshot:
-        enabled: false
-      serviceAccount:
-        create: true
-      podSecurityContext:
-        fsGroup: 1001
-        runAsUser: 1001
+      replicas: 1
+
 
   cert-manager:
     version: 1.17.2
