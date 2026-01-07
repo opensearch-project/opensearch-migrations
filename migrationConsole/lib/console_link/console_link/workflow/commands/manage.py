@@ -35,6 +35,8 @@ class WorkflowTreeApp(App):
     
     BINDINGS = [
         ("o", "view_logs", "View Logs"),
+        ("a", "approve_step", "Approve"),
+        ("r", "refresh", "Refresh"),
         ("q,escape", "quit", "Quit"),
         ("left", "collapse_node", "Collapse"),
         ("right", "expand_node", "Expand"),
@@ -53,6 +55,7 @@ class WorkflowTreeApp(App):
         self.namespace = namespace
         self.tail_lines = tail_lines
         self.follow = follow
+        self.node_mapping = {}  # Track node_id -> TreeNode for live updates
     
     def compose(self) -> ComposeResult:
         yield Header()
@@ -66,6 +69,9 @@ class WorkflowTreeApp(App):
         tree = self.query_one("#workflow-tree", Tree)
         self._populate_tree(tree, self.tree_nodes, tree.root)
         tree.root.expand_all()
+        
+        # Start live refresh timer (every 10 seconds)
+        self.set_interval(10.0, self._live_refresh)
     
     def on_key(self, event) -> None:
         """Handle key events including Ctrl+C."""
@@ -82,6 +88,9 @@ class WorkflowTreeApp(App):
             label = get_step_rich_label(node, status_output)
             
             tree_node = parent_node.add(label, data=node)
+            
+            # Track node mapping for live updates
+            self.node_mapping[node['id']] = tree_node
             
             # Track pod nodes for selection
             if node['type'] == 'Pod':
@@ -106,6 +115,18 @@ class WorkflowTreeApp(App):
         tree = self.query_one("#workflow-tree", Tree)
         if tree.cursor_node and tree.cursor_node.data and tree.cursor_node.data['type'] == 'Pod':
             self._show_logs_in_pager(tree.cursor_node.data)
+    
+    def action_approve_step(self) -> None:
+        """Approve current selected Suspend node."""
+        tree = self.query_one("#workflow-tree", Tree)
+        if (tree.cursor_node and tree.cursor_node.data and 
+            tree.cursor_node.data['type'] == 'Suspend' and 
+            tree.cursor_node.data['phase'] == 'Running'):
+            self._approve_workflow_step(tree.cursor_node.data)
+    
+    def action_refresh(self) -> None:
+        """Manually refresh workflow data."""
+        self._live_refresh()
     
     def _show_logs_in_pager(self, node_data: Dict) -> None:
         """Show logs in a pager and return to UI."""
@@ -184,13 +205,141 @@ class WorkflowTreeApp(App):
         except Exception as e:
             return f"Error retrieving logs: {str(e)}"
     
+    def _approve_workflow_step(self, node_data: Dict) -> None:
+        """Approve a suspended workflow step."""
+        try:
+            service = WorkflowService()
+            
+            # Show confirmation
+            step_name = node_data.get('display_name', 'Unknown Step')
+            
+            with self.suspend():
+                click.echo(f"\nApproving step: {step_name}")
+                click.echo("This will resume the workflow execution.")
+                
+                if not click.confirm("Continue with approval?", default=True):
+                    click.echo("Approval cancelled.")
+                    return
+            
+            # Approve the workflow
+            result = service.approve_workflow(
+                workflow_name=self.workflow_name,
+                namespace=self.namespace,
+                argo_server=f"http://localhost:2746",  # Use default for now
+                token=None,
+                insecure=False
+            )
+            
+            if result['success']:
+                self.notify(f"✅ Approved: {step_name}", severity="information")
+                # Refresh the tree by rebuilding it
+                self._refresh_workflow_data()
+            else:
+                self.notify(f"❌ Approval failed: {result.get('message', 'Unknown error')}", 
+                           severity="error")
+                
+        except Exception as e:
+            self.notify(f"Error approving step: {str(e)}", severity="error")
+    
+    def _refresh_workflow_data(self) -> None:
+        """Refresh workflow data and rebuild tree."""
+        try:
+            # Get fresh workflow data
+            result, workflow_data = _get_workflow_data(
+                WorkflowService(), self.workflow_name, 
+                f"http://localhost:2746", self.namespace, False, None
+            )
+            
+            if result['success']:
+                # Rebuild tree with fresh data
+                tree_nodes = build_nested_workflow_tree(workflow_data)
+                filtered_tree = filter_tree_nodes(tree_nodes)
+                
+                # Update the tree
+                tree = self.query_one("#workflow-tree", Tree)
+                tree.clear()
+                tree.root.label = "Workflow Steps"
+                self._populate_tree(tree, filtered_tree, tree.root)
+                tree.root.expand_all()
+                
+                self.workflow_data = workflow_data
+                self.tree_nodes = filtered_tree
+                
+        except Exception as e:
+            self.notify(f"Error refreshing data: {str(e)}", severity="error")
+    
+    def _live_refresh(self) -> None:
+        """Live refresh workflow data with smart updates."""
+        try:
+            # Get fresh workflow data
+            result, new_workflow_data = _get_workflow_data(
+                WorkflowService(), self.workflow_name, 
+                f"http://localhost:2746", self.namespace, False, None
+            )
+            
+            if not result['success']:
+                return
+            
+            # Build new tree structure
+            new_tree_nodes = build_nested_workflow_tree(new_workflow_data)
+            new_filtered_tree = filter_tree_nodes(new_tree_nodes)
+            
+            # Update existing nodes and add new ones
+            self._update_tree_nodes(new_filtered_tree, new_workflow_data)
+            
+            # Update stored data
+            self.workflow_data = new_workflow_data
+            self.tree_nodes = new_filtered_tree
+            
+        except Exception as e:
+            logger.error(f"Live refresh error: {e}")
+    
+    def _update_tree_nodes(self, new_nodes: List[Dict[str, Any]], new_workflow_data: Dict) -> None:
+        """Update existing nodes and add new ones."""
+        def process_nodes(nodes, parent_tree_node=None):
+            tree = self.query_one("#workflow-tree", Tree)
+            if parent_tree_node is None:
+                parent_tree_node = tree.root
+            
+            for node in sorted(nodes, key=lambda n: n.get('started_at') or '9999-12-31T23:59:59Z'):
+                node_id = node['id']
+                status_output = get_step_status_output(new_workflow_data, node_id)
+                new_label = get_step_rich_label(node, status_output)
+                
+                if node_id in self.node_mapping:
+                    # Update existing node
+                    tree_node = self.node_mapping[node_id]
+                    if tree_node.data.get('phase') != node.get('phase'):
+                        tree_node.set_label(new_label)
+                        tree_node.data = node
+                else:
+                    # Add new node
+                    tree_node = parent_tree_node.add(new_label, data=node)
+                    self.node_mapping[node_id] = tree_node
+                    
+                    if node['type'] == 'Pod':
+                        self.pod_nodes.append(node)
+                
+                # Process children
+                if node['children']:
+                    process_nodes(node['children'], self.node_mapping[node_id])
+        
+        process_nodes(new_nodes)
+    
     def check_action_enabled(self, action: str) -> bool:
         """Check if an action should be enabled based on current context."""
+        tree = self.query_one("#workflow-tree", Tree)
+        if not tree.cursor_node or not tree.cursor_node.data:
+            return action not in ("view_logs", "approve_step")
+        
+        node_data = tree.cursor_node.data
+        
         if action == "view_logs":
-            tree = self.query_one("#workflow-tree", Tree)
-            return (tree.cursor_node and 
-                   tree.cursor_node.data and 
-                   tree.cursor_node.data.get('type') == 'Pod')
+            return node_data.get('type') == 'Pod'
+        elif action == "approve_step":
+            return (node_data.get('type') == 'Suspend' and 
+                   node_data.get('phase') == 'Running')
+        
         return True
     
     def action_select_node(self) -> None:
