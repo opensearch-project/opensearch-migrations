@@ -103,8 +103,8 @@ class ArgoService:
         # Print namespace resource summary
         try:
             logger.info(f"===== Namespace {self.namespace} resource summary =====")
-            get_all_args = {"get": "all", "--namespace": self.namespace}
-            self._run_kubectl_command(get_all_args)
+            get_args = {"get": "pods,services,deployments,statefulsets,workflows", "--namespace": self.namespace}
+            self._run_kubectl_command(get_args)
         except Exception as e:
             logger.error(f"Failed to get namespace resources: {e}")
 
@@ -117,11 +117,11 @@ class ArgoService:
             with open(output_file, 'w') as f:
                 f.write(f"===== Namespace {self.namespace} Diagnostics =====\n\n")
 
-                # kubectl get all
-                f.write("===== kubectl get all =====\n")
+                # kubectl get resources
+                f.write("===== kubectl get pods,services,deployments,statefulsets,workflows =====\n")
                 try:
                     result = CommandRunner("kubectl", {
-                        "get": "all",
+                        "get": "pods,services,deployments,statefulsets,workflows",
                         "--namespace": self.namespace,
                         "-o": "wide"
                     }).run()
@@ -129,11 +129,11 @@ class ArgoService:
                 except Exception as e:
                     f.write(f"Error: {e}\n\n")
 
-                # kubectl describe all
-                f.write("===== kubectl describe all =====\n")
+                # kubectl describe resources
+                f.write("===== kubectl describe pods,services,deployments,statefulsets,workflows =====\n")
                 try:
                     result = CommandRunner("kubectl", {
-                        "describe": "all",
+                        "describe": "pods,services,deployments,statefulsets,workflows",
                         "--namespace": self.namespace
                     }).run()
                     f.write(result + "\n\n")
