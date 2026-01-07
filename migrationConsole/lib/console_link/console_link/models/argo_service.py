@@ -92,21 +92,13 @@ class ArgoService:
         return result
 
     def print_workflow_details(self, workflow_name: str) -> None:
-        """Print workflow details and namespace state for debugging failed workflows."""
+        """Print workflow details for debugging failed workflows."""
         try:
             workflow_data = self._get_workflow_status_json(workflow_name)
             logger.info(
                 f"Workflow {workflow_name} full status:\n{json.dumps(workflow_data.get('status', {}), indent=2)}")
         except Exception as e:
             logger.error(f"Failed to get workflow details: {e}")
-
-        # Print namespace resource summary
-        try:
-            logger.info(f"===== Namespace {self.namespace} resource summary =====")
-            get_args = {"get": "pods,services,deployments,statefulsets,workflows", "--namespace": self.namespace}
-            self._run_kubectl_command(get_args)
-        except Exception as e:
-            logger.error(f"Failed to get namespace resources: {e}")
 
     def save_namespace_diagnostics(self, output_dir: str) -> Optional[str]:
         """Save detailed namespace diagnostics to a file for artifact collection."""
