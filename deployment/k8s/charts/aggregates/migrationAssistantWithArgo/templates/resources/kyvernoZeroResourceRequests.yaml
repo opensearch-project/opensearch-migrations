@@ -25,13 +25,13 @@ data:
               - resources:
                   kinds:
                     - Pod
-                  selector:
-                    matchExpressions:
-                      - key: serviceAccountName
-                        operator: In
-                        values:
-                          - migration-console-access-role
-                          - argo-workflow-executor
+          preconditions:
+            any:
+              - key: "{{`{{ request.object.spec.serviceAccountName }}`}}"
+                operator: In
+                value:
+                  - migration-console-access-role
+                  - argo-workflow-executor
           mutate:
             foreach:
               - list: "request.object.spec.containers[]"
@@ -55,15 +55,13 @@ data:
               - resources:
                   kinds:
                     - Pod
-                  selector:
-                    matchExpressions:
-                      - key: serviceAccountName
-                        operator: In
-                        values:
-                          - migration-console-access-role
-                          - argo-workflow-executor
           preconditions:
             all:
+              - key: "{{`{{ request.object.spec.serviceAccountName }}`}}"
+                operator: In
+                value:
+                  - migration-console-access-role
+                  - argo-workflow-executor
               - key: "{{`{{ request.object.spec.initContainers || '' | length(@) }}`}}"
                 operator: GreaterThan
                 value: 0
