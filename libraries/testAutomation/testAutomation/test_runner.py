@@ -193,17 +193,17 @@ class TestRunner:
 
     def cleanup_deployment(self) -> None:
         self.cleanup_clusters()
-        # Delete CRs with finalizers before helm uninstall
-        for crd in ["etcdclusters.etcd.aenix.io", "etcds.druid.gardener.cloud"]:
+        # Delete etcd custom resources before helm uninstall to prevent stuck finalizers
+        for cr_type in ["etcdclusters.etcd.aenix.io", "etcds.druid.gardener.cloud"]:
             self.k8s_service.run_command(
-                ["kubectl", "delete", crd, "--all",
+                ["kubectl", "delete", cr_type, "--all",
                  "-n", self.k8s_service.namespace, "--ignore-not-found", "--timeout=300s"],
                 ignore_errors=True)
-        # Force remove any stuck finalizers
-        crds = "etcdclusters.etcd.aenix.io,etcds.druid.gardener.cloud"
+        # Force remove any stuck finalizers on etcd CRs
+        cr_types = "etcdclusters.etcd.aenix.io,etcds.druid.gardener.cloud"
         ns = self.k8s_service.namespace
         self.k8s_service.run_command(
-            ["bash", "-c", f"kubectl get {crds} -n {ns} -o name 2>/dev/null | xargs -r -n1 "
+            ["bash", "-c", f"kubectl get {cr_types} -n {ns} -o name 2>/dev/null | xargs -r -n1 "
              f"kubectl patch -n {ns} --type=merge -p '{{\"metadata\":{{\"finalizers\":null}}}}'"],
             ignore_errors=True)
         self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)

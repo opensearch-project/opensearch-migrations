@@ -27,6 +27,8 @@ data:
                     - Pod
           preconditions:
             any:
+              # Double braces with backticks: outer {{` `}} escapes Helm templating,
+              # inner {{ }} is Kyverno's JMESPath expression syntax
               - key: "{{`{{ request.object.spec.serviceAccountName }}`}}"
                 operator: In
                 value:
