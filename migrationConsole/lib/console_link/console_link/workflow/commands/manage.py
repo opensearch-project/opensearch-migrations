@@ -15,7 +15,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
 
-# Internal imports - assuming these exist in your project structure
+# Internal imports
 from ..models.utils import ExitCode
 from ..services.workflow_service import WorkflowService
 from ..tree_utils import (
@@ -36,7 +36,7 @@ NODE_TYPE_SUSPEND = "Suspend"
 PHASE_RUNNING = "Running"
 PHASE_SUCCEEDED = "Succeeded"
 
-# Set up file logging for debugging
+# Set up file logging
 log_dir = os.path.join(tempfile.gettempdir(), "workflow_manage")
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, f"manage_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
@@ -51,7 +51,6 @@ logger.setLevel(logging.INFO)
 logger.propagate = False
 
 class ConfirmModal(ModalScreen[bool]):
-    """Modal dialog for confirmation."""
     CSS = """
     ConfirmModal {
         align: center middle;
@@ -77,7 +76,11 @@ class ConfirmModal(ModalScreen[bool]):
         min-width: 12;
     }
     """
-    BINDINGS = [("y", "confirm", "Yes"), ("n", "cancel", "No"), ("escape", "cancel", "No")]
+    BINDINGS = [
+        Binding("y", "confirm", "Yes"),
+        Binding("n", "cancel", "No"),
+        Binding("escape", "cancel", "No", show=False)
+    ]
 
     def __init__(self, message: str):
         super().__init__()
@@ -104,38 +107,14 @@ class ConfirmModal(ModalScreen[bool]):
 
 
 class WorkflowTreeApp(App):
-    """Interactive tree navigation app for workflow steps."""
-
     CSS = """
     Tree {
         scrollbar-gutter: stable;
     }
-
-    /* 1. Hide the keys by default using !important to override internal styles */
-    Footer > .footer--key-o, 
-    Footer > .footer--key-a {
-        display: none !important;
-    }
-
-    /* 2. Show them ONLY when the parent Footer has the toggle class */
-    Footer.can-view-logs > .footer--key-o {
-        display: block !important;
-    }
-
-    Footer.can-approve > .footer--key-a {
-        display: block !important;
-    }
     """
 
-    BINDINGS = [
-        Binding("o", "view_logs", "View Logs", show=True),
-        Binding("a", "approve_step", "Approve", show=True),
-        Binding("r", "refresh", "Refresh"),
-        Binding("q", "quit", "Quit"),
-        Binding("escape", "quit", "Quit"),
-        Binding("left", "collapse_node", "Collapse"),
-        Binding("right", "expand_node", "Expand"),
-    ]
+    # We leave BINDINGS empty because we are using a full manual refresh strategy
+    BINDINGS = []
 
     def __init__(self, tree_nodes: List[Dict[str, Any]], workflow_data: Dict[str, Any],
                  k8s_client, workflow_name: str, namespace: str):
@@ -168,66 +147,68 @@ class WorkflowTreeApp(App):
         self._populate_tree(tree, self.tree_nodes, tree.root)
         tree.root.expand_all()
 
-        # Start live refresh timer (every 3 seconds)
+        # Manually trigger initial binding setup
+        self._update_dynamic_bindings()
         self.set_interval(3.0, self._start_background_refresh)
 
-    def check_action_enabled(self, action: str) -> bool:
-        """
-        TEXTUAL HOOK: Controls whether an action can be triggered.
-        This prevents 'ghost' keypresses for hidden bindings.
-        """
-        if action == "view_logs":
-            return (self.current_node_data is not None and
-                    self.current_node_data.get('type') == NODE_TYPE_POD)
-
-        if action == "approve_step":
-            return (self.current_node_data is not None and
-                    self.current_node_data.get('type') == NODE_TYPE_SUSPEND and
-                    self.current_node_data.get('phase') == PHASE_RUNNING)
-
-        return True
-
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
-        """Update UI state and binding visibility when cursor moves."""
+        """Called when the cursor moves in the tree."""
         self.current_node_data = event.node.data
-        footer = self.query_one(Footer)
+        self._update_dynamic_bindings()
 
-        # Determine visibility states
-        is_pod = self.current_node_data is not None and self.current_node_data.get('type') == NODE_TYPE_POD
-        is_approvable = (self.current_node_data is not None and
-                         self.current_node_data.get('type') == NODE_TYPE_SUSPEND and
-                         self.current_node_data.get('phase') == PHASE_RUNNING)
+    def _update_dynamic_bindings(self) -> None:
+        """
+        Clears existing bindings and re-maps them based on context.
+        Using .refresh_bindings() is the key for 0.70.0.
+        """
+        # Reset the internal BindingMap
+        self._bindings = self._bindings.__class__()
 
-        # Toggle CSS classes on the Footer to show/hide keys
-        footer.set_class(is_pod, "can-view-logs")
-        footer.set_class(is_approvable, "can-approve")
+        # 1. Base (Permanent) Bindings
+        self.bind("r", "refresh", description="Refresh", show=True)
+        self.bind("q", "quit", description="Quit", show=True)
+        self.bind("escape", "quit", show=False)
+        self.bind("left", "collapse_node", show=False)
+        self.bind("right", "expand_node", show=False)
+
+        # 2. Add Contextual Bindings
+        if self.current_node_data:
+            node_type = self.current_node_data.get('type')
+            node_phase = self.current_node_data.get('phase')
+
+            if node_type == NODE_TYPE_POD:
+                self.bind("o", "view_logs", description="View Logs", show=True)
+
+            elif node_type == NODE_TYPE_SUSPEND and node_phase == PHASE_RUNNING:
+                self.bind("a", "approve_step", description="Approve", show=True)
+
+        # 3. CRITICAL: Notify widgets that bindings have changed
+        # This is the most reliable way in newer Textual versions to update the Footer
+        self.refresh_bindings()
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
-        """Handle tree node selection and run live check if applicable."""
+        """Triggered when Enter or Space is pressed on a node."""
         if (event.node.data and
                 event.node.data['type'] == NODE_TYPE_POD and
                 self._should_run_live_check(event.node.data) and
                 self._is_last_leaf_at_level(event.node) and
                 event.node.data.get('id') not in self.nodes_with_live_checks):
-
             self._run_live_check_async(event.node, event.node.data)
+
     def on_key(self, event) -> None:
         """Handle Ctrl+C to exit."""
         if event.key == "ctrl+c":
             self.exit()
             event.prevent_default()
-    
 
     def action_view_logs(self) -> None:
-        """View logs for current selected Pod node in pager."""
-        if self.current_node_data and self.current_node_data['type'] == NODE_TYPE_POD:
+        if self.current_node_data and self.current_node_data.get('type') == NODE_TYPE_POD:
             self._show_logs_in_pager(self.current_node_data)
 
     def action_approve_step(self) -> None:
-        """Approve current selected Suspend node - shows confirmation modal."""
         if (self.current_node_data and
-                self.current_node_data['type'] == NODE_TYPE_SUSPEND and
-                self.current_node_data['phase'] == PHASE_RUNNING):
+                self.current_node_data.get('type') == NODE_TYPE_SUSPEND and
+                self.current_node_data.get('phase') == PHASE_RUNNING):
 
             node_data = self.current_node_data
             step_name = node_data.get('display_name', 'Unknown Step')
@@ -237,8 +218,6 @@ class WorkflowTreeApp(App):
                     self._execute_approval(node_data)
 
             self.push_screen(ConfirmModal(f"Approve '{step_name}'?"), handle_confirm)
-
-    # --- Core Logic & Tree Management ---
 
     def _get_node_label(self, node: Dict, workflow_data: Dict):
         status_output = get_step_status_output(workflow_data, node['id'])
@@ -254,7 +233,6 @@ class WorkflowTreeApp(App):
                 self._populate_tree(tree, node['children'], tree_node)
 
     def action_refresh(self) -> None:
-        logger.info("Manual refresh triggered")
         self._start_background_refresh()
 
     def _start_background_refresh(self) -> None:
@@ -276,9 +254,7 @@ class WorkflowTreeApp(App):
             return
 
         if event.worker.name and event.worker.name.startswith("live_check_"):
-            result = event.worker.result
-            node_id = event.worker.name.replace("live_check_", "")
-            self._update_live_check_result(node_id, result)
+            self._update_live_check_result(event.worker.name.replace("live_check_", ""), event.worker.result)
         elif event.worker.name == "refresh_worker":
             try:
                 result, new_workflow_data = event.worker.result
@@ -308,11 +284,12 @@ class WorkflowTreeApp(App):
             else:
                 for child in list(tree.root.children):
                     if not child.data: child.remove()
-                tree.root.label = "Workflow Steps"
                 self._update_tree_recursive(tree.root, new_filtered_tree, new_workflow_data)
 
             self.workflow_data = new_workflow_data
             self.tree_nodes = new_filtered_tree
+            # Re-sync bindings in case the selected node's phase updated
+            self._update_dynamic_bindings()
         except Exception as e:
             logger.error(f"Apply updates error: {e}")
 
