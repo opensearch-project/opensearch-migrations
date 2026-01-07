@@ -22,6 +22,12 @@ from .utils import auto_detect_workflow
 from .status import ConfigConverter, StatusCheckRunner
 from console_link.environment import Environment
 
+# Node types and phases
+NODE_TYPE_POD = "Pod"
+NODE_TYPE_SUSPEND = "Suspend"
+PHASE_RUNNING = "Running"
+PHASE_SUCCEEDED = "Succeeded"
+
 # Set up file logging for debugging
 import datetime
 import tempfile
@@ -120,14 +126,11 @@ class WorkflowTreeApp(App):
         super().__init__()
         self.tree_nodes = tree_nodes
         self.workflow_data = workflow_data
-        self.pod_nodes = []
-        self.selected_node = None
         self.nodes_with_live_checks = set()  # Track nodes with live check results
         self.k8s_client = k8s_client
         self.workflow_name = workflow_name
         self.namespace = namespace
         self.tail_lines = 500
-        self.follow = False
         self.node_mapping = {}  # Track node_id -> TreeNode for live updates
     
     def compose(self) -> ComposeResult:
@@ -151,22 +154,21 @@ class WorkflowTreeApp(App):
         # Start live refresh timer (every 3 seconds)
         self.set_interval(3.0, self._start_background_refresh)
     
+    def _get_node_label(self, node: Dict, workflow_data: Dict):
+        """Get rich label for a node."""
+        status_output = get_step_status_output(workflow_data, node['id'])
+        return get_step_rich_label(node, status_output)
+    
     def _populate_tree(self, tree: Tree, nodes: List[Dict[str, Any]], parent_node) -> None:
         """Populate textual tree with workflow nodes."""
         sorted_nodes = sorted(nodes, key=lambda n: n.get('started_at') or '9999-12-31T23:59:59Z')
         
         for node in sorted_nodes:
-            status_output = get_step_status_output(self.workflow_data, node['id'])
-            label = get_step_rich_label(node, status_output)
-            
+            label = self._get_node_label(node, self.workflow_data)
             tree_node = parent_node.add(label, data=node)
             
             # Track node mapping for live updates
             self.node_mapping[node['id']] = tree_node
-            
-            # Track pod nodes for selection
-            if node['type'] == 'Pod':
-                self.pod_nodes.append(node)
             
             # Add children recursively
             if node['children']:
@@ -175,7 +177,7 @@ class WorkflowTreeApp(App):
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         """Handle tree node selection and run live check if applicable."""
         if (event.node.data and 
-            event.node.data['type'] == 'Pod' and 
+            event.node.data['type'] == NODE_TYPE_POD and 
             self._should_run_live_check(event.node.data) and
             self._is_last_leaf_at_level(event.node) and
             event.node.data.get('id') not in self.nodes_with_live_checks):
@@ -191,15 +193,15 @@ class WorkflowTreeApp(App):
     def action_view_logs(self) -> None:
         """View logs for current selected Pod node in pager."""
         tree = self.query_one("#workflow-tree", Tree)
-        if tree.cursor_node and tree.cursor_node.data and tree.cursor_node.data['type'] == 'Pod':
+        if tree.cursor_node and tree.cursor_node.data and tree.cursor_node.data['type'] == NODE_TYPE_POD:
             self._show_logs_in_pager(tree.cursor_node.data)
     
     def action_approve_step(self) -> None:
         """Approve current selected Suspend node - shows confirmation modal."""
         tree = self.query_one("#workflow-tree", Tree)
         if (tree.cursor_node and tree.cursor_node.data and 
-            tree.cursor_node.data['type'] == 'Suspend' and 
-            tree.cursor_node.data['phase'] == 'Running'):
+            tree.cursor_node.data['type'] == NODE_TYPE_SUSPEND and 
+            tree.cursor_node.data['phase'] == PHASE_RUNNING):
             node_data = tree.cursor_node.data
             step_name = node_data.get('display_name', 'Unknown Step')
             
@@ -284,7 +286,6 @@ class WorkflowTreeApp(App):
             
             # Clear mappings
             self.node_mapping.clear()
-            self.pod_nodes.clear()
             self.nodes_with_live_checks.clear()
             
         except Exception as e:
@@ -292,6 +293,7 @@ class WorkflowTreeApp(App):
     
     def _show_logs_in_pager(self, node_data: Dict) -> None:
         """Show logs in a pager and return to UI."""
+        temp_file = None
         try:
             # Find the pod
             node_id = node_data['id']
@@ -318,11 +320,11 @@ class WorkflowTreeApp(App):
                 pager = os.environ.get('PAGER', 'less')
                 subprocess.run([pager, temp_file])
             
-            # Clean up temp file
-            os.unlink(temp_file)
-            
         except Exception as e:
             self.notify(f"Error viewing logs: {str(e)}", severity="error")
+        finally:
+            if temp_file and os.path.exists(temp_file):
+                os.unlink(temp_file)
     
     def _get_pod_logs(self, pod_name: str, node_data: Dict) -> str:
         """Get logs from pod containers."""
@@ -416,8 +418,7 @@ class WorkflowTreeApp(App):
             node_id = node['id']
             new_node_ids.add(node_id)
             
-            status_output = get_step_status_output(workflow_data, node_id)
-            new_label = get_step_rich_label(node, status_output)
+            new_label = self._get_node_label(node, workflow_data)
             
             if node_id in existing_children:
                 # Update existing node
@@ -429,9 +430,6 @@ class WorkflowTreeApp(App):
                 # Add new node
                 tree_node = parent_tree_node.add(new_label, data=node)
                 self.node_mapping[node_id] = tree_node
-                
-                if node['type'] == 'Pod':
-                    self.pod_nodes.append(node)
             
             # Update children recursively
             if node['children']:
@@ -454,16 +452,12 @@ class WorkflowTreeApp(App):
         node_data = tree.cursor_node.data
         
         if action == "view_logs":
-            return node_data.get('type') == 'Pod'
+            return node_data.get('type') == NODE_TYPE_POD
         elif action == "approve_step":
-            return (node_data.get('type') == 'Suspend' and 
-                   node_data.get('phase') == 'Running')
+            return (node_data.get('type') == NODE_TYPE_SUSPEND and 
+                   node_data.get('phase') == PHASE_RUNNING)
         
         return True
-    
-    def action_select_node(self) -> None:
-        """Select current highlighted node."""
-        pass  # Remove the old select behavior
     
     def action_expand_node(self) -> None:
         """Expand current highlighted node and run live check if applicable."""
@@ -473,7 +467,7 @@ class WorkflowTreeApp(App):
             
             # Run live check if this is an eligible Pod node
             if (tree.cursor_node.data and 
-                tree.cursor_node.data['type'] == 'Pod' and 
+                tree.cursor_node.data['type'] == NODE_TYPE_POD and 
                 self._should_run_live_check(tree.cursor_node.data) and
                 self._is_last_leaf_at_level(tree.cursor_node) and
                 tree.cursor_node.data.get('id') not in self.nodes_with_live_checks):
@@ -495,7 +489,7 @@ class WorkflowTreeApp(App):
     
     def _should_run_live_check(self, node_data: Dict) -> bool:
         """Check if node qualifies for live status check."""
-        return (node_data.get('phase') != 'Succeeded' and
+        return (node_data.get('phase') != PHASE_SUCCEEDED and
                 get_node_input_parameter(node_data, 'configContents') and
                 self._has_status_output(node_data))
     
@@ -511,7 +505,7 @@ class WorkflowTreeApp(App):
         
         # Get all Pod siblings
         pod_siblings = [child for child in tree_node.parent.children 
-                       if child.data and child.data.get('type') == 'Pod']
+                       if child.data and child.data.get('type') == NODE_TYPE_POD]
         
         if not pod_siblings:
             return True
@@ -666,12 +660,6 @@ def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token):
             click.echo("No workflow steps found.")
             return
         
-        # Check for pod nodes
-        pod_nodes = _extract_pod_nodes(filtered_tree)
-        if not pod_nodes:
-            click.echo("No pod steps available for log viewing.")
-            return
-        
         # Initialize k8s client
         k8s_core_api = _initialize_k8s_client(ctx)
         
@@ -702,17 +690,3 @@ def _get_workflow_data(service, workflow_name, argo_server, namespace, insecure,
     workflow_data = response.json() if response.status_code == 200 else {}
     
     return result, workflow_data
-
-
-def _extract_pod_nodes(tree_nodes):
-    """Extract all pod nodes from tree structure."""
-    pod_nodes = []
-    
-    def collect_pods(nodes):
-        for node in nodes:
-            if node['type'] == 'Pod':
-                pod_nodes.append(node)
-            collect_pods(node.get('children', []))
-    
-    collect_pods(tree_nodes)
-    return pod_nodes
