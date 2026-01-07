@@ -21,7 +21,15 @@ from .utils import auto_detect_workflow
 from .status import ConfigConverter, StatusCheckRunner
 from console_link.environment import Environment
 
+# Set up file logging for debugging
+file_handler = logging.FileHandler('/tmp/workflow_manage.log')
+file_handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+
 logger = logging.getLogger(__name__)
+logger.addHandler(file_handler)
+logger.setLevel(logging.INFO)
 
 
 class WorkflowTreeApp(App):
@@ -43,7 +51,7 @@ class WorkflowTreeApp(App):
     ]
     
     def __init__(self, tree_nodes: List[Dict[str, Any]], workflow_data: Dict[str, Any], 
-                 k8s_client, workflow_name: str, namespace: str, tail_lines: int, follow: bool):
+                 k8s_client, workflow_name: str, namespace: str):
         super().__init__()
         self.tree_nodes = tree_nodes
         self.workflow_data = workflow_data
@@ -53,8 +61,8 @@ class WorkflowTreeApp(App):
         self.k8s_client = k8s_client
         self.workflow_name = workflow_name
         self.namespace = namespace
-        self.tail_lines = tail_lines
-        self.follow = follow
+        self.tail_lines = 500
+        self.follow = False
         self.node_mapping = {}  # Track node_id -> TreeNode for live updates
     
     def compose(self) -> ComposeResult:
@@ -70,8 +78,8 @@ class WorkflowTreeApp(App):
         self._populate_tree(tree, self.tree_nodes, tree.root)
         tree.root.expand_all()
         
-        # Start live refresh timer (every 10 seconds)
-        self.set_interval(10.0, self._live_refresh)
+        # Start live refresh timer (every 3 seconds)
+        self.set_interval(3.0, self._start_background_refresh)
     
     def on_key(self, event) -> None:
         """Handle key events including Ctrl+C."""
@@ -126,7 +134,86 @@ class WorkflowTreeApp(App):
     
     def action_refresh(self) -> None:
         """Manually refresh workflow data."""
-        self._live_refresh()
+        logger.info("Manual refresh triggered")
+        self.notify("Refreshing...", severity="information")
+        self._start_background_refresh()
+    
+
+    def _start_background_refresh(self) -> None:
+        """Start background refresh worker."""
+        worker = self.run_worker(self._fetch_workflow_data, thread=True, exclusive=False)
+        worker.name = "refresh_worker"
+    
+    def _fetch_workflow_data(self) -> tuple:
+        """Fetch workflow data in background thread."""
+        try:
+            result, new_workflow_data = _get_workflow_data(
+                WorkflowService(), self.workflow_name, 
+                f"http://localhost:2746", self.namespace, False, None
+            )
+            return result, new_workflow_data
+        except Exception as e:
+            return {"success": False, "error": str(e)}, {}
+    
+    def on_worker_state_changed(self, event) -> None:
+        """Handle worker completion for both refresh and live checks."""
+        if not event.worker.is_finished:
+            return
+            
+        if event.worker.name and event.worker.name.startswith("live_check_"):
+            # Handle live check workers
+            result = event.worker.result
+            node_id = event.worker.name.replace("live_check_", "")
+            self._update_live_check_result(node_id, result)
+        elif event.worker.name == "refresh_worker":
+            # Handle refresh workers
+            try:
+                result, new_workflow_data = event.worker.result
+                if result.get('success'):
+                    self._apply_workflow_updates(new_workflow_data)
+                else:
+                    # Workflow deleted - clear tree but keep polling
+                    self._clear_tree_on_failure(result.get('error', 'Workflow not found'))
+            except Exception as e:
+                logger.error(f"Background refresh error: {e}")
+    
+    def _apply_workflow_updates(self, new_workflow_data: Dict) -> None:
+        """Apply workflow updates using smart diffing (original approach)."""
+        try:
+            logger.info("Applying workflow updates")
+            # Build new tree structure
+            new_tree_nodes = build_nested_workflow_tree(new_workflow_data)
+            new_filtered_tree = filter_tree_nodes(new_tree_nodes)
+            
+            # Update existing nodes and add new ones (original smart approach)
+            self._update_tree_nodes(new_filtered_tree, new_workflow_data)
+            
+            # Update stored data
+            self.workflow_data = new_workflow_data
+            self.tree_nodes = new_filtered_tree
+            
+            self.notify("Refreshed", severity="information")
+            logger.info("Workflow updates applied successfully")
+            
+        except Exception as e:
+            logger.error(f"Apply updates error: {e}")
+            self.notify(f"Refresh failed: {e}", severity="error")
+    
+    def _clear_tree_on_failure(self, error_msg: str) -> None:
+        """Clear tree when workflow fetch fails but keep app running."""
+        try:
+            tree = self.query_one("#workflow-tree", Tree)
+            tree.clear()
+            tree.root.label = f"⚠️  Workflow fetch failed: {error_msg}"
+            tree.root.add("Retrying in 3 seconds...")
+            
+            # Clear mappings
+            self.node_mapping.clear()
+            self.pod_nodes.clear()
+            self.nodes_with_live_checks.clear()
+            
+        except Exception as e:
+            logger.error(f"Error clearing tree: {e}")
     
     def _show_logs_in_pager(self, node_data: Dict) -> None:
         """Show logs in a pager and return to UI."""
@@ -232,8 +319,8 @@ class WorkflowTreeApp(App):
             
             if result['success']:
                 self.notify(f"✅ Approved: {step_name}", severity="information")
-                # Refresh the tree by rebuilding it
-                self._refresh_workflow_data()
+                # Refresh the tree
+                self._start_background_refresh()
             else:
                 self.notify(f"❌ Approval failed: {result.get('message', 'Unknown error')}", 
                            severity="error")
@@ -241,90 +328,56 @@ class WorkflowTreeApp(App):
         except Exception as e:
             self.notify(f"Error approving step: {str(e)}", severity="error")
     
-    def _refresh_workflow_data(self) -> None:
-        """Refresh workflow data and rebuild tree."""
-        try:
-            # Get fresh workflow data
-            result, workflow_data = _get_workflow_data(
-                WorkflowService(), self.workflow_name, 
-                f"http://localhost:2746", self.namespace, False, None
-            )
-            
-            if result['success']:
-                # Rebuild tree with fresh data
-                tree_nodes = build_nested_workflow_tree(workflow_data)
-                filtered_tree = filter_tree_nodes(tree_nodes)
-                
-                # Update the tree
-                tree = self.query_one("#workflow-tree", Tree)
-                tree.clear()
-                tree.root.label = "Workflow Steps"
-                self._populate_tree(tree, filtered_tree, tree.root)
-                tree.root.expand_all()
-                
-                self.workflow_data = workflow_data
-                self.tree_nodes = filtered_tree
-                
-        except Exception as e:
-            self.notify(f"Error refreshing data: {str(e)}", severity="error")
-    
-    def _live_refresh(self) -> None:
-        """Live refresh workflow data with smart updates."""
-        try:
-            # Get fresh workflow data
-            result, new_workflow_data = _get_workflow_data(
-                WorkflowService(), self.workflow_name, 
-                f"http://localhost:2746", self.namespace, False, None
-            )
-            
-            if not result['success']:
-                return
-            
-            # Build new tree structure
-            new_tree_nodes = build_nested_workflow_tree(new_workflow_data)
-            new_filtered_tree = filter_tree_nodes(new_tree_nodes)
-            
-            # Update existing nodes and add new ones
-            self._update_tree_nodes(new_filtered_tree, new_workflow_data)
-            
-            # Update stored data
-            self.workflow_data = new_workflow_data
-            self.tree_nodes = new_filtered_tree
-            
-        except Exception as e:
-            logger.error(f"Live refresh error: {e}")
-    
+
     def _update_tree_nodes(self, new_nodes: List[Dict[str, Any]], new_workflow_data: Dict) -> None:
-        """Update existing nodes and add new ones."""
-        def process_nodes(nodes, parent_tree_node=None):
-            tree = self.query_one("#workflow-tree", Tree)
-            if parent_tree_node is None:
-                parent_tree_node = tree.root
-            
-            for node in sorted(nodes, key=lambda n: n.get('started_at') or '9999-12-31T23:59:59Z'):
-                node_id = node['id']
-                status_output = get_step_status_output(new_workflow_data, node_id)
-                new_label = get_step_rich_label(node, status_output)
-                
-                if node_id in self.node_mapping:
-                    # Update existing node
-                    tree_node = self.node_mapping[node_id]
-                    if tree_node.data.get('phase') != node.get('phase'):
-                        tree_node.set_label(new_label)
-                        tree_node.data = node
-                else:
-                    # Add new node
-                    tree_node = parent_tree_node.add(new_label, data=node)
-                    self.node_mapping[node_id] = tree_node
-                    
-                    if node['type'] == 'Pod':
-                        self.pod_nodes.append(node)
-                
-                # Process children
-                if node['children']:
-                    process_nodes(node['children'], self.node_mapping[node_id])
+        """Update existing nodes and add new ones incrementally."""
+        tree = self.query_one("#workflow-tree", Tree)
         
-        process_nodes(new_nodes)
+        # Update tree incrementally instead of rebuilding
+        self._update_tree_recursive(tree.root, new_nodes, new_workflow_data)
+    
+    def _update_tree_recursive(self, parent_tree_node, new_nodes: List[Dict], workflow_data: Dict) -> None:
+        """Recursively update tree nodes."""
+        # Create lookup of existing children by node ID
+        existing_children = {}
+        for child in parent_tree_node.children:
+            if child.data and child.data.get('id'):
+                existing_children[child.data['id']] = child
+        
+        # Process new nodes
+        new_node_ids = set()
+        for node in sorted(new_nodes, key=lambda n: n.get('started_at') or '9999-12-31T23:59:59Z'):
+            node_id = node['id']
+            new_node_ids.add(node_id)
+            
+            status_output = get_step_status_output(workflow_data, node_id)
+            new_label = get_step_rich_label(node, status_output)
+            
+            if node_id in existing_children:
+                # Update existing node
+                tree_node = existing_children[node_id]
+                if tree_node.data.get('phase') != node.get('phase'):
+                    tree_node.set_label(new_label)
+                tree_node.data = node
+            else:
+                # Add new node
+                tree_node = parent_tree_node.add(new_label, data=node)
+                self.node_mapping[node_id] = tree_node
+                
+                if node['type'] == 'Pod':
+                    self.pod_nodes.append(node)
+            
+            # Update children recursively
+            if node['children']:
+                self._update_tree_recursive(self.node_mapping[node_id], node['children'], workflow_data)
+        
+        # Remove nodes that no longer exist
+        for child in list(parent_tree_node.children):
+            if child.data and child.data.get('id') not in new_node_ids:
+                child.remove()
+                # Clean up mappings
+                if child.data.get('id') in self.node_mapping:
+                    del self.node_mapping[child.data['id']]
     
     def check_action_enabled(self, action: str) -> bool:
         """Check if an action should be enabled based on current context."""
@@ -450,13 +503,6 @@ class WorkflowTreeApp(App):
         except Exception as e:
             return {"error": str(e)}
     
-    def on_worker_state_changed(self, event) -> None:
-        """Handle live check completion."""
-        if event.worker.name and event.worker.name.startswith("live_check_") and event.worker.is_finished:
-            result = event.worker.result
-            node_id = event.worker.name.replace("live_check_", "")
-            self._update_live_check_result(node_id, result)
-    
     def _update_live_check_result(self, node_id: str, result: Dict) -> None:
         """Update tree with live check result."""
         tree = self.query_one("#workflow-tree", Tree)
@@ -515,10 +561,8 @@ class WorkflowTreeApp(App):
 @click.option('--namespace', default='ma', help='Kubernetes namespace (default: ma)')
 @click.option('--insecure', is_flag=True, default=False, help='Skip TLS certificate verification')
 @click.option('--token', help='Bearer token for authentication')
-@click.option('--tail-lines', type=int, default=500, help='Number of lines to show (default: 500)')
-@click.option('--follow', '-f', is_flag=True, default=False, help='Stream logs in real-time')
 @click.pass_context
-def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token, tail_lines, follow):
+def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token):
     """Interactive workflow step management with tree navigation.
     
     Navigate workflow steps using arrow keys and Enter to view logs.
@@ -566,8 +610,7 @@ def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
         k8s_core_api = _initialize_k8s_client(ctx)
         
         # Launch interactive tree
-        app = WorkflowTreeApp(filtered_tree, workflow_data, k8s_core_api, 
-                             workflow_name, namespace, tail_lines, follow)
+        app = WorkflowTreeApp(filtered_tree, workflow_data, k8s_core_api, workflow_name, namespace)
         app.run()
         
         click.echo("Exited manage interface.")
