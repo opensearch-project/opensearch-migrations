@@ -199,6 +199,8 @@ charts:
     version: "0.4.2"
     repository: "oci://ghcr.io/aenix-io/charts/etcd-operator"
     namespace: etcd-operator-system
+    dependsOn: cert-manager
+    waitForInstallation: true
     values:
       etcdOperator:
         vpa:
@@ -211,6 +213,7 @@ charts:
   cert-manager:
     version: 1.17.2
     repository: https://charts.jetstack.io
+    waitForInstallation: true
     values:
       crds:
         enabled: true
