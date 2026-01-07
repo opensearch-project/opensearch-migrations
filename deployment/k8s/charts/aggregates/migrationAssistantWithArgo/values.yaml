@@ -610,6 +610,7 @@ charts:
   kyverno:
     version: "3.5.2"
     repository: "https://kyverno.github.io/kyverno/"
+    namespace: kyverno
     values:
       admissionController:
         replicas: 1
