@@ -120,8 +120,8 @@ spec:
           {{- if $chart.version }}
                   --version {{ $chart.version }} \
           {{- end }}
-                  --namespace {{ default $.Release.Namespace $chart.namespace }} \
           {{- if $chart.namespace }}
+                  --namespace {{ $chart.namespace }} \
                   --create-namespace \
           {{- end }}
                   --timeout {{ default "300" $chart.timeout }}s \
