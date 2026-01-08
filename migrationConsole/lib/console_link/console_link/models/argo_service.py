@@ -14,6 +14,7 @@ from console_link.models.command_result import CommandResult
 logger = logging.getLogger(__name__)
 
 ENDING_ARGO_PHASES = ["Succeeded", "Failed", "Error", "Stopped", "Terminated"]
+K8S_RESOURCE_TYPES = "pods,services,deployments,statefulsets,workflows"
 
 
 class WorkflowEndedBeforeSuspend(Exception):
@@ -103,7 +104,7 @@ class ArgoService:
         # Print namespace resource summary
         try:
             logger.info(f"===== Namespace {self.namespace} resource summary =====")
-            get_args = {"get": "pods,services,deployments,statefulsets,workflows", "--namespace": self.namespace}
+            get_args = {"get": K8S_RESOURCE_TYPES, "--namespace": self.namespace}
             self._run_kubectl_command(get_args)
         except Exception as e:
             logger.error(f"Failed to get namespace resources: {e}")
@@ -118,10 +119,10 @@ class ArgoService:
                 f.write(f"===== Namespace {self.namespace} Diagnostics =====\n\n")
 
                 # kubectl get resources
-                f.write("===== kubectl get pods,services,deployments,statefulsets,workflows =====\n")
+                f.write(f"===== kubectl get {K8S_RESOURCE_TYPES} =====\n")
                 try:
                     result = CommandRunner("kubectl", {
-                        "get": "pods,services,deployments,statefulsets,workflows",
+                        "get": K8S_RESOURCE_TYPES,
                         "--namespace": self.namespace,
                         "-o": "wide"
                     }).run()
@@ -130,10 +131,10 @@ class ArgoService:
                     f.write(f"Error: {e}\n\n")
 
                 # kubectl describe resources
-                f.write("===== kubectl describe pods,services,deployments,statefulsets,workflows =====\n")
+                f.write(f"===== kubectl describe {K8S_RESOURCE_TYPES} =====\n")
                 try:
                     result = CommandRunner("kubectl", {
-                        "describe": "pods,services,deployments,statefulsets,workflows",
+                        "describe": K8S_RESOURCE_TYPES,
                         "--namespace": self.namespace
                     }).run()
                     f.write(result + "\n\n")
