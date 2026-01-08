@@ -40,7 +40,6 @@ NODE_TYPE_POD = "Pod"
 NODE_TYPE_SUSPEND = "Suspend"
 PHASE_RUNNING = "Running"
 PHASE_SUCCEEDED = "Succeeded"
-DEFAULT_ARGO_URL = "http://localhost:2746"
 
 # --- Logging Configuration ---
 log_dir = os.path.join(tempfile.gettempdir(), "workflow_manage")
@@ -124,7 +123,7 @@ class WorkflowTreeApp(App):
     #pod-status { height: 1; padding: 0 1; }
     """
     BINDINGS = []
-    def __init__(self, tree_nodes: List[Dict], workflow_data: Dict, k8s_client, name: str, ns: str):
+    def __init__(self, tree_nodes: List[Dict], workflow_data: Dict, k8s_client, name: str, ns: str, argo_server: str):
         super().__init__()
         self.title = f"[{ns}] {name}"
         self.tree_nodes = tree_nodes
@@ -132,6 +131,7 @@ class WorkflowTreeApp(App):
         self.k8s_client = k8s_client
         self.workflow_name = name
         self.namespace = ns
+        self.argo_server = argo_server
 
         self.nodes_with_live_checks = set()
         self.live_check_in_progress = set()
@@ -258,7 +258,7 @@ class WorkflowTreeApp(App):
     # --- Data Fetching & Workers ---
     def _fetch_workflow_data(self) -> Tuple[Dict, Dict]:
         try:
-            return _get_workflow_data_internal(WorkflowService(), self.workflow_name, DEFAULT_ARGO_URL, self.namespace, False, None)
+            return _get_workflow_data_internal(WorkflowService(), self.workflow_name, self.argo_server, self.namespace, False, None)
         except Exception as e:
             return {"success": False, "error": str(e)}, {}
 
@@ -397,7 +397,7 @@ class WorkflowTreeApp(App):
 
     def _execute_approval(self, node_data: Dict) -> None:
         try:
-            res = WorkflowService().approve_workflow(self.workflow_name, self.namespace, DEFAULT_ARGO_URL, None, False, f"id={node_data.get('id')}")
+            res = WorkflowService().approve_workflow(self.workflow_name, self.namespace, self.argo_server, None, False, f"id={node_data.get('id')}")
             if res['success']:
                 self.notify(f"✅ Approved: {node_data.get('display_name')}")
                 self.action_refresh()
@@ -518,7 +518,12 @@ class WorkflowTreeApp(App):
 # --- Entrypoint ---
 @click.command(name="manage")
 @click.argument('workflow_name', required=False)
-@click.option('--argo-server', default=DEFAULT_ARGO_URL)
+@click.option(
+    '--argo-server',
+    default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
+            f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
+    help='Argo Server URL (default: ARGO_SERVER env var, or ARGO_SERVER_SERVICE_HOST:ARGO_SERVER_SERVICE_PORT)'
+)
 @click.option('--namespace', default='ma')
 @click.option('--insecure', is_flag=True, default=False)
 @click.option('--token')
@@ -537,7 +542,7 @@ def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token):
         if not nodes:
             click.echo("No workflow steps found.")
             return
-        app = WorkflowTreeApp(nodes, data, _initialize_k8s_client(ctx), workflow_name, namespace)
+        app = WorkflowTreeApp(nodes, data, _initialize_k8s_client(ctx), workflow_name, namespace, argo_server)
         app.run()
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
