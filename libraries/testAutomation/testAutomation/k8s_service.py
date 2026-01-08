@@ -163,7 +163,7 @@ class K8sService:
             elapsed = time.time() - start_time
             if elapsed > timeout_seconds:
                 raise TimeoutError(f"Timeout reached: Not all PVCs were deleted within {timeout_seconds} seconds. "
-                                   f"Remaining PVCs: {', '.join(remaining_pvcs)}")
+                                   f"Remaining PVCs: {[pvc.metadata.name for pvc in remaining_pvcs]}")
 
             logger.info(f"Waiting for PVCs to be deleted. Remaining: {[pvc.metadata.name for pvc in remaining_pvcs]}")
             time.sleep(poll_interval)
