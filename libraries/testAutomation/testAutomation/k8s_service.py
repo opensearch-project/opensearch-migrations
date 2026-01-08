@@ -182,6 +182,11 @@ class K8sService:
             logger.info(f"Namespace '{namespace}' already exists")
             return result
 
+    def delete_namespace(self) -> None:
+        logger.info(f"Deleting namespace '{self.namespace}'")
+        self.run_command(["kubectl", "delete", "namespace", self.namespace,
+                         "--ignore-not-found", "--grace-period=0", "--force"])
+
     def check_helm_release_exists(self, release_name: str) -> bool:
         logger.info(f"Checking if {release_name} is already deployed in '{self.namespace}' namespace")
         check_command = ["helm", "status", release_name, "-n", self.namespace]
