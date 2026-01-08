@@ -27,7 +27,7 @@ data:
                     - Pod
           preconditions:
             any:
-              - key: "{{`{{ request.object.spec.serviceAccountName }}`}}" # Backticks escape Helm, inner braces are Kyverno JMESPath
+              - key: "{{`{{ request.object.spec.serviceAccountName || '' }}`}}" # Backticks escape Helm, inner braces are Kyverno JMESPath
                 operator: In
                 value:
                   - migration-console-access-role
@@ -57,7 +57,7 @@ data:
                     - Pod
           preconditions:
             all:
-              - key: "{{`{{ request.object.spec.serviceAccountName }}`}}"
+              - key: "{{`{{ request.object.spec.serviceAccountName || '' }}`}}"
                 operator: In
                 value:
                   - migration-console-access-role
