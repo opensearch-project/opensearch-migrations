@@ -198,7 +198,7 @@ charts:
   etcd-operator:
     version: "0.4.2"
     repository: "oci://ghcr.io/aenix-io/charts/etcd-operator"
-    namespace: ma
+    namespace: "{{ .Release.Namespace }}"
     dependsOn: cert-manager
     waitForInstallation: true
     values:
@@ -610,7 +610,7 @@ charts:
   kyverno:
     version: "3.5.2"
     repository: "https://kyverno.github.io/kyverno/"
-    namespace: ma
+    namespace: "{{ .Release.Namespace }}"
     values:
       admissionController:
         replicas: 1
