@@ -121,7 +121,7 @@ spec:
                   --version {{ $chart.version }} \
           {{- end }}
           {{- if $chart.namespace }}
-                  --namespace {{ $chart.namespace }} \
+                  --namespace {{ tpl $chart.namespace $ }} \
                   --create-namespace \
           {{- end }}
                   --timeout {{ default "300" $chart.timeout }}s \
