@@ -299,7 +299,12 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
             # Add node to tree
             node_tree = parent_tree.add(node_label)
             if (live_check := node.get('live_check', None)):
-                parent_tree.add(json.dumps(live_check))
+                if live_check.get('success') and 'value' in live_check:
+                    # Format the value with proper newlines
+                    value = live_check['value'].replace('\\n', '\n')
+                    parent_tree.add(f"Live Status: {value}")
+                else:
+                    parent_tree.add(json.dumps(live_check))
 
             # Recursively add children
             if node['children']:

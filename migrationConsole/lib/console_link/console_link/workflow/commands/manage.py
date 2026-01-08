@@ -1,5 +1,4 @@
 """Interactive manage command for workflow CLI - interactive tree navigation for log viewing."""
-
 import datetime
 import logging
 import os
@@ -7,8 +6,8 @@ import platform
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any, Dict, List, Optional, Tuple
-
 import base64
 import click
 import requests
@@ -19,6 +18,7 @@ from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Header, Static, Tree
 from textual.widgets.tree import TreeNode
+from rich.text import Text
 
 # Internal imports
 from ..models.utils import ExitCode
@@ -49,13 +49,19 @@ log_file = os.path.join(log_dir, f"manage_{datetime.datetime.now().strftime('%Y%
 
 file_handler = logging.FileHandler(log_file)
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s'))
+
+# Redirect ALL logging to file
+root_logger = logging.getLogger()
+root_logger.addHandler(file_handler)
+root_logger.setLevel(logging.DEBUG)
+# Remove any existing console handlers
+for handler in root_logger.handlers[:]:
+    if isinstance(handler, logging.StreamHandler) and handler.stream in (sys.stdout, sys.stderr):
+        root_logger.removeHandler(handler)
+
 logger = logging.getLogger(__name__)
-logger.addHandler(file_handler)
-logger.setLevel(logging.INFO)
-logger.propagate = False
 
 # --- Utilities ---
-
 def copy_to_clipboard(text: str) -> bool:
     """Universal copy-to-clipboard: SSH, kubectl exec, and Local OS."""
     try:
@@ -68,7 +74,6 @@ def copy_to_clipboard(text: str) -> bool:
             sys.stdout.write(osc_52)
             sys.stdout.flush()
             if is_remote: return True
-
         system = platform.system()
         if system == "Darwin":
             subprocess.run(['pbcopy'], input=text.encode('utf-8'), check=True)
@@ -84,7 +89,6 @@ def copy_to_clipboard(text: str) -> bool:
         return False
 
 # --- UI Screens ---
-
 class ConfirmModal(ModalScreen[bool]):
     CSS = """
     ConfirmModal { align: center middle; background: $background 60%; }
@@ -98,34 +102,28 @@ class ConfirmModal(ModalScreen[bool]):
         Binding("n", "cancel", "No"),
         Binding("escape", "cancel", "No", show=False)
     ]
-
     def __init__(self, message: str):
         super().__init__()
         self.message = message
-
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
             yield Static(self.message, id="question")
             with Horizontal(id="buttons"):
                 yield Button("Yes (y)", id="yes", variant="success")
                 yield Button("No (n)", id="no", variant="error")
-
     def on_mount(self) -> None:
         self.query_one("#yes", Button).focus()
-
     def action_confirm(self) -> None: self.dismiss(True)
     def action_cancel(self) -> None: self.dismiss(False)
     def on_button_pressed(self, event: Button.Pressed) -> None: self.dismiss(event.button.id == "yes")
 
 # --- Main Application ---
-
 class WorkflowTreeApp(App):
     CSS = """
     Tree { scrollbar-gutter: stable; }
     #pod-status { height: 1; padding: 0 1; }
     """
     BINDINGS = []
-
     def __init__(self, tree_nodes: List[Dict], workflow_data: Dict, k8s_client, name: str, ns: str):
         super().__init__()
         self.title = f"[{ns}] {name}"
@@ -136,6 +134,9 @@ class WorkflowTreeApp(App):
         self.namespace = ns
 
         self.nodes_with_live_checks = set()
+        self.live_check_in_progress = set()
+        self.last_check_time = {}
+
         self.node_mapping = {}
         self.current_node_data = None
         self.tail_lines = 500
@@ -147,8 +148,7 @@ class WorkflowTreeApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        # Redirect logs to file to prevent TUI corruption
-        logging.getLogger().handlers = [file_handler]
+        logger.addHandler(file_handler)
         tree = self.query_one("#workflow-tree", Tree)
         self._populate_tree(tree, self.tree_nodes, tree.root)
         tree.root.expand_all()
@@ -156,42 +156,50 @@ class WorkflowTreeApp(App):
         self.set_interval(3.0, self.action_refresh)
 
     # --- Event Handlers ---
-
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
         self.current_node_data = event.node.data
         self._update_pod_status()
         self._update_dynamic_bindings()
 
     def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
-        """Central trigger for live checks (mouse or keyboard)."""
         node = event.node
+        node_id = node.data.get('id') if node.data else None
+
         if (node.data and node.data.get('type') == NODE_TYPE_POD and
                 self._should_run_live_check(node.data) and
-                self._is_last_leaf_at_level(node) and
-                node.data.get('id') not in self.nodes_with_live_checks):
-            self._run_live_check_async(node, node.data)
+                self._is_branch_latest(node_id)):
+            if node_id not in self.nodes_with_live_checks:
+                self._run_live_check_async(node, node.data)
+
+        elif node.data and node.data.get("is_live_status_header"):
+            has_real_data = any(c.data and c.data.get("is_live_data") for c in node.children)
+            if not has_real_data:
+                origin_id = node.data.get("origin_id")
+                if origin_node := self.node_mapping.get(origin_id):
+                    self.nodes_with_live_checks.discard(origin_id)
+                    self._run_live_check_async(origin_node, origin_node.data)
 
     def on_tree_node_collapsed(self, event: Tree.NodeCollapsed) -> None:
-        """Central cleanup for ephemeral nodes (mouse or keyboard)."""
-        self._remove_ephemeral_nodes(event.node)
+        node = event.node
+        if node.data and node.data.get("is_live_status_header"):
+            origin_id = node.data.get("origin_id")
+            self.nodes_with_live_checks.discard(origin_id)
+            node.set_label("[bold cyan]Live Status:[/]")
+            for child in list(node.children): child.remove()
 
     def on_key(self, event) -> None:
-        """Safely exit on Ctrl+C."""
         if event.key == "ctrl+c":
             self.exit()
             event.prevent_default()
 
     # --- Actions ---
-
     def _update_dynamic_bindings(self) -> None:
-        """Context-aware keybindings."""
         self._bindings = self._bindings.__class__()
         self.bind("ctrl+p", "command_palette", show=False)
         self.bind("r", "refresh", description="Refresh")
         self.bind("q", "quit", description="Quit")
         self.bind("left", "collapse_node", show=False)
         self.bind("right", "expand_node", show=False)
-
         if self.current_node_data:
             ntype = self.current_node_data.get('type')
             if ntype == NODE_TYPE_POD:
@@ -199,7 +207,6 @@ class WorkflowTreeApp(App):
                 self.bind("c", "copy_pod_name", description="Copy Pod Name")
             elif ntype == NODE_TYPE_SUSPEND and self.current_node_data.get('phase') == PHASE_RUNNING:
                 self.bind("a", "approve_step", description="Approve")
-
         self.refresh_bindings()
 
     def action_refresh(self) -> None:
@@ -219,33 +226,24 @@ class WorkflowTreeApp(App):
         except Exception as e: self.notify(f"❌ Error: {str(e)}", severity="error")
 
     def action_approve_step(self) -> None:
-        """Handles the approval flow for Suspend nodes."""
         node = self.current_node_data
         if not node: return
-
         def handle_confirm(confirmed: bool) -> None:
             if confirmed: self._execute_approval(node)
-
         if node.get('type') == NODE_TYPE_SUSPEND and node.get('phase') == PHASE_RUNNING:
             self.push_screen(ConfirmModal(f"Approve '{node.get('display_name')}'?"), handle_confirm)
 
     def action_expand_node(self) -> None:
-        """Expand via keyboard. Triggers on_tree_node_expanded automatically."""
         tree = self.query_one("#workflow-tree", Tree)
-        if node := tree.cursor_node:
-            node.expand()
+        if node := tree.cursor_node: node.expand()
 
     def action_collapse_node(self) -> None:
-        """Collapse via keyboard. Triggers on_tree_node_collapsed automatically."""
         tree = self.query_one("#workflow-tree", Tree)
         if node := tree.cursor_node:
-            if node.is_expanded:
-                node.collapse()
-            elif node.parent:
-                tree.select_node(node.parent)
+            if node.is_expanded: node.collapse()
+            elif node.parent: tree.select_node(node.parent)
 
     # --- Tree Management ---
-
     def _populate_tree(self, tree: Tree, nodes: List[Dict], parent_node) -> None:
         for node in sorted(nodes, key=lambda n: n.get('started_at') or '9'):
             label = self._get_node_label(node, self.workflow_data)
@@ -258,7 +256,6 @@ class WorkflowTreeApp(App):
         return get_step_rich_label(node, status_output)
 
     # --- Data Fetching & Workers ---
-
     def _fetch_workflow_data(self) -> Tuple[Dict, Dict]:
         try:
             return _get_workflow_data_internal(WorkflowService(), self.workflow_name, DEFAULT_ARGO_URL, self.namespace, False, None)
@@ -278,22 +275,49 @@ class WorkflowTreeApp(App):
     def _apply_workflow_updates(self, new_data: Dict) -> None:
         try:
             tree = self.query_one("#workflow-tree", Tree)
+            # Restore root label if it was showing an error
             tree.root.label = "Workflow Steps"
-            self.title = f"[{self.namespace}] {self.workflow_name}"
+            # Capture current scroll position to prevent jumping
+            old_scroll_x, old_scroll_y = tree.scroll_offset
+
             new_nodes = filter_tree_nodes(build_nested_workflow_tree(new_data))
+
             if self.workflow_data.get('status', {}).get('startedAt') != new_data.get('status', {}).get('startedAt'):
                 tree.clear()
                 self.node_mapping.clear()
                 self.nodes_with_live_checks.clear()
+                self.live_check_in_progress.clear()
                 self._populate_tree(tree, new_nodes, tree.root)
                 tree.root.expand_all()
             else:
                 self._update_tree_recursive(tree.root, new_nodes, new_data)
+
             self.workflow_data = new_data
             self.tree_nodes = new_nodes
+
+            # Find the active edge per branch: latest node that hasn't succeeded yet in each branch
+            latest_active_ids = self._get_latest_pod_ids_per_branch(new_nodes)
+
+            # 1. Prune Live Status if it no longer represents a branch front
+            for node_id in list(self.nodes_with_live_checks):
+                if node_id not in latest_active_ids:
+                    if t_node := self.node_mapping.get(node_id):
+                        self._remove_ephemeral_nodes(t_node)
+
+            # 2. Trigger/Reposition Live Status for each branch
+            for latest_active_id in latest_active_ids:
+                latest_node = self.node_mapping.get(latest_active_id)
+                if latest_node and self._should_run_live_check(latest_node.data):
+                    self._run_live_check_async(latest_node, latest_node.data)
+
             self._update_dynamic_bindings()
             self._update_pod_status()
-        except Exception as e: logger.error(f"Update error: {e}")
+
+            # Anchor scroll back to previous position
+            tree.scroll_to(old_scroll_x, old_scroll_y, animate=False)
+
+        except Exception as e:
+            logger.error(f"Update error: {e}")
 
     def _update_pod_status(self) -> None:
         status = self.query_one("#pod-status", Static)
@@ -307,39 +331,40 @@ class WorkflowTreeApp(App):
                 pod_name = _find_pod_by_node_id(self.k8s_client, self.namespace, self.workflow_name, node['id'], node, None)
                 if pod_name: node['pod_name'] = pod_name
             status.update(f"Pod: {pod_name or '(unknown)'}")
-        except Exception:
-            status.update("Pod: (error)")
+        except Exception: status.update("Pod: (error)")
 
     def _update_tree_recursive(self, parent_tree_node, new_nodes: List[Dict], workflow_data: Dict) -> None:
-        existing_children = {child.data['id']: child for child in parent_tree_node.children if child.data}
+        existing_children = {child.data['id']: child for child in parent_tree_node.children if child.data and 'id' in child.data and not child.data.get('is_ephemeral')}
         new_ids = {node['id'] for node in new_nodes}
-        pods = [n for n in new_nodes if n.get('type') == NODE_TYPE_POD]
-        latest_pod_id = max(pods, key=lambda n: n.get('started_at', ''), default=None).get('id') if pods else None
-
         for node in new_nodes:
             node_id = node['id']
             label = self._get_node_label(node, workflow_data)
             if node_id in existing_children:
                 tree_node = existing_children[node_id]
-                if tree_node.data.get('phase') != node.get('phase'): tree_node.set_label(label)
+                if tree_node.data.get('phase') != node.get('phase'):
+                    tree_node.set_label(label)
+                    if node.get('phase') == PHASE_SUCCEEDED: self._remove_ephemeral_nodes(tree_node)
                 tree_node.data = node
-                if node.get('type') == NODE_TYPE_POD and node_id != latest_pod_id: self._remove_ephemeral_nodes(tree_node)
             else:
                 tree_node = parent_tree_node.add(label, data=node)
+                tree_node.expand()
                 self.node_mapping[node_id] = tree_node
             if node['children']: self._update_tree_recursive(self.node_mapping[node_id], node['children'], workflow_data)
 
         for child in list(parent_tree_node.children):
-            if child.data and child.data['id'] not in new_ids:
+            if child.data and 'id' in child.data and child.data['id'] not in new_ids and not child.data.get('is_ephemeral'):
                 self.node_mapping.pop(child.data['id'], None)
                 child.remove()
 
     def _handle_refresh_error(self, error_msg: str) -> None:
         tree = self.query_one("#workflow-tree", Tree)
+        tree.clear()
+        self.node_mapping.clear()
+        self.nodes_with_live_checks.clear()
+        self.live_check_in_progress.clear()
         tree.root.label = f"⚠️  Fetch failed: {error_msg}"
 
     # --- External Integrations ---
-
     def _show_logs_in_pager(self, node_data: Dict) -> None:
         temp_path = None
         try:
@@ -380,28 +405,74 @@ class WorkflowTreeApp(App):
         except Exception as e: self.notify(f"Error: {e}", severity="error")
 
     # --- Live Check Logic ---
+    def _get_latest_pod_ids_per_branch(self, nodes: List[Dict]) -> set:
+        """Return the latest active pod ID from each parallel branch."""
+        latest_ids = set()
+        def find_branches(n_list):
+            for n in n_list:
+                children = n.get('children', [])
+                if len(children) > 1:
+                    for branch in children:
+                        all_pods = []
+                        def collect(node):
+                            if node.get('type') == NODE_TYPE_POD and node.get('phase') != PHASE_SUCCEEDED:
+                                all_pods.append(node)
+                            for c in node.get('children', []):
+                                collect(c)
+                        collect(branch)
+                        if all_pods:
+                            latest = max(all_pods, key=lambda p: (p.get('started_at') or '', p.get('id', '')))
+                            latest_ids.add(latest.get('id'))
+                elif children:
+                    find_branches(children)
+        find_branches(nodes)
+        return latest_ids
+
+    def _is_branch_latest(self, node_id: str) -> bool:
+        return node_id in self._get_latest_pod_ids_per_branch(self.tree_nodes)
 
     def _remove_ephemeral_nodes(self, tree_node: TreeNode) -> None:
-        for child in list(tree_node.children):
+        parent = tree_node.parent if tree_node.parent else tree_node
+        for child in list(parent.children):
             if child.data and child.data.get("is_ephemeral"):
+                if child.data.get("is_live_status_header"):
+                    child.set_label("[bold cyan]Live Status:[/]")
                 child.remove()
-                if tree_node.data:
-                    self.nodes_with_live_checks.discard(tree_node.data['id'])
+        if tree_node.data and 'id' in tree_node.data:
+            nid = tree_node.data['id']
+            self.nodes_with_live_checks.discard(nid)
+            self.live_check_in_progress.discard(nid)
 
     def _should_run_live_check(self, node_data: Dict) -> bool:
         has_config = get_node_input_parameter(node_data, 'configContents')
-        has_output = any(p.get('name') == 'statusOutput' for p in node_data.get('outputs', {}).get('parameters', []))
-        return node_data.get('phase') != PHASE_SUCCEEDED and has_config and has_output
-
-    def _is_last_leaf_at_level(self, tree_node) -> bool:
-        if not tree_node.parent: return True
-        siblings = [c for c in tree_node.parent.children if c.data and c.data.get('type') == NODE_TYPE_POD]
-        return not siblings or tree_node == max(siblings, key=lambda n: n.data.get('started_at', ''))
+        return node_data.get('phase') != PHASE_SUCCEEDED and has_config
 
     def _run_live_check_async(self, tree_node, node_data: Dict) -> None:
-        tree_node.add("🔄 Running live check...", data={"is_ephemeral": True})
+        node_id = node_data['id']
+        now = time.time()
+        if now - self.last_check_time.get(node_id, 0) < 2.0: return
+        if node_id in self.live_check_in_progress: return
+
+        self.live_check_in_progress.add(node_id)
+        self.last_check_time[node_id] = now
+
+        parent = tree_node.parent if tree_node.parent else tree_node
+        header = next((c for c in parent.children if c.data and c.data.get("is_live_status_header")), None)
+
+        if header and len(parent.children) > 0 and parent.children[-1] != header:
+            was_expanded = header.is_expanded
+            header.remove()
+            header = parent.add("[bold cyan]Live Status:[/]", data={"is_ephemeral": True, "is_live_status_header": True, "origin_id": node_id})
+            if was_expanded: header.expand()
+        elif not header:
+            header = parent.add("[bold cyan]Live Status:[/]", data={"is_ephemeral": True, "is_live_status_header": True, "origin_id": node_id})
+
+        if not any(c.data and c.data.get("is_live_data") for c in header.children):
+            if not any(c.data and c.data.get("is_loading_indicator") for c in header.children):
+                header.add("🔄 Checking...", data={"is_ephemeral": True, "is_loading_indicator": True})
+
         worker = self.run_worker(lambda: self._perform_live_check(node_data), thread=True)
-        worker.name = f"live_check_{node_data['id']}"
+        worker.name = f"live_check_{node_id}"
 
     def _perform_live_check(self, node_data: Dict) -> Dict:
         try:
@@ -416,15 +487,35 @@ class WorkflowTreeApp(App):
         except Exception as e: return {"error": str(e)}
 
     def _update_live_check_result(self, node_id: str, result: Dict) -> None:
-        if target := self.node_mapping.get(node_id):
-            self._remove_ephemeral_nodes(target)
-            icon, msg = ("✅", result.get('message')) if result.get('success') else ("❌", result.get('error'))
-            target.add(f"{icon} {msg or 'Check finished'}", data={"is_ephemeral": True})
-            self.nodes_with_live_checks.add(node_id)
-            target.expand()
+        self.live_check_in_progress.discard(node_id)
+        target = self.node_mapping.get(node_id)
+        if not target or not target.parent: return
+
+        header = next((c for c in target.parent.children if c.data and c.data.get("is_live_status_header")), None)
+        if not header: return
+
+        if target.data.get('phase') == PHASE_SUCCEEDED:
+            header.remove()
+            return
+
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        header.set_label(f"[bold cyan]Live Status[/] [italic gray](Updated: {ts})[bold cyan]:[/]")
+
+        for child in list(header.children): child.remove()
+
+        if result.get('success') and result.get('value'):
+            lines = result['value'].replace('\\n', '\n').split('\n')
+            for line in lines:
+                if line.strip():
+                    header.add(line, data={"is_ephemeral": True, "is_live_data": True})
+            header.expand()
+        else:
+            msg = result.get('message') or result.get('error') or "Check failed"
+            header.add(f"❌ {msg}", data={"is_ephemeral": True})
+
+        self.nodes_with_live_checks.add(node_id)
 
 # --- Entrypoint ---
-
 @click.command(name="manage")
 @click.argument('workflow_name', required=False)
 @click.option('--argo-server', default=DEFAULT_ARGO_URL)

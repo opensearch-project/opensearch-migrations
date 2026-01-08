@@ -223,8 +223,19 @@ class StatusCheckRunner:
         try:
             logger.info("Calling snapshot_middleware.status() with deep_check=True")
             result = snapshot_middleware.status(env.snapshot, deep_check=True)
-            logger.info(f"Snapshot status result: success={result.success}")
-            return {"success": result.success, "value": result.value}
+            logger.info(f"Snapshot status result type: {type(result)}")
+            
+            # Handle both CommandResult and tuple returns
+            if hasattr(result, 'success'):
+                # CommandResult object
+                logger.info(f"Snapshot status result: success={result.success}")
+                return {"success": result.success, "value": result.value}
+            else:
+                # Tuple from @handle_errors decorator
+                exit_code, message = result
+                success = exit_code.value == 0
+                logger.info(f"Snapshot status result: success={success}")
+                return {"success": success, "value": message}
         except Exception as e:
             logger.error(f"Exception in snapshot status check: {e}")
             return {"error": str(e)}
@@ -240,11 +251,22 @@ class StatusCheckRunner:
         try:
             logger.info("Calling backfill_middleware.status() with deep_check=True")
             result = backfill_middleware.status(env.backfill, deep_check=True)
-            logger.info(f"Backfill status result: success={result.success}")
-            if result.success:
-                status_enum, message = result.value
-                return {"success": True, "status": str(status_enum), "message": message}
-            return {"success": False, "error": str(result.value)}
+            logger.info(f"Backfill status result type: {type(result)}")
+            
+            # Handle both CommandResult and tuple returns
+            if hasattr(result, 'success'):
+                # CommandResult object
+                logger.info(f"Backfill status result: success={result.success}")
+                if result.success:
+                    status_enum, message = result.value
+                    return {"success": True, "status": str(status_enum), "message": message}
+                return {"success": False, "error": str(result.value)}
+            else:
+                # Tuple from @handle_errors decorator
+                exit_code, message = result
+                success = exit_code.value == 0
+                logger.info(f"Backfill status result: success={success}")
+                return {"success": success, "value": message}
         except Exception as e:
             logger.error(f"Exception in backfill status check: {e}")
             return {"error": str(e)}
@@ -450,12 +472,13 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
             workflow_name, argo_server, namespace, insecure, show_all, live_status)
             
     except Exception as e:
+        logger.error(f"Status command failed: {e}", exc_info=True)
         click.echo(f"Error: {str(e)}", err=True)
         ctx.exit(ExitCode.FAILURE.value)
 
 
 # Compatibility function for output.py
-def _display_workflow_status(result: dict, show_output_hint: bool = True, workflow_data: dict = None):
+def _display_workflow_status(show_output_hint: bool = True, workflow_data: dict = None):
     """Compatibility function for output.py - displays workflow status using new classes."""
     displayer = StatusWorkflowDisplayer()
     
