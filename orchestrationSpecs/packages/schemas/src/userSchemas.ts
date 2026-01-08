@@ -272,7 +272,7 @@ export const HTTP_AUTH_MTLS = z.object({
     })
 });
 
-export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123])\.[0-9]+$/);
+export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123])(?:\.[0-9]+)+$/);
 
 export const CLUSTER_CONFIG = z.object({
     endpoint:  z.string().regex(/^(?:https?:\/\/[^:\/\s]+(:\d+)?(\/)?)?$/).default("").optional(),
