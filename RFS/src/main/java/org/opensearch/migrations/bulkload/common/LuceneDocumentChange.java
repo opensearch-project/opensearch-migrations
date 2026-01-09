@@ -4,12 +4,13 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
 /**
- * This class represents a document at the Lucene level within RFS.  It tracks where the document was within the Lucene
- * index, as well as the document's embedded Elasticsearch/OpenSearch properties
+ * This class represents a document change at the Lucene level within RFS. It tracks where the document was within the
+ * Lucene index, as well as the document's embedded Elasticsearch/OpenSearch properties and the type of change
+ * (INDEX or DELETE).
  */
 @RequiredArgsConstructor
 @Getter
-public class RfsLuceneDocument {
+public class LuceneDocumentChange {
     // The Lucene document number of the document
     public final int luceneDocNumber;
 
@@ -26,5 +27,5 @@ public class RfsLuceneDocument {
     public final String routing;
 
     // The operation type for reindexing this document
-    public final RfsDocumentOperation operation;
+    public final DocumentChangeType operation;
 }

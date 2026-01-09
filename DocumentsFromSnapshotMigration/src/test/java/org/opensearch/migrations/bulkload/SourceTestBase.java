@@ -30,9 +30,9 @@ import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
+import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
-import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
@@ -252,7 +252,26 @@ public class SourceTestBase {
         String transformationConfig,
         DocumentExceptionAllowlist allowlist
     ) {
-        for (int runNumber = 1; ; ++runNumber) {
+        return migrateDocumentsSequentially(sourceRepo, previousSnapshotName, snapshotName, indexAllowlist, target,
+            runCounter, clockJitter, testContext, sourceVersion, targetVersion, transformationConfig, allowlist, Integer.MAX_VALUE);
+    }
+
+    public static int migrateDocumentsSequentially(
+        FileSystemRepo sourceRepo,
+        String previousSnapshotName,
+        String snapshotName,
+        List<String> indexAllowlist,
+        SearchClusterContainer target,
+        AtomicInteger runCounter,
+        Random clockJitter,
+        DocumentMigrationTestContext testContext,
+        Version sourceVersion,
+        Version targetVersion,
+        String transformationConfig,
+        DocumentExceptionAllowlist allowlist,
+        int maxRuns
+    ) {
+        for (int runNumber = 1; runNumber <= maxRuns; ++runNumber) {
             try {
                 var workResult = migrateDocumentsWithOneWorker(
                     sourceRepo,
@@ -283,6 +302,7 @@ public class SourceTestBase {
                     "but just going to run again with this worker to simulate task/container recycling").log();
             }
         }
+        throw new AssertionError("Migration did not complete within " + maxRuns + " runs");
     }
 
     static class LeasePastError extends Error {
@@ -339,7 +359,7 @@ public class SourceTestBase {
                 .addArgument(workItemId).log();
             shouldThrow.set(true);
         })) {
-            UnaryOperator<RfsLuceneDocument> terminatingDocumentFilter = d -> {
+            UnaryOperator<LuceneDocumentChange> terminatingDocumentFilter = d -> {
                 if (shouldThrow.get()) {
                     throw new LeasePastError();
                 }
@@ -361,8 +381,8 @@ public class SourceTestBase {
             var readerFactory = spy(new LuceneIndexReader.Factory(sourceResourceProvider));
             when(readerFactory.getReader(any())).thenAnswer(inv -> {
                 var reader = (LuceneIndexReader)spy(inv.callRealMethod());
-                when(reader.readDocuments(any())).thenAnswer(inv2 -> {
-                    var flux = (Flux<RfsLuceneDocument>)inv2.callRealMethod();
+                when(reader.streamDocumentChanges(any())).thenAnswer(inv2 -> {
+                    var flux = (Flux<LuceneDocumentChange>)inv2.callRealMethod();
                     return flux.map(terminatingDocumentFilter);
                 });
                 return reader;
