@@ -31,12 +31,6 @@ images:
 charts:
   kyverno:
     values:
-      # Use Ignore failure policy to prevent race condition where Kyverno webhook
-      # intercepts cert-manager's startupapicheck-job before Kyverno's admission
-      # controller is fully ready, causing cert-manager installation to fail
-      features:
-        forceFailurePolicyIgnore:
-          enabled: true
       cleanupJobs:
         admissionReports:
           image:
