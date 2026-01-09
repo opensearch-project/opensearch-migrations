@@ -54,7 +54,9 @@ function makeParamsDict(
                 luceneDir: "/tmp",
                 cleanLocalDirs: true
             }),
-            makeRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), true)
+            makeRepoParamDict(
+                expr.omit(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), "s3RoleArn"),
+                true)
         )
     );
 }

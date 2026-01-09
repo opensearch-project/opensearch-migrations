@@ -102,10 +102,17 @@ def call(Map config = [:]) {
 
             stage('Cleanup Previous MA Deployment') {
                 steps {
-                    timeout(time: 10, unit: 'MINUTES') {
+                    timeout(time: 3, unit: 'MINUTES') {
                         script {
                             sh "kubectl config use-context minikube"
-                            sh "kubectl delete namespace ma --ignore-not-found"
+                            sh """
+                                timeout 60 kubectl delete namespace ma --ignore-not-found || {
+                                    echo "Namespace delete timed out, forcing cleanup..."
+                                    kubectl get all -A
+                                    kubectl api-resources --verbs=list --namespaced -o name | xargs -n1 -I{} kubectl get {} -n ma -o name 2>/dev/null | xargs -r -n1 kubectl patch -n ma --type=merge -p '{"metadata":{"finalizers":null}}'
+                                    kubectl delete namespace ma --ignore-not-found --force --grace-period=0 || true
+                                }
+                            """
                         }
                     }
                 }

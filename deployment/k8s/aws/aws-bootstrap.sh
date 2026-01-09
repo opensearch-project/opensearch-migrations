@@ -24,8 +24,10 @@ namespace="ma"
 build_images=false
 build_images_locally=false
 keep_build_images_job_alive=false
+use_existing_built_images=false
 use_public_images=true
 skip_console_exec=false
+stage_filter=""
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -41,9 +43,11 @@ while [[ $# -gt 0 ]]; do
     --namespace) namespace="$2"; shift 2 ;;
     --build-images) build_images="$2"; shift 2 ;;
     --build-images-locally) build_images_locally=true; shift 1 ;;
+    --use-existing-built-images) use_existing_built_images=true; shift ;;
     --use-public-images) use_public_images="$2"; shift 2 ;;
     --keep-build-images-job-alive) keep_build_images_job_alive=true; shift 1 ;;
     --skip-console-exec) skip_console_exec=true; shift 1 ;;
+    --stage) stage_filter="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo "Options:"
@@ -58,9 +62,11 @@ while [[ $# -gt 0 ]]; do
       echo "  --namespace <val>                         (default: $namespace)"
       echo "  --build-images <true|false>               (default: $build_images)"
       echo "  --build-images-locally                    (default: $build_images_locally)"
+      echo "  --use-existing-built-images               (default: $use_existing_built_images)"
       echo "  --use-public-images <true|false>          (default: $use_public_images)"
       echo "  --keep-build-images-job-alive             (default: $keep_build_images_job_alive)"
       echo "  --skip-console-exec                       (default: $skip_console_exec)"
+      echo "  --stage <val>                             Filter CFN exports by stage name"
       exit 0
       ;;
     *)
@@ -115,6 +121,10 @@ get_cfn_export() {
   # Example CFN stack output value will look like: export MIGRATIONS_EKS_CLUSTER_NAME=migration-eks-cluster-dev-us-east-2;
   # export MIGRATIONS_ECR_REGISTRY=123456789012.dkr.ecr.us-east-2.amazonaws.com/migration-ecr-dev-us-east-2;...
   while read -r name value; do
+    # If stage_filter is set, only include exports that contain the stage name
+    if [[ -n "$stage_filter" && ! "$name" =~ $stage_filter ]]; then
+      continue
+    fi
     names+=("$name")
     values+=("$value")
   done < <(aws cloudformation list-exports \
@@ -122,7 +132,7 @@ get_cfn_export() {
     --output text)
 
   if [ ${#names[@]} -eq 0 ]; then
-    echo "Error: No exports found starting with '$prefix'" >&2
+    echo "Error: No exports found starting with '$prefix'${stage_filter:+ matching stage '$stage_filter'}" >&2
     return 1
   elif [ ${#names[@]} -eq 1 ]; then
     echo "${values[0]}"
@@ -321,7 +331,9 @@ if [[ "$skip_git_pull" == "false" ]]; then
 fi
 
 if [[ "$build_images" == "true" ]]; then
-  if [[ "$build_images_locally" == "true" ]]; then
+  if [[ "$use_existing_built_images" == "true" ]]; then
+    echo "skipping all builds - assuming that images are already built to the private registry"
+  elif [[ "$build_images_locally" == "true" ]]; then
     echo "Expecting a build-images service to have already been deployed such that it will push images to ECR."
     echo "See ${base_dir}/buildImages/README-Minikube.md"
     echo "Building amd64 images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"
@@ -374,15 +386,6 @@ if [[ "$build_images" == "true" ]]; then
   fi
 fi
 
-# Get latest release version from GitHub releases API
-RELEASE_VERSION=$(curl -s https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
-if [[ -z "$RELEASE_VERSION" ]]; then
-  echo "Warning: Could not fetch latest release from GitHub, falling back to VERSION file"
-  RELEASE_VERSION=$(<"$base_dir/VERSION")
-fi
-RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
-echo "Using RELEASE_VERSION=$RELEASE_VERSION"
-
 if [[ "$use_public_images" == "false" ]]; then
   IMAGE_FLAGS="\
     --set images.captureProxy.repository=${MIGRATIONS_ECR_REGISTRY} \
@@ -397,6 +400,15 @@ if [[ "$use_public_images" == "false" ]]; then
     --set images.installer.tag=migrations_migration_console_latest"
 # Use latest public images
 else
+  # Get latest release version from GitHub releases API
+  RELEASE_VERSION=$(curl -s https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+  if [[ -z "$RELEASE_VERSION" ]]; then
+    echo "Warning: Could not fetch latest release from GitHub, falling back to VERSION file"
+    RELEASE_VERSION=$(<"$base_dir/VERSION")
+  fi
+  RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
+  echo "Using RELEASE_VERSION=$RELEASE_VERSION"
+
   echo "Using release version tag '$RELEASE_VERSION' for all Migration Assistant images"
   IMAGE_FLAGS="\
     --set images.captureProxy.repository=public.ecr.aws/opensearchproject/opensearch-migrations-traffic-capture-proxy \

@@ -17,14 +17,11 @@ async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string
     const isSecure = /^localstacks:\/\//i.test(s3Endpoint);
     const protocol = isSecure ? 'https://' : 'http://';
 
-    // Extract hostname and port
-    const withoutPrefix = s3Endpoint.replace(/^localstacks?:\/\//i, '');
-    const portMatch = withoutPrefix.match(/:\d+/);
-    const port = portMatch ? portMatch[0] : '';
-
-    const localStackHostName = withoutPrefix
-        .replace(/\/.*$/, '')  // Remove path
-        .replace(/:\d+$/, '');  // Remove port
+    // Extract hostname and port - first normalize to http(s):// for parsing
+    const normalizedEndpoint = s3Endpoint.replace(/^localstacks?:\/\//i, protocol);
+    const url = new URL(normalizedEndpoint);
+    const localStackHostName = url.hostname;
+    const port = url.port ? `:${url.port}` : '';
 
     const result = await dns.lookup(localStackHostName);
     let s3Ip = result.address;

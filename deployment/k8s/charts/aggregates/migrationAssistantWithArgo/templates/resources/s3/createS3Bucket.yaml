@@ -37,7 +37,8 @@ spec:
               valueFrom:
                 configMapKeyRef:
                   name: migrations-default-s3-config
-                  key: ENDPOINT
+                  key: ENDPOINT_HTTP
+                  optional: true
             - name: BUCKET_NAME
               valueFrom:
                 configMapKeyRef:

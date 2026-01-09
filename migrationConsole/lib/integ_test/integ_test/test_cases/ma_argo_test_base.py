@@ -1,6 +1,5 @@
 from enum import Enum
 import logging
-import json
 
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
@@ -128,15 +127,15 @@ class MATestBase:
     def prepare_workflow_parameters(self):
         # For existing clusters
         if self.imported_clusters:
-            self.workflow_template = "full-migration"
-            source_migration_configs = [
+            self.workflow_template = "full-migration-imported-clusters"
+            source_configs = [
                 {
                     "source": self.source_cluster.config,
                     "snapshot-and-migration-configs": self.workflow_snapshot_and_migration_config
                 }
             ]
-            self.parameters["source-migration-configs"] = source_migration_configs
-            self.parameters["targets"] = json.dumps([self.target_cluster.config], separators=(',', ':'))
+            self.parameters["source-configs"] = source_configs
+            self.parameters["target-config"] = self.target_cluster.config
         else:
             self.parameters["snapshot-and-migration-configs"] = self.workflow_snapshot_and_migration_config
             self.parameters["source-cluster-template"] = self.source_argo_cluster_template
