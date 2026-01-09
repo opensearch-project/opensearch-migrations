@@ -205,12 +205,32 @@ class K8sService:
             except Exception as e:
                 logger.warning(f"Failed to cleanup {webhook_type}: {e}")
 
+    def wait_for_pods_terminated(self, timeout_seconds: int = 60) -> None:
+        """Wait for all pods in namespace to terminate."""
+        import time
+        start = time.time()
+        while time.time() - start < timeout_seconds:
+            result = self.run_command(
+                ["kubectl", "get", "pods", "-n", self.namespace, "-o", "name"],
+                ignore_errors=True
+            )
+            if not result or not result.stdout.strip():
+                return
+            time.sleep(2)
+        logger.warning(f"Timeout waiting for pods to terminate in namespace '{self.namespace}'")
+
     def delete_namespace(self) -> None:
         logger.info(f"Deleting namespace '{self.namespace}'")
-        # Delete all webhooks referencing this namespace (cert-manager, kyverno, prometheus, etcd, etc.)
+        # Delete webhooks first to prevent them blocking namespace deletion
         self.delete_webhooks_referencing_namespace()
+        # Delete namespace
         self.run_command(["kubectl", "delete", "namespace", self.namespace,
                          "--ignore-not-found", "--grace-period=0", "--force"])
+        # Wait for pods to fully terminate before deleting webhooks again
+        # This prevents kyverno from recreating webhooks during termination
+        self.wait_for_pods_terminated()
+        # Delete webhooks again in case they were recreated during pod termination
+        self.delete_webhooks_referencing_namespace()
 
     def check_helm_release_exists(self, release_name: str) -> bool:
         logger.info(f"Checking if {release_name} is already deployed in '{self.namespace}' namespace")
