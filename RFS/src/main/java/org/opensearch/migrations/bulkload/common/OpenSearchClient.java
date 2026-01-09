@@ -13,6 +13,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
+import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
@@ -82,6 +83,12 @@ public abstract class OpenSearchClient {
     }
 
     public AwarenessAttributeSettings getAwarenessAttributeSettings() {
+        // OpenSearch Serverless does not support _cluster/settings API, return default disabled settings
+        if (version.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH) {
+            log.info("Serverless target detected, skipping awareness attribute settings (not supported)");
+            return new AwarenessAttributeSettings(false, 0);
+        }
+
         String settingsPath = "_cluster/settings?flat_settings&include_defaults";
         log.info("Starting getAwarenessAttributeSettings call to path={}", settingsPath);
         long startTime = System.currentTimeMillis();

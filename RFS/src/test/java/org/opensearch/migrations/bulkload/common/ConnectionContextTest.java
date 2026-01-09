@@ -158,4 +158,92 @@ class ConnectionContextTest {
         assertFalse(sourceArgs.isInsecure());
         assertTrue(sourceArgs.isDisableCompression());
     }
+
+    @Test
+    void testCoordinatorArgsDefaultValues() {
+        ConnectionContext.CoordinatorArgs coordinatorArgs = new ConnectionContext.CoordinatorArgs();
+        assertNull(coordinatorArgs.getHost());
+        assertNull(coordinatorArgs.getUsername());
+        assertNull(coordinatorArgs.getPassword());
+        assertNull(coordinatorArgs.getAwsRegion());
+        assertNull(coordinatorArgs.getAwsServiceSigningName());
+        assertNull(coordinatorArgs.getCaCert());
+        assertNull(coordinatorArgs.getClientCert());
+        assertNull(coordinatorArgs.getClientCertKey());
+        assertFalse(coordinatorArgs.isInsecure());
+        assertTrue(coordinatorArgs.isDisableCompression());
+    }
+
+    @Test
+    void testCoordinatorArgsIsEnabled_WhenHostIsNull_ReturnsFalse() {
+        ConnectionContext.CoordinatorArgs coordinatorArgs = new ConnectionContext.CoordinatorArgs();
+        assertFalse(coordinatorArgs.isEnabled());
+    }
+
+    @Test
+    void testCoordinatorArgsIsEnabled_WhenHostIsSet_ReturnsTrue() {
+        ConnectionContext.CoordinatorArgs coordinatorArgs = new ConnectionContext.CoordinatorArgs();
+        coordinatorArgs.host = "http://coordinator:9200";
+        assertTrue(coordinatorArgs.isEnabled());
+    }
+
+    @Test
+    void testCoordinatorArgsToConnectionContext_WithNoAuth() {
+        ConnectionContext.CoordinatorArgs coordinatorArgs = new ConnectionContext.CoordinatorArgs();
+        coordinatorArgs.host = "http://coordinator:9200";
+
+        ConnectionContext context = coordinatorArgs.toConnectionContext();
+
+        assertEquals("http://coordinator:9200", context.getUri().toString());
+        assertEquals(ConnectionContext.Protocol.HTTP, context.getProtocol());
+        assertTrue(context.getRequestTransformer() instanceof NoAuthTransformer);
+    }
+
+    @Test
+    void testCoordinatorArgsToConnectionContext_WithBasicAuth() {
+        ConnectionContext.CoordinatorArgs coordinatorArgs = new ConnectionContext.CoordinatorArgs();
+        coordinatorArgs.host = "https://coordinator:9200";
+        coordinatorArgs.username = "admin";
+        coordinatorArgs.password = "secret";
+
+        ConnectionContext context = coordinatorArgs.toConnectionContext();
+
+        assertEquals("https://coordinator:9200", context.getUri().toString());
+        assertEquals(ConnectionContext.Protocol.HTTPS, context.getProtocol());
+        assertTrue(context.getRequestTransformer() instanceof BasicAuthTransformer);
+    }
+
+    @Test
+    void testCoordinatorArgsToConnectionContext_WithSigV4Auth() {
+        ConnectionContext.CoordinatorArgs coordinatorArgs = new ConnectionContext.CoordinatorArgs();
+        coordinatorArgs.host = "https://coordinator.us-east-1.amazonaws.com";
+        coordinatorArgs.awsRegion = "us-east-1";
+        coordinatorArgs.awsServiceSigningName = "es";
+
+        ConnectionContext context = coordinatorArgs.toConnectionContext();
+
+        assertEquals("https://coordinator.us-east-1.amazonaws.com", context.getUri().toString());
+        assertEquals(ConnectionContext.Protocol.HTTPS, context.getProtocol());
+        assertTrue(context.getRequestTransformer() instanceof SigV4AuthTransformer);
+    }
+
+    @Test
+    void testCoordinatorArgsToConnectionContext_FailsWithPartialBasicAuth() {
+        ConnectionContext.CoordinatorArgs coordinatorArgs = new ConnectionContext.CoordinatorArgs();
+        coordinatorArgs.host = "http://coordinator:9200";
+        coordinatorArgs.username = "admin";
+        // password not set
+
+        assertThrows(IllegalArgumentException.class, coordinatorArgs::toConnectionContext);
+    }
+
+    @Test
+    void testCoordinatorArgsToConnectionContext_FailsWithPartialSigV4Auth() {
+        ConnectionContext.CoordinatorArgs coordinatorArgs = new ConnectionContext.CoordinatorArgs();
+        coordinatorArgs.host = "http://coordinator:9200";
+        coordinatorArgs.awsRegion = "us-east-1";
+        // awsServiceSigningName not set
+
+        assertThrows(IllegalArgumentException.class, coordinatorArgs::toConnectionContext);
+    }
 }
