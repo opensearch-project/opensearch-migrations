@@ -148,6 +148,7 @@ class WorkflowTreeApp(App):
         self.nodes_with_live_checks = set()
         self.live_check_in_progress = set()
         self.last_check_time = {}
+        self._active_branch_tips = set()
 
         self.node_mapping = {}
         self.current_node_data = None
@@ -173,6 +174,9 @@ class WorkflowTreeApp(App):
         self._populate_tree(tree, self.tree_nodes, tree.root)
         tree.root.expand_all()
         self._update_dynamic_bindings()
+        
+        # Initialize active branch tips cache
+        self._active_branch_tips = self._get_active_branch_tips(self.tree_nodes)
 
         # Seed pod name cache
         self._trigger_bulk_pod_name_resolve()
@@ -273,7 +277,7 @@ class WorkflowTreeApp(App):
 
         if (node.data and node.data.get('type') == NODE_TYPE_POD and
                 self._should_run_live_check(node.data) and
-                self._is_branch_latest(node_id)):
+                self._is_active_tip(node_id)):
             if node_id not in self.nodes_with_live_checks:
                 self._run_live_check_async(node, node.data)
 
@@ -446,6 +450,9 @@ class WorkflowTreeApp(App):
             # Update persistent storage
             self.workflow_data = new_data
             self.tree_nodes = new_nodes
+            
+            # Update active branch tips cache
+            self._active_branch_tips = self._get_active_branch_tips(new_nodes)
 
             # Trigger Pod Cache Sync (Fast Path)
             self._pod_name_cache_is_dirty = True
@@ -562,7 +569,7 @@ class WorkflowTreeApp(App):
         except Exception as e: self.notify(f"Error: {e}", severity="error")
 
     # --- Live Check Logic ---
-    def _get_latest_pod_ids_per_branch(self, nodes: List[Dict]) -> set:
+    def _get_active_branch_tips(self, nodes: List[Dict]) -> set:
         """Return the latest active pod ID from each parallel branch."""
         latest_ids = set()
         def find_branches(n_list):
@@ -583,8 +590,9 @@ class WorkflowTreeApp(App):
         find_branches(nodes)
         return latest_ids
 
-    def _is_branch_latest(self, node_id: str) -> bool:
-        return node_id in self._get_latest_pod_ids_per_branch(self.tree_nodes)
+    def _is_active_tip(self, node_id: str) -> bool:
+        """Check if this node is an active tip of a parallel branch."""
+        return node_id in self._active_branch_tips
 
     def _remove_ephemeral_nodes(self, tree_node: TreeNode) -> None:
         parent = tree_node.parent if tree_node.parent else tree_node

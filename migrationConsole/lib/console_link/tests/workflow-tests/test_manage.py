@@ -1,5 +1,6 @@
 """Unit tests for manage.py workflow command."""
 
+import json
 import pytest
 from unittest.mock import Mock, patch
 
@@ -98,28 +99,56 @@ class TestGetWorkflowDataInternal:
     @patch('console_link.workflow.commands.manage.requests.get')
     def test_returns_workflow_data_on_success(self, mock_get):
         from console_link.workflow.commands.manage import _get_workflow_data_internal
+        import io
         
         mock_service = Mock()
-        mock_service.get_workflow_status.return_value = {'success': True}
-        mock_get.return_value = Mock(
+        mock_service.get_workflow_status.return_value = {
+            'success': True,
+            'workflow': {'status': {'startedAt': '2024-01-01T00:00:00Z'}}
+        }
+        
+        # Mock streaming response with proper raw attribute for ijson
+        workflow_data = {
+            'status': {
+                'nodes': {
+                    'node1': {
+                        'displayName': 'test-node',
+                        'phase': 'Running',
+                        'type': 'Pod',
+                        'boundaryID': None
+                    }
+                }
+            }
+        }
+        mock_response = Mock(
             status_code=200,
-            json=Mock(return_value={'status': {'phase': 'Running'}})
+            raw=io.BytesIO(json.dumps(workflow_data).encode('utf-8'))
         )
+        mock_get.return_value = mock_response
         
         result, data = _get_workflow_data_internal(
             mock_service, 'test-wf', 'http://localhost:2746', 'ma', False, None
         )
         
         assert result['success'] is True
-        assert data['status']['phase'] == 'Running'
+        assert 'nodes' in data['status']
+        assert 'node1' in data['status']['nodes']
+        assert data['status']['nodes']['node1']['phase'] == 'Running'
 
     @patch('console_link.workflow.commands.manage.requests.get')
     def test_includes_auth_header_when_token_provided(self, mock_get):
         from console_link.workflow.commands.manage import _get_workflow_data_internal
+        import io
         
         mock_service = Mock()
         mock_service.get_workflow_status.return_value = {'success': True}
-        mock_get.return_value = Mock(status_code=200, json=Mock(return_value={}))
+        
+        # Mock streaming response
+        mock_response = Mock(
+            status_code=200,
+            raw=io.BytesIO(json.dumps({'status': {'nodes': {}}}).encode('utf-8'))
+        )
+        mock_get.return_value = mock_response
         
         _get_workflow_data_internal(
             mock_service, 'test-wf', 'http://localhost:2746', 'ma', False, 'my-token'
@@ -204,7 +233,7 @@ class TestWorkflowTreeAppLiveCheck:
         # Returns truthy (the config string) when conditions met
         assert app._should_run_live_check(node)
 
-    def test_get_latest_pod_ids_per_branch_returns_set(self):
+    def test_get_active_branch_tips_returns_set(self):
         # Flat list - no branches, returns empty set
         nodes = [
             make_node_data(node_id='n1', node_type='Pod', started_at='2024-01-01T10:00:00Z'),
@@ -212,15 +241,15 @@ class TestWorkflowTreeAppLiveCheck:
         ]
         app = make_app(tree_nodes=nodes)
         
-        result = app._get_latest_pod_ids_per_branch(nodes)
+        result = app._get_active_branch_tips(nodes)
         assert isinstance(result, set)
 
-    def test_is_branch_latest_uses_cached_ids(self):
+    def test_is_active_tip_uses_cached_ids(self):
         app = make_app()
-        app._latest_active_ids = {'n2'}
+        app._active_branch_tips = {'n2'}
         
-        assert app._is_branch_latest('n2') is True
-        assert app._is_branch_latest('n1') is False
+        assert app._is_active_tip('n2') is True
+        assert app._is_active_tip('n1') is False
 
 
 class TestWorkflowTreeAppWorkers:
@@ -313,7 +342,7 @@ class TestWorkflowTreeAppApproval:
     def test_execute_approval_notifies_on_success(self, mock_service_class):
         app = make_app()
         app.notify = Mock()
-        app.action_refresh = Mock()
+        app.action_manual_refresh = Mock()
         
         mock_service_class.return_value.approve_workflow.return_value = {'success': True}
         
@@ -322,6 +351,7 @@ class TestWorkflowTreeAppApproval:
         
         app.notify.assert_called()
         assert '✅' in str(app.notify.call_args)
+        app.action_manual_refresh.assert_called_once()
 
     @patch('console_link.workflow.commands.manage.WorkflowService')
     def test_execute_approval_notifies_error_on_failure(self, mock_service_class):

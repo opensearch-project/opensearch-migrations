@@ -31,9 +31,14 @@
         "finished_at": null
       }
     ],
-    "inputs": {},
+    "inputs": {
+      "parameters": [
+        {"name": "groupName", "value": "rootgroup"}
+      ]
+    },
     "outputs": {},
     "started_at": null,
-    "finished_at": null
+    "finished_at": null,
+    "group_name": "rootgroup"
   }
 ]

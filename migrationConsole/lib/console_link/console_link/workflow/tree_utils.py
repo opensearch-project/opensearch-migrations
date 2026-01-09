@@ -61,10 +61,9 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
                 group_name = param.get('value', '')
                 break
         
-        tree_nodes[node_id] = {
+        tree_node = {
             'id': node_id,
             'display_name': node.get('displayName', ''),
-            'group_name': group_name,
             'phase': node.get('phase', 'Unknown'),
             'type': node.get('type', ''),
             'boundary_id': node.get('boundaryID'),
@@ -74,6 +73,9 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
             'started_at': node.get('startedAt'),
             'finished_at': node.get('finishedAt')
         }
+        if group_name:
+            tree_node['group_name'] = group_name
+        tree_nodes[node_id] = tree_node
     
     # Second pass: establish parent-child relationships
     for node_id, tree_node in tree_nodes.items():

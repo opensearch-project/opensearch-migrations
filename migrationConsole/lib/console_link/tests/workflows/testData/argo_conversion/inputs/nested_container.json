@@ -12,7 +12,12 @@
         "displayName": "container",
         "type": "Steps",
         "phase": "Running",
-        "boundaryID": "root"
+        "boundaryID": "root",
+        "inputs": {
+          "parameters": [
+            {"name": "groupName", "value": "rootgroup"}
+          ]
+        }
       },
       "child1": {
         "id": "child1",

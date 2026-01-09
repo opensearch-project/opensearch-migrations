@@ -5,7 +5,12 @@
         "id": "root",
         "displayName": "workflow",
         "type": "Steps",
-        "phase": "Running"
+        "phase": "Running",
+        "inputs": {
+          "parameters": [
+            {"name": "groupName", "value": "rootgroup"}
+          ]
+        }
       },
       "step1": {
         "id": "step1", 
