@@ -155,7 +155,8 @@ class WorkflowTreeApp(App):
 
         # Pod Resolution State
         self._pod_name_cache = {}
-        self._pod_resolution_in_progress = set()
+        self._pod_name_cache_is_dirty = True
+        self._bulk_pod_name_refresh_active = False
         self._is_exiting = False
         # Track the unique ID of the current workflow run to prevent stale worker updates
         self._current_run_id = workflow_data.get('status', {}).get('startedAt')
@@ -173,36 +174,32 @@ class WorkflowTreeApp(App):
         tree.root.expand_all()
         self._update_dynamic_bindings()
 
-        # Seed cache and start crawler
-        self.run_worker(self._bulk_resolve_pods, thread=True, name="bulk_pod_resolve")
-        self._speculative_pod_resolution(self.tree_nodes)
+        # Seed pod name cache
+        self._trigger_bulk_pod_name_resolve()
 
         self.set_interval(3.0, self.action_refresh)
 
     def on_unmount(self) -> None:
         logger.info("App unmounting - setting exit flag")
         self._is_exiting = True
-        active_workers = [w for w in self.workers if not w.is_finished]
-        logger.info(f"Outstanding workers at exit: {len(active_workers)} - {[w.name for w in active_workers]}")
 
     # --- Pod Resolution Logic ---
-    def _fetch_workflow_pods_metadata(self, workflow_name: str) -> list[dict]:
-        """
-        High-performance fetch of pod metadata for a specific workflow.
-        Returns a list of raw pod metadata dictionaries.
-        """
-        headers = {'Accept': 'application/json;as=PartialObjectMetadataList;v=v1;g=meta.k8s.io'}
-        params = [
-            ('labelSelector', f"workflows.argoproj.io/workflow={workflow_name}"),
-            ('resourceVersion', '0')
-        ]
+    def _fetch_workflow_pods_metadata(self, workflow_name: str, use_cache: bool = True) -> list[dict]:
+        """High-performance fetch of pod metadata for a specific workflow."""
+        query_params = [('labelSelector', f"workflows.argoproj.io/workflow={workflow_name}")]
+
+        # Hybrid Consistency: resourceVersion=0 hits the API cache (fast).
+        # Omitting it forces a strongly consistent read from etcd (safe/slow).
+        if use_cache:
+            query_params.append(('resourceVersion', '0'))
 
         try:
-            # Requesting metadata-only and bypassing class deserialization
+            # use call_api to bypass the V1Pod object creation, which is much slower
             response_tuple = self.k8s_client.api_client.call_api(
                 f'/api/v1/namespaces/{self.namespace}/pods', 'GET',
-                header_params=headers,
-                query_params=params,
+                # Use headers to request ONLY metadata (strips spec and status)
+                header_params={'Accept': 'application/json;as=PartialObjectMetadataList;v=v1;g=meta.k8s.io'},
+                query_params=query_params,
                 _preload_content=False,
                 _request_timeout=10
             )
@@ -213,86 +210,56 @@ class WorkflowTreeApp(App):
                 return data.get('items', [])
             finally:
                 response_object.close()
-
         except Exception as e:
-            logger.error(f"Failed to fetch pod metadata for {workflow_name}: {e}")
+            logger.error(f"Failed to fetch pod metadata for {workflow_name} (use_cache={use_cache}): {e}")
             return []
 
-    def _bulk_resolve_pods(self) -> None:
-        """Seed cache using the shared metadata helper."""
-        logger.info(f"STARTING bulk pod resolution for: {self.workflow_name}")
+    def _trigger_bulk_pod_name_resolve(self, use_cache: bool = True) -> None:
+        """Kicks off a background fetch if dirty and not already active."""
+        if self._bulk_pod_name_refresh_active or self._is_exiting or not self._pod_name_cache_is_dirty:
+            return
 
-        items = self._fetch_workflow_pods_metadata(self.workflow_name)
-        count = 0
+        self._bulk_pod_name_refresh_active = True
+        self._pod_name_cache_is_dirty = False
 
-        for pod in items:
-            metadata = pod.get('metadata', {})
-            name = metadata.get('name')
-            node_id = metadata.get('annotations', {}).get('workflows.argoproj.io/node-id')
+        # Pass current_run_id as a fencing token
+        run_id = self._current_run_id
+        self.run_worker(lambda: self._bulk_resolve_pods(run_id, use_cache), thread=True, name="bulk_pod_resolve")
 
-            if node_id and name:
-                self._pod_name_cache[node_id] = name
-                count += 1
-
-        logger.info(f"Bulk resolve FINISHED. Cached {count} pods.")
-        self.call_from_thread(self._update_pod_status)
-
-    def _find_pod_by_node_id(self, node_id, selected_node, ctx):
-        """Find a specific pod by node-id using the shared metadata helper."""
-        click.echo(f"Searching for pod with node-id: {node_id}...", nl=False)
-
-        items = self._fetch_workflow_pods_metadata(self.workflow_name)
-
-        for pod in items:
-            metadata = pod.get('metadata', {})
-            annotations = metadata.get('annotations', {})
-
-            if annotations.get('workflows.argoproj.io/node-id') == node_id:
-                click.echo(" Found.")
-                return metadata.get('name')
-
-        return None # Failure
-
-    def _resolve_pod_worker(self, node: Dict, run_id: str) -> Tuple[str, Optional[str], str]:
-        """
-        Persistent poller.
-        Returns (node_id, pod_name, run_id) to the main thread.
-        """
-        node_id = node['id']
-        logger.info(f"WORKER START: pod_resolve_{node_id}")
+    def _bulk_resolve_pods(self, run_id: str, use_cache: bool = True) -> None:
+        """Worker: Fetches metadata and returns results tied to a run_id."""
+        logger.info(f"WORKER START: _bulk_resolve_pods (use_cache={use_cache})")
         try:
-            for _ in range(300):
-                if self._is_exiting or self._current_run_id != run_id:
-                    return node_id, None, run_id
-                try:
-                    # API call is thread-safe, but its result is returned rather than stored here
-                    pod_name = _find_pod_by_node_id(self.k8s_client, self.namespace, self.workflow_name, node_id, node, None)
-                    if pod_name:
-                        return node_id, pod_name, run_id
-                except Exception:
-                    pass
-                time.sleep(1.0)
-            return node_id, None, run_id
+            items = self._fetch_workflow_pods_metadata(self.workflow_name, use_cache=use_cache)
+            new_names = {}
+
+            for pod in items:
+                metadata = pod.get('metadata', {})
+                node_id = metadata.get('annotations', {}).get('workflows.argoproj.io/node-id')
+                if node_id:
+                    new_names[node_id] = metadata.get('name')
+
+            self.call_from_thread(self._finalize_bulk_resolve, new_names, run_id)
         finally:
-            logger.info(f"WORKER END: pod_resolve_{node_id}")
+            logger.info("WORKER END: _bulk_resolve_pods")
 
-    def _speculative_pod_resolution(self, nodes: List[Dict]) -> None:
-        """Kicks off workers. State check happens on the main thread."""
-        for node in nodes:
-            node_id = node.get('id')
-            if (node.get('type') == NODE_TYPE_POD and
-                    node_id not in self._pod_name_cache and
-                    node_id not in self._pod_resolution_in_progress):
+    def _finalize_bulk_resolve(self, new_names: Dict[str, str], worker_run_id: str) -> None:
+        """Main Thread: Fences the update and checks if another run is needed."""
+        if worker_run_id != self._current_run_id: # Discard if the workflow has changed since this worker started
+            logger.info(f"Discarding stale bulk resolve (Worker ID: {worker_run_id} vs Current: {self._current_run_id})")
+            self._bulk_pod_name_refresh_active = False # Reset flag so a valid worker can start
+            return
 
-                self._pod_resolution_in_progress.add(node_id)
-                # Pass current_run_id so the worker knows if it becomes 'stale'
-                self.run_worker(
-                    lambda n=node, r=self._current_run_id: self._resolve_pod_worker(n, r),
-                    thread=True,
-                    name=f"pod_resolve_{node_id}"
-                )
-            if node.get('children'):
-                self._speculative_pod_resolution(node['children'])
+        self._pod_name_cache.update(new_names)
+        self._bulk_pod_name_refresh_active = False
+
+        self._update_pod_status()
+        self._update_dynamic_bindings()
+
+        # If more changes happened during the fetch, loop again
+        # (using cached reads since this is automatically triggered)
+        if self._pod_name_cache_is_dirty:
+            self._trigger_bulk_pod_name_resolve(use_cache=True)
 
     # --- Event Handlers ---
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
@@ -335,21 +302,46 @@ class WorkflowTreeApp(App):
     def _update_dynamic_bindings(self) -> None:
         self._bindings = self._bindings.__class__()
         self.bind("ctrl+p", "command_palette", show=False)
-        self.bind("r", "refresh", description="Refresh")
+        self.bind("r", "manual_refresh", description="Refresh")
         self.bind("q", "quit", description="Quit")
         self.bind("left", "collapse_node", show=False)
         self.bind("right", "expand_node", show=False)
+
         if self.current_node_data:
+            node_id = self.current_node_data.get('id')
             ntype = self.current_node_data.get('type')
-            if ntype == NODE_TYPE_POD:
+            pod_resolved = node_id in self._pod_name_cache
+
+            if ntype == NODE_TYPE_POD and pod_resolved:
                 self.bind("o", "view_logs", description="View Logs")
                 self.bind("c", "copy_pod_name", description="Copy Pod Name")
             elif ntype == NODE_TYPE_SUSPEND and self.current_node_data.get('phase') == PHASE_RUNNING:
                 self.bind("a", "approve_step", description="Approve")
+
         self.refresh_bindings()
 
     def action_refresh(self) -> None:
         self.run_worker(self._fetch_workflow_data, thread=True, name="refresh_worker")
+
+    def action_manual_refresh(self) -> None:
+        """User-triggered manual refresh (Strongly Consistent)."""
+        self.notify("Refreshing tree and pod metadata (Strong consistency)...", title="Manual Refresh")
+        self.run_worker(self._force_refresh_sequence, thread=True, name="manual_refresh_worker")
+
+    def _force_refresh_sequence(self) -> Tuple[Dict, Dict]:
+        """Sequential fetch: Workflow Tree Data -> Trigger Strong Pod Resolution."""
+        logger.info("WORKER START: _force_refresh_sequence")
+        result = self._fetch_workflow_data()
+        self.call_from_thread(self._handle_manual_refresh_result, result)
+        return result
+
+    def _handle_manual_refresh_result(self, result: Tuple[Dict, Dict]) -> None:
+        """Main Thread: Process tree result and then trigger a STRONG pod fetch."""
+        res, slim_data = result
+        if res.get('success'):
+            self._apply_workflow_updates(slim_data)
+            self._pod_name_cache_is_dirty = True
+            self._trigger_bulk_pod_name_resolve(use_cache=False)
 
     def action_view_logs(self) -> None:
         if self.current_node_data and self.current_node_data.get('type') == NODE_TYPE_POD:
@@ -360,7 +352,7 @@ class WorkflowTreeApp(App):
         pod_name = self._pod_name_cache.get(self.current_node_data['id'])
         if pod_name and copy_to_clipboard(pod_name):
             self.notify(f"📋 Copied: {pod_name}", title="Clipboard", severity="information", timeout=3)
-        else: self.notify("❌ Pod name not resolved yet", severity="error")
+        else: self.notify("❌ Pod name not available", severity="error")
 
     def action_approve_step(self) -> None:
         node = self.current_node_data
@@ -408,87 +400,78 @@ class WorkflowTreeApp(App):
             return
 
         name = event.worker.name or ""
-        if name.startswith("pod_resolve_"):
-            # result is (node_id, pod_name, run_id)
-            res = event.worker.result
-            if not res: return
-            node_id, pod_name, worker_run_id = res
-
-            # Only update if the workflow hasn't restarted since worker began
-            if worker_run_id == self._current_run_id:
-                self._pod_resolution_in_progress.discard(node_id)
-                if pod_name:
-                    self._pod_name_cache[node_id] = pod_name
-                    if self.current_node_data and self.current_node_data.get('id') == node_id:
-                        self._update_pod_status()
-            else:
-                logger.debug(f"Discarding stale pod resolution for {node_id}")
+        if name == "refresh_worker" and event.worker.result:
+            res, slim_data = event.worker.result
+            if res.get('success'):
+                self._apply_workflow_updates(slim_data)
 
     def _apply_workflow_updates(self, new_data: Dict) -> None:
         try:
-            log_mem("Refresh Update Start")
+            # Content Guard: Skip everything if no changes detected at the Argo level
+            old_rv = self.workflow_data.get('metadata', {}).get('resourceVersion')
+            new_rv = new_data.get('metadata', {}).get('resourceVersion')
             new_run_id = new_data.get('status', {}).get('startedAt')
 
-            # If the workflow restarted, clear everything safely on the main thread
-            if self._current_run_id != new_run_id:
-                logger.info(f"Workflow restart detected (Run ID: {new_run_id}). Clearing state.")
-                self._current_run_id = new_run_id
-                self._pod_name_cache.clear()
-                self._pod_resolution_in_progress.clear()
+            is_restart = self._current_run_id != new_run_id
+
+            # If the version is the same, and it's not a totally new workflow, do nothing.
+            if old_rv == new_rv and not is_restart:
+                return
+
+            log_mem("Refresh Update Start (Changes Detected)")
 
             tree = self.query_one("#workflow-tree", Tree)
-            # Restore root label if it was showing an error
             tree.root.label = "Workflow Steps"
-            # Capture current scroll position to prevent jumping
             old_scroll_x, old_scroll_y = tree.scroll_offset
 
             new_nodes = filter_tree_nodes(build_nested_workflow_tree(new_data))
-            log_mem("New Nodes Built")
 
-            if self.workflow_data.get('status', {}).get('startedAt') != new_data.get('status', {}).get('startedAt'):
+            if is_restart:
+                logger.info(f"Workflow restart/swap (Run ID: {new_run_id}). Hard reset.")
+                self._current_run_id = new_run_id
+
+                # Full State Wipe
                 tree.clear()
                 self.node_mapping.clear()
                 self.nodes_with_live_checks.clear()
                 self.live_check_in_progress.clear()
                 self._pod_name_cache.clear()
-                self._pod_resolution_in_progress.clear()
+
                 self._populate_tree(tree, new_nodes, tree.root)
                 tree.root.expand_all()
-                self.run_worker(self._bulk_resolve_pods, thread=True, name="bulk_pod_resolve")
             else:
+                # Soft Update
                 self._update_tree_recursive(tree.root, new_nodes, new_data)
 
+            # Update persistent storage
             self.workflow_data = new_data
             self.tree_nodes = new_nodes
 
-            # Force garbage collection
-            gc.collect()
-            log_mem("Post-Refresh Cleanup")
+            # Trigger Pod Cache Sync (Fast Path)
+            self._pod_name_cache_is_dirty = True
+            self._trigger_bulk_pod_name_resolve(use_cache=True)
 
-            # speculatively resolve any new pods appearing
-            self._speculative_pod_resolution(new_nodes)
-
-            # Find the active edge per branch: latest node that hasn't succeeded yet in each branch
+            # --- Live Status Management ---
             latest_active_ids = self._get_latest_pod_ids_per_branch(new_nodes)
 
-            # 1. Prune Live Status if it no longer represents a branch front
             for node_id in list(self.nodes_with_live_checks):
                 if node_id not in latest_active_ids:
                     if t_node := self.node_mapping.get(node_id):
                         self._remove_ephemeral_nodes(t_node)
 
-            # 2. Trigger/Reposition Live Status for each branch
             for latest_active_id in latest_active_ids:
                 latest_node = self.node_mapping.get(latest_active_id)
                 if latest_node and self._should_run_live_check(latest_node.data):
                     self._run_live_check_async(latest_node, latest_node.data)
 
+            # Update UI components
             self._update_dynamic_bindings()
             self._update_pod_status()
 
-            # Anchor scroll back to previous position
             tree.scroll_to(old_scroll_x, old_scroll_y, animate=False)
-            self._speculative_pod_resolution(new_nodes)
+            gc.collect()
+            log_mem("Post-Refresh Cleanup Complete")
+
         except Exception as e:
             logger.error(f"Update error: {e}")
 
@@ -502,10 +485,8 @@ class WorkflowTreeApp(App):
         node_id = node['id']
         if node_id in self._pod_name_cache:
             status.update(f"Pod: [bold green]{self._pod_name_cache[node_id]}[/]")
-        elif node_id in self._pod_resolution_in_progress:
-            status.update(f"Pod: [italic yellow]Resolving...[/]")
         else:
-            status.update(f"Pod: [gray]({node.get('phase', 'Pending')})[/]")
+            status.update(f"Pod: [gray](name not available)[/]")
 
     def _update_tree_recursive(self, parent_tree_node, new_nodes: List[Dict], workflow_data: Dict) -> None:
         existing_children = {child.data['id']: child for child in parent_tree_node.children if child.data and 'id' in child.data and not child.data.get('is_ephemeral')}
@@ -543,12 +524,7 @@ class WorkflowTreeApp(App):
         temp_path = None
         try:
             pod_name = self._pod_name_cache.get(node_data['id'])
-            if not pod_name:
-                pod_name = _find_pod_by_node_id(self.k8s_client, self.namespace, self.workflow_name, node_data['id'], node_data, None)
-
-            if not pod_name:
-                self.notify("Pod name not resolved", severity="warning")
-                return
+            if not pod_name: return
 
             logs = self._get_pod_logs(pod_name)
             with tempfile.NamedTemporaryFile(mode='w', suffix='.log', delete=False) as f:
@@ -581,7 +557,7 @@ class WorkflowTreeApp(App):
             res = WorkflowService().approve_workflow(self.workflow_name, self.namespace, self.argo_server, None, False, f"id={node_data.get('id')}")
             if res['success']:
                 self.notify(f"✅ Approved: {node_data.get('display_name')}")
-                self.action_refresh()
+                self.action_manual_refresh()
             else: self.notify(f"❌ Failed: {res.get('message')}", severity="error")
         except Exception as e: self.notify(f"Error: {e}", severity="error")
 
