@@ -62,33 +62,33 @@ class StatusCommandHandler:
     def _handle_single_workflow(self, workflow_name: str, argo_server: str,
                                 namespace: str, insecure: bool, live_check: bool) -> None:
         """Handle status display for a specific workflow."""
-        result, workflow_data = self.data_fetcher.get_workflow_data(
+        workflow_data = self.data_fetcher.get_workflow_data(
             workflow_name, argo_server, namespace, insecure)
         
-        if not result['success']:
-            click.echo(f"Error: {result['error']}", err=True)
+        if not workflow_data:
+            click.echo(f"Error: Could not fetch workflow {workflow_name}", err=True)
             raise click.Abort()
 
-        self._display_workflow_with_tree(result, workflow_data, live_check)
+        self._display_workflow_with_tree(workflow_data, live_check)
 
     def _handle_workflow_list(self, show_all: bool, argo_server: str, namespace: str,
                               insecure: bool, live_check: bool) -> None:
         """Handle status display for workflow list."""
-        workflow_statuses = self.data_fetcher.list_workflows_with_status(
+        workflow_list = self.data_fetcher.list_workflows(
             argo_server, namespace, insecure, exclude_completed=not show_all)
 
-        if not workflow_statuses:
+        if not workflow_list:
             self._handle_no_workflows(show_all, argo_server, namespace, insecure, live_check)
             return
 
-        click.echo(f"Found {len(workflow_statuses)} workflow(s) in namespace {namespace}:")
+        click.echo(f"Found {len(workflow_list)} workflow(s) in namespace {namespace}:")
         click.echo("")
 
-        sorted_workflows = self.sorter.sort_workflows_chronologically(workflow_statuses)
-        for result in sorted_workflows:
-            _, workflow_data = self.data_fetcher.get_workflow_data(
-                result['workflow_name'], argo_server, namespace, insecure)
-            self._display_workflow_with_tree(result, workflow_data, live_check)
+        sorted_workflows = self.sorter.sort_workflows_chronologically(workflow_list)
+        logger.info(f"Processing {len(sorted_workflows)} sorted workflows")
+        for i, workflow_data in enumerate(sorted_workflows):
+            logger.info(f"Processing workflow {i+1}/{len(sorted_workflows)}: {self._get_workflow_name(workflow_data)}")
+            self._display_workflow_with_tree(workflow_data, live_check)
 
     def _handle_no_workflows(self, show_all: bool, argo_server: str, namespace: str,
                              insecure: bool, live_check: bool) -> None:
@@ -100,30 +100,41 @@ class StatusCommandHandler:
         click.echo(f"No running workflows found in namespace {namespace}")
         
         # Try to show most recent completed workflow
-        all_workflows = self.data_fetcher.list_workflows_with_status(
+        all_workflows = self.data_fetcher.list_workflows(
             argo_server, namespace, insecure, exclude_completed=False)
         
         if all_workflows:
             most_recent = self.sorter.find_most_recent_completed(all_workflows)
             if most_recent:
                 click.echo("\nShowing last completed workflow:\n")
-                _, workflow_data = self.data_fetcher.get_workflow_data(
-                    most_recent['workflow_name'], argo_server, namespace, insecure)
-                self._display_workflow_with_tree(most_recent, workflow_data, live_check)
+                self._display_workflow_with_tree(most_recent, live_check)
             
             click.echo("\nUse --all to see all completed workflows")
         else:
             click.echo("Use --all to see completed workflows")
 
-    def _display_workflow_with_tree(self, result: Dict[str, Any], workflow_data: Dict[str, Any],
-                                    live_check: bool) -> None:
+    def _get_workflow_name(self, workflow_data: Dict[str, Any]) -> str:
+        """Extract workflow name from workflow data."""
+        return workflow_data.get('metadata', {}).get('name', 'unknown')
+
+    def _display_workflow_with_tree(self, workflow_data: Dict[str, Any], live_check: bool) -> None:
         """Display workflow using tree structure with optional live status checks."""
         tree_nodes = build_nested_workflow_tree(workflow_data)
-        if live_check: self.live_check_processor.enrich_tree_with_live_checks(tree_nodes, workflow_data)
+        if live_check: 
+            self.live_check_processor.enrich_tree_with_live_checks(tree_nodes, workflow_data)
         filtered_tree = filter_tree_nodes(tree_nodes)
+        
+        # Extract status info from workflow data
+        status = workflow_data.get('status', {})
+        metadata = workflow_data.get('metadata', {})
+        
         self.displayer.display_workflow_status(
-            result['workflow_name'], result['phase'], result['started_at'], 
-            result['finished_at'], filtered_tree, workflow_data)
+            metadata.get('name', 'unknown'),
+            status.get('phase', 'Unknown'),
+            status.get('startedAt'),
+            status.get('finishedAt'),
+            filtered_tree,
+            workflow_data)
 
 
 class WorkflowDataFetcher:
@@ -134,20 +145,17 @@ class WorkflowDataFetcher:
         self.token = token
 
     def get_workflow_data(self, workflow_name: str, argo_server: str, namespace: str, 
-                         insecure: bool) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Get workflow status and raw workflow data."""
-        result = self.service.get_workflow_status(
-            workflow_name=workflow_name, namespace=namespace, argo_server=argo_server,
-            token=self.token, insecure=insecure)
+                         insecure: bool) -> Dict[str, Any]:
+        """Get workflow data from Argo API (single network call)."""
+        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+        url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
         
-        workflow_data = self._fetch_raw_workflow_data(
-            workflow_name, argo_server, namespace, insecure)
-        
-        return result, workflow_data
+        response = requests.get(url, headers=headers, verify=not insecure)
+        return response.json() if response.status_code == 200 else {}
 
-    def list_workflows_with_status(self, argo_server: str, namespace: str, 
-                                 insecure: bool, exclude_completed: bool) -> List[Dict[str, Any]]:
-        """List workflows and get their status data."""
+    def list_workflows(self, argo_server: str, namespace: str, 
+                      insecure: bool, exclude_completed: bool) -> List[Dict[str, Any]]:
+        """List workflows and get their full data (one call per workflow)."""
         list_result = self.service.list_workflows(
             namespace=namespace, argo_server=argo_server, token=self.token, 
             insecure=insecure, exclude_completed=exclude_completed)
@@ -155,42 +163,31 @@ class WorkflowDataFetcher:
         if not list_result['success'] or list_result['count'] == 0:
             return []
 
-        workflow_statuses = []
+        workflows = []
         for wf_name in list_result['workflows']:
-            result = self.service.get_workflow_status(
-                workflow_name=wf_name, namespace=namespace, argo_server=argo_server,
-                token=self.token, insecure=insecure)
-            if result['success']:
-                workflow_statuses.append(result)
+            workflow_data = self.get_workflow_data(wf_name, argo_server, namespace, insecure)
+            if workflow_data:
+                workflows.append(workflow_data)
 
-        return workflow_statuses
-
-    def _fetch_raw_workflow_data(self, workflow_name: str, argo_server: str, 
-                               namespace: str, insecure: bool) -> Dict[str, Any]:
-        """Fetch raw workflow data from Argo API."""
-        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
-        url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
-        
-        response = requests.get(url, headers=headers, verify=not insecure)
-        return response.json() if response.status_code == 200 else {}
+        return workflows
 
 
 class WorkflowSorter:
     """Sort a group of workflow (not the tasks within them)."""
     
     @staticmethod
-    def sort_workflows_chronologically(workflow_statuses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Sort workflows by start time (oldest first)."""
-        return sorted(workflow_statuses, key=lambda x: x['started_at'] or '')
+    def sort_workflows_chronologically(workflows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Sort workflows by start time (newest first)."""
+        return sorted(workflows, key=lambda x: x.get('status', {}).get('startedAt', ''), reverse=True)
 
     @staticmethod
-    def find_most_recent_completed(workflow_statuses: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def find_most_recent_completed(workflows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """Find the most recently completed workflow."""
-        completed_workflows = [wf for wf in workflow_statuses if wf.get('finished_at')]
+        completed_workflows = [wf for wf in workflows if wf.get('status', {}).get('finishedAt')]
         if not completed_workflows:
-            return workflow_statuses[0] if workflow_statuses else None
+            return workflows[0] if workflows else None
         
-        return max(completed_workflows, key=lambda x: x['finished_at'])
+        return max(completed_workflows, key=lambda x: x.get('status', {}).get('finishedAt', ''))
 
 
 class StatusCheckRunner:

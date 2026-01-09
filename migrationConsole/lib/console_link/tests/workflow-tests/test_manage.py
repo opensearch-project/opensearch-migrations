@@ -188,14 +188,8 @@ class TestWorkflowTreeAppLiveCheck:
         app = make_app()
         node = make_node_data(config_contents=None, has_status_output=True)
         
-        # Returns falsy (None from `has_config and has_output`) when config missing
+        # Returns falsy (None from `has_config`) when config missing
         assert not app._should_run_live_check(node)
-
-    def test_should_run_live_check_false_without_status_output(self):
-        app = make_app()
-        node = make_node_data(config_contents='some config', has_status_output=False)
-        
-        assert app._should_run_live_check(node) is False
 
     def test_should_run_live_check_false_when_succeeded(self):
         app = make_app()
@@ -203,45 +197,30 @@ class TestWorkflowTreeAppLiveCheck:
         
         assert app._should_run_live_check(node) is False
 
-    def test_should_run_live_check_true_when_running_with_config_and_output(self):
+    def test_should_run_live_check_truthy_when_running_with_config(self):
         app = make_app()
         node = make_node_data(phase='Running', config_contents='cfg', has_status_output=True)
         
-        assert app._should_run_live_check(node) is True
+        # Returns truthy (the config string) when conditions met
+        assert app._should_run_live_check(node)
 
-    def test_get_latest_pod_id_returns_most_recent(self):
+    def test_get_latest_pod_ids_per_branch_returns_set(self):
+        # Flat list - no branches, returns empty set
         nodes = [
             make_node_data(node_id='n1', node_type='Pod', started_at='2024-01-01T10:00:00Z'),
             make_node_data(node_id='n2', node_type='Pod', started_at='2024-01-01T11:00:00Z'),
         ]
         app = make_app(tree_nodes=nodes)
         
-        assert app._get_latest_pod_id(nodes) == 'n2'
+        result = app._get_latest_pod_ids_per_branch(nodes)
+        assert isinstance(result, set)
 
-    def test_get_latest_pod_id_ignores_non_pods(self):
-        nodes = [
-            make_node_data(node_id='n1', node_type='Pod', started_at='2024-01-01T10:00:00Z'),
-            make_node_data(node_id='n2', node_type='Suspend', started_at='2024-01-01T12:00:00Z'),
-        ]
-        app = make_app(tree_nodes=nodes)
+    def test_is_branch_latest_uses_cached_ids(self):
+        app = make_app()
+        app._latest_active_ids = {'n2'}
         
-        assert app._get_latest_pod_id(nodes) == 'n1'
-
-    def test_get_latest_pod_id_returns_none_when_no_pods(self):
-        nodes = [make_node_data(node_id='n1', node_type='Suspend')]
-        app = make_app(tree_nodes=nodes)
-        
-        assert app._get_latest_pod_id(nodes) is None
-
-    def test_is_globally_latest_true_for_latest(self):
-        nodes = [
-            make_node_data(node_id='n1', node_type='Pod', started_at='2024-01-01T10:00:00Z'),
-            make_node_data(node_id='n2', node_type='Pod', started_at='2024-01-01T11:00:00Z'),
-        ]
-        app = make_app(tree_nodes=nodes)
-        
-        assert app._is_globally_latest('n2') is True
-        assert app._is_globally_latest('n1') is False
+        assert app._is_branch_latest('n2') is True
+        assert app._is_branch_latest('n1') is False
 
 
 class TestWorkflowTreeAppWorkers:

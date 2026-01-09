@@ -89,8 +89,9 @@ class TestWorkflowCLICommands:
         assert 'Waiting for workflow to complete' in result.output
         assert 'Succeeded' in result.output
 
+    @patch('console_link.workflow.commands.status.requests.get')
     @patch('console_link.workflow.commands.status.WorkflowService')
-    def test_status_command_single_workflow(self, mock_service_class):
+    def test_status_command_single_workflow(self, mock_service_class, mock_requests_get):
         """Test status command for a specific workflow."""
         runner = CliRunner()
 
@@ -98,20 +99,45 @@ class TestWorkflowCLICommands:
         mock_service = Mock()
         mock_service_class.return_value = mock_service
 
-        mock_service.get_workflow_status.return_value = {
-            'success': True,
-            'workflow_name': 'test-workflow',
-            'namespace': 'ma',
-            'phase': 'Running',
-            'progress': '1/2',
-            'started_at': '2024-01-01T10:00:00Z',
-            'finished_at': None,
-            'steps': [
-                {'name': 'step1', 'phase': 'Succeeded', 'type': 'Pod', 'started_at': '2024-01-01T10:00:00Z'},
-                {'name': 'step2', 'phase': 'Running', 'type': 'Pod', 'started_at': '2024-01-01T10:01:00Z'}
-            ],
-            'error': None
+        # Mock the Argo API response with full workflow data
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'metadata': {
+                'name': 'test-workflow',
+                'namespace': 'ma'
+            },
+            'status': {
+                'phase': 'Running',
+                'startedAt': '2024-01-01T10:00:00Z',
+                'finishedAt': None,
+                'nodes': {
+                    'test-workflow': {
+                        'id': 'test-workflow',
+                        'displayName': 'test-workflow',
+                        'type': 'Steps',
+                        'phase': 'Running'
+                    },
+                    'test-workflow-step1': {
+                        'id': 'test-workflow-step1',
+                        'displayName': 'step1',
+                        'type': 'Pod',
+                        'phase': 'Succeeded',
+                        'boundaryID': 'test-workflow',
+                        'startedAt': '2024-01-01T10:00:00Z'
+                    },
+                    'test-workflow-step2': {
+                        'id': 'test-workflow-step2',
+                        'displayName': 'step2',
+                        'type': 'Pod',
+                        'phase': 'Running',
+                        'boundaryID': 'test-workflow',
+                        'startedAt': '2024-01-01T10:01:00Z'
+                    }
+                }
+            }
         }
+        mock_requests_get.return_value = mock_response
 
         result = runner.invoke(workflow_cli, ['status', 'test-workflow'])
 
@@ -122,8 +148,9 @@ class TestWorkflowCLICommands:
         assert 'step2' in result.output
         assert 'workflow output test-workflow' in result.output
 
+    @patch('console_link.workflow.commands.status.requests.get')
     @patch('console_link.workflow.commands.status.WorkflowService')
-    def test_status_command_list_all(self, mock_service_class):
+    def test_status_command_list_all(self, mock_service_class, mock_requests_get):
         """Test status command listing all workflows."""
         runner = CliRunner()
 
@@ -138,30 +165,49 @@ class TestWorkflowCLICommands:
             'error': None
         }
 
-        mock_service.get_workflow_status.side_effect = [
-            {
-                'success': True,
-                'workflow_name': 'workflow-1',
-                'namespace': 'ma',
-                'phase': 'Running',
-                'progress': '1/2',
-                'started_at': '2024-01-01T10:00:00Z',
-                'finished_at': None,
-                'steps': [],
-                'error': None
-            },
-            {
-                'success': True,
-                'workflow_name': 'workflow-2',
-                'namespace': 'ma',
-                'phase': 'Succeeded',
-                'progress': '2/2',
-                'started_at': '2024-01-01T09:00:00Z',
-                'finished_at': '2024-01-01T09:05:00Z',
-                'steps': [],
-                'error': None
-            }
-        ]
+        # Mock requests.get to return workflow data for each workflow
+        def mock_get_response(*args, **kwargs):
+            url = args[0]
+            mock_response = Mock()
+            mock_response.status_code = 200
+            
+            if 'workflow-1' in url:
+                mock_response.json.return_value = {
+                    'metadata': {'name': 'workflow-1', 'namespace': 'ma'},
+                    'status': {
+                        'phase': 'Running',
+                        'startedAt': '2024-01-01T10:00:00Z',
+                        'finishedAt': None,
+                        'nodes': {
+                            'workflow-1': {
+                                'id': 'workflow-1',
+                                'displayName': 'workflow-1',
+                                'type': 'Steps',
+                                'phase': 'Running'
+                            }
+                        }
+                    }
+                }
+            elif 'workflow-2' in url:
+                mock_response.json.return_value = {
+                    'metadata': {'name': 'workflow-2', 'namespace': 'ma'},
+                    'status': {
+                        'phase': 'Succeeded',
+                        'startedAt': '2024-01-01T09:00:00Z',
+                        'finishedAt': '2024-01-01T09:05:00Z',
+                        'nodes': {
+                            'workflow-2': {
+                                'id': 'workflow-2',
+                                'displayName': 'workflow-2',
+                                'type': 'Steps',
+                                'phase': 'Succeeded'
+                            }
+                        }
+                    }
+                }
+            return mock_response
+        
+        mock_requests_get.side_effect = mock_get_response
 
         result = runner.invoke(workflow_cli, ['status'])
 
