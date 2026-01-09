@@ -182,13 +182,29 @@ class K8sService:
             logger.info(f"Namespace '{namespace}' already exists")
             return result
 
+    def delete_webhooks_referencing_namespace(self) -> None:
+        """Delete all webhooks that reference services in this namespace."""
+        logger.info(f"Deleting webhooks referencing namespace '{self.namespace}'")
+        for webhook_type in ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]:
+            try:
+                result = self.run_command(
+                    ["kubectl", "get", webhook_type, "-o",
+                     f"jsonpath={{range .items[?(@.webhooks[*].clientConfig.service.namespace==\"{self.namespace}\")]}}{{.metadata.name}}{{\"\\n\"}}{{end}}"],
+                    ignore_errors=True
+                )
+                if result and result.stdout.strip():
+                    for name in result.stdout.strip().split("\n"):
+                        if name:
+                            logger.info(f"Deleting {webhook_type} '{name}' (references namespace '{self.namespace}')")
+                            self.run_command(["kubectl", "delete", webhook_type, name, "--ignore-not-found"],
+                                             ignore_errors=True)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup {webhook_type}: {e}")
+
     def delete_namespace(self) -> None:
         logger.info(f"Deleting namespace '{self.namespace}'")
-        # Delete cluster-scoped kyverno webhooks that persist after namespace deletion
-        self.run_command(["kubectl", "delete", "mutatingwebhookconfigurations",
-                         "-l", "webhook.kyverno.io/managed-by=kyverno", "--ignore-not-found"], ignore_errors=True)
-        self.run_command(["kubectl", "delete", "validatingwebhookconfigurations",
-                         "-l", "webhook.kyverno.io/managed-by=kyverno", "--ignore-not-found"], ignore_errors=True)
+        # Delete all webhooks referencing this namespace (cert-manager, kyverno, prometheus, etcd, etc.)
+        self.delete_webhooks_referencing_namespace()
         self.run_command(["kubectl", "delete", "namespace", self.namespace,
                          "--ignore-not-found", "--grace-period=0", "--force"])
 
