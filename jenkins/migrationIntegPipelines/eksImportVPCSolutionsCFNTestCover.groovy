@@ -7,8 +7,8 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
 
 // Shared library function (location from root: vars/eksSolutionsCFNTest.groovy)
 eksSolutionsCFNTest(
-    vpcMode: 'create',
-    defaultStage: 'eks-create-vpc',
+    vpcMode: 'import',
+    defaultStage: 'eks-import-vpc',
     defaultGitUrl: 'https://github.com/jugal-chauhan/opensearch-migrations.git',
     defaultGitBranch: 'jenkins-pipeline-eks-cfn-import-vpc'
 )

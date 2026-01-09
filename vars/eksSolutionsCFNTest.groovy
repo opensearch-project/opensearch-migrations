@@ -1,12 +1,20 @@
 def call(Map config = [:]) {
+    // Config options:
+    //   vpcMode: 'create' (default) or 'import'
+    //   defaultStage: stage name default
+    //   defaultGitUrl: git repo URL default
+    //   defaultGitBranch: git branch default
+    def vpcMode = config.vpcMode ?: 'create'
+    def isImportVpc = (vpcMode == 'import')
+    def clusterContextFilePath = "tmp/cluster-context-${currentBuild.number}.json"
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         parameters {
-            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
-            string(name: 'STAGE', defaultValue: "eks-create-vpc", description: 'Stage name for deployment environment')
+            string(name: 'GIT_REPO_URL', defaultValue: config.defaultGitUrl ?: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
+            string(name: 'GIT_BRANCH', defaultValue: config.defaultGitBranch ?: 'main', description: 'Git branch to use for repository')
+            string(name: 'STAGE', defaultValue: config.defaultStage ?: "eks-cfn-${vpcMode}-vpc", description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: "us-east-1", description: 'AWS region for deployment')
             booleanParam(name: 'BUILD_IMAGES', defaultValue: false, description: 'Build container images from source instead of using public images')
         }
@@ -14,7 +22,7 @@ def call(Map config = [:]) {
         options {
             // Acquire lock on a given deployment stage
             lock(label: params.STAGE, quantity: 1, variable: 'stage')
-            timeout(time: 2, unit: 'HOURS')
+            timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
         }
@@ -34,6 +42,25 @@ def call(Map config = [:]) {
                             echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
                         }
                         git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
+                    }
+                }
+            }
+
+            stage('Deploy Source Cluster') {
+                when { expression { isImportVpc } }
+                steps {
+                    timeout(time: 60, unit: 'MINUTES') {
+                        dir('test') {
+                            script {
+                                deployClustersStep(
+                                    stage: "${stage}",
+                                    region: "${params.REGION}",
+                                    clusterContextFilePath: "${clusterContextFilePath}",
+                                    sourceVer: "ES_7.10",
+                                    sourceClusterType: "OPENSEARCH_MANAGED_SERVICE"
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -58,27 +85,51 @@ def call(Map config = [:]) {
                     timeout(time: 30, unit: 'MINUTES') {
                         dir('deployment/migration-assistant-solution') {
                             script {
-                                env.STACK_NAME = "Migration-Assistant-Infra-Create-VPC-eks-${stage}-${params.REGION}"
+                                def templateName = isImportVpc ? "Migration-Assistant-Infra-Import-VPC-eks" : "Migration-Assistant-Infra-Create-VPC-eks"
+                                env.STACK_NAME = "${templateName}-${stage}-${params.REGION}"
                                 echo "Deploying CloudFormation stack: ${env.STACK_NAME} in region ${params.REGION}"
                                 
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh """
-                                            set -euo pipefail
-                                            aws cloudformation create-stack \
-                                              --stack-name "${env.STACK_NAME}" \
-                                              --template-body file://cdk.out/Migration-Assistant-Infra-Create-VPC-eks.template.json \
-                                              --parameters ParameterKey=Stage,ParameterValue=${stage} \
-                                              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-                                              --region "${params.REGION}"
+                                        if (isImportVpc) {
+                                            def clusterDetails = readJSON text: env.clusterDetailsJson
+                                            def sourceCluster = clusterDetails.source
+                                            sh """
+                                                set -euo pipefail
+                                                aws cloudformation create-stack \
+                                                  --stack-name "${env.STACK_NAME}" \
+                                                  --template-body file://cdk.out/${templateName}.template.json \
+                                                  --parameters ParameterKey=Stage,ParameterValue=${stage} \
+                                                               ParameterKey=VPCId,ParameterValue=${sourceCluster.vpcId} \
+                                                               ParameterKey=VPCSubnetIds,ParameterValue=\\"${sourceCluster.subnetIds}\\" \
+                                                  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+                                                  --region "${params.REGION}"
 
-                                            echo "Waiting for stack CREATE_COMPLETE..."
-                                            aws cloudformation wait stack-create-complete \
-                                              --stack-name "${env.STACK_NAME}" \
-                                              --region "${params.REGION}"
+                                                echo "Waiting for stack CREATE_COMPLETE..."
+                                                aws cloudformation wait stack-create-complete \
+                                                  --stack-name "${env.STACK_NAME}" \
+                                                  --region "${params.REGION}"
 
-                                            echo "CloudFormation stack ${env.STACK_NAME} is CREATE_COMPLETE."
-                                        """
+                                                echo "CloudFormation stack ${env.STACK_NAME} is CREATE_COMPLETE."
+                                            """
+                                        } else {
+                                            sh """
+                                                set -euo pipefail
+                                                aws cloudformation create-stack \
+                                                  --stack-name "${env.STACK_NAME}" \
+                                                  --template-body file://cdk.out/${templateName}.template.json \
+                                                  --parameters ParameterKey=Stage,ParameterValue=${stage} \
+                                                  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+                                                  --region "${params.REGION}"
+
+                                                echo "Waiting for stack CREATE_COMPLETE..."
+                                                aws cloudformation wait stack-create-complete \
+                                                  --stack-name "${env.STACK_NAME}" \
+                                                  --region "${params.REGION}"
+
+                                                echo "CloudFormation stack ${env.STACK_NAME} is CREATE_COMPLETE."
+                                            """
+                                        }
                                     }
                                 }
                                 echo "CloudFormation stack ${env.STACK_NAME} deployed successfully"
@@ -136,7 +187,7 @@ def call(Map config = [:]) {
         
         post {
             always {
-                timeout(time: 30, unit: 'MINUTES') {
+                timeout(time: 60, unit: 'MINUTES') {
                     script {
                         echo "Cleaning up CloudFormation stack: ${env.STACK_NAME}"
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
@@ -155,6 +206,14 @@ def call(Map config = [:]) {
 
                                     echo "CloudFormation stack ${env.STACK_NAME} has been deleted."
                                 """
+
+                                // Cleanup source cluster stacks if import-vpc mode
+                                if (isImportVpc) {
+                                    echo "Cleaning up source cluster CDK stacks..."
+                                    dir("${WORKSPACE}/test/amazon-opensearch-service-sample-cdk") {
+                                        sh "cdk destroy '*' --force --concurrency 3 || echo 'CDK destroy completed with warnings'"
+                                    }
+                                }
                             }
                         }
                         echo "CloudFormation cleanup completed"
