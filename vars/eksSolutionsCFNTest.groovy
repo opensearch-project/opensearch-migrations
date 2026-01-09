@@ -1,11 +1,11 @@
 def call(Map config = [:]) {
     // Config options:
-    //   vpcMode: 'create' (default) or 'import'
+    //   vpcMode: 'Create' (default) or 'Import'
     //   defaultStage: stage name default
     //   defaultGitUrl: git repo URL default
     //   defaultGitBranch: git branch default
-    def vpcMode = config.vpcMode ?: 'create'
-    def isImportVpc = (vpcMode == 'import')
+    def vpcMode = config.vpcMode ?: 'Create'
+    def isImportVpc = (vpcMode == 'Import')
     def clusterContextFilePath = "tmp/cluster-context-${currentBuild.number}.json"
 
     pipeline {
@@ -14,7 +14,7 @@ def call(Map config = [:]) {
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: config.defaultGitUrl ?: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: config.defaultGitBranch ?: 'main', description: 'Git branch to use for repository')
-            string(name: 'STAGE', defaultValue: config.defaultStage ?: "eks-cfn-${vpcMode}-vpc", description: 'Stage name for deployment environment')
+            string(name: 'STAGE', defaultValue: config.defaultStage ?: "Eks${vpcMode}Vpc", description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: "us-east-1", description: 'AWS region for deployment')
             booleanParam(name: 'BUILD_IMAGES', defaultValue: false, description: 'Build container images from source instead of using public images')
         }
