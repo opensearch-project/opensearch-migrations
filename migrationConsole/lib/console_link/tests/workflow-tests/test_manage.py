@@ -62,7 +62,7 @@ def make_app(tree_nodes=None, workflow_data=None, k8s_client=None):
     if k8s_client is None:
         k8s_client = Mock()
     
-    return WorkflowTreeApp(tree_nodes, workflow_data, k8s_client, 'test-wf', 'ma')
+    return WorkflowTreeApp(tree_nodes, workflow_data, k8s_client, 'test-wf', 'ma', 'http://localhost:2746')
 
 
 # --- Tests ---

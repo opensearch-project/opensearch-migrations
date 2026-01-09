@@ -47,12 +47,12 @@ os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, f"manage_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
 
 file_handler = logging.FileHandler(log_file)
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s'))
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - [%(threadName)s] - %(name)s - %(message)s'))
 
 # Redirect ALL logging to file
 root_logger = logging.getLogger()
 root_logger.addHandler(file_handler)
-root_logger.setLevel(logging.DEBUG)
+root_logger.setLevel(logging.INFO)
 # Remove any existing console handlers
 for handler in root_logger.handlers[:]:
     if isinstance(handler, logging.StreamHandler) and handler.stream in (sys.stdout, sys.stderr):
@@ -141,6 +141,11 @@ class WorkflowTreeApp(App):
         self.current_node_data = None
         self.tail_lines = 500
 
+        # Pod Resolution State
+        self._pod_name_cache = {}
+        self._pod_resolution_in_progress = set()
+        self._is_exiting = False
+
     def compose(self) -> ComposeResult:
         yield Header()
         yield Container(Tree("Workflow Steps", id="workflow-tree"), id="tree-container")
@@ -148,12 +153,108 @@ class WorkflowTreeApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        logger.addHandler(file_handler)
         tree = self.query_one("#workflow-tree", Tree)
         self._populate_tree(tree, self.tree_nodes, tree.root)
         tree.root.expand_all()
         self._update_dynamic_bindings()
+
+        # Seed cache and start crawler
+        self.run_worker(self._bulk_resolve_pods, thread=True, name="bulk_pod_resolve")
+        self._speculative_pod_resolution(self.tree_nodes)
+
         self.set_interval(3.0, self.action_refresh)
+
+    def on_unmount(self) -> None:
+        self._is_exiting = True
+
+    # --- Pod Resolution Logic ---
+    def _bulk_resolve_pods(self) -> None:
+        """Seed cache using a single K8s list call with granular trace logging."""
+        try:
+            logger.info(f"STARTING bulk pod resolution for workflow: {self.workflow_name}")
+
+            # Explicit timeout to prevent the 'hanging' you noticed earlier
+            pods = self.k8s_client.list_namespaced_pod(
+                namespace=self.namespace,
+                label_selector=f"workflows.argoproj.io/workflow={self.workflow_name}",
+                _request_timeout=30
+            )
+
+            if not pods or pods.items is None:
+                logger.warning("Bulk resolve: K8s API returned a successful response but items list is None.")
+                return
+
+            found_names = [p.metadata.name for p in pods.items if p.metadata]
+            logger.debug(f"K8s API found {len(found_names)} pods: {found_names}")
+
+            count = 0
+            for pod in pods.items:
+                metadata = getattr(pod, 'metadata', None)
+                if metadata is None:
+                    logger.debug("Bulk resolve: Encountered pod object with NO metadata field.")
+                    continue
+
+                pod_name = getattr(metadata, 'name', 'unknown-pod')
+
+                annotations = getattr(metadata, 'annotations', None)
+                if annotations is None:
+                    logger.debug(f"Bulk resolve: Pod '{pod_name}' has metadata but annotations is None.")
+                    continue
+
+                node_id = annotations.get('workflows.argoproj.io/node-id')
+                if node_id:
+                    self._pod_name_cache[node_id] = pod_name
+                    count += 1
+                else:
+                    logger.debug(f"Bulk resolve: Pod '{pod_name}' is missing the node-id annotation.")
+
+            logger.info(f"Bulk resolve FINISHED. Successfully cached {count} pod names.")
+            self.call_from_thread(self._update_pod_status)
+
+        except Exception as e:
+            # logger.exception provides a full stack trace to the log file
+            logger.exception(f"Bulk resolution worker failed: {str(e)}")
+
+    def _resolve_pod_worker(self, node: Dict) -> Optional[str]:
+        """Persistent worker that polls K8s until the pod name is found."""
+        node_id = node['id']
+        logger.debug(f"Worker [{node_id}] starting persistent poll.")
+
+        for attempt in range(300):
+            if self._is_exiting:
+                return None
+            try:
+                # Calling your helper which searches for the specific node-id
+                pod_name = _find_pod_by_node_id(self.k8s_client, self.namespace, self.workflow_name, node_id, node, None)
+                if pod_name:
+                    logger.info(f"Worker [{node_id}] RESOLVED to pod: {pod_name}")
+                    return pod_name
+            except Exception as e:
+                # Log the error every 10 seconds so you can see why it's failing
+                if attempt % 10 == 0:
+                    logger.warning(f"Worker [{node_id}] attempt {attempt} error: {str(e)}")
+
+            time.sleep(1.0)
+
+        logger.warning(f"Worker [{node_id}] GAVE UP after 300 seconds.")
+        return None
+
+    def _speculative_pod_resolution(self, nodes: List[Dict]) -> None:
+        """Recursive crawler to kick off workers for new pods."""
+        for node in nodes:
+            node_id = node.get('id')
+            if (node.get('type') == NODE_TYPE_POD and
+                    node_id not in self._pod_name_cache and
+                    node_id not in self._pod_resolution_in_progress):
+
+                self._pod_resolution_in_progress.add(node_id)
+                self.run_worker(
+                    lambda n=node: self._resolve_pod_worker(n),
+                    thread=True,
+                    name=f"pod_resolve_{node_id}"
+                )
+            if node.get('children'):
+                self._speculative_pod_resolution(node['children'])
 
     # --- Event Handlers ---
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
@@ -218,12 +319,10 @@ class WorkflowTreeApp(App):
 
     def action_copy_pod_name(self) -> None:
         if not (self.current_node_data and self.current_node_data.get('type') == NODE_TYPE_POD): return
-        try:
-            pod_name = _find_pod_by_node_id(self.k8s_client, self.namespace, self.workflow_name, self.current_node_data['id'], self.current_node_data, None)
-            if pod_name and copy_to_clipboard(pod_name):
-                self.notify(f"📋 Copied: {pod_name}", title="Clipboard", severity="information", timeout=3)
-            else: self.notify("❌ Clipboard copy failed", severity="error")
-        except Exception as e: self.notify(f"❌ Error: {str(e)}", severity="error")
+        pod_name = self._pod_name_cache.get(self.current_node_data['id'])
+        if pod_name and copy_to_clipboard(pod_name):
+            self.notify(f"📋 Copied: {pod_name}", title="Clipboard", severity="information", timeout=3)
+        else: self.notify("❌ Pod name not resolved yet", severity="error")
 
     def action_approve_step(self) -> None:
         node = self.current_node_data
@@ -265,7 +364,15 @@ class WorkflowTreeApp(App):
     def on_worker_state_changed(self, event) -> None:
         if not event.worker.is_finished: return
         name = event.worker.name or ""
-        if name.startswith("live_check_"):
+
+        if name.startswith("pod_resolve_"):
+            node_id = name.replace("pod_resolve_", "")
+            self._pod_resolution_in_progress.discard(node_id)
+            if pod_name := event.worker.result:
+                self._pod_name_cache[node_id] = pod_name
+                if self.current_node_data and self.current_node_data.get('id') == node_id:
+                    self._update_pod_status()
+        elif name.startswith("live_check_"):
             self._update_live_check_result(name.replace("live_check_", ""), event.worker.result)
         elif name == "refresh_worker":
             result, new_data = event.worker.result
@@ -287,13 +394,19 @@ class WorkflowTreeApp(App):
                 self.node_mapping.clear()
                 self.nodes_with_live_checks.clear()
                 self.live_check_in_progress.clear()
+                self._pod_name_cache.clear()
+                self._pod_resolution_in_progress.clear()
                 self._populate_tree(tree, new_nodes, tree.root)
                 tree.root.expand_all()
+                self.run_worker(self._bulk_resolve_pods, thread=True, name="bulk_pod_resolve")
             else:
                 self._update_tree_recursive(tree.root, new_nodes, new_data)
 
             self.workflow_data = new_data
             self.tree_nodes = new_nodes
+
+            # speculatively resolve any new pods appearing
+            self._speculative_pod_resolution(new_nodes)
 
             # Find the active edge per branch: latest node that hasn't succeeded yet in each branch
             latest_active_ids = self._get_latest_pod_ids_per_branch(new_nodes)
@@ -325,13 +438,14 @@ class WorkflowTreeApp(App):
         if not node or node.get('type') != NODE_TYPE_POD:
             status.update("")
             return
-        try:
-            pod_name = node.get('pod_name')
-            if not pod_name:
-                pod_name = _find_pod_by_node_id(self.k8s_client, self.namespace, self.workflow_name, node['id'], node, None)
-                if pod_name: node['pod_name'] = pod_name
-            status.update(f"Pod: {pod_name or '(unknown)'}")
-        except Exception: status.update("Pod: (error)")
+
+        node_id = node['id']
+        if node_id in self._pod_name_cache:
+            status.update(f"Pod: [bold green]{self._pod_name_cache[node_id]}[/]")
+        elif node_id in self._pod_resolution_in_progress:
+            status.update(f"Pod: [italic yellow]Resolving...[/]")
+        else:
+            status.update(f"Pod: [gray]({node.get('phase', 'Pending')})[/]")
 
     def _update_tree_recursive(self, parent_tree_node, new_nodes: List[Dict], workflow_data: Dict) -> None:
         existing_children = {child.data['id']: child for child in parent_tree_node.children if child.data and 'id' in child.data and not child.data.get('is_ephemeral')}
@@ -368,7 +482,14 @@ class WorkflowTreeApp(App):
     def _show_logs_in_pager(self, node_data: Dict) -> None:
         temp_path = None
         try:
-            pod_name = _find_pod_by_node_id(self.k8s_client, self.namespace, self.workflow_name, node_data['id'], node_data, None)
+            pod_name = self._pod_name_cache.get(node_data['id'])
+            if not pod_name:
+                pod_name = _find_pod_by_node_id(self.k8s_client, self.namespace, self.workflow_name, node_data['id'], node_data, None)
+
+            if not pod_name:
+                self.notify("Pod name not resolved", severity="warning")
+                return
+
             logs = self._get_pod_logs(pod_name)
             with tempfile.NamedTemporaryFile(mode='w', suffix='.log', delete=False) as f:
                 f.write(f"=== Logs: {node_data['display_name']} ===\nPod: {pod_name}\n\n{logs}")
@@ -417,14 +538,12 @@ class WorkflowTreeApp(App):
                         def collect(node):
                             if node.get('type') == NODE_TYPE_POD and node.get('phase') != PHASE_SUCCEEDED:
                                 all_pods.append(node)
-                            for c in node.get('children', []):
-                                collect(c)
+                            for c in node.get('children', []): collect(c)
                         collect(branch)
                         if all_pods:
                             latest = max(all_pods, key=lambda p: (p.get('started_at') or '', p.get('id', '')))
                             latest_ids.add(latest.get('id'))
-                elif children:
-                    find_branches(children)
+                elif children: find_branches(children)
         find_branches(nodes)
         return latest_ids
 
