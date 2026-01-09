@@ -13,7 +13,6 @@ import org.opensearch.migrations.bulkload.common.RfsDocumentOperation;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 
 import lombok.extern.slf4j.Slf4j;
-import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
@@ -28,7 +27,7 @@ public class LuceneReader {
        If the startSegmentIndex is 0, it will start from the first segment.
        If the startDocId is 0, it will start from the first document in the segment.
      */
-    static Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId) {
+    public static Flux<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId) {
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)

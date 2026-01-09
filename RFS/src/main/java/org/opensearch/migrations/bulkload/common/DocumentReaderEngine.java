@@ -8,13 +8,17 @@ import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 import reactor.core.publisher.Flux;
 
 public interface DocumentReaderEngine {
+
+    @SuppressWarnings("java:S100") // Record component accessors are valid method names
+    record DocumentsResult(Flux<RfsLuceneDocument> deletions, Flux<RfsLuceneDocument> additions, Runnable cleanup) {}
+
     SnapshotShardUnpacker createUnpacker(
         SnapshotShardUnpacker.Factory unpackerFactory,
         String indexName,
         int shardNumber
     );
 
-    Flux<RfsLuceneDocument> readDocuments(
+    DocumentsResult readDocuments(
         LuceneIndexReader reader,
         String indexName,
         int shardNumber,

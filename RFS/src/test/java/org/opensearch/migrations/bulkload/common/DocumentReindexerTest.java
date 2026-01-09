@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.bulkload.common.DocumentReaderEngine.DocumentsResult;
 import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -68,7 +69,7 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index",  documentStream, mockContext))
+        StepVerifier.create(documentReindexer.reindex("test-index", new DocumentsResult(Flux.empty(), documentStream, () -> {}), mockContext))
             .expectNextCount(3)
             .expectNext(new WorkItemCursor(10))
             .thenRequest(4)
@@ -107,7 +108,7 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+        StepVerifier.create(documentReindexer.reindex("test-index", new DocumentsResult(Flux.empty(), documentStream, () -> {}), mockContext))
         .expectNextCount(4)
         .expectNext(new WorkItemCursor(5))
         .thenRequest(5)
@@ -155,7 +156,7 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+        StepVerifier.create(documentReindexer.reindex("test-index", new DocumentsResult(Flux.empty(), documentStream, () -> {}), mockContext))
             .expectNext(new WorkItemCursor(1))
             .thenRequest(5)
             .verifyComplete();
@@ -190,7 +191,7 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+        StepVerifier.create(documentReindexer.reindex("test-index", new DocumentsResult(Flux.empty(), documentStream, () -> {}), mockContext))
             .expectNext(new WorkItemCursor(1))
             .thenRequest(1)
             .verifyComplete();
@@ -220,7 +221,7 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+        StepVerifier.create(documentReindexer.reindex("test-index", new DocumentsResult(Flux.empty(), documentStream, () -> {}), mockContext))
             .expectNext(new WorkItemCursor(1))
             .thenRequest(1)
             .verifyComplete();
@@ -257,7 +258,7 @@ class DocumentReindexerTest {
                     .doOnTerminate(concurrentRequests::decrementAndGet);
             });
 
-        StepVerifier.create(concurrentReindexer.reindex("test-index", documentStream, mockContext))
+        StepVerifier.create(concurrentReindexer.reindex("test-index", new DocumentsResult(Flux.empty(), documentStream, () -> {}), mockContext))
             .expectNextCount(99)
             .expectNext(new WorkItemCursor(100))
             .thenRequest(100)
@@ -301,7 +302,7 @@ class DocumentReindexerTest {
                 });
 
         // Execute the reindexing process
-        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+        StepVerifier.create(documentReindexer.reindex("test-index", new DocumentsResult(Flux.empty(), documentStream, () -> {}), mockContext))
             .expectNext(new WorkItemCursor(1))
             .thenRequest(1)
             .verifyComplete();

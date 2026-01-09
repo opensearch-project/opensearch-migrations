@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.bulkload.common.DocumentReaderEngine.DocumentsResult;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient.BulkResponse;
@@ -112,7 +113,7 @@ public class PerformanceVerificationTest {
 
         // Start reindexing in a separate thread
         Thread reindexThread = new Thread(() -> {
-            reindexer.reindex("test-index", documentsStream, mockContext).then().block();
+            reindexer.reindex("test-index", new DocumentsResult(Flux.empty(), documentsStream, () -> {}), mockContext).then().block();
         });
         reindexThread.start();
 
