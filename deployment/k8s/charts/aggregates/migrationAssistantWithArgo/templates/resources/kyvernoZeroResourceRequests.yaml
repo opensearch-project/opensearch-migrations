@@ -16,7 +16,7 @@ data:
       annotations:
         policies.kyverno.io/title: Zero Resource Requests for Dev
         policies.kyverno.io/description: >-
-          Sets resource requests to 0 for dev environments.
+          Removes resource requests/limits for dev environments.
     spec:
       rules:
         - name: zero-container-resources
@@ -27,7 +27,7 @@ data:
                     - Pod
           preconditions:
             any:
-              - key: "{{`{{ request.object.spec.serviceAccountName || '' }}`}}" # Backticks escape Helm, inner braces are Kyverno JMESPath
+              - key: "{{`{{ request.object.spec.serviceAccountName || '' }}`}}"
                 operator: In
                 value:
                   - migration-console-access-role
@@ -39,16 +39,22 @@ data:
                   metadata:
                     annotations:
                       kyverno.io/mutated-by: "zero-resource-requests"
-                      kyverno.io/original-cpu-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.cpu || 'none' }}`}}"
-                      kyverno.io/original-memory-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.memory || 'none' }}`}}"
+                      kyverno.io/original-requests-cpu-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.cpu || 'none' }}`}}"
+                      kyverno.io/original-requests-memory-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.memory || 'none' }}`}}"
+                      kyverno.io/original-limits-cpu-{{`{{ element.name }}`}}: "{{`{{ element.resources.limits.cpu || 'none' }}`}}"
+                      kyverno.io/original-limits-memory-{{`{{ element.name }}`}}: "{{`{{ element.resources.limits.memory || 'none' }}`}}"
                   spec:
                     containers:
                       - name: "{{`{{ element.name }}`}}"
                         resources:
                           requests:
-                            cpu: "0"
-                            memory: "0"
-                            ephemeral-storage: "0"
+                            cpu: null
+                            memory: null
+                            ephemeral-storage: null
+                          limits:
+                            cpu: null
+                            memory: null
+                            ephemeral-storage: null
         - name: zero-init-container-resources
           match:
             any:
@@ -71,17 +77,22 @@ data:
                 patchStrategicMerge:
                   metadata:
                     annotations:
-                      kyverno.io/mutated-by: "zero-resource-requests"
-                      kyverno.io/original-init-cpu-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.cpu || 'none' }}`}}"
-                      kyverno.io/original-init-memory-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.memory || 'none' }}`}}"
+                      kyverno.io/original-init-requests-cpu-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.cpu || 'none' }}`}}"
+                      kyverno.io/original-init-requests-memory-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.memory || 'none' }}`}}"
+                      kyverno.io/original-init-limits-cpu-{{`{{ element.name }}`}}: "{{`{{ element.resources.limits.cpu || 'none' }}`}}"
+                      kyverno.io/original-init-limits-memory-{{`{{ element.name }}`}}: "{{`{{ element.resources.limits.memory || 'none' }}`}}"
                   spec:
                     initContainers:
                       - name: "{{`{{ element.name }}`}}"
                         resources:
                           requests:
-                            cpu: "0"
-                            memory: "0"
-                            ephemeral-storage: "0"
+                            cpu: null
+                            memory: null
+                            ephemeral-storage: null
+                          limits:
+                            cpu: null
+                            memory: null
+                            ephemeral-storage: null
 ---
 apiVersion: batch/v1
 kind: Job

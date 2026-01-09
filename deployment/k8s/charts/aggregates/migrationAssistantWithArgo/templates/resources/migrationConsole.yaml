@@ -17,7 +17,7 @@ rules:
     resources: ["pods/attach"]
     verbs: ["create", "get"]
   - apiGroups: [ "apps" ]
-    resources: ["deployments", "deployments/scale"]
+    resources: ["deployments", "deployments/scale", "statefulsets"]
     verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
   - apiGroups: ["argoproj.io"]
     resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]

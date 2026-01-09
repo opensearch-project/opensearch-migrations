@@ -34,7 +34,7 @@ spec:
               set -e
 
               {{ include "migration.helmUninstallFunctions" . | nindent 14 }}
-              # Skip fluent-bit (logging), kyverno handled at end of uninstall_charts
+              # Skip fluent-bit (logging); kyverno handled at end of uninstall_charts
               uninstall_charts fluent-bit
 
 ---

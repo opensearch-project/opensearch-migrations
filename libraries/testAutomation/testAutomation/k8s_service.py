@@ -73,11 +73,18 @@ class K8sService:
         )
 
     def _is_pod_ready(self, pod: V1Pod) -> bool:
-        """Checks if a pod is in a Ready state."""
-        for condition in pod.status.conditions or []:
-            if condition.type == "Ready" and condition.status == "True":
-                return True
-        return False
+        """Checks if pod is Running and all containers are ready."""
+        if pod.status.phase != "Running":
+            return False
+        # Check all init containers completed
+        for status in pod.status.init_container_statuses or []:
+            if not status.ready and not (status.state and status.state.terminated):
+                return False
+        # Check all containers ready
+        for status in pod.status.container_statuses or []:
+            if not status.ready:
+                return False
+        return True
 
     def get_migration_console_pod_id(self) -> str:
         logger.debug("Retrieving the latest migration console pod...")
@@ -100,19 +107,28 @@ class K8sService:
         printable_cmd = " ".join(command_list)
         logger.info(f"Executing command [{printable_cmd}] in pod: {console_pod_id}")
 
-        # Open a streaming connection
-        resp = stream.stream(
-            self.k8s_client.connect_get_namespaced_pod_exec,
-            console_pod_id,
-            self.namespace,
-            command=command_list,
-            container="console",
-            stderr=True,
-            stdin=False,
-            stdout=True,
-            tty=False,
-            _preload_content=(not unbuffered)  # Allow printing as output comes in
-        )
+        # Retry exec in case container isn't fully ready for connections yet
+        import time
+        for attempt in range(5):
+            try:
+                resp = stream.stream(
+                    self.k8s_client.connect_get_namespaced_pod_exec,
+                    console_pod_id,
+                    self.namespace,
+                    command=command_list,
+                    container="console",
+                    stderr=True,
+                    stdin=False,
+                    stdout=True,
+                    tty=False,
+                    _preload_content=(not unbuffered)
+                )
+                break
+            except Exception:
+                if attempt < 4:
+                    time.sleep(2)
+                else:
+                    raise
 
         if unbuffered:
             # Read from the stream while it is open
@@ -208,16 +224,18 @@ class K8sService:
     def wait_for_pods_terminated(self, timeout_seconds: int = 60) -> None:
         """Wait for all pods in namespace to terminate."""
         import time
-        start = time.time()
-        while time.time() - start < timeout_seconds:
+        deadline = time.time() + timeout_seconds
+        while True:
             result = self.run_command(
                 ["kubectl", "get", "pods", "-n", self.namespace, "-o", "name"],
                 ignore_errors=True
             )
             if not result or not result.stdout.strip():
                 return
+            if time.time() >= deadline:
+                break
             time.sleep(2)
-        logger.warning(f"Timeout waiting for pods to terminate in namespace '{self.namespace}'")
+        logger.warning(f"Timeout waiting for pods to terminate in {self.namespace}")
 
     def delete_namespace(self) -> None:
         logger.info(f"Deleting namespace '{self.namespace}'")
