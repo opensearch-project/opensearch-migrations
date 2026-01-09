@@ -43,7 +43,7 @@ public class RegularDocumentReaderEngine implements DocumentReaderEngine {
     }
 
     @Override
-    public DocumentsResult readDocuments(
+    public DocumentChangeset prepareChangeset(
         LuceneIndexReader reader,
         String indexName,
         int shardNumber,
@@ -52,7 +52,7 @@ public class RegularDocumentReaderEngine implements DocumentReaderEngine {
     ) throws IOException {
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexName, shardNumber);
         var directoryReader = reader.getReader(shardMetadata.getSegmentFileName());
-        return new DocumentsResult(
+        return new DocumentChangeset(
             Flux.empty(),
             LuceneReader.readDocsByLeavesFromStartingPosition(directoryReader, startingDocId),
             LuceneDirectoryReader.getCleanupRunnable(directoryReader)

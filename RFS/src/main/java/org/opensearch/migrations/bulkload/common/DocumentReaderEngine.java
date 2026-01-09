@@ -10,7 +10,7 @@ import reactor.core.publisher.Flux;
 public interface DocumentReaderEngine {
 
     @SuppressWarnings("java:S100") // Record component accessors are valid method names
-    record DocumentsResult(Flux<RfsLuceneDocument> deletions, Flux<RfsLuceneDocument> additions, Runnable cleanup) {}
+    record DocumentChangeset(Flux<LuceneDocumentChange> deletions, Flux<LuceneDocumentChange> additions, Runnable cleanup) {}
 
     SnapshotShardUnpacker createUnpacker(
         SnapshotShardUnpacker.Factory unpackerFactory,
@@ -18,7 +18,7 @@ public interface DocumentReaderEngine {
         int shardNumber
     );
 
-    DocumentsResult readDocuments(
+    DocumentChangeset prepareChangeset(
         LuceneIndexReader reader,
         String indexName,
         int shardNumber,

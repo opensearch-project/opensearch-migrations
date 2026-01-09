@@ -151,7 +151,7 @@ public class DocumentsRunner {
 
         // Get the root context from the DocumentReindexContext
         var rootContext = ((DocumentMigrationContexts.BaseDocumentMigrationContext) context).getRootInstrumentationScope();
-        var documents = documentReaderEngine.readDocuments(
+        var documents = documentReaderEngine.prepareChangeset(
             reader,
             workItem.getIndexName(),
             workItem.getShardNumber(),

@@ -9,7 +9,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.bulkload.common.DocumentReaderEngine.DocumentsResult;
+import org.opensearch.migrations.bulkload.common.DocumentReaderEngine.DocumentChangeset;
 import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts.IDocumentReindexContext;
@@ -59,14 +59,14 @@ public class DocumentReindexer {
         this.allowlist = allowlist;
     }
 
-    public Flux<WorkItemCursor> reindex(String indexName, DocumentsResult documents, IDocumentReindexContext context) {
+    public Flux<WorkItemCursor> reindex(String indexName, DocumentChangeset documents, IDocumentReindexContext context) {
         // Process deletions first, then additions, cleanup always runs at the end
         return reindexStream(indexName, documents.deletions(), context)
             .thenMany(reindexStream(indexName, documents.additions(), context))
             .doFinally(s -> documents.cleanup().run());
     }
 
-    private Flux<WorkItemCursor> reindexStream(String indexName, Flux<RfsLuceneDocument> documentStream, IDocumentReindexContext context) {
+    private Flux<WorkItemCursor> reindexStream(String indexName, Flux<LuceneDocumentChange> documentStream, IDocumentReindexContext context) {
         // Create executor with hook for threadSafeTransformer cleaner
         AtomicInteger id = new AtomicInteger();
         int transformationParallelizationFactor = Runtime.getRuntime().availableProcessors();
@@ -107,7 +107,7 @@ public class DocumentReindexer {
     }
 
     @SneakyThrows
-    List<RfsDocument> transformDocumentBatch(IJsonTransformer transformer, List<RfsLuceneDocument> docs, String indexName) {
+    List<RfsDocument> transformDocumentBatch(IJsonTransformer transformer, List<LuceneDocumentChange> docs, String indexName) {
         var originalDocs = docs.stream().map(doc ->
                         RfsDocument.fromLuceneDocument(doc, indexName))
                 .collect(Collectors.toList());

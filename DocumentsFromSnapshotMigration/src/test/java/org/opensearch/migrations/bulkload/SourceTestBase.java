@@ -30,9 +30,9 @@ import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
+import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
-import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
@@ -359,7 +359,7 @@ public class SourceTestBase {
                 .addArgument(workItemId).log();
             shouldThrow.set(true);
         })) {
-            UnaryOperator<RfsLuceneDocument> terminatingDocumentFilter = d -> {
+            UnaryOperator<LuceneDocumentChange> terminatingDocumentFilter = d -> {
                 if (shouldThrow.get()) {
                     throw new LeasePastError();
                 }
@@ -381,8 +381,8 @@ public class SourceTestBase {
             var readerFactory = spy(new LuceneIndexReader.Factory(sourceResourceProvider));
             when(readerFactory.getReader(any())).thenAnswer(inv -> {
                 var reader = (LuceneIndexReader)spy(inv.callRealMethod());
-                when(reader.readDocuments(any())).thenAnswer(inv2 -> {
-                    var flux = (Flux<RfsLuceneDocument>)inv2.callRealMethod();
+                when(reader.streamDocumentChanges(any())).thenAnswer(inv2 -> {
+                    var flux = (Flux<LuceneDocumentChange>)inv2.callRealMethod();
                     return flux.map(terminatingDocumentFilter);
                 });
                 return reader;

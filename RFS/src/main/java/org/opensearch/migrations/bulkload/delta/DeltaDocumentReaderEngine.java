@@ -10,7 +10,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentReaderEngine;
-import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
@@ -55,7 +55,7 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
 
 
     @Override
-    public DocumentsResult readDocuments(
+    public DocumentChangeset prepareChangeset(
         LuceneIndexReader reader,
         String indexName,
         int shardNumber,
@@ -74,17 +74,17 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
                 previousReader, currentReader, startingDocId, rootContext);
 
             var deletions = switch (deltaMode) {
-                case UPDATES_ONLY -> Flux.<RfsLuceneDocument>empty();
+                case UPDATES_ONLY -> Flux.<LuceneDocumentChange>empty();
                 case UPDATES_AND_DELETES, DELETES_ONLY -> deltaResult.deletions;
             };
             var additions = switch (deltaMode) {
-                case DELETES_ONLY -> Flux.<RfsLuceneDocument>empty();
+                case DELETES_ONLY -> Flux.<LuceneDocumentChange>empty();
                 case UPDATES_ONLY, UPDATES_AND_DELETES -> deltaResult.additions;
             };
-            return new DocumentsResult(deletions, additions, LuceneDirectoryReader.getCleanupRunnable(previousReader, currentReader));
+            return new DocumentChangeset(deletions, additions, LuceneDirectoryReader.getCleanupRunnable(previousReader, currentReader));
         } catch (Exception e) {
             log.atError()
-                .setMessage("Exception during delta readDocuments")
+                .setMessage("Exception during delta prepareChangeset")
                 .setCause(e)
                 .log();
             LuceneDirectoryReader.getCleanupRunnable(previousReader, currentReader).run();
