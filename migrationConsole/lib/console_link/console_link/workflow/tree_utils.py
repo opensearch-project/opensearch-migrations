@@ -139,7 +139,7 @@ def get_step_status_output(workflow_data: Dict[str, Any], node_id: str) -> Optio
         parameters = outputs.get("parameters", [])
         for param in parameters:
             if param.get("name") == "statusOutput":
-                logger.info(f"Found statusOutput in node {current_node_id}: {param.get('value')}")
+                logger.debug(f"Found statusOutput in node {current_node_id}: {param.get('value')}")
                 return param.get("value")
         
         # Check children

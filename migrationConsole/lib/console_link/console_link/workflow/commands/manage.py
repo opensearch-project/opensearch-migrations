@@ -1,5 +1,8 @@
 """Interactive manage command for workflow CLI - interactive tree navigation for log viewing."""
 import datetime
+import gc
+import ijson
+import json
 import logging
 import os
 import platform
@@ -25,15 +28,23 @@ from ..models.utils import ExitCode
 from ..services.workflow_service import WorkflowService
 from ..tree_utils import (
     build_nested_workflow_tree,
+    clean_display_name,
     filter_tree_nodes,
     get_node_input_parameter,
     get_step_rich_label,
     get_step_status_output,
 )
-from .output import _find_pod_by_node_id, _initialize_k8s_client
+from .output import _initialize_k8s_client
 from .status import ConfigConverter, StatusCheckRunner
 from .utils import auto_detect_workflow
 from console_link.environment import Environment
+
+import psutil
+
+def log_mem(context: str):
+    process = psutil.Process(os.getpid())
+    mem = process.memory_info().rss / 1024 / 1024
+    logger.info(f"MEMORY [{context}]: {mem:.2f} MB")
 
 # --- Constants ---
 NODE_TYPE_POD = "Pod"
@@ -125,6 +136,7 @@ class WorkflowTreeApp(App):
     BINDINGS = []
     def __init__(self, tree_nodes: List[Dict], workflow_data: Dict, k8s_client, name: str, ns: str, argo_server: str):
         super().__init__()
+        log_mem("App Init Start")
         self.title = f"[{ns}] {name}"
         self.tree_nodes = tree_nodes
         self.workflow_data = workflow_data
@@ -147,6 +159,7 @@ class WorkflowTreeApp(App):
         self._is_exiting = False
         # Track the unique ID of the current workflow run to prevent stale worker updates
         self._current_run_id = workflow_data.get('status', {}).get('startedAt')
+        log_mem("App Init Complete")
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -167,55 +180,78 @@ class WorkflowTreeApp(App):
         self.set_interval(3.0, self.action_refresh)
 
     def on_unmount(self) -> None:
+        logger.info("App unmounting - setting exit flag")
         self._is_exiting = True
+        active_workers = [w for w in self.workers if not w.is_finished]
+        logger.info(f"Outstanding workers at exit: {len(active_workers)} - {[w.name for w in active_workers]}")
 
     # --- Pod Resolution Logic ---
-    def _bulk_resolve_pods(self) -> None:
-        """Seed cache using a single K8s list call with granular trace logging."""
-        try:
-            logger.info(f"STARTING bulk pod resolution for workflow: {self.workflow_name}")
+    def _fetch_workflow_pods_metadata(self, workflow_name: str) -> list[dict]:
+        """
+        High-performance fetch of pod metadata for a specific workflow.
+        Returns a list of raw pod metadata dictionaries.
+        """
+        headers = {'Accept': 'application/json;as=PartialObjectMetadataList;v=v1;g=meta.k8s.io'}
+        params = [
+            ('labelSelector', f"workflows.argoproj.io/workflow={workflow_name}"),
+            ('resourceVersion', '0')
+        ]
 
-            # Explicit timeout to prevent the 'hanging' you noticed earlier
-            pods = self.k8s_client.list_namespaced_pod(
-                namespace=self.namespace,
-                label_selector=f"workflows.argoproj.io/workflow={self.workflow_name}",
-                _request_timeout=30
+        try:
+            # Requesting metadata-only and bypassing class deserialization
+            response_tuple = self.k8s_client.api_client.call_api(
+                f'/api/v1/namespaces/{self.namespace}/pods', 'GET',
+                header_params=headers,
+                query_params=params,
+                _preload_content=False,
+                _request_timeout=10
             )
 
-            if not pods or pods.items is None:
-                logger.warning("Bulk resolve: K8s API returned a successful response but items list is None.")
-                return
-
-            found_names = [p.metadata.name for p in pods.items if p.metadata]
-            logger.debug(f"K8s API found {len(found_names)} pods: {found_names}")
-
-            count = 0
-            for pod in pods.items:
-                metadata = getattr(pod, 'metadata', None)
-                if metadata is None:
-                    logger.debug("Bulk resolve: Encountered pod object with NO metadata field.")
-                    continue
-
-                pod_name = getattr(metadata, 'name', 'unknown-pod')
-
-                annotations = getattr(metadata, 'annotations', None)
-                if annotations is None:
-                    logger.debug(f"Bulk resolve: Pod '{pod_name}' has metadata but annotations is None.")
-                    continue
-
-                node_id = annotations.get('workflows.argoproj.io/node-id')
-                if node_id:
-                    self._pod_name_cache[node_id] = pod_name
-                    count += 1
-                else:
-                    logger.debug(f"Bulk resolve: Pod '{pod_name}' is missing the node-id annotation.")
-
-            logger.info(f"Bulk resolve FINISHED. Successfully cached {count} pod names.")
-            self.call_from_thread(self._update_pod_status)
+            response_object = response_tuple[0]
+            try:
+                data = json.loads(response_object.read())
+                return data.get('items', [])
+            finally:
+                response_object.close()
 
         except Exception as e:
-            # logger.exception provides a full stack trace to the log file
-            logger.exception(f"Bulk resolution worker failed: {str(e)}")
+            logger.error(f"Failed to fetch pod metadata for {workflow_name}: {e}")
+            return []
+
+    def _bulk_resolve_pods(self) -> None:
+        """Seed cache using the shared metadata helper."""
+        logger.info(f"STARTING bulk pod resolution for: {self.workflow_name}")
+
+        items = self._fetch_workflow_pods_metadata(self.workflow_name)
+        count = 0
+
+        for pod in items:
+            metadata = pod.get('metadata', {})
+            name = metadata.get('name')
+            node_id = metadata.get('annotations', {}).get('workflows.argoproj.io/node-id')
+
+            if node_id and name:
+                self._pod_name_cache[node_id] = name
+                count += 1
+
+        logger.info(f"Bulk resolve FINISHED. Cached {count} pods.")
+        self.call_from_thread(self._update_pod_status)
+
+    def _find_pod_by_node_id(self, node_id, selected_node, ctx):
+        """Find a specific pod by node-id using the shared metadata helper."""
+        click.echo(f"Searching for pod with node-id: {node_id}...", nl=False)
+
+        items = self._fetch_workflow_pods_metadata(self.workflow_name)
+
+        for pod in items:
+            metadata = pod.get('metadata', {})
+            annotations = metadata.get('annotations', {})
+
+            if annotations.get('workflows.argoproj.io/node-id') == node_id:
+                click.echo(" Found.")
+                return metadata.get('name')
+
+        return None # Failure
 
     def _resolve_pod_worker(self, node: Dict, run_id: str) -> Tuple[str, Optional[str], str]:
         """
@@ -223,18 +259,22 @@ class WorkflowTreeApp(App):
         Returns (node_id, pod_name, run_id) to the main thread.
         """
         node_id = node['id']
-        for _ in range(300):
-            if self._is_exiting or self._current_run_id != run_id:
-                return node_id, None, run_id
-            try:
-                # API call is thread-safe, but its result is returned rather than stored here
-                pod_name = _find_pod_by_node_id(self.k8s_client, self.namespace, self.workflow_name, node_id, node, None)
-                if pod_name:
-                    return node_id, pod_name, run_id
-            except Exception:
-                pass
-            time.sleep(1.0)
-        return node_id, None, run_id
+        logger.info(f"WORKER START: pod_resolve_{node_id}")
+        try:
+            for _ in range(300):
+                if self._is_exiting or self._current_run_id != run_id:
+                    return node_id, None, run_id
+                try:
+                    # API call is thread-safe, but its result is returned rather than stored here
+                    pod_name = _find_pod_by_node_id(self.k8s_client, self.namespace, self.workflow_name, node_id, node, None)
+                    if pod_name:
+                        return node_id, pod_name, run_id
+                except Exception:
+                    pass
+                time.sleep(1.0)
+            return node_id, None, run_id
+        finally:
+            logger.info(f"WORKER END: pod_resolve_{node_id}")
 
     def _speculative_pod_resolution(self, nodes: List[Dict]) -> None:
         """Kicks off workers. State check happens on the main thread."""
@@ -354,10 +394,13 @@ class WorkflowTreeApp(App):
 
     # --- Data Fetching & Workers ---
     def _fetch_workflow_data(self) -> Tuple[Dict, Dict]:
+        logger.info("WORKER START: refresh_worker")
         try:
             return _get_workflow_data_internal(WorkflowService(), self.workflow_name, self.argo_server, self.namespace, False, None)
         except Exception as e:
             return {"success": False, "error": str(e)}, {}
+        finally:
+            logger.info("WORKER END: refresh_worker")
 
     def on_worker_state_changed(self, event) -> None:
         """The Main Thread's 'Gatekeeper' for state changes."""
@@ -383,6 +426,7 @@ class WorkflowTreeApp(App):
 
     def _apply_workflow_updates(self, new_data: Dict) -> None:
         try:
+            log_mem("Refresh Update Start")
             new_run_id = new_data.get('status', {}).get('startedAt')
 
             # If the workflow restarted, clear everything safely on the main thread
@@ -399,6 +443,7 @@ class WorkflowTreeApp(App):
             old_scroll_x, old_scroll_y = tree.scroll_offset
 
             new_nodes = filter_tree_nodes(build_nested_workflow_tree(new_data))
+            log_mem("New Nodes Built")
 
             if self.workflow_data.get('status', {}).get('startedAt') != new_data.get('status', {}).get('startedAt'):
                 tree.clear()
@@ -415,6 +460,10 @@ class WorkflowTreeApp(App):
 
             self.workflow_data = new_data
             self.tree_nodes = new_nodes
+
+            # Force garbage collection
+            gc.collect()
+            log_mem("Post-Refresh Cleanup")
 
             # speculatively resolve any new pods appearing
             self._speculative_pod_resolution(new_nodes)
@@ -605,6 +654,8 @@ class WorkflowTreeApp(App):
         worker.name = f"live_check_{node_id}"
 
     def _perform_live_check(self, node_data: Dict) -> Dict:
+        node_id = node_data.get('id', 'unknown')
+        logger.info(f"WORKER START: live_check_{node_id}")
         try:
             raw_cfg = get_node_input_parameter(node_data, 'configContents')
             svc_cfg = ConfigConverter.convert_with_jq(raw_cfg)
@@ -614,7 +665,10 @@ class WorkflowTreeApp(App):
                 node_data['check_type'] = 'snapshot' if 'snapshot' in name_low else 'backfill'
                 return StatusCheckRunner.run_status_check(env, node_data)
             return {"error": "Config conversion failed"}
-        except Exception as e: return {"error": str(e)}
+        except Exception as e:
+            return {"error": str(e)}
+        finally:
+            logger.info(f"WORKER END: live_check_{node_id}")
 
     def _update_live_check_result(self, node_id: str, result: Dict) -> None:
         self.live_check_in_progress.discard(node_id)
@@ -679,8 +733,47 @@ def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token):
         ctx.exit(ExitCode.FAILURE.value)
 
 def _get_workflow_data_internal(service, name, server, ns, insecure, token):
+    log_mem("Fetch Data Start")
     res = service.get_workflow_status(name, ns, server, token, insecure)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     url = f"{server}/api/v1/workflows/{ns}/{name}"
-    resp = requests.get(url, headers=headers, verify=not insecure)
-    return res, (resp.json() if resp.status_code == 200 else {})
+
+    resp = requests.get(url, headers=headers, verify=not insecure, stream=True)
+    if resp.status_code != 200:
+        return res, {}
+
+    slim_nodes = {}
+    node_count = 0
+    try:
+        parser = ijson.kvitems(resp.raw, 'status.nodes')
+        for node_id, node in parser:
+            node_count += 1
+            # EXTREME SLIMMING: Only keep what is actually rendered in tree_utils
+            slim_nodes[node_id] = {
+                "id": node_id,
+                "displayName": clean_display_name(node.get("displayName")), # no reason to keep the massive version
+                "phase": node.get("phase"),
+                "type": node.get("type"),
+                "boundaryID": node.get("boundaryID"),
+                "children": node.get("children", []),
+                "startedAt": node.get("startedAt"),
+                "finishedAt": node.get("finishedAt"),
+                # Only keep inputs/outputs if they contain specific UI keys
+                "inputs": {"parameters": [p for p in node.get("inputs", {}).get("parameters", []) if p['name'] in ('groupName', 'configContents')]},
+                "outputs": {"parameters": [p for p in node.get("outputs", {}).get("parameters", []) if p['name'] in ('statusOutput', 'overriddenPhase')]}
+            }
+    except Exception as e:
+        logger.error(f"Streaming parse failed: {e}")
+    finally:
+        resp.close()
+
+    slim_data = {
+        "metadata": {"name": name},
+        "status": {
+            "nodes": slim_nodes,
+            "startedAt": res.get('workflow', {}).get('status', {}).get('startedAt')
+        }
+    }
+
+    log_mem(f"Fetch Data Complete ({node_count} nodes)")
+    return res, slim_data
