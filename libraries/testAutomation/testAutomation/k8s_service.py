@@ -187,9 +187,13 @@ class K8sService:
         logger.info(f"Deleting webhooks referencing namespace '{self.namespace}'")
         for webhook_type in ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]:
             try:
+                ns = self.namespace
+                jsonpath = (
+                    f"jsonpath={{range .items[?(@.webhooks[*].clientConfig.service.namespace=="
+                    f"\"{ns}\")]}}{{.metadata.name}}{{\"\\n\"}}{{end}}"
+                )
                 result = self.run_command(
-                    ["kubectl", "get", webhook_type, "-o",
-                     f"jsonpath={{range .items[?(@.webhooks[*].clientConfig.service.namespace==\"{self.namespace}\")]}}{{.metadata.name}}{{\"\\n\"}}{{end}}"],
+                    ["kubectl", "get", webhook_type, "-o", jsonpath],
                     ignore_errors=True
                 )
                 if result and result.stdout.strip():
