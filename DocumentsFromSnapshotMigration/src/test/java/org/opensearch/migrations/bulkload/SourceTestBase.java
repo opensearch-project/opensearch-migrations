@@ -252,7 +252,26 @@ public class SourceTestBase {
         String transformationConfig,
         DocumentExceptionAllowlist allowlist
     ) {
-        for (int runNumber = 1; ; ++runNumber) {
+        return migrateDocumentsSequentially(sourceRepo, previousSnapshotName, snapshotName, indexAllowlist, target,
+            runCounter, clockJitter, testContext, sourceVersion, targetVersion, transformationConfig, allowlist, Integer.MAX_VALUE);
+    }
+
+    public static int migrateDocumentsSequentially(
+        FileSystemRepo sourceRepo,
+        String previousSnapshotName,
+        String snapshotName,
+        List<String> indexAllowlist,
+        SearchClusterContainer target,
+        AtomicInteger runCounter,
+        Random clockJitter,
+        DocumentMigrationTestContext testContext,
+        Version sourceVersion,
+        Version targetVersion,
+        String transformationConfig,
+        DocumentExceptionAllowlist allowlist,
+        int maxRuns
+    ) {
+        for (int runNumber = 1; runNumber <= maxRuns; ++runNumber) {
             try {
                 var workResult = migrateDocumentsWithOneWorker(
                     sourceRepo,
@@ -283,6 +302,7 @@ public class SourceTestBase {
                     "but just going to run again with this worker to simulate task/container recycling").log();
             }
         }
+        throw new AssertionError("Migration did not complete within " + maxRuns + " runs");
     }
 
     static class LeasePastError extends Error {
