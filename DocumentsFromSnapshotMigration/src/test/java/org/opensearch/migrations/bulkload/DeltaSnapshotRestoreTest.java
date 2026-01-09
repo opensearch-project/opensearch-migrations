@@ -230,7 +230,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     .withTracking(false, true, false);
                 var runCounter = new AtomicInteger();
                 var clockJitter = new Random(1);
-                var maxRuns = numberOfShards + 2; // shards + 1 for completion check, +1 buffer
+                var maxRuns = numberOfShards + 1; // shards + 1 for completion check
 
                 var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
                     sourceRepo,
@@ -276,7 +276,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     .withTracking(false, true, false);
                 var runCounter = new AtomicInteger();
                 var clockJitter = new Random(1);
-                var maxRuns = numberOfShards + 2;
+                var maxRuns = numberOfShards + 1;
 
                 var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
                     sourceRepo,
