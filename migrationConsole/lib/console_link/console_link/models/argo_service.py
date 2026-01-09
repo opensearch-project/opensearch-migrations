@@ -103,13 +103,15 @@ class ArgoService:
         # Print namespace resource summary
         try:
             logger.info(f"===== Namespace {self.namespace} resource summary =====")
-            get_args = {"get": "pods,services,deployments,statefulsets,workflows", "--namespace": self.namespace}
+            summary_resources = "pods,services,deployments,statefulsets,workflows"
+            get_args = {"get": summary_resources, "--namespace": self.namespace}
             self._run_kubectl_command(get_args)
         except Exception as e:
             logger.error(f"Failed to get namespace resources: {e}")
 
     def save_namespace_diagnostics(self, output_dir: str) -> Optional[str]:
         """Save detailed namespace diagnostics to a file for artifact collection."""
+        diagnostic_resources = "pods,services,deployments,statefulsets,workflows"
         try:
             os.makedirs(output_dir, exist_ok=True)
             output_file = os.path.join(output_dir, f"namespace-{self.namespace}-diagnostics.txt")
@@ -118,10 +120,10 @@ class ArgoService:
                 f.write(f"===== Namespace {self.namespace} Diagnostics =====\n\n")
 
                 # kubectl get resources
-                f.write("===== kubectl get pods,services,deployments,statefulsets,workflows =====\n")
+                f.write(f"===== kubectl get {diagnostic_resources} =====\n")
                 try:
                     result = CommandRunner("kubectl", {
-                        "get": "pods,services,deployments,statefulsets,workflows",
+                        "get": diagnostic_resources,
                         "--namespace": self.namespace,
                         "-o": "wide"
                     }).run()
@@ -130,10 +132,10 @@ class ArgoService:
                     f.write(f"Error: {e}\n\n")
 
                 # kubectl describe resources
-                f.write("===== kubectl describe pods,services,deployments,statefulsets,workflows =====\n")
+                f.write(f"===== kubectl describe {diagnostic_resources} =====\n")
                 try:
                     result = CommandRunner("kubectl", {
-                        "describe": "pods,services,deployments,statefulsets,workflows",
+                        "describe": diagnostic_resources,
                         "--namespace": self.namespace
                     }).run()
                     f.write(result + "\n\n")

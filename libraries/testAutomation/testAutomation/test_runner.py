@@ -193,15 +193,15 @@ class TestRunner:
 
     def cleanup_deployment(self) -> None:
         self.cleanup_clusters()
-        self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
-        self.k8s_service.wait_for_all_healthy_pods()
-        self.k8s_service.delete_all_pvcs()
+        self.k8s_service.delete_namespace()
 
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
 
     def run(self, skip_delete: bool = False, keep_workflows: bool = False,
             reuse_clusters: bool = False, test_reports_dir: str = None, copy_logs: bool = False) -> None:
+        # Cleanup any stale resources from previous runs before starting
+        self.k8s_service.delete_namespace()
         self.k8s_service.create_namespace(self.k8s_service.namespace)
 
         combos_with_failures = []

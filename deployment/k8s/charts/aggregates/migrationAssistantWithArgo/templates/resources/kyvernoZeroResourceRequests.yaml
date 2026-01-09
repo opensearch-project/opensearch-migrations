@@ -27,7 +27,7 @@ data:
                     - Pod
           preconditions:
             any:
-              - key: "{{`{{ request.object.spec.serviceAccountName }}`}}" # Backticks escape Helm, inner braces are Kyverno JMESPath
+              - key: "{{`{{ request.object.spec.serviceAccountName || '' }}`}}" # Backticks escape Helm, inner braces are Kyverno JMESPath
                 operator: In
                 value:
                   - migration-console-access-role
@@ -57,7 +57,7 @@ data:
                     - Pod
           preconditions:
             all:
-              - key: "{{`{{ request.object.spec.serviceAccountName }}`}}"
+              - key: "{{`{{ request.object.spec.serviceAccountName || '' }}`}}"
                 operator: In
                 value:
                   - migration-console-access-role
@@ -106,6 +106,9 @@ spec:
             - /bin/sh
             - -c
             - |
+              set -e
+              echo "Waiting for Kyverno CRD to be established..."
+              kubectl wait --for=condition=Established crd/clusterpolicies.kyverno.io --timeout=300s
               echo "Waiting for Kyverno admission controller to be ready..."
               kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=admission-controller -n {{ .Release.Namespace }} --timeout=120s
               kubectl apply -f /policy/policy.yaml
