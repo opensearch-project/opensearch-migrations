@@ -145,6 +145,8 @@ class WorkflowTreeApp(App):
         self._pod_name_cache = {}
         self._pod_resolution_in_progress = set()
         self._is_exiting = False
+        # Track the unique ID of the current workflow run to prevent stale worker updates
+        self._current_run_id = workflow_data.get('status', {}).get('startedAt')
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -215,32 +217,27 @@ class WorkflowTreeApp(App):
             # logger.exception provides a full stack trace to the log file
             logger.exception(f"Bulk resolution worker failed: {str(e)}")
 
-    def _resolve_pod_worker(self, node: Dict) -> Optional[str]:
-        """Persistent worker that polls K8s until the pod name is found."""
+    def _resolve_pod_worker(self, node: Dict, run_id: str) -> Tuple[str, Optional[str], str]:
+        """
+        Persistent poller.
+        Returns (node_id, pod_name, run_id) to the main thread.
+        """
         node_id = node['id']
-        logger.debug(f"Worker [{node_id}] starting persistent poll.")
-
-        for attempt in range(300):
-            if self._is_exiting:
-                return None
+        for _ in range(300):
+            if self._is_exiting or self._current_run_id != run_id:
+                return node_id, None, run_id
             try:
-                # Calling your helper which searches for the specific node-id
+                # API call is thread-safe, but its result is returned rather than stored here
                 pod_name = _find_pod_by_node_id(self.k8s_client, self.namespace, self.workflow_name, node_id, node, None)
                 if pod_name:
-                    logger.info(f"Worker [{node_id}] RESOLVED to pod: {pod_name}")
-                    return pod_name
-            except Exception as e:
-                # Log the error every 10 seconds so you can see why it's failing
-                if attempt % 10 == 0:
-                    logger.warning(f"Worker [{node_id}] attempt {attempt} error: {str(e)}")
-
+                    return node_id, pod_name, run_id
+            except Exception:
+                pass
             time.sleep(1.0)
-
-        logger.warning(f"Worker [{node_id}] GAVE UP after 300 seconds.")
-        return None
+        return node_id, None, run_id
 
     def _speculative_pod_resolution(self, nodes: List[Dict]) -> None:
-        """Recursive crawler to kick off workers for new pods."""
+        """Kicks off workers. State check happens on the main thread."""
         for node in nodes:
             node_id = node.get('id')
             if (node.get('type') == NODE_TYPE_POD and
@@ -248,8 +245,9 @@ class WorkflowTreeApp(App):
                     node_id not in self._pod_resolution_in_progress):
 
                 self._pod_resolution_in_progress.add(node_id)
+                # Pass current_run_id so the worker knows if it becomes 'stale'
                 self.run_worker(
-                    lambda n=node: self._resolve_pod_worker(n),
+                    lambda n=node, r=self._current_run_id: self._resolve_pod_worker(n, r),
                     thread=True,
                     name=f"pod_resolve_{node_id}"
                 )
@@ -362,25 +360,38 @@ class WorkflowTreeApp(App):
             return {"success": False, "error": str(e)}, {}
 
     def on_worker_state_changed(self, event) -> None:
-        if not event.worker.is_finished: return
-        name = event.worker.name or ""
+        """The Main Thread's 'Gatekeeper' for state changes."""
+        if not event.worker.is_finished:
+            return
 
+        name = event.worker.name or ""
         if name.startswith("pod_resolve_"):
-            node_id = name.replace("pod_resolve_", "")
-            self._pod_resolution_in_progress.discard(node_id)
-            if pod_name := event.worker.result:
-                self._pod_name_cache[node_id] = pod_name
-                if self.current_node_data and self.current_node_data.get('id') == node_id:
-                    self._update_pod_status()
-        elif name.startswith("live_check_"):
-            self._update_live_check_result(name.replace("live_check_", ""), event.worker.result)
-        elif name == "refresh_worker":
-            result, new_data = event.worker.result
-            if result.get('success'): self._apply_workflow_updates(new_data)
-            else: self._handle_refresh_error(result.get('error', 'Workflow not found'))
+            # result is (node_id, pod_name, run_id)
+            res = event.worker.result
+            if not res: return
+            node_id, pod_name, worker_run_id = res
+
+            # Only update if the workflow hasn't restarted since worker began
+            if worker_run_id == self._current_run_id:
+                self._pod_resolution_in_progress.discard(node_id)
+                if pod_name:
+                    self._pod_name_cache[node_id] = pod_name
+                    if self.current_node_data and self.current_node_data.get('id') == node_id:
+                        self._update_pod_status()
+            else:
+                logger.debug(f"Discarding stale pod resolution for {node_id}")
 
     def _apply_workflow_updates(self, new_data: Dict) -> None:
         try:
+            new_run_id = new_data.get('status', {}).get('startedAt')
+
+            # If the workflow restarted, clear everything safely on the main thread
+            if self._current_run_id != new_run_id:
+                logger.info(f"Workflow restart detected (Run ID: {new_run_id}). Clearing state.")
+                self._current_run_id = new_run_id
+                self._pod_name_cache.clear()
+                self._pod_resolution_in_progress.clear()
+
             tree = self.query_one("#workflow-tree", Tree)
             # Restore root label if it was showing an error
             tree.root.label = "Workflow Steps"
@@ -428,7 +439,7 @@ class WorkflowTreeApp(App):
 
             # Anchor scroll back to previous position
             tree.scroll_to(old_scroll_x, old_scroll_y, animate=False)
-
+            self._speculative_pod_resolution(new_nodes)
         except Exception as e:
             logger.error(f"Update error: {e}")
 
