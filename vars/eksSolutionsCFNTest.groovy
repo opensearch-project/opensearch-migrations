@@ -184,7 +184,7 @@ def call(Map config = [:]) {
                 }
             }
         }
-        
+
         post {
             always {
                 timeout(time: 60, unit: 'MINUTES') {
@@ -217,7 +217,7 @@ def call(Map config = [:]) {
                             }
                         }
                         echo "CloudFormation cleanup completed"
-                        
+
                         // TODO (MIGRATIONS-2777): Run kubectl with an isolated KUBECONFIG per pipeline run
                         // For now, do best effort cleanup of the migration EKS context created by aws-bootstrap.sh.
                         sh """
