@@ -174,6 +174,9 @@ public class RfsMigrateDocuments {
         @ParametersDelegate
         public ConnectionContext.TargetArgs targetArgs = new ConnectionContext.TargetArgs();
 
+        @ParametersDelegate
+        public ConnectionContext.CoordinatorArgs coordinatorArgs = new ConnectionContext.CoordinatorArgs();
+
         @Parameter(required = false,
             names = { "--index-allowlist", "--indexAllowlist" },
             description = ("Optional.  List of index names to migrate (e.g. 'logs_2024_01, logs_2024_02').  " +
@@ -362,6 +365,11 @@ public class RfsMigrateDocuments {
             );
         }
 
+        // Validate coordinator args - the ConnectionContext constructor will validate auth param consistency,
+        // but we log here if coordinator is enabled for visibility
+        if (args.coordinatorArgs.isEnabled()) {
+            log.info("Coordinator connection enabled with host: {}", args.coordinatorArgs.host);
+        }
     }
 
     public static void main(String[] args) throws Exception {
@@ -391,9 +399,39 @@ public class RfsMigrateDocuments {
         var luceneDirPath = Paths.get(arguments.luceneDir);
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
-        var connectionContext = arguments.targetArgs.toConnectionContext();
-        OpenSearchClient targetClient = new OpenSearchClientFactory(connectionContext).determineVersionAndCreate();
+        var targetConnectionContext = arguments.targetArgs.toConnectionContext();
+        OpenSearchClient targetClient = new OpenSearchClientFactory(targetConnectionContext).determineVersionAndCreate();
         var targetVersion = targetClient.getClusterVersion();
+
+        // Determine coordinator connection and version
+        final ConnectionContext coordinatorConnectionContext;
+        final Version coordinatorVersion;
+        if (arguments.coordinatorArgs.isEnabled()) {
+            coordinatorConnectionContext = arguments.coordinatorArgs.toConnectionContext();
+            var coordinatorClientFactory = new OpenSearchClientFactory(coordinatorConnectionContext);
+            coordinatorVersion = coordinatorClientFactory.getClusterVersion();
+            if (coordinatorVersion.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH) {
+                throw new IllegalArgumentException(
+                    "OpenSearch Serverless cannot be used as a coordinator cluster. " +
+                    "Serverless does not support the work coordination indices required for document migration. " +
+                    "Please use a managed OpenSearch or self-hosted cluster for coordination."
+                );
+            }
+            log.atInfo().setMessage("Using separate coordinator cluster: {} (version: {})")
+                .addArgument(coordinatorConnectionContext.getUri())
+                .addArgument(coordinatorVersion)
+                .log();
+        } else {
+            coordinatorConnectionContext = targetConnectionContext;
+            coordinatorVersion = targetVersion;
+            if (coordinatorVersion.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH) {
+                throw new IllegalArgumentException(
+                    "OpenSearch Serverless cannot be used for work coordination. " +
+                    "Please specify a separate coordinator cluster using --coordinator-host."
+                );
+            }
+            log.atInfo().setMessage("Using target cluster for coordination").log();
+        }
 
         var docTransformerConfig = Optional.ofNullable(TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams))
             .orElse(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
@@ -406,11 +444,11 @@ public class RfsMigrateDocuments {
         var progressCursor = new AtomicReference<WorkItemCursor>();
         var cancellationRunnableRef = new AtomicReference<Runnable>();
         var workItemTimeProvider = new WorkItemTimeProvider();
-        var coordinatorFactory = new WorkCoordinatorFactory(targetVersion, arguments.indexNameSuffix);
+        var coordinatorFactory = new WorkCoordinatorFactory(coordinatorVersion, arguments.indexNameSuffix);
         var cleanShutdownCompleted = new AtomicBoolean(false);
 
         try (var workCoordinator = coordinatorFactory.get(
-                 new CoordinateWorkHttpClient(connectionContext),
+                 new CoordinateWorkHttpClient(coordinatorConnectionContext),
                  TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                  workerId,
                 Clock.systemUTC(),

@@ -302,6 +302,83 @@ public class ConnectionContext {
         }
     }
 
+    @Getter
+    public static class CoordinatorArgs implements IParams {
+        @Parameter(
+            names = {"--coordinator-host", "--coordinatorHost" },
+            description = "Optional. The coordinator cluster host and port (e.g. http://localhost:9200). " +
+                "When provided, work coordination will use this cluster instead of the target cluster.",
+            required = false)
+        public String host = null;
+
+        @Parameter(
+            names = {"--coordinator-username", "--coordinatorUsername" },
+            description = "Optional. The coordinator cluster username; if not provided, will assume no auth on coordinator",
+            required = false)
+        public String username = null;
+
+        @Parameter(
+            names = {"--coordinator-password", "--coordinatorPassword" },
+            description = "Optional. The coordinator cluster password; if not provided, will assume no auth on coordinator",
+            required = false)
+        public String password = null;
+
+        @Parameter(
+            names = {"--coordinator-cacert", "--coordinatorCaCert" },
+            description = "Optional. The coordinator CA certificate",
+            required = false,
+            converter = PathConverter.class)
+        public Path caCert = null;
+
+        @Parameter(
+            names = {"--coordinator-client-cert", "--coordinatorClientCert" },
+            description = "Optional. The coordinator client TLS certificate",
+            required = false,
+            converter = PathConverter.class)
+        public Path clientCert = null;
+
+        @Parameter(
+            names = {"--coordinator-client-cert-key", "--coordinatorClientCertKey" },
+            description = "Optional. The coordinator client TLS certificate key",
+            required = false,
+            converter = PathConverter.class)
+        public Path clientCertKey = null;
+
+        @Parameter(
+            names = {"--coordinator-aws-region", "--coordinatorAwsRegion" },
+            description = "Optional. The coordinator aws region. Required only if sigv4 auth is used for coordinator",
+            required = false)
+        public String awsRegion = null;
+
+        @Parameter(
+            names = {"--coordinator-aws-service-signing-name", "--coordinatorAwsServiceSigningName" },
+            description = "Optional. The coordinator aws service signing name, e.g 'es' for " +
+                "Amazon OpenSearch Service and 'aoss' for Amazon OpenSearch Serverless. " +
+                "Required if sigv4 auth is used for coordinator.",
+            required = false)
+        public String awsServiceSigningName = null;
+
+        @Parameter(
+            names = { "--coordinator-insecure", "--coordinatorInsecure" },
+            description = "Allow untrusted SSL certificates for coordinator cluster",
+            required = false)
+        public boolean insecure = false;
+
+        @Override
+        public boolean isDisableCompression() {
+            // Coordinator requests are lightweight, no need for compression
+            return true;
+        }
+
+        /**
+         * Returns true if coordinator arguments have been provided.
+         * When host is provided, coordinator connection is considered enabled.
+         */
+        public boolean isEnabled() {
+            return host != null;
+        }
+    }
+
     private static void validateClientCertPairPresence(IParams params) {
         if ((params.getClientCert() != null) ^ (params.getClientCertKey() != null)) {
             throw new IllegalArgumentException(
