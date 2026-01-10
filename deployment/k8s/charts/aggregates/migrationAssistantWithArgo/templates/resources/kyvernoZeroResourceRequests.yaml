@@ -48,13 +48,13 @@ data:
                       - name: "{{`{{ element.name }}`}}"
                         resources:
                           requests:
-                            cpu: null
-                            memory: null
-                            ephemeral-storage: null
+                            cpu: "0"
+                            memory: "0"
+                            ephemeral-storage: "0"
                           limits:
-                            cpu: null
-                            memory: null
-                            ephemeral-storage: null
+                            cpu: "0"
+                            memory: "0"
+                            ephemeral-storage: "0"
         - name: zero-init-container-resources
           match:
             any:
