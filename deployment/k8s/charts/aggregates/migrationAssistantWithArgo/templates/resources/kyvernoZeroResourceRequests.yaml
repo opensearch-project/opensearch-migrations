@@ -15,11 +15,10 @@ data:
       name: zero-resource-requests
       annotations:
         policies.kyverno.io/title: Zero Resource Requests for Dev
-        policies.kyverno.io/description: >-
-          Removes resource requests/limits for dev environments.
+        policies.kyverno.io/description: Zeros cpu/memory requests and limits for dev environments.
     spec:
       rules:
-        - name: zero-container-resources
+        - name: zero-resources
           match:
             any:
               - resources:
@@ -33,62 +32,29 @@ data:
                   - migration-console-access-role
                   - argo-workflow-executor
           mutate:
-            foreach:
-              - list: "request.object.spec.containers[]"
-                patchStrategicMerge:
-                  metadata:
-                    annotations:
-                      kyverno.io/mutated-by: "zero-resource-requests"
-                      kyverno.io/original-requests-cpu-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.cpu || 'none' }}`}}"
-                      kyverno.io/original-requests-memory-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.memory || 'none' }}`}}"
-                      kyverno.io/original-limits-cpu-{{`{{ element.name }}`}}: "{{`{{ element.resources.limits.cpu || 'none' }}`}}"
-                      kyverno.io/original-limits-memory-{{`{{ element.name }}`}}: "{{`{{ element.resources.limits.memory || 'none' }}`}}"
-                  spec:
-                    containers:
-                      - name: "{{`{{ element.name }}`}}"
-                        resources:
-                          requests:
-                            cpu: "0"
-                            memory: "0"
-                          limits:
-                            cpu: "0"
-                            memory: "0"
-        - name: zero-init-container-resources
-          match:
-            any:
-              - resources:
-                  kinds:
-                    - Pod
-          preconditions:
-            all:
-              - key: "{{`{{ request.object.spec.serviceAccountName || '' }}`}}"
-                operator: In
-                value:
-                  - migration-console-access-role
-                  - argo-workflow-executor
-              - key: "{{`{{ request.object.spec.initContainers || '' | length(@) }}`}}"
-                operator: GreaterThan
-                value: 0
-          mutate:
-            foreach:
-              - list: "request.object.spec.initContainers[]"
-                patchStrategicMerge:
-                  metadata:
-                    annotations:
-                      kyverno.io/original-init-requests-cpu-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.cpu || 'none' }}`}}"
-                      kyverno.io/original-init-requests-memory-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.memory || 'none' }}`}}"
-                      kyverno.io/original-init-limits-cpu-{{`{{ element.name }}`}}: "{{`{{ element.resources.limits.cpu || 'none' }}`}}"
-                      kyverno.io/original-init-limits-memory-{{`{{ element.name }}`}}: "{{`{{ element.resources.limits.memory || 'none' }}`}}"
-                  spec:
-                    initContainers:
-                      - name: "{{`{{ element.name }}`}}"
-                        resources:
-                          requests:
-                            cpu: "0"
-                            memory: "0"
-                          limits:
-                            cpu: "0"
-                            memory: "0"
+            patchStrategicMerge:
+              metadata:
+                annotations:
+                  kyverno.io/mutated-by: "zero-resource-requests"
+              spec:
+                containers:
+                  - (name): "*"
+                    resources:
+                      requests:
+                        cpu: "0"
+                        memory: "0"
+                      limits:
+                        cpu: "0"
+                        memory: "0"
+                initContainers:
+                  - (name): "*"
+                    resources:
+                      requests:
+                        cpu: "0"
+                        memory: "0"
+                      limits:
+                        cpu: "0"
+                        memory: "0"
 ---
 apiVersion: batch/v1
 kind: Job
