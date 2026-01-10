@@ -15,11 +15,10 @@ data:
       name: zero-resource-requests
       annotations:
         policies.kyverno.io/title: Zero Resource Requests for Dev
-        policies.kyverno.io/description: >-
-          Sets resource requests to 0 for dev environments.
+        policies.kyverno.io/description: Zeros cpu/memory requests and limits for dev environments.
     spec:
       rules:
-        - name: zero-container-resources
+        - name: zero-resources
           match:
             any:
               - resources:
@@ -27,61 +26,35 @@ data:
                     - Pod
           preconditions:
             any:
-              - key: "{{`{{ request.object.spec.serviceAccountName || '' }}`}}" # Backticks escape Helm, inner braces are Kyverno JMESPath
-                operator: In
-                value:
-                  - migration-console-access-role
-                  - argo-workflow-executor
-          mutate:
-            foreach:
-              - list: "request.object.spec.containers[]"
-                patchStrategicMerge:
-                  metadata:
-                    annotations:
-                      kyverno.io/mutated-by: "zero-resource-requests"
-                      kyverno.io/original-cpu-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.cpu || 'none' }}`}}"
-                      kyverno.io/original-memory-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.memory || 'none' }}`}}"
-                  spec:
-                    containers:
-                      - name: "{{`{{ element.name }}`}}"
-                        resources:
-                          requests:
-                            cpu: "0"
-                            memory: "0"
-                            ephemeral-storage: "0"
-        - name: zero-init-container-resources
-          match:
-            any:
-              - resources:
-                  kinds:
-                    - Pod
-          preconditions:
-            all:
               - key: "{{`{{ request.object.spec.serviceAccountName || '' }}`}}"
                 operator: In
                 value:
                   - migration-console-access-role
                   - argo-workflow-executor
-              - key: "{{`{{ request.object.spec.initContainers || '' | length(@) }}`}}"
-                operator: GreaterThan
-                value: 0
           mutate:
-            foreach:
-              - list: "request.object.spec.initContainers[]"
-                patchStrategicMerge:
-                  metadata:
-                    annotations:
-                      kyverno.io/mutated-by: "zero-resource-requests"
-                      kyverno.io/original-init-cpu-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.cpu || 'none' }}`}}"
-                      kyverno.io/original-init-memory-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.memory || 'none' }}`}}"
-                  spec:
-                    initContainers:
-                      - name: "{{`{{ element.name }}`}}"
-                        resources:
-                          requests:
-                            cpu: "0"
-                            memory: "0"
-                            ephemeral-storage: "0"
+            patchStrategicMerge:
+              metadata:
+                annotations:
+                  kyverno.io/mutated-by: "zero-resource-requests"
+              spec:
+                containers:
+                  - (name): "*"
+                    resources:
+                      requests:
+                        cpu: "0"
+                        memory: "0"
+                      limits:
+                        cpu: "0"
+                        memory: "0"
+                initContainers:
+                  - (name): "*"
+                    resources:
+                      requests:
+                        cpu: "0"
+                        memory: "0"
+                      limits:
+                        cpu: "0"
+                        memory: "0"
 ---
 apiVersion: batch/v1
 kind: Job

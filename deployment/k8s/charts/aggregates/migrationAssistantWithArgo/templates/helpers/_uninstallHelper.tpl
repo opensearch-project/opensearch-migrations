@@ -1,7 +1,9 @@
 {{- define "migration.helmUninstallFunctions" -}}
 uninstall_charts() {
-  # Accepts space-separated list of releases
+  # Accepts space-separated list of releases to skip
   local RELEASES_TO_SKIP=("$@")
+  # Always skip kyverno in parallel uninstall - handled synchronously at end
+  RELEASES_TO_SKIP+=("kyverno")
 
   echo "Starting Helm uninstallation sequence..."
   UMBRELLA_CHART_ID="{{ .Release.Name }}"
@@ -58,5 +60,15 @@ uninstall_charts() {
 
   wait
   echo "Uninstallation sequence completed!"
+
+  # Uninstall kyverno last (synchronously) to avoid webhook issues
+  for NAMESPACE in $NAMESPACES; do
+    OWNERSHIP=$(helm get values kyverno -n $NAMESPACE -o json 2>/dev/null | jq -r '.global.managedBy // empty')
+    if [ "$OWNERSHIP" = "$UMBRELLA_CHART_ID" ]; then
+      echo "Uninstalling kyverno last..."
+      helm uninstall kyverno -n $NAMESPACE --debug
+      break
+    fi
+  done
 }
 {{- end }}
