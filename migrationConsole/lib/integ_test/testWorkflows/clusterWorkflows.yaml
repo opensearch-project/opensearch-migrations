@@ -798,7 +798,7 @@ spec:
             EOF
             
             # Install OpenSearch 1.3
-            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch --set rbac.create=true --set rbac.serviceAccountName=migration-console-access-role \
+            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch --set rbac.create=false --set rbac.serviceAccountName=migration-console-access-role \
               --namespace {{inputs.parameters.namespace}} \
               --values /tmp/opensearch-values.yaml \
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
@@ -890,7 +890,7 @@ spec:
             EOF
             
             # Install OpenSearch 2.19.1
-            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch --set rbac.create=true --set rbac.serviceAccountName=migration-console-access-role \
+            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch --set rbac.create=false --set rbac.serviceAccountName=migration-console-access-role \
               --namespace {{inputs.parameters.namespace}} \
               --values /tmp/opensearch-values.yaml \
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
@@ -978,7 +978,7 @@ spec:
                 - "repository-s3"
             EOF
             
-            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch --set rbac.create=true --set rbac.serviceAccountName=migration-console-access-role \
+            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch --set rbac.create=false --set rbac.serviceAccountName=migration-console-access-role \
               --namespace {{inputs.parameters.namespace}} \
               --values /tmp/opensearch-values.yaml \
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
