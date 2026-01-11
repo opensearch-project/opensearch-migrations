@@ -6,7 +6,6 @@ def call(Map config = [:]) {
     //   defaultGitBranch: git branch default
     def vpcMode = config.vpcMode ?: 'Create'
     def isImportVpc = (vpcMode == 'Import')
-    def clusterContextFilePath = "tmp/cluster-context-${currentBuild.number}.json"
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -25,6 +24,10 @@ def call(Map config = [:]) {
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
+        }
+
+        environment {
+            TEST_VPC_STACK_NAME = "test-vpc-${stage}-${params.REGION}"
         }
 
         stages {
@@ -46,19 +49,30 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Deploy Source Cluster') {
+            stage('Deploy Test VPC') {
                 when { expression { isImportVpc } }
                 steps {
-                    timeout(time: 60, unit: 'MINUTES') {
-                        dir('test') {
-                            script {
-                                deployClustersStep(
-                                    stage: "${stage}",
-                                    region: "${params.REGION}",
-                                    clusterContextFilePath: "${clusterContextFilePath}",
-                                    sourceVer: "ES_7.10",
-                                    sourceClusterType: "OPENSEARCH_MANAGED_SERVICE"
-                                )
+                    timeout(time: 10, unit: 'MINUTES') {
+                        script {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    sh """
+                                        set -euo pipefail
+                                        aws cloudformation create-stack \
+                                          --stack-name "${env.TEST_VPC_STACK_NAME}" \
+                                          --region "${params.REGION}" \
+                                          --template-body '${getTestVpcTemplate()}' \
+                                          --parameters ParameterKey=Stage,ParameterValue=${stage}
+
+                                        echo "Waiting for test VPC stack CREATE_COMPLETE..."
+                                        aws cloudformation wait stack-create-complete \
+                                          --stack-name "${env.TEST_VPC_STACK_NAME}" \
+                                          --region "${params.REGION}"
+                                    """
+                                    env.TEST_VPC_ID = sh(script: "aws cloudformation describe-stacks --stack-name ${env.TEST_VPC_STACK_NAME} --region ${params.REGION} --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' --output text", returnStdout: true).trim()
+                                    env.TEST_SUBNET_IDS = sh(script: "aws cloudformation describe-stacks --stack-name ${env.TEST_VPC_STACK_NAME} --region ${params.REGION} --query 'Stacks[0].Outputs[?OutputKey==`SubnetIds`].OutputValue' --output text", returnStdout: true).trim()
+                                    echo "Test VPC created: VPC=${env.TEST_VPC_ID}, Subnets=${env.TEST_SUBNET_IDS}"
+                                }
                             }
                         }
                     }
@@ -92,16 +106,14 @@ def call(Map config = [:]) {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
                                         if (isImportVpc) {
-                                            def clusterDetails = readJSON text: env.clusterDetailsJson
-                                            def sourceCluster = clusterDetails.source
                                             sh """
                                                 set -euo pipefail
                                                 aws cloudformation create-stack \
                                                   --stack-name "${env.STACK_NAME}" \
                                                   --template-body file://cdk.out/${templateName}.template.json \
                                                   --parameters ParameterKey=Stage,ParameterValue=${stage} \
-                                                               ParameterKey=VPCId,ParameterValue=${sourceCluster.vpcId} \
-                                                               ParameterKey=VPCSubnetIds,ParameterValue=\\"${sourceCluster.subnetIds}\\" \
+                                                               ParameterKey=VPCId,ParameterValue=${env.TEST_VPC_ID} \
+                                                               ParameterKey=VPCSubnetIds,ParameterValue=\\"${env.TEST_SUBNET_IDS}\\" \
                                                   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
                                                   --region "${params.REGION}"
 
@@ -207,12 +219,21 @@ def call(Map config = [:]) {
                                     echo "CloudFormation stack ${env.STACK_NAME} has been deleted."
                                 """
 
-                                // Cleanup source cluster stacks if import-vpc mode
+                                // Cleanup test VPC if import-vpc mode
                                 if (isImportVpc) {
-                                    echo "Cleaning up source cluster CDK stacks..."
-                                    dir("${WORKSPACE}/test/amazon-opensearch-service-sample-cdk") {
-                                        sh "cdk destroy '*' --force --concurrency 3 || echo 'CDK destroy completed with warnings'"
-                                    }
+                                    echo "Cleaning up test VPC stack: ${env.TEST_VPC_STACK_NAME}"
+                                    sh """
+                                        set -euo pipefail
+                                        aws cloudformation delete-stack \
+                                            --stack-name "${env.TEST_VPC_STACK_NAME}" \
+                                            --region "${params.REGION}"
+
+                                        aws cloudformation wait stack-delete-complete \
+                                            --stack-name "${env.TEST_VPC_STACK_NAME}" \
+                                            --region "${params.REGION}"
+
+                                        echo "Test VPC stack ${env.TEST_VPC_STACK_NAME} has been deleted."
+                                    """
                                 }
                             }
                         }
@@ -232,4 +253,162 @@ def call(Map config = [:]) {
             }
         }
     }
+}
+
+// Test VPC template for Import-VPC mode with VPC endpoints (private, no internet)
+def getTestVpcTemplate() {
+    return '''{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Test VPC for Import-VPC EKS CFN testing with private VPC endpoints",
+  "Parameters": {
+    "Stage": {
+      "Type": "String",
+      "Default": "test"
+    }
+  },
+  "Resources": {
+    "VPC": {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+        "CidrBlock": "10.200.0.0/16",
+        "EnableDnsHostnames": true,
+        "EnableDnsSupport": true,
+        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-vpc-${Stage}"}}]
+      }
+    },
+    "SubnetA": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": {"Ref": "VPC"},
+        "CidrBlock": "10.200.1.0/24",
+        "AvailabilityZone": {"Fn::Select": [0, {"Fn::GetAZs": ""}]},
+        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-subnet-a-${Stage}"}}]
+      }
+    },
+    "SubnetB": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": {"Ref": "VPC"},
+        "CidrBlock": "10.200.2.0/24",
+        "AvailabilityZone": {"Fn::Select": [1, {"Fn::GetAZs": ""}]},
+        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-subnet-b-${Stage}"}}]
+      }
+    },
+    "RouteTable": {
+      "Type": "AWS::EC2::RouteTable",
+      "Properties": {
+        "VpcId": {"Ref": "VPC"},
+        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-rt-${Stage}"}}]
+      }
+    },
+    "SubnetARouteTableAssoc": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": {"Ref": "SubnetA"},
+        "RouteTableId": {"Ref": "RouteTable"}
+      }
+    },
+    "SubnetBRouteTableAssoc": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": {"Ref": "SubnetB"},
+        "RouteTableId": {"Ref": "RouteTable"}
+      }
+    },
+    "EndpointSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Security group for VPC endpoints",
+        "VpcId": {"Ref": "VPC"},
+        "SecurityGroupIngress": [
+          {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "CidrIp": "10.200.0.0/16"}
+        ],
+        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-endpoint-sg-${Stage}"}}]
+      }
+    },
+    "S3Endpoint": {
+      "Type": "AWS::EC2::VPCEndpoint",
+      "Properties": {
+        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.s3"},
+        "VpcId": {"Ref": "VPC"},
+        "VpcEndpointType": "Gateway",
+        "RouteTableIds": [{"Ref": "RouteTable"}]
+      }
+    },
+    "EcrApiEndpoint": {
+      "Type": "AWS::EC2::VPCEndpoint",
+      "Properties": {
+        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.ecr.api"},
+        "VpcId": {"Ref": "VPC"},
+        "VpcEndpointType": "Interface",
+        "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
+        "SecurityGroupIds": [{"Ref": "EndpointSecurityGroup"}],
+        "PrivateDnsEnabled": true
+      }
+    },
+    "EcrDkrEndpoint": {
+      "Type": "AWS::EC2::VPCEndpoint",
+      "Properties": {
+        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.ecr.dkr"},
+        "VpcId": {"Ref": "VPC"},
+        "VpcEndpointType": "Interface",
+        "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
+        "SecurityGroupIds": [{"Ref": "EndpointSecurityGroup"}],
+        "PrivateDnsEnabled": true
+      }
+    },
+    "Ec2Endpoint": {
+      "Type": "AWS::EC2::VPCEndpoint",
+      "Properties": {
+        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.ec2"},
+        "VpcId": {"Ref": "VPC"},
+        "VpcEndpointType": "Interface",
+        "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
+        "SecurityGroupIds": [{"Ref": "EndpointSecurityGroup"}],
+        "PrivateDnsEnabled": true
+      }
+    },
+    "EksEndpoint": {
+      "Type": "AWS::EC2::VPCEndpoint",
+      "Properties": {
+        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.eks"},
+        "VpcId": {"Ref": "VPC"},
+        "VpcEndpointType": "Interface",
+        "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
+        "SecurityGroupIds": [{"Ref": "EndpointSecurityGroup"}],
+        "PrivateDnsEnabled": true
+      }
+    },
+    "LogsEndpoint": {
+      "Type": "AWS::EC2::VPCEndpoint",
+      "Properties": {
+        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.logs"},
+        "VpcId": {"Ref": "VPC"},
+        "VpcEndpointType": "Interface",
+        "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
+        "SecurityGroupIds": [{"Ref": "EndpointSecurityGroup"}],
+        "PrivateDnsEnabled": true
+      }
+    },
+    "StsEndpoint": {
+      "Type": "AWS::EC2::VPCEndpoint",
+      "Properties": {
+        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.sts"},
+        "VpcId": {"Ref": "VPC"},
+        "VpcEndpointType": "Interface",
+        "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
+        "SecurityGroupIds": [{"Ref": "EndpointSecurityGroup"}],
+        "PrivateDnsEnabled": true
+      }
+    }
+  },
+  "Outputs": {
+    "VpcId": {
+      "Value": {"Ref": "VPC"}
+    },
+    "SubnetIds": {
+      "Value": {"Fn::Join": [",", [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}]]}
+    }
+  }
+}'''
 }
