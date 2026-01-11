@@ -255,11 +255,11 @@ def call(Map config = [:]) {
     }
 }
 
-// Test VPC template for Import-VPC mode with VPC endpoints (private, no internet)
+// Test VPC template for Import-VPC mode with NAT Gateway for EKS node internet access
 def getTestVpcTemplate() {
     return '''{
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "Test VPC for Import-VPC EKS CFN testing with private VPC endpoints",
+  "Description": "Test VPC for Import-VPC EKS CFN testing with NAT Gateway",
   "Parameters": {
     "Stage": {
       "Type": "String",
@@ -276,129 +276,113 @@ def getTestVpcTemplate() {
         "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-vpc-${Stage}"}}]
       }
     },
-    "SubnetA": {
+    "InternetGateway": {
+      "Type": "AWS::EC2::InternetGateway",
+      "Properties": {
+        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-igw-${Stage}"}}]
+      }
+    },
+    "VPCGatewayAttachment": {
+      "Type": "AWS::EC2::VPCGatewayAttachment",
+      "Properties": {
+        "VpcId": {"Ref": "VPC"},
+        "InternetGatewayId": {"Ref": "InternetGateway"}
+      }
+    },
+    "PublicSubnet": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": {"Ref": "VPC"},
+        "CidrBlock": "10.200.0.0/24",
+        "AvailabilityZone": {"Fn::Select": [0, {"Fn::GetAZs": ""}]},
+        "MapPublicIpOnLaunch": true,
+        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-public-subnet-${Stage}"}}]
+      }
+    },
+    "PublicRouteTable": {
+      "Type": "AWS::EC2::RouteTable",
+      "Properties": {
+        "VpcId": {"Ref": "VPC"},
+        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-public-rt-${Stage}"}}]
+      }
+    },
+    "PublicRoute": {
+      "Type": "AWS::EC2::Route",
+      "DependsOn": "VPCGatewayAttachment",
+      "Properties": {
+        "RouteTableId": {"Ref": "PublicRouteTable"},
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {"Ref": "InternetGateway"}
+      }
+    },
+    "PublicSubnetRouteTableAssoc": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": {"Ref": "PublicSubnet"},
+        "RouteTableId": {"Ref": "PublicRouteTable"}
+      }
+    },
+    "NatEIP": {
+      "Type": "AWS::EC2::EIP",
+      "DependsOn": "VPCGatewayAttachment",
+      "Properties": {
+        "Domain": "vpc",
+        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-nat-eip-${Stage}"}}]
+      }
+    },
+    "NatGateway": {
+      "Type": "AWS::EC2::NatGateway",
+      "Properties": {
+        "AllocationId": {"Fn::GetAtt": ["NatEIP", "AllocationId"]},
+        "SubnetId": {"Ref": "PublicSubnet"},
+        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-nat-${Stage}"}}]
+      }
+    },
+    "PrivateSubnetA": {
       "Type": "AWS::EC2::Subnet",
       "Properties": {
         "VpcId": {"Ref": "VPC"},
         "CidrBlock": "10.200.1.0/24",
         "AvailabilityZone": {"Fn::Select": [0, {"Fn::GetAZs": ""}]},
-        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-subnet-a-${Stage}"}}]
+        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-private-subnet-a-${Stage}"}}]
       }
     },
-    "SubnetB": {
+    "PrivateSubnetB": {
       "Type": "AWS::EC2::Subnet",
       "Properties": {
         "VpcId": {"Ref": "VPC"},
         "CidrBlock": "10.200.2.0/24",
         "AvailabilityZone": {"Fn::Select": [1, {"Fn::GetAZs": ""}]},
-        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-subnet-b-${Stage}"}}]
+        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-private-subnet-b-${Stage}"}}]
       }
     },
-    "RouteTable": {
+    "PrivateRouteTable": {
       "Type": "AWS::EC2::RouteTable",
       "Properties": {
         "VpcId": {"Ref": "VPC"},
-        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-rt-${Stage}"}}]
+        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-private-rt-${Stage}"}}]
       }
     },
-    "SubnetARouteTableAssoc": {
+    "PrivateRoute": {
+      "Type": "AWS::EC2::Route",
+      "Properties": {
+        "RouteTableId": {"Ref": "PrivateRouteTable"},
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "NatGatewayId": {"Ref": "NatGateway"}
+      }
+    },
+    "PrivateSubnetARouteTableAssoc": {
       "Type": "AWS::EC2::SubnetRouteTableAssociation",
       "Properties": {
-        "SubnetId": {"Ref": "SubnetA"},
-        "RouteTableId": {"Ref": "RouteTable"}
+        "SubnetId": {"Ref": "PrivateSubnetA"},
+        "RouteTableId": {"Ref": "PrivateRouteTable"}
       }
     },
-    "SubnetBRouteTableAssoc": {
+    "PrivateSubnetBRouteTableAssoc": {
       "Type": "AWS::EC2::SubnetRouteTableAssociation",
       "Properties": {
-        "SubnetId": {"Ref": "SubnetB"},
-        "RouteTableId": {"Ref": "RouteTable"}
-      }
-    },
-    "EndpointSecurityGroup": {
-      "Type": "AWS::EC2::SecurityGroup",
-      "Properties": {
-        "GroupDescription": "Security group for VPC endpoints",
-        "VpcId": {"Ref": "VPC"},
-        "SecurityGroupIngress": [
-          {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "CidrIp": "10.200.0.0/16"}
-        ],
-        "Tags": [{"Key": "Name", "Value": {"Fn::Sub": "test-endpoint-sg-${Stage}"}}]
-      }
-    },
-    "S3Endpoint": {
-      "Type": "AWS::EC2::VPCEndpoint",
-      "Properties": {
-        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.s3"},
-        "VpcId": {"Ref": "VPC"},
-        "VpcEndpointType": "Gateway",
-        "RouteTableIds": [{"Ref": "RouteTable"}]
-      }
-    },
-    "EcrApiEndpoint": {
-      "Type": "AWS::EC2::VPCEndpoint",
-      "Properties": {
-        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.ecr.api"},
-        "VpcId": {"Ref": "VPC"},
-        "VpcEndpointType": "Interface",
-        "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
-        "SecurityGroupIds": [{"Ref": "EndpointSecurityGroup"}],
-        "PrivateDnsEnabled": true
-      }
-    },
-    "EcrDkrEndpoint": {
-      "Type": "AWS::EC2::VPCEndpoint",
-      "Properties": {
-        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.ecr.dkr"},
-        "VpcId": {"Ref": "VPC"},
-        "VpcEndpointType": "Interface",
-        "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
-        "SecurityGroupIds": [{"Ref": "EndpointSecurityGroup"}],
-        "PrivateDnsEnabled": true
-      }
-    },
-    "Ec2Endpoint": {
-      "Type": "AWS::EC2::VPCEndpoint",
-      "Properties": {
-        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.ec2"},
-        "VpcId": {"Ref": "VPC"},
-        "VpcEndpointType": "Interface",
-        "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
-        "SecurityGroupIds": [{"Ref": "EndpointSecurityGroup"}],
-        "PrivateDnsEnabled": true
-      }
-    },
-    "EksEndpoint": {
-      "Type": "AWS::EC2::VPCEndpoint",
-      "Properties": {
-        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.eks"},
-        "VpcId": {"Ref": "VPC"},
-        "VpcEndpointType": "Interface",
-        "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
-        "SecurityGroupIds": [{"Ref": "EndpointSecurityGroup"}],
-        "PrivateDnsEnabled": true
-      }
-    },
-    "LogsEndpoint": {
-      "Type": "AWS::EC2::VPCEndpoint",
-      "Properties": {
-        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.logs"},
-        "VpcId": {"Ref": "VPC"},
-        "VpcEndpointType": "Interface",
-        "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
-        "SecurityGroupIds": [{"Ref": "EndpointSecurityGroup"}],
-        "PrivateDnsEnabled": true
-      }
-    },
-    "StsEndpoint": {
-      "Type": "AWS::EC2::VPCEndpoint",
-      "Properties": {
-        "ServiceName": {"Fn::Sub": "com.amazonaws.${AWS::Region}.sts"},
-        "VpcId": {"Ref": "VPC"},
-        "VpcEndpointType": "Interface",
-        "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
-        "SecurityGroupIds": [{"Ref": "EndpointSecurityGroup"}],
-        "PrivateDnsEnabled": true
+        "SubnetId": {"Ref": "PrivateSubnetB"},
+        "RouteTableId": {"Ref": "PrivateRouteTable"}
       }
     }
   },
@@ -407,7 +391,7 @@ def getTestVpcTemplate() {
       "Value": {"Ref": "VPC"}
     },
     "SubnetIds": {
-      "Value": {"Fn::Join": [",", [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}]]}
+      "Value": {"Fn::Join": [",", [{"Ref": "PrivateSubnetA"}, {"Ref": "PrivateSubnetB"}]]}
     }
   }
 }'''
