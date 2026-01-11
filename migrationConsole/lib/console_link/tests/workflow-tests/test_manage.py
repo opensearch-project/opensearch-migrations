@@ -1,10 +1,13 @@
+import base64
+
 import pytest
 import json
 from unittest.mock import MagicMock, patch, ANY
 from textual.widgets import Tree, Footer, Static, Button
 from rich.text import Text
 
-from console_link.workflow.commands.manage import NODE_TYPE_POD, WorkflowTreeApp, ConfirmModal, NODE_TYPE_SUSPEND
+from console_link.workflow.commands.manage import NODE_TYPE_POD, WorkflowTreeApp, ConfirmModal, NODE_TYPE_SUSPEND, \
+    copy_to_clipboard
 
 import logging
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
@@ -124,6 +127,14 @@ async def test_workflow_lifecycle_transitions(mock_tree_nodes, mock_workflow_pod
 async def test_functional_keybindings_execution(mock_workflow_pod_suspend):
     """Verify that keys actually trigger actions based on navigation state."""
     k8s_mock = MagicMock()
+    def get_pod_items_response(path, method, header_params=None, query_params=None, **kwargs):
+        mock_resp = MagicMock()
+        # Simulate finding pod-1 specifically for node-1
+        items = [{"metadata": {"name": "node-1", "annotations": {"workflows.argoproj.io/node-id": "node-1"}}}]
+        mock_resp.read.return_value = json.dumps({"items": items}).encode('utf-8')
+        return (mock_resp, 200, {})
+
+    k8s_mock.api_client.call_api.side_effect = get_pod_items_response
     app = WorkflowTreeApp(k8s_mock, "test-wf", "default", "http://argo")
 
     with patch("console_link.workflow.commands.manage._get_workflow_data_internal") as mock_fetch:
@@ -139,14 +150,20 @@ async def test_functional_keybindings_execution(mock_workflow_pod_suspend):
 
             # Navigation to node-1 (pod)
             await pilot.press("down")
-            app._pod_name_cache["node-1"] = "real-pod-abc"
-            app._update_dynamic_bindings()
             await pilot.pause()
 
             with patch.object(app, "_show_logs_in_pager") as mock_logs:
-                await pilot.press("o") # output command
-                await pilot.pause()
-                mock_logs.assert_called_once()
+                for _ in range(50):
+                    await pilot.press("o")
+                    await pilot.pause(0.1)
+                    if mock_logs.call_count:
+                        break
+                else:
+                    pytest.fail("output command was never called for node-1")
+
+            with patch("console_link.workflow.commands.manage.copy_to_clipboard") as mock_copy:
+                await pilot.press("c")
+                mock_copy.assert_called_once_with("node-1")
 
             await pilot.press("down")
             await pilot.pause()
@@ -196,9 +213,8 @@ async def test_manual_refresh_resolves_missing_pods(mock_workflow_two_pods):
             tree = app.query_one("#workflow-tree")
 
             # Wait for population
-            MAX_WAIT_SECONDS = 5
-            for i in range(MAX_WAIT_SECONDS):
-                await pilot.pause(MAX_WAIT_SECONDS/1000.0)
+            for _ in range(50):
+                await pilot.pause(0.1)
                 if tree.root.children:
                     break
             else:
@@ -230,9 +246,8 @@ async def test_manual_refresh_resolves_missing_pods(mock_workflow_two_pods):
                 # Give some time for the strong background resolve to finish.
                 # Eventually, it should have added the second node's pod name,
                 # at which point, the output command should have worked
-                MAX_WAIT_SECONDS = 5
-                for i in range(MAX_WAIT_SECONDS):
-                    await pilot.pause(MAX_WAIT_SECONDS/1000.0)
+                for _ in range(50):
+                    await pilot.pause(0.1)
                     await pilot.press("o")
                     if mock_logs.call_count:
                         mock_logs.assert_called_once()
@@ -244,44 +259,75 @@ async def test_manual_refresh_resolves_missing_pods(mock_workflow_two_pods):
 
 
 @pytest.mark.asyncio
-async def test_approve_step_interaction(mock_tree_nodes, mock_workflow_pod_suspend):
+async def test_approve_step_interaction(mock_workflow_pod_suspend):
     """Test the Modal flow and Service call for approving a step."""
     k8s_mock = MagicMock()
-    app = WorkflowTreeApp(mock_tree_nodes, mock_workflow_pod_suspend, k8s_mock, "test-wf", "default", "http://argo")
+    app = WorkflowTreeApp(k8s_mock, "test-wf", "default", "http://argo")
 
-    with patch("your_module.WorkflowService") as mock_service_class:
+    # 1. Patch the Service class used inside the App
+    with patch("console_link.workflow.commands.manage.WorkflowService") as mock_service_class:
+        # mock_service represents the instance created inside WorkflowTreeApp
         mock_service = mock_service_class.return_value
         mock_service.approve_workflow.return_value = {"success": True}
 
         async with app.run_test() as pilot:
-            # Navigate to Suspend node (node-2)
-            await pilot.press("down", "down")
+            # 2. Manually load the tree using your unsafe method
+            app._apply_workflow_updates_unsafe(mock_workflow_pod_suspend, False)
+            await pilot.pause()  # Let the renderer catch up
 
-            # Press 'a' to approve
+            # 3. Navigate to Suspend node (node-2)
+            # We use individual presses to ensure highlight events fire
+            await pilot.press("down")
+            await pilot.press("down")
+            await pilot.pause()
+
+            # 4. Trigger the Modal
             await pilot.press("a")
+            await pilot.pause()
 
-            # Verify Modal is present
+            # Verify Modal is present and focused
             assert isinstance(app.screen, ConfirmModal)
 
-            # Press 'y' inside the modal
-            await pilot.press("y")
+            # 5. Press 'y' inside the modal using the Poll pattern
+            # We poll the service call count to see when 'y' is finally accepted
+            for _ in range(50):
+                await pilot.press("y")
+                await pilot.pause(0.1)
+                if mock_service.approve_workflow.call_count > 0:
+                    break
+            else:
+                pytest.fail("Approval service was never called after pressing 'y'")
 
-            # Verify the service was called correctly
+            # 6. Verify the service was called with correct parameters
+            # Note: Ensure the 'node-2' selector matches your internal logic
             mock_service.approve_workflow.assert_called_once_with(
                 "test-wf", "default", "http://argo", None, False, "id=node-2"
             )
 
+            # Verify the modal closed after success
+            assert not isinstance(app.screen, ConfirmModal)
 
-@pytest.mark.asyncio
-@patch("your_module.copy_to_clipboard")
-async def test_copy_pod_name_action(mock_copy, mock_tree_nodes, mock_workflow_pod_suspend):
-    """Verify that the copy action sends the correct pod name to the clipboard utility."""
-    k8s_mock = MagicMock()
-    app = WorkflowTreeApp(mock_tree_nodes, mock_workflow_pod_suspend, k8s_mock, "test-wf", "default", "http://argo")
-    app._pod_name_cache["node-1"] = "pod-to-copy"
 
-    async with app.run_test() as pilot:
-        await pilot.press("down")  # Highlight pod
-        await pilot.press("c")  # Trigger copy
+@pytest.mark.parametrize("env_updates, expected_wrapper", [
+    ({"SSH_TTY": "/dev/pts/0", "TERM": "xterm-256color"}, "{osc}"),
+    ({"SSH_TTY": "/dev/pts/0", "TERM": "xterm-256color", "TMUX": "1"}, "\x1bPtmux;\x1b{osc}\x1b\\")
+], ids=["standard_ssh", "tmux_ssh"])
+def test_copy_to_clipboard_protocol_logic(env_updates, expected_wrapper, mocker):
+    """Verifies the raw escape sequences generated for different terminal types."""
+    test_text = "test-pod"
+    b64_val = base64.b64encode(test_text.encode()).decode()
+    raw_osc = f"\x1b]52;c;{b64_val}\x07"
 
-        mock_copy.assert_called_once_with("pod-to-copy")
+    # Format the expected string based on the wrapper
+    expected_output = expected_wrapper.format(osc=raw_osc)
+
+    # Mock environment and stdout
+    mocker.patch.dict("os.environ", env_updates, clear=False)
+    mock_stdout = mocker.patch("sys.stdout.write")
+
+    # Run the function
+    result = copy_to_clipboard(test_text)
+
+    # Assertions
+    assert result is True
+    mock_stdout.assert_called_with(expected_output)
