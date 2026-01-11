@@ -21,7 +21,7 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {
-    ReplicaSet
+    ReplicaSet, Deployment
 } from "@opensearch-migrations/argo-workflow-builders";
 import {makeRepoParamDict} from "./metadataMigration";
 import {
@@ -61,11 +61,11 @@ function makeParamsDict(
     );
 }
 
-function getRfsReplicasetName(sessionName: BaseExpression<string>) {
-    return expr.concat(sessionName, expr.literal("-reindex-from-snapshot"));
+function getRfsDeploymentName(sessionName: BaseExpression<string>) {
+    return expr.concat(sessionName, expr.literal("-rfs"));
 }
 
-function getRfsReplicasetManifest
+function getRfsDeploymentManifest
 (args: {
     workflowName: BaseExpression<string>,
     jsonConfig: BaseExpression<string>
@@ -79,7 +79,7 @@ function getRfsReplicasetManifest
     rfsImageName: BaseExpression<string>,
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
     resources: BaseExpression<ResourceRequirementsType>
-}): ReplicaSet {
+}): Deployment {
     const basicCredsSecretName = expr.ternary(
         expr.isEmpty(args.basicCredsSecretNameOrEmpty),
         expr.literal("empty"),
@@ -151,26 +151,36 @@ function getRfsReplicasetManifest
             { container: baseContainerDefinition, volumes: []}
         )
     );
+    const deploymentName = getRfsDeploymentName(args.sessionName);
     return {
         apiVersion: "apps/v1",
-        kind: "ReplicaSet",
+        kind: "Deployment",
         metadata: {
-            name: makeStringTypeProxy(getRfsReplicasetName(args.sessionName)),
+            name: makeStringTypeProxy(deploymentName),
             labels: {
                 "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName)
             },
         },
         spec: {
             replicas: makeDirectTypeProxy(args.podReplicas),
+            strategy: {
+                type: "RollingUpdate",
+                rollingUpdate: {
+                    maxUnavailable: 1,
+                    maxSurge: 1
+                }
+            },
             selector: {
                 matchLabels: {
                     app: "bulk-loader",
+                    "deployment-name": makeStringTypeProxy(deploymentName)
                 },
             },
             template: {
                 metadata: {
                     labels: {
                         app: "bulk-loader",
+                        "deployment-name": makeStringTypeProxy(deploymentName),
                         "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                     },
                 },
@@ -181,26 +191,53 @@ function getRfsReplicasetManifest
                 }
             }
         }
-    } as ReplicaSet;
+    } as Deployment;
 }
 
 
-function getCheckHistoricalBackfillCompletionScript(sessionName: BaseExpression<string>) {
+function getCheckBackfillStatusScript(sessionName: BaseExpression<string>) {
     const template = `
-set -e && 
-python -c '
-import sys
-from lib.console_link.console_link.environment import Environment
-from lib.console_link.console_link.models.backfill_rfs import get_detailed_status_obj
-from lib.console_link.console_link.models.backfill_rfs import all_shards_finished_processing
+set -e -x
+touch /tmp/status-output.txt
+touch /tmp/phase-output.txt
 
-status = get_detailed_status_obj(Environment(config_file="/config/migration_services.yaml").target_cluster,
-                                 True,
-                                 "{{SESSION_NAME}}")
-print(status)
-all_finished = all_shards_finished_processing(Environment(config_file="/config/migration_services.yaml").target_cluster,
-                                              "{{SESSION_NAME}}")
-sys.exit(0 if all_finished else 1)'`;
+status=$(console --config-file=/config/migration_services.yaml backfill status --deep-check)
+
+# Check if initializing
+if [[ "$status" == "Shards are initializing" ]]; then
+    echo "Shards are initializing" > /tmp/status-output.txt
+else
+    # Format detailed status
+    echo "$status" | awk '
+    /^Backfill status:/ { status = $3 }
+    /^Backfill percentage_completed:/ { pct = $3 }
+    /^Backfill eta_ms:/ { eta = $3 }
+    /^Backfill shard_total:/ { total = $3 }
+    /^Backfill shard_complete:/ { complete = $3 }
+    /^Backfill shard_in_progress:/ { progress = $3 }
+    /^Backfill shard_waiting:/ { waiting = $3 }
+
+    END {
+        gsub(/^[^.]+\\./, "", status)
+        eta_str = (eta == "" || eta == "None") ? "unknown" : int(eta/1000) "s"
+        printf "complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d\\n", 
+               pct, eta_str, progress, waiting, complete, total
+    }
+    ' > /tmp/status-output.txt
+fi
+
+# Check completion status - exit 0 only if complete, otherwise exit 1
+echo "$status" | awk '
+/^Backfill shard_total:/ {total=$3} 
+/^Backfill shard_complete:/ {complete=$3} 
+END {
+  if(total > 0 && total==complete) {
+    exit 0
+  } else {
+    exit 1
+  }
+}' || (echo Checked > /tmp/phase-output.txt && exit 1)
+`;
     return expr.fillTemplate(template, {"SESSION_NAME": sessionName});
 }
 
@@ -219,9 +256,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 action: "delete", flags: ["--ignore-not-found"],
                 manifest: {
                     "apiVersion": "apps/v1",
-                    "kind": "ReplicaSet",
+                    "kind": "Deployment",
                     "metadata": {
-                        "name": getRfsReplicasetName(b.inputs.sessionName)
+                        "name": getRfsDeploymentName(b.inputs.sessionName)
                     }
                 }
             })
@@ -233,10 +270,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("sessionName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
-            .addStep("checkHistoricalBackfillCompletion", MigrationConsole, "runMigrationCommand", c =>
+            .addStep("checkBackfillStatus", MigrationConsole, "runMigrationCommandForStatus", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    command: getCheckHistoricalBackfillCompletionScript(b.inputs.sessionName)
+                    command: getCheckBackfillStatusScript(b.inputs.sessionName)
                 }))
         )
         .addRetryParameters({
@@ -261,7 +298,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             .setDefinition({
                 action: "create",
                 setOwnerReference: true,
-                manifest: getRfsReplicasetManifest({
+                manifest: getRfsDeploymentManifest({
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     useLocalstackAwsCreds: expr.deserializeRecord(b.inputs.useLocalStack),
@@ -323,7 +360,13 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c)
                 }))
             .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c =>
-                c.register(selectInputsForRegister(b, c)))
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    backfillSession: expr.serialize(expr.makeDict({
+                        sessionName: b.inputs.sessionName,
+                        deploymentName: getRfsDeploymentName(b.inputs.sessionName)
+                    }))
+                }))
             .addStep("waitForCompletion", INTERNAL, "waitForCompletion", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),

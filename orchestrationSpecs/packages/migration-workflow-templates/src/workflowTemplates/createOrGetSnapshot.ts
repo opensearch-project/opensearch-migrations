@@ -1,6 +1,6 @@
 import {z} from "zod";
 import {CreateSnapshot} from "./createSnapshot";
-import {SNAPSHOT_NAME_CONFIG} from "@opensearch-migrations/schemas";
+import {ARGO_CREATE_SNAPSHOT_OPTIONS, SNAPSHOT_NAME_CONFIG} from "@opensearch-migrations/schemas";
 import {
     COMPLETE_SNAPSHOT_CONFIG,
     CREATE_SNAPSHOT_OPTIONS,
@@ -52,7 +52,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
 
 
     .addTemplate("createOrGetSnapshot", t => t
-        .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof CREATE_SNAPSHOT_OPTIONS>>())
+        .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>>())
         .addRequiredInput("uniqueRunNonce", typeToken<string>())

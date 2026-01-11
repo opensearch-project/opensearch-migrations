@@ -33,6 +33,7 @@ import {
     TaskRebinder
 } from "./taskBuilder";
 import {NamedTask} from "./sharedTypes";
+import {SynchronizationConfig} from "./synchronization";
 
 export interface StepGroup {
     steps: NamedTask[];
@@ -91,7 +92,8 @@ export class StepsBuilder<
         public readonly bodyScope: StepsScope,
         readonly stepGroups: StepGroup[],
         public readonly outputsScope: OutputParamsScope,
-        protected readonly retryParameters: GenericScope
+        protected readonly retryParameters: GenericScope,
+        public readonly synchronization: SynchronizationConfig | undefined
     ) {
         const rebind = <
             NewBodyScope extends TasksOutputsScope,
@@ -103,11 +105,12 @@ export class StepsBuilder<
             body: NewBodyScope,
             outputs: NewOutputScope,
             retry: GenericScope,
+            synchronization?: SynchronizationConfig
         ): Self => {
-            return new StepsBuilder(ctx, inputs, body, this.stepGroups, outputs, retry) as any;
+            return new StepsBuilder(ctx, inputs, body, this.stepGroups, outputs, retry, synchronization) as any;
         };
 
-        super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, rebind);
+        super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, rebind);
     }
 
     protected getExpressionBuilderContext(): StepsExpressionContext<InputParamsScope, StepsScope> {
@@ -138,7 +141,8 @@ export class StepsBuilder<
                 results.scope,
                 [...this.stepGroups, {steps: results.taskList}],
                 this.outputsScope,
-                this.retryParameters
+                this.retryParameters,
+                this.synchronization
             ) as any;
         } else {
             return newGroup; // Propagate the error object to the callsite

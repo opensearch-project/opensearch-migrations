@@ -72,6 +72,7 @@ class Environment:
                 if allow_empty:
                     self.config = {}  # or {} or whatever default you want
                 else:
+                    logger.exception("Got an error while loading or parsing the config file")
                     raise
         elif isinstance(config, Dict):
             self.config = config
@@ -101,7 +102,7 @@ class Environment:
                                           client_options=self.client_options)
             logger.info(f"Target cluster initialized: {self.target_cluster.endpoint}")
         else:
-            logger.warning("No target cluster provided. This may prevent other actions from proceeding.")
+            logger.info("No target cluster provided. This may prevent other actions from proceeding.")
 
         if 'metrics_source' in self.config:
             self.metrics_source = get_metrics_source(
