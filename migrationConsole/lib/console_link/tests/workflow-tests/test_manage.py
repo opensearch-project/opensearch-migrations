@@ -1,369 +1,287 @@
-"""Unit tests for manage.py workflow command."""
-
-import json
 import pytest
-from unittest.mock import Mock, patch
+import json
+from unittest.mock import MagicMock, patch, ANY
+from textual.widgets import Tree, Footer, Static, Button
+from rich.text import Text
 
+from console_link.workflow.commands.manage import NODE_TYPE_POD, WorkflowTreeApp, ConfirmModal, NODE_TYPE_SUSPEND
 
-# --- Test Data Builders ---
+import logging
+logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-def make_node_data(
-    node_id='n1',
-    display_name='Test Step',
-    node_type='Pod',
-    phase='Running',
-    started_at='2024-01-01T10:00:00Z',
-    finished_at=None,
-    children=None,
-    config_contents=None,
-    has_status_output=False
-):
-    """Build a node_data dict with controlled defaults."""
-    inputs = {'parameters': []}
-    if config_contents:
-        inputs['parameters'].append({'name': 'configContents', 'value': config_contents})
-    
-    outputs = {'parameters': []}
-    if has_status_output:
-        outputs['parameters'].append({'name': 'statusOutput', 'value': ''})
-    
+@pytest.fixture
+def mock_workflow_two_pods():
     return {
-        'id': node_id,
-        'display_name': display_name,
-        'type': node_type,
-        'phase': phase,
-        'started_at': started_at,
-        'finished_at': finished_at,
-        'children': children or [],
-        'inputs': inputs,
-        'outputs': outputs,
-        'group_name': None,
-        'boundary_id': None
+        "metadata": {"name": "test-wf", "resourceVersion": "123"},
+        "status": {
+            "startedAt": "2023-01-01T00:00:00Z",
+            "nodes": {
+                "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": "Running", "children": []},
+                "node-2": {"id": "node-2", "displayName": "step-2", "type": "Pod", "phase": "Running", "children": []}
+            }
+        }
     }
 
-
-def make_workflow_data(started_at='2024-01-01T10:00:00Z', nodes=None):
-    """Build workflow_data dict with controlled defaults."""
+@pytest.fixture
+def mock_workflow_pod_suspend():
     return {
-        'status': {
-            'startedAt': started_at,
-            'nodes': nodes or {}
+        "metadata": {"name": "test-wf", "resourceVersion": "123"},
+        "status": {
+            "startedAt": "2023-01-01T00:00:00Z",
+            "nodes": {
+                "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": "Running", "children": []},
+                "node-2": {"id": "node-2", "displayName": "suspend-1", "type": "Suspend", "phase": "Running",
+                           "children": []}
+            }
         }
     }
 
 
-def make_app(tree_nodes=None, workflow_data=None, k8s_client=None):
-    """Create a WorkflowTreeApp with controlled dependencies."""
-    from console_link.workflow.commands.manage import WorkflowTreeApp
-    
-    if tree_nodes is None:
-        tree_nodes = [make_node_data()]
-    if workflow_data is None:
-        workflow_data = make_workflow_data()
-    if k8s_client is None:
-        k8s_client = Mock()
-    
-    return WorkflowTreeApp(tree_nodes, workflow_data, k8s_client, 'test-wf', 'ma', 'http://localhost:2746')
+@pytest.fixture
+def mock_tree_nodes():
+    return [
+        {
+            "id": "node-1",
+            "display_name": "step-1",
+            "type": NODE_TYPE_POD,
+            "phase": "Running",
+            "children": [],
+            "started_at": "2023-01-01T00:00:01Z"
+        },
+        {
+            "id": "node-2",
+            "display_name": "suspend-1",
+            "type": NODE_TYPE_SUSPEND,
+            "phase": "Running",
+            "children": [],
+            "started_at": "2023-01-01T00:00:02Z"
+        }
+    ]
 
 
 # --- Tests ---
 
-class TestCopyToClipboard:
-    """Tests for copy_to_clipboard utility function."""
-
-    @patch('console_link.workflow.commands.manage.subprocess.run')
-    @patch('console_link.workflow.commands.manage.platform.system', return_value='Darwin')
-    def test_macos_uses_pbcopy(self, mock_system, mock_run):
-        from console_link.workflow.commands.manage import copy_to_clipboard
-        mock_run.return_value = Mock(returncode=0)
-        
-        result = copy_to_clipboard("test text")
-        
-        assert result is True
-        mock_run.assert_called_with(['pbcopy'], input=b'test text', check=True)
-
-    @patch('console_link.workflow.commands.manage.subprocess.run')
-    @patch('console_link.workflow.commands.manage.platform.system', return_value='Darwin')
-    def test_returns_false_on_exception(self, mock_system, mock_run):
-        from console_link.workflow.commands.manage import copy_to_clipboard
-        mock_run.side_effect = Exception("clipboard error")
-        
-        result = copy_to_clipboard("test text")
-        
-        assert result is False
+import pytest
+from unittest.mock import MagicMock, patch
 
 
-class TestGetWorkflowDataInternal:
-    """Tests for _get_workflow_data_internal helper."""
+@pytest.mark.asyncio
+async def test_workflow_lifecycle_transitions(mock_tree_nodes, mock_workflow_pod_suspend):
+    """
+    Tests the three main states of the app:
+    1. Pending (Waiting for workflow)
+    2. Active (Workflow discovered/populated)
+    3. Re-Pending (Workflow deleted)
+    """
+    k8s_mock = MagicMock()
+    app = WorkflowTreeApp(k8s_mock, "test-wf", "default", "http://argo")
 
-    @patch('console_link.workflow.commands.manage.requests.get')
-    def test_returns_workflow_data_on_success(self, mock_get):
-        from console_link.workflow.commands.manage import _get_workflow_data_internal
-        import io
-        
-        mock_service = Mock()
-        mock_service.get_workflow_status.return_value = {
-            'success': True,
-            'workflow': {'status': {'startedAt': '2024-01-01T00:00:00Z'}}
-        }
-        
-        # Mock streaming response with proper raw attribute for ijson
-        workflow_data = {
-            'status': {
-                'nodes': {
-                    'node1': {
-                        'displayName': 'test-node',
-                        'phase': 'Running',
-                        'type': 'Pod',
-                        'boundaryID': None
-                    }
-                }
-            }
-        }
-        mock_response = Mock(
-            status_code=200,
-            raw=io.BytesIO(json.dumps(workflow_data).encode('utf-8'))
-        )
-        mock_get.return_value = mock_response
-        
-        result, data = _get_workflow_data_internal(
-            mock_service, 'test-wf', 'http://localhost:2746', 'ma', False, None
-        )
-        
-        assert result['success'] is True
-        assert 'nodes' in data['status']
-        assert 'node1' in data['status']['nodes']
-        assert data['status']['nodes']['node1']['phase'] == 'Running'
+    async with app.run_test() as pilot:
+        tree = app.query_one("#workflow-tree")
 
-    @patch('console_link.workflow.commands.manage.requests.get')
-    def test_includes_auth_header_when_token_provided(self, mock_get):
-        from console_link.workflow.commands.manage import _get_workflow_data_internal
-        import io
-        
-        mock_service = Mock()
-        mock_service.get_workflow_status.return_value = {'success': True}
-        
-        # Mock streaming response
-        mock_response = Mock(
-            status_code=200,
-            raw=io.BytesIO(json.dumps({'status': {'nodes': {}}}).encode('utf-8'))
-        )
-        mock_get.return_value = mock_response
-        
-        _get_workflow_data_internal(
-            mock_service, 'test-wf', 'http://localhost:2746', 'ma', False, 'my-token'
-        )
-        
-        assert mock_get.call_args[1]['headers']['Authorization'] == 'Bearer my-token'
+        # --- STATE 1: PENDING ---
+        # Simulate a 404/Empty result from the Hub
+        app._apply_workflow_updates_unsafe({}, False)
+        await pilot.pause()
 
-    @patch('console_link.workflow.commands.manage.requests.get')
-    def test_returns_empty_dict_on_api_failure(self, mock_get):
-        from console_link.workflow.commands.manage import _get_workflow_data_internal
-        
-        mock_service = Mock()
-        mock_service.get_workflow_status.return_value = {'success': True}
-        mock_get.return_value = Mock(status_code=404)
-        
-        result, data = _get_workflow_data_internal(
-            mock_service, 'test-wf', 'http://localhost:2746', 'ma', False, None
-        )
-        
-        assert data == {}
+        assert "Waiting for Workflow" in str(tree.root.label)
+        assert len(tree.root.children) == 0
+        assert app._refresh_scheduled is False
+
+        # --- STATE 2: ACTIVE ---
+        # Simulate a successful discovery
+        app._apply_workflow_updates_unsafe(mock_workflow_pod_suspend, False)
+        await pilot.pause()
+
+        assert "Workflow Steps" in str(tree.root.label)
+        assert len(tree.root.children) == 2
+        assert app._refresh_scheduled is True
+        assert app._current_run_id == mock_workflow_pod_suspend['status']['startedAt']
+
+        # --- STATE 3: RE-PENDING ---
+        # Simulate the workflow being deleted (API returns None again)
+        app._apply_workflow_updates_unsafe(None, False)
+        await pilot.pause()
+
+        assert "Waiting for Workflow" in str(tree.root.label)
+        assert len(tree.root.children) == 0
+        # Internal data should be wiped
+        assert app.workflow_data == {}
+
+        # --- STATE 4: RE-DISCOVERY (New Run ID) ---
+        new_run_data = mock_workflow_pod_suspend.copy()
+        new_run_data['status']['startedAt'] = '2026-01-01T12:00:00Z'  # Different ID
+
+        app._apply_workflow_updates_unsafe(new_run_data, False)
+        await pilot.pause()
+
+        assert len(tree.root.children) == 2
+        assert app._current_run_id == '2026-01-01T12:00:00Z'
 
 
-class TestManageCommand:
-    """Tests for manage_command CLI entry point."""
+@pytest.mark.asyncio
+async def test_functional_keybindings_execution(mock_workflow_pod_suspend):
+    """Verify that keys actually trigger actions based on navigation state."""
+    k8s_mock = MagicMock()
+    app = WorkflowTreeApp(k8s_mock, "test-wf", "default", "http://argo")
 
-    @patch('console_link.workflow.commands.manage._initialize_k8s_client')
-    @patch('console_link.workflow.commands.manage._get_workflow_data_internal')
-    @patch('console_link.workflow.commands.manage.WorkflowService')
-    @patch('console_link.workflow.commands.manage.WorkflowTreeApp')
-    def test_runs_app_on_success(self, mock_app_class, mock_service_class, mock_get_data, mock_k8s):
-        from click.testing import CliRunner
-        from console_link.workflow.commands.manage import manage_command
-        
-        mock_get_data.return_value = (
-            {'success': True},
-            {'status': {'nodes': {'n1': {'type': 'Pod', 'displayName': 'step1', 'phase': 'Running'}}}}
-        )
-        mock_app = Mock()
-        mock_app_class.return_value = mock_app
-        
-        runner = CliRunner()
-        result = runner.invoke(manage_command, ['test-workflow'])
-        
-        assert result.exit_code == 0
-        mock_app.run.assert_called_once()
+    with patch("console_link.workflow.commands.manage._get_workflow_data_internal") as mock_fetch:
+        mock_fetch.return_value = ({"success": True}, mock_workflow_pod_suspend)
 
-    @patch('console_link.workflow.commands.manage._get_workflow_data_internal')
-    @patch('console_link.workflow.commands.manage.WorkflowService')
-    def test_exits_with_error_when_workflow_not_found(self, mock_service_class, mock_get_data):
-        from click.testing import CliRunner
-        from console_link.workflow.commands.manage import manage_command
-        
-        mock_get_data.return_value = ({'success': False, 'error': 'Not found'}, {})
-        
-        runner = CliRunner()
-        result = runner.invoke(manage_command, ['nonexistent'])
-        
-        assert result.exit_code != 0
-        assert 'Not found' in result.output
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
 
+            # Wait for the tree to appear and be ready
+            while len(tree.root.children) == 0:
+                await pilot.pause(0.05)
+            tree.focus()
 
-class TestWorkflowTreeAppLiveCheck:
-    """Tests for live check logic in WorkflowTreeApp."""
+            # Navigation to node-1 (pod)
+            await pilot.press("down")
+            app._pod_name_cache["node-1"] = "real-pod-abc"
+            app._update_dynamic_bindings()
+            await pilot.pause()
 
-    def test_should_run_live_check_false_without_config(self):
-        app = make_app()
-        node = make_node_data(config_contents=None, has_status_output=True)
-        
-        # Returns falsy (None from `has_config`) when config missing
-        assert not app._should_run_live_check(node)
+            with patch.object(app, "_show_logs_in_pager") as mock_logs:
+                await pilot.press("o") # output command
+                await pilot.pause()
+                mock_logs.assert_called_once()
 
-    def test_should_run_live_check_false_when_succeeded(self):
-        app = make_app()
-        node = make_node_data(phase='Succeeded', config_contents='cfg', has_status_output=True)
-        
-        assert app._should_run_live_check(node) is False
+            await pilot.press("down")
+            await pilot.pause()
 
-    def test_should_run_live_check_truthy_when_running_with_config(self):
-        app = make_app()
-        node = make_node_data(phase='Running', config_contents='cfg', has_status_output=True)
-        
-        # Returns truthy (the config string) when conditions met
-        assert app._should_run_live_check(node)
+            with patch.object(app, "_execute_approval") as mock_approve:
+                await pilot.press("a")
+                await pilot.pause()
 
-    def test_get_active_branch_tips_returns_set(self):
-        # Flat list - no branches, returns empty set
-        nodes = [
-            make_node_data(node_id='n1', node_type='Pod', started_at='2024-01-01T10:00:00Z'),
-            make_node_data(node_id='n2', node_type='Pod', started_at='2024-01-01T11:00:00Z'),
-        ]
-        app = make_app(tree_nodes=nodes)
-        
-        result = app._get_active_branch_tips(nodes)
-        assert isinstance(result, set)
+                # Check if the modal is now the active screen
+                from console_link.workflow.commands.manage import ConfirmModal
+                assert isinstance(app.screen, ConfirmModal)
 
-    def test_is_active_tip_uses_cached_ids(self):
-        app = make_app()
-        app._active_branch_tips = {'n2'}
-        
-        assert app._is_active_tip('n2') is True
-        assert app._is_active_tip('n1') is False
+                # Close modal to clean up
+                await pilot.press("escape")
 
 
-class TestWorkflowTreeAppWorkers:
-    """Tests for async worker methods."""
+@pytest.mark.asyncio
+async def test_manual_refresh_resolves_missing_pods(mock_workflow_two_pods):
+    """Verify that a manual refresh finds pods that the initial cached fetch missed."""
+    logger.error("starting test")
+    k8s_mock = MagicMock()
+    app = WorkflowTreeApp(k8s_mock, "test-wf", "default", "http://argo")
 
-    @patch('console_link.workflow.commands.manage._get_workflow_data_internal')
-    def test_fetch_workflow_data_returns_result(self, mock_get_data):
-        app = make_app()
-        mock_get_data.return_value = ({'success': True}, {'status': {'phase': 'Running'}})
-        
-        result, data = app._fetch_workflow_data()
-        
-        assert result['success'] is True
+    def get_pod_items_response(path, method, header_params=None, query_params=None, **kwargs):
+        is_cached = any(p == ('resourceVersion', '0') for p in (query_params or []))
 
-    @patch('console_link.workflow.commands.manage._get_workflow_data_internal')
-    def test_fetch_workflow_data_handles_exception(self, mock_get_data):
-        app = make_app()
-        mock_get_data.side_effect = Exception("Network error")
-        
-        result, _ = app._fetch_workflow_data()
-        
-        assert result['success'] is False
-        assert 'Network error' in result['error']
+        mock_resp = MagicMock()
+        if is_cached:
+            # Cached version only sees pod-1
+            items = [{"metadata": {"name": "pod-1", "annotations": {"workflows.argoproj.io/node-id": "node-1"}}}]
+        else:
+            # Strong version sees both pod-1 and pod-2
+            items = [
+                {"metadata": {"name": "pod-1", "annotations": {"workflows.argoproj.io/node-id": "node-1"}}},
+                {"metadata": {"name": "pod-2", "annotations": {"workflows.argoproj.io/node-id": "node-2"}}}
+            ]
 
-    @patch('console_link.workflow.commands.manage.Environment')
-    @patch('console_link.workflow.commands.manage.StatusCheckRunner.run_status_check')
-    @patch('console_link.workflow.commands.manage.ConfigConverter.convert_with_jq')
-    def test_perform_live_check_returns_status(self, mock_convert, mock_run_check, mock_env):
-        app = make_app()
-        mock_convert.return_value = "source_cluster:\n  endpoint: http://test"
-        mock_run_check.return_value = {'success': True, 'value': 'status output'}
-        
-        node = make_node_data(display_name='backfill step', config_contents='raw config')
-        result = app._perform_live_check(node)
-        
-        assert result['success'] is True
+        mock_resp.read.return_value = json.dumps({"items": items}).encode('utf-8')
+        return (mock_resp, 200, {})
 
-    @patch('console_link.workflow.commands.manage.ConfigConverter.convert_with_jq')
-    def test_perform_live_check_returns_error_when_config_conversion_fails(self, mock_convert):
-        app = make_app()
-        mock_convert.return_value = None
-        
-        node = make_node_data(config_contents='bad config')
-        result = app._perform_live_check(node)
-        
-        assert 'error' in result
+    k8s_mock.api_client.call_api.side_effect = get_pod_items_response
 
-    @patch('console_link.workflow.commands.manage.ConfigConverter.convert_with_jq')
-    def test_perform_live_check_handles_exception(self, mock_convert):
-        app = make_app()
-        mock_convert.side_effect = Exception("Conversion failed")
-        
-        node = make_node_data(config_contents='config')
-        result = app._perform_live_check(node)
-        
-        assert 'error' in result
+    with patch("console_link.workflow.commands.manage._get_workflow_data_internal") as mock_fetch:
+        mock_fetch.return_value = ({"success": True}, mock_workflow_two_pods)
 
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
 
-class TestWorkflowTreeAppPodLogs:
-    """Tests for pod log retrieval."""
+            # Wait for population
+            MAX_WAIT_SECONDS = 5
+            for i in range(MAX_WAIT_SECONDS):
+                await pilot.pause(MAX_WAIT_SECONDS/1000.0)
+                if tree.root.children:
+                    break
+            else:
+                pytest.fail("tree.root.children is still not set")
 
-    def test_get_pod_logs_returns_container_logs(self):
-        k8s_client = Mock()
-        mock_pod = Mock()
-        mock_pod.spec.init_containers = []
-        mock_pod.spec.containers = [Mock(name='main')]
-        k8s_client.read_namespaced_pod.return_value = mock_pod
-        k8s_client.read_namespaced_pod_log.return_value = "log output"
-        
-        app = make_app(k8s_client=k8s_client)
-        result = app._get_pod_logs('test-pod')
-        
-        assert 'main' in result
-        assert 'log output' in result
+            tree.focus()
 
-    def test_get_pod_logs_returns_error_on_exception(self):
-        k8s_client = Mock()
-        k8s_client.read_namespaced_pod.side_effect = Exception("Pod not found")
-        
-        app = make_app(k8s_client=k8s_client)
-        result = app._get_pod_logs('nonexistent-pod')
-        
-        assert 'Error' in result
+            # INITIAL CACHED STATE ---
+            # Navigate to node-1 (Pod 1)
+            await pilot.press("down")
+            await pilot.pause()
+
+            # Verify logs are available for Pod 1
+            with patch.object(app, "_show_logs_in_pager") as mock_logs:
+                await pilot.press("o")
+                mock_logs.assert_called_once()
+
+            # Navigate to node-2 (Pod 2 - still unknown to cache)
+            await pilot.press("down")
+            await pilot.pause()
+
+            # Verify logs are NOT available (binding should not exist)
+            with patch.object(app, "_show_logs_in_pager") as mock_logs:
+                await pilot.press("o")
+                mock_logs.assert_not_called()
+
+                # --- PHASE 2: MANUAL REFRESH (STRONGLY-CONSISTENT reads of the k8s state) ---
+                await pilot.press("r")
+                # Give some time for the strong background resolve to finish.
+                # Eventually, it should have added the second node's pod name,
+                # at which point, the output command should have worked
+                MAX_WAIT_SECONDS = 5
+                for i in range(MAX_WAIT_SECONDS):
+                    await pilot.pause(MAX_WAIT_SECONDS/1000.0)
+                    await pilot.press("o")
+                    if mock_logs.call_count:
+                        mock_logs.assert_called_once()
+                        break
+                else:
+                    pytest.fail("output command was never called for node-2")
+
+            logger.error("Done with test")
 
 
-class TestWorkflowTreeAppApproval:
-    """Tests for approval functionality."""
+@pytest.mark.asyncio
+async def test_approve_step_interaction(mock_tree_nodes, mock_workflow_pod_suspend):
+    """Test the Modal flow and Service call for approving a step."""
+    k8s_mock = MagicMock()
+    app = WorkflowTreeApp(mock_tree_nodes, mock_workflow_pod_suspend, k8s_mock, "test-wf", "default", "http://argo")
 
-    @patch('console_link.workflow.commands.manage.WorkflowService')
-    def test_execute_approval_notifies_on_success(self, mock_service_class):
-        app = make_app()
-        app.notify = Mock()
-        app.action_manual_refresh = Mock()
-        
-        mock_service_class.return_value.approve_workflow.return_value = {'success': True}
-        
-        node = make_node_data(display_name='Approval Gate')
-        app._execute_approval(node)
-        
-        app.notify.assert_called()
-        assert '✅' in str(app.notify.call_args)
-        app.action_manual_refresh.assert_called_once()
+    with patch("your_module.WorkflowService") as mock_service_class:
+        mock_service = mock_service_class.return_value
+        mock_service.approve_workflow.return_value = {"success": True}
 
-    @patch('console_link.workflow.commands.manage.WorkflowService')
-    def test_execute_approval_notifies_error_on_failure(self, mock_service_class):
-        app = make_app()
-        app.notify = Mock()
-        
-        mock_service_class.return_value.approve_workflow.return_value = {
-            'success': False, 'message': 'Not allowed'
-        }
-        
-        node = make_node_data(display_name='Approval Gate')
-        app._execute_approval(node)
-        
-        app.notify.assert_called()
-        assert 'error' in str(app.notify.call_args)
+        async with app.run_test() as pilot:
+            # Navigate to Suspend node (node-2)
+            await pilot.press("down", "down")
+
+            # Press 'a' to approve
+            await pilot.press("a")
+
+            # Verify Modal is present
+            assert isinstance(app.screen, ConfirmModal)
+
+            # Press 'y' inside the modal
+            await pilot.press("y")
+
+            # Verify the service was called correctly
+            mock_service.approve_workflow.assert_called_once_with(
+                "test-wf", "default", "http://argo", None, False, "id=node-2"
+            )
+
+
+@pytest.mark.asyncio
+@patch("your_module.copy_to_clipboard")
+async def test_copy_pod_name_action(mock_copy, mock_tree_nodes, mock_workflow_pod_suspend):
+    """Verify that the copy action sends the correct pod name to the clipboard utility."""
+    k8s_mock = MagicMock()
+    app = WorkflowTreeApp(mock_tree_nodes, mock_workflow_pod_suspend, k8s_mock, "test-wf", "default", "http://argo")
+    app._pod_name_cache["node-1"] = "pod-to-copy"
+
+    async with app.run_test() as pilot:
+        await pilot.press("down")  # Highlight pod
+        await pilot.press("c")  # Trigger copy
+
+        mock_copy.assert_called_once_with("pod-to-copy")

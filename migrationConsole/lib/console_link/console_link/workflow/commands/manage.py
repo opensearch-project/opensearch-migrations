@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
 import base64
 import click
 import requests
@@ -76,7 +77,7 @@ def copy_to_clipboard(text: str) -> bool:
     """Universal copy-to-clipboard: SSH, kubectl exec, and Local OS."""
     try:
         is_remote = any(k in os.environ for k in ["SSH_TTY", "SSH_CLIENT", "KUBERNETES_SERVICE_HOST"])
-        if is_remote or os.environ.get("TERM") in ["xterm-256color", "screen-256color"]:
+        if os.environ.get("TERM") in ["xterm-256color", "screen-256color"]:
             b64_text = base64.b64encode(text.encode('utf-8')).decode('utf-8')
             osc_52 = f"\x1b]52;c;{b64_text}\x07"
             if "TMUX" in os.environ:
@@ -134,34 +135,34 @@ class WorkflowTreeApp(App):
     #pod-status { height: 1; padding: 0 1; }
     """
     BINDINGS = []
-    def __init__(self, tree_nodes: List[Dict], workflow_data: Dict, k8s_client, name: str, ns: str, argo_server: str):
+    def __init__(self, k8s_client, name: str, ns: str, argo_server: str):
         super().__init__()
         log_mem("App Init Start")
+
         self.title = f"[{ns}] {name}"
-        self.tree_nodes = tree_nodes
-        self.workflow_data = workflow_data
-        self.k8s_client = k8s_client
         self.workflow_name = name
         self.namespace = ns
+
+        self.k8s_client = k8s_client
         self.argo_server = argo_server
 
-        self.nodes_with_live_checks = set()
-        self.live_check_in_progress = set()
-        self.last_check_time = {}
-        self._active_branch_tips = set()
-
-        self.node_mapping = {}
-        self.current_node_data = None
+        self._is_exiting = False
+        self._bulk_pod_name_refresh_active = False
         self.tail_lines = 500
 
-        # Pod Resolution State
+        # Workflow Working State
+        self.current_node_data = None
+        self._current_run_id = None
+        self.last_check_time = {}
+        self.node_mapping = {}
+        self.nodes_with_live_checks = {}
         self._pod_name_cache = {}
         self._pod_name_cache_is_dirty = True
-        self._bulk_pod_name_refresh_active = False
-        self._is_exiting = False
-        # Track the unique ID of the current workflow run to prevent stale worker updates
-        self._current_run_id = workflow_data.get('status', {}).get('startedAt')
-        log_mem("App Init Complete")
+        self._refresh_scheduled = False
+        self.tree_nodes = []
+        self.workflow_data = {}
+
+        self.marker_file = Path(tempfile.gettempdir()) / f"wf_ready_{self.workflow_name}.tmp"
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -170,22 +171,91 @@ class WorkflowTreeApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        tree = self.query_one("#workflow-tree", Tree)
-        self._populate_tree(tree, self.tree_nodes, tree.root)
-        tree.root.expand_all()
-        self._update_dynamic_bindings()
-        
-        # Initialize active branch tips cache
-        self._active_branch_tips = self._get_active_branch_tips(self.tree_nodes)
-
-        # Seed pod name cache
-        self._trigger_bulk_pod_name_resolve()
-
-        self.set_interval(3.0, self.action_refresh)
+        # Optimize for existence: try an immediate fetch
+        self.action_refresh_workflow()
 
     def on_unmount(self) -> None:
         logger.info("App unmounting - setting exit flag")
         self._is_exiting = True
+        if self.marker_file.exists():
+            try: self.marker_file.unlink()
+            except Exception: pass
+
+    def action_refresh_workflow(self) -> None:
+        self.run_worker(self._refresh_workflow, thread=True)
+
+    def _refresh_workflow(self) -> None:
+        logger.info(f"WORKER START: _refresh_workflow")
+        result = self._fetch_workflow_data()
+        self.call_from_thread(self._handle_refresh_workflow_result, result, False)
+
+    def _handle_refresh_workflow_result(self, result: Tuple[Dict, Dict], force_reload: bool) -> None:
+        res, slim_data = result
+
+        if not res.get('success'):
+            logger.warning(f"Error getting workflow {res.get('error', 'Unknown error')}.")
+            return
+        self._apply_workflow_updates(slim_data, force_reload)
+
+    def action_manual_refresh(self) -> None:
+        """User-triggered manual refresh (Strongly Consistent)."""
+        self.notify("Refreshing tree and pod metadata (Strong consistency)...", title="Manual Refresh")
+        self.run_worker(self._force_refresh_workflow, thread=True)
+
+    def _force_refresh_workflow(self) -> Tuple[Dict, Dict]:
+        """Sequential fetch: Workflow Tree Data -> Trigger Strong Pod Resolution."""
+        logger.info("WORKER START: _force_refresh_workflow")
+        result = self._fetch_workflow_data()
+        self.call_from_thread(self._handle_refresh_workflow_result, result, True)
+
+    def _handle_manual_refresh_result(self, result: Tuple[Dict, Dict]) -> None:
+        """Main Thread: Process tree result and then trigger a STRONG pod fetch."""
+        res, slim_data = result
+        if res.get('success'):
+            self._apply_workflow_updates(slim_data)
+            self._pod_name_cache_is_dirty = True
+            self._trigger_bulk_pod_name_resolve(use_cache=False)
+
+    def _initial_fetch_worker(self) -> None:
+        result = self._fetch_workflow_data()
+        self.call_from_thread(self._handle_initial_fetch, result)
+
+    def _handle_initial_fetch(self, result: Tuple[Dict, Dict]) -> None:
+        res, slim_data = result
+        if res.get('success'):
+            new_nodes = filter_tree_nodes(build_nested_workflow_tree(slim_data))
+            self._initialize_internal_state(new_nodes, slim_data)
+        else:
+            self._initialize_internal_state()
+
+    # --- Marker-based Waiter ---
+    def _start_background_waiter(self):
+        """Spawns a detached shell process to watch K8s and signal the TUI."""
+        if self.marker_file.exists():
+            try: self.marker_file.unlink()
+            except Exception: pass
+
+        cmd = (
+            f"kubectl wait workflow/{self.workflow_name} "
+            f"--for=jsonpath='{{.metadata.name}}'={self.workflow_name} "
+            f"-n {self.namespace} --timeout=300s && touch {self.marker_file}"
+        )
+        subprocess.Popen(cmd, shell=True, start_new_session=True)
+        logger.info(f"Spawned background kubectl waiter: {self.marker_file}")
+
+    def _wait_for_workflow_worker(self) -> None:
+        """Lightweight worker: polls disk, deletes immediately on find."""
+        self._start_background_waiter()
+        while not self._is_exiting:
+            if self.marker_file.exists():
+                logger.info("Workflow detected via marker.")
+                try:
+                    self.marker_file.unlink()
+                except FileNotFoundError:
+                    pass
+                self.call_from_thread(self.action_manual_refresh)
+                break
+            time.sleep(1)
 
     # --- Pod Resolution Logic ---
     def _fetch_workflow_pods_metadata(self, workflow_name: str, use_cache: bool = True) -> list[dict]:
@@ -220,7 +290,8 @@ class WorkflowTreeApp(App):
 
     def _trigger_bulk_pod_name_resolve(self, use_cache: bool = True) -> None:
         """Kicks off a background fetch if dirty and not already active."""
-        if self._bulk_pod_name_refresh_active or self._is_exiting or not self._pod_name_cache_is_dirty:
+        if self._bulk_pod_name_refresh_active or self._is_exiting or \
+                (not self._pod_name_cache_is_dirty and use_cache):
             return
 
         self._bulk_pod_name_refresh_active = True
@@ -234,6 +305,7 @@ class WorkflowTreeApp(App):
         """Worker: Fetches metadata and returns results tied to a run_id."""
         logger.info(f"WORKER START: _bulk_resolve_pods (use_cache={use_cache})")
         try:
+            logger.error("TODO - if this call fails, I need to retry or reset the pod_cache_is_dirty flag!")
             items = self._fetch_workflow_pods_metadata(self.workflow_name, use_cache=use_cache)
             new_names = {}
 
@@ -324,29 +396,6 @@ class WorkflowTreeApp(App):
 
         self.refresh_bindings()
 
-    def action_refresh(self) -> None:
-        self.run_worker(self._fetch_workflow_data, thread=True, name="refresh_worker")
-
-    def action_manual_refresh(self) -> None:
-        """User-triggered manual refresh (Strongly Consistent)."""
-        self.notify("Refreshing tree and pod metadata (Strong consistency)...", title="Manual Refresh")
-        self.run_worker(self._force_refresh_sequence, thread=True, name="manual_refresh_worker")
-
-    def _force_refresh_sequence(self) -> Tuple[Dict, Dict]:
-        """Sequential fetch: Workflow Tree Data -> Trigger Strong Pod Resolution."""
-        logger.info("WORKER START: _force_refresh_sequence")
-        result = self._fetch_workflow_data()
-        self.call_from_thread(self._handle_manual_refresh_result, result)
-        return result
-
-    def _handle_manual_refresh_result(self, result: Tuple[Dict, Dict]) -> None:
-        """Main Thread: Process tree result and then trigger a STRONG pod fetch."""
-        res, slim_data = result
-        if res.get('success'):
-            self._apply_workflow_updates(slim_data)
-            self._pod_name_cache_is_dirty = True
-            self._trigger_bulk_pod_name_resolve(use_cache=False)
-
     def action_view_logs(self) -> None:
         if self.current_node_data and self.current_node_data.get('type') == NODE_TYPE_POD:
             self._show_logs_in_pager(self.current_node_data)
@@ -409,76 +458,60 @@ class WorkflowTreeApp(App):
             if res.get('success'):
                 self._apply_workflow_updates(slim_data)
 
-    def _apply_workflow_updates(self, new_data: Dict) -> None:
-        try:
-            # Content Guard: Skip everything if no changes detected at the Argo level
-            old_rv = self.workflow_data.get('metadata', {}).get('resourceVersion')
-            new_rv = new_data.get('metadata', {}).get('resourceVersion')
-            new_run_id = new_data.get('status', {}).get('startedAt')
+    def _apply_workflow_updates_unsafe(self, new_data: Dict, force_reload: bool) -> None:
+        tree = self.query_one("#workflow-tree", Tree)
 
-            is_restart = self._current_run_id != new_run_id
+        if not new_data:
+            if self.workflow_data or not any(w.name == "wait_worker" for w in self.workers):
+                logger.warning("No workflow data. Reverting to pending.")
+                self.workflow_data = {}
+                self.tree_nodes = []
+                self.node_mapping.clear()
+                tree.clear()
+                tree.root.label = "[yellow]⏳ Waiting for Workflow to be created...[/]"
+                self.run_worker(self._wait_for_workflow_worker, thread=True, name="wait_worker")
+            return
 
-            # If the version is the same, and it's not a totally new workflow, do nothing.
-            if old_rv == new_rv and not is_restart:
+        new_run_id = new_data.get('status', {}).get('startedAt')
+        is_restart = self._current_run_id != new_run_id
+
+        # Content Guard: Skip if nothing changed
+        # Hard Restart Logic (Pending -> Active OR Workflow Restarted)
+        if is_restart or self.workflow_data and not force_reload:
+            if self.workflow_data.get('metadata', {}).get('resourceVersion') == \
+                    new_data.get('metadata', {}).get('resourceVersion'):
                 return
 
-            log_mem("Refresh Update Start (Changes Detected)")
+        if is_restart or not self.workflow_data:
+            self._current_run_id = new_run_id
+            tree.clear()
+            self.node_mapping.clear()
+            self.nodes_with_live_checks.clear()
+            self._pod_name_cache.clear()
 
-            tree = self.query_one("#workflow-tree", Tree)
             tree.root.label = "Workflow Steps"
-            old_scroll_x, old_scroll_y = tree.scroll_offset
+            self.tree_nodes = filter_tree_nodes(build_nested_workflow_tree(new_data))
+            self._populate_tree(tree, self.tree_nodes, tree.root)
+            tree.root.expand_all()
 
+            if not self._refresh_scheduled:
+                self.set_interval(3.0, self.action_refresh_workflow)
+                self._refresh_scheduled = True
+        else:
             new_nodes = filter_tree_nodes(build_nested_workflow_tree(new_data))
-
-            if is_restart:
-                logger.info(f"Workflow restart/swap (Run ID: {new_run_id}). Hard reset.")
-                self._current_run_id = new_run_id
-
-                # Full State Wipe
-                tree.clear()
-                self.node_mapping.clear()
-                self.nodes_with_live_checks.clear()
-                self.live_check_in_progress.clear()
-                self._pod_name_cache.clear()
-
-                self._populate_tree(tree, new_nodes, tree.root)
-                tree.root.expand_all()
-            else:
-                # Soft Update
-                self._update_tree_recursive(tree.root, new_nodes, new_data)
-
-            # Update persistent storage
-            self.workflow_data = new_data
+            self._update_tree_recursive(tree.root, new_nodes, new_data)
             self.tree_nodes = new_nodes
-            
-            # Update active branch tips cache
-            self._active_branch_tips = self._get_active_branch_tips(new_nodes)
 
-            # Trigger Pod Cache Sync (Fast Path)
-            self._pod_name_cache_is_dirty = True
-            self._trigger_bulk_pod_name_resolve(use_cache=True)
+        self.workflow_data = new_data
 
-            # --- Live Status Management ---
-            latest_active_ids = self._get_latest_pod_ids_per_branch(new_nodes)
+        # Trigger dynamic UI updates (Bindings, Pod Names, Live Checks)
+        self._trigger_bulk_pod_name_resolve(not force_reload)
+        self._update_dynamic_bindings()
+        self._update_pod_status()
 
-            for node_id in list(self.nodes_with_live_checks):
-                if node_id not in latest_active_ids:
-                    if t_node := self.node_mapping.get(node_id):
-                        self._remove_ephemeral_nodes(t_node)
-
-            for latest_active_id in latest_active_ids:
-                latest_node = self.node_mapping.get(latest_active_id)
-                if latest_node and self._should_run_live_check(latest_node.data):
-                    self._run_live_check_async(latest_node, latest_node.data)
-
-            # Update UI components
-            self._update_dynamic_bindings()
-            self._update_pod_status()
-
-            tree.scroll_to(old_scroll_x, old_scroll_y, animate=False)
-            gc.collect()
-            log_mem("Post-Refresh Cleanup Complete")
-
+    def _apply_workflow_updates(self, new_data: Dict, force_reload: bool) -> None:
+        try:
+            self._apply_workflow_updates_unsafe(new_data, force_reload)
         except Exception as e:
             logger.error(f"Update error: {e}")
 
@@ -519,12 +552,12 @@ class WorkflowTreeApp(App):
                 child.remove()
 
     def _handle_refresh_error(self, error_msg: str) -> None:
-        tree = self.query_one("#workflow-tree", Tree)
-        tree.clear()
-        self.node_mapping.clear()
-        self.nodes_with_live_checks.clear()
-        self.live_check_in_progress.clear()
-        tree.root.label = f"⚠️  Fetch failed: {error_msg}"
+        if "not found" in error_msg.lower():
+            logger.warning(f"Workflow {self.workflow_name} deleted. Resetting.")
+            self._initialize_internal_state()
+        else:
+            tree = self.query_one("#workflow-tree", Tree)
+            tree.root.label = f"⚠️  Fetch failed: {error_msg}"
 
     # --- External Integrations ---
     def _show_logs_in_pager(self, node_data: Dict) -> None:
@@ -569,30 +602,31 @@ class WorkflowTreeApp(App):
         except Exception as e: self.notify(f"Error: {e}", severity="error")
 
     # --- Live Check Logic ---
-    def _get_active_branch_tips(self, nodes: List[Dict]) -> set:
-        """Return the latest active pod ID from each parallel branch."""
-        latest_ids = set()
-        def find_branches(n_list):
+    def _get_branch_front_ids(self, nodes: List[Dict]) -> set:
+        """Return the ID of the latest started pod for every parent container context."""
+        parent_to_latest = {}  # ParentID -> PodNode
+
+        def collect(n_list, parent_id):
             for n in n_list:
-                children = n.get('children', [])
-                if len(children) > 1:
-                    for branch in children:
-                        all_pods = []
-                        def collect(node):
-                            if node.get('type') == NODE_TYPE_POD and node.get('phase') != PHASE_SUCCEEDED:
-                                all_pods.append(node)
-                            for c in node.get('children', []): collect(c)
-                        collect(branch)
-                        if all_pods:
-                            latest = max(all_pods, key=lambda p: (p.get('started_at') or '', p.get('id', '')))
-                            latest_ids.add(latest.get('id'))
-                elif children: find_branches(children)
-        find_branches(nodes)
-        return latest_ids
+                if n.get('type') == NODE_TYPE_POD:
+                    current_latest = parent_to_latest.get(parent_id)
+                    n_key = (n.get('started_at') or '', n.get('id', ''))
+                    l_key = (current_latest.get('started_at') or '', current_latest.get('id', '')) if current_latest else ('', '')
+                    if not current_latest or n_key > l_key:
+                        parent_to_latest[parent_id] = n
+                if n.get('children'):
+                    collect(n['children'], n['id'])
+
+        collect(nodes, "root")
+        return {p['id'] for p in parent_to_latest.values()}
+
+    def _get_active_branch_tips(self, nodes: List[Dict]) -> set:
+        """Compatibility shim for old tip logic."""
+        return self._get_branch_front_ids(nodes)
 
     def _is_active_tip(self, node_id: str) -> bool:
         """Check if this node is an active tip of a parallel branch."""
-        return node_id in self._active_branch_tips
+        return node_id in self._get_branch_front_ids(self.tree_nodes)
 
     def _remove_ephemeral_nodes(self, tree_node: TreeNode) -> None:
         parent = tree_node.parent if tree_node.parent else tree_node
@@ -616,11 +650,14 @@ class WorkflowTreeApp(App):
         if now - self.last_check_time.get(node_id, 0) < 2.0: return
         if node_id in self.live_check_in_progress: return
 
-        self.live_check_in_progress.add(node_id)
-        self.last_check_time[node_id] = now
-
         parent = tree_node.parent if tree_node.parent else tree_node
         header = next((c for c in parent.children if c.data and c.data.get("is_live_status_header")), None)
+
+        if header and not header.is_expanded:
+            return
+
+        self.live_check_in_progress.add(node_id)
+        self.last_check_time[node_id] = now
 
         if header and len(parent.children) > 0 and parent.children[-1] != header:
             was_expanded = header.is_expanded
@@ -669,6 +706,7 @@ class WorkflowTreeApp(App):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         header.set_label(f"[bold cyan]Live Status[/] [italic gray](Updated: {ts})[bold cyan]:[/]")
 
+        had_data = any(c.data and c.data.get("is_live_data") for c in header.children)
         for child in list(header.children): child.remove()
 
         if result.get('success') and result.get('value'):
@@ -676,7 +714,8 @@ class WorkflowTreeApp(App):
             for line in lines:
                 if line.strip():
                     header.add(line, data={"is_ephemeral": True, "is_live_data": True})
-            header.expand()
+            if not had_data:
+                header.expand()
         else:
             msg = result.get('message') or result.get('error') or "Check failed"
             header.add(f"❌ {msg}", data={"is_ephemeral": True})
@@ -685,7 +724,7 @@ class WorkflowTreeApp(App):
 
 # --- Entrypoint ---
 @click.command(name="manage")
-@click.argument('workflow_name', required=False)
+@click.argument('workflow-name', required=False)
 @click.option(
     '--argo-server',
     default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
@@ -701,20 +740,28 @@ def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token):
         service = WorkflowService()
         if not workflow_name:
             workflow_name = auto_detect_workflow(service, namespace, argo_server, token, insecure, ctx)
-            if not workflow_name: return
-        result, data = _get_workflow_data_internal(service, workflow_name, argo_server, namespace, insecure, token)
-        if not result['success']:
-            click.echo(f"Error: {result['error']}", err=True)
-            ctx.exit(ExitCode.FAILURE.value)
-        nodes = filter_tree_nodes(build_nested_workflow_tree(data))
-        if not nodes:
-            click.echo("No workflow steps found.")
-            return
-        app = WorkflowTreeApp(nodes, data, _initialize_k8s_client(ctx), workflow_name, namespace, argo_server)
+            if not workflow_name:
+                click.echo("No workflows found.  Use --workflow-name to wait for a specific workflow to start.")
+                return
+        app = WorkflowTreeApp(_initialize_k8s_client(ctx), workflow_name, namespace, argo_server)
         app.run()
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
         ctx.exit(ExitCode.FAILURE.value)
+
+def wait_for_workflow(name: str, namespace: str, timeout: str = "60s"):
+    """Blocks until the workflow resource exists in the cluster."""
+    try:
+        # We use 'get' first to see if it exists, or 'wait --for=condition' if it's already there
+        subprocess.run(
+            ["kubectl", "wait", f"workflow/{name}", "--for=jsonpath={.metadata.name}", name,
+             "-n", namespace, f"--timeout={timeout}"],
+            check=True,
+            capture_output=True
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
 def _get_workflow_data_internal(service, name, server, ns, insecure, token):
     log_mem("Fetch Data Start")
@@ -752,7 +799,7 @@ def _get_workflow_data_internal(service, name, server, ns, insecure, token):
         resp.close()
 
     slim_data = {
-        "metadata": {"name": name},
+        "metadata": {"name": name, "resourceVersion": res.get('workflow', {}).get('metadata', {}).get('resourceVersion')},
         "status": {
             "nodes": slim_nodes,
             "startedAt": res.get('workflow', {}).get('status', {}).get('startedAt')
