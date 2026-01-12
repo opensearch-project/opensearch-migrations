@@ -197,12 +197,27 @@ public class LuceneReader {
             }
 
             if (sourceBytes == null || sourceBytes.length == 0) {
-                log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have the _source field enabled.")
-                    .addArgument(luceneDocId)
-                    .addArgument(getSegmentReaderDebugInfo)
-                    .addArgument(indexDirectoryPath)
-                    .log();
-                return null;  // Skip these
+                // Try to reconstruct _source from doc_values
+                log.atDebug().setMessage("Document {} has no _source, attempting reconstruction from doc_values")
+                    .addArgument(openSearchDocId).log();
+                String reconstructed = SourceReconstructor.reconstructSource(reader, luceneDocId);
+                
+                if (reconstructed == null || reconstructed.isEmpty()) {
+                    log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, _source is missing and reconstruction failed.")
+                        .addArgument(luceneDocId)
+                        .addArgument(getSegmentReaderDebugInfo)
+                        .addArgument(indexDirectoryPath)
+                        .log();
+                    return null;  // Skip these
+                }
+                sourceBytes = reconstructed.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                log.atDebug().setMessage("Successfully reconstructed _source for document {} from doc_values")
+                    .addArgument(openSearchDocId).log();
+            } else {
+                // Merge excluded fields from doc_values and stored fields
+                String merged = SourceReconstructor.mergeWithDocValues(
+                    new String(sourceBytes, java.nio.charset.StandardCharsets.UTF_8), reader, luceneDocId, document);
+                sourceBytes = merged.getBytes(java.nio.charset.StandardCharsets.UTF_8);
             }
 
             log.atDebug().setMessage("Reading document {}").addArgument(openSearchDocId).log();
