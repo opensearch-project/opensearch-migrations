@@ -15,6 +15,8 @@ import lombok.extern.slf4j.Slf4j;
 public class SourceReconstructor {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+    private SourceReconstructor() {}
+
     /**
      * Reconstructs _source JSON from doc_values for a document.
      * 
