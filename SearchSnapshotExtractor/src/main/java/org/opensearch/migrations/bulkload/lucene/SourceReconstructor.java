@@ -19,6 +19,11 @@ public class SourceReconstructor {
 
     private SourceReconstructor() {}
 
+    /** Skip internal fields (e.g., _id) and multi-field sub-fields (e.g., title.keyword) */
+    private static boolean shouldSkipField(String fieldName) {
+        return fieldName.startsWith("_") || fieldName.contains(".");
+    }
+
     /**
      * Reconstructs _source JSON from doc_values for a document.
      * 
@@ -32,12 +37,9 @@ public class SourceReconstructor {
             
             for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
                 String fieldName = fieldInfo.name();
-                
-                // Skip internal fields and multi-field sub-fields (e.g., title.keyword)
-                if (fieldName.startsWith("_") || fieldName.contains(".")) {
+                if (shouldSkipField(fieldName)) {
                     continue;
                 }
-                
                 Object value = reader.getDocValue(docId, fieldInfo);
                 if (value != null) {
                     reconstructed.put(fieldName, convertDocValue(value, fieldInfo));
@@ -66,10 +68,9 @@ public class SourceReconstructor {
             Map<String, Object> existing = OBJECT_MAPPER.readValue(existingSource, Map.class);
             boolean modified = false;
             
-            // First: try doc_values
             for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
                 String fieldName = fieldInfo.name();
-                if (fieldName.startsWith("_") || fieldName.contains(".") || existing.containsKey(fieldName)) {
+                if (shouldSkipField(fieldName) || existing.containsKey(fieldName)) {
                     continue;
                 }
                 Object value = reader.getDocValue(docId, fieldInfo);
@@ -79,10 +80,9 @@ public class SourceReconstructor {
                 }
             }
             
-            // Second: try stored fields from document
             for (var field : document.getFields()) {
                 String fieldName = field.name();
-                if (fieldName.startsWith("_") || fieldName.contains(".") || existing.containsKey(fieldName)) {
+                if (shouldSkipField(fieldName) || existing.containsKey(fieldName)) {
                     continue;
                 }
                 Object value = getStoredFieldValue(field);

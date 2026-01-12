@@ -9,7 +9,6 @@ import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
 import shadow.lucene9.org.apache.lucene.index.BinaryDocValues;
 import shadow.lucene9.org.apache.lucene.index.FieldInfo;
 import shadow.lucene9.org.apache.lucene.index.FilterCodecReader;
@@ -26,7 +25,6 @@ import shadow.lucene9.org.apache.lucene.util.BytesRef;
 import shadow.lucene9.org.apache.lucene.util.FixedBitSet;
 import shadow.lucene9.org.apache.lucene.util.SparseFixedBitSet;
 
-@Slf4j
 public class LeafReader9 implements LuceneLeafReader {
 
     private final LeafReader wrapped;
@@ -98,11 +96,6 @@ public class LeafReader9 implements LuceneLeafReader {
             }
         }
         return fields;
-    }
-
-    @Override
-    public Iterable<String> getFieldTerms(String fieldName) throws IOException {
-        return getFieldTermsInternal(fieldName);
     }
 
     private List<String> getFieldTermsInternal(String fieldName) {
