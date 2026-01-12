@@ -33,4 +33,7 @@ public interface DocValueFieldInfo {
         SORTED_NUMERIC,
         SORTED_SET
     }
+
+    /** Simple implementation for use by all LeafReader versions */
+    record Simple(String name, DocValueType docValueType, boolean isBoolean) implements DocValueFieldInfo {}
 }
