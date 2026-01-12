@@ -1,6 +1,8 @@
 """Interactive manage command for workflow CLI - interactive tree navigation for log viewing."""
 import datetime
 import gc
+from dataclasses import dataclass
+
 import ijson
 import json
 import logging
@@ -10,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Callable
 from pathlib import Path
 import base64
 import click
@@ -24,9 +26,10 @@ from textual.widgets import Button, Footer, Header, Static, Tree
 from textual.widgets.tree import TreeNode
 from rich.text import Text
 
+from .manage_injections import PodScraperInterface, ArgoService, make_k8s_pod_scraper, WaiterInterface, make_argo_service
 # Internal imports
 from ..models.utils import ExitCode
-from ..services.workflow_service import WorkflowService
+from ..services.workflow_service import WorkflowService, WorkflowApproveResult
 from ..tree_utils import (
     build_nested_workflow_tree,
     clean_display_name,
@@ -52,6 +55,7 @@ NODE_TYPE_POD = "Pod"
 NODE_TYPE_SUSPEND = "Suspend"
 PHASE_RUNNING = "Running"
 PHASE_SUCCEEDED = "Succeeded"
+LOADING_ROOT_LABEL = "[yellow]⏳ Waiting for Workflow to be created...[/]"
 
 # --- Logging Configuration ---
 log_dir = os.path.join(tempfile.gettempdir(), "workflow_manage")
@@ -99,6 +103,7 @@ def copy_to_clipboard(text: str) -> bool:
     except Exception:
         return False
 
+
 # --- UI Screens ---
 class ConfirmModal(ModalScreen[bool]):
     CSS = """
@@ -135,16 +140,23 @@ class WorkflowTreeApp(App):
     #pod-status { height: 1; padding: 0 1; }
     """
     BINDINGS = []
-    def __init__(self, k8s_client, name: str, ns: str, argo_server: str):
+    def __init__(self, namespace: str,
+                 name: str,
+                 argo_service: ArgoService,
+                 pod_scraper: PodScraperInterface,
+                 workflow_waiter: WaiterInterface,
+                 refresh_interval):
         super().__init__()
+        self.refresh_interval = refresh_interval
+        self.waiter = workflow_waiter
+        self.pod_scraper = pod_scraper
+
         log_mem("App Init Start")
 
-        self.title = f"[{ns}] {name}"
+        self.title = f"[{namespace}] {name}"
         self.workflow_name = name
-        self.namespace = ns
-
-        self.k8s_client = k8s_client
-        self.argo_server = argo_server
+        self.namespace = namespace
+        self.argo_service = argo_service
 
         self._is_exiting = False
         self._bulk_pod_name_refresh_active = False
@@ -158,7 +170,6 @@ class WorkflowTreeApp(App):
         self.nodes_with_live_checks = {}
         self._pod_name_cache = {}
         self._pod_name_cache_is_dirty = True
-        self._refresh_scheduled = False
         self.tree_nodes = []
         self.workflow_data = {}
 
@@ -166,7 +177,7 @@ class WorkflowTreeApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Container(Tree("Workflow Steps", id="workflow-tree"), id="tree-container")
+        yield Container(Tree(LOADING_ROOT_LABEL, id="workflow-tree"), id="tree-container")
         yield Static("", id="pod-status")
         yield Footer()
 
@@ -178,116 +189,63 @@ class WorkflowTreeApp(App):
         logger.info("App unmounting - setting exit flag")
         self._is_exiting = True
         if self.marker_file.exists():
-            try: self.marker_file.unlink()
+            try: self.waiter.reset()
             except Exception: pass
 
+    def _fetch_workflow_data(self):
+        try:
+            return self.argo_service.get_workflow(self.workflow_name, self.namespace)
+        except Exception as e:
+            return {"success": False, "error": str(e)}, {}
+
     def action_refresh_workflow(self) -> None:
-        self.run_worker(self._refresh_workflow, thread=True)
+        logger.info("action_refresh_workflow")
+        self.run_worker(self._refresh_workflow, thread=True, name="_refresh_workflow")
 
     def _refresh_workflow(self) -> None:
         logger.info(f"WORKER START: _refresh_workflow")
         result = self._fetch_workflow_data()
         self.call_from_thread(self._handle_refresh_workflow_result, result, False)
+        logger.info("WORKER END: _refresh_workflow")
 
     def _handle_refresh_workflow_result(self, result: Tuple[Dict, Dict], force_reload: bool) -> None:
         res, slim_data = result
 
-        if not res.get('success'):
-            logger.warning(f"Error getting workflow {res.get('error', 'Unknown error')}.")
-            return
-        self._apply_workflow_updates(slim_data, force_reload)
+        logger.info(f"START: _handle_refresh_workflow_result")
+        try:
+            if not res.get('success'):
+                logger.warning(f"Error getting workflow {res.get('error', 'Unknown error')}.")
+                slim_data = {}
+            self._apply_workflow_updates(slim_data, force_reload)
+        finally:
+            logger.info(f"END: _handle_refresh_workflow_result")
 
     def action_manual_refresh(self) -> None:
         """User-triggered manual refresh (Strongly Consistent)."""
         self.notify("Refreshing tree and pod metadata (Strong consistency)...", title="Manual Refresh")
-        self.run_worker(self._force_refresh_workflow, thread=True)
+        self.run_worker(self._force_refresh_workflow, thread=True, name="_force_refresh_workflow")
 
     def _force_refresh_workflow(self) -> Tuple[Dict, Dict]:
         """Sequential fetch: Workflow Tree Data -> Trigger Strong Pod Resolution."""
         logger.info("WORKER START: _force_refresh_workflow")
         result = self._fetch_workflow_data()
         self.call_from_thread(self._handle_refresh_workflow_result, result, True)
-
-    def _handle_manual_refresh_result(self, result: Tuple[Dict, Dict]) -> None:
-        """Main Thread: Process tree result and then trigger a STRONG pod fetch."""
-        res, slim_data = result
-        if res.get('success'):
-            self._apply_workflow_updates(slim_data)
-            self._pod_name_cache_is_dirty = True
-            self._trigger_bulk_pod_name_resolve(use_cache=False)
-
-    def _initial_fetch_worker(self) -> None:
-        result = self._fetch_workflow_data()
-        self.call_from_thread(self._handle_initial_fetch, result)
-
-    def _handle_initial_fetch(self, result: Tuple[Dict, Dict]) -> None:
-        res, slim_data = result
-        if res.get('success'):
-            new_nodes = filter_tree_nodes(build_nested_workflow_tree(slim_data))
-            self._initialize_internal_state(new_nodes, slim_data)
-        else:
-            self._initialize_internal_state()
-
-    # --- Marker-based Waiter ---
-    def _start_background_waiter(self):
-        """Spawns a detached shell process to watch K8s and signal the TUI."""
-        if self.marker_file.exists():
-            try: self.marker_file.unlink()
-            except Exception: pass
-
-        cmd = (
-            f"kubectl wait workflow/{self.workflow_name} "
-            f"--for=jsonpath='{{.metadata.name}}'={self.workflow_name} "
-            f"-n {self.namespace} --timeout=300s && touch {self.marker_file}"
-        )
-        subprocess.Popen(cmd, shell=True, start_new_session=True)
-        logger.info(f"Spawned background kubectl waiter: {self.marker_file}")
+        logger.info("WORKER END: _force_refresh_workflow")
 
     def _wait_for_workflow_worker(self) -> None:
         """Lightweight worker: polls disk, deletes immediately on find."""
-        self._start_background_waiter()
+        logger.info("WORKER START: _wait_for_workflow_worker")
+        self.waiter.trigger() # use the injected value, don't call _start_background_waiter directly
         while not self._is_exiting:
-            if self.marker_file.exists():
-                logger.info("Workflow detected via marker.")
-                try:
-                    self.marker_file.unlink()
-                except FileNotFoundError:
-                    pass
-                self.call_from_thread(self.action_manual_refresh)
+            if self.waiter.checker():  # Use injected checker
+                logger.info("Workflow detected via waiter.")
+                self.waiter.reset()
+                self.call_from_thread(self.action_refresh_workflow)
                 break
-            time.sleep(1)
+            time.sleep(0.1)  # Reduced sleep for snappier testing
+        logger.info("WORKER END: _wait_for_workflow_worker")
 
     # --- Pod Resolution Logic ---
-    def _fetch_workflow_pods_metadata(self, workflow_name: str, use_cache: bool = True) -> list[dict]:
-        """High-performance fetch of pod metadata for a specific workflow."""
-        query_params = [('labelSelector', f"workflows.argoproj.io/workflow={workflow_name}")]
-
-        # Hybrid Consistency: resourceVersion=0 hits the API cache (fast).
-        # Omitting it forces a strongly consistent read from etcd (safe/slow).
-        if use_cache:
-            query_params.append(('resourceVersion', '0'))
-
-        try:
-            # use call_api to bypass the V1Pod object creation, which is much slower
-            response_tuple = self.k8s_client.api_client.call_api(
-                f'/api/v1/namespaces/{self.namespace}/pods', 'GET',
-                # Use headers to request ONLY metadata (strips spec and status)
-                header_params={'Accept': 'application/json;as=PartialObjectMetadataList;v=v1;g=meta.k8s.io'},
-                query_params=query_params,
-                _preload_content=False,
-                _request_timeout=10
-            )
-
-            response_object = response_tuple[0]
-            try:
-                data = json.loads(response_object.read())
-                return data.get('items', [])
-            finally:
-                response_object.close()
-        except Exception as e:
-            logger.error(f"Failed to fetch pod metadata for {workflow_name} (use_cache={use_cache}): {e}")
-            return []
-
     def _trigger_bulk_pod_name_resolve(self, use_cache: bool = True) -> None:
         """Kicks off a background fetch if dirty and not already active."""
         if self._bulk_pod_name_refresh_active or self._is_exiting or \
@@ -299,14 +257,14 @@ class WorkflowTreeApp(App):
 
         # Pass current_run_id as a fencing token
         run_id = self._current_run_id
-        self.run_worker(lambda: self._bulk_resolve_pods(run_id, use_cache), thread=True, name="bulk_pod_resolve")
+        self.run_worker(lambda: self._bulk_resolve_pods(run_id, use_cache), thread=True, name="_bulk_resolve_pods")
 
     def _bulk_resolve_pods(self, run_id: str, use_cache: bool = True) -> None:
         """Worker: Fetches metadata and returns results tied to a run_id."""
         logger.info(f"WORKER START: _bulk_resolve_pods (use_cache={use_cache})")
         try:
             logger.error("TODO - if this call fails, I need to retry or reset the pod_cache_is_dirty flag!")
-            items = self._fetch_workflow_pods_metadata(self.workflow_name, use_cache=use_cache)
+            items = self.pod_scraper.fetch_pods_metadata(self.workflow_name, self.namespace, use_cache)
             new_names = {}
 
             for pod in items:
@@ -437,16 +395,6 @@ class WorkflowTreeApp(App):
         status_output = get_step_status_output(workflow_data, node['id'])
         return get_step_rich_label(node, status_output)
 
-    # --- Data Fetching & Workers ---
-    def _fetch_workflow_data(self) -> Tuple[Dict, Dict]:
-        logger.info("WORKER START: refresh_worker")
-        try:
-            return _get_workflow_data_internal(WorkflowService(), self.workflow_name, self.argo_server, self.namespace, False, None)
-        except Exception as e:
-            return {"success": False, "error": str(e)}, {}
-        finally:
-            logger.info("WORKER END: refresh_worker")
-
     def on_worker_state_changed(self, event) -> None:
         """The Main Thread's 'Gatekeeper' for state changes."""
         if not event.worker.is_finished:
@@ -462,14 +410,12 @@ class WorkflowTreeApp(App):
         tree = self.query_one("#workflow-tree", Tree)
 
         if not new_data:
-            if self.workflow_data or not any(w.name == "wait_worker" for w in self.workers):
-                logger.warning("No workflow data. Reverting to pending.")
-                self.workflow_data = {}
-                self.tree_nodes = []
-                self.node_mapping.clear()
-                tree.clear()
-                tree.root.label = "[yellow]⏳ Waiting for Workflow to be created...[/]"
-                self.run_worker(self._wait_for_workflow_worker, thread=True, name="wait_worker")
+            logger.warning("No workflow data. Reverting to pending.")
+            self.workflow_data = {}
+            self.tree_nodes = []
+            self.node_mapping.clear()
+            tree.clear()
+            tree.root.label = LOADING_ROOT_LABEL
             return
 
         new_run_id = new_data.get('status', {}).get('startedAt')
@@ -493,10 +439,6 @@ class WorkflowTreeApp(App):
             self.tree_nodes = filter_tree_nodes(build_nested_workflow_tree(new_data))
             self._populate_tree(tree, self.tree_nodes, tree.root)
             tree.root.expand_all()
-
-            if not self._refresh_scheduled:
-                self.set_interval(3.0, self.action_refresh_workflow)
-                self._refresh_scheduled = True
         else:
             new_nodes = filter_tree_nodes(build_nested_workflow_tree(new_data))
             self._update_tree_recursive(tree.root, new_nodes, new_data)
@@ -514,6 +456,14 @@ class WorkflowTreeApp(App):
             self._apply_workflow_updates_unsafe(new_data, force_reload)
         except Exception as e:
             logger.error(f"Update error: {e}")
+            raise
+        finally:
+            if not new_data:
+                logger.info(f"No workflow found.  Beginning to wait for one.")
+                self.run_worker(self._wait_for_workflow_worker, thread=True, name="_wait_for_workflow_worker")
+            else:
+                logger.info(f"Setting timer to refresh in {self.refresh_interval}s")
+                self.set_timer(self.refresh_interval, self.action_refresh_workflow)
 
     def _update_pod_status(self) -> None:
         status = self.query_one("#pod-status", Static)
@@ -579,14 +529,15 @@ class WorkflowTreeApp(App):
             if temp_path and os.path.exists(temp_path): os.unlink(temp_path)
 
     def _get_pod_logs(self, pod_name: str) -> str:
+        """Injected fetch of pod logs."""
         try:
-            pod = self.k8s_client.read_namespaced_pod(name=pod_name, namespace=self.namespace)
+            pod = self.pod_scraper.read_pod(pod_name, self.namespace)
             containers = [c.name for c in (pod.spec.init_containers or []) + pod.spec.containers]
             output = []
             for c in containers:
                 output.append(f"\n--- Container: {c} ---\n")
                 try:
-                    logs = self.k8s_client.read_namespaced_pod_log(pod_name, self.namespace, container=c, tail_lines=self.tail_lines)
+                    logs = self.pod_scraper.read_pod_log(pod_name, self.namespace, c, self.tail_lines)
                     output.append(logs or "(No output)")
                 except Exception: output.append("(Not ready)")
             return "".join(output)
@@ -594,7 +545,7 @@ class WorkflowTreeApp(App):
 
     def _execute_approval(self, node_data: Dict) -> None:
         try:
-            res = WorkflowService().approve_workflow(self.workflow_name, self.namespace, self.argo_server, None, False, f"id={node_data.get('id')}")
+            res = self.argo_service.approve_step(node_data)
             if res['success']:
                 self.notify(f"✅ Approved: {node_data.get('display_name')}")
                 self.action_manual_refresh()
@@ -671,7 +622,7 @@ class WorkflowTreeApp(App):
             if not any(c.data and c.data.get("is_loading_indicator") for c in header.children):
                 header.add("🔄 Checking...", data={"is_ephemeral": True, "is_loading_indicator": True})
 
-        worker = self.run_worker(lambda: self._perform_live_check(node_data), thread=True)
+        worker = self.run_worker(lambda: self._perform_live_check(node_data), thread=True, name="_perform_live_check")
         worker.name = f"live_check_{node_id}"
 
     def _perform_live_check(self, node_data: Dict) -> Dict:
@@ -724,7 +675,7 @@ class WorkflowTreeApp(App):
 
 # --- Entrypoint ---
 @click.command(name="manage")
-@click.argument('workflow-name', required=False)
+@click.option('--workflow-name', required=False)
 @click.option(
     '--argo-server',
     default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
@@ -743,68 +694,12 @@ def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token):
             if not workflow_name:
                 click.echo("No workflows found.  Use --workflow-name to wait for a specific workflow to start.")
                 return
-        app = WorkflowTreeApp(_initialize_k8s_client(ctx), workflow_name, namespace, argo_server)
+        app = WorkflowTreeApp(namespace, workflow_name,
+                              make_argo_service(argo_server, False, None),
+                              make_k8s_pod_scraper(_initialize_k8s_client(ctx)),
+                              WaiterInterface.default(workflow_name, namespace),
+                              3.0)
         app.run()
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
         ctx.exit(ExitCode.FAILURE.value)
-
-def wait_for_workflow(name: str, namespace: str, timeout: str = "60s"):
-    """Blocks until the workflow resource exists in the cluster."""
-    try:
-        # We use 'get' first to see if it exists, or 'wait --for=condition' if it's already there
-        subprocess.run(
-            ["kubectl", "wait", f"workflow/{name}", "--for=jsonpath={.metadata.name}", name,
-             "-n", namespace, f"--timeout={timeout}"],
-            check=True,
-            capture_output=True
-        )
-        return True
-    except subprocess.CalledProcessError:
-        return False
-
-def _get_workflow_data_internal(service, name, server, ns, insecure, token):
-    log_mem("Fetch Data Start")
-    res = service.get_workflow_status(name, ns, server, token, insecure)
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    url = f"{server}/api/v1/workflows/{ns}/{name}"
-
-    resp = requests.get(url, headers=headers, verify=not insecure, stream=True)
-    if resp.status_code != 200:
-        return res, {}
-
-    slim_nodes = {}
-    node_count = 0
-    try:
-        parser = ijson.kvitems(resp.raw, 'status.nodes')
-        for node_id, node in parser:
-            node_count += 1
-            # EXTREME SLIMMING: Only keep what is actually rendered in tree_utils
-            slim_nodes[node_id] = {
-                "id": node_id,
-                "displayName": clean_display_name(node.get("displayName")), # no reason to keep the massive version
-                "phase": node.get("phase"),
-                "type": node.get("type"),
-                "boundaryID": node.get("boundaryID"),
-                "children": node.get("children", []),
-                "startedAt": node.get("startedAt"),
-                "finishedAt": node.get("finishedAt"),
-                # Only keep inputs/outputs if they contain specific UI keys
-                "inputs": {"parameters": [p for p in node.get("inputs", {}).get("parameters", []) if p['name'] in ('groupName', 'configContents')]},
-                "outputs": {"parameters": [p for p in node.get("outputs", {}).get("parameters", []) if p['name'] in ('statusOutput', 'overriddenPhase')]}
-            }
-    except Exception as e:
-        logger.error(f"Streaming parse failed: {e}")
-    finally:
-        resp.close()
-
-    slim_data = {
-        "metadata": {"name": name, "resourceVersion": res.get('workflow', {}).get('metadata', {}).get('resourceVersion')},
-        "status": {
-            "nodes": slim_nodes,
-            "startedAt": res.get('workflow', {}).get('status', {}).get('startedAt')
-        }
-    }
-
-    log_mem(f"Fetch Data Complete ({node_count} nodes)")
-    return res, slim_data
