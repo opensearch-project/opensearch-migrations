@@ -1,11 +1,11 @@
 def call(Map config = [:]) {
     // Config options:
-    //   vpcMode: 'Create' (default) or 'Import'
+    //   vpcMode: 'create' (default) or 'import'
     //   defaultStage: stage name default
     //   defaultGitUrl: git repo URL default
     //   defaultGitBranch: git branch default
-    def vpcMode = config.vpcMode ?: 'Create'
-    def isImportVpc = (vpcMode == 'Import')
+    def vpcMode = config.vpcMode ?: 'create'
+    def isImportVpc = (vpcMode == 'import')
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
