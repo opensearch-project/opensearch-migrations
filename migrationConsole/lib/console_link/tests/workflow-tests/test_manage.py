@@ -1,12 +1,16 @@
 import base64
+import copy
+import signal
+from contextlib import contextmanager
+from typing import Any
+
 import pytest
 from unittest.mock import MagicMock, ANY, patch
 
 from console_link.workflow.commands.manage import (
     WorkflowTreeApp,
     ConfirmModal,
-    copy_to_clipboard,
-    LOADING_ROOT_LABEL
+    copy_to_clipboard, PHASE_SUCCEEDED, PHASE_RUNNING
 )
 from console_link.workflow.commands.manage_injections import (
     WaiterInterface,
@@ -22,6 +26,19 @@ logger = logging.getLogger(__name__)
 
 # --- Helpers & Fixtures ---
 
+@contextmanager
+def timeout(seconds):
+    def timeout_handler(signum, frame):
+        raise TimeoutError(f"Test timed out after {seconds} seconds")
+
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(seconds*1000)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+
+
 def get_clean_text_label(textual_node):
     """Extract plain text from a Rich-enabled Textual label."""
     label = textual_node.label
@@ -29,14 +46,16 @@ def get_clean_text_label(textual_node):
 
 
 @pytest.fixture
-def mock_workflow_with_two_pods():
+def mock_workflow_with_two_pods() -> dict[str, Any]:
     return {
         "metadata": {"name": "test-wf", "resourceVersion": "123"},
         "status": {
             "startedAt": "2023-01-01T00:00:00Z",
             "nodes": {
-                "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": "Running", "children": []},
-                "node-2": {"id": "node-2", "displayName": "step-2", "type": "Pod", "phase": "Running", "children": []}
+                "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": "Failed", "children": [],
+                           "inputs": { "parameters": [ { "name": "configContents", "value": "cfg" } ] } },
+                "node-2": {"id": "node-2", "displayName": "step-2", "type": "Pod", "phase": PHASE_RUNNING, "children": [],
+                           "inputs": { "parameters": [ { "name": "configContents", "value": "cfg" } ] } }
             }
         }
     }
@@ -49,8 +68,8 @@ def mock_workflow_with_pod_and_suspend():
         "status": {
             "startedAt": "2023-01-01T00:00:00Z",
             "nodes": {
-                "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": "Running", "children": []},
-                "node-2": {"id": "node-2", "displayName": "suspend-1", "type": "Suspend", "phase": "Running",
+                "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": PHASE_SUCCEEDED, "children": []},
+                "node-2": {"id": "node-2", "displayName": "suspend-1", "type": "Suspend", "phase": PHASE_RUNNING,
                            "children": []}
             }
         }
@@ -71,9 +90,12 @@ async def test_waiter_loop_and_rediscovery(mock_workflow_with_two_pods):
     """Test the discovery, deletion, and re-discovery lifecycle via WaiterInterface."""
 
     env_state = {"workflow_exists": False}
+    workflow = mock_workflow_with_two_pods
+    del workflow["status"]["nodes"]["node-1"]["inputs"]
+    del workflow["status"]["nodes"]["node-2"]["inputs"]
     argo_service = ArgoService(get_workflow=
                                lambda name, namespace: \
-                                   ({"success": True}, mock_workflow_with_two_pods)
+                                   ({"success": True}, workflow)
                                    if env_state["workflow_exists"] else ({"success": False, "error": "not found"}, {}),
                                approve_step=MagicMock())
 
@@ -102,8 +124,9 @@ async def test_waiter_loop_and_rediscovery(mock_workflow_with_two_pods):
         assert "Waiting for Workflow" in get_clean_text_label(tree.root)
 
         logger.info("Waiting for workflow detection trigger to fire")
-        while mock_waiter.trigger.call_count == 0:
-            await pilot.pause(0.1)
+        with timeout(5):
+            while mock_waiter.trigger.call_count == 0:
+                await pilot.pause(0.1)
         assert mock_waiter.trigger.call_count == 1
 
         logger.info("Confirmed that no workflow was found and the UI indicated so.")
@@ -165,8 +188,9 @@ async def test_functional_keybindings_execution(mock_workflow_with_pod_and_suspe
 
     async with app.run_test() as pilot:
         tree = app.query_one("#workflow-tree")
-        while len(tree.root.children) == 0:
-            await pilot.pause(0.05)
+        with timeout(5):
+            while len(tree.root.children) == 0:
+                await pilot.pause(0.1)
         tree.focus()
 
         # Navigate to Pod (node-1)
@@ -244,6 +268,73 @@ async def test_manual_refresh_consistency(mock_workflow_with_two_pods):
         assert False in fetch_log
         assert app._pod_name_cache["node-2"] == "p2"
 
+
+@pytest.mark.asyncio
+async def test_live_check_lifecycle(mock_workflow_with_two_pods):
+    """
+    Test that Live Status appears when the last node is Running
+    and disappears when a new Succeeded node is added.
+    """
+    # Setup with two pods, where the second one is still running
+    workflow = mock_workflow_with_two_pods
+    workflow_nodes = workflow["status"]["nodes"]
+    workflow["status"]["nodes"] = {}
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    def mocked_get_workflow(*args, **kwargs):
+        logging.info("Mock: get_workflow called!")
+        logging.info(f"Mock: Current node count in 'workflow' variable: {len(workflow['status'].get('nodes', {}))}")
+
+        # Create the result
+        result = ({"success": True}, copy.deepcopy(workflow))
+
+        logging.debug(f"Mock: Returning: {result}")
+        return result
+    argo_service.get_workflow.side_effect = mocked_get_workflow
+
+    app = WorkflowTreeApp(
+        namespace="default", name="test",
+        argo_service=argo_service,
+        pod_scraper=MagicMock(),
+        workflow_waiter=MagicMock(),
+        refresh_interval=0.10
+    )
+
+    async with app.run_test() as pilot:
+        tree = app.query_one("#workflow-tree")
+        await pilot.pause()
+
+        logging.info("No Live Status node after the initial load")
+        assert not any("Live Status" in str(c.label) for c in tree.root.children)
+
+        logging.info("Adding one running node in, so a live status node should appear")
+        workflow["status"]["nodes"] = workflow_nodes
+        workflow["metadata"]["resourceVersion"] = "124"
+        logging.info("Updated resourceVersion to 124")
+        success = False
+        for _ in range(50):
+            await pilot.pause(0.1)
+            labels = [getattr(c.label, "plain", str(c.label)) for c in tree.root.children]
+            if any("Live Status" in l for l in labels):
+                success = True
+                break
+        assert success, f"Live Status node never appeared. Labels found: {labels}"
+
+
+        logging.info("Found live status node, marking the last item as succeeded.")
+        logging.info("Will wait for Live Status node to disappear.")
+        # Update: Update the last pod to be successful
+        workflow["status"]["nodes"]["node-2"]["phase"] = PHASE_SUCCEEDED
+        workflow["status"]["nodes"]["node-2"]["startedAt"] = "2026-01-01T00:05:00Z"
+        workflow["metadata"]["resourceVersion"] = "125"
+        logging.info("Updated resourceVersion to 125")
+
+        with timeout(5):
+            while any("Live Status" in str(c.label) for c in tree.root.children):
+                await pilot.pause(0.1)
+                logger.debug("still has live status node")
+
+        assert not any("Live Status" in str(c.label) for c in tree.root.children)
 
 @pytest.mark.parametrize("env_updates, expected_wrapper", [
     ({"SSH_TTY": "/dev/pts/0", "TERM": "xterm-256color"}, "{osc}"),

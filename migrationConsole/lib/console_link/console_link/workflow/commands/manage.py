@@ -163,11 +163,12 @@ class WorkflowTreeApp(App):
         self.tail_lines = 500
 
         # Workflow Working State
+        self.active_loop_ids = set()
         self.current_node_data = None
         self._current_run_id = None
-        self.last_check_time = {}
         self.node_mapping = {}
-        self.nodes_with_live_checks = {}
+        self.nodes_with_live_checks = set()
+        self.live_check_in_progress = set()
         self._pod_name_cache = {}
         self._pod_name_cache_is_dirty = True
         self.tree_nodes = []
@@ -225,7 +226,7 @@ class WorkflowTreeApp(App):
         self.notify("Refreshing tree and pod metadata (Strong consistency)...", title="Manual Refresh")
         self.run_worker(self._force_refresh_workflow, thread=True, name="_force_refresh_workflow")
 
-    def _force_refresh_workflow(self) -> Tuple[Dict, Dict]:
+    def _force_refresh_workflow(self) -> None:
         """Sequential fetch: Workflow Tree Data -> Trigger Strong Pod Resolution."""
         logger.info("WORKER START: _force_refresh_workflow")
         result = self._fetch_workflow_data()
@@ -301,32 +302,6 @@ class WorkflowTreeApp(App):
         self._update_pod_status()
         self._update_dynamic_bindings()
 
-    def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
-        node = event.node
-        node_id = node.data.get('id') if node.data else None
-
-        if (node.data and node.data.get('type') == NODE_TYPE_POD and
-                self._should_run_live_check(node.data) and
-                self._is_active_tip(node_id)):
-            if node_id not in self.nodes_with_live_checks:
-                self._run_live_check_async(node, node.data)
-
-        elif node.data and node.data.get("is_live_status_header"):
-            has_real_data = any(c.data and c.data.get("is_live_data") for c in node.children)
-            if not has_real_data:
-                origin_id = node.data.get("origin_id")
-                if origin_node := self.node_mapping.get(origin_id):
-                    self.nodes_with_live_checks.discard(origin_id)
-                    self._run_live_check_async(origin_node, origin_node.data)
-
-    def on_tree_node_collapsed(self, event: Tree.NodeCollapsed) -> None:
-        node = event.node
-        if node.data and node.data.get("is_live_status_header"):
-            origin_id = node.data.get("origin_id")
-            self.nodes_with_live_checks.discard(origin_id)
-            node.set_label("[bold cyan]Live Status:[/]")
-            for child in list(node.children): child.remove()
-
     def on_key(self, event) -> None:
         if event.key == "ctrl+c":
             self.exit()
@@ -390,24 +365,17 @@ class WorkflowTreeApp(App):
             tree_node = parent_node.add(label, data=node)
             self.node_mapping[node['id']] = tree_node
             if node['children']: self._populate_tree(tree, node['children'], tree_node)
+        # Immediate UI Sync for the newly populated branch
+        self._reconcile_live_status_node_with_argo_workflow(parent_node)
 
     def _get_node_label(self, node: Dict, workflow_data: Dict):
         status_output = get_step_status_output(workflow_data, node['id'])
         return get_step_rich_label(node, status_output)
 
-    def on_worker_state_changed(self, event) -> None:
-        """The Main Thread's 'Gatekeeper' for state changes."""
-        if not event.worker.is_finished:
-            return
-
-        name = event.worker.name or ""
-        if name == "refresh_worker" and event.worker.result:
-            res, slim_data = event.worker.result
-            if res.get('success'):
-                self._apply_workflow_updates(slim_data)
-
     def _apply_workflow_updates_unsafe(self, new_data: Dict, force_reload: bool) -> None:
-        tree = self.query_one("#workflow-tree", Tree)
+        tree = self.query("#workflow-tree").first()
+        if not tree:
+            return
 
         if not new_data:
             logger.warning("No workflow data. Reverting to pending.")
@@ -427,6 +395,8 @@ class WorkflowTreeApp(App):
             if self.workflow_data.get('metadata', {}).get('resourceVersion') == \
                     new_data.get('metadata', {}).get('resourceVersion'):
                 return
+
+        logger.info(f"Setting up tree for {new_data.get('metadata', {}).get('resourceVersion')}")
 
         if is_restart or not self.workflow_data:
             self._current_run_id = new_run_id
@@ -488,7 +458,6 @@ class WorkflowTreeApp(App):
                 tree_node = existing_children[node_id]
                 if tree_node.data.get('phase') != node.get('phase'):
                     tree_node.set_label(label)
-                    if node.get('phase') == PHASE_SUCCEEDED: self._remove_ephemeral_nodes(tree_node)
                 tree_node.data = node
             else:
                 tree_node = parent_tree_node.add(label, data=node)
@@ -500,6 +469,10 @@ class WorkflowTreeApp(App):
             if child.data and 'id' in child.data and child.data['id'] not in new_ids and not child.data.get('is_ephemeral'):
                 self.node_mapping.pop(child.data['id'], None)
                 child.remove()
+
+        # Reactive UI Reconciliation: Injects or Removes the Live Status node
+        # based on the current active tip of this specific branch.
+        self._reconcile_live_status_node_with_argo_workflow(parent_tree_node)
 
     def _handle_refresh_error(self, error_msg: str) -> None:
         if "not found" in error_msg.lower():
@@ -553,111 +526,118 @@ class WorkflowTreeApp(App):
         except Exception as e: self.notify(f"Error: {e}", severity="error")
 
     # --- Live Check Logic ---
-    def _get_branch_front_ids(self, nodes: List[Dict]) -> set:
-        """Return the ID of the latest started pod for every parent container context."""
-        parent_to_latest = {}  # ParentID -> PodNode
+    def _reconcile_live_status_node_with_argo_workflow(self, parent_tree_node: TreeNode):
+        """Derived-state logic: Manages the 'Live Status' node and kicks off its independent loop."""
+        real_children = [c.data for c in parent_tree_node.children if c.data and not c.data.get("is_ephemeral")]
+        if not real_children: return
 
-        def collect(n_list, parent_id):
-            for n in n_list:
-                if n.get('type') == NODE_TYPE_POD:
-                    current_latest = parent_to_latest.get(parent_id)
-                    n_key = (n.get('started_at') or '', n.get('id', ''))
-                    l_key = (current_latest.get('started_at') or '', current_latest.get('id', '')) if current_latest else ('', '')
-                    if not current_latest or n_key > l_key:
-                        parent_to_latest[parent_id] = n
-                if n.get('children'):
-                    collect(n['children'], n['id'])
+        tip = max(real_children, key=lambda x: x.get("started_at") or "")
+        tip_id = tip['id']
 
-        collect(nodes, "root")
-        return {p['id'] for p in parent_to_latest.values()}
+        # Check for capability (config) and status (active)
+        has_config = get_node_input_parameter(tip, 'configContents') is not None
+        logger.info(f"has_config={has_config} for {json.dumps(tip)}")
+        is_active = not tip.get('phase') in [PHASE_RUNNING, PHASE_SUCCEEDED]
 
-    def _get_active_branch_tips(self, nodes: List[Dict]) -> set:
-        """Compatibility shim for old tip logic."""
-        return self._get_branch_front_ids(nodes)
+        should_exist = has_config and is_active
 
-    def _is_active_tip(self, node_id: str) -> bool:
-        """Check if this node is an active tip of a parallel branch."""
-        return node_id in self._get_branch_front_ids(self.tree_nodes)
+        # Look for the header in the parent's children
+        existing_live_check_node = next((c for c in parent_tree_node.children if c.data and c.data.get("is_live_status_header")),
+                               None)
 
-    def _remove_ephemeral_nodes(self, tree_node: TreeNode) -> None:
-        parent = tree_node.parent if tree_node.parent else tree_node
-        for child in list(parent.children):
-            if child.data and child.data.get("is_ephemeral"):
-                if child.data.get("is_live_status_header"):
-                    child.set_label("[bold cyan]Live Status:[/]")
-                child.remove()
-        if tree_node.data and 'id' in tree_node.data:
-            nid = tree_node.data['id']
-            self.nodes_with_live_checks.discard(nid)
-            self.live_check_in_progress.discard(nid)
+        if should_exist:
+            if not existing_live_check_node:
+                # Create the header node
+                parent_tree_node.add(
+                    "[bold cyan]Live Status:[/]",
+                    data={"is_ephemeral": True, "is_live_status_header": True, "origin_id": tip_id}
+                )
+            else:
+                # Update origin link in case the tip shifted within the group
+                existing_live_check_node.data["origin_id"] = tip_id
 
-    def _should_run_live_check(self, node_data: Dict) -> bool:
-        has_config = get_node_input_parameter(node_data, 'configContents')
-        return node_data.get('phase') != PHASE_SUCCEEDED and has_config
+            # Kick off the independent loop if not already running for this tip
+            if tip_id not in self.active_loop_ids:
+                self.active_loop_ids.add(tip_id)
+                self._per_node_live_loop(tip_id)
+
+        elif existing_live_check_node:
+            # Node removal is reactive: disappears instantly when Pod succeeds
+            # The async loop for this node_id will notice the missing header and exit naturally
+            existing_live_check_node.remove()
+            self.nodes_with_live_checks.discard(tip_id)
+
+    def _per_node_live_loop(self, last_check_node_id: str) -> None:
+        """Independent, self-scheduling update loop for a specific live status display."""
+        if self._is_exiting:
+            self.active_loop_ids.discard(last_check_node_id)
+            return
+
+        tree_node = self.node_mapping.get(last_check_node_id) # node was removed
+        if not tree_node:
+            self.active_loop_ids.discard(last_check_node_id)
+            return # do NOT reschedule a continuation timer
+
+        # Is the 'Live Status' node still present?
+        header = next((c for c in tree_node.parent.children
+                       if c.data and c.data.get("is_live_status_header")), None)
+
+        if header and header.data.get("origin_id") == last_check_node_id:
+            if header.is_expanded:
+                self._run_live_check_async(tree_node, tree_node.data)
+            # Either way, keep the loop going in case it expands - this should be cheap to run w/out the async
+            # status check, and it makes the state model much simpler
+            self.set_timer(self.refresh_interval, lambda: self._per_node_live_loop(last_check_node_id))
+        else:
+            # The node was removed or re-assigned to a new tip.
+            self.active_loop_ids.discard(last_check_node_id)
 
     def _run_live_check_async(self, tree_node, node_data: Dict) -> None:
         node_id = node_data['id']
         now = time.time()
-        if now - self.last_check_time.get(node_id, 0) < 2.0: return
         if node_id in self.live_check_in_progress: return
 
-        parent = tree_node.parent if tree_node.parent else tree_node
-        header = next((c for c in parent.children if c.data and c.data.get("is_live_status_header")), None)
-
-        if header and not header.is_expanded:
-            return
-
         self.live_check_in_progress.add(node_id)
-        self.last_check_time[node_id] = now
 
-        if header and len(parent.children) > 0 and parent.children[-1] != header:
-            was_expanded = header.is_expanded
-            header.remove()
-            header = parent.add("[bold cyan]Live Status:[/]", data={"is_ephemeral": True, "is_live_status_header": True, "origin_id": node_id})
-            if was_expanded: header.expand()
-        elif not header:
-            header = parent.add("[bold cyan]Live Status:[/]", data={"is_ephemeral": True, "is_live_status_header": True, "origin_id": node_id})
+        # Worker invokes the direct update method via call_from_thread
+        self.run_worker(lambda: self._perform_live_check(node_data), thread=True, name=f"live_check_{node_id}")
 
-        if not any(c.data and c.data.get("is_live_data") for c in header.children):
-            if not any(c.data and c.data.get("is_loading_indicator") for c in header.children):
-                header.add("🔄 Checking...", data={"is_ephemeral": True, "is_loading_indicator": True})
-
-        worker = self.run_worker(lambda: self._perform_live_check(node_data), thread=True, name="_perform_live_check")
-        worker.name = f"live_check_{node_id}"
-
-    def _perform_live_check(self, node_data: Dict) -> Dict:
+    def _perform_live_check(self, node_data: Dict) -> None:
         node_id = node_data.get('id', 'unknown')
         logger.info(f"WORKER START: live_check_{node_id}")
         try:
+            # Fetch derived routing/config from workflow parameters
             raw_cfg = get_node_input_parameter(node_data, 'configContents')
             svc_cfg = ConfigConverter.convert_with_jq(raw_cfg)
             if svc_cfg:
                 env = Environment(config=yaml.safe_load(svc_cfg))
                 name_low = node_data.get('display_name', '').lower()
                 node_data['check_type'] = 'snapshot' if 'snapshot' in name_low else 'backfill'
-                return StatusCheckRunner.run_status_check(env, node_data)
-            return {"error": "Config conversion failed"}
+
+                # Perform the external status check
+                result = StatusCheckRunner.run_status_check(env, node_data)
+                self.call_from_thread(self._update_live_check_result, node_id, result)
+                return
+            self.call_from_thread(self._update_live_check_result, node_id, {"error": "Config conversion failed"})
         except Exception as e:
-            return {"error": str(e)}
+            self.call_from_thread(self._update_live_check_result, node_id, {"error": str(e)})
         finally:
             logger.info(f"WORKER END: live_check_{node_id}")
 
     def _update_live_check_result(self, node_id: str, result: Dict) -> None:
+        """Main-thread update: Fills the UI node with external check results."""
         self.live_check_in_progress.discard(node_id)
         target = self.node_mapping.get(node_id)
         if not target or not target.parent: return
 
+        # Find the ephemeral header linked to this branch tip
         header = next((c for c in target.parent.children if c.data and c.data.get("is_live_status_header")), None)
         if not header: return
 
-        if target.data.get('phase') == PHASE_SUCCEEDED:
-            header.remove()
-            return
-
         ts = datetime.datetime.now().strftime("%H:%M:%S")
-        header.set_label(f"[bold cyan]Live Status[/] [italic gray](Updated: {ts})[bold cyan]:[/]")
+        header.set_label(f"[bold cyan]Live Status[/] [italic gray]({ts})[bold cyan]:[/]")
 
-        had_data = any(c.data and c.data.get("is_live_data") for c in header.children)
+        # Clear existing ephemeral log lines
         for child in list(header.children): child.remove()
 
         if result.get('success') and result.get('value'):
@@ -665,8 +645,6 @@ class WorkflowTreeApp(App):
             for line in lines:
                 if line.strip():
                     header.add(line, data={"is_ephemeral": True, "is_live_data": True})
-            if not had_data:
-                header.expand()
         else:
             msg = result.get('message') or result.get('error') or "Check failed"
             header.add(f"❌ {msg}", data={"is_ephemeral": True})

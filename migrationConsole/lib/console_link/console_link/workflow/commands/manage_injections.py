@@ -52,6 +52,7 @@ class WaiterInterface:
 
 @dataclass
 class ArgoService:
+    # This must return an immutable copy of the dictionary
     get_workflow: Callable[[str, str], tuple[str, dict]]
     approve_step: Callable[[str, str, dict], WorkflowApproveResult]
 
