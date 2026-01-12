@@ -50,7 +50,7 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
 
 aws cloudformation wait stack-create-complete \
-  --stack-name "${$CFN_STACK_NAME}" --region "${AWS_REGION}"
+  --stack-name "${CFN_STACK_NAME}" --region "${AWS_REGION}"
 
 echo "Get the exported values to set as environment variables, which should include the $MIGRATIONS_ECR_REGISTRY"
 eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`MigrationsExportString\`)].[Value]" --output text) 
