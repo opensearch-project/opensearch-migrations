@@ -197,12 +197,24 @@ public class LuceneReader {
             }
 
             if (sourceBytes == null || sourceBytes.isEmpty()) {
-                log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have the _source field enabled.")
-                    .addArgument(luceneDocId)
-                    .addArgument(getSegmentReaderDebugInfo)
-                    .addArgument(indexDirectoryPath)
-                    .log();
-                return null;  // Skip these
+                // Try to reconstruct _source from doc_values
+                log.atDebug().setMessage("Document {} has no _source, attempting reconstruction from doc_values")
+                    .addArgument(openSearchDocId).log();
+                sourceBytes = SourceReconstructor.reconstructSource(reader, luceneDocId);
+                
+                if (sourceBytes == null || sourceBytes.isEmpty()) {
+                    log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, _source is missing and reconstruction failed.")
+                        .addArgument(luceneDocId)
+                        .addArgument(getSegmentReaderDebugInfo)
+                        .addArgument(indexDirectoryPath)
+                        .log();
+                    return null;  // Skip these
+                }
+                log.atDebug().setMessage("Successfully reconstructed _source for document {} from doc_values")
+                    .addArgument(openSearchDocId).log();
+            } else {
+                // Merge excluded fields from doc_values and stored fields
+                sourceBytes = SourceReconstructor.mergeWithDocValues(sourceBytes, reader, luceneDocId, document);
             }
 
             log.atDebug().setMessage("Reading document {}").addArgument(openSearchDocId).log();
