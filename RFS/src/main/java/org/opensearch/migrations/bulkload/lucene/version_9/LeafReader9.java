@@ -1,18 +1,32 @@
 package org.opensearch.migrations.bulkload.lucene.version_9;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
+import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
+import shadow.lucene9.org.apache.lucene.index.BinaryDocValues;
+import shadow.lucene9.org.apache.lucene.index.FieldInfo;
 import shadow.lucene9.org.apache.lucene.index.FilterCodecReader;
 import shadow.lucene9.org.apache.lucene.index.LeafReader;
+import shadow.lucene9.org.apache.lucene.index.NumericDocValues;
 import shadow.lucene9.org.apache.lucene.index.SegmentReader;
+import shadow.lucene9.org.apache.lucene.index.SortedDocValues;
+import shadow.lucene9.org.apache.lucene.index.SortedNumericDocValues;
+import shadow.lucene9.org.apache.lucene.index.SortedSetDocValues;
+import shadow.lucene9.org.apache.lucene.index.Terms;
+import shadow.lucene9.org.apache.lucene.index.TermsEnum;
 import shadow.lucene9.org.apache.lucene.util.Bits;
+import shadow.lucene9.org.apache.lucene.util.BytesRef;
 import shadow.lucene9.org.apache.lucene.util.FixedBitSet;
 import shadow.lucene9.org.apache.lucene.util.SparseFixedBitSet;
 
+@Slf4j
 public class LeafReader9 implements LuceneLeafReader {
 
     private final LeafReader wrapped;
@@ -70,5 +84,153 @@ public class LeafReader9 implements LuceneLeafReader {
         return getSegmentReader()
             .getSegmentInfo()
             .toString();
+    }
+
+    @Override
+    public Iterable<DocValueFieldInfo> getDocValueFields() {
+        List<DocValueFieldInfo> fields = new ArrayList<>();
+        for (FieldInfo fieldInfo : wrapped.getFieldInfos()) {
+            DocValueFieldInfo.DocValueType dvType = convertDocValuesType(fieldInfo.getDocValuesType());
+            if (dvType != DocValueFieldInfo.DocValueType.NONE) {
+                log.info("Field: {}, DocValuesType: {}, attributes: {}", 
+                    fieldInfo.name, fieldInfo.getDocValuesType(), fieldInfo.attributes());
+                boolean isBoolean = dvType == DocValueFieldInfo.DocValueType.SORTED_NUMERIC 
+                    && DocValueFieldInfo.hasOnlyBooleanTerms(getFieldTermsInternal(fieldInfo.name));
+                fields.add(new FieldInfo9(fieldInfo.name, dvType, isBoolean));
+            }
+        }
+        return fields;
+    }
+
+    @Override
+    public Iterable<String> getFieldTerms(String fieldName) throws IOException {
+        return getFieldTermsInternal(fieldName);
+    }
+
+    private List<String> getFieldTermsInternal(String fieldName) {
+        try {
+            Terms terms = wrapped.terms(fieldName);
+            if (terms == null) return null;
+            List<String> result = new ArrayList<>();
+            TermsEnum termsEnum = terms.iterator();
+            BytesRef term;
+            while ((term = termsEnum.next()) != null) {
+                result.add(term.utf8ToString());
+            }
+            return result;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private static DocValueFieldInfo.DocValueType convertDocValuesType(
+            shadow.lucene9.org.apache.lucene.index.DocValuesType luceneType) {
+        switch (luceneType) {
+            case NUMERIC: return DocValueFieldInfo.DocValueType.NUMERIC;
+            case BINARY: return DocValueFieldInfo.DocValueType.BINARY;
+            case SORTED: return DocValueFieldInfo.DocValueType.SORTED;
+            case SORTED_NUMERIC: return DocValueFieldInfo.DocValueType.SORTED_NUMERIC;
+            case SORTED_SET: return DocValueFieldInfo.DocValueType.SORTED_SET;
+            default: return DocValueFieldInfo.DocValueType.NONE;
+        }
+    }
+
+    @Override
+    public Object getDocValue(int docId, DocValueFieldInfo fieldInfo) throws IOException {
+        String fieldName = fieldInfo.name();
+        switch (fieldInfo.docValueType()) {
+            case NUMERIC:
+                return getNumericValue(docId, fieldName);
+            case SORTED:
+                return getSortedValue(docId, fieldName);
+            case SORTED_SET:
+                return getSortedSetValues(docId, fieldName);
+            case SORTED_NUMERIC:
+                return getSortedNumericValues(docId, fieldName);
+            case BINARY:
+                return getBinaryValue(docId, fieldName);
+            default:
+                return null;
+        }
+    }
+
+    private Object getNumericValue(int docId, String fieldName) throws IOException {
+        NumericDocValues dv = wrapped.getNumericDocValues(fieldName);
+        if (dv != null && dv.advanceExact(docId)) {
+            return dv.longValue();
+        }
+        return null;
+    }
+
+    private Object getSortedValue(int docId, String fieldName) throws IOException {
+        SortedDocValues dv = wrapped.getSortedDocValues(fieldName);
+        if (dv != null && dv.advanceExact(docId)) {
+            return dv.lookupOrd(dv.ordValue()).utf8ToString();
+        }
+        return null;
+    }
+
+    private Object getSortedSetValues(int docId, String fieldName) throws IOException {
+        SortedSetDocValues dv = wrapped.getSortedSetDocValues(fieldName);
+        if (dv != null && dv.advanceExact(docId)) {
+            List<String> values = new ArrayList<>();
+            long ord;
+            while ((ord = dv.nextOrd()) != SortedSetDocValues.NO_MORE_ORDS) {
+                values.add(dv.lookupOrd(ord).utf8ToString());
+            }
+            return values.size() == 1 ? values.get(0) : values;
+        }
+        return null;
+    }
+
+    private Object getSortedNumericValues(int docId, String fieldName) throws IOException {
+        SortedNumericDocValues dv = wrapped.getSortedNumericDocValues(fieldName);
+        if (dv != null && dv.advanceExact(docId)) {
+            int count = dv.docValueCount();
+            if (count == 1) {
+                return dv.nextValue();
+            }
+            List<Long> values = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) {
+                values.add(dv.nextValue());
+            }
+            return values;
+        }
+        return null;
+    }
+
+    private Object getBinaryValue(int docId, String fieldName) throws IOException {
+        BinaryDocValues dv = wrapped.getBinaryDocValues(fieldName);
+        if (dv != null && dv.advanceExact(docId)) {
+            return dv.binaryValue().utf8ToString();
+        }
+        return null;
+    }
+
+    private static class FieldInfo9 implements DocValueFieldInfo {
+        private final String name;
+        private final DocValueType docValueType;
+        private final boolean isBoolean;
+
+        FieldInfo9(String name, DocValueType docValueType, boolean isBoolean) {
+            this.name = name;
+            this.docValueType = docValueType;
+            this.isBoolean = isBoolean;
+        }
+
+        @Override
+        public String name() {
+            return name;
+        }
+
+        @Override
+        public DocValueType docValueType() {
+            return docValueType;
+        }
+
+        @Override
+        public boolean isBoolean() {
+            return isBoolean;
+        }
     }
 }

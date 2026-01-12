@@ -10,4 +10,8 @@ public interface LuceneField {
 
     public String utf8ToStringValue();
 
+    /** Returns numeric value if field is numeric, null otherwise */
+    default Number numericValue() {
+        return null;
+    }
 }
