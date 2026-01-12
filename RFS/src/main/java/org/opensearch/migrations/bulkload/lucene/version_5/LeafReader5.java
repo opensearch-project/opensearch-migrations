@@ -87,7 +87,7 @@ public class LeafReader5 implements LuceneLeafReader {
             if (dvType != DocValueFieldInfo.DocValueType.NONE) {
                 boolean isBoolean = dvType == DocValueFieldInfo.DocValueType.SORTED_NUMERIC 
                     && DocValueFieldInfo.hasOnlyBooleanTerms(getFieldTermsInternal(fieldInfo.name));
-                fields.add(new FieldInfo5(fieldInfo.name, dvType, isBoolean));
+                fields.add(new DocValueFieldInfo.Simple(fieldInfo.name, dvType, isBoolean));
             }
         }
         return fields;
@@ -213,26 +213,5 @@ public class LeafReader5 implements LuceneLeafReader {
 
     public String toString() {
         return wrapped.toString();
-    }
-
-    private static class FieldInfo5 implements DocValueFieldInfo {
-        private final String name;
-        private final DocValueType docValueType;
-        private final boolean isBoolean;
-
-        FieldInfo5(String name, DocValueType docValueType, boolean isBoolean) {
-            this.name = name;
-            this.docValueType = docValueType;
-            this.isBoolean = isBoolean;
-        }
-
-        @Override
-        public String name() { return name; }
-
-        @Override
-        public DocValueType docValueType() { return docValueType; }
-
-        @Override
-        public boolean isBoolean() { return isBoolean; }
     }
 }
