@@ -33,12 +33,4 @@ public interface LuceneLeafReader {
         return null;
     }
 
-    /**
-     * Returns all indexed terms for a field, or null if field has no terms.
-     * Used for detecting field types (e.g., boolean fields have only "T"/"F" terms).
-     */
-    default Iterable<String> getFieldTerms(String fieldName) throws IOException {
-        return null;
-    }
-
 }
