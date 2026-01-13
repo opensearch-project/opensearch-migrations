@@ -2,9 +2,9 @@ package org.opensearch.migrations.bulkload.common;
 
 
 /**
- * Internal enum representing the operation type for an RFS document.
+ * Internal enum representing the operation type for a document change.
  */
-public enum RfsDocumentOperation {
+public enum DocumentChangeType {
     /**
      * Document should be indexed
      */

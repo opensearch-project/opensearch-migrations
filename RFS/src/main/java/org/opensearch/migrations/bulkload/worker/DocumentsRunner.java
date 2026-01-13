@@ -10,7 +10,6 @@ import java.util.function.Supplier;
 import org.opensearch.migrations.bulkload.common.DocumentReaderEngine;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.RfsException;
-import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
@@ -152,7 +151,7 @@ public class DocumentsRunner {
 
         // Get the root context from the DocumentReindexContext
         var rootContext = ((DocumentMigrationContexts.BaseDocumentMigrationContext) context).getRootInstrumentationScope();
-        Flux<RfsLuceneDocument> documents = documentReaderEngine.readDocuments(
+        var documents = documentReaderEngine.prepareChangeset(
             reader,
             workItem.getIndexName(),
             workItem.getShardNumber(),

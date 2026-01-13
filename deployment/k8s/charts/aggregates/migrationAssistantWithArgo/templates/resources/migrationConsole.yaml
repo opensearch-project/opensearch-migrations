@@ -11,13 +11,13 @@ metadata:
   name: migration-console-access-role
 rules:
   - apiGroups: [ "" ]
-    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log", "secrets", "services"]
+    resources: ["configmaps", "events", "persistentvolumeclaims", "pods", "pods/log", "secrets", "services"]
     verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
   - apiGroups: [""]
     resources: ["pods/attach"]
     verbs: ["create", "get"]
   - apiGroups: [ "apps" ]
-    resources: ["deployments", "deployments/scale"]
+    resources: ["deployments", "deployments/scale", "statefulsets"]
     verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
   - apiGroups: ["argoproj.io"]
     resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]

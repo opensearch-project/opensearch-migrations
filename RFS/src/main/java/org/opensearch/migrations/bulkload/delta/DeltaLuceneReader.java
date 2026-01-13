@@ -6,8 +6,8 @@ import java.util.List;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
-import org.opensearch.migrations.bulkload.common.RfsDocumentOperation;
-import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.common.DocumentChangeType;
+import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
@@ -25,7 +25,7 @@ import reactor.core.scheduler.Schedulers;
  * DeltaLuceneReader
  * <p>
  * Provides a delta-style backfill between a previous and current Lucene snapshot.
- * Emits both new documents and delete operations as {@link RfsLuceneDocument} or {@link BulkOperationSpec} via Reactor streams.
+ * Emits both new documents and delete operations as {@link LuceneDocumentChange} or {@link BulkOperationSpec} via Reactor streams.
  *
  * <h3>Functionality</h3>
  * - Builds segment → reader maps from both snapshots.
@@ -81,10 +81,10 @@ public class DeltaLuceneReader {
      * Container class for delta results containing both additions and deletions
      */
     public static class DeltaResult {
-        public final Flux<RfsLuceneDocument> additions;
-        public final Flux<RfsLuceneDocument> deletions;
+        public final Flux<LuceneDocumentChange> additions;
+        public final Flux<LuceneDocumentChange> deletions;
         
-        public DeltaResult(Flux<RfsLuceneDocument> additions, Flux<RfsLuceneDocument> deletions) {
+        public DeltaResult(Flux<LuceneDocumentChange> additions, Flux<LuceneDocumentChange> deletions) {
             this.additions = additions;
             this.deletions = deletions;
         }
@@ -172,7 +172,7 @@ public class DeltaLuceneReader {
                         sharedSegmentReaderScheduler,
                         maxDocumentsToReadAtOnce,
                         Path.of(c.getReader().getSegmentName()),
-                        RfsDocumentOperation.INDEX)
+                        DocumentChangeType.INDEX)
                 ).subscribeOn(sharedSegmentReaderScheduler); // Scheduler to read documents on
 
             // Create deletions stream - these are documents that were removed between snapshots
@@ -183,7 +183,7 @@ public class DeltaLuceneReader {
                         sharedSegmentReaderScheduler,
                         maxDocumentsToReadAtOnce,
                         Path.of(c.getReader().getSegmentName()),
-                        RfsDocumentOperation.DELETE)
+                        DocumentChangeType.DELETE)
                 ).subscribeOn(sharedSegmentReaderScheduler);
 
             return new DeltaResult(additionsStream, deletionsStream);
