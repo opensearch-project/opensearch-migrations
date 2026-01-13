@@ -197,10 +197,10 @@ public class LuceneReader {
             }
 
             if (sourceBytes == null || sourceBytes.length == 0) {
-                // Try to reconstruct _source from doc_values
-                log.atDebug().setMessage("Document {} has no _source, attempting reconstruction from doc_values")
+                // Try to reconstruct _source from doc_values and stored fields
+                log.atDebug().setMessage("Document {} has no _source, attempting reconstruction from doc_values and stored fields")
                     .addArgument(openSearchDocId).log();
-                String reconstructed = SourceReconstructor.reconstructSource(reader, luceneDocId);
+                String reconstructed = SourceReconstructor.reconstructSource(reader, luceneDocId, document);
                 
                 if (reconstructed == null || reconstructed.isEmpty()) {
                     log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, _source is missing and reconstruction failed.")

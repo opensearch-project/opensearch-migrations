@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.lucene.version_6;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 
@@ -46,6 +47,20 @@ public class LeafReader6 implements LuceneLeafReader {
             Bits::get,
             sparseBits -> sparseBits::nextSetBit
         );
+    }
+
+    /**
+     * Safely convert BytesRef to String, handling binary data.
+     */
+    private static String bytesRefToString(BytesRef ref) {
+        if (ref == null || ref.length == 0) return null;
+        try {
+            return ref.utf8ToString();
+        } catch (AssertionError | Exception e) {
+            byte[] bytes = new byte[ref.length];
+            System.arraycopy(ref.bytes, ref.offset, bytes, 0, ref.length);
+            return Base64.getEncoder().encodeToString(bytes);
+        }
     }
 
     public Document6 document(int luceneDocId) throws IOException {
@@ -100,7 +115,10 @@ public class LeafReader6 implements LuceneLeafReader {
             TermsEnum termsEnum = terms.iterator();
             BytesRef term;
             while ((term = termsEnum.next()) != null) {
-                result.add(term.utf8ToString());
+                String termStr = bytesRefToString(term);
+                if (termStr != null) {
+                    result.add(termStr);
+                }
             }
             return result;
         } catch (IOException e) {
@@ -136,7 +154,7 @@ public class LeafReader6 implements LuceneLeafReader {
         if (dv != null) {
             int ord = dv.getOrd(docId);
             if (ord >= 0) {
-                return dv.lookupOrd(ord).utf8ToString();
+                return bytesRefToString(dv.lookupOrd(ord));
             }
         }
         return null;
@@ -150,7 +168,10 @@ public class LeafReader6 implements LuceneLeafReader {
             List<String> values = new ArrayList<>();
             long ord;
             while ((ord = dv.nextOrd()) != SortedSetDocValues.NO_MORE_ORDS) {
-                values.add(dv.lookupOrd(ord).utf8ToString());
+                String val = bytesRefToString(dv.lookupOrd(ord));
+                if (val != null) {
+                    values.add(val);
+                }
             }
             if (!values.isEmpty()) {
                 return values.size() == 1 ? values.get(0) : values;
@@ -185,7 +206,7 @@ public class LeafReader6 implements LuceneLeafReader {
         if (dv != null) {
             BytesRef value = dv.get(docId);
             if (value != null && value.length > 0) {
-                return value.utf8ToString();
+                return bytesRefToString(value);
             }
         }
         return null;
