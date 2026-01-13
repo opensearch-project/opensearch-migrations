@@ -30,7 +30,7 @@ configurations {
     lucene9Implementation.extendsFrom(lucene9)
 }
 
-tasks.named('processLucene9Resources', Copy) {
+tasks.named('processLucene9Resources').configure {
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
 }
 
