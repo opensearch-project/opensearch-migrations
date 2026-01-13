@@ -32,7 +32,6 @@ lucene5 = '5.5.5'
 lucene6 = '6.6.6'
 lucene7 = '7.7.3'
 lucene9 = "9.12.1"
-opensearch-jvector = "2.19.1.0"
 mockito = "5.21.0"
 netty = "4.1.124.Final"
 opensearch-testcontainers = "2.0.1"
@@ -131,8 +130,6 @@ lucene-v9-analysis-common = { module = "org.apache.lucene:lucene-analysis-common
 lucene-v9-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene9" }
 lucene-v9-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene9" }
 lucene-v9-suggest = { module = "org.apache.lucene:lucene-suggest", version.ref = "lucene9" }
-
-opensearch-jvector = { module = "org.opensearch.knn:opensearch-jvector", version.ref = "opensearch-jvector" }
 
 mockito-core = { module = "org.mockito:mockito-core", version.ref = "mockito" }
 mockito-junit-jupiter = { module = "org.mockito:mockito-junit-jupiter", version.ref = "mockito" }
