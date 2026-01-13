@@ -11,6 +11,7 @@ import org.apache.lucene.codecs.CompoundFormat;
 import org.apache.lucene.codecs.DocValuesFormat;
 import org.apache.lucene.codecs.FilterCodec;
 
+@SuppressWarnings("java:S120") // Package name must match OpenSearch KNN plugin for Lucene codec SPI
 public class KNN84Codec extends FilterCodec {
     private static final String NAME = "KNN84Codec";
     public KNN84Codec() { super(NAME, new Lucene87Codec()); }

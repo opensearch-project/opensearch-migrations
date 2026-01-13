@@ -13,6 +13,7 @@ import org.apache.lucene.codecs.DocValuesFormat;
 import org.apache.lucene.codecs.FilterCodec;
 import org.apache.lucene.codecs.KnnVectorsFormat;
 
+@SuppressWarnings("java:S120") // Package name must match OpenSearch KNN plugin for Lucene codec SPI
 public class KNN920Codec extends FilterCodec {
     private static final String NAME = "KNN920Codec";
     public KNN920Codec() { super(NAME, new Lucene92Codec()); }

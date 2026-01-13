@@ -15,6 +15,7 @@ import org.apache.lucene.store.IndexInput;
  * Minimal CompoundDirectory that handles KNN engine files.
  * KNN files (.hnsw, .nmslib, .faiss) are stored outside compound file.
  */
+@SuppressWarnings("java:S120") // Package name must match OpenSearch KNN plugin for Lucene codec SPI
 public class KNN80CompoundDirectory extends CompoundDirectory {
     private static final Set<String> KNN_EXTENSIONS = Set.of("hnsw", "nmslib", "faiss");
     

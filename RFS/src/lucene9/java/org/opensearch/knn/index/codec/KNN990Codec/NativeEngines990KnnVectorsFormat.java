@@ -19,6 +19,7 @@ import org.apache.lucene.util.Bits;
  * Minimal stub for reading KNN vector indices during migration.
  * Returns empty reader since we don't need to read vector data.
  */
+@SuppressWarnings("java:S120") // Package name must match OpenSearch KNN plugin for Lucene codec SPI
 public class NativeEngines990KnnVectorsFormat extends KnnVectorsFormat {
     private static final String FORMAT_NAME = "NativeEngines990KnnVectorsFormat";
 
@@ -41,6 +42,7 @@ public class NativeEngines990KnnVectorsFormat extends KnnVectorsFormat {
         return 16000;
     }
 
+    @SuppressWarnings("java:S1186") // Empty methods intentional - stub reader for migration
     private static final KnnVectorsReader EMPTY_VECTORS_READER = new KnnVectorsReader() {
         @Override
         public long ramBytesUsed() {
@@ -48,10 +50,14 @@ public class NativeEngines990KnnVectorsFormat extends KnnVectorsFormat {
         }
 
         @Override
-        public void close() {}
+        public void close() {
+            // Stub - no resources to close
+        }
 
         @Override
-        public void checkIntegrity() {}
+        public void checkIntegrity() {
+            // Stub - no integrity check needed for migration
+        }
 
         @Override
         public FloatVectorValues getFloatVectorValues(String s) {
@@ -64,9 +70,13 @@ public class NativeEngines990KnnVectorsFormat extends KnnVectorsFormat {
         }
 
         @Override
-        public void search(String s, float[] floats, KnnCollector knnCollector, Bits bits) {}
+        public void search(String s, float[] floats, KnnCollector knnCollector, Bits bits) {
+            // Stub - vector search not needed for migration
+        }
 
         @Override
-        public void search(String s, byte[] bytes, KnnCollector knnCollector, Bits bits) {}
+        public void search(String s, byte[] bytes, KnnCollector knnCollector, Bits bits) {
+            // Stub - vector search not needed for migration
+        }
     };
 }

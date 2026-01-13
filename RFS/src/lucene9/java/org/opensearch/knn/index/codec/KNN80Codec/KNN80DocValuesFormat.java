@@ -14,6 +14,7 @@ import org.apache.lucene.index.SegmentWriteState;
 /**
  * Minimal DocValuesFormat that delegates to underlying format.
  */
+@SuppressWarnings("java:S120") // Package name must match OpenSearch KNN plugin for Lucene codec SPI
 public class KNN80DocValuesFormat extends DocValuesFormat {
     private final DocValuesFormat delegate;
 
