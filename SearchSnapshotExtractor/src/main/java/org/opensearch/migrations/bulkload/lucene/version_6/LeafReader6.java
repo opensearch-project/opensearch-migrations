@@ -120,21 +120,9 @@ public class LeafReader6 implements LuceneLeafReader {
         };
     }
 
-    @Override
-    public Object getDocValue(int docId, DocValueFieldInfo fieldInfo) throws IOException {
-        String fieldName = fieldInfo.name();
-        return switch (fieldInfo.docValueType()) {
-            case NUMERIC -> getNumericValue(docId, fieldName);
-            case SORTED -> getSortedValue(docId, fieldName);
-            case SORTED_SET -> getSortedSetValues(docId, fieldName);
-            case SORTED_NUMERIC -> getSortedNumericValues(docId, fieldName);
-            case BINARY -> getBinaryValue(docId, fieldName);
-            case NONE -> null;
-        };
-    }
-
     // Lucene 6 uses get(docId) for random access
-    private Object getNumericValue(int docId, String fieldName) throws IOException {
+    @Override
+    public Object getNumericValue(int docId, String fieldName) throws IOException {
         NumericDocValues dv = wrapped.getNumericDocValues(fieldName);
         if (dv != null) {
             return dv.get(docId);
@@ -142,7 +130,8 @@ public class LeafReader6 implements LuceneLeafReader {
         return null;
     }
 
-    private Object getSortedValue(int docId, String fieldName) throws IOException {
+    @Override
+    public Object getSortedValue(int docId, String fieldName) throws IOException {
         SortedDocValues dv = wrapped.getSortedDocValues(fieldName);
         if (dv != null) {
             int ord = dv.getOrd(docId);
@@ -153,7 +142,8 @@ public class LeafReader6 implements LuceneLeafReader {
         return null;
     }
 
-    private Object getSortedSetValues(int docId, String fieldName) throws IOException {
+    @Override
+    public Object getSortedSetValues(int docId, String fieldName) throws IOException {
         SortedSetDocValues dv = wrapped.getSortedSetDocValues(fieldName);
         if (dv != null) {
             dv.setDocument(docId);
@@ -169,7 +159,8 @@ public class LeafReader6 implements LuceneLeafReader {
         return null;
     }
 
-    private Object getSortedNumericValues(int docId, String fieldName) throws IOException {
+    @Override
+    public Object getSortedNumericValues(int docId, String fieldName) throws IOException {
         SortedNumericDocValues dv = wrapped.getSortedNumericDocValues(fieldName);
         if (dv != null) {
             dv.setDocument(docId);
@@ -188,7 +179,8 @@ public class LeafReader6 implements LuceneLeafReader {
         return null;
     }
 
-    private Object getBinaryValue(int docId, String fieldName) throws IOException {
+    @Override
+    public Object getBinaryValue(int docId, String fieldName) throws IOException {
         BinaryDocValues dv = wrapped.getBinaryDocValues(fieldName);
         if (dv != null) {
             BytesRef value = dv.get(docId);

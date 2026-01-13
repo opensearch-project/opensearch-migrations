@@ -27,10 +27,23 @@ public interface LuceneLeafReader {
 
     /**
      * Gets the doc_value for a field at the given document ID.
-     * Default implementation returns null for backward compatibility.
      */
     default Object getDocValue(int docId, DocValueFieldInfo fieldInfo) throws IOException {
-        return null;
+        String fieldName = fieldInfo.name();
+        return switch (fieldInfo.docValueType()) {
+            case NUMERIC -> getNumericValue(docId, fieldName);
+            case SORTED -> getSortedValue(docId, fieldName);
+            case SORTED_SET -> getSortedSetValues(docId, fieldName);
+            case SORTED_NUMERIC -> getSortedNumericValues(docId, fieldName);
+            case BINARY -> getBinaryValue(docId, fieldName);
+            case NONE -> null;
+        };
     }
+
+    default Object getNumericValue(int docId, String fieldName) throws IOException { return null; }
+    default Object getSortedValue(int docId, String fieldName) throws IOException { return null; }
+    default Object getSortedSetValues(int docId, String fieldName) throws IOException { return null; }
+    default Object getSortedNumericValues(int docId, String fieldName) throws IOException { return null; }
+    default Object getBinaryValue(int docId, String fieldName) throws IOException { return null; }
 
 }
