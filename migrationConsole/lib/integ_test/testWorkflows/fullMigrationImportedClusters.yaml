@@ -146,8 +146,8 @@ spec:
                   | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
                   # Move sigv4 under authConfig
                   | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
-                  # Add snapshot repo
-                  | . + {"snapshotRepo": $repo}
+                  # Add snapshot repo only if not already present
+                  | if has("snapshotRepo") then . else . + {"snapshotRepo": $repo} end
                 )
               )')
             
@@ -159,19 +159,22 @@ spec:
               | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
               # Move sigv4 under authConfig
               | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+              # Move basic_auth under authConfig.basic with secretName
+              | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
             ')
             
             # Build snapshotExtractAndLoadConfigs from snapshot-and-migration-configs
+            # Pass through snapshotConfig if provided, otherwise use default
             SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '[
               .[0]["snapshot-and-migration-configs"][] | {
-                "snapshotConfig": {
+                "snapshotConfig": (if .snapshotConfig then .snapshotConfig else {
                   "snapshotNameConfig": {
                     "snapshotNamePrefix": "testsnapshot"
                   }
-                },
-                "createSnapshotConfig": {},
+                } end),
+                "createSnapshotConfig": (if .snapshotConfig.snapshotNameConfig.externallyManagedSnapshot then null else {} end),
                 "migrations": .migrations
-              }
+              } | with_entries(select(.value != null))
             ]')
             
             # Build the complete OVERALL_MIGRATION_CONFIG
