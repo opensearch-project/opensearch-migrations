@@ -14,7 +14,6 @@ public interface DocValueFieldInfo {
 
     /** Checks if field has only boolean terms (T/F) - used for boolean detection */
     static boolean hasOnlyBooleanTerms(Iterable<String> terms) {
-        if (terms == null) return false;
         boolean hasTerms = false;
         for (String term : terms) {
             hasTerms = true;
