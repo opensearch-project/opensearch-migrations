@@ -2,6 +2,7 @@ import os
 import tempfile
 import subprocess
 import logging
+from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +12,33 @@ class LogManager:
         self.pod_scraper = pod_scraper
         self.namespace = namespace
         self.tail_lines = tail_lines
+
+    def get_containers(self, pod_name: str) -> List[str]:
+        """Get list of user containers (excluding Argo sidecars) from a pod."""
+        try:
+            pod = self.pod_scraper.read_pod(pod_name, self.namespace)
+            main_containers = [c.name for c in pod.spec.containers] if pod.spec.containers else []
+            # Filter out Argo executor containers
+            return [c for c in main_containers if c not in ('wait', 'init')]
+        except Exception as e:
+            logger.error(f"Error getting containers for {pod_name}: {e}")
+            return []
+
+    def follow_logs(self, app, pod_name: str, container: str, display_name: str) -> None:
+        """Follow logs using kubectl logs -f and pipe to less."""
+        try:
+            cmd = ['kubectl', 'logs', pod_name, '-f', '-c', container, '-n', self.namespace]
+            
+            # Suspend Textual UI to hand control to kubectl and less
+            with app.suspend():
+                os.system('clear')
+                # Use os.system to run the command in a separate process group
+                # This prevents kubectl exit from affecting the parent application
+                kubectl_cmd = ' '.join(cmd + ['|', 'less', '-R', '+F'])
+                os.system(kubectl_cmd)
+                    
+        except Exception as e:
+            app.notify(f"Follow Error: {e}", severity="error")
 
     def show_in_pager(self, app, pod_name: str, display_name: str) -> None:
         """Fetch logs, write to temp file, and open system pager."""
@@ -25,7 +53,7 @@ class LogManager:
             # Suspend Textual UI to hand control to the terminal pager (less/more)
             with app.suspend():
                 os.system('clear')
-                pager = os.environ.get('PAGER', 'less -R')  # -R for color support
+                pager = os.environ.get('PAGER', 'less -qqR')  # -qq: no bell; -R: color support
                 subprocess.run(pager.split() + [temp_path])
 
         except Exception as e:

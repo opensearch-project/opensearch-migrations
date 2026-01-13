@@ -214,6 +214,86 @@ async def test_functional_keybindings_execution(mock_workflow_with_pod_and_suspe
 
 
 @pytest.mark.asyncio
+async def test_follow_logs_binding_responds_to_phase_changes(mock_workflow_with_two_pods):
+    """Verify follow logs only works for Running pods and updates as phase changes."""
+
+    workflow = copy.deepcopy(mock_workflow_with_two_pods)
+    # Start with node-2 as Pending (not running)
+    workflow["status"]["nodes"]["node-2"]["phase"] = "Pending"
+
+    mock_pod = MagicMock()
+    mock_pod.spec.init_containers = []
+    mock_pod.spec.containers = [MagicMock(name="main")]
+
+    k8s_interface = MagicMock(spec=PodScraperInterface(None, None, None))
+    k8s_interface.fetch_pods_metadata.return_value = [
+        {"metadata": {"name": "pod-1", "annotations": {"workflows.argoproj.io/node-id": "node-1"}}},
+        {"metadata": {"name": "pod-2", "annotations": {"workflows.argoproj.io/node-id": "node-2"}}}
+    ]
+    k8s_interface.read_pod.return_value = mock_pod
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": True}, copy.deepcopy(workflow))
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=k8s_interface,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0
+    )
+
+    async with app.run_test() as pilot:
+        tree = app.query_one("#workflow-tree")
+        assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+        tree.focus()
+
+        # Navigate to node-2 (Pending)
+        await pilot.press("down")
+        await pilot.press("down")
+        await pilot.pause()
+
+        # 'f' should NOT trigger follow_logs for Pending pod
+        with patch.object(app.logs, "follow_logs") as mock_follow:
+            await pilot.press("f")
+            await pilot.pause()
+            mock_follow.assert_not_called()
+
+        # Update workflow: node-2 is now Running
+        workflow["status"]["nodes"]["node-2"]["phase"] = PHASE_RUNNING
+        workflow["metadata"]["resourceVersion"] = "124"
+        argo_service.get_workflow.return_value = ({"success": True}, copy.deepcopy(workflow))
+
+        # Trigger refresh without moving focus
+        await pilot.press("r")
+        assert await wait_until(pilot, lambda: app.current_node_data and
+                                app.current_node_data.get('phase') == PHASE_RUNNING, timeout=5.0)
+
+        # Now 'f' SHOULD trigger follow_logs
+        with patch.object(app.logs, "follow_logs") as mock_follow:
+            await pilot.press("f")
+            await pilot.pause()
+            mock_follow.assert_called_once()
+
+        # Update workflow: node-2 is now Succeeded
+        workflow["status"]["nodes"]["node-2"]["phase"] = PHASE_SUCCEEDED
+        workflow["metadata"]["resourceVersion"] = "125"
+        argo_service.get_workflow.return_value = ({"success": True}, copy.deepcopy(workflow))
+
+        # Trigger refresh without moving focus
+        await pilot.press("r")
+        assert await wait_until(pilot, lambda: app.current_node_data and
+                                app.current_node_data.get('phase') == PHASE_SUCCEEDED, timeout=5.0)
+
+        # 'f' should NOT trigger follow_logs for Succeeded pod
+        with patch.object(app.logs, "follow_logs") as mock_follow:
+            await pilot.press("f")
+            await pilot.pause()
+            mock_follow.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_manual_refresh_consistency(mock_workflow_with_two_pods):
     """Verify manual refresh forces a non-cached (strongly consistent) K8s metadata fetch."""
 

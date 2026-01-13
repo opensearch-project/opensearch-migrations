@@ -14,6 +14,7 @@ from textual.containers import Container
 from textual.widgets import Footer, Header, Static, Tree
 
 from .confirm_modal import ConfirmModal
+from .container_select_modal import ContainerSelectModal
 from .live_status_manager import LiveStatusManager
 from .log_manager import LogManager
 from .manage_injections import ArgoWorkflowInterface, PodScraperInterface, WaiterInterface
@@ -57,7 +58,7 @@ class WorkflowTreeApp(App):
         self.workflow_name, self.namespace = name, namespace
         self._current_run_id: Optional[str] = None
         self._is_exiting = False
-        self.current_node_data = None
+        self._current_node_id: Optional[str] = None
         self._pod_name_cache = self.pods.cache  # Alias for test compatibility
 
     def compose(self) -> ComposeResult:
@@ -131,7 +132,6 @@ class WorkflowTreeApp(App):
 
     def action_manual_refresh(self) -> None:
         """User-triggered manual refresh (Strongly Consistent)."""
-        self.notify("Refreshing tree and pod metadata (Strong consistency)...", title="Manual Refresh")
         self.run_worker(self._force_refresh_workflow, thread=True, name="_force_refresh_workflow")
 
     def _force_refresh_workflow(self) -> None:
@@ -142,14 +142,46 @@ class WorkflowTreeApp(App):
     # --- Event Handlers & Actions ---
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
-        self.current_node_data = event.node.data
+        self._current_node_id = event.node.data.get('id') if event.node.data else None
         self._update_pod_status()
         self._update_dynamic_bindings()
 
-    def on_key(self, event) -> None:
-        if event.key == "ctrl+c":
-            self.exit()
-            event.prevent_default()
+    @property
+    def current_node_data(self) -> Optional[Dict]:
+        """Get fresh node data from tree state."""
+        if not self._current_node_id:
+            return None
+        tree_node = self.tree_state.get_node(self._current_node_id)
+        return tree_node.data if tree_node else None
+
+    def action_follow_logs(self) -> None:
+        if not self.current_node_data or self.current_node_data.get('type') != NODE_TYPE_POD:
+            return
+        
+        node_id = self.current_node_data.get('id')
+        pod_name = self.pods.get_name(node_id)
+        if not pod_name:
+            self.notify("Pod not available", severity="error")
+            return
+        
+        containers = self.logs.get_containers(pod_name)
+        if not containers:
+            self.notify("No containers found", severity="error")
+            return
+        
+        if len(containers) == 1:
+            # Single container, follow directly
+            self.logs.follow_logs(self, pod_name, containers[0], self.current_node_data.get('display_name', ''))
+        else:
+            # Multiple containers, show selection dialog
+            self.push_screen(
+                ContainerSelectModal(containers, pod_name),
+                lambda container: self._follow_selected_container(pod_name, container) if container else None
+            )
+
+    def _follow_selected_container(self, pod_name: str, container: str) -> None:
+        """Follow logs for the selected container."""
+        self.logs.follow_logs(self, pod_name, container, self.current_node_data.get('display_name', ''))
 
     def action_view_logs(self) -> None:
         if self.current_node_data and self.current_node_data.get('type') == NODE_TYPE_POD:
@@ -202,9 +234,17 @@ class WorkflowTreeApp(App):
 
     def _update_pod_status(self) -> None:
         status_bar = self.query_one("#pod-status", Static)
-        node_id = self.current_node_data.get('id') if self.current_node_data else None
-        name = self.pods.get_name(node_id) if node_id else None
-        status_bar.update(f"Pod: [bold green]{name}[/]" if name else "Pod: (not available)")
+        if not self.current_node_data:
+            status_bar.update("")
+            return
+        
+        node_type = self.current_node_data.get('type')
+        if node_type == NODE_TYPE_POD:
+            node_id = self.current_node_data.get('id')
+            name = self.pods.get_name(node_id) if node_id else None
+            status_bar.update(f"Pod: [bold green]{name}[/]" if name else "Pod: (not available)")
+        else:
+            status_bar.update("")
 
     def _update_dynamic_bindings(self) -> None:
         """Reconfigures the Footer and keys based on the currently selected node."""
@@ -224,6 +264,8 @@ class WorkflowTreeApp(App):
 
             if ntype == NODE_TYPE_POD and pod_resolved:
                 self.bind("o", "view_logs", description="View Logs")
+                if node.get('phase') == PHASE_RUNNING:
+                    self.bind("f", "follow_logs", description="Follow Logs")
                 self.bind("c", "copy_pod_name", description="Copy Pod Name")
             elif ntype == NODE_TYPE_SUSPEND and node.get('phase') == PHASE_RUNNING:
                 self.bind("a", "approve_step", description="Approve")
