@@ -74,19 +74,20 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         new FieldTypeConfig("long", "long", 9999L, true, VersionRange.ALL)
     );
 
-    // Permutations: [excluded, hasDocValues, hasStore]
-    private static final boolean[][] PERMUTATIONS = {
-        {false, true, false},   // in_source (default)
-        {true, true, true},     // excluded_dv_store
-        {true, true, false},    // excluded_dv_nostore
-        {true, false, true},    // excluded_nodv_store
-        {true, false, false}    // excluded_nodv_nostore (unrecoverable)
-    };
+    /** Field storage permutations */
+    enum Perm {
+        IN_SOURCE(false, true, false),
+        EXCLUDED_DV_STORE(true, true, true),
+        EXCLUDED_DV_NOSTORE(true, true, false),
+        EXCLUDED_NODV_STORE(true, false, true),
+        EXCLUDED_NODV_NOSTORE(true, false, false);
 
-    private static final String[] PERM_NAMES = {
-        "in_source", "excluded_dv_store", "excluded_dv_nostore",
-        "excluded_nodv_store", "excluded_nodv_nostore"
-    };
+        final boolean excluded, hasDv, hasStore;
+        Perm(boolean excluded, boolean hasDv, boolean hasStore) {
+            this.excluded = excluded; this.hasDv = hasDv; this.hasStore = hasStore;
+        }
+        boolean isRecoverable() { return !excluded || hasDv || hasStore; }
+    }
 
     // Version pairs to test
     static Stream<Arguments> versionPairs() {
@@ -125,8 +126,16 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
     }
 
     private static boolean needsExplicitDocValues(ContainerVersion version) {
-        // ES 1.x doesn't have doc_values enabled by default
         return VersionMatchers.isES_1_X.test(version.getVersion());
+    }
+
+    /** Text fields don't support doc_values */
+    private static boolean isValidCombo(FieldTypeConfig cfg, Perm p) {
+        return cfg.supportsDocValues || !p.hasDv;
+    }
+
+    private static String fieldName(FieldTypeConfig cfg, Perm p) {
+        return cfg.targetType + "_" + p.name().toLowerCase();
     }
 
     @ParameterizedTest(name = "{0} -> {1}")
@@ -155,29 +164,22 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                 if (!isTypeAvailable(config, sourceVersion)) continue;
                 activeTypes.add(config);
 
-                for (int i = 0; i < PERMUTATIONS.length; i++) {
-                    boolean excluded = PERMUTATIONS[i][0];
-                    boolean hasDv = PERMUTATIONS[i][1];
-                    boolean hasStore = PERMUTATIONS[i][2];
+                for (var p : Perm.values()) {
+                    if (!isValidCombo(config, p)) continue;
 
-                    // Skip invalid: text/string(analyzed) doesn't support doc_values
-                    if (!config.supportsDocValues && hasDv && excluded) continue;
-                    if (!config.supportsDocValues && !hasDv && !excluded) continue;
-
-                    String fieldName = config.targetType + "_" + PERM_NAMES[i];
-                    if (excluded) excludedFields.add(fieldName);
+                    String fieldName = fieldName(config, p);
+                    if (p.excluded) excludedFields.add(fieldName);
 
                     // Build source property
                     props.append("\"").append(fieldName).append("\": {\"type\": \"").append(config.sourceType).append("\"");
                     for (var entry : config.extraSourceProps.entrySet()) {
                         props.append(", \"").append(entry.getKey()).append("\": \"").append(entry.getValue()).append("\"");
                     }
-                    // ES 1.x needs explicit doc_values: true (not default)
-                    if (hasDv && config.supportsDocValues && needsExplicitDocValues(sourceVersion)) {
+                    if (p.hasDv && config.supportsDocValues && needsExplicitDocValues(sourceVersion)) {
                         props.append(", \"doc_values\": true");
                     }
-                    if (!hasDv && config.supportsDocValues) props.append(", \"doc_values\": false");
-                    if (hasStore) props.append(", \"store\": true");
+                    if (!p.hasDv && config.supportsDocValues) props.append(", \"doc_values\": false");
+                    if (p.hasStore) props.append(", \"store\": true");
                     props.append("},\n");
 
                     // Build doc field
@@ -222,12 +224,9 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             // Create target index with modern types
             StringBuilder targetProps = new StringBuilder();
             for (var config : activeTypes) {
-                for (int i = 0; i < PERMUTATIONS.length; i++) {
-                    boolean excluded = PERMUTATIONS[i][0];
-                    boolean hasDv = PERMUTATIONS[i][1];
-                    if (!config.supportsDocValues && hasDv && excluded) continue;
-                    if (!config.supportsDocValues && !hasDv && !excluded) continue;
-                    String fieldName = config.targetType + "_" + PERM_NAMES[i];
+                for (var p : Perm.values()) {
+                    if (!isValidCombo(config, p)) continue;
+                    String fieldName = fieldName(config, p);
                     targetProps.append("\"").append(fieldName).append("\": {\"type\": \"").append(config.targetType).append("\"},\n");
                 }
             }
@@ -258,27 +257,16 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
 
             // Assert each field
             for (var config : activeTypes) {
-                for (int i = 0; i < PERMUTATIONS.length; i++) {
-                    boolean excluded = PERMUTATIONS[i][0];
-                    boolean hasDv = PERMUTATIONS[i][1];
-                    boolean hasStore = PERMUTATIONS[i][2];
+                for (var p : Perm.values()) {
+                    if (!isValidCombo(config, p)) continue;
 
-                    if (!config.supportsDocValues && hasDv && excluded) continue;
-                    if (!config.supportsDocValues && !hasDv && !excluded) continue;
-
-                    String fieldName = config.targetType + "_" + PERM_NAMES[i];
+                    String fieldName = fieldName(config, p);
                     JsonNode fieldValue = source.get(fieldName);
 
-                    boolean recoverable = !excluded || hasDv || hasStore;
-                    String actual = fieldValue != null ? fieldValue.asText() : null;
-
-                    log.info("{}: expected={}, actual={}, recoverable={}",
-                        fieldName, config.testValue, actual, recoverable);
-
-                    if (!recoverable) {
-                        assertNull(fieldValue, fieldName + " should NOT be recovered");
-                    } else {
+                    if (p.isRecoverable()) {
                         assertEquals(true, fieldValue != null, fieldName + " should be recovered");
+                    } else {
+                        assertNull(fieldValue, fieldName + " should NOT be recovered");
                     }
                 }
             }
