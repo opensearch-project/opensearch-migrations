@@ -3,13 +3,13 @@
  */
 package org.opensearch.knn.index.codec.KNN80Codec;
 
+import java.io.IOException;
+import java.util.Set;
+
 import org.apache.lucene.codecs.CompoundDirectory;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
-
-import java.io.IOException;
-import java.util.Set;
 
 /**
  * Minimal CompoundDirectory that handles KNN engine files.

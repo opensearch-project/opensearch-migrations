@@ -3,14 +3,15 @@
  */
 package org.opensearch.knn.index.codec.KNN920Codec;
 
+import org.opensearch.knn.index.codec.KNN80Codec.KNN80CompoundFormat;
+import org.opensearch.knn.index.codec.KNN80Codec.KNN80DocValuesFormat;
+import org.opensearch.knn.index.codec.KNN990Codec.NativeEngines990KnnVectorsFormat;
+
 import org.apache.lucene.backward_codecs.lucene92.Lucene92Codec;
 import org.apache.lucene.codecs.CompoundFormat;
 import org.apache.lucene.codecs.DocValuesFormat;
 import org.apache.lucene.codecs.FilterCodec;
 import org.apache.lucene.codecs.KnnVectorsFormat;
-import org.opensearch.knn.index.codec.KNN80Codec.KNN80CompoundFormat;
-import org.opensearch.knn.index.codec.KNN80Codec.KNN80DocValuesFormat;
-import org.opensearch.knn.index.codec.KNN990Codec.NativeEngines990KnnVectorsFormat;
 
 public class KNN920Codec extends FilterCodec {
     private static final String NAME = "KNN920Codec";

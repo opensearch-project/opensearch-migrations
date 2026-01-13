@@ -3,13 +3,13 @@
  */
 package org.opensearch.knn.index.codec.KNN80Codec;
 
+import java.io.IOException;
+
 import org.apache.lucene.codecs.DocValuesConsumer;
 import org.apache.lucene.codecs.DocValuesFormat;
 import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.SegmentWriteState;
-
-import java.io.IOException;
 
 /**
  * Minimal DocValuesFormat that delegates to underlying format.

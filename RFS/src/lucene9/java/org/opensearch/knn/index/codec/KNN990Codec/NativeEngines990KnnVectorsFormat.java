@@ -3,6 +3,8 @@
  */
 package org.opensearch.knn.index.codec.KNN990Codec;
 
+import java.io.IOException;
+
 import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.KnnVectorsWriter;
@@ -12,8 +14,6 @@ import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.util.Bits;
-
-import java.io.IOException;
 
 /**
  * Minimal stub for reading KNN vector indices during migration.
@@ -70,4 +70,3 @@ public class NativeEngines990KnnVectorsFormat extends KnnVectorsFormat {
         public void search(String s, byte[] bytes, KnnCollector knnCollector, Bits bits) {}
     };
 }
-

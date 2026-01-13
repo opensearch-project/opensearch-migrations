@@ -3,13 +3,13 @@
  */
 package org.opensearch.knn.index.codec.KNN84Codec;
 
+import org.opensearch.knn.index.codec.KNN80Codec.KNN80CompoundFormat;
+import org.opensearch.knn.index.codec.KNN80Codec.KNN80DocValuesFormat;
+
 import org.apache.lucene.backward_codecs.lucene87.Lucene87Codec;
-import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.CompoundFormat;
 import org.apache.lucene.codecs.DocValuesFormat;
 import org.apache.lucene.codecs.FilterCodec;
-import org.opensearch.knn.index.codec.KNN80Codec.KNN80CompoundFormat;
-import org.opensearch.knn.index.codec.KNN80Codec.KNN80DocValuesFormat;
 
 public class KNN84Codec extends FilterCodec {
     private static final String NAME = "KNN84Codec";
