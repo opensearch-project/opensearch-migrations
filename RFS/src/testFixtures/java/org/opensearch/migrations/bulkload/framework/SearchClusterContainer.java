@@ -149,6 +149,25 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static final ContainerVersion ES_V1_5 = OlderElasticsearchVersion.fromTag("1.5.2");
 
     public static final ContainerVersion OS_V1_3_16 = OpenSearchVersion.fromTag("1.3.16");
+    public static final ContainerVersion OS_V2_0_1 = OpenSearchVersion.fromTag("2.0.1");
+    public static final ContainerVersion OS_V2_1_0 = OpenSearchVersion.fromTag("2.1.0");
+    public static final ContainerVersion OS_V2_2_1 = OpenSearchVersion.fromTag("2.2.1");
+    public static final ContainerVersion OS_V2_3_0 = OpenSearchVersion.fromTag("2.3.0");
+    public static final ContainerVersion OS_V2_4_1 = OpenSearchVersion.fromTag("2.4.1");
+    public static final ContainerVersion OS_V2_5_0 = OpenSearchVersion.fromTag("2.5.0");
+    public static final ContainerVersion OS_V2_6_0 = OpenSearchVersion.fromTag("2.6.0");
+    public static final ContainerVersion OS_V2_7_0 = OpenSearchVersion.fromTag("2.7.0");
+    public static final ContainerVersion OS_V2_8_0 = OpenSearchVersion.fromTag("2.8.0");
+    public static final ContainerVersion OS_V2_9_0 = OpenSearchVersion.fromTag("2.9.0");
+    public static final ContainerVersion OS_V2_10_0 = OpenSearchVersion.fromTag("2.10.0");
+    public static final ContainerVersion OS_V2_11_1 = OpenSearchVersion.fromTag("2.11.1");
+    public static final ContainerVersion OS_V2_12_0 = OpenSearchVersion.fromTag("2.12.0");
+    public static final ContainerVersion OS_V2_13_0 = OpenSearchVersion.fromTag("2.13.0");
+    public static final ContainerVersion OS_V2_14_0 = OpenSearchVersion.fromTag("2.14.0");
+    public static final ContainerVersion OS_V2_15_0 = OpenSearchVersion.fromTag("2.15.0");
+    public static final ContainerVersion OS_V2_16_0 = OpenSearchVersion.fromTag("2.16.0");
+    public static final ContainerVersion OS_V2_17_1 = OpenSearchVersion.fromTag("2.17.1");
+    public static final ContainerVersion OS_V2_18_0 = OpenSearchVersion.fromTag("2.18.0");
     public static final ContainerVersion OS_V2_19_1 = OpenSearchVersion.fromTag("2.19.1");
     public static final ContainerVersion OS_V3_0_0 = OpenSearchVersion.fromTag("3.0.0");
     public static final ContainerVersion OS_LATEST = OS_V2_19_1;
