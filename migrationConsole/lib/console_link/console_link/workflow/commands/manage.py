@@ -206,6 +206,7 @@ class WorkflowTreeApp(App):
     def _refresh_workflow(self) -> None:
         logger.info(f"WORKER START: _refresh_workflow")
         result = self._fetch_workflow_data()
+        logger.info(f"fetched data {json.dumps(result)}")
         self.call_from_thread(self._handle_refresh_workflow_result, result, False)
         logger.info("WORKER END: _refresh_workflow")
 
@@ -391,10 +392,10 @@ class WorkflowTreeApp(App):
 
         # Content Guard: Skip if nothing changed
         # Hard Restart Logic (Pending -> Active OR Workflow Restarted)
-        if is_restart or self.workflow_data and not force_reload:
-            if self.workflow_data.get('metadata', {}).get('resourceVersion') == \
-                    new_data.get('metadata', {}).get('resourceVersion'):
-                return
+        # if is_restart or self.workflow_data and not force_reload:
+        #     if self.workflow_data.get('metadata', {}).get('resourceVersion') == \
+        #             new_data.get('metadata', {}).get('resourceVersion'):
+        #         return
 
         logger.info(f"Setting up tree for {new_data.get('metadata', {}).get('resourceVersion')}")
 

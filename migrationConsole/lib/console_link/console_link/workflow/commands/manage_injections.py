@@ -32,7 +32,7 @@ class WaiterInterface:
                     pass
             cmd = (
                 f"kubectl wait workflow/{workflow_name} "
-                f"--for=create -n {namespace} --timeout=300s && touch {marker}"
+                f"--for=create -n {namespace} --timeout=300s 2>&1 > /dev/null && touch {marker}"
             )
             subprocess.Popen(cmd, shell=True, start_new_session=True)
 
@@ -138,10 +138,10 @@ def make_k8s_pod_scraper(k8s_client) -> PodScraperInterface:
                 query_params=query_params, _preload_content=False, _request_timeout=10
             )
             data = json.loads(resp[0].read())
-            return data.get('items', [])
+            return data.get('items', []) or [] # with PartialObjectMetadataList, items could be null
         except Exception as e:
             logger.error(f"Failed to fetch pod metadata: {e}")
-            return []
+            raise
         finally:
             if 'resp' in locals(): resp[0].close()
 
