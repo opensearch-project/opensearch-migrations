@@ -404,34 +404,7 @@ public class RfsMigrateDocuments {
         var targetVersion = targetClient.getClusterVersion();
 
         // Determine coordinator connection and version
-        final ConnectionContext coordinatorConnectionContext;
-        final Version coordinatorVersion;
-        if (arguments.coordinatorArgs.isEnabled()) {
-            coordinatorConnectionContext = arguments.coordinatorArgs.toConnectionContext();
-            var coordinatorClientFactory = new OpenSearchClientFactory(coordinatorConnectionContext);
-            coordinatorVersion = coordinatorClientFactory.getClusterVersion();
-            if (coordinatorVersion.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH) {
-                throw new IllegalArgumentException(
-                    "OpenSearch Serverless cannot be used as a coordinator cluster. " +
-                    "Serverless does not support the work coordination indices required for document migration. " +
-                    "Please use a managed OpenSearch or self-hosted cluster for coordination."
-                );
-            }
-            log.atInfo().setMessage("Using separate coordinator cluster: {} (version: {})")
-                .addArgument(coordinatorConnectionContext.getUri())
-                .addArgument(coordinatorVersion)
-                .log();
-        } else {
-            coordinatorConnectionContext = targetConnectionContext;
-            coordinatorVersion = targetVersion;
-            if (coordinatorVersion.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH) {
-                throw new IllegalArgumentException(
-                    "OpenSearch Serverless cannot be used for work coordination. " +
-                    "Please specify a separate coordinator cluster using --coordinator-host."
-                );
-            }
-            log.atInfo().setMessage("Using target cluster for coordination").log();
-        }
+        var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
 
         var docTransformerConfig = Optional.ofNullable(TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams))
             .orElse(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
@@ -444,11 +417,11 @@ public class RfsMigrateDocuments {
         var progressCursor = new AtomicReference<WorkItemCursor>();
         var cancellationRunnableRef = new AtomicReference<Runnable>();
         var workItemTimeProvider = new WorkItemTimeProvider();
-        var coordinatorFactory = new WorkCoordinatorFactory(coordinatorVersion, arguments.indexNameSuffix);
+        var coordinatorFactory = new WorkCoordinatorFactory(coordinatorInfo.version(), arguments.indexNameSuffix);
         var cleanShutdownCompleted = new AtomicBoolean(false);
 
         try (var workCoordinator = coordinatorFactory.get(
-                 new CoordinateWorkHttpClient(coordinatorConnectionContext),
+                 new CoordinateWorkHttpClient(coordinatorInfo.connectionContext()),
                  TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                  workerId,
                 Clock.systemUTC(),
@@ -553,6 +526,34 @@ public class RfsMigrateDocuments {
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
         }
+    }
+
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
+    private record CoordinatorInfo(ConnectionContext connectionContext, Version version) {}
+
+    private static CoordinatorInfo resolveCoordinatorConnection(Args arguments, ConnectionContext targetConnectionContext, Version targetVersion) {
+        if (arguments.coordinatorArgs.isEnabled()) {
+            var ctx = arguments.coordinatorArgs.toConnectionContext();
+            var version = new OpenSearchClientFactory(ctx).getClusterVersion();
+            if (version.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH) {
+                throw new IllegalArgumentException(
+                    "OpenSearch Serverless cannot be used as a coordinator cluster. " +
+                    "Serverless does not support the work coordination indices required for document migration. " +
+                    "Please use a managed OpenSearch or self-hosted cluster for coordination."
+                );
+            }
+            log.atInfo().setMessage("Using separate coordinator cluster: {} (version: {})")
+                .addArgument(ctx.getUri()).addArgument(version).log();
+            return new CoordinatorInfo(ctx, version);
+        }
+        if (targetVersion.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH) {
+            throw new IllegalArgumentException(
+                "OpenSearch Serverless cannot be used for work coordination. " +
+                "Please specify a separate coordinator cluster using --coordinator-host."
+            );
+        }
+        log.atInfo().setMessage("Using target cluster for coordination").log();
+        return new CoordinatorInfo(targetConnectionContext, targetVersion);
     }
 
     private static void executeCleanShutdownProcess(
