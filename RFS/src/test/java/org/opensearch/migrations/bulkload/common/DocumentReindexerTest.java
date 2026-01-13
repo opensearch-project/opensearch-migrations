@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.bulkload.common.DocumentReaderEngine.DocumentChangeset;
 import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -57,7 +58,7 @@ class DocumentReindexerTest {
 
     @Test
     void reindex_shouldBufferByDocumentCount() {
-        Flux<RfsLuceneDocument> documentStream = Flux.range(1, 10)
+        Flux<LuceneDocumentChange> documentStream = Flux.range(1, 10)
             .map(i -> createTestDocument(i));
 
         when(mockClient.sendBulkRequest(eq("test-index"), any(), any(), any()))
@@ -68,7 +69,7 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index",  documentStream, mockContext))
+        StepVerifier.create(documentReindexer.reindex("test-index", new DocumentChangeset(Flux.empty(), documentStream, () -> {}), mockContext))
             .expectNextCount(3)
             .expectNext(new WorkItemCursor(10))
             .thenRequest(4)
@@ -96,7 +97,7 @@ class DocumentReindexerTest {
     @Test
     void reindex_shouldBufferBySize() {
         int numDocs = 5;
-        Flux<RfsLuceneDocument> documentStream = Flux.range(1, numDocs)
+        Flux<LuceneDocumentChange> documentStream = Flux.range(1, numDocs)
             .map(i -> createLargeTestDocument(i, MAX_BYTES_PER_BULK_REQUEST / 2 + 1));
 
         when(mockClient.sendBulkRequest(eq("test-index"), any(), any(), any()))
@@ -107,7 +108,7 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+        StepVerifier.create(documentReindexer.reindex("test-index", new DocumentChangeset(Flux.empty(), documentStream, () -> {}), mockContext))
         .expectNextCount(4)
         .expectNext(new WorkItemCursor(5))
         .thenRequest(5)
@@ -143,7 +144,7 @@ class DocumentReindexerTest {
             mockClient, numDocs, MAX_BYTES_PER_BULK_REQUEST, MAX_CONCURRENT_REQUESTS, () -> transformer
         );
 
-        Flux<RfsLuceneDocument> documentStream = Flux.range(1, numDocs)
+        Flux<LuceneDocumentChange> documentStream = Flux.range(1, numDocs)
             .map(i -> createLargeTestDocument(i, MAX_BYTES_PER_BULK_REQUEST / 2 + 1)
         );
 
@@ -155,7 +156,7 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+        StepVerifier.create(documentReindexer.reindex("test-index", new DocumentChangeset(Flux.empty(), documentStream, () -> {}), mockContext))
             .expectNext(new WorkItemCursor(1))
             .thenRequest(5)
             .verifyComplete();
@@ -180,7 +181,7 @@ class DocumentReindexerTest {
 
     @Test
     void reindex_shouldSendDocumentsLargerThanMaxBulkSize() {
-        Flux<RfsLuceneDocument> documentStream = Flux.just(createLargeTestDocument(1, MAX_BYTES_PER_BULK_REQUEST * 3 / 2));
+        Flux<LuceneDocumentChange> documentStream = Flux.just(createLargeTestDocument(1, MAX_BYTES_PER_BULK_REQUEST * 3 / 2));
 
         when(mockClient.sendBulkRequest(eq("test-index"), any(), any(), any()))
             .thenAnswer(invocation -> {
@@ -190,7 +191,7 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+        StepVerifier.create(documentReindexer.reindex("test-index", new DocumentChangeset(Flux.empty(), documentStream, () -> {}), mockContext))
             .expectNext(new WorkItemCursor(1))
             .thenRequest(1)
             .verifyComplete();
@@ -210,7 +211,7 @@ class DocumentReindexerTest {
 
     @Test
     void reindex_shouldTrimAndRemoveNewlineFromSource() {
-        Flux<RfsLuceneDocument> documentStream = Flux.just(createTestDocumentWithWhitespace(1));
+        Flux<LuceneDocumentChange> documentStream = Flux.just(createTestDocumentWithWhitespace(1));
 
         when(mockClient.sendBulkRequest(eq("test-index"), any(), any(), any()))
             .thenAnswer(invocation -> {
@@ -220,7 +221,7 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+        StepVerifier.create(documentReindexer.reindex("test-index", new DocumentChangeset(Flux.empty(), documentStream, () -> {}), mockContext))
             .expectNext(new WorkItemCursor(1))
             .thenRequest(1)
             .verifyComplete();
@@ -243,7 +244,7 @@ class DocumentReindexerTest {
         int maxConcurrentRequests = 5;
         DocumentReindexer concurrentReindexer = new DocumentReindexer(mockClient, 1, MAX_BYTES_PER_BULK_REQUEST, maxConcurrentRequests, null);
 
-        Flux<RfsLuceneDocument> documentStream = Flux.range(1, numDocs).map(i -> createTestDocument(i));
+        Flux<LuceneDocumentChange> documentStream = Flux.range(1, numDocs).map(i -> createTestDocument(i));
 
         AtomicInteger concurrentRequests = new AtomicInteger(0);
         AtomicInteger maxObservedConcurrency = new AtomicInteger(0);
@@ -257,7 +258,7 @@ class DocumentReindexerTest {
                     .doOnTerminate(concurrentRequests::decrementAndGet);
             });
 
-        StepVerifier.create(concurrentReindexer.reindex("test-index", documentStream, mockContext))
+        StepVerifier.create(concurrentReindexer.reindex("test-index", new DocumentChangeset(Flux.empty(), documentStream, () -> {}), mockContext))
             .expectNextCount(99)
             .expectNext(new WorkItemCursor(100))
             .thenRequest(100)
@@ -285,7 +286,7 @@ class DocumentReindexerTest {
         documentReindexer = new DocumentReindexer(mockClient, MAX_DOCS_PER_BULK, MAX_BYTES_PER_BULK_REQUEST, MAX_CONCURRENT_REQUESTS, () -> transformer);
 
         // Create a stream of documents, some requiring transformation and some not
-        Flux<RfsLuceneDocument> documentStream = Flux.just(
+        Flux<LuceneDocumentChange> documentStream = Flux.just(
                 createTestDocumentWithType(1, "_type1"),
                 createTestDocumentWithType(2, null),
                 createTestDocumentWithType(3, "_type3")
@@ -301,7 +302,7 @@ class DocumentReindexerTest {
                 });
 
         // Execute the reindexing process
-        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+        StepVerifier.create(documentReindexer.reindex("test-index", new DocumentChangeset(Flux.empty(), documentStream, () -> {}), mockContext))
             .expectNext(new WorkItemCursor(1))
             .thenRequest(1)
             .verifyComplete();
@@ -328,17 +329,17 @@ class DocumentReindexerTest {
                 "Document 3 should have _type removed");
     }
 
-    private RfsLuceneDocument createTestDocument(int id) {
-        return new RfsLuceneDocument(id, String.valueOf(id), null, "{\"field\":\"value\"}", null, RfsDocumentOperation.INDEX);
+    private LuceneDocumentChange createTestDocument(int id) {
+        return new LuceneDocumentChange(id, String.valueOf(id), null, "{\"field\":\"value\"}", null, DocumentChangeType.INDEX);
     }
 
-    private RfsLuceneDocument createTestDocumentWithWhitespace(int id) {
-        return new RfsLuceneDocument(id, String.valueOf(id), null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ", null, RfsDocumentOperation.INDEX);
+    private LuceneDocumentChange createTestDocumentWithWhitespace(int id) {
+        return new LuceneDocumentChange(id, String.valueOf(id), null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ", null, DocumentChangeType.INDEX);
     }
 
-    private RfsLuceneDocument createLargeTestDocument(int id, int size) {
+    private LuceneDocumentChange createLargeTestDocument(int id, int size) {
         String largeField = "x".repeat(size);
-        return new RfsLuceneDocument(id, String.valueOf(id), null, "{\"field\":\"" + largeField + "\"}", null, RfsDocumentOperation.INDEX);
+        return new LuceneDocumentChange(id, String.valueOf(id), null, "{\"field\":\"" + largeField + "\"}", null, DocumentChangeType.INDEX);
     }
 
     /**
@@ -346,10 +347,10 @@ class DocumentReindexerTest {
      *
      * @param id The document ID.
      * @param type The _type of the document.
-     * @return A new instance of RfsLuceneDocument with the specified _type.
+     * @return A new instance of LuceneDocumentChange with the specified _type.
      */
-    private RfsLuceneDocument createTestDocumentWithType(int id, String type) {
+    private LuceneDocumentChange createTestDocumentWithType(int id, String type) {
         String source = "{\"field\":\"value\"}";
-        return new RfsLuceneDocument(id, String.valueOf(id), type, source, null, RfsDocumentOperation.INDEX);
+        return new LuceneDocumentChange(id, String.valueOf(id), type, source, null, DocumentChangeType.INDEX);
     }
 }

@@ -1,7 +1,6 @@
 package org.opensearch.migrations.bulkload.delta;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.Comparator;
 import java.util.Set;
 import java.util.TreeSet;
@@ -11,7 +10,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentReaderEngine;
-import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
@@ -56,7 +55,7 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
 
 
     @Override
-    public Flux<RfsLuceneDocument> readDocuments(
+    public DocumentChangeset prepareChangeset(
         LuceneIndexReader reader,
         String indexName,
         int shardNumber,
@@ -74,43 +73,22 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
             var deltaResult = DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(
                 previousReader, currentReader, startingDocId, rootContext);
 
-            Runnable cleanup = getCleanup(indexName, previousReader, currentReader);
-            return (switch (deltaMode) {
-                case UPDATES_ONLY -> deltaResult.additions;
-                case UPDATES_AND_DELETES ->
-                    // Using concat to perform deletions first then additions
-                    Flux.concat(
-                        deltaResult.deletions,
-                        deltaResult.additions
-                    );
-                case DELETES_ONLY -> deltaResult.deletions;
-            }).doFinally(s -> cleanup.run());
+            var deletions = switch (deltaMode) {
+                case UPDATES_ONLY -> Flux.<LuceneDocumentChange>empty();
+                case UPDATES_AND_DELETES, DELETES_ONLY -> deltaResult.deletions;
+            };
+            var additions = switch (deltaMode) {
+                case DELETES_ONLY -> Flux.<LuceneDocumentChange>empty();
+                case UPDATES_ONLY, UPDATES_AND_DELETES -> deltaResult.additions;
+            };
+            return new DocumentChangeset(deletions, additions, LuceneDirectoryReader.getCleanupRunnable(previousReader, currentReader));
         } catch (Exception e) {
             log.atError()
-                .setMessage("Exception during delta readDocuments")
+                .setMessage("Exception during delta prepareChangeset")
                 .setCause(e)
                 .log();
-            getCleanup(indexName, previousReader, currentReader).run();
+            LuceneDirectoryReader.getCleanupRunnable(previousReader, currentReader).run();
             throw e;
         }
-    }
-
-    private static Runnable getCleanup(String indexName, LuceneDirectoryReader previousReader, LuceneDirectoryReader currentReader) {
-        return () -> {
-            try {
-                if (previousReader != null) {
-                    previousReader.close();
-                }
-                if (currentReader != null) {
-                    currentReader.close();
-                }
-            } catch (IOException e) {
-                log.atError()
-                    .setMessage("Unable to close reader for index [" + indexName + "]")
-                    .setCause(e)
-                    .log();
-                throw new UncheckedIOException(e);
-            }
-        };
     }
 }

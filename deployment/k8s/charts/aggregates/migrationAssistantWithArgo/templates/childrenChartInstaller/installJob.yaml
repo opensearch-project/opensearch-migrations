@@ -77,9 +77,23 @@ spec:
                 return 1
               }
 
+              # Install Kyverno first and wait for it to be fully ready before other charts
+              # This prevents race conditions where Kyverno's webhook intercepts other chart
+              # installations before Kyverno's admission controller is ready
+      {{- if (index $.Values.conditionalPackageInstalls "kyverno") }}
+        {{- $kyvernoChart := index .Values.charts "kyverno" }}
+        {{- if $kyvernoChart }}
+              echo "Installing Kyverno first (must be ready before other charts)..."
+              {{- include "migration.installChart" (dict "name" "kyverno" "chart" $kyvernoChart "root" $ "forceWait" true) | nindent 14 }}
+              echo "Kyverno installed and ready"
+        {{- end }}
+      {{- end }}
+
               # Install charts
       {{- range $name, $chart := .Values.charts }}
-        {{- if (not (index $.Values.conditionalPackageInstalls $name)) }}
+        {{- if eq $name "kyverno" }}
+              echo "Skipping kyverno in main loop (already installed)"
+        {{- else if (not (index $.Values.conditionalPackageInstalls $name)) }}
               echo "Skipping install for: {{ $name }} because conditionalPackageInstalls.{{ $name }} disabled it."
         {{- else }}
               echo "Preparing chart: {{ $name }}"
