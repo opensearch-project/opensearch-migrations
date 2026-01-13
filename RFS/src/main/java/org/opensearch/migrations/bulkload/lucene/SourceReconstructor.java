@@ -25,19 +25,34 @@ public class SourceReconstructor {
     }
 
     /**
-     * Reconstructs _source JSON from doc_values for a document.
+     * Reconstructs _source JSON from stored fields and doc_values for a document.
+     * Stored fields are checked first (more performant), then doc_values for remaining fields.
      * 
      * @param reader The leaf reader to access doc_values
      * @param docId The document ID within the segment
+     * @param document The Lucene document containing stored fields
      * @return Reconstructed JSON string, or null if reconstruction fails
      */
-    public static String reconstructSource(LuceneLeafReader reader, int docId) {
+    public static String reconstructSource(LuceneLeafReader reader, int docId, LuceneDocument document) {
         try {
             Map<String, Object> reconstructed = new LinkedHashMap<>();
             
+            // First, read from stored fields (more performant)
+            for (var field : document.getFields()) {
+                String fieldName = field.name();
+                if (shouldSkipField(fieldName)) {
+                    continue;
+                }
+                Object value = getStoredFieldValue(field);
+                if (value != null) {
+                    reconstructed.put(fieldName, value);
+                }
+            }
+            
+            // Then, read from doc_values (for fields not already in stored fields)
             for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
                 String fieldName = fieldInfo.name();
-                if (shouldSkipField(fieldName)) {
+                if (shouldSkipField(fieldName) || reconstructed.containsKey(fieldName)) {
                     continue;
                 }
                 Object value = reader.getDocValue(docId, fieldInfo);
@@ -47,7 +62,7 @@ public class SourceReconstructor {
             }
             
             if (reconstructed.isEmpty()) {
-                log.atDebug().setMessage("No doc_values found for document {}").addArgument(docId).log();
+                log.atWarn().setMessage("No stored fields or doc_values found for document {}").addArgument(docId).log();
                 return null;
             }
             
@@ -120,10 +135,21 @@ public class SourceReconstructor {
         return value;
     }
 
-    /** Converts doc_value, handling boolean 0/1 to false/true conversion */
+    /** Converts doc_value, handling boolean 0/1 to false/true conversion and IP numeric to string */
     private static Object convertDocValue(Object value, DocValueFieldInfo fieldInfo) {
         if (fieldInfo.isBoolean() && value instanceof Long) {
             return ((Long) value) != 0;
+        }
+        // IP fields store IPv4 as unsigned 32-bit integers
+        // Detect by field name pattern (ip_*) - this is a heuristic
+        if (value instanceof Long && fieldInfo.name().startsWith("ip_")) {
+            long ipLong = (Long) value;
+            // Convert numeric IP back to dotted-decimal notation
+            return String.format("%d.%d.%d.%d",
+                (ipLong >> 24) & 0xFF,
+                (ipLong >> 16) & 0xFF,
+                (ipLong >> 8) & 0xFF,
+                ipLong & 0xFF);
         }
         return value;
     }
