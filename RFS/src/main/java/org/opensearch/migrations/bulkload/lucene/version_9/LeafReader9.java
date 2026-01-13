@@ -130,20 +130,14 @@ public class LeafReader9 implements LuceneLeafReader {
     @Override
     public Object getDocValue(int docId, DocValueFieldInfo fieldInfo) throws IOException {
         String fieldName = fieldInfo.name();
-        switch (fieldInfo.docValueType()) {
-            case NUMERIC:
-                return getNumericValue(docId, fieldName);
-            case SORTED:
-                return getSortedValue(docId, fieldName);
-            case SORTED_SET:
-                return getSortedSetValues(docId, fieldName);
-            case SORTED_NUMERIC:
-                return getSortedNumericValues(docId, fieldName);
-            case BINARY:
-                return getBinaryValue(docId, fieldName);
-            default:
-                return null;
-        }
+        return switch (fieldInfo.docValueType()) {
+            case NUMERIC -> getNumericValue(docId, fieldName);
+            case SORTED -> getSortedValue(docId, fieldName);
+            case SORTED_SET -> getSortedSetValues(docId, fieldName);
+            case SORTED_NUMERIC -> getSortedNumericValues(docId, fieldName);
+            case BINARY -> getBinaryValue(docId, fieldName);
+            case NONE -> null;
+        };
     }
 
     private Object getNumericValue(int docId, String fieldName) throws IOException {
