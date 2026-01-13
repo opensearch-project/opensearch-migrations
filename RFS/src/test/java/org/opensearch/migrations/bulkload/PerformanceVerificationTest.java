@@ -6,10 +6,11 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.bulkload.common.DocumentReaderEngine.DocumentChangeset;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
+import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient.BulkResponse;
-import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.version_9.DirectoryReader9;
@@ -105,14 +106,14 @@ public class PerformanceVerificationTest {
         IDocumentMigrationContexts.IDocumentReindexContext mockContext = mock(IDocumentMigrationContexts.IDocumentReindexContext.class);
         when(mockContext.createBulkRequest()).thenReturn(mock(IRfsContexts.IRequestContext.class));
 
-        Flux<RfsLuceneDocument> documentsStream = reader.readDocuments(segmentsFileName).map(d -> {
+        Flux<LuceneDocumentChange> documentsStream = reader.streamDocumentChanges(segmentsFileName).map(d -> {
             ingestedDocuments.incrementAndGet();
             return d;
         });
 
         // Start reindexing in a separate thread
         Thread reindexThread = new Thread(() -> {
-            reindexer.reindex("test-index", documentsStream, mockContext).then().block();
+            reindexer.reindex("test-index", new DocumentChangeset(Flux.empty(), documentsStream, () -> {}), mockContext).then().block();
         });
         reindexThread.start();
 

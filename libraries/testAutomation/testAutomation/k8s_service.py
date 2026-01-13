@@ -73,11 +73,18 @@ class K8sService:
         )
 
     def _is_pod_ready(self, pod: V1Pod) -> bool:
-        """Checks if a pod is in a Ready state."""
-        for condition in pod.status.conditions or []:
-            if condition.type == "Ready" and condition.status == "True":
-                return True
-        return False
+        """Checks if pod is Running and all containers are ready."""
+        if pod.status.phase != "Running":
+            return False
+        # Check all init containers completed
+        for status in pod.status.init_container_statuses or []:
+            if not status.ready and not (status.state and status.state.terminated):
+                return False
+        # Check all containers ready
+        for status in pod.status.container_statuses or []:
+            if not status.ready:
+                return False
+        return True
 
     def get_migration_console_pod_id(self) -> str:
         logger.debug("Retrieving the latest migration console pod...")
@@ -100,19 +107,28 @@ class K8sService:
         printable_cmd = " ".join(command_list)
         logger.info(f"Executing command [{printable_cmd}] in pod: {console_pod_id}")
 
-        # Open a streaming connection
-        resp = stream.stream(
-            self.k8s_client.connect_get_namespaced_pod_exec,
-            console_pod_id,
-            self.namespace,
-            command=command_list,
-            container="console",
-            stderr=True,
-            stdin=False,
-            stdout=True,
-            tty=False,
-            _preload_content=(not unbuffered)  # Allow printing as output comes in
-        )
+        # Retry exec in case container isn't fully ready for connections yet
+        import time
+        for attempt in range(5):
+            try:
+                resp = stream.stream(
+                    self.k8s_client.connect_get_namespaced_pod_exec,
+                    console_pod_id,
+                    self.namespace,
+                    command=command_list,
+                    container="console",
+                    stderr=True,
+                    stdin=False,
+                    stdout=True,
+                    tty=False,
+                    _preload_content=(not unbuffered)
+                )
+                break
+            except Exception:
+                if attempt < 4:
+                    time.sleep(2)
+                else:
+                    raise
 
         if unbuffered:
             # Read from the stream while it is open
@@ -163,7 +179,7 @@ class K8sService:
             elapsed = time.time() - start_time
             if elapsed > timeout_seconds:
                 raise TimeoutError(f"Timeout reached: Not all PVCs were deleted within {timeout_seconds} seconds. "
-                                   f"Remaining PVCs: {', '.join(remaining_pvcs)}")
+                                   f"Remaining PVCs: {[pvc.metadata.name for pvc in remaining_pvcs]}")
 
             logger.info(f"Waiting for PVCs to be deleted. Remaining: {[pvc.metadata.name for pvc in remaining_pvcs]}")
             time.sleep(poll_interval)
@@ -181,6 +197,58 @@ class K8sService:
         else:
             logger.info(f"Namespace '{namespace}' already exists")
             return result
+
+    def delete_webhooks_referencing_namespace(self) -> None:
+        """Delete all webhooks that reference services in this namespace."""
+        logger.info(f"Deleting webhooks referencing namespace '{self.namespace}'")
+        for webhook_type in ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]:
+            try:
+                ns = self.namespace
+                jsonpath = (
+                    f"jsonpath={{range .items[?(@.webhooks[*].clientConfig.service.namespace=="
+                    f"\"{ns}\")]}}{{.metadata.name}}{{\"\\n\"}}{{end}}"
+                )
+                result = self.run_command(
+                    ["kubectl", "get", webhook_type, "-o", jsonpath],
+                    ignore_errors=True
+                )
+                if result and result.stdout.strip():
+                    for name in result.stdout.strip().split("\n"):
+                        if name:
+                            logger.info(f"Deleting {webhook_type} '{name}' (references namespace '{self.namespace}')")
+                            self.run_command(["kubectl", "delete", webhook_type, name, "--ignore-not-found"],
+                                             ignore_errors=True)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup {webhook_type}: {e}")
+
+    def wait_for_pods_terminated(self, timeout_seconds: int = 60) -> None:
+        """Wait for all pods in namespace to terminate."""
+        import time
+        deadline = time.time() + timeout_seconds
+        while True:
+            result = self.run_command(
+                ["kubectl", "get", "pods", "-n", self.namespace, "-o", "name"],
+                ignore_errors=True
+            )
+            if not result or not result.stdout.strip():
+                return
+            if time.time() >= deadline:
+                break
+            time.sleep(2)
+        logger.warning(f"Timeout waiting for pods to terminate in {self.namespace}")
+
+    def delete_namespace(self) -> None:
+        logger.info(f"Deleting namespace '{self.namespace}'")
+        # Delete webhooks first to prevent them blocking namespace deletion
+        self.delete_webhooks_referencing_namespace()
+        # Delete namespace
+        self.run_command(["kubectl", "delete", "namespace", self.namespace,
+                         "--ignore-not-found", "--grace-period=0", "--force"])
+        # Wait for pods to fully terminate before deleting webhooks again
+        # This prevents kyverno from recreating webhooks during termination
+        self.wait_for_pods_terminated()
+        # Delete webhooks again in case they were recreated during pod termination
+        self.delete_webhooks_referencing_namespace()
 
     def check_helm_release_exists(self, release_name: str) -> bool:
         logger.info(f"Checking if {release_name} is already deployed in '{self.namespace}' namespace")

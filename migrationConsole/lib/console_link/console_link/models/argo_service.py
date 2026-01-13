@@ -103,13 +103,15 @@ class ArgoService:
         # Print namespace resource summary
         try:
             logger.info(f"===== Namespace {self.namespace} resource summary =====")
-            get_all_args = {"get": "all", "--namespace": self.namespace}
-            self._run_kubectl_command(get_all_args)
+            summary_resources = "pods,services,deployments,statefulsets,workflows"
+            get_args = {"get": summary_resources, "--namespace": self.namespace}
+            self._run_kubectl_command(get_args)
         except Exception as e:
             logger.error(f"Failed to get namespace resources: {e}")
 
     def save_namespace_diagnostics(self, output_dir: str) -> Optional[str]:
         """Save detailed namespace diagnostics to a file for artifact collection."""
+        diagnostic_resources = "pods,services,deployments,statefulsets,workflows"
         try:
             os.makedirs(output_dir, exist_ok=True)
             output_file = os.path.join(output_dir, f"namespace-{self.namespace}-diagnostics.txt")
@@ -117,11 +119,11 @@ class ArgoService:
             with open(output_file, 'w') as f:
                 f.write(f"===== Namespace {self.namespace} Diagnostics =====\n\n")
 
-                # kubectl get all
-                f.write("===== kubectl get all =====\n")
+                # kubectl get resources
+                f.write(f"===== kubectl get {diagnostic_resources} =====\n")
                 try:
                     result = CommandRunner("kubectl", {
-                        "get": "all",
+                        "get": diagnostic_resources,
                         "--namespace": self.namespace,
                         "-o": "wide"
                     }).run()
@@ -129,11 +131,11 @@ class ArgoService:
                 except Exception as e:
                     f.write(f"Error: {e}\n\n")
 
-                # kubectl describe all
-                f.write("===== kubectl describe all =====\n")
+                # kubectl describe resources
+                f.write(f"===== kubectl describe {diagnostic_resources} =====\n")
                 try:
                     result = CommandRunner("kubectl", {
-                        "describe": "all",
+                        "describe": diagnostic_resources,
                         "--namespace": self.namespace
                     }).run()
                     f.write(result + "\n\n")
