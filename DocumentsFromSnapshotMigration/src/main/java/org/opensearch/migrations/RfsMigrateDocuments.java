@@ -529,7 +529,7 @@ public class RfsMigrateDocuments {
     }
 
     @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
-    private record CoordinatorInfo(ConnectionContext ctx, Version ver) {}
+    private record CoordinatorInfo(ConnectionContext connectionContext, Version version) {}
 
     private static CoordinatorInfo resolveCoordinatorConnection(Args arguments, ConnectionContext targetConnectionContext, Version targetVersion) {
         if (arguments.coordinatorArgs.isEnabled()) {
