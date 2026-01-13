@@ -110,14 +110,14 @@ public class LeafReader5 implements LuceneLeafReader {
 
     private static DocValueFieldInfo.DocValueType convertDocValuesType(
             shadow.lucene5.org.apache.lucene.index.DocValuesType luceneType) {
-        switch (luceneType) {
-            case NUMERIC: return DocValueFieldInfo.DocValueType.NUMERIC;
-            case BINARY: return DocValueFieldInfo.DocValueType.BINARY;
-            case SORTED: return DocValueFieldInfo.DocValueType.SORTED;
-            case SORTED_NUMERIC: return DocValueFieldInfo.DocValueType.SORTED_NUMERIC;
-            case SORTED_SET: return DocValueFieldInfo.DocValueType.SORTED_SET;
-            default: return DocValueFieldInfo.DocValueType.NONE;
-        }
+        return switch (luceneType) {
+            case NUMERIC -> DocValueFieldInfo.DocValueType.NUMERIC;
+            case BINARY -> DocValueFieldInfo.DocValueType.BINARY;
+            case SORTED -> DocValueFieldInfo.DocValueType.SORTED;
+            case SORTED_NUMERIC -> DocValueFieldInfo.DocValueType.SORTED_NUMERIC;
+            case SORTED_SET -> DocValueFieldInfo.DocValueType.SORTED_SET;
+            case NONE -> DocValueFieldInfo.DocValueType.NONE;
+        };
     }
 
     @Override
