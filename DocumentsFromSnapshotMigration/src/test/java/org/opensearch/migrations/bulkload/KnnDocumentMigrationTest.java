@@ -157,9 +157,8 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
             }
         }
 
-        // === Index codec compression types (OS 2.9+) ===
-        if (isVersionAtLeast(sourceVersion, 2, 9)) {
-            // zstd and zstd_no_dict codecs
+        // === Index codec compression types (OS 2.9 only - zstd/zstd_no_dict not supported for KNN in 2.10+) ===
+        if (sourceVersion.getMajor() == 2 && sourceVersion.getMinor() == 9) {
             configs.add(knnConfigWithCodec("knn-zstd", "faiss", "hnsw", "l2", dim, "zstd"));
             configs.add(knnConfigWithCodec("knn-zstd-nodict", "faiss", "hnsw", "l2", dim, "zstd_no_dict"));
         }
