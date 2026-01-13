@@ -15,7 +15,7 @@ static def expandVersionString(String input) {
     def pattern = ~/^(ES|OS)_(\d+)\.(\d+)$/
     def matcher = trimmed =~ pattern
     if (!matcher.matches()) {
-        error("Invalid version string format: '${input}'. Expected something like ES_7.10 or OS_1.3")
+        error("Invalid version string format: '${input}'. Expected something like ES_7.10 or OS_2.19")
     }
     def prefix = matcher[0][1]
     def major  = matcher[0][2]
@@ -25,8 +25,8 @@ static def expandVersionString(String input) {
 }
 
 def call(Map config = [:]) {
-    def defaultStageId = config.defaultStageId ?: "eks-byos"
-    def jobName = config.jobName ?: "eks-byos-integ-test"
+    def defaultStageId = config.defaultStageId ?: "eksbyos"
+    def jobName = config.jobName ?: "byos-eks-integ-test"
     def clusterContextFilePath = "tmp/cluster-context-byos-${currentBuild.number}.json"
     
     // Target cluster size configurations
@@ -63,14 +63,14 @@ def call(Map config = [:]) {
             string(name: 'SNAPSHOT_NAME', defaultValue: 'large-snapshot', description: 'Name of the snapshot within the folder')
             choice(
                 name: 'SOURCE_VERSION',
-                choices: ['ES_6.8', 'ES_7.10', 'OS_1.3', 'OS_2.11'],
+                choices: ['ES_5.6', 'ES_6.8', 'ES_7.10'],
                 description: 'Version of the cluster that created the snapshot'
             )
             
             // Target cluster configuration
             choice(
                 name: 'TARGET_VERSION',
-                choices: ['OS_2.19', 'OS_1.3', 'OS_3.1'],
+                choices: ['OS_2.19', 'OS_3.1'],
                 description: 'Target OpenSearch version'
             )
             choice(
@@ -80,8 +80,8 @@ def call(Map config = [:]) {
             )
             
             // Reuse options
-            booleanParam(name: 'REUSE_TARGET_CLUSTER', defaultValue: false, description: 'Reuse existing target cluster (will clear indices instead of destroying)')
-            booleanParam(name: 'SKIP_TARGET_CLEANUP', defaultValue: false, description: 'Skip target cluster cleanup after test (for debugging or reuse)')
+            booleanParam(name: 'REUSE_TARGET_CLUSTER', defaultValue: true, description: 'Reuse existing target cluster (will clear indices instead of destroying)')
+            booleanParam(name: 'SKIP_TARGET_CLEANUP', defaultValue: true, description: 'Skip target cluster cleanup after test (for debugging or reuse)')
         }
 
         options {
