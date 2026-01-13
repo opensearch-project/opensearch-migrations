@@ -19,7 +19,7 @@ import lombok.experimental.UtilityClass;
 public class SupportedClusters {
     private static List<ContainerVersion> sources() {
         return List.of(
-            SearchClusterContainer.OS_V1_3_16,
+            SearchClusterContainer.OS_V1_3_20,
             SearchClusterContainer.ES_V8_19,
             SearchClusterContainer.ES_V7_17,
             SearchClusterContainer.ES_V7_10_2,
@@ -36,7 +36,7 @@ public class SupportedClusters {
             SearchClusterContainer.OS_V1_0_1,
             SearchClusterContainer.OS_V1_1_0,
             SearchClusterContainer.OS_V1_2_4,
-            SearchClusterContainer.OS_V1_3_16,
+            SearchClusterContainer.OS_V1_3_20,
             // OpenSearch 2.x
             SearchClusterContainer.OS_V2_0_1,
             SearchClusterContainer.OS_V2_1_0,
@@ -57,7 +57,7 @@ public class SupportedClusters {
             SearchClusterContainer.OS_V2_16_0,
             SearchClusterContainer.OS_V2_17_1,
             SearchClusterContainer.OS_V2_18_0,
-            SearchClusterContainer.OS_V2_19_1,
+            SearchClusterContainer.OS_V2_19_4,
             // Elasticsearch
             SearchClusterContainer.ES_V8_18,
             SearchClusterContainer.ES_V8_17,
@@ -119,8 +119,8 @@ public class SupportedClusters {
 
     private static List<ContainerVersion> targets() {
         return List.of(
-            SearchClusterContainer.OS_V1_3_16,
-            SearchClusterContainer.OS_V2_19_1,
+            SearchClusterContainer.OS_V1_3_20,
+            SearchClusterContainer.OS_V2_19_4,
             SearchClusterContainer.OS_V3_0_0
         );
     }
@@ -146,7 +146,7 @@ public class SupportedClusters {
                 .toList());
 
         // Individual Pairs
-        matrix.add(new MigrationPair(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1));
+        matrix.add(new MigrationPair(SearchClusterContainer.OS_V2_19_4, SearchClusterContainer.OS_V2_19_4));
         matrix.add(new MigrationPair(SearchClusterContainer.ES_V7_17, SearchClusterContainer.ES_V7_10_2));
 
         if (includeRFSOnly) {

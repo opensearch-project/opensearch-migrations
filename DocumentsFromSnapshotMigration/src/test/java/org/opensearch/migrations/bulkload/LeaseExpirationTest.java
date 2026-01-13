@@ -51,7 +51,7 @@ public class LeaseExpirationTest extends SourceTestBase {
                         .map(migrationPair ->
                                 Arguments.of(false, migrationPair.source(), migrationPair.target())),
                 // Add test for ES 7 -> OS 2 with forceMoreSegments=true
-                Stream.of(Arguments.of(true, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_1))
+                Stream.of(Arguments.of(true, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_4))
         );
     }
 

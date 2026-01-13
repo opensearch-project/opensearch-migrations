@@ -84,10 +84,10 @@ public class DataStreamMigrationTest extends SourceTestBase {
 
         try (
             var network = Network.newNetwork();
-            var osSourceContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_1)
+            var osSourceContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
                     .withAccessToHost(true)
                     .withNetwork(network);
-            var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_1)
+            var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
                     .withAccessToHost(true)
                     .withNetwork(network)
                     .withNetworkAliases(TARGET_DOCKER_HOSTNAME)

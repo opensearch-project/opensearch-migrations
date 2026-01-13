@@ -151,7 +151,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static final ContainerVersion OS_V1_0_1 = OpenSearchVersion.fromTag("1.0.1");
     public static final ContainerVersion OS_V1_1_0 = OpenSearchVersion.fromTag("1.1.0");
     public static final ContainerVersion OS_V1_2_4 = OpenSearchVersion.fromTag("1.2.4");
-    public static final ContainerVersion OS_V1_3_16 = OpenSearchVersion.fromTag("1.3.16");
+    public static final ContainerVersion OS_V1_3_20 = OpenSearchVersion.fromTag("1.3.20");
     public static final ContainerVersion OS_V2_0_1 = OpenSearchVersion.fromTag("2.0.1");
     public static final ContainerVersion OS_V2_1_0 = OpenSearchVersion.fromTag("2.1.0");
     public static final ContainerVersion OS_V2_2_1 = OpenSearchVersion.fromTag("2.2.1");
@@ -171,9 +171,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static final ContainerVersion OS_V2_16_0 = OpenSearchVersion.fromTag("2.16.0");
     public static final ContainerVersion OS_V2_17_1 = OpenSearchVersion.fromTag("2.17.1");
     public static final ContainerVersion OS_V2_18_0 = OpenSearchVersion.fromTag("2.18.0");
-    public static final ContainerVersion OS_V2_19_1 = OpenSearchVersion.fromTag("2.19.1");
+    public static final ContainerVersion OS_V2_19_4 = OpenSearchVersion.fromTag("2.19.4");
     public static final ContainerVersion OS_V3_0_0 = OpenSearchVersion.fromTag("3.0.0");
-    public static final ContainerVersion OS_LATEST = OS_V2_19_1;
+    public static final ContainerVersion OS_LATEST = OS_V2_19_4;
 
     public enum INITIALIZATION_FLAVOR {
         BASE(Map.of("discovery.type", "single-node",
