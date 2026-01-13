@@ -36,30 +36,36 @@ class WorkflowTreeApp(App):
     #pod-status { height: 1; padding: 0 1; }
     """
 
-    def __init__(self, namespace: str, name: str, argo_service: ArgoWorkflowInterface,
-                 pod_scraper: PodScraperInterface, workflow_waiter: WaiterInterface,
+    def __init__(self,
+                 namespace: str,
+                 name: str,
+                 argo_service: ArgoWorkflowInterface,
+                 pod_scraper: PodScraperInterface,
+                 workflow_waiter: WaiterInterface,
                  refresh_interval: float):
         super().__init__()
+        self.title = f"[{namespace}] {name}" # override from base
+
+        # Exposed Metadata
+        self.current_run_id: Optional[str] = None
+        self.is_exiting = False
 
         # Injected Services
-        self.argo_service = argo_service
-        self.waiter = workflow_waiter
-        self.pod_scraper = pod_scraper
-        self.refresh_interval = refresh_interval
+        self._argo_service = argo_service
+        self._workflow_waiter = workflow_waiter
+        self._pod_scraper = pod_scraper
+        self._refresh_interval = refresh_interval
 
         # State Containers (Managers)
-        self.pods = PodNameManager(self, pod_scraper, name, namespace)
-        self.tree_state = TreeStateManager(on_new_pod=self.pods.observe_node)
-        self.logs = LogManager(pod_scraper, namespace)
-        self.live = LiveStatusManager(refresh_interval)
+        self._pods = PodNameManager(self, pod_scraper, name, namespace)
+        self._tree_state = TreeStateManager(on_new_pod=self._pods.observe_node)
+        self._logs = LogManager(pod_scraper, namespace)
+        self._live = LiveStatusManager(refresh_interval)
 
-        # Application Metadata
-        self.title = f"[{namespace}] {name}"
-        self.workflow_name, self.namespace = name, namespace
-        self._current_run_id: Optional[str] = None
-        self._is_exiting = False
+        # Internal Application Metadata
+        self._workflow_name = name
+        self._namespace = namespace
         self._current_node_id: Optional[str] = None
-        self._pod_name_cache = self.pods.cache  # Alias for test compatibility
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -68,13 +74,13 @@ class WorkflowTreeApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.tree_state.set_tree_widget(self.query_one("#workflow-tree", Tree))
+        self._tree_state.set_tree_widget(self.query_one("#workflow-tree", Tree))
         self.action_refresh_workflow()
 
     def on_unmount(self) -> None:
-        self._is_exiting = True
+        self.is_exiting = True
         try:
-            self.waiter.reset()
+            self._workflow_waiter.reset()
         except Exception:
             pass
 
@@ -83,7 +89,7 @@ class WorkflowTreeApp(App):
     def _fetch_workflow_data(self):
         """Wrapper that converts exceptions to error responses."""
         try:
-            return self.argo_service.get_workflow(self.workflow_name, self.namespace)
+            return self._argo_service.get_workflow(self._workflow_name, self._namespace)
         except Exception as e:
             return {"success": False, "error": str(e)}, {}
 
@@ -98,34 +104,34 @@ class WorkflowTreeApp(App):
     def _handle_workflow_data(self, new_data: Dict, force_reload: bool = False) -> None:
         """The Conductor routes data to the relevant managers."""
         if not new_data:
-            self.tree_state.reset(LOADING_ROOT_LABEL)
+            self._tree_state.reset(LOADING_ROOT_LABEL)
             self.run_worker(self._wait_for_workflow_worker, thread=True, name="_wait_for_workflow_worker")
             return
 
         new_run_id = new_data.get('status', {}).get('startedAt')
-        is_restart = self._current_run_id != new_run_id
+        is_restart = self.current_run_id != new_run_id
 
         if is_restart:
-            self._current_run_id = new_run_id
-            self.pods.clear_cache()
-            self.tree_state.rebuild(new_data)
+            self.current_run_id = new_run_id
+            self._pods.clear_cache()
+            self._tree_state.rebuild(new_data)
         else:
-            self.tree_state.update(new_data)
+            self._tree_state.update(new_data)
 
-        self.pods.trigger_resolve(new_run_id, use_cache=not force_reload)
+        self._pods.trigger_resolve(new_run_id, use_cache=not force_reload)
 
-        self.live.reconcile(self, self.tree_state)
+        self._live.reconcile(self, self._tree_state)
 
-        self._update_pod_status()
+        self.update_pod_status()
         self._update_dynamic_bindings()
-        self.set_timer(self.refresh_interval, self.action_refresh_workflow)
+        self.set_timer(self._refresh_interval, self.action_refresh_workflow)
 
     def _wait_for_workflow_worker(self) -> None:
         """Lightweight worker: polls disk, deletes immediately on find."""
-        self.waiter.trigger()
-        while not self._is_exiting:
-            if self.waiter.checker():
-                self.waiter.reset()
+        self._workflow_waiter.trigger()
+        while not self.is_exiting:
+            if self._workflow_waiter.checker():
+                self._workflow_waiter.reset()
                 self.call_from_thread(self.action_refresh_workflow)
                 break
             time.sleep(0.1)
@@ -143,7 +149,7 @@ class WorkflowTreeApp(App):
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
         self._current_node_id = event.node.data.get('id') if event.node.data else None
-        self._update_pod_status()
+        self.update_pod_status()
         self._update_dynamic_bindings()
 
     @property
@@ -151,7 +157,7 @@ class WorkflowTreeApp(App):
         """Get fresh node data from tree state."""
         if not self._current_node_id:
             return None
-        tree_node = self.tree_state.get_node(self._current_node_id)
+        tree_node = self._tree_state.get_node(self._current_node_id)
         return tree_node.data if tree_node else None
 
     def action_follow_logs(self) -> None:
@@ -159,19 +165,19 @@ class WorkflowTreeApp(App):
             return
         
         node_id = self.current_node_data.get('id')
-        pod_name = self.pods.get_name(node_id)
+        pod_name = self._pods.get_name(node_id)
         if not pod_name:
             self.notify("Pod not available", severity="error")
             return
         
-        containers = self.logs.get_containers(pod_name)
+        containers = self._logs.get_containers(pod_name)
         if not containers:
             self.notify("No containers found", severity="error")
             return
         
         if len(containers) == 1:
             # Single container, follow directly
-            self.logs.follow_logs(self, pod_name, containers[0], self.current_node_data.get('display_name', ''))
+            self._logs.follow_logs(self, pod_name, containers[0], self.current_node_data.get('display_name', ''))
         else:
             # Multiple containers, show selection dialog
             self.push_screen(
@@ -181,24 +187,24 @@ class WorkflowTreeApp(App):
 
     def _follow_selected_container(self, pod_name: str, container: str) -> None:
         """Follow logs for the selected container."""
-        self.logs.follow_logs(self, pod_name, container, self.current_node_data.get('display_name', ''))
+        self._logs.follow_logs(self, pod_name, container, self.current_node_data.get('display_name', ''))
 
     def action_view_logs(self) -> None:
         if self.current_node_data and self.current_node_data.get('type') == NODE_TYPE_POD:
-            pod_name = self.pods.get_name(self.current_node_data['id'])
+            pod_name = self._pods.get_name(self.current_node_data['id'])
             if pod_name:
                 self._show_logs_in_pager(self.current_node_data)
 
     def _show_logs_in_pager(self, node_data: Dict) -> None:
-        pod_name = self.pods.get_name(node_data['id'])
+        pod_name = self._pods.get_name(node_data['id'])
         if pod_name:
-            self.logs.show_in_pager(self, pod_name, node_data.get('display_name', ''))
+            self._logs.show_in_pager(self, pod_name, node_data.get('display_name', ''))
 
     def action_copy_pod_name(self) -> None:
         if not self.current_node_data:
             return
         node_id = self.current_node_data.get('id')
-        if pod_name := self.pods.get_name(node_id):
+        if pod_name := self._pods.get_name(node_id):
             if copy_to_clipboard(pod_name):
                 self.notify(f"📋 Copied: {pod_name}")
 
@@ -210,7 +216,7 @@ class WorkflowTreeApp(App):
 
     def _execute_approval(self, node_data: Dict) -> None:
         try:
-            res = self.argo_service.approve_step(self.namespace, self.workflow_name, node_data)
+            res = self._argo_service.approve_step(self._namespace, self._workflow_name, node_data)
             if res.get('success'):
                 self.notify(f"✅ Approved: {node_data.get('display_name')}")
                 self.action_manual_refresh()
@@ -232,7 +238,7 @@ class WorkflowTreeApp(App):
             elif node.parent:
                 tree.select_node(node.parent)
 
-    def _update_pod_status(self) -> None:
+    def update_pod_status(self) -> None:
         status_bar = self.query_one("#pod-status", Static)
         if not self.current_node_data:
             status_bar.update("")
@@ -241,7 +247,7 @@ class WorkflowTreeApp(App):
         node_type = self.current_node_data.get('type')
         if node_type == NODE_TYPE_POD:
             node_id = self.current_node_data.get('id')
-            name = self.pods.get_name(node_id) if node_id else None
+            name = self._pods.get_name(node_id) if node_id else None
             status_bar.update(f"Pod: [bold green]{name}[/]" if name else "Pod: (not available)")
         else:
             status_bar.update("")
@@ -260,7 +266,7 @@ class WorkflowTreeApp(App):
         if node:
             node_id = node.get('id')
             ntype = node.get('type')
-            pod_resolved = self.pods.get_name(node_id) is not None
+            pod_resolved = self._pods.get_name(node_id) is not None
 
             if ntype == NODE_TYPE_POD and pod_resolved:
                 self.bind("o", "view_logs", description="View Logs")

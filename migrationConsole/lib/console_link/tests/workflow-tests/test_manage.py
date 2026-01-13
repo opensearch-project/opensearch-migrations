@@ -255,7 +255,7 @@ async def test_follow_logs_binding_responds_to_phase_changes(mock_workflow_with_
         await pilot.pause()
 
         # 'f' should NOT trigger follow_logs for Pending pod
-        with patch.object(app.logs, "follow_logs") as mock_follow:
+        with patch.object(app._logs, "follow_logs") as mock_follow:
             await pilot.press("f")
             await pilot.pause()
             mock_follow.assert_not_called()
@@ -271,7 +271,7 @@ async def test_follow_logs_binding_responds_to_phase_changes(mock_workflow_with_
                                 app.current_node_data.get('phase') == PHASE_RUNNING, timeout=5.0)
 
         # Now 'f' SHOULD trigger follow_logs
-        with patch.object(app.logs, "follow_logs") as mock_follow:
+        with patch.object(app._logs, "follow_logs") as mock_follow:
             await pilot.press("f")
             await pilot.pause()
             mock_follow.assert_called_once()
@@ -287,7 +287,7 @@ async def test_follow_logs_binding_responds_to_phase_changes(mock_workflow_with_
                                 app.current_node_data.get('phase') == PHASE_SUCCEEDED, timeout=5.0)
 
         # 'f' should NOT trigger follow_logs for Succeeded pod
-        with patch.object(app.logs, "follow_logs") as mock_follow:
+        with patch.object(app._logs, "follow_logs") as mock_follow:
             await pilot.press("f")
             await pilot.pause()
             mock_follow.assert_not_called()
@@ -334,7 +334,7 @@ async def test_manual_refresh_consistency(mock_workflow_with_two_pods):
 
         # Check the log: the most recent call should have use_cache=False
         assert False in fetch_log
-        assert app._pod_name_cache["node-2"] == "p2"
+        assert app._pods.cache["node-2"] == "p2"
 
 
 @pytest.mark.asyncio

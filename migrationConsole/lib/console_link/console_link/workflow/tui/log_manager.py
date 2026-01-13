@@ -9,14 +9,14 @@ logger = logging.getLogger(__name__)
 
 class LogManager:
     def __init__(self, pod_scraper, namespace: str, tail_lines: int = 500):
-        self.pod_scraper = pod_scraper
-        self.namespace = namespace
-        self.tail_lines = tail_lines
+        self._pod_scraper = pod_scraper
+        self._namespace = namespace
+        self._tail_lines = tail_lines
 
     def get_containers(self, pod_name: str) -> List[str]:
         """Get list of user containers (excluding Argo sidecars) from a pod."""
         try:
-            pod = self.pod_scraper.read_pod(pod_name, self.namespace)
+            pod = self._pod_scraper.read_pod(pod_name, self._namespace)
             main_containers = [c.name for c in pod.spec.containers] if pod.spec.containers else []
             # Filter out Argo executor containers
             return [c for c in main_containers if c not in ('wait', 'init')]
@@ -27,7 +27,7 @@ class LogManager:
     def follow_logs(self, app, pod_name: str, container: str, display_name: str) -> None:
         """Follow logs using kubectl logs -f and pipe to less."""
         try:
-            cmd = ['kubectl', 'logs', pod_name, '-f', '-c', container, '-n', self.namespace]
+            cmd = ['kubectl', 'logs', pod_name, '-f', '-c', container, '-n', self._namespace]
             
             # Suspend Textual UI to hand control to kubectl and less
             with app.suspend():
@@ -65,7 +65,7 @@ class LogManager:
     def _get_pod_logs(self, pod_name: str) -> str:
         """Internal helper to aggregate logs from all containers in a pod."""
         try:
-            pod = self.pod_scraper.read_pod(pod_name, self.namespace)
+            pod = self._pod_scraper.read_pod(pod_name, self._namespace)
             # Combine init and standard containers
             containers = [c.name for c in (pod.spec.init_containers or []) + pod.spec.containers]
 
@@ -73,8 +73,8 @@ class LogManager:
             for c in containers:
                 output.append(f"\n--- Container: {c} ---\n")
                 try:
-                    logs = self.pod_scraper.read_pod_log(
-                        pod_name, self.namespace, c, self.tail_lines
+                    logs = self._pod_scraper.read_pod_log(
+                        pod_name, self._namespace, c, self._tail_lines
                     )
                     output.append(logs or "(No output)")
                 except Exception:

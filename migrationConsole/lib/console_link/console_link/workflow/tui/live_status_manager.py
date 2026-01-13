@@ -17,9 +17,9 @@ class LiveStatusManager:
     """
 
     def __init__(self, refresh_interval: float):
-        self.refresh_interval = refresh_interval
-        self.active_loop_ids: Set[str] = set()
-        self.live_check_in_progress: Set[str] = set()
+        self._refresh_interval = refresh_interval
+        self._active_loop_ids: Set[str] = set()
+        self._live_check_in_progress: Set[str] = set()
 
     def reconcile(self, app: Any, tree_state: Any) -> None:
         """
@@ -62,8 +62,8 @@ class LiveStatusManager:
                     )
 
                 # 4. Kick off the independent loop if not already running for this tip
-                if tip_id not in self.active_loop_ids:
-                    self.active_loop_ids.add(tip_id)
+                if tip_id not in self._active_loop_ids:
+                    self._active_loop_ids.add(tip_id)
                     self._per_node_live_loop(app, tree_state, tip_id)
             except ValueError:
                 # Parent node might have been pruned during a race condition
@@ -71,7 +71,7 @@ class LiveStatusManager:
         else:
             # If the node succeeded, remove the Live Status node
             self._remove_live_status_attachment(tree_state, tip_id)
-            self.active_loop_ids.discard(tip_id)
+            self._active_loop_ids.discard(tip_id)
 
     def _remove_live_status_attachment(self, tree_state: Any, tip_id: str) -> None:
         """Remove the Live Status attachment node."""
@@ -85,14 +85,14 @@ class LiveStatusManager:
 
     def _per_node_live_loop(self, app: Any, tree_state: Any, node_id: str) -> None:
         """Independent, self-scheduling update loop for a specific live status."""
-        if app._is_exiting:
-            self.active_loop_ids.discard(node_id)
+        if app.is_exiting:
+            self._active_loop_ids.discard(node_id)
             return
 
         # Check if the attachment node still exists in the host
         parent_node = tree_state.get_node(node_id)
         if not parent_node:
-            self.active_loop_ids.discard(node_id)
+            self._active_loop_ids.discard(node_id)
             return
 
         # Find the header attachment we created earlier
@@ -105,21 +105,21 @@ class LiveStatusManager:
 
             # Reschedule the next tick of this specific loop
             app.set_timer(
-                self.refresh_interval,
+                self._refresh_interval,
                 lambda: self._per_node_live_loop(app, tree_state, node_id)
             )
         else:
-            self.active_loop_ids.discard(node_id)
+            self._active_loop_ids.discard(node_id)
 
     def _should_continue_loop(self, node_id: str) -> bool:
-        return node_id in self.active_loop_ids
+        return node_id in self._active_loop_ids
 
     def _run_live_check_async(self, app: Any, tree_state: Any, node_id: str, header_node: Any) -> None:
         """Dispatches the worker thread."""
-        if node_id in self.live_check_in_progress:
+        if node_id in self._live_check_in_progress:
             return
 
-        self.live_check_in_progress.add(node_id)
+        self._live_check_in_progress.add(node_id)
         node_data = tree_state.get_node(node_id).data
 
         app.run_worker(
@@ -146,7 +146,7 @@ class LiveStatusManager:
         except Exception as e:
             app.call_from_thread(self._update_ui_result, node_id, {"error": str(e)})
         finally:
-            self.live_check_in_progress.discard(node_id)
+            self._live_check_in_progress.discard(node_id)
 
     def _update_ui_result(self, node_id: str, result: Dict) -> None:
         """Main Thread: Injects lines into the attachment node children."""

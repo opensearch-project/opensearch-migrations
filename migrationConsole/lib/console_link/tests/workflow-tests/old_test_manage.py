@@ -400,7 +400,7 @@ class TestWorkflowTreeAppRerender:
 
         # Verify hard restart logic
         mock_tree.clear.assert_called_once()
-        assert app._current_run_id == '11:00:00Z'
+        assert app.current_run_id == '11:00:00Z'
         assert app.node_mapping != {}  # Tree was repopulated
 
     def test_apply_workflow_updates_soft_update(self):
@@ -467,7 +467,7 @@ class TestWorkflowTreeAppRerender:
         new_workflow = {
             'metadata': {'resourceVersion': '2'},
             'status': {
-                'startedAt': app._current_run_id,
+                'startedAt': app.current_run_id,
                 'nodes': {node_id: {'phase': 'Succeeded'}}
             }
         }

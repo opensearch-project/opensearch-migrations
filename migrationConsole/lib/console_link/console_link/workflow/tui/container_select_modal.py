@@ -23,11 +23,11 @@ class ContainerSelectModal(ModalScreen[str]):
     def __init__(self, containers: List[str], pod_name: str):
         super().__init__()
         self.containers = containers
-        self.pod_name = pod_name
+        self._pod_name = pod_name
 
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
-            yield Static(f"Select container to follow in pod: {self.pod_name}", id="title")
+            yield Static(f"Select container to follow in pod: {self._pod_name}", id="title")
             with Vertical(id="buttons"):
                 for container in self.containers:
                     yield Button(container, id=container)

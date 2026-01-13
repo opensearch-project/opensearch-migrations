@@ -12,8 +12,8 @@ class TreeStateManager:
     def __init__(self, tree_widget: Optional[Tree] = None, on_new_pod: Optional[Callable[[str], None]] = None):
         self.tree: Optional[Tree] = tree_widget
         self.node_mapping: Dict[str, TreeNode] = {}
-        self.workflow_data: Dict = {}
-        self.on_new_pod = on_new_pod
+        self._workflow_data: Dict = {}
+        self._on_new_pod_handler = on_new_pod
 
     def set_tree_widget(self, tree_widget: Tree) -> None:
         self.tree = tree_widget
@@ -25,7 +25,7 @@ class TreeStateManager:
 
     def rebuild(self, workflow_data: Dict) -> None:
         """Full rebuild for first load or workflow restart."""
-        self.workflow_data = workflow_data
+        self._workflow_data = workflow_data
         self.node_mapping.clear()
         self.tree.clear()
         self.tree.root.label = "[bold]Workflow Steps[/]"
@@ -35,7 +35,7 @@ class TreeStateManager:
 
     def update(self, workflow_data: Dict) -> None:
         """Incremental update for ongoing workflow."""
-        self.workflow_data = workflow_data
+        self._workflow_data = workflow_data
         nodes = filter_tree_nodes(build_nested_workflow_tree(workflow_data))
         self._update_recursive(self.tree.root, nodes)
 
@@ -59,8 +59,8 @@ class TreeStateManager:
             label = self._get_label(node)
             tree_node = parent_node.add(label, data=node)
             self.node_mapping[node['id']] = tree_node
-            if node.get('type') == 'Pod' and self.on_new_pod:
-                self.on_new_pod(node['id'])
+            if node.get('type') == 'Pod' and self._on_new_pod_handler:
+                self._on_new_pod_handler(node['id'])
             if node.get('children'):
                 self._populate_recursive(tree_node, node['children'])
 
@@ -84,8 +84,8 @@ class TreeStateManager:
                 tree_node = parent_tree_node.add(label, data=node)
                 tree_node.expand()
                 self.node_mapping[node_id] = tree_node
-                if node.get('type') == 'Pod' and self.on_new_pod:
-                    self.on_new_pod(node_id)
+                if node.get('type') == 'Pod' and self._on_new_pod_handler:
+                    self._on_new_pod_handler(node_id)
 
             if node.get('children'):
                 self._update_recursive(self.node_mapping[node_id], node['children'])
@@ -97,5 +97,5 @@ class TreeStateManager:
                 child.remove()
 
     def _get_label(self, node: Dict):
-        status_output = get_step_status_output(self.workflow_data, node['id'])
+        status_output = get_step_status_output(self._workflow_data, node['id'])
         return get_step_rich_label(node, status_output)
