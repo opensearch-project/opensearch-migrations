@@ -148,6 +148,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static final ContainerVersion ES_V1_6 = OlderElasticsearchVersion.fromTag("1.6.2");
     public static final ContainerVersion ES_V1_5 = OlderElasticsearchVersion.fromTag("1.5.2");
 
+    public static final ContainerVersion OS_V1_0_1 = OpenSearchVersion.fromTag("1.0.1");
+    public static final ContainerVersion OS_V1_1_0 = OpenSearchVersion.fromTag("1.1.0");
+    public static final ContainerVersion OS_V1_2_4 = OpenSearchVersion.fromTag("1.2.4");
     public static final ContainerVersion OS_V1_3_16 = OpenSearchVersion.fromTag("1.3.16");
     public static final ContainerVersion OS_V2_0_1 = OpenSearchVersion.fromTag("2.0.1");
     public static final ContainerVersion OS_V2_1_0 = OpenSearchVersion.fromTag("2.1.0");

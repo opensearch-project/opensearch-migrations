@@ -90,6 +90,38 @@ public class SupportedClusters {
         );
     }
 
+    /** Extended OpenSearch sources for KNN testing - all OS 1.x and 2.x minor versions */
+    public static List<ContainerVersion> extendedOpenSearchSources() {
+        return List.of(
+            // OpenSearch 1.x
+            SearchClusterContainer.OS_V1_0_1,
+            SearchClusterContainer.OS_V1_1_0,
+            SearchClusterContainer.OS_V1_2_4,
+            SearchClusterContainer.OS_V1_3_16,
+            // OpenSearch 2.x
+            SearchClusterContainer.OS_V2_0_1,
+            SearchClusterContainer.OS_V2_1_0,
+            SearchClusterContainer.OS_V2_2_1,
+            SearchClusterContainer.OS_V2_3_0,
+            SearchClusterContainer.OS_V2_4_1,
+            SearchClusterContainer.OS_V2_5_0,
+            SearchClusterContainer.OS_V2_6_0,
+            SearchClusterContainer.OS_V2_7_0,
+            SearchClusterContainer.OS_V2_8_0,
+            SearchClusterContainer.OS_V2_9_0,
+            SearchClusterContainer.OS_V2_10_0,
+            SearchClusterContainer.OS_V2_11_1,
+            SearchClusterContainer.OS_V2_12_0,
+            SearchClusterContainer.OS_V2_13_0,
+            SearchClusterContainer.OS_V2_14_0,
+            SearchClusterContainer.OS_V2_15_0,
+            SearchClusterContainer.OS_V2_16_0,
+            SearchClusterContainer.OS_V2_17_1,
+            SearchClusterContainer.OS_V2_18_0,
+            SearchClusterContainer.OS_V2_19_1
+        );
+    }
+
     private static List<ContainerVersion> targets() {
         return List.of(
             SearchClusterContainer.OS_V1_3_16,
