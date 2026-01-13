@@ -48,7 +48,9 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
     }
 
     private static Stream<Arguments> extendedScenarios() {
-        return SupportedClusters.extendedOpenSearchSources().stream().map(Arguments::of);
+        return SupportedClusters.extendedSources().stream()
+            .filter(v -> VersionMatchers.isOS_1_X.test(v.getVersion()) || VersionMatchers.isOS_2_X.test(v.getVersion()))
+            .map(Arguments::of);
     }
 
     @ParameterizedTest(name = "KNN Documents From {0} to {1}")
