@@ -1,9 +1,5 @@
 """Interactive manage command for workflow CLI - interactive tree navigation for log viewing."""
 import datetime
-import gc
-from dataclasses import dataclass
-
-import ijson
 import json
 import logging
 import os
@@ -16,7 +12,6 @@ from typing import Any, Dict, List, Optional, Tuple, Callable
 from pathlib import Path
 import base64
 import click
-import requests
 import yaml
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -24,7 +19,6 @@ from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Header, Static, Tree
 from textual.widgets.tree import TreeNode
-from rich.text import Text
 
 from .manage_injections import PodScraperInterface, ArgoService, make_k8s_pod_scraper, WaiterInterface, make_argo_service
 # Internal imports
@@ -32,7 +26,6 @@ from ..models.utils import ExitCode
 from ..services.workflow_service import WorkflowService, WorkflowApproveResult
 from ..tree_utils import (
     build_nested_workflow_tree,
-    clean_display_name,
     filter_tree_nodes,
     get_node_input_parameter,
     get_step_rich_label,
@@ -76,64 +69,7 @@ for handler in root_logger.handlers[:]:
 
 logger = logging.getLogger(__name__)
 
-# --- Utilities ---
-def copy_to_clipboard(text: str) -> bool:
-    """Universal copy-to-clipboard: SSH, kubectl exec, and Local OS."""
-    try:
-        is_remote = any(k in os.environ for k in ["SSH_TTY", "SSH_CLIENT", "KUBERNETES_SERVICE_HOST"])
-        if os.environ.get("TERM") in ["xterm-256color", "screen-256color"]:
-            b64_text = base64.b64encode(text.encode('utf-8')).decode('utf-8')
-            osc_52 = f"\x1b]52;c;{b64_text}\x07"
-            if "TMUX" in os.environ:
-                osc_52 = f"\x1bPtmux;\x1b{osc_52}\x1b\\"
-            sys.stdout.write(osc_52)
-            sys.stdout.flush()
-            if is_remote: return True
-        system = platform.system()
-        if system == "Darwin":
-            subprocess.run(['pbcopy'], input=text.encode('utf-8'), check=True)
-        elif system == "Windows":
-            subprocess.run(['clip'], input=text, text=True, check=True)
-        elif system == "Linux":
-            try:
-                subprocess.run(['wl-copy'], input=text.encode('utf-8'), check=True)
-            except FileNotFoundError:
-                subprocess.run(['xclip', '-selection', 'clipboard'], input=text.encode('utf-8'), check=True)
-        return True
-    except Exception:
-        return False
 
-
-# --- UI Screens ---
-class ConfirmModal(ModalScreen[bool]):
-    CSS = """
-    ConfirmModal { align: center middle; background: $background 60%; }
-    #dialog { width: 45; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
-    #question { text-align: center; margin-bottom: 1; }
-    #buttons { align: center middle; height: 3; }
-    Button { margin: 0 1; min-width: 12; }
-    """
-    BINDINGS = [
-        Binding("y", "confirm", "Yes"),
-        Binding("n", "cancel", "No"),
-        Binding("escape", "cancel", "No", show=False)
-    ]
-    def __init__(self, message: str):
-        super().__init__()
-        self.message = message
-    def compose(self) -> ComposeResult:
-        with Container(id="dialog"):
-            yield Static(self.message, id="question")
-            with Horizontal(id="buttons"):
-                yield Button("Yes (y)", id="yes", variant="success")
-                yield Button("No (n)", id="no", variant="error")
-    def on_mount(self) -> None:
-        self.query_one("#yes", Button).focus()
-    def action_confirm(self) -> None: self.dismiss(True)
-    def action_cancel(self) -> None: self.dismiss(False)
-    def on_button_pressed(self, event: Button.Pressed) -> None: self.dismiss(event.button.id == "yes")
-
-# --- Main Application ---
 class WorkflowTreeApp(App):
     CSS = """
     Tree { scrollbar-gutter: stable; }
@@ -171,7 +107,6 @@ class WorkflowTreeApp(App):
         self.live_check_in_progress = set()
         self._pod_name_cache = {}
         self._pod_name_cache_is_dirty = True
-        self.tree_nodes = []
         self.workflow_data = {}
 
         self.marker_file = Path(tempfile.gettempdir()) / f"wf_ready_{self.workflow_name}.tmp"
@@ -381,7 +316,6 @@ class WorkflowTreeApp(App):
         if not new_data:
             logger.warning("No workflow data. Reverting to pending.")
             self.workflow_data = {}
-            self.tree_nodes = []
             self.node_mapping.clear()
             tree.clear()
             tree.root.label = LOADING_ROOT_LABEL
@@ -407,13 +341,12 @@ class WorkflowTreeApp(App):
             self._pod_name_cache.clear()
 
             tree.root.label = "Workflow Steps"
-            self.tree_nodes = filter_tree_nodes(build_nested_workflow_tree(new_data))
-            self._populate_tree(tree, self.tree_nodes, tree.root)
+            tree_nodes = filter_tree_nodes(build_nested_workflow_tree(new_data))
+            self._populate_tree(tree, tree_nodes, tree.root)
             tree.root.expand_all()
         else:
             new_nodes = filter_tree_nodes(build_nested_workflow_tree(new_data))
             self._update_tree_recursive(tree.root, new_nodes, new_data)
-            self.tree_nodes = new_nodes
 
         self.workflow_data = new_data
 
@@ -474,14 +407,6 @@ class WorkflowTreeApp(App):
         # Reactive UI Reconciliation: Injects or Removes the Live Status node
         # based on the current active tip of this specific branch.
         self._reconcile_live_status_node_with_argo_workflow(parent_tree_node)
-
-    def _handle_refresh_error(self, error_msg: str) -> None:
-        if "not found" in error_msg.lower():
-            logger.warning(f"Workflow {self.workflow_name} deleted. Resetting.")
-            self._initialize_internal_state()
-        else:
-            tree = self.query_one("#workflow-tree", Tree)
-            tree.root.label = f"⚠️  Fetch failed: {error_msg}"
 
     # --- External Integrations ---
     def _show_logs_in_pager(self, node_data: Dict) -> None:
@@ -595,7 +520,6 @@ class WorkflowTreeApp(App):
 
     def _run_live_check_async(self, tree_node, node_data: Dict) -> None:
         node_id = node_data['id']
-        now = time.time()
         if node_id in self.live_check_in_progress: return
 
         self.live_check_in_progress.add(node_id)
@@ -651,6 +575,64 @@ class WorkflowTreeApp(App):
             header.add(f"❌ {msg}", data={"is_ephemeral": True})
 
         self.nodes_with_live_checks.add(node_id)
+
+
+class ConfirmModal(ModalScreen[bool]):
+    CSS = """
+    ConfirmModal { align: center middle; background: $background 60%; }
+    #dialog { width: 45; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
+    #question { text-align: center; margin-bottom: 1; }
+    #buttons { align: center middle; height: 3; }
+    Button { margin: 0 1; min-width: 12; }
+    """
+    BINDINGS = [
+        Binding("y", "confirm", "Yes"),
+        Binding("n", "cancel", "No"),
+        Binding("escape", "cancel", "No", show=False)
+    ]
+    def __init__(self, message: str):
+        super().__init__()
+        self.message = message
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog"):
+            yield Static(self.message, id="question")
+            with Horizontal(id="buttons"):
+                yield Button("Yes (y)", id="yes", variant="success")
+                yield Button("No (n)", id="no", variant="error")
+    def on_mount(self) -> None:
+        self.query_one("#yes", Button).focus()
+    def action_confirm(self) -> None: self.dismiss(True)
+    def action_cancel(self) -> None: self.dismiss(False)
+    def on_button_pressed(self, event: Button.Pressed) -> None: self.dismiss(event.button.id == "yes")
+
+
+# --- Utilities ---
+def copy_to_clipboard(text: str) -> bool:
+    """Universal copy-to-clipboard: SSH, kubectl exec, and Local OS."""
+    try:
+        is_remote = any(k in os.environ for k in ["SSH_TTY", "SSH_CLIENT", "KUBERNETES_SERVICE_HOST"])
+        if os.environ.get("TERM") in ["xterm-256color", "screen-256color"]:
+            b64_text = base64.b64encode(text.encode('utf-8')).decode('utf-8')
+            osc_52 = f"\x1b]52;c;{b64_text}\x07"
+            if "TMUX" in os.environ:
+                osc_52 = f"\x1bPtmux;\x1b{osc_52}\x1b\\"
+            sys.stdout.write(osc_52)
+            sys.stdout.flush()
+            if is_remote: return True
+        system = platform.system()
+        if system == "Darwin":
+            subprocess.run(['pbcopy'], input=text.encode('utf-8'), check=True)
+        elif system == "Windows":
+            subprocess.run(['clip'], input=text, text=True, check=True)
+        elif system == "Linux":
+            try:
+                subprocess.run(['wl-copy'], input=text.encode('utf-8'), check=True)
+            except FileNotFoundError:
+                subprocess.run(['xclip', '-selection', 'clipboard'], input=text.encode('utf-8'), check=True)
+        return True
+    except Exception:
+        return False
+
 
 # --- Entrypoint ---
 @click.command(name="manage")
