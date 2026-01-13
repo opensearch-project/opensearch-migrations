@@ -1,7 +1,6 @@
 import base64
 import copy
-import signal
-from contextlib import contextmanager
+import time
 from typing import Any
 
 import pytest
@@ -24,21 +23,6 @@ logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logg
 logger = logging.getLogger(__name__)
 
 
-# --- Helpers & Fixtures ---
-
-@contextmanager
-def timeout(seconds):
-    def timeout_handler(signum, frame):
-        raise TimeoutError(f"Test timed out after {seconds} seconds")
-
-    signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(seconds * 1000)
-    try:
-        yield
-    finally:
-        signal.alarm(0)
-
-
 def get_clean_text_label(textual_node):
     """Extract plain text from a Rich-enabled Textual label."""
     label = textual_node.label
@@ -55,8 +39,8 @@ def mock_workflow_with_two_pods() -> dict[str, Any]:
                 "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": "Failed",
                            "children": [], "startedAt": "2023-01-01T00:01:00Z",
                            "inputs": {"parameters": [{"name": "configContents", "value": "cfg"}]}},
-                "node-2": {"id": "node-2", "displayName": "step-2", "type": "Pod",
-                           "phase": PHASE_RUNNING, "children": [], "startedAt": "2023-01-01T00:02:00Z",
+                "node-2": {"id": "node-2", "displayName": "step-2", "type": "Pod", "phase": PHASE_RUNNING,
+                           "children": [], "startedAt": "2023-01-01T00:02:00Z",
                            "inputs": {"parameters": [{"name": "configContents", "value": "cfg"}]}}
             }
         }
@@ -84,6 +68,24 @@ FAILING_WAITER = WaiterInterface(
     checker=lambda: pytest.fail("Waiter checker called unexpectedly"),
     reset=MagicMock()
 )
+
+
+async def wait_until(pilot, predicate, timeout=5.0, interval=0.1):
+    """
+    Global utility to poll a condition within a Textual test.
+
+    Args:
+        pilot: The Textual Pilot instance.
+        predicate: A callable that returns True when the condition is met.
+        timeout: Maximum time to wait in seconds.
+        interval: Time to sleep between polls.
+    """
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        if predicate():
+            return True
+        await pilot.pause(interval)
+    return False
 
 
 # --- Tests ---
@@ -126,21 +128,13 @@ async def test_waiter_loop_and_rediscovery(mock_workflow_with_two_pods):
         assert "Waiting for Workflow" in get_clean_text_label(tree.root)
 
         logger.info("Waiting for workflow detection trigger to fire")
-        with timeout(5):
-            while mock_waiter.trigger.call_count == 0:
-                await pilot.pause(0.1)
-        assert mock_waiter.trigger.call_count == 1
+        assert await wait_until(pilot, lambda: mock_waiter.trigger.call_count == 1)
 
         logger.info("Confirmed that no workflow was found and the UI indicated so.")
         env_state["workflow_exists"] = True
 
         logger.info("Waiting for the newly disclosed workflow to appear")
-        for _ in range(100):
-            await pilot.pause(0.1)
-            if "Workflow Steps" in get_clean_text_label(tree.root):
-                break
-        else:
-            pytest.fail("UI never moved to 'Active' state")
+        assert await wait_until(pilot, lambda: "Workflow Steps" in get_clean_text_label(tree.root))
 
         assert len(tree.root.children) == 2
         mock_waiter.reset.assert_called()
@@ -150,13 +144,7 @@ async def test_waiter_loop_and_rediscovery(mock_workflow_with_two_pods):
         env_state["workflow_exists"] = False
         mock_waiter.trigger.reset_mock()
 
-        for _ in range(10000):
-            await pilot.pause(0.1)
-            if "Waiting for Workflow" in get_clean_text_label(tree.root):
-                break
-        else:
-            pytest.fail("UI never reverted to 'Pending' state")
-
+        assert await wait_until(pilot, lambda: "Waiting for Workflow" in get_clean_text_label(tree.root))
         assert mock_waiter.trigger.call_count >= 1
 
 
@@ -190,9 +178,7 @@ async def test_functional_keybindings_execution(mock_workflow_with_pod_and_suspe
 
     async with app.run_test() as pilot:
         tree = app.query_one("#workflow-tree")
-        with timeout(5):
-            while len(tree.root.children) == 0:
-                await pilot.pause(0.1)
+        assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
         tree.focus()
 
         # Navigate to Pod (node-1)
@@ -307,38 +293,27 @@ async def test_live_check_lifecycle(mock_workflow_with_two_pods):
 
     async with app.run_test() as pilot:
         tree = app.query_one("#workflow-tree")
+
+        # Helper for checking node existence
+        def has_live_status():
+            return any("Live Status" in str(c.label) for c in tree.root.children)
+
+        # start empty
         await pilot.pause()
+        assert not has_live_status()
 
         logging.info("No Live Status node after the initial load")
-        assert not any("Live Status" in str(c.label) for c in tree.root.children)
-
         logging.info("Adding one running node in, so a live status node should appear")
         workflow["status"]["nodes"] = workflow_nodes
         workflow["metadata"]["resourceVersion"] = "124"
         logging.info("Updated resourceVersion to 124")
-        success = False
-        for _ in range(50):
-            await pilot.pause(0.1)
-            labels = [getattr(c.label, "plain", str(c.label)) for c in tree.root.children]
-            if any("Live Status" in label for label in labels):
-                success = True
-                break
-        assert success, f"Live Status node never appeared. Labels found: {labels}"
+        assert await wait_until(pilot, has_live_status), "Live Status never appeared"
 
         logging.info("Found live status node, marking the last item as succeeded.")
         logging.info("Will wait for Live Status node to disappear.")
-        # Update: Update the last pod to be successful
         workflow["status"]["nodes"]["node-2"]["phase"] = PHASE_SUCCEEDED
-        workflow["status"]["nodes"]["node-2"]["startedAt"] = "2026-01-01T00:05:00Z"
         workflow["metadata"]["resourceVersion"] = "125"
-        logging.info("Updated resourceVersion to 125")
-
-        with timeout(5):
-            while any("Live Status" in str(c.label) for c in tree.root.children):
-                await pilot.pause(0.1)
-                logger.debug("still has live status node")
-
-        assert not any("Live Status" in str(c.label) for c in tree.root.children)
+        assert await wait_until(pilot, lambda: not has_live_status()), "Live Status didn't disappear"
 
 
 @pytest.mark.parametrize("env_updates, expected_wrapper", [
