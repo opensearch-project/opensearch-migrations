@@ -7,15 +7,15 @@ from typing import Any
 import pytest
 from unittest.mock import MagicMock, ANY, patch
 
-from console_link.workflow.commands.manage import (
+from console_link.workflow.tui.workflow_manage_app import (
     WorkflowTreeApp,
-    ConfirmModal,
     copy_to_clipboard, PHASE_SUCCEEDED, PHASE_RUNNING
 )
-from console_link.workflow.commands.manage_injections import (
+from console_link.workflow.tui.confirm_modal import ConfirmModal
+from console_link.workflow.tui.manage_injections import (
     WaiterInterface,
     PodScraperInterface,
-    ArgoService
+    ArgoWorkflowInterface as ArgoService
 )
 
 import logging
@@ -53,8 +53,10 @@ def mock_workflow_with_two_pods() -> dict[str, Any]:
             "startedAt": "2023-01-01T00:00:00Z",
             "nodes": {
                 "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": "Failed", "children": [],
+                           "startedAt": "2023-01-01T00:01:00Z",
                            "inputs": { "parameters": [ { "name": "configContents", "value": "cfg" } ] } },
                 "node-2": {"id": "node-2", "displayName": "step-2", "type": "Pod", "phase": PHASE_RUNNING, "children": [],
+                           "startedAt": "2023-01-01T00:02:00Z",
                            "inputs": { "parameters": [ { "name": "configContents", "value": "cfg" } ] } }
             }
         }
@@ -205,7 +207,7 @@ async def test_functional_keybindings_execution(mock_workflow_with_pod_and_suspe
             mock_pager_method.assert_called_once()
 
         # Test Clipboard (triggers external utility)
-        with patch("console_link.workflow.commands.manage.copy_to_clipboard", return_value=True) as mock_cp:
+        with patch("console_link.workflow.tui.workflow_manage_app.copy_to_clipboard", return_value=True) as mock_cp:
             await pilot.press("c")
             await pilot.pause()
             mock_cp.assert_called_once_with("pod-1")

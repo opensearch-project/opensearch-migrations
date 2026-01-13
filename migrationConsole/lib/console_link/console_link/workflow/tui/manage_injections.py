@@ -8,7 +8,6 @@ from typing import Callable, List, Dict, Any, Optional
 import ijson
 import requests
 
-from console_link.workflow.commands.approve import approve_command
 from console_link.workflow.services.workflow_service import WorkflowApproveResult, logger, WorkflowService
 from console_link.workflow.tree_utils import clean_display_name
 
@@ -51,12 +50,12 @@ class WaiterInterface:
         )
 
 @dataclass
-class ArgoService:
+class ArgoWorkflowInterface:
     # This must return an immutable copy of the dictionary
     get_workflow: Callable[[str, str], tuple[str, dict]]
     approve_step: Callable[[str, str, dict], WorkflowApproveResult]
 
-def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoService:
+def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflowInterface:
     def _get_workflow_data_internal(service, name, namespace) -> tuple[str, dict]:
         res = service.get_workflow_status(name, namespace, argo_url, token, insecure)
         headers = {"Authorization": f"Bearer {token}"} if token else {}
@@ -100,7 +99,7 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoService:
                          "resourceVersion": res.get('workflow', {}).get('metadata', {}).get('resourceVersion')},
             "status": {
                 "nodes": slim_nodes,
-                "startedAt": res.get('workflow', {}).get('status', {}).get('startedAt')
+                "startedAt": res.get('started_at')
             }
         }
 
@@ -110,7 +109,7 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoService:
         return WorkflowService().approve_workflow(workflow_name, namespace, argo_url, token, insecure,
                                            f"id={node_data.get('id')}")
 
-    return ArgoService(
+    return ArgoWorkflowInterface(
         get_workflow=lambda name, namespace: _get_workflow_data_internal(WorkflowService(), name, namespace),
         approve_step=approve
     )
