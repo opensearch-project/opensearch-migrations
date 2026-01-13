@@ -169,6 +169,7 @@ jobs:
           helm package deployment/k8s/charts/aggregates/migrationAssistantWithArgo \
             --version ${{ steps.get_data.outputs.version }} \
             --app-version ${{ steps.get_data.outputs.version }}
+          mv migration-assistant-*.tgz migration-assistant-helm.tgz
       - name: Configure AWS Credentials for Solutions Credentials
         if: ${{ !github.event.act }}
         uses: aws-actions/configure-aws-credentials@v5
@@ -210,5 +211,7 @@ jobs:
             opensearch-migrations-source.tar.gz
             opensearch-migrations-build.tar.gz
             kiro-cli/build/kiro-assistant.tar.gz
-            migration-assistant-${{ steps.get_data.outputs.version }}.tgz
+            migration-assistant-helm.tgz
+            deployment/k8s/aws/aws-bootstrap.sh
+            deployment/k8s/dashboards/*.json
             **/*.spdx.json
