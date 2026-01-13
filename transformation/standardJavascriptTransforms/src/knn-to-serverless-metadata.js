@@ -33,7 +33,7 @@ function convertSpaceType(spaceType) {
             return normalized;
         case 'l1':
         case 'linf':
-            console.error(`WARNING: space_type '${spaceType}' is not supported on OpenSearch Serverless. Converting to 'l2'. This may affect search results.`);
+            console.error(`WARNING: space_type '${spaceType}' is not supported on OpenSearch Serverless. Converting to 'l2'. This will affect search results.`);
             return 'l2';
         default:
             return 'l2';
