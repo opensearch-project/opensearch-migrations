@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.lucene.version_6;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
@@ -94,7 +95,7 @@ public class LeafReader6 implements LuceneLeafReader {
     private List<String> getFieldTermsInternal(String fieldName) {
         try {
             Terms terms = wrapped.terms(fieldName);
-            if (terms == null) return null;
+            if (terms == null) return Collections.emptyList();
             List<String> result = new ArrayList<>();
             TermsEnum termsEnum = terms.iterator();
             BytesRef term;
@@ -103,7 +104,7 @@ public class LeafReader6 implements LuceneLeafReader {
             }
             return result;
         } catch (IOException e) {
-            return null;
+            return Collections.emptyList();
         }
     }
 
