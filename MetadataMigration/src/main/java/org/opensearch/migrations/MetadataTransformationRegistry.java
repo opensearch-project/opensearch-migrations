@@ -57,6 +57,17 @@ public class MetadataTransformationRegistry {
                 .build())
             .build(),
         TransformerConfigs.builder()
+            .filename("js/knn-to-serverless-metadata.js")
+            .isRelevantForVersions(andSourceTargetVersionPredicate(
+                    v -> true,
+                    UnboundVersionMatchers.isAmazonServerlessOpenSearch
+            ))
+            .transformerInfo(Transformers.TransformerInfo.builder()
+                .name("knn_vector to Serverless-compatible Faiss HNSW")
+                .descriptionLine("Convert knn_vector fields to Faiss HNSW for OpenSearch Serverless compatibility")
+                .build())
+            .build(),
+        TransformerConfigs.builder()
             .filename("js/metadataUpdater.js")
             .context(
                 "{" +

@@ -22,6 +22,8 @@ public class UnboundVersionMatchers {
     public static final Predicate<Version> isGreaterOrEqualOS_3_x = greaterOrEqualMajorVersion(Version.fromString("OS 3.0.0"));
     public static final Predicate<Version> equalOrGreaterThanOS_2_7 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("OS 2.7.0"))
         .or(isGreaterOrEqualOS_3_x);
+    public static final Predicate<Version> isAmazonServerlessOpenSearch = version -> 
+        version != null && version.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH;
 
     static Predicate<Version> belowMajorVersion(final Version version) {
         return other -> {
