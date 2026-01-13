@@ -1,7 +1,6 @@
 """Unit tests for manage.py workflow command."""
 
 import json
-import pytest
 from unittest.mock import Mock, patch, MagicMock
 
 
@@ -350,6 +349,7 @@ class TestWorkflowTreeAppApproval:
         app.notify.assert_called()
         assert 'error' in str(app.notify.call_args)
 
+
 def rig_mock_tree(app):
     """Mocks the internal Textual tree structure so we can spy on UI changes."""
     mock_tree = MagicMock()
@@ -358,6 +358,7 @@ def rig_mock_tree(app):
 
     # Track nodes added to the tree
     nodes = {}
+
     def add_node(label, data=None, expand=False):
         node = MagicMock()
         node.data = data
@@ -370,6 +371,7 @@ def rig_mock_tree(app):
     # Mock query_one to return our mock tree
     app.query_one = Mock(return_value=mock_tree)
     return mock_tree, nodes
+
 
 class TestWorkflowTreeAppRerender:
     """Tests to verify tree re-rendering logic for updates and restarts."""
@@ -388,7 +390,7 @@ class TestWorkflowTreeAppRerender:
         new_workflow = {
             'metadata': {'resourceVersion': '2'},
             'status': {
-                'startedAt': '11:00:00Z', # Change triggers hard restart
+                'startedAt': '11:00:00Z',  # Change triggers hard restart
                 'nodes': {'n1': {'displayName': 'new-node', 'phase': 'Running'}}
             }
         }
@@ -399,7 +401,7 @@ class TestWorkflowTreeAppRerender:
         # Verify hard restart logic
         mock_tree.clear.assert_called_once()
         assert app._current_run_id == '11:00:00Z'
-        assert app.node_mapping != {} # Tree was repopulated
+        assert app.node_mapping != {}  # Tree was repopulated
 
     def test_apply_workflow_updates_soft_update(self):
         """Verify that same run_id but new ResourceVersion updates existing nodes."""

@@ -1,6 +1,6 @@
 import logging
 import yaml
-from typing import Dict, Set, Optional, Any
+from typing import Dict, Set, Any
 
 # Internal imports (adjust paths based on your final structure)
 from console_link.environment import Environment
@@ -53,7 +53,7 @@ class LiveStatusManager:
                 parent_tree_node = tip_tree_node.parent
 
                 # Look for existing attachment in parent's children
-                existing = next((c for c in parent_tree_node.children 
+                existing = next((c for c in parent_tree_node.children
                                 if c.data and c.data.get("attachment_id") == "live-status-header"), None)
                 if not existing:
                     parent_tree_node.add(
@@ -153,6 +153,5 @@ class LiveStatusManager:
         # We don't touch 'app' here; we use the logic to find our attachment point
         # This is the 'Slot' we are filling.
         # This requires the App to have a reference to tree_state
-        tree_state = getattr(self, '_tree_state_ref', None)
         # Note: In a real app, you'd likely pass tree_state into this method
         # via the call_from_thread closure.

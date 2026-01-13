@@ -2,7 +2,10 @@ from typing import Callable, Dict, List, Optional
 
 from textual.widgets._tree import TreeNode, Tree
 
-from console_link.workflow.tree_utils import get_step_status_output, get_step_rich_label, build_nested_workflow_tree, filter_tree_nodes
+from console_link.workflow.tree_utils import (
+    get_step_status_output, get_step_rich_label,
+    build_nested_workflow_tree, filter_tree_nodes
+)
 
 
 class TreeStateManager:
@@ -88,7 +91,8 @@ class TreeStateManager:
                 self._update_recursive(self.node_mapping[node_id], node['children'])
 
         for child in list(parent_tree_node.children):
-            if child.data and 'id' in child.data and child.data['id'] not in new_ids and not child.data.get('is_ephemeral'):
+            if (child.data and 'id' in child.data and child.data['id'] not in new_ids and
+                    not child.data.get('is_ephemeral')):
                 self.node_mapping.pop(child.data['id'], None)
                 child.remove()
 

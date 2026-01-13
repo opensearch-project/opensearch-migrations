@@ -167,16 +167,18 @@ class K8sRFSBackfill(RFSBackfill):
         
         # Always perform deep check for K8s
         try:
-            logger.info("config="+str(self.config))
+            logger.info("config=" + str(self.config))
             session_name = self.config["reindex_from_snapshot"].get("backfill_session_name", "")
             logger.info(f"Using backfill_session_name for deep check: '{session_name}'")
             shard_status = get_detailed_status(target_cluster=self.target_cluster, session_name=session_name)
-        except Exception as e:
-            logger.exception(f"Failed to get detailed status")
+        except Exception:
+            logger.exception("Failed to get detailed status")
             shard_status = None
         
-        # Include pod/worker counts and shard status
-        status_parts = [f"Pods - Running: {deployment_status.running}, Pending: {deployment_status.pending}, Desired: {deployment_status.desired}"]
+        status_parts = [
+            f"Pods - Running: {deployment_status.running}, "
+            f"Pending: {deployment_status.pending}, Desired: {deployment_status.desired}"
+        ]
         if shard_status:
             status_parts.append(shard_status)
         
@@ -276,11 +278,10 @@ class ECSRFSBackfill(RFSBackfill):
 def get_detailed_status(target_cluster: Cluster, session_name: str) -> Optional[str]:
     values = get_detailed_status_obj(target_cluster=target_cluster,
                                      session_name=session_name,
-                                     active_workers=True) # Assume active workers
-    
+                                     active_workers=True)  # Assume active workers
     # Check if shards are initializing
-    if (values.shard_total is None and values.shard_complete is None and 
-        values.shard_in_progress is None and values.shard_waiting is None):
+    if (values.shard_total is None and values.shard_complete is None and
+            values.shard_in_progress is None and values.shard_waiting is None):
         return "Shards are initializing"
     
     return "\n".join([f"Backfill {key}: {value}" for key, value in values.__dict__.items() if value is not None])
@@ -394,7 +395,7 @@ def get_detailed_status_obj(target_cluster: Cluster,
 
     # Get progress queries and run them
     progress_queries = generate_progress_queries()
-    values = {key: parse_query_response(progress_queries[key], target_cluster, index_to_check, key) 
+    values = {key: parse_query_response(progress_queries[key], target_cluster, index_to_check, key)
               for key in progress_queries.keys()}
     if None in values.values():
         logger.warning(f"Failed to get values for some queries: {values}")

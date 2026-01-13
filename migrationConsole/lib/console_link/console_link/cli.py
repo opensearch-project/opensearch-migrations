@@ -273,8 +273,8 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
         if cluster is None:
             raise AttributeError
     except AttributeError:
-        raise click.BadArgumentUsage(f"Unknown cluster {cluster}. Currently only `source_cluster` and `target_cluster`"
-                                     " are valid and must also be defined in the config file.")
+        raise click.BadArgumentUsage(f"Unknown cluster {cluster}. Currently only `source_cluster` and "
+                                     "`target_cluster` are valid and must also be defined in the config file.")
 
     if path[0] != '/':
         path = '/' + path
@@ -291,7 +291,7 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
 
 
 @cluster_group.command(name="generate-data")
-@click.option('--cluster', type=click.Choice(['source_cluster', 'target_cluster'], case_sensitive=False), 
+@click.option('--cluster', type=click.Choice(['source_cluster', 'target_cluster'], case_sensitive=False),
               required=True, help='Target cluster for data generation')
 @click.option('--index-name', required=True, help='Name of the index to populate')
 @click.option('--doc-size-bytes', type=int, default=150, help='Approximate size of each document in bytes')
@@ -321,8 +321,8 @@ def generate_data_cmd(ctx, cluster, index_name, doc_size_bytes, num_docs, target
         if cluster_obj is None:
             raise AttributeError
     except AttributeError:
-        raise click.BadArgumentUsage(f"Unknown cluster {cluster}. Currently only `source_cluster` and `target_cluster`"
-                                     " are valid and must also be defined in the config file.")
+        raise click.BadArgumentUsage(f"Unknown cluster {cluster}. Currently only `source_cluster` and "
+                                     "`target_cluster` are valid and must also be defined in the config file.")
     
     click.echo(f"Generating {num_docs:,} documents in index '{index_name}' on {cluster}")
     click.echo(f"Document size: ~{doc_size_bytes} bytes, Batch size: {batch_size}")
@@ -330,15 +330,15 @@ def generate_data_cmd(ctx, cluster, index_name, doc_size_bytes, num_docs, target
     # Import bulk generation function
     try:
         # Try container path first, then dev path
-        import sys
         import os
         import importlib.util
         
         # Container path (copied during Docker build)
         container_path = "/root/testDocumentGenerator.py"
         # Dev path (relative to current file)
-        dev_path = os.path.join(os.path.dirname(__file__), 
-                               '../../../TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole/testDocumentGenerator.py')
+        dev_path = os.path.join(
+            os.path.dirname(__file__),
+            '../../../TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole/testDocumentGenerator.py')
         
         script_path = container_path if os.path.exists(container_path) else dev_path
         
@@ -351,7 +351,7 @@ def generate_data_cmd(ctx, cluster, index_name, doc_size_bytes, num_docs, target
         result = bulk_insert_data(cluster_obj, index_name, num_docs, doc_size_bytes, batch_size)
         
         # Display results
-        click.echo(f"\nData generation completed:")
+        click.echo("\nData generation completed:")
         click.echo(f"  Documents inserted: {result['total_inserted']:,}")
         click.echo(f"  Errors: {result['total_errors']:,}")
         click.echo(f"  Time elapsed: {result['elapsed_time']:.1f}s")

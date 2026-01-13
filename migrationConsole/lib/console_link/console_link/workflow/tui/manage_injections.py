@@ -49,11 +49,13 @@ class WaiterInterface:
             marker_file=marker
         )
 
+
 @dataclass
 class ArgoWorkflowInterface:
     # This must return an immutable copy of the dictionary
     get_workflow: Callable[[str, str], tuple[str, dict]]
     approve_step: Callable[[str, str, dict], WorkflowApproveResult]
+
 
 def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflowInterface:
     def _get_workflow_data_internal(service, name, namespace) -> tuple[str, dict]:
@@ -107,18 +109,20 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
 
     def approve(namespace: str, workflow_name: str, node_data: dict) -> WorkflowApproveResult:
         return WorkflowService().approve_workflow(workflow_name, namespace, argo_url, token, insecure,
-                                           f"id={node_data.get('id')}")
+                                                  f"id={node_data.get('id')}")
 
     return ArgoWorkflowInterface(
         get_workflow=lambda name, namespace: _get_workflow_data_internal(WorkflowService(), name, namespace),
         approve_step=approve
     )
 
+
 @dataclass
 class PodScraperInterface:
     fetch_pods_metadata: Callable[[str, str, bool], List[Dict]]
     read_pod: Callable[[str, str], Any]
     read_pod_log: Callable[[str, str, str, int], str]
+
 
 def make_k8s_pod_scraper(k8s_client) -> PodScraperInterface:
     def fetch_metadata(wf_name, ns, use_cache):
@@ -127,26 +131,28 @@ def make_k8s_pod_scraper(k8s_client) -> PodScraperInterface:
 
         # Hybrid Consistency: resourceVersion=0 hits the API cache (fast).
         # Omitting it forces a strongly consistent read from etcd (safe/slow).
-        if use_cache: query_params.append(('resourceVersion', '0'))
+        if use_cache:
+            query_params.append(('resourceVersion', '0'))
         try:
             # use call_api to bypass the V1Pod object creation, which is much slower
             resp = k8s_client.api_client.call_api(
                 f'/api/v1/namespaces/{ns}/pods', 'GET',
-                # Use headers to request ONLY metadata (strips spec and status)
-                header_params={'Accept': 'application/json;as=PartialObjectMetadataList;v=v1;g=meta.k8s.io'},
+                header_params={'Accept': 'application/json;as=PartialObjectMetadataList;'
+                                         'v=v1;g=meta.k8s.io'},  # Use headers to request ONLY metadata
                 query_params=query_params, _preload_content=False, _request_timeout=10
             )
             data = json.loads(resp[0].read())
-            return data.get('items', []) or [] # with PartialObjectMetadataList, items could be null
+            return data.get('items', []) or []  # with PartialObjectMetadataList, items could be null
         except Exception as e:
             logger.error(f"Failed to fetch pod metadata: {e}")
             raise
         finally:
-            if 'resp' in locals(): resp[0].close()
+            if 'resp' in locals():
+                resp[0].close()
 
     return PodScraperInterface(
         fetch_pods_metadata=fetch_metadata,
         read_pod=lambda name, ns: k8s_client.read_namespaced_pod(name=name, namespace=ns),
-        read_pod_log=lambda name, ns, c, lines: \
+        read_pod_log=lambda name, ns, c, lines:
             k8s_client.read_namespaced_pod_log(name, ns, container=c, tail_lines=lines)
     )

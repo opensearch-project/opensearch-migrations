@@ -3,17 +3,14 @@
 import logging
 import os
 import sys
-import json
 import subprocess
-import tempfile
 import yaml
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 
 import click
 import requests
-from rich.console import Console
 
 # Add console_link to path for direct function calls
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -21,8 +18,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from ..models.utils import ExitCode
 from ..services.workflow_service import WorkflowService
 from ..tree_utils import (
-    build_nested_workflow_tree, 
-    filter_tree_nodes, 
+    build_nested_workflow_tree,
+    filter_tree_nodes,
     display_workflow_tree,
     get_node_input_parameter,
     WorkflowDisplayer
@@ -36,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 class StatusCommandHandler:
     """Main orchestrator for status command operations."""
-    
+
     def __init__(self, service: WorkflowService, token: Optional[str] = None):
         self.service = service
         self.data_fetcher = WorkflowDataFetcher(service, token)
@@ -64,7 +61,7 @@ class StatusCommandHandler:
         """Handle status display for a specific workflow."""
         workflow_data = self.data_fetcher.get_workflow_data(
             workflow_name, argo_server, namespace, insecure)
-        
+
         if not workflow_data:
             click.echo(f"Error: Could not fetch workflow {workflow_name}", err=True)
             raise click.Abort()
@@ -98,17 +95,17 @@ class StatusCommandHandler:
             return
 
         click.echo(f"No running workflows found in namespace {namespace}")
-        
+
         # Try to show most recent completed workflow
         all_workflows = self.data_fetcher.list_workflows(
             argo_server, namespace, insecure, exclude_completed=False)
-        
+
         if all_workflows:
             most_recent = self.sorter.find_most_recent_completed(all_workflows)
             if most_recent:
                 click.echo("\nShowing last completed workflow:\n")
                 self._display_workflow_with_tree(most_recent, live_check)
-            
+
             click.echo("\nUse --all to see all completed workflows")
         else:
             click.echo("Use --all to see completed workflows")
@@ -120,14 +117,14 @@ class StatusCommandHandler:
     def _display_workflow_with_tree(self, workflow_data: Dict[str, Any], live_check: bool) -> None:
         """Display workflow using tree structure with optional live status checks."""
         tree_nodes = build_nested_workflow_tree(workflow_data)
-        if live_check: 
+        if live_check:
             self.live_check_processor.enrich_tree_with_live_checks(tree_nodes, workflow_data)
         filtered_tree = filter_tree_nodes(tree_nodes)
-        
+
         # Extract status info from workflow data
         status = workflow_data.get('status', {})
         metadata = workflow_data.get('metadata', {})
-        
+
         self.displayer.display_workflow_status(
             metadata.get('name', 'unknown'),
             status.get('phase', 'Unknown'),
@@ -139,25 +136,25 @@ class StatusCommandHandler:
 
 class WorkflowDataFetcher:
     """Handles all workflow data retrieval operations."""
-    
+
     def __init__(self, service: WorkflowService, token: Optional[str] = None):
         self.service = service
         self.token = token
 
-    def get_workflow_data(self, workflow_name: str, argo_server: str, namespace: str, 
-                         insecure: bool) -> Dict[str, Any]:
+    def get_workflow_data(self, workflow_name: str, argo_server: str, namespace: str,
+                          insecure: bool) -> Dict[str, Any]:
         """Get workflow data from Argo API (single network call)."""
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
         url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
-        
+
         response = requests.get(url, headers=headers, verify=not insecure)
         return response.json() if response.status_code == 200 else {}
 
-    def list_workflows(self, argo_server: str, namespace: str, 
-                      insecure: bool, exclude_completed: bool) -> List[Dict[str, Any]]:
+    def list_workflows(self, argo_server: str, namespace: str,
+                       insecure: bool, exclude_completed: bool) -> List[Dict[str, Any]]:
         """List workflows and get their full data (one call per workflow)."""
         list_result = self.service.list_workflows(
-            namespace=namespace, argo_server=argo_server, token=self.token, 
+            namespace=namespace, argo_server=argo_server, token=self.token,
             insecure=insecure, exclude_completed=exclude_completed)
 
         if not list_result['success'] or list_result['count'] == 0:
@@ -174,7 +171,7 @@ class WorkflowDataFetcher:
 
 class WorkflowSorter:
     """Sort a group of workflow (not the tasks within them)."""
-    
+
     @staticmethod
     def sort_workflows_chronologically(workflows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Sort workflows by start time (newest first)."""
@@ -186,19 +183,19 @@ class WorkflowSorter:
         completed_workflows = [wf for wf in workflows if wf.get('status', {}).get('finishedAt')]
         if not completed_workflows:
             return workflows[0] if workflows else None
-        
+
         return max(completed_workflows, key=lambda x: x.get('status', {}).get('finishedAt', ''))
 
 
 class StatusCheckRunner:
     """Dynamic status check runner based on node type."""
-    
+
     @staticmethod
     def run_status_check(env: Environment, node: Dict[str, Any]) -> Dict[str, Any]:
         """Run appropriate status check based on check_type."""
         check_type = node.get('check_type', '')
         logger.info(f"Running {check_type} status check for node: {node.get('display_name')}")
-        
+
         if check_type == 'snapshot':
             logger.info("Calling snapshot status middleware")
             return StatusCheckRunner._check_snapshot_status(env)
@@ -216,12 +213,12 @@ class StatusCheckRunner:
         if not env.snapshot:
             logger.warning("No snapshot configured in environment")
             return {"error": "No snapshot configured"}
-        
+
         try:
             logger.info("Calling snapshot_middleware.status() with deep_check=True")
             result = snapshot_middleware.status(env.snapshot, deep_check=True)
             logger.info(f"Snapshot status result type: {type(result)}")
-            
+
             # Handle both CommandResult and tuple returns
             if hasattr(result, 'success'):
                 # CommandResult object
@@ -244,12 +241,12 @@ class StatusCheckRunner:
         if not env.backfill:
             logger.warning("No backfill configured in environment")
             return {"error": "No backfill configured"}
-        
+
         try:
             logger.info("Calling backfill_middleware.status() with deep_check=True")
             result = backfill_middleware.status(env.backfill, deep_check=True)
             logger.info(f"Backfill status result type: {type(result)}")
-            
+
             # Handle both CommandResult and tuple returns
             if hasattr(result, 'success'):
                 # CommandResult object
@@ -271,17 +268,17 @@ class StatusCheckRunner:
 
 class ConfigConverter:
     """Handles configuration conversion using jq."""
-    
+
     @staticmethod
     def convert_with_jq(config_contents: str) -> Optional[str]:
         """Convert workflow config to services config using jq."""
         jq_script_path = os.environ.get('WORKFLOW_CONFIG_JQ_SCRIPT', 'workflowConfigToServicesConfig.jq')
-        
+
         try:
             result = subprocess.run([
                 'jq', '-f', jq_script_path
             ], input=config_contents, text=True, capture_output=True)
-            
+
             return result.stdout if result.returncode == 0 else None
         except Exception as e:
             logger.error(f"Error running jq: {e}")
@@ -290,15 +287,15 @@ class ConfigConverter:
 
 class StatusWorkflowDisplayer(WorkflowDisplayer):
     """Status-specific workflow display implementation."""
-    
-    def display_workflow_status(self, workflow_name: str, phase: str, started_at: str, 
+
+    def display_workflow_status(self, workflow_name: str, phase: str, started_at: str,
                                 finished_at: str, tree_nodes: List[Dict[str, Any]],
                                 workflow_data: Dict[str, Any] = None) -> None:
         """Display complete workflow status with tree."""
         self.display_workflow_header(workflow_name, phase, started_at, finished_at)
         click.echo("")
         display_workflow_tree(tree_nodes, workflow_data or {})
-        
+
         if phase in ('Running', 'Pending'):
             click.echo("")
             click.echo(f"To view step outputs, run: workflow output {workflow_name}")
@@ -338,7 +335,7 @@ class StatusWorkflowDisplayer(WorkflowDisplayer):
 
 class LiveCheckProcessor:
     """Processes live status checks for workflow nodes using injected status runner."""
-    
+
     def __init__(self, config_converter: ConfigConverter, status_runner: StatusCheckRunner = None):
         self.config_converter = config_converter
         self.status_runner = status_runner or StatusCheckRunner()
@@ -347,7 +344,7 @@ class LiveCheckProcessor:
                                      workflow_data: Dict[str, Any]) -> Dict[str, Any]:
         """Add live check results to tree nodes."""
         logger.info("Starting live check enrichment process")
-        
+
         pending_groups = self._find_pending_nodes(tree_nodes)
         logger.info(f"Found {len(pending_groups)} pending groups")
 
@@ -445,7 +442,7 @@ class LiveCheckProcessor:
 @click.option('--namespace', default='ma', help='Kubernetes namespace for the workflow (default: ma)')
 @click.option('--insecure', is_flag=True, default=False, help='Skip TLS certificate verification')
 @click.option('--token', help='Bearer token for authentication')
-@click.option('--all', 'show_all', is_flag=True, default=False, 
+@click.option('--all', 'show_all', is_flag=True, default=False,
               help='Show all workflows including completed ones (default: only running)')
 @click.option('--live-status', is_flag=True, default=False,
               help='Run a current status check for each snapshot and backfill still running')
@@ -464,10 +461,10 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
     try:
         service = WorkflowService()
         handler = StatusCommandHandler(service, token)
-        
+
         handler.handle_status_command(
             workflow_name, argo_server, namespace, insecure, show_all, live_status)
-            
+
     except Exception as e:
         logger.error(f"Status command failed: {e}", exc_info=True)
         click.echo(f"Error: {str(e)}", err=True)
@@ -475,22 +472,22 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
 
 
 # Compatibility function for output.py
-def _display_workflow_status(show_output_hint: bool = True, workflow_data: dict = None):
+def _display_workflow_status(workflow_result: dict, show_output_hint: bool = True, workflow_data: dict = None):
     """Compatibility function for output.py - displays workflow status using new classes."""
     displayer = StatusWorkflowDisplayer()
-    
+
     # If no workflow_data provided, create minimal tree from step_tree in result
-    if not workflow_data and 'step_tree' in result:
-        tree_nodes = result['step_tree']
+    if not workflow_data and 'step_tree' in workflow_result:
+        tree_nodes = workflow_result['step_tree']
     else:
         # Build tree from workflow_data if available
         tree_nodes = build_nested_workflow_tree(workflow_data) if workflow_data else []
         tree_nodes = filter_tree_nodes(tree_nodes)
-    
+
     displayer.display_workflow_status(
-        result['workflow_name'], result['phase'], result['started_at'], 
-        result['finished_at'], tree_nodes, workflow_data)
-    
-    if show_output_hint and result['phase'] in ('Running', 'Pending'):
+        workflow_result['workflow_name'], workflow_result['phase'], workflow_result['started_at'],
+        workflow_result['finished_at'], tree_nodes, workflow_data)
+
+    if show_output_hint and workflow_result['phase'] in ('Running', 'Pending'):
         click.echo("")
-        click.echo(f"To view step outputs, run: workflow output {result['workflow_name']}")
+        click.echo(f"To view step outputs, run: workflow output {workflow_result['workflow_name']}")

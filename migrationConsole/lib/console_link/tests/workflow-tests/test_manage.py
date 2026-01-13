@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from typing import Any
 
 import pytest
-from unittest.mock import MagicMock, ANY, patch
+from unittest.mock import MagicMock, patch
 
 from console_link.workflow.tui.workflow_manage_app import (
     WorkflowTreeApp,
@@ -32,7 +32,7 @@ def timeout(seconds):
         raise TimeoutError(f"Test timed out after {seconds} seconds")
 
     signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(seconds*1000)
+    signal.alarm(seconds * 1000)
     try:
         yield
     finally:
@@ -52,12 +52,12 @@ def mock_workflow_with_two_pods() -> dict[str, Any]:
         "status": {
             "startedAt": "2023-01-01T00:00:00Z",
             "nodes": {
-                "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": "Failed", "children": [],
-                           "startedAt": "2023-01-01T00:01:00Z",
-                           "inputs": { "parameters": [ { "name": "configContents", "value": "cfg" } ] } },
-                "node-2": {"id": "node-2", "displayName": "step-2", "type": "Pod", "phase": PHASE_RUNNING, "children": [],
-                           "startedAt": "2023-01-01T00:02:00Z",
-                           "inputs": { "parameters": [ { "name": "configContents", "value": "cfg" } ] } }
+                "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": "Failed",
+                           "children": [], "startedAt": "2023-01-01T00:01:00Z",
+                           "inputs": {"parameters": [{"name": "configContents", "value": "cfg"}]}},
+                "node-2": {"id": "node-2", "displayName": "step-2", "type": "Pod",
+                           "phase": PHASE_RUNNING, "children": [], "startedAt": "2023-01-01T00:02:00Z",
+                           "inputs": {"parameters": [{"name": "configContents", "value": "cfg"}]}}
             }
         }
     }
@@ -70,7 +70,8 @@ def mock_workflow_with_pod_and_suspend():
         "status": {
             "startedAt": "2023-01-01T00:00:00Z",
             "nodes": {
-                "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": PHASE_SUCCEEDED, "children": []},
+                "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod",
+                           "phase": PHASE_SUCCEEDED, "children": []},
                 "node-2": {"id": "node-2", "displayName": "suspend-1", "type": "Suspend", "phase": PHASE_RUNNING,
                            "children": []}
             }
@@ -95,10 +96,9 @@ async def test_waiter_loop_and_rediscovery(mock_workflow_with_two_pods):
     workflow = mock_workflow_with_two_pods
     del workflow["status"]["nodes"]["node-1"]["inputs"]
     del workflow["status"]["nodes"]["node-2"]["inputs"]
-    argo_service = ArgoService(get_workflow=
-                               lambda name, namespace: \
-                                   ({"success": True}, workflow)
-                                   if env_state["workflow_exists"] else ({"success": False, "error": "not found"}, {}),
+    argo_service = ArgoService(get_workflow=lambda name, namespace:
+                               ({"success": True}, workflow)
+                               if env_state["workflow_exists"] else ({"success": False, "error": "not found"}, {}),
                                approve_step=MagicMock())
 
     pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
@@ -247,7 +247,7 @@ async def test_manual_refresh_consistency(mock_workflow_with_two_pods):
     k8s_interface = MagicMock(spec=PodScraperInterface(None, None, None))
     k8s_interface.fetch_pods_metadata.side_effect = fetch_metadata_mock
 
-    argo_service = MagicMock(spec=ArgoService(None,None))
+    argo_service = MagicMock(spec=ArgoService(None, None))
     argo_service.get_workflow.return_value = ({"success": True}, mock_workflow_with_two_pods)
 
     app = WorkflowTreeApp(
@@ -283,9 +283,12 @@ async def test_live_check_lifecycle(mock_workflow_with_two_pods):
     workflow["status"]["nodes"] = {}
 
     argo_service = MagicMock(spec=ArgoService(None, None))
+
     def mocked_get_workflow(*args, **kwargs):
+
         logging.info("Mock: get_workflow called!")
-        logging.info(f"Mock: Current node count in 'workflow' variable: {len(workflow['status'].get('nodes', {}))}")
+        logging.info(f"Mock: Current node count in 'workflow' variable: "
+                     f"{len(workflow['status'].get('nodes', {}))}")
 
         # Create the result
         result = ({"success": True}, copy.deepcopy(workflow))
@@ -317,11 +320,10 @@ async def test_live_check_lifecycle(mock_workflow_with_two_pods):
         for _ in range(50):
             await pilot.pause(0.1)
             labels = [getattr(c.label, "plain", str(c.label)) for c in tree.root.children]
-            if any("Live Status" in l for l in labels):
+            if any("Live Status" in label for label in labels):
                 success = True
                 break
         assert success, f"Live Status node never appeared. Labels found: {labels}"
-
 
         logging.info("Found live status node, marking the last item as succeeded.")
         logging.info("Will wait for Live Status node to disappear.")
@@ -337,6 +339,7 @@ async def test_live_check_lifecycle(mock_workflow_with_two_pods):
                 logger.debug("still has live status node")
 
         assert not any("Live Status" in str(c.label) for c in tree.root.children)
+
 
 @pytest.mark.parametrize("env_updates, expected_wrapper", [
     ({"SSH_TTY": "/dev/pts/0", "TERM": "xterm-256color"}, "{osc}"),
