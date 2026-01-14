@@ -42,18 +42,6 @@ class TreeStateManager:
     def get_node(self, node_id: str) -> Optional[TreeNode]:
         return self.node_mapping.get(node_id)
 
-    def get_or_create_attachment(self, parent_id: str, label: str, attachment_id: str) -> TreeNode:
-        """Get or create an ephemeral attachment node on a parent."""
-        parent = self.node_mapping.get(parent_id)
-        if not parent:
-            raise ValueError(f"Parent node {parent_id} not found")
-
-        for child in parent.children:
-            if child.data and child.data.get("attachment_id") == attachment_id:
-                return child
-
-        return parent.add(label, data={"is_ephemeral": True, "attachment_id": attachment_id, "origin_id": parent_id})
-
     def _populate_recursive(self, parent_node: TreeNode, nodes: List[Dict]) -> None:
         for node in sorted(nodes, key=lambda n: n.get('started_at') or '9'):
             label = self._get_label(node)

@@ -120,7 +120,7 @@ class WorkflowTreeApp(App):
 
         self._pods.trigger_resolve(new_run_id, use_cache=not force_reload)
 
-        self._live.reconcile(self, self._tree_state)
+        self._live.reconcile_tree_for_live_status_checks(self, self._tree_state.tree.root)
 
         self.update_pod_status()
         self._update_dynamic_bindings()
