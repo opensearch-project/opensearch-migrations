@@ -49,6 +49,8 @@ def call(Map config = [:]) {
                 }
             }
 
+            // Deploy a test VPC for Import-VPC mode testing.
+            // NOTE: If extending to support additional VPC configurations consider moving to CDK instead of inline CFN.
             stage('Deploy Test VPC') {
                 when { expression { isImportVpc } }
                 steps {
