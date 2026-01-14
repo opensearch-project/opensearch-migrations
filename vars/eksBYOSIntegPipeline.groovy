@@ -175,7 +175,7 @@ def call(Map config = [:]) {
                     timeout(time: 30, unit: 'MINUTES') {
                         dir('deployment/migration-assistant-solution') {
                             script {
-                                env.STACK_NAME_SUFFIX = "${maStageName}-us-east-1"
+                                env.STACK_NAME_SUFFIX = "${maStageName}-${params.SNAPSHOT_REGION}"
                                 def clusterDetails = readJSON text: env.clusterDetailsJson
                                 def targetCluster = clusterDetails.target
                                 def vpcId = targetCluster.vpcId
@@ -183,7 +183,7 @@ def call(Map config = [:]) {
 
                                 sh "npm install"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh """
                                             cdk deploy Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} \
                                               --parameters Stage=${maStageName} \
@@ -205,7 +205,7 @@ def call(Map config = [:]) {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 1200, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 1200, roleSessionName: 'jenkins-session') {
                                     def rawOutput = sh(
                                         script: """
                                           aws cloudformation describe-stacks \
@@ -244,7 +244,7 @@ def call(Map config = [:]) {
                                           --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
                                           --access-scope type=cluster
                                         
-                                        aws eks update-kubeconfig --region us-east-1 --name $env.eksClusterName
+                                        aws eks update-kubeconfig --region ${params.SNAPSHOT_REGION} --name $env.eksClusterName
 
                                         for i in {1..10}; do
                                           if kubectl get namespace default >/dev/null 2>&1; then
@@ -267,7 +267,7 @@ def call(Map config = [:]) {
                                             endpoint: targetCluster.endpoint,
                                             allow_insecure: true,
                                             sigv4: [
-                                                    region: "us-east-1",
+                                                    region: params.SNAPSHOT_REGION,
                                                     service: "es"
                                             ],
                                             version: params.TARGET_VERSION
@@ -311,7 +311,7 @@ def call(Map config = [:]) {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                     sh "docker run --privileged --rm tonistiigi/binfmt --install all"
 
                                     // Remove and recreate builder to ensure fresh credentials are used
@@ -332,7 +332,7 @@ def call(Map config = [:]) {
                         dir('deployment/k8s/aws') {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                         def usePublicImages = params.BUILD_IMAGES ? "false" : "true"
                                         sh "./aws-bootstrap.sh --skip-git-pull --base-dir /home/ec2-user/workspace/${jobName} --use-public-images ${usePublicImages} --skip-console-exec --stage ${maStageName}"
                                     }
@@ -414,11 +414,11 @@ ENVEOF
                     timeout(time: 5, unit: 'MINUTES') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 600, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 600, roleSessionName: 'jenkins-session') {
                                     sh """
-                                      kubectl exec migration-console-0 -n ma -- bash -c '
+                                      echo y | kubectl exec migration-console-0 -n ma -- bash -c '
                                         source /.venv/bin/activate && \
-                                        console clusters clear-indices --cluster target --acknowledge-risk
+                                        console clusters clear-indices --cluster target
                                       '
                                     """
                                 }
@@ -437,7 +437,7 @@ ENVEOF
                             def clusterDetails = readJSON text: env.clusterDetailsJson
                             def targetCluster = clusterDetails.target
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 4500, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 4500, roleSessionName: 'jenkins-session') {
                                     sh "kubectl -n ma get pods || true"
                                     
                                     // Cleanup MA namespace
@@ -513,7 +513,7 @@ def deployTargetClusterOnly(Map config) {
     sh "echo 'Using cluster context file options:' && cat ${config.clusterContextFilePath}"
 
     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-        withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+        withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
             sh "./awsDeployCluster.sh --stage ${config.stage} --context-file ${config.clusterContextFilePath}"
         }
     }
@@ -528,7 +528,7 @@ def deployTargetClusterOnly(Map config) {
  */
 def reuseTargetCluster(Map config) {
     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-        withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 1200, roleSessionName: 'jenkins-session') {
+        withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 1200, roleSessionName: 'jenkins-session') {
             // Find existing target cluster stack
             def stacks = sh(
                 script: """
