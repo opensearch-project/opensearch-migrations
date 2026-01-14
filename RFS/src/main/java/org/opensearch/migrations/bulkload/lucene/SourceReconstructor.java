@@ -166,7 +166,7 @@ public class SourceReconstructor {
             return num;
         }
         byte[] binaryData = field.binaryValue();
-        if (binaryData != null) {
+        if (binaryData != null && binaryData.length > 0) {
             // STRING fields (keyword/text) in ES 5+ store UTF-8 bytes - decode as string
             if (mappingInfo != null && mappingInfo.type() == EsFieldType.STRING) {
                 return new String(binaryData, java.nio.charset.StandardCharsets.UTF_8);
