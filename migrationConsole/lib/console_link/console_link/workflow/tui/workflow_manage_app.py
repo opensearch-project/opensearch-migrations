@@ -21,6 +21,7 @@ from .manage_injections import ArgoWorkflowInterface, PodScraperInterface, Waite
 from .pod_name_manager import PodNameManager
 from .tree_state_manager import TreeStateManager
 
+TREE_ROOT_ANCHOR = "workflow-tree"
 
 # --- Constants ---
 NODE_TYPE_POD = "Pod"
@@ -65,7 +66,6 @@ class WorkflowTreeApp(App):
         # Internal Application Metadata
         self._workflow_name = name
         self._namespace = namespace
-        self._current_node_id: Optional[str] = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -74,8 +74,12 @@ class WorkflowTreeApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self._tree_state.set_tree_widget(self.query_one("#workflow-tree", Tree))
+        self._tree_state.set_tree_widget(self.tree_root_widget)
         self.action_refresh_workflow()
+
+    @property
+    def tree_root_widget(self) -> Tree:
+        return self.query_one(f"#{TREE_ROOT_ANCHOR}", Tree)
 
     def on_unmount(self) -> None:
         self.is_exiting = True
@@ -151,17 +155,14 @@ class WorkflowTreeApp(App):
     # --- Event Handlers & Actions ---
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
-        self._current_node_id = event.node.data.get('id') if event.node.data else None
         self.update_pod_status()
         self._update_dynamic_bindings()
 
     @property
     def current_node_data(self) -> Optional[Dict]:
-        """Get fresh node data from tree state."""
-        if not self._current_node_id:
-            return None
-        tree_node = self._tree_state.get_node(self._current_node_id)
-        return tree_node.data if tree_node else None
+        """Get current node data from tree widget's cursor."""
+        node = self.tree_root_widget.cursor_node
+        return node.data if node and node.data else None
 
     def action_follow_logs(self) -> None:
         if not self.current_node_data or self.current_node_data.get('type') != NODE_TYPE_POD:
@@ -180,7 +181,7 @@ class WorkflowTreeApp(App):
         
         if len(containers) == 1:
             # Single container, follow directly
-            self._logs.follow_logs(self, pod_name, containers[0], self.current_node_data.get('display_name', ''))
+            self._logs.follow_logs(self, pod_name, containers[0])
         else:
             # Multiple containers, show selection dialog
             self.push_screen(
@@ -190,7 +191,7 @@ class WorkflowTreeApp(App):
 
     def _follow_selected_container(self, pod_name: str, container: str) -> None:
         """Follow logs for the selected container."""
-        self._logs.follow_logs(self, pod_name, container, self.current_node_data.get('display_name', ''))
+        self._logs.follow_logs(self, pod_name, container)
 
     def action_view_logs(self) -> None:
         if self.current_node_data and self.current_node_data.get('type') == NODE_TYPE_POD:
@@ -229,12 +230,12 @@ class WorkflowTreeApp(App):
             self.notify(f"Error: {e}", severity="error")
 
     def action_expand_node(self) -> None:
-        tree = self.query_one("#workflow-tree", Tree)
+        tree = self.tree_root_widget
         if node := tree.cursor_node:
             node.expand()
 
     def action_collapse_node(self) -> None:
-        tree = self.query_one("#workflow-tree", Tree)
+        tree = self.tree_root_widget
         if node := tree.cursor_node:
             if node.is_expanded:
                 node.collapse()
