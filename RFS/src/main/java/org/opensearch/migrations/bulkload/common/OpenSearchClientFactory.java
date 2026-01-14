@@ -50,7 +50,13 @@ public class OpenSearchClientFactory {
             version = getClusterVersion();
         }
 
-        if (!connectionContext.isDisableCompression() && Boolean.TRUE.equals(getCompressionEnabled())) {
+        // Serverless doesn't support _cluster/settings API, default to compression enabled
+        if (version.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH) {
+            log.info("Serverless target detected, defaulting to compression enabled");
+            compressionMode = connectionContext.isDisableCompression()
+                ? CompressionMode.UNCOMPRESSED
+                : CompressionMode.GZIP_BODY_COMPRESSION;
+        } else if (!connectionContext.isDisableCompression() && Boolean.TRUE.equals(getCompressionEnabled())) {
             compressionMode = CompressionMode.GZIP_BODY_COMPRESSION;
         } else {
             compressionMode = CompressionMode.UNCOMPRESSED;
