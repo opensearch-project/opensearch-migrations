@@ -84,7 +84,9 @@ def _initialize_k8s_client(ctx):
             err=True
         )
         ctx.exit(ExitCode.FAILURE.value)
-    return client.CoreV1Api()
+    # Explicitly use the loaded configuration to avoid threading/global state issues
+    api_client = client.ApiClient(client.Configuration.get_default_copy())
+    return client.CoreV1Api(api_client)
 
 
 def _find_pod_by_node_id(k8s_core_api, namespace, workflow_name, node_id, selected_node, ctx):

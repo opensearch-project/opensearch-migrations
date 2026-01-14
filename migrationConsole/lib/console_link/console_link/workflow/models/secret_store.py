@@ -49,7 +49,8 @@ class SecretStore:
             logger.info("Using provided Kubernetes client")
         else:
             load_k8s_config()
-            self.v1 = client.CoreV1Api()
+            api_client = client.ApiClient(client.Configuration.get_default_copy())
+            self.v1 = client.CoreV1Api(api_client)
 
     def save_secret(
             self,

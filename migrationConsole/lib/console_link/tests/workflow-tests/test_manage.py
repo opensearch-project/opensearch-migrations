@@ -389,6 +389,32 @@ async def test_live_check_lifecycle(mock_workflow_with_two_pods):
         logging.info("Updated resourceVersion to 124")
         assert await wait_until(pilot, has_live_status), "Live Status never appeared"
 
+        # Verify status check is called and results rendered when expanded
+        mock_status_result = {"success": True, "value": "Progress: 50%\nDocs: 1000/2000"}
+        with patch("console_link.workflow.tui.live_status_manager.StatusCheckRunner.run_status_check",
+                   return_value=mock_status_result) as mock_check, \
+             patch("console_link.workflow.tui.live_status_manager.ConfigConverter.convert_with_jq",
+                   return_value="{}"), \
+             patch("console_link.workflow.tui.live_status_manager.Environment"):
+            live_node = next(c for c in tree.root.children if "Live Status" in str(c.label))
+            live_node.expand()
+            assert await wait_until(pilot, lambda: mock_check.call_count > 0, timeout=30.0), \
+                "StatusCheckRunner.run_status_check was never called"
+            assert await wait_until(pilot, lambda: any("Progress" in str(c.label) for c in live_node.children), timeout=3.0), \
+                f"Status results not rendered. Children: {[str(c.label) for c in live_node.children]}"
+
+            # Verify continued polling - wait for at least one more call
+            prev_count = mock_check.call_count
+            assert await wait_until(pilot, lambda: mock_check.call_count > prev_count, timeout=3.0), \
+                "Status check not called again while expanded"
+
+            # Collapse and verify no more calls
+            live_node.collapse()
+            count_after_collapse = mock_check.call_count
+            await pilot.pause(0.3)
+            assert mock_check.call_count == count_after_collapse, \
+                f"Status check called while collapsed: {mock_check.call_count} > {count_after_collapse}"
+
         logging.info("Found live status node, marking the last item as succeeded.")
         logging.info("Will wait for Live Status node to disappear.")
         workflow["status"]["nodes"]["node-2"]["phase"] = PHASE_SUCCEEDED

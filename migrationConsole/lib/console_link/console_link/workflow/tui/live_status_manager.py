@@ -1,3 +1,4 @@
+import datetime
 import logging
 import yaml
 from typing import Dict, Set, Any
@@ -24,10 +25,9 @@ class LiveStatusManager:
     def reconcile(self, app: Any, tree_state: Any) -> None:
         """
         Main entry point called by the App's refresh cycle.
-        Identifies the 'tip' of the workflow and ensures an attachment exists.
+        Finds all parent nodes that have children with configContents and ensures
+        a Live Status attachment exists for each active one.
         """
-        # 1. Identify the 'tip' node (the most recently started active node)
-        # We look at the node_mapping owned by the tree_state
         real_nodes = [
             node.data for node in tree_state.node_mapping.values()
             if node.data and not node.data.get("is_ephemeral")
@@ -36,49 +36,92 @@ class LiveStatusManager:
         if not real_nodes:
             return
 
-        tip = max(real_nodes, key=lambda x: x.get("started_at") or "")
-        tip_id = tip['id']
+        # Group nodes by parent, find tips with configContents
+        # A "tip" is the last (by started_at) child with configContents under each parent
+        parents_with_config_children = {}
+        for node_data in real_nodes:
+            if get_node_input_parameter(node_data, 'configContents') is not None:
+                tree_node = tree_state.get_node(node_data['id'])
+                if tree_node and tree_node.parent:
+                    parent_id = id(tree_node.parent)  # Use object id since parent might be root
+                    if parent_id not in parents_with_config_children:
+                        parents_with_config_children[parent_id] = {
+                            'parent_node': tree_node.parent,
+                            'config_children': []
+                        }
+                    parents_with_config_children[parent_id]['config_children'].append(node_data)
 
-        # 2. Determine if this tip supports Live Checks
-        has_config = get_node_input_parameter(tip, 'configContents') is not None
-        # Phase logic: show for anything other than Succeeded
-        is_active = tip.get('phase') != "Succeeded"
+        # For each parent, find the tip (last by started_at) and decide if Live Status should exist
+        active_tips = set()
+        parents_with_active_status = set()
+        for parent_info in parents_with_config_children.values():
+            parent_node = parent_info['parent_node']
+            config_children = parent_info['config_children']
+            tip = max(config_children, key=lambda x: x.get("started_at") or "")
+            tip_id = tip['id']
+            is_active = tip.get('phase') != "Succeeded"
+            
+            logger.info(f"reconcile: parent has {len(config_children)} config children, tip={tip_id}, phase={tip.get('phase')}, is_active={is_active}")
 
-        if has_config and is_active:
-            try:
-                # 3. Get the parent of the tip node to attach Live Status as a sibling
-                tip_tree_node = tree_state.get_node(tip_id)
-                if not tip_tree_node or not tip_tree_node.parent:
-                    return
-                parent_tree_node = tip_tree_node.parent
+            if is_active:
+                active_tips.add(tip_id)
+                parents_with_active_status.add(id(parent_node))
+                self._ensure_live_status(app, tree_state, parent_node, tip_id)
+            else:
+                logger.info(f"reconcile: removing Live Status for parent because tip {tip_id} is Succeeded")
+                self._remove_live_status_for_parent(parent_node)
 
-                # Look for existing attachment in parent's children
-                existing = next((c for c in parent_tree_node.children
-                                if c.data and c.data.get("attachment_id") == "live-status-header"), None)
-                if not existing:
-                    parent_tree_node.add(
-                        "[bold cyan]Live Status:[/]",
-                        data={"is_ephemeral": True, "attachment_id": "live-status-header", "origin_id": tip_id}
-                    )
+        # Also clean up any Live Status nodes on parents that no longer have config children
+        # (This handles the case where nodes were removed from the tree)
+        for node in tree_state.node_mapping.values():
+            if node.parent:
+                for child in list(node.parent.children):
+                    if (child.data and child.data.get("attachment_id") == "live-status-header" 
+                        and id(node.parent) not in parents_with_active_status):
+                        logger.info(f"reconcile: cleaning up orphaned Live Status")
+                        child.remove()
 
-                # 4. Kick off the independent loop if not already running for this tip
-                if tip_id not in self._active_loop_ids:
-                    self._active_loop_ids.add(tip_id)
-                    self._per_node_live_loop(app, tree_state, tip_id)
-            except ValueError:
-                # Parent node might have been pruned during a race condition
-                pass
+        # Clean up any loops for tips that are no longer active
+        for old_tip in list(self._active_loop_ids):
+            if old_tip not in active_tips:
+                self._active_loop_ids.discard(old_tip)
+
+    def _ensure_live_status(self, app: Any, tree_state: Any, parent_node: Any, tip_id: str) -> None:
+        """Ensure Live Status exists for this parent, pointing to tip_id."""
+        existing = next((c for c in parent_node.children
+                        if c.data and c.data.get("attachment_id") == "live-status-header"), None)
+
+        if existing:
+            old_origin = existing.data.get("origin_id")
+            if old_origin != tip_id:
+                existing.data["origin_id"] = tip_id
+                self._active_loop_ids.discard(old_origin)
+                logger.info(f"reconcile: updated origin_id from {old_origin} to {tip_id}")
+
+            # Move any nodes that ended up after Live Status to before it
+            children = list(parent_node.children)
+            live_status_idx = children.index(existing)
+            nodes_after = children[live_status_idx + 1:]
+            for node in nodes_after:
+                if node.data and not node.data.get("is_ephemeral"):
+                    logger.info(f"reconcile: moving node {node.data.get('id')} before Live Status")
+                    label = node.label
+                    data = node.data
+                    node.remove()
+                    parent_node.add(label, data=data, before=existing)
         else:
-            # If the node succeeded, remove the Live Status node
-            self._remove_live_status_attachment(tree_state, tip_id)
-            self._active_loop_ids.discard(tip_id)
+            parent_node.add(
+                "[bold cyan]Live Status:[/]",
+                data={"is_ephemeral": True, "attachment_id": "live-status-header", "origin_id": tip_id}
+            )
 
-    def _remove_live_status_attachment(self, tree_state: Any, tip_id: str) -> None:
-        """Remove the Live Status attachment node."""
-        tip_tree_node = tree_state.get_node(tip_id)
-        if not tip_tree_node or not tip_tree_node.parent:
-            return
-        for child in list(tip_tree_node.parent.children):
+        if tip_id not in self._active_loop_ids:
+            self._active_loop_ids.add(tip_id)
+            self._per_node_live_loop(app, tree_state, tip_id)
+
+    def _remove_live_status_for_parent(self, parent_node: Any) -> None:
+        """Remove Live Status attachment from this parent."""
+        for child in list(parent_node.children):
             if child.data and child.data.get("attachment_id") == "live-status-header":
                 child.remove()
                 break
@@ -89,21 +132,18 @@ class LiveStatusManager:
             self._active_loop_ids.discard(node_id)
             return
 
-        # Check if the attachment node still exists in the host
         parent_node = tree_state.get_node(node_id)
         if not parent_node:
             self._active_loop_ids.discard(node_id)
             return
 
-        # Find the header attachment we created earlier
-        header = next((c for c in parent_node.children
+        header = next((c for c in parent_node.parent.children
                        if c.data and c.data.get("attachment_id") == "live-status-header"), None)
 
         if header and self._should_continue_loop(node_id):
             if header.is_expanded:
                 self._run_live_check_async(app, tree_state, node_id, header)
 
-            # Reschedule the next tick of this specific loop
             app.set_timer(
                 self._refresh_interval,
                 lambda: self._per_node_live_loop(app, tree_state, node_id)
@@ -123,12 +163,12 @@ class LiveStatusManager:
         node_data = tree_state.get_node(node_id).data
 
         app.run_worker(
-            lambda: self._perform_check_worker(app, node_data),
+            lambda: self._perform_check_worker(app, tree_state, node_data),
             thread=True,
             name=f"live_check_{node_id}"
         )
 
-    def _perform_check_worker(self, app: Any, node_data: Dict) -> None:
+    def _perform_check_worker(self, app: Any, tree_state: Any, node_data: Dict) -> None:
         """Background Thread: Performs the actual K8s/External status check."""
         node_id = node_data['id']
         try:
@@ -140,18 +180,38 @@ class LiveStatusManager:
                 node_data['check_type'] = 'snapshot' if 'snapshot' in name_low else 'backfill'
 
                 result = StatusCheckRunner.run_status_check(env, node_data)
-                app.call_from_thread(self._update_ui_result, node_id, result)
+                app.call_from_thread(self._update_ui_result, tree_state, node_id, result)
                 return
-            app.call_from_thread(self._update_ui_result, node_id, {"error": "Config conversion failed"})
+            app.call_from_thread(self._update_ui_result, tree_state, node_id, {"error": "Config conversion failed"})
         except Exception as e:
-            app.call_from_thread(self._update_ui_result, node_id, {"error": str(e)})
+            logger.exception(f"_perform_check_worker: exception for {node_id}")
+            app.call_from_thread(self._update_ui_result, tree_state, node_id, {"error": str(e)})
         finally:
             self._live_check_in_progress.discard(node_id)
 
-    def _update_ui_result(self, node_id: str, result: Dict) -> None:
-        """Main Thread: Injects lines into the attachment node children."""
-        # We don't touch 'app' here; we use the logic to find our attachment point
-        # This is the 'Slot' we are filling.
-        # This requires the App to have a reference to tree_state
-        # Note: In a real app, you'd likely pass tree_state into this method
-        # via the call_from_thread closure.
+    def _update_ui_result(self, tree_state: Any, node_id: str, result: Dict) -> None:
+        """Main Thread: Fills the UI node with external check results."""
+        target = tree_state.get_node(node_id)
+        if not target or not target.parent:
+            return
+
+        header = next((c for c in target.parent.children
+                       if c.data and c.data.get("attachment_id") == "live-status-header"), None)
+        if not header:
+            return
+
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        header.set_label(f"[bold cyan]Live Status[/] [italic gray]({ts})[bold cyan]:[/]")
+
+        for child in list(header.children):
+            child.remove()
+
+        if result.get('success'):
+            # Handle different result formats (value for snapshot, status+message for backfill)
+            content = result.get('value') or f"{result.get('status', '')}\n{result.get('message', '')}"
+            for line in content.replace('\\n', '\n').split('\n'):
+                if line.strip():
+                    header.add(line, data={"is_ephemeral": True, "is_live_data": True})
+        else:
+            msg = result.get('message') or result.get('error') or "Check failed"
+            header.add(f"❌ {msg}", data={"is_ephemeral": True})

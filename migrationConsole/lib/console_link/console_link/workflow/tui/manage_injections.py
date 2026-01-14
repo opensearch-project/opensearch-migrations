@@ -76,7 +76,7 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
                 # Only keep what is actually rendered in tree_utils
                 slim_nodes[node_id] = {
                     "id": node_id,
-                    "displayName": clean_display_name(node.get("displayName")),
+                    "displayName": clean_display_name(node.get("displayName") or node_id),
                     # no reason to keep the massive version
                     "phase": node.get("phase"),
                     "type": node.get("type"),
@@ -139,7 +139,8 @@ def make_k8s_pod_scraper(k8s_client) -> PodScraperInterface:
                 f'/api/v1/namespaces/{ns}/pods', 'GET',
                 header_params={'Accept': 'application/json;as=PartialObjectMetadataList;'
                                          'v=v1;g=meta.k8s.io'},  # Use headers to request ONLY metadata
-                query_params=query_params, _preload_content=False, _request_timeout=10
+                query_params=query_params, _preload_content=False, _request_timeout=10,
+                auth_settings=['BearerToken']
             )
             data = json.loads(resp[0].read())
             return data.get('items', []) or []  # with PartialObjectMetadataList, items could be null
