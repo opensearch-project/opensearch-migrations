@@ -423,6 +423,119 @@ async def test_live_check_lifecycle(mock_workflow_with_two_pods):
         assert await wait_until(pilot, lambda: not has_live_status()), "Live Status didn't disappear"
 
 
+@pytest.mark.asyncio
+async def test_workflow_restart_clears_and_rebuilds_tree():
+    """Verify that when a workflow restarts (new startedAt), the tree is cleared and rebuilt."""
+
+    workflow_v1 = {
+        "metadata": {"name": "test-wf", "resourceVersion": "123"},
+        "status": {
+            "startedAt": "2023-01-01T00:00:00Z",
+            "nodes": {
+                "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod",
+                           "phase": PHASE_RUNNING, "children": []},
+                "node-2": {"id": "node-2", "displayName": "step-2", "type": "Pod",
+                           "phase": PHASE_RUNNING, "children": []}
+            }
+        }
+    }
+
+    workflow_v2 = {
+        "metadata": {"name": "test-wf", "resourceVersion": "999"},
+        "status": {
+            "startedAt": "2023-01-02T00:00:00Z",  # New run
+            "nodes": {
+                "node-new": {"id": "node-new", "displayName": "fresh-step", "type": "Pod",
+                             "phase": PHASE_RUNNING, "children": []}
+            }
+        }
+    }
+
+    current_workflow = [workflow_v1]
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.side_effect = lambda *a, **kw: ({"success": True}, copy.deepcopy(current_workflow[0]))
+
+    app = WorkflowTreeApp(
+        namespace="default", name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=MagicMock(),
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=0.1
+    )
+
+    async with app.run_test() as pilot:
+        tree = app.query_one("#workflow-tree")
+        assert await wait_until(pilot, lambda: len(tree.root.children) == 2, timeout=5.0), \
+            f"Initial workflow nodes not loaded. Children: {len(tree.root.children)}"
+
+        old_labels = {get_clean_text_label(c) for c in tree.root.children}
+        assert any("step-1" in lbl for lbl in old_labels)
+
+        # Simulate workflow restart
+        current_workflow[0] = workflow_v2
+
+        assert await wait_until(pilot, lambda: len(tree.root.children) == 1, timeout=5.0), \
+            f"Tree not rebuilt after workflow restart. Children: {len(tree.root.children)}"
+
+        new_labels = {get_clean_text_label(c) for c in tree.root.children}
+        assert any("fresh-step" in lbl for lbl in new_labels), \
+            f"New node not found. Labels: {new_labels}"
+
+
+@pytest.mark.asyncio
+async def test_node_phase_update_preserves_tree_structure():
+    """Verify that phase changes update nodes in-place without rebuilding the tree."""
+
+    workflow = {
+        "metadata": {"name": "test-wf", "resourceVersion": "123"},
+        "status": {
+            "startedAt": "2023-01-01T00:00:00Z",
+            "nodes": {
+                "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod",
+                           "phase": "Failed", "children": []},
+                "node-2": {"id": "node-2", "displayName": "step-2", "type": "Pod",
+                           "phase": PHASE_RUNNING, "children": []}
+            }
+        }
+    }
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.side_effect = lambda *a, **kw: ({"success": True}, copy.deepcopy(workflow))
+
+    app = WorkflowTreeApp(
+        namespace="default", name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=MagicMock(),
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=0.1
+    )
+
+    async with app.run_test() as pilot:
+        tree = app.query_one("#workflow-tree")
+        assert await wait_until(pilot, lambda: len(tree.root.children) == 2, timeout=5.0)
+
+        # Find the running node
+        def get_node_2_label():
+            for c in tree.root.children:
+                if "step-2" in get_clean_text_label(c):
+                    return get_clean_text_label(c)
+            return ""
+
+        assert await wait_until(pilot, lambda: "Running" in get_node_2_label(), timeout=5.0), \
+            f"Expected Running phase in label: {get_node_2_label()}"
+
+        # Update phase
+        workflow["status"]["nodes"]["node-2"]["phase"] = PHASE_SUCCEEDED
+        workflow["metadata"]["resourceVersion"] = "124"
+
+        assert await wait_until(pilot, lambda: "Succeeded" in get_node_2_label(), timeout=5.0), \
+            f"Phase not updated. Current label: {get_node_2_label()}"
+
+        # Tree structure preserved
+        assert len(tree.root.children) == 2, "Tree structure changed unexpectedly"
+
+
 @pytest.mark.parametrize("env_updates, expected_wrapper", [
     ({"SSH_TTY": "/dev/pts/0", "TERM": "xterm-256color"}, "{osc}"),
     ({"SSH_TTY": "/dev/pts/0", "TERM": "xterm-256color", "TMUX": "1"}, "\x1bPtmux;\x1b{osc}\x1b\\")
