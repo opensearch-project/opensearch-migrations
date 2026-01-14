@@ -1,12 +1,12 @@
-import json
-import subprocess
-import tempfile
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Callable, List, Dict, Any, Optional
-
+import atexit
 import ijson
+import json
 import requests
+import subprocess
+import threading
+
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional
 
 from console_link.workflow.services.workflow_service import WorkflowApproveResult, logger, WorkflowService
 from console_link.workflow.tree_utils import clean_display_name
@@ -17,36 +17,84 @@ class WaiterInterface:
     trigger: Callable[[], None]
     checker: Callable[[], bool]
     reset: Callable[[], None]
-    marker_file: Optional[Path] = None
 
     @classmethod
     def default(cls, workflow_name: str, namespace: str) -> "WaiterInterface":
-        marker = Path(tempfile.gettempdir()) / f"wf_ready_{workflow_name}.tmp"
+        _running = threading.Event()
+        _ready_signal = threading.Event()
+        _active_process: List[subprocess.Popen] = []
+        _lock = threading.Lock()  # The gatekeeper for process management
+
+        def cleanup_subprocess():
+            """Kill kubectl processes safely using the lock."""
+            with _lock:
+                for p in _active_process:
+                    if p.poll() is None:
+                        try:
+                            logger.info(f"Terminating kubectl process: {p.pid}...")
+                            p.terminate()
+                            p.wait(timeout=0.2)
+                        except Exception:
+                            p.kill()
+                _active_process.clear()
+
+        atexit.register(cleanup_subprocess)
+
+        def run_kubectl_wait_loop():
+            while _running.is_set():
+                cmd = [
+                    "kubectl", "wait", f"workflow/{workflow_name}",
+                    "--for=create", "-n", namespace, "--timeout=300s"
+                ]
+
+                proc: Optional[subprocess.Popen] = None
+
+                # Ensure we don't start a process if cleanup is happening (or about to)
+                with _lock:  # CRITICAL SECTION:
+                    if not _running.is_set():
+                        logger.debug("Spawn aborted: waiter is stopping.")
+                        return
+
+                    try:
+                        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        logger.info(f"Tracking process {proc.pid} as kubectl wait...")
+                        _active_process.append(proc)
+                    except Exception as e:
+                        logger.error(f"Failed to spawn kubectl: {e}")
+                        _running.clear()
+                        return
+
+                try:
+                    exit_code = proc.wait()
+
+                    with _lock:
+                        if proc in _active_process:
+                            _active_process.remove(proc)
+
+                    if exit_code == 0:
+                        logger.info(f"Kubectl wait {proc.pid} succeeded.")
+                        _running.clear()
+                        _ready_signal.set()
+                        return
+
+                except Exception:
+                    logger.exception("Caught exception while waiting for kubectl process")
+                    # Use event.wait for a interruptible sleep
+                    if not _running.wait(timeout=2):
+                        break
 
         def trigger():
-            if marker.exists():
-                try:
-                    marker.unlink()
-                except Exception:
-                    pass
-            cmd = (
-                f"kubectl wait workflow/{workflow_name} "
-                f"--for=create -n {namespace} --timeout=300s 2>&1 > /dev/null && touch {marker}"
-            )
-            subprocess.Popen(cmd, shell=True, start_new_session=True)
-
-        def reset():
-            if marker.exists():
-                try:
-                    marker.unlink()
-                except Exception:
-                    pass
+            with _lock:
+                if not _running.is_set():
+                    logger.debug("Starting background wait thread.")
+                    _ready_signal.clear()
+                    _running.set()
+                    threading.Thread(target=run_kubectl_wait_loop, daemon=True, name="run_kubectl_wait_loop").start()
 
         return cls(
             trigger=trigger,
-            checker=lambda: marker.exists(),
-            reset=reset,
-            marker_file=marker
+            checker=lambda: _ready_signal.is_set(),
+            reset=lambda: _ready_signal.clear()
         )
 
 

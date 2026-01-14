@@ -127,8 +127,11 @@ class WorkflowTreeApp(App):
         self.set_timer(self._refresh_interval, self.action_refresh_workflow)
 
     def _wait_for_workflow_worker(self) -> None:
-        """Lightweight worker: polls disk, deletes immediately on find."""
-        self._workflow_waiter.trigger()
+        """Lightweight worker: monitors memory event, triggers refresh on find."""
+        # Only trigger if we aren't already waiting and haven't found it yet
+        if not self._workflow_waiter.checker():
+            self._workflow_waiter.trigger()
+
         while not self.is_exiting:
             if self._workflow_waiter.checker():
                 self._workflow_waiter.reset()
