@@ -34,7 +34,9 @@ def _configure_file_logging():
     log_file = os.path.join(log_dir, f"manage_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
 
     file_handler = logging.FileHandler(log_file)
-    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - [%(threadName)s] - %(name)s - %(message)s'))
+    file_handler.setFormatter(
+        logging.Formatter('%(asctime)s - %(levelname)s - [%(threadName)s] - %(name)s - %(message)s')
+    )
 
     root_logger = logging.getLogger()
     root_logger.addHandler(file_handler)

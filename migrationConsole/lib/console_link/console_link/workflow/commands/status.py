@@ -118,7 +118,7 @@ class StatusCommandHandler:
         """Display workflow using tree structure with optional live status checks."""
         tree_nodes = build_nested_workflow_tree(workflow_data)
         if live_check:
-            self.live_check_processor.enrich_tree_with_live_checks(tree_nodes, workflow_data)
+            self.live_check_processor.enrich_tree_with_live_checks(tree_nodes)
         filtered_tree = filter_tree_nodes(tree_nodes)
 
         # Extract status info from workflow data
@@ -340,8 +340,7 @@ class LiveCheckProcessor:
         self.config_converter = config_converter
         self.status_runner = status_runner or StatusCheckRunner()
 
-    def enrich_tree_with_live_checks(self, tree_nodes: List[Dict[str, Any]],
-                                     workflow_data: Dict[str, Any]) -> Dict[str, Any]:
+    def enrich_tree_with_live_checks(self, tree_nodes: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Add live check results to tree nodes."""
         logger.info("Starting live check enrichment process")
 

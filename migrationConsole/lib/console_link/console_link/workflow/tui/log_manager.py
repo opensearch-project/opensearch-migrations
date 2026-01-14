@@ -24,7 +24,7 @@ class LogManager:
             logger.error(f"Error getting containers for {pod_name}: {e}")
             return []
 
-    def follow_logs(self, app, pod_name: str, container: str, display_name: str) -> None:
+    def follow_logs(self, app, pod_name: str, container: str) -> None:
         """Follow logs using kubectl logs -f and pipe to less."""
         try:
             cmd = ['kubectl', 'logs', pod_name, '-f', '-c', container, '-n', self._namespace]

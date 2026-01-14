@@ -107,13 +107,8 @@ def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def filter_recursive(nodes):
         filtered = []
         for node in nodes:
-            if should_keep_by_type(node):
-                # Keep leaf nodes (Pod, Suspend, Skipped)
-                filtered_node = node.copy()
-                filtered_node['children'] = filter_recursive(node['children'])
-                filtered.append(filtered_node)
-            elif has_group_name(node):
-                # Keep containers with groupName (meaningful grouping)
+            if should_keep_by_type(node) or has_group_name(node):
+                # Keep leaf nodes (Pod, Suspend, Skipped) or containers with a meaningful groupName
                 filtered_node = node.copy()
                 filtered_node['children'] = filter_recursive(node['children'])
                 filtered.append(filtered_node)

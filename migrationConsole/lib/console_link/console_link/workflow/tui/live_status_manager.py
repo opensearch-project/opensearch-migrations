@@ -91,7 +91,7 @@ class LiveStatusManager:
             logger.debug("Removing orphaned live status (no config children)")
             live_status_node.remove()
 
-        for child in list(node.children):
+        for child in node.children:
             if child.data and not child.data.get("is_ephemeral"):
                 self._reconcile_node(app, child, current_live_check_group_nodes)
 
@@ -159,7 +159,7 @@ class LiveStatusManager:
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         header.set_label(f"[bold cyan]Live Status[/] [italic gray]({ts})[bold cyan]:[/]")
 
-        for child in list(header.children):
+        for child in header.children:
             child.remove()
 
         if result.get('success'):

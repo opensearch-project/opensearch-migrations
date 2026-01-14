@@ -116,11 +116,9 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
             raise requests.HTTPError(f"Request failed with status {resp.status_code}")
 
         slim_nodes = {}
-        node_count = 0
         try:
             parser = ijson.kvitems(resp.raw, 'status.nodes')
             for node_id, node in parser:
-                node_count += 1
                 # Only keep what is actually rendered in tree_utils
                 slim_nodes[node_id] = {
                     "id": node_id,
