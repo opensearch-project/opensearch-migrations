@@ -16,4 +16,9 @@ public interface LuceneField {
     default Number numericValue() {
         return null;
     }
+
+    /** Returns raw binary value as bytes, null if not binary */
+    default byte[] binaryValue() {
+        return null;
+    }
 }

@@ -11,6 +11,7 @@ import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import shadow.lucene9.org.apache.lucene.index.BinaryDocValues;
 import shadow.lucene9.org.apache.lucene.index.FieldInfo;
 import shadow.lucene9.org.apache.lucene.index.FilterCodecReader;
@@ -27,6 +28,7 @@ import shadow.lucene9.org.apache.lucene.util.BytesRef;
 import shadow.lucene9.org.apache.lucene.util.FixedBitSet;
 import shadow.lucene9.org.apache.lucene.util.SparseFixedBitSet;
 
+@Slf4j
 public class LeafReader9 implements LuceneLeafReader {
 
     private final LeafReader wrapped;
@@ -200,8 +202,11 @@ public class LeafReader9 implements LuceneLeafReader {
     @Override
     public Object getBinaryValue(int docId, String fieldName) throws IOException {
         BinaryDocValues dv = wrapped.getBinaryDocValues(fieldName);
+        log.atDebug().setMessage("getBinaryValue for field {} docId {}: dv={}").addArgument(fieldName).addArgument(docId).addArgument(dv != null).log();
         if (dv != null && dv.advanceExact(docId)) {
-            return bytesRefToString(dv.binaryValue());
+            BytesRef value = dv.binaryValue();
+            log.atDebug().setMessage("getBinaryValue {} got BytesRef length={}").addArgument(fieldName).addArgument(value != null ? value.length : -1).log();
+            return bytesRefToString(value);
         }
         return null;
     }

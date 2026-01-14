@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -41,23 +42,37 @@ public class SourceReconstructor {
             for (var field : document.getFields()) {
                 String fieldName = field.name();
                 if (shouldSkipField(fieldName)) {
+                    log.atDebug().setMessage("Skipping stored field: {}").addArgument(fieldName).log();
                     continue;
                 }
                 Object value = getStoredFieldValue(field);
                 if (value != null) {
+                    log.atDebug().setMessage("Stored field {}: {}").addArgument(fieldName).addArgument(value).log();
                     reconstructed.put(fieldName, value);
+                } else {
+                    log.atDebug().setMessage("Stored field {} returned null value").addArgument(fieldName).log();
                 }
             }
             
             // Then, read from doc_values (for fields not already in stored fields)
             for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
                 String fieldName = fieldInfo.name();
-                if (shouldSkipField(fieldName) || reconstructed.containsKey(fieldName)) {
+                log.atDebug().setMessage("Processing doc_value field: {} type: {}").addArgument(fieldName).addArgument(fieldInfo.docValueType()).log();
+                if (shouldSkipField(fieldName)) {
+                    log.atDebug().setMessage("Skipping doc_value field: {}").addArgument(fieldName).log();
+                    continue;
+                }
+                if (reconstructed.containsKey(fieldName)) {
+                    log.atDebug().setMessage("Doc_value field {} already in reconstructed from stored").addArgument(fieldName).log();
                     continue;
                 }
                 Object value = reader.getDocValue(docId, fieldInfo);
                 if (value != null) {
-                    reconstructed.put(fieldName, convertDocValue(value, fieldInfo));
+                    Object converted = convertDocValue(value, fieldInfo);
+                    log.atDebug().setMessage("Doc_value field {}: {} -> {}").addArgument(fieldName).addArgument(value).addArgument(converted).log();
+                    reconstructed.put(fieldName, converted);
+                } else {
+                    log.atDebug().setMessage("Doc_value field {} returned null for docId {}").addArgument(fieldName).addArgument(docId).log();
                 }
             }
             
@@ -66,6 +81,7 @@ public class SourceReconstructor {
                 return null;
             }
             
+            log.atDebug().setMessage("Reconstructed source for doc {}: {}").addArgument(docId).addArgument(reconstructed).log();
             return OBJECT_MAPPER.writeValueAsString(reconstructed);
         } catch (IOException e) {
             log.atWarn().setCause(e).setMessage("Failed to reconstruct source for document {}").addArgument(docId).log();
@@ -114,12 +130,17 @@ public class SourceReconstructor {
         }
     }
 
-    /** Extracts value from stored field, converting booleans stored as T/F */
+    /** Extracts value from stored field, converting booleans stored as T/F and binary as base64 */
     private static Object getStoredFieldValue(LuceneField field) {
         // Check if it's a numeric field first
         Number num = field.numericValue();
         if (num != null) {
             return num;
+        }
+        // Check for binary data - must be encoded as base64 for ES binary fields
+        byte[] binaryData = field.binaryValue();
+        if (binaryData != null) {
+            return Base64.getEncoder().encodeToString(binaryData);
         }
         // String field - check for boolean encoding
         String value = field.stringValue();
