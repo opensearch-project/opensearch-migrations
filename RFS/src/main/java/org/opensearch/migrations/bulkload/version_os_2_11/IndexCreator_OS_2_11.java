@@ -41,10 +41,12 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             ObjectNodeUtils.removeFieldsByPath(settings, field);
         }
 
-        ObjectNode mappings = indexMetadata.getMappings();
-        String[] problemMappingFields = { "_all" };
-        for (var field : problemMappingFields) {
-            ObjectNodeUtils.removeFieldsByPath(mappings, field);
+        ObjectNode mappings = (ObjectNode) indexMetadata.getMappings();
+        if (mappings != null) {
+            String[] problemMappingFields = { "_all" };
+            for (var field : problemMappingFields) {
+                ObjectNodeUtils.removeFieldsByPath(mappings, field);
+            }
         }
 
         // Assemble the request body
