@@ -11,6 +11,7 @@ import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import shadow.lucene6.org.apache.lucene.index.BinaryDocValues;
 import shadow.lucene6.org.apache.lucene.index.FieldInfo;
 import shadow.lucene6.org.apache.lucene.index.LeafReader;
@@ -26,6 +27,7 @@ import shadow.lucene6.org.apache.lucene.util.BytesRef;
 import shadow.lucene6.org.apache.lucene.util.FixedBitSet;
 import shadow.lucene6.org.apache.lucene.util.SparseFixedBitSet;
 
+@Slf4j
 public class LeafReader6 implements LuceneLeafReader {
 
     private final LeafReader wrapped;
@@ -98,6 +100,7 @@ public class LeafReader6 implements LuceneLeafReader {
         List<DocValueFieldInfo> fields = new ArrayList<>();
         for (FieldInfo fieldInfo : wrapped.getFieldInfos()) {
             DocValueFieldInfo.DocValueType dvType = convertDocValuesType(fieldInfo.getDocValuesType());
+            log.atDebug().setMessage("Field {} has docValuesType {} -> {}").addArgument(fieldInfo.name).addArgument(fieldInfo.getDocValuesType()).addArgument(dvType).log();
             if (dvType != DocValueFieldInfo.DocValueType.NONE) {
                 boolean isBoolean = dvType == DocValueFieldInfo.DocValueType.SORTED_NUMERIC 
                     && DocValueFieldInfo.hasOnlyBooleanTerms(getFieldTermsInternal(fieldInfo.name));
@@ -203,8 +206,10 @@ public class LeafReader6 implements LuceneLeafReader {
     @Override
     public Object getBinaryValue(int docId, String fieldName) throws IOException {
         BinaryDocValues dv = wrapped.getBinaryDocValues(fieldName);
+        log.atDebug().setMessage("getBinaryValue for field {} docId {}: dv={}").addArgument(fieldName).addArgument(docId).addArgument(dv != null).log();
         if (dv != null) {
             BytesRef value = dv.get(docId);
+            log.atDebug().setMessage("getBinaryValue {} got BytesRef length={}").addArgument(fieldName).addArgument(value != null ? value.length : -1).log();
             if (value != null && value.length > 0) {
                 return bytesRefToString(value);
             }
