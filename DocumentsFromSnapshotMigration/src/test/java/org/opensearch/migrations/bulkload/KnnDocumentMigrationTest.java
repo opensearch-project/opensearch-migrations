@@ -150,8 +150,8 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
             }
         }
 
-        // === Lucene engine (OS 2.x+) ===
-        if (VersionMatchers.isOS_2_X.test(sourceVersion)) {
+        // === Lucene engine (OS 2.4+) ===
+        if (isVersionAtLeast(sourceVersion, 2, 4)) {
             for (var spaceType : List.of("l2", "cosinesimil")) {
                 configs.add(knnConfig("knn-lucene-" + spaceType, "lucene", "hnsw", spaceType, dim, null, null));
             }
