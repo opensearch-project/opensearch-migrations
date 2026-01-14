@@ -44,7 +44,7 @@ class WorkflowTreeApp(App):
                  workflow_waiter: WaiterInterface,
                  refresh_interval: float):
         super().__init__()
-        self.title = f"[{namespace}] {name}" # override from base
+        self.title = f"[{namespace}] {name}"  # override from base
 
         # Exposed Metadata
         self.current_run_id: Optional[str] = None

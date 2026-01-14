@@ -400,8 +400,9 @@ async def test_live_check_lifecycle(mock_workflow_with_two_pods):
             live_node.expand()
             assert await wait_until(pilot, lambda: mock_check.call_count > 0, timeout=30.0), \
                 "StatusCheckRunner.run_status_check was never called"
-            assert await wait_until(pilot, lambda: any("Progress" in str(c.label) for c in live_node.children), timeout=3.0), \
-                f"Status results not rendered. Children: {[str(c.label) for c in live_node.children]}"
+            assert await wait_until(
+                pilot, lambda: any("Progress" in str(c.label) for c in live_node.children), timeout=3.0
+            ), f"Status results not rendered. Children: {[str(c.label) for c in live_node.children]}"
 
             # Verify continued polling - wait for at least one more call
             prev_count = mock_check.call_count

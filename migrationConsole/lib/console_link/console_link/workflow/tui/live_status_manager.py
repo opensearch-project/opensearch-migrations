@@ -44,8 +44,8 @@ class LiveStatusManager:
         """Process a node: manage live status based on configContents children."""
         config_children = [
             c for c in node.children
-            if c.data and not c.data.get("is_ephemeral")
-            and get_node_input_parameter(c.data, 'configContents') is not None
+            if c.data and not c.data.get("is_ephemeral") and
+            get_node_input_parameter(c.data, 'configContents') is not None
         ]
         live_status_node = next(
             (c for c in node.children if c.data and c.data.get("ephemeral_node_type") == "live-status-check"), None
@@ -53,11 +53,14 @@ class LiveStatusManager:
 
         if config_children:
             any_succeeded = any(c.data.get('phase') == "Succeeded" for c in config_children)
-            logger.info(f"config_children={len(config_children)}, any_succeeded={any_succeeded}, phases={[c.data.get('phase') for c in config_children]}")
+            logger.info(
+                f"config_children={len(config_children)}, any_succeeded={any_succeeded}, "
+                f"phases={[c.data.get('phase') for c in config_children]}"
+            )
 
             if any_succeeded:
                 if live_status_node:
-                    logger.info(f"Removing live status: a config child succeeded")
+                    logger.info("Removing live status: a config child succeeded")
                     live_status_node.remove()
             else:
                 if not live_status_node:
@@ -82,7 +85,7 @@ class LiveStatusManager:
 
                 current_live_check_group_nodes.add(live_status_node)
                 if live_status_node not in self._active_live_check_group_nodes:
-                    logger.debug(f"Starting live loop")
+                    logger.debug("Starting live loop")
                     self._start_live_loop(app, live_status_node)
         elif live_status_node:
             logger.debug("Removing orphaned live status (no config children)")
