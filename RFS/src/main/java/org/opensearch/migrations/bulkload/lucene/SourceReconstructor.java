@@ -57,11 +57,17 @@ public class SourceReconstructor {
                 if (shouldSkipField(fieldName) || reconstructed.containsKey(fieldName)) {
                     continue;
                 }
+                FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
+                // Skip if mapping says doc_values is disabled (ES 2.x may still have them internally)
+                if (mappingInfo != null && !mappingInfo.docValues()) {
+                    continue;
+                }
                 Object value = reader.getDocValue(docId, fieldInfo);
                 if (value != null) {
-                    FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
                     Object converted = convertDocValue(value, fieldInfo, mappingInfo);
-                    reconstructed.put(fieldName, converted);
+                    if (converted != null) {
+                        reconstructed.put(fieldName, converted);
+                    }
                 }
             }
             
@@ -151,17 +157,26 @@ public class SourceReconstructor {
     private static Object getStoredFieldValue(LuceneField field, FieldMappingInfo mappingInfo) {
         Number num = field.numericValue();
         if (num != null) {
-            log.debug("Stored field {} has numeric value: {}, mappingInfo: {}", field.name(), num, mappingInfo);
-            // IP fields in ES 2.x store IPv4 as 32-bit integer
-            if (mappingInfo != null && mappingInfo.type() == EsFieldType.IP) {
-                long ipLong = num.longValue();
-                String ip = String.format("%d.%d.%d.%d",
-                    (ipLong >> 24) & 0xFF,
-                    (ipLong >> 16) & 0xFF,
-                    (ipLong >> 8) & 0xFF,
-                    ipLong & 0xFF);
-                log.debug("Converted IP numeric {} to string {}", ipLong, ip);
-                return ip;
+            if (mappingInfo != null) {
+                // IP fields in ES 2.x store IPv4 as 32-bit integer
+                if (mappingInfo.type() == EsFieldType.IP) {
+                    long ipLong = num.longValue();
+                    return String.format("%d.%d.%d.%d",
+                        (ipLong >> 24) & 0xFF, (ipLong >> 16) & 0xFF,
+                        (ipLong >> 8) & 0xFF, ipLong & 0xFF);
+                }
+                // DATE fields store epoch millis - convert to ISO format
+                if (mappingInfo.type() == EsFieldType.DATE) {
+                    return formatDate(num.longValue(), mappingInfo.format());
+                }
+                // DATE_NANOS fields store epoch nanos
+                if (mappingInfo.type() == EsFieldType.DATE_NANOS) {
+                    return formatDateNanos(num.longValue());
+                }
+                // SCALED_FLOAT needs to be divided by scaling factor
+                if (mappingInfo.type() == EsFieldType.SCALED_FLOAT && mappingInfo.scalingFactor() != null) {
+                    return num.longValue() / mappingInfo.scalingFactor();
+                }
             }
             return num;
         }
@@ -174,6 +189,10 @@ public class SourceReconstructor {
             // IP fields in ES 5+ store as 16-byte IPv6 format
             if (mappingInfo != null && mappingInfo.type() == EsFieldType.IP) {
                 return convertIpBytes(binaryData);
+            }
+            // GEO_POINT stored as 8 bytes (2 x 4-byte floats for lat/lon) - skip, use doc_values
+            if (mappingInfo != null && mappingInfo.type() == EsFieldType.GEO_POINT) {
+                return null; // Let doc_values handle geo_point
             }
             // Actual binary fields should be base64 encoded
             return Base64.getEncoder().encodeToString(binaryData);
@@ -200,6 +219,26 @@ public class SourceReconstructor {
                         yield Long.parseLong(value);
                     }
                     case BOOLEAN -> Boolean.parseBoolean(value);
+                    case DATE -> {
+                        // Date stored as epoch millis string - convert to ISO format
+                        if (value.matches("\\d+")) {
+                            yield formatDate(Long.parseLong(value), mappingInfo.format());
+                        }
+                        yield value; // Already in date format
+                    }
+                    case DATE_NANOS -> {
+                        // Date nanos stored as epoch nanos string
+                        if (value.matches("\\d+")) {
+                            yield formatDateNanos(Long.parseLong(value));
+                        }
+                        yield value;
+                    }
+                    case SCALED_FLOAT -> {
+                        if (mappingInfo.scalingFactor() != null && value.matches("\\d+")) {
+                            yield Long.parseLong(value) / mappingInfo.scalingFactor();
+                        }
+                        yield Double.parseDouble(value);
+                    }
                     case IP -> {
                         // ES 2.x stores IP as numeric string - convert to dotted decimal
                         if (value.matches("\\d+")) {
@@ -377,8 +416,7 @@ public class SourceReconstructor {
     /** Check if field type can be recovered from Points (BKD tree) */
     private static boolean isPointsRecoverable(EsFieldType type) {
         return type == EsFieldType.IP || type == EsFieldType.NUMERIC || 
-               type == EsFieldType.DATE || type == EsFieldType.DATE_NANOS ||
-               type == EsFieldType.BOOLEAN || type == EsFieldType.GEO_POINT;
+               type == EsFieldType.DATE || type == EsFieldType.DATE_NANOS;
     }
 
     /** Extract value from Points (BKD tree) - used as fallback when doc_values/stored not available */
@@ -441,24 +479,6 @@ public class SourceReconstructor {
                     if (packed.length == 8) {
                         long epochNanos = decodeLongPoint(packed);
                         yield formatDateNanos(epochNanos);
-                    }
-                    yield null;
-                }
-                case BOOLEAN -> {
-                    if (packed.length == 4) {
-                        int value = decodeIntPoint(packed);
-                        yield value == 1;
-                    }
-                    yield null;
-                }
-                case GEO_POINT -> {
-                    // Geo point stored as 2 dimensions, 4 bytes each
-                    if (packed.length == 8) {
-                        int latBits = decodeIntPoint(packed, 0);
-                        int lonBits = decodeIntPoint(packed, 4);
-                        double lat = decodeLatitude(latBits);
-                        double lon = decodeLongitude(lonBits);
-                        yield Map.of("lat", lat, "lon", lon);
                     }
                     yield null;
                 }
