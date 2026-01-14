@@ -57,6 +57,8 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         new FieldTypeConfig("keyword", "keyword", "test_kw", true, VersionRange.ES_5_PLUS),
         // Boolean - ES 2.x+ supports doc_values
         new FieldTypeConfig("boolean", "boolean", true, true, VersionRange.ES_2_PLUS),
+        // Binary - stored as base64 in ES, doc_values not reliably recoverable
+        new FieldTypeConfig("binary", "binary", "dGVzdA==", false, VersionRange.ES_5_PLUS),
         // Integer/Long - work correctly with doc_values
         new FieldTypeConfig("integer", "integer", 42, true, VersionRange.ALL),
         new FieldTypeConfig("long", "long", 9999L, true, VersionRange.ALL)
