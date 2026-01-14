@@ -54,8 +54,8 @@ def call(Map config = [:]) {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         parameters {
-            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/jugal-chauhan/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'jenkins-pipeline-eks-large-migration', description: 'Git branch to use for repository')
+            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
+            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             
             // Snapshot configuration - minimal parameters, bucket name derived from account ID
@@ -79,6 +79,9 @@ def call(Map config = [:]) {
                 choices: ['default', 'large'],
                 description: 'Target cluster size (default: 2x r6g.large, large: 6x r6g.4xlarge with dedicated masters)'
             )
+            
+            // Build options
+            booleanParam(name: 'BUILD_IMAGES', defaultValue: false, description: 'Build container images from source instead of using public images')
             
             // Reuse options
             booleanParam(name: 'REUSE_TARGET_CLUSTER', defaultValue: true, description: 'Reuse existing target cluster (will clear indices instead of destroying)')
@@ -223,6 +226,7 @@ def call(Map config = [:]) {
                                                 [(key): value]
                                             }
                                     
+                                    env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']
                                     env.eksClusterName = exportsMap['MIGRATIONS_EKS_CLUSTER_NAME']
                                     env.clusterSecurityGroup = exportsMap['EKS_CLUSTER_SECURITY_GROUP']
 
@@ -299,6 +303,36 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Build Docker Images') {
+                when {
+                    expression { return params.BUILD_IMAGES }
+                }
+                steps {
+                    timeout(time: 1, unit: 'HOURS') {
+                        script {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    sh "docker run --privileged --rm tonistiigi/binfmt --install all"
+
+                                    def builderExists = sh(
+                                            script: "docker buildx ls | grep -q '^ecr-builder'",
+                                            returnStatus: true
+                                    ) == 0
+
+                                    if (!builderExists) {
+                                        sh "docker buildx create --name ecr-builder --driver docker-container --bootstrap"
+                                    } else {
+                                        sh "docker buildx inspect ecr-builder --bootstrap"
+                                    }
+                                    sh "docker buildx use ecr-builder"
+                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -Pbuilder=ecr-builder"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             stage('Install Helm Chart') {
                 steps {
                     timeout(time: 15, unit: 'MINUTES') {
@@ -306,7 +340,8 @@ def call(Map config = [:]) {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir /home/ec2-user/workspace/${jobName} --use-public-images true --skip-console-exec --stage ${maStageName}"
+                                        def usePublicImages = params.BUILD_IMAGES ? "false" : "true"
+                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir /home/ec2-user/workspace/${jobName} --use-public-images ${usePublicImages} --skip-console-exec --stage ${maStageName}"
                                     }
                                 }
                             }
@@ -326,6 +361,25 @@ def call(Map config = [:]) {
                                       echo "Waiting for migration-console pod to be ready..."
                                       kubectl wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=600s
                                       echo "migration-console pod is ready"
+                                    """
+                                    
+                                    // Copy test files when using public images (they don't have our branch code)
+                                    if (!params.BUILD_IMAGES) {
+                                        sh """
+                                          echo "Copying test files to migration-console (using public images)..."
+                                          kubectl cp ${WORKSPACE}/migrationConsole/lib/integ_test/integ_test/test_cases/snapshot_only_tests.py \
+                                            ma/migration-console-0:/root/lib/integ_test/integ_test/test_cases/snapshot_only_tests.py
+                                          kubectl cp ${WORKSPACE}/migrationConsole/lib/integ_test/integ_test/conftest.py \
+                                            ma/migration-console-0:/root/lib/integ_test/integ_test/conftest.py
+                                          echo "Test files copied"
+                                        """
+                                    }
+                                    
+                                    // Apply the workflow template to the cluster
+                                    sh """
+                                      echo "Applying workflow template..."
+                                      kubectl apply -f ${WORKSPACE}/migrationConsole/lib/integ_test/testWorkflows/fullMigrationImportedClusters.yaml -n ma
+                                      echo "Workflow template applied"
                                     """
                                     
                                     // Derive bucket name from account ID and region
