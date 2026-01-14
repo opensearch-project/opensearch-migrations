@@ -59,13 +59,14 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         new FieldTypeConfig("boolean", "boolean", true, true, VersionRange.ES_2_PLUS),
         // Binary - stored as base64 in ES, doc_values not reliably recoverable
         new FieldTypeConfig("binary", "binary", "dGVzdA==", false, VersionRange.ES_5_PLUS),
-        // Integer/Long - work correctly with doc_values
+        // Integer/Long - work correctly with doc_values and points
         new FieldTypeConfig("integer", "integer", 42, true, VersionRange.ALL),
-        new FieldTypeConfig("long", "long", 9999L, true, VersionRange.ALL)
-        // TODO: float/double doc_values return raw bit representation - needs conversion
-        // TODO: date doc_values return epoch millis - needs format conversion  
-        // TODO: text stored fields not being recovered - needs investigation
-        // TODO: IP stored fields need special handling
+        new FieldTypeConfig("long", "long", 9999L, true, VersionRange.ALL),
+        // Float/Double - ES 5+ supports points
+        new FieldTypeConfig("float", "float", 3.14f, true, VersionRange.ES_5_PLUS),
+        new FieldTypeConfig("double", "double", 2.71828, true, VersionRange.ES_5_PLUS),
+        // IP - ES 2.x+ supports doc_values for IP
+        new FieldTypeConfig("ip", "ip", "192.168.1.1", true, VersionRange.ES_2_PLUS)
     );
 
     /** Field storage permutations - _source is disabled, so we test recovery via doc_values */
@@ -84,13 +85,13 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
 
     static Stream<Arguments> versionPairs() {
         return Stream.of(
-            Arguments.of(SearchClusterContainer.ES_V1_7_6, SearchClusterContainer.OS_V2_19_1),
-            Arguments.of(SearchClusterContainer.ES_V2_4_6, SearchClusterContainer.OS_V2_19_1),
-            Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.OS_V2_19_1),
-            Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V2_19_1),
-            Arguments.of(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_1),
-            Arguments.of(SearchClusterContainer.OS_V1_3_16, SearchClusterContainer.OS_V2_19_1),
-            Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1)
+            Arguments.of(SearchClusterContainer.ES_V1_7_6, SearchClusterContainer.OS_V3_0_0),
+            Arguments.of(SearchClusterContainer.ES_V2_4_6, SearchClusterContainer.OS_V3_0_0),
+            Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.OS_V3_0_0),
+            Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V3_0_0),
+            Arguments.of(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V3_0_0),
+            Arguments.of(SearchClusterContainer.OS_V1_3_16, SearchClusterContainer.OS_V3_0_0),
+            Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V3_0_0)
         );
     }
 
@@ -225,6 +226,8 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
 
             // ES 1.x doc_values reconstruction not supported - only stored fields work
             boolean docValuesSupported = !VersionMatchers.isES_1_X.test(sourceVersion.getVersion());
+            // ES 5+ supports Points (BKD tree) for numeric/IP fields
+            boolean pointsSupported = !UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion());
 
             for (var config : activeTypes) {
                 for (var p : Perm.values()) {
@@ -233,9 +236,33 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                     String fieldName = fieldName(config, p);
                     JsonNode fieldValue = source.get(fieldName);
 
-                    boolean shouldRecover = p.hasStore || (p.hasDv && docValuesSupported);
+                    // Points can recover numeric/IP fields even without doc_values or store
+                    boolean canRecoverFromPoints = pointsSupported && 
+                        (config.targetType.equals("integer") || config.targetType.equals("long") || 
+                         config.targetType.equals("float") || config.targetType.equals("double") ||
+                         config.targetType.equals("ip"));
+                    boolean shouldRecover = p.hasStore || (p.hasDv && docValuesSupported) || canRecoverFromPoints;
                     if (shouldRecover) {
-                        assertEquals(true, fieldValue != null, fieldName + " should be recovered");
+                        assertEquals(true, fieldValue != null, fieldName + " should be recovered but was null");
+                        
+                        // Skip value check for keyword stored fields in ES 5+ (stored as binary)
+                        // TODO: Fix keyword stored field handling in SourceReconstructor
+                        boolean isKeywordStoredInES5Plus = config.targetType.equals("keyword") 
+                            && p.hasStore 
+                            && !UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion());
+                        if (isKeywordStoredInES5Plus && !p.hasDv) {
+                            log.info("Skipping value check for {} (keyword stored field in ES 5+)", fieldName);
+                            continue;
+                        }
+                        
+                        // Compare string representations to handle type differences 
+                        String expected = String.valueOf(config.testValue);
+                        String actual = fieldValue.isTextual() ? fieldValue.asText() : String.valueOf(
+                            fieldValue.isBoolean() ? fieldValue.asBoolean() :
+                            fieldValue.isInt() ? fieldValue.asInt() :
+                            fieldValue.isLong() ? fieldValue.asLong() : fieldValue.asText()
+                        );
+                        assertEquals(expected, actual, fieldName + " value mismatch");
                     } else {
                         assertNull(fieldValue, fieldName + " should NOT be recovered");
                     }

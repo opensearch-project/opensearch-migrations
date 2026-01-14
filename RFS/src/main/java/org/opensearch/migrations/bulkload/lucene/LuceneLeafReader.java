@@ -46,4 +46,11 @@ public interface LuceneLeafReader {
     default Object getSortedNumericValues(int docId, String fieldName) throws IOException { return null; }
     default Object getBinaryValue(int docId, String fieldName) throws IOException { return null; }
 
+    /**
+     * Gets point values for a field at the given document ID.
+     * Used as fallback when doc_values and stored fields are not available.
+     * @return List of byte arrays (packed point values) or null if not available
+     */
+    default java.util.List<byte[]> getPointValues(int docId, String fieldName) throws IOException { return null; }
+
 }

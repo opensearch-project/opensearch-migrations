@@ -16,6 +16,7 @@ import shadow.lucene6.org.apache.lucene.index.BinaryDocValues;
 import shadow.lucene6.org.apache.lucene.index.FieldInfo;
 import shadow.lucene6.org.apache.lucene.index.LeafReader;
 import shadow.lucene6.org.apache.lucene.index.NumericDocValues;
+import shadow.lucene6.org.apache.lucene.index.PointValues;
 import shadow.lucene6.org.apache.lucene.index.SegmentReader;
 import shadow.lucene6.org.apache.lucene.index.SortedDocValues;
 import shadow.lucene6.org.apache.lucene.index.SortedNumericDocValues;
@@ -219,5 +220,46 @@ public class LeafReader6 implements LuceneLeafReader {
 
     public String toString() {
         return wrapped.toString();
+    }
+
+    @Override
+    public List<byte[]> getPointValues(int docId, String fieldName) throws IOException {
+        PointValues pointValues = wrapped.getPointValues();
+        if (pointValues == null) {
+            return null;
+        }
+        
+        // Check if field has points
+        int numDims;
+        try {
+            numDims = pointValues.getNumDimensions(fieldName);
+        } catch (Exception e) {
+            return null;
+        }
+        if (numDims == 0) {
+            return null;
+        }
+        
+        List<byte[]> result = new ArrayList<>();
+        
+        pointValues.intersect(fieldName, new PointValues.IntersectVisitor() {
+            @Override
+            public void visit(int visitDocId) {
+            }
+            
+            @Override
+            public void visit(int visitDocId, byte[] packedValue) {
+                if (visitDocId == docId) {
+                    result.add(packedValue.clone());
+                }
+            }
+            
+            @Override
+            public PointValues.Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
+                return PointValues.Relation.CELL_CROSSES_QUERY;
+            }
+        });
+        
+        return result.isEmpty() ? null : result;
     }
 }

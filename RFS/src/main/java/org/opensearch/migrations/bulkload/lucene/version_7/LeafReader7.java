@@ -16,6 +16,7 @@ import shadow.lucene7.org.apache.lucene.index.FieldInfo;
 import shadow.lucene7.org.apache.lucene.index.FilterCodecReader;
 import shadow.lucene7.org.apache.lucene.index.LeafReader;
 import shadow.lucene7.org.apache.lucene.index.NumericDocValues;
+import shadow.lucene7.org.apache.lucene.index.PointValues;
 import shadow.lucene7.org.apache.lucene.index.SegmentReader;
 import shadow.lucene7.org.apache.lucene.index.SortedDocValues;
 import shadow.lucene7.org.apache.lucene.index.SortedNumericDocValues;
@@ -207,5 +208,35 @@ public class LeafReader7 implements LuceneLeafReader {
 
     public String toString() {
         return wrapped.toString();
+    }
+
+    @Override
+    public List<byte[]> getPointValues(int docId, String fieldName) throws IOException {
+        PointValues pointValues = wrapped.getPointValues(fieldName);
+        if (pointValues == null) {
+            return null;
+        }
+        
+        List<byte[]> result = new ArrayList<>();
+        
+        pointValues.intersect(new PointValues.IntersectVisitor() {
+            @Override
+            public void visit(int visitDocId) {
+            }
+            
+            @Override
+            public void visit(int visitDocId, byte[] packedValue) {
+                if (visitDocId == docId) {
+                    result.add(packedValue.clone());
+                }
+            }
+            
+            @Override
+            public PointValues.Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
+                return PointValues.Relation.CELL_CROSSES_QUERY;
+            }
+        });
+        
+        return result.isEmpty() ? null : result;
     }
 }
