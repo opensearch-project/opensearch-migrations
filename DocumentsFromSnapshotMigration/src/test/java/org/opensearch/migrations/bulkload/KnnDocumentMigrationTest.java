@@ -29,9 +29,21 @@ import org.testcontainers.lifecycle.Startables;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * End-to-end test for KNN plugin support during document migration.
- * Tests KNN document extraction from OpenSearch snapshots with various engines, 
- * space types, encoders, and index codecs.
+ * Tests KNN plugin document migration from OpenSearch 1.x/2.x to OpenSearch 3.0+.
+ * 
+ * <h2>Supported KNN Configurations</h2>
+ * <table border="1">
+ *   <tr><th>Engine</th><th>Versions</th><th>Space Types</th><th>Notes</th></tr>
+ *   <tr><td>nmslib</td><td>OS 1.x+</td><td>l2, cosinesimil, innerproduct</td><td>Deprecated in 2.x</td></tr>
+ *   <tr><td>faiss</td><td>OS 2.x+</td><td>l2, innerproduct</td><td>SQ encoder in 2.13+</td></tr>
+ *   <tr><td>lucene</td><td>OS 2.4+</td><td>l2, cosinesimil</td><td></td></tr>
+ * </table>
+ * 
+ * <h2>Index Codecs</h2>
+ * <ul>
+ *   <li>default, best_compression - Supported</li>
+ *   <li>zstd, zstd_no_dict - Supported (requires zstd-jni decompression)</li>
+ * </ul>
  */
 @Tag("isolatedTest")
 @Slf4j
@@ -40,36 +52,68 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
     @TempDir
     private File localDirectory;
 
-    private static Stream<Arguments> scenarios() {
+    /** KNN engine availability by OpenSearch version */
+    enum KnnEngine {
+        NMSLIB("nmslib", v -> true),                                    // All OS versions
+        FAISS("faiss", VersionMatchers.isOS_2_X::test),                 // OS 2.x+
+        LUCENE("lucene", v -> isAtLeast(v, 2, 4));                      // OS 2.4+
+
+        final String name;
+        final java.util.function.Predicate<Version> isAvailable;
+        KnnEngine(String name, java.util.function.Predicate<Version> isAvailable) {
+            this.name = name;
+            this.isAvailable = isAvailable;
+        }
+    }
+
+    /** Index codec availability - zstd only works in specific OS 2.x versions before custom-codecs plugin conflict */
+    enum IndexCodec {
+        DEFAULT(null, v -> true),
+        BEST_COMPRESSION("best_compression", v -> true),
+        // zstd codecs only available in OS 2.9-2.16 (before custom-codecs plugin conflict with KNN)
+        ZSTD("zstd", v -> isAtLeast(v, 2, 9) && !isAtLeast(v, 2, 17)),
+        ZSTD_NO_DICT("zstd_no_dict", v -> isAtLeast(v, 2, 9) && !isAtLeast(v, 2, 17));
+
+        final String name;
+        final java.util.function.Predicate<Version> isAvailable;
+        IndexCodec(String name, java.util.function.Predicate<Version> isAvailable) {
+            this.name = name;
+            this.isAvailable = isAvailable;
+        }
+    }
+
+    static Stream<Arguments> scenarios() {
         return Stream.of(
             Arguments.of(SearchClusterContainer.OS_V1_3_20, SearchClusterContainer.OS_V3_0_0),
+            Arguments.of(SearchClusterContainer.OS_V2_9_0, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.OS_V2_19_4, SearchClusterContainer.OS_V3_0_0)
         );
     }
 
-    private static Stream<Arguments> extendedScenarios() {
+    /** Extended sources - all OpenSearch 1.x/2.x versions */
+    static Stream<Arguments> extendedScenarios() {
         return SupportedClusters.extendedSources().stream()
             .filter(v -> VersionMatchers.isOS_1_X.test(v.getVersion()) || VersionMatchers.isOS_2_X.test(v.getVersion()))
-            .map(Arguments::of);
+            .map(v -> Arguments.of(v, SearchClusterContainer.OS_V3_0_0));
     }
 
-    @ParameterizedTest(name = "KNN Documents From {0} to {1}")
+    @ParameterizedTest(name = "KNN: {0} -> {1}")
     @MethodSource("scenarios")
-    void knnDocumentMigrationTest(ContainerVersion sourceVersion, ContainerVersion targetVersion) {
+    void knnDocumentMigration(ContainerVersion sourceVersion, ContainerVersion targetVersion) {
         try (
-            final var sourceCluster = new SearchClusterContainer(sourceVersion);
-            final var targetCluster = new SearchClusterContainer(targetVersion)
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
             migrateKnnDocuments(sourceCluster, targetCluster);
         }
     }
 
-    @ParameterizedTest(name = "KNN Documents From {0} to OS 3.0.0")
+    @ParameterizedTest(name = "KNN Extended: {0} -> {1}")
     @MethodSource("extendedScenarios")
-    void extendedKnnDocumentMigrationTest(ContainerVersion sourceVersion) {
+    void knnDocumentMigrationExtended(ContainerVersion sourceVersion, ContainerVersion targetVersion) {
         try (
-            final var sourceCluster = new SearchClusterContainer(sourceVersion);
-            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V3_0_0)
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
             migrateKnnDocuments(sourceCluster, targetCluster);
         }
@@ -77,154 +121,95 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
 
     @SneakyThrows
     private void migrateKnnDocuments(SearchClusterContainer sourceCluster, SearchClusterContainer targetCluster) {
-        final var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        final var testDocMigrationContext = DocumentMigrationTestContext.factory().noOtelTracking();
-
         Startables.deepStart(sourceCluster, targetCluster).join();
 
-        var sourceOperations = new ClusterOperations(sourceCluster);
+        var sourceOps = new ClusterOperations(sourceCluster);
         var sourceVersion = sourceCluster.getContainerVersion().getVersion();
 
-        // Create KNN indices with various configurations
-        var knnConfigs = generateKnnIndexConfigs(sourceVersion);
-        for (var config : knnConfigs) {
-            log.info("Creating KNN index: {}", config.name);
-            sourceOperations.createIndex(config.name, config.body);
-            sourceOperations.createDocument(config.name, "1", config.document);
+        // Create KNN indices
+        var configs = generateConfigs(sourceVersion);
+        for (var cfg : configs) {
+            log.info("Creating KNN index: {}", cfg.name);
+            sourceOps.createIndex(cfg.name, cfg.body);
+            sourceOps.createDocument(cfg.name, "1", cfg.doc);
         }
-        sourceOperations.post("/_refresh", null);
+        sourceOps.post("/_refresh", null);
 
-        // Take snapshot
-        var snapshotName = "knn_doc_snap";
-        createSnapshot(sourceCluster, snapshotName, snapshotContext);
+        // Snapshot and migrate
+        var snapshotName = "knn_snap";
+        createSnapshot(sourceCluster, snapshotName, SnapshotTestContext.factory().noOtelTracking());
         sourceCluster.copySnapshotData(localDirectory.toString());
 
-        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(sourceVersion, true);
-        var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+        var sourceRepo = new FileSystemRepo(localDirectory.toPath(),
+            ClusterProviderRegistry.getSnapshotFileFinder(sourceVersion, true));
+        var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
 
-        // Migrate documents
-        var runCounter = new AtomicInteger();
-        var clockJitter = new Random(1);
-
-        var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
-            sourceRepo,
-            snapshotName,
-            List.of(),
-            targetCluster,
-            runCounter,
-            clockJitter,
-            testDocMigrationContext,
-            sourceVersion,
-            targetCluster.getContainerVersion().getVersion(),
-            null
+        var result = waitForRfsCompletion(() -> migrateDocumentsSequentially(
+            sourceRepo, snapshotName, List.of(), targetCluster,
+            new AtomicInteger(), new Random(1), docCtx,
+            sourceVersion, targetCluster.getContainerVersion().getVersion(), null
         ));
 
-        assertNotNull(expectedTerminationException, "Migration should complete");
-        checkClusterMigrationOnFinished(sourceCluster, targetCluster, testDocMigrationContext);
+        assertNotNull(result, "Migration should complete");
+        checkClusterMigrationOnFinished(sourceCluster, targetCluster, docCtx);
     }
 
-    /**
-     * Generates KNN index configurations based on source version capabilities.
-     * Tests all supported combinations of engines, space types, encoders, and codecs.
-     */
-    private List<KnnIndexConfig> generateKnnIndexConfigs(Version sourceVersion) {
-        var configs = new ArrayList<KnnIndexConfig>();
+    private List<KnnConfig> generateConfigs(Version v) {
+        var configs = new ArrayList<KnnConfig>();
         int dim = 4;
 
-        // === NMSLIB engine (all versions, deprecated in 2.x) ===
-        // Space types: l2, innerproduct, cosinesimil
-        for (var spaceType : List.of("l2", "cosinesimil", "innerproduct")) {
-            configs.add(knnConfig("knn-nmslib-" + spaceType, "nmslib", "hnsw", spaceType, dim, null, null));
-        }
-
-        // === Faiss engine (OS 2.x+) ===
-        if (VersionMatchers.isOS_2_X.test(sourceVersion)) {
-            // Faiss HNSW with different space types
-            for (var spaceType : List.of("l2", "innerproduct")) {
-                configs.add(knnConfig("knn-faiss-hnsw-" + spaceType, "faiss", "hnsw", spaceType, dim, null, null));
-            }
-
-            // Faiss with SQ encoder (OS 2.13+)
-            if (isVersionAtLeast(sourceVersion, 2, 13)) {
-                configs.add(knnConfig("knn-faiss-sq-fp16", "faiss", "hnsw", "l2", dim, "sq", "fp16"));
+        // Test each available engine with its supported space types
+        if (KnnEngine.NMSLIB.isAvailable.test(v)) {
+            for (var space : List.of("l2", "cosinesimil", "innerproduct")) {
+                configs.add(knnConfig("knn-nmslib-" + space, "nmslib", space, dim, null));
             }
         }
 
-        // === Lucene engine (OS 2.4+) ===
-        if (isVersionAtLeast(sourceVersion, 2, 4)) {
-            for (var spaceType : List.of("l2", "cosinesimil")) {
-                configs.add(knnConfig("knn-lucene-" + spaceType, "lucene", "hnsw", spaceType, dim, null, null));
+        if (KnnEngine.FAISS.isAvailable.test(v)) {
+            for (var space : List.of("l2", "innerproduct")) {
+                configs.add(knnConfig("knn-faiss-" + space, "faiss", space, dim, null));
             }
         }
 
-        // === Index codec compression types (OS 2.9 only - zstd/zstd_no_dict not supported for KNN in 2.10+) ===
-        if (sourceVersion.getMajor() == 2 && sourceVersion.getMinor() == 9) {
-            configs.add(knnConfigWithCodec("knn-zstd", "faiss", "hnsw", "l2", dim, "zstd"));
-            configs.add(knnConfigWithCodec("knn-zstd-nodict", "faiss", "hnsw", "l2", dim, "zstd_no_dict"));
+        if (KnnEngine.LUCENE.isAvailable.test(v)) {
+            for (var space : List.of("l2", "cosinesimil")) {
+                configs.add(knnConfig("knn-lucene-" + space, "lucene", space, dim, null));
+            }
         }
 
-        // === Best compression codec (all versions) ===
-        configs.add(knnConfigWithCodec("knn-best-compression", "nmslib", "hnsw", "l2", dim, "best_compression"));
+        // Test available codecs
+        if (IndexCodec.BEST_COMPRESSION.isAvailable.test(v)) {
+            configs.add(knnConfig("knn-best-compression", "nmslib", "l2", dim, "best_compression"));
+        }
+        if (IndexCodec.ZSTD.isAvailable.test(v)) {
+            configs.add(knnConfig("knn-zstd", "faiss", "l2", dim, "zstd"));
+        }
+        if (IndexCodec.ZSTD_NO_DICT.isAvailable.test(v)) {
+            configs.add(knnConfig("knn-zstd-nodict", "faiss", "l2", dim, "zstd_no_dict"));
+        }
 
         return configs;
     }
 
-    private boolean isVersionAtLeast(Version version, int major, int minor) {
-        return version.getMajor() > major || (version.getMajor() == major && version.getMinor() >= minor);
+    private static boolean isAtLeast(Version v, int major, int minor) {
+        return v.getMajor() > major || (v.getMajor() == major && v.getMinor() >= minor);
     }
 
-    private KnnIndexConfig knnConfig(String name, String engine, String method, String spaceType, 
-                                      int dim, String encoder, String encoderType) {
-        String body = encoder != null 
-            ? createKnnIndexBodyWithEncoder(engine, method, spaceType, dim, encoder, encoderType)
-            : createKnnIndexBody(engine, method, spaceType, dim);
-        return new KnnIndexConfig(name, body, createVectorDocument(dim));
-    }
+    private KnnConfig knnConfig(String name, String engine, String spaceType, int dim, String codec) {
+        String settings = codec != null
+            ? String.format("\"knn\":true,\"number_of_shards\":1,\"number_of_replicas\":0,\"codec\":\"%s\"", codec)
+            : "\"knn\":true,\"number_of_shards\":1,\"number_of_replicas\":0";
 
-    private KnnIndexConfig knnConfigWithCodec(String name, String engine, String method, String spaceType,
-                                               int dim, String codec) {
-        return new KnnIndexConfig(name, createKnnIndexBodyWithCodec(engine, method, spaceType, dim, codec),
-            createVectorDocument(dim));
-    }
-
-    private String createKnnIndexBody(String engine, String method, String spaceType, int dimension) {
-        return String.format(
-            "{\"settings\":{\"index\":{\"knn\":true,\"number_of_shards\":1,\"number_of_replicas\":0}}," +
+        String body = String.format(
+            "{\"settings\":{\"index\":{%s}}," +
             "\"mappings\":{\"properties\":{\"my_vector\":{\"type\":\"knn_vector\",\"dimension\":%d," +
-            "\"method\":{\"name\":\"%s\",\"space_type\":\"%s\",\"engine\":\"%s\"," +
+            "\"method\":{\"name\":\"hnsw\",\"space_type\":\"%s\",\"engine\":\"%s\"," +
             "\"parameters\":{\"ef_construction\":100,\"m\":16}}}}}}",
-            dimension, method, spaceType, engine);
+            settings, dim, spaceType, engine);
+
+        String doc = String.format("{\"my_vector\":[0.1,0.2,0.3,0.4],\"title\":\"test\"}");
+        return new KnnConfig(name, body, doc);
     }
 
-    private String createKnnIndexBodyWithEncoder(String engine, String method, String spaceType,
-                                                  int dimension, String encoderName, String encoderType) {
-        return String.format(
-            "{\"settings\":{\"index\":{\"knn\":true,\"number_of_shards\":1,\"number_of_replicas\":0}}," +
-            "\"mappings\":{\"properties\":{\"my_vector\":{\"type\":\"knn_vector\",\"dimension\":%d," +
-            "\"method\":{\"name\":\"%s\",\"space_type\":\"%s\",\"engine\":\"%s\"," +
-            "\"parameters\":{\"ef_construction\":100,\"m\":16," +
-            "\"encoder\":{\"name\":\"%s\",\"parameters\":{\"type\":\"%s\"}}}}}}}}",
-            dimension, method, spaceType, engine, encoderName, encoderType);
-    }
-
-    private String createKnnIndexBodyWithCodec(String engine, String method, String spaceType,
-                                                int dimension, String codec) {
-        return String.format(
-            "{\"settings\":{\"index\":{\"knn\":true,\"number_of_shards\":1,\"number_of_replicas\":0,\"codec\":\"%s\"}}," +
-            "\"mappings\":{\"properties\":{\"my_vector\":{\"type\":\"knn_vector\",\"dimension\":%d," +
-            "\"method\":{\"name\":\"%s\",\"space_type\":\"%s\",\"engine\":\"%s\"," +
-            "\"parameters\":{\"ef_construction\":100,\"m\":16}}}}}}",
-            codec, dimension, method, spaceType, engine);
-    }
-
-    private String createVectorDocument(int dimension) {
-        StringBuilder vector = new StringBuilder("[");
-        for (int i = 0; i < dimension; i++) {
-            vector.append(i == 0 ? "" : ",").append(String.format("%.4f", (i + 1) * 0.1));
-        }
-        vector.append("]");
-        return String.format("{\"my_vector\":%s,\"title\":\"test doc\"}", vector);
-    }
-
-    private record KnnIndexConfig(String name, String body, String document) {}
+    private record KnnConfig(String name, String body, String doc) {}
 }

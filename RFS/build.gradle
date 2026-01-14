@@ -120,6 +120,7 @@ dependencies {
     lucene9 libs.lucene.v9.analysis.common
     lucene9 libs.lucene.v9.backward.codecs
     lucene9 libs.lucene.v9.suggest
+    lucene9 libs.zstd.jni
 
     implementation shadowLucene5.outputs.files
     implementation shadowLucene6.outputs.files
