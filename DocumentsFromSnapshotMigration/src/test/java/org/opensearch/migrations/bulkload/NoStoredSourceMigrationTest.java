@@ -3,11 +3,13 @@ package org.opensearch.migrations.bulkload;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.UnboundVersionMatchers;
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
@@ -39,10 +41,13 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         ES_1_TO_4,    // ES 1.x - 4.x (string type)
         ES_2_PLUS,    // ES 2.x+ (boolean/ip/geo_point doc_values support)
         ES_5_PLUS,    // ES 5.x+ (text/keyword)
+        ES_7_PLUS,    // ES 7.x+ (date_nanos)
+        OS_2_8_PLUS,  // OpenSearch 2.8+ (unsigned_long)
         ALL           // All versions
     }
 
     record FieldTypeConfig(
+        String fieldName,     // Unique field name prefix
         String sourceType,
         String targetType,
         Object testValue,
@@ -52,21 +57,29 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
 
     private static final List<FieldTypeConfig> FIELD_TYPES = List.of(
         // String (not_analyzed) for ES 1.x-4.x, maps to keyword on target
-        new FieldTypeConfig("string", "keyword", "test_str", true, VersionRange.ES_1_TO_4),
+        new FieldTypeConfig("string", "string", "keyword", "test_str", true, VersionRange.ES_1_TO_4),
         // Keyword - ES 5.x+ only
-        new FieldTypeConfig("keyword", "keyword", "test_kw", true, VersionRange.ES_5_PLUS),
+        new FieldTypeConfig("keyword", "keyword", "keyword", "test_kw", true, VersionRange.ES_5_PLUS),
         // Boolean - ES 2.x+ supports doc_values
-        new FieldTypeConfig("boolean", "boolean", true, true, VersionRange.ES_2_PLUS),
-        // Binary - stored as base64 in ES, doc_values not reliably recoverable
-        new FieldTypeConfig("binary", "binary", "dGVzdA==", false, VersionRange.ES_5_PLUS),
+        new FieldTypeConfig("boolean", "boolean", "boolean", true, true, VersionRange.ES_2_PLUS),
+        // Binary - stored as base64 in ES, doc_values not supported
+        new FieldTypeConfig("binary", "binary", "binary", "dGVzdA==", false, VersionRange.ES_5_PLUS),
         // Integer/Long - work correctly with doc_values and points
-        new FieldTypeConfig("integer", "integer", 42, true, VersionRange.ALL),
-        new FieldTypeConfig("long", "long", 9999L, true, VersionRange.ALL),
+        new FieldTypeConfig("integer", "integer", "integer", 42, true, VersionRange.ALL),
+        new FieldTypeConfig("long", "long", "long", 9999L, true, VersionRange.ALL),
         // Float/Double - ES 5+ supports points
-        new FieldTypeConfig("float", "float", 3.14f, true, VersionRange.ES_5_PLUS),
-        new FieldTypeConfig("double", "double", 2.71828, true, VersionRange.ES_5_PLUS),
-        // IP - ES 2.x+ supports doc_values for IP
-        new FieldTypeConfig("ip", "ip", "192.168.1.1", true, VersionRange.ES_2_PLUS)
+        new FieldTypeConfig("float", "float", "float", 3.14f, true, VersionRange.ES_5_PLUS),
+        new FieldTypeConfig("double", "double", "double", 2.71828, true, VersionRange.ES_5_PLUS),
+        // IP - ES 2.x+ supports doc_values for IP (test IPv4)
+        new FieldTypeConfig("ip", "ip", "ip", "192.168.1.1", true, VersionRange.ES_2_PLUS),
+        // IP with IPv6 - ES 5.x+ (test full IPv6 address)
+        new FieldTypeConfig("ipv6", "ip", "ip", "2001:db8:85a3::8a2e:370:7334", true, VersionRange.ES_5_PLUS)
+        // TODO: Add these once reconstruction is fixed:
+        // - date (needs proper epoch millis -> ISO conversion in doc_values path)
+        // - scaled_float (needs scaling_factor from mapping)
+        // - date_nanos (needs proper epoch nanos -> ISO conversion)
+        // - geo_point (needs proper lat/lon reconstruction)
+        // - unsigned_long (OS 2.8+ only)
     );
 
     /** Field storage permutations - _source is disabled, so we test recovery via doc_values */
@@ -104,6 +117,8 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             case ES_1_TO_4 -> UnboundVersionMatchers.isBelowES_5_X.test(v);
             case ES_2_PLUS -> !VersionMatchers.isES_1_X.test(v);
             case ES_5_PLUS -> !UnboundVersionMatchers.isBelowES_5_X.test(v);
+            case ES_7_PLUS -> !UnboundVersionMatchers.isBelowES_7_X.test(v);
+            case OS_2_8_PLUS -> VersionMatchers.anyOS.test(v) && (v.getMajor() > 2 || (v.getMajor() == 2 && v.getMinor() >= 8));
             case ALL -> true;
         };
     }
@@ -118,7 +133,16 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
     }
 
     private static String fieldName(FieldTypeConfig cfg, Perm p) {
-        return cfg.targetType + "_" + p.name().toLowerCase();
+        return cfg.fieldName + "_" + p.name().toLowerCase();
+    }
+
+    /** Normalize IPv6 address to full form for comparison */
+    private static String normalizeIpv6(String ip) {
+        try {
+            return java.net.InetAddress.getByName(ip).getHostAddress();
+        } catch (Exception e) {
+            return ip;
+        }
     }
 
     @ParameterizedTest(name = "{0} -> {1}")
@@ -152,13 +176,25 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                     props.append("\"").append(fieldName).append("\": {\"type\": \"").append(config.sourceType).append("\"");
                     // String type in ES 1.x/2.x needs index: not_analyzed to behave like keyword
                     if (config.sourceType.equals("string")) props.append(", \"index\": \"not_analyzed\"");
+                    // scaled_float requires scaling_factor
+                    if (config.sourceType.equals("scaled_float")) props.append(", \"scaling_factor\": 100");
+                    // date_epoch uses epoch_millis format
+                    if (config.fieldName.equals("date_epoch")) props.append(", \"format\": \"epoch_millis\"");
                     if (!p.hasDv && config.supportsDocValues) props.append(", \"doc_values\": false");
                     if (p.hasStore) props.append(", \"store\": true");
                     props.append("},\n");
 
-                    String jsonValue = config.testValue instanceof String 
-                        ? "\"" + config.testValue + "\"" 
-                        : config.testValue.toString();
+                    String jsonValue;
+                    if (config.testValue instanceof String) {
+                        jsonValue = "\"" + config.testValue + "\"";
+                    } else if (config.testValue instanceof Map) {
+                        // geo_point as {"lat": x, "lon": y}
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> map = (Map<String, Object>) config.testValue;
+                        jsonValue = "{\"lat\":" + map.get("lat") + ",\"lon\":" + map.get("lon") + "}";
+                    } else {
+                        jsonValue = config.testValue.toString();
+                    }
                     docFields.append("\"").append(fieldName).append("\": ").append(jsonValue).append(",\n");
                 }
             }
@@ -197,7 +233,9 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                 for (var p : Perm.values()) {
                     if (!isValidCombo(config, p)) continue;
                     String fieldName = fieldName(config, p);
-                    targetProps.append("\"").append(fieldName).append("\": {\"type\": \"").append(config.targetType).append("\"},\n");
+                    targetProps.append("\"").append(fieldName).append("\": {\"type\": \"").append(config.targetType).append("\"");
+                    if (config.targetType.equals("scaled_float")) targetProps.append(", \"scaling_factor\": 100");
+                    targetProps.append("},\n");
                 }
             }
             String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}," +
@@ -262,6 +300,11 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                             fieldValue.isInt() ? fieldValue.asInt() :
                             fieldValue.isLong() ? fieldValue.asLong() : fieldValue.asText()
                         );
+                        // Normalize IPv6 addresses for comparison (:: vs :0:0:)
+                        if (config.sourceType.equals("ip") && expected.contains(":")) {
+                            expected = normalizeIpv6(expected);
+                            actual = normalizeIpv6(actual);
+                        }
                         assertEquals(expected, actual, fieldName + " value mismatch");
                     } else {
                         assertNull(fieldValue, fieldName + " should NOT be recovered");
