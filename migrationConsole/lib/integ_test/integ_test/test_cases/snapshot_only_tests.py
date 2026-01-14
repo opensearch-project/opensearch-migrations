@@ -53,14 +53,19 @@ class Test0010ExternalSnapshotMigration(MATestBase):
     def import_existing_clusters(self):
         """Override - only import target cluster, no source needed."""
         if self.reuse_clusters:
-            target_cluster = self.argo_service.get_cluster_from_configmap(
-                f"target-{self.target_version.full_cluster_type}-"
-                f"{self.target_version.major_version}-{self.target_version.minor_version}"
-            )
+            configmap_prefix = (f"target-{self.target_version.full_cluster_type}-"
+                                f"{self.target_version.major_version}-{self.target_version.minor_version}")
+            logger.info(f"Looking for target cluster configmap with prefix: {configmap_prefix}")
+            target_cluster = self.argo_service.get_cluster_from_configmap(configmap_prefix)
             if target_cluster:
+                logger.info(f"Found target cluster: {target_cluster.endpoint}")
                 self.imported_clusters = True
                 self.target_cluster = target_cluster
                 self.source_cluster = None
+            else:
+                raise ValueError(f"BYOS test requires existing target cluster. "
+                                 f"No configmap found with prefix '{configmap_prefix}'. "
+                                 f"Ensure the target cluster configmap exists in namespace 'ma'.")
 
     def prepare_workflow_snapshot_and_migration_config(self):
         """Configure for external snapshot - use externallyManagedSnapshot to skip snapshot creation."""
