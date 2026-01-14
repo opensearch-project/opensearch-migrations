@@ -82,10 +82,6 @@ def call(Map config = [:]) {
             
             // Build options
             booleanParam(name: 'BUILD_IMAGES', defaultValue: false, description: 'Build container images from source instead of using public images')
-            
-            // Reuse options
-            booleanParam(name: 'REUSE_TARGET_CLUSTER', defaultValue: true, description: 'Reuse existing target cluster (will clear indices instead of destroying)')
-            booleanParam(name: 'SKIP_TARGET_CLEANUP', defaultValue: true, description: 'Skip target cluster cleanup after test (for debugging or reuse)')
         }
 
         options {
@@ -135,9 +131,6 @@ def call(Map config = [:]) {
             }
 
             stage('Deploy Target Cluster') {
-                when {
-                    expression { return !params.REUSE_TARGET_CLUSTER }
-                }
                 steps {
                     timeout(time: 60, unit: 'MINUTES') {
                         dir('test') {
@@ -149,21 +142,6 @@ def call(Map config = [:]) {
                                     targetVer: params.TARGET_VERSION,
                                     sizeConfig: sizeConfig
                                 )
-                            }
-                        }
-                    }
-                }
-            }
-
-            stage('Reuse Target Cluster') {
-                when {
-                    expression { return params.REUSE_TARGET_CLUSTER }
-                }
-                steps {
-                    timeout(time: 10, unit: 'MINUTES') {
-                        dir('test') {
-                            script {
-                                reuseTargetCluster(stage: "${maStageName}")
                             }
                         }
                     }
@@ -405,28 +383,6 @@ ENVEOF
                     }
                 }
             }
-
-            stage('Clear Target Indices') {
-                when {
-                    expression { return params.REUSE_TARGET_CLUSTER || params.SKIP_TARGET_CLEANUP }
-                }
-                steps {
-                    timeout(time: 5, unit: 'MINUTES') {
-                        script {
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 600, roleSessionName: 'jenkins-session') {
-                                    sh """
-                                      echo y | kubectl exec migration-console-0 -n ma -- bash -c '
-                                        source /.venv/bin/activate && \
-                                        console clusters clear-indices --cluster target
-                                      '
-                                    """
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
 
         post {
@@ -467,12 +423,8 @@ ENVEOF
                                     // Destroy MA CDK stack
                                     sh "cd $WORKSPACE/deployment/migration-assistant-solution && cdk destroy Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} --force --concurrency 3 || true"
                                     
-                                    // Conditionally destroy target cluster
-                                    if (!params.SKIP_TARGET_CLEANUP && !params.REUSE_TARGET_CLUSTER) {
-                                        sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json || true"
-                                    } else {
-                                        echo "Skipping target cluster cleanup (REUSE_TARGET_CLUSTER=${params.REUSE_TARGET_CLUSTER}, SKIP_TARGET_CLEANUP=${params.SKIP_TARGET_CLEANUP})"
-                                    }
+                                    // Destroy target cluster
+                                    sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json || true"
                                 }
                             }
                         }
@@ -521,75 +473,4 @@ def deployTargetClusterOnly(Map config) {
     def rawJsonFile = readFile "tmp/cluster-details-${config.stage}.json"
     echo "Cluster details JSON:\n${rawJsonFile}"
     env.clusterDetailsJson = rawJsonFile
-}
-
-/**
- * Reuse existing target cluster - retrieve details from existing CloudFormation stack
- */
-def reuseTargetCluster(Map config) {
-    withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-        withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 1200, roleSessionName: 'jenkins-session') {
-            // Find existing target cluster stack
-            def stacks = sh(
-                script: """
-                  aws cloudformation list-stacks \
-                    --query "StackSummaries[?StackStatus!='DELETE_COMPLETE' && StackStatus!='DELETE_IN_PROGRESS' && contains(StackName, 'OpenSearchDomain-target-${config.stage}')].StackName" \
-                    --output text
-                """,
-                returnStdout: true
-            ).trim()
-
-            if (!stacks) {
-                error("No existing target cluster found for stage ${config.stage}. Cannot reuse.")
-            }
-
-            def stackName = stacks.split('\n')[0].trim()
-            echo "Found existing target cluster stack: ${stackName}"
-
-            // Get cluster details
-            def outputs = sh(
-                script: """
-                  aws cloudformation describe-stacks --stack-name ${stackName} \
-                    --query "Stacks[0].Outputs" --output json
-                """,
-                returnStdout: true
-            ).trim()
-
-            def outputsJson = readJSON text: outputs
-            def endpoint = "https://" + outputsJson.find { it.OutputKey =~ /^ClusterEndpoint/ }?.OutputValue
-            def securityGroupId = outputsJson.find { it.OutputKey =~ /^ClusterAccessSecurityGroupId/ }?.OutputValue
-            def subnets = outputsJson.find { it.OutputKey =~ /^ClusterSubnets/ }?.OutputValue
-
-            // Get VPC ID from network stack
-            def networkStack = sh(
-                script: """
-                  aws cloudformation list-stacks \
-                    --query "StackSummaries[?StackStatus!='DELETE_COMPLETE' && contains(StackName, 'NetworkInfra-${config.stage}')].StackName" \
-                    --output text | head -1
-                """,
-                returnStdout: true
-            ).trim()
-
-            def vpcId = sh(
-                script: """
-                  aws cloudformation describe-stacks --stack-name ${networkStack} \
-                    --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue" \
-                    --output text
-                """,
-                returnStdout: true
-            ).trim()
-
-            def clusterDetails = [
-                target: [
-                    vpcId: vpcId,
-                    endpoint: endpoint,
-                    securityGroupId: securityGroupId,
-                    subnetIds: subnets
-                ]
-            ]
-
-            env.clusterDetailsJson = JsonOutput.toJson(clusterDetails)
-            echo "Reusing cluster details:\n${env.clusterDetailsJson}"
-        }
-    }
 }
