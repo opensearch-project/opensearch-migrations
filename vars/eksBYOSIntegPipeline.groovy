@@ -314,16 +314,9 @@ def call(Map config = [:]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                     sh "docker run --privileged --rm tonistiigi/binfmt --install all"
 
-                                    def builderExists = sh(
-                                            script: "docker buildx ls | grep -q '^ecr-builder'",
-                                            returnStatus: true
-                                    ) == 0
-
-                                    if (!builderExists) {
-                                        sh "docker buildx create --name ecr-builder --driver docker-container --bootstrap"
-                                    } else {
-                                        sh "docker buildx inspect ecr-builder --bootstrap"
-                                    }
+                                    // Remove and recreate builder to ensure fresh credentials are used
+                                    sh "docker buildx rm ecr-builder || true"
+                                    sh "docker buildx create --name ecr-builder --driver docker-container --bootstrap"
                                     sh "docker buildx use ecr-builder"
                                     sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -Pbuilder=ecr-builder"
                                 }
