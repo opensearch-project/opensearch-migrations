@@ -184,6 +184,32 @@ class OpenSearchClientFactoryTest {
     }
 
     @Test
+    void determineVersion_serverless_skipsCompressionCheckAndDefaultsToEnabled() {
+        var versionResponse = new HttpResponse(404, "Not Found", Map.of(), "");
+        when(restClient.getAsync("", null)).thenReturn(Mono.just(versionResponse));
+
+        openSearchClientFactory.determineVersionAndCreate();
+
+        // Should default to compression enabled without calling _cluster/settings
+        assertEquals(CompressionMode.GZIP_BODY_COMPRESSION, openSearchClientFactory.getCompressionMode());
+        verify(restClient, times(1)).getAsync("", null);
+        verifyNoMoreInteractions(restClient);
+    }
+
+    @Test
+    void determineVersion_serverless_respectsDisableCompressionFlag() {
+        when(connectionContext.isDisableCompression()).thenReturn(true);
+        var versionResponse = new HttpResponse(404, "Not Found", Map.of(), "");
+        when(restClient.getAsync("", null)).thenReturn(Mono.just(versionResponse));
+
+        openSearchClientFactory.determineVersionAndCreate();
+
+        assertEquals(CompressionMode.UNCOMPRESSED, openSearchClientFactory.getCompressionMode());
+        verify(restClient, times(1)).getAsync("", null);
+        verifyNoMoreInteractions(restClient);
+    }
+
+    @Test
     void testCheckCompatibilityModeFromResponse() {
         Function<Boolean, JsonNode> createCompatibilitySection = (Boolean value) ->
             OBJECT_MAPPER.createObjectNode()
