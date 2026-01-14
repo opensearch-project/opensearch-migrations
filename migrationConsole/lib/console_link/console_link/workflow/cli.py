@@ -28,8 +28,12 @@ def workflow_cli(ctx, verbose):
         click.echo(workflow_cli.get_help(ctx))
         ctx.exit(ExitCode.INVALID_INPUT.value)
 
-    # Configure logging
-    logging.basicConfig(level=logging.WARN - (10 * verbose))
+    # Configure logging - only if no handlers exist to avoid issues with Click's CliRunner in tests
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        logging.basicConfig(level=logging.WARN - (10 * verbose))
+    else:
+        root_logger.setLevel(logging.WARN - (10 * verbose))
     logger.info(f"Logging set to {logging.getLevelName(logger.getEffectiveLevel())}")
 
     # Initialize ctx.obj as a dictionary before assigning to it

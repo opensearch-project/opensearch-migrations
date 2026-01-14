@@ -18,30 +18,33 @@ from ..tui.manage_injections import make_argo_service, make_k8s_pod_scraper, Wai
 from ..tui.workflow_manage_app import WorkflowTreeApp
 
 
+logger = logging.getLogger(__name__)
+
+
 def log_mem(context: str):
     process = psutil.Process(os.getpid())
     mem = process.memory_info().rss / 1024 / 1024
     logger.info(f"MEMORY [{context}]: {mem:.2f} MB")
 
 
-# --- Logging Configuration ---
-log_dir = os.path.join(tempfile.gettempdir(), "workflow_manage")
-os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, f"manage_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+def _configure_file_logging():
+    """Configure logging to redirect to file only when manage command runs."""
+    log_dir = os.path.join(tempfile.gettempdir(), "workflow_manage")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"manage_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
 
-file_handler = logging.FileHandler(log_file)
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - [%(threadName)s] - %(name)s - %(message)s'))
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - [%(threadName)s] - %(name)s - %(message)s'))
 
-# Redirect ALL logging to file
-root_logger = logging.getLogger()
-root_logger.addHandler(file_handler)
-root_logger.setLevel(logging.INFO)
-# Remove any existing console handlers
-for handler in root_logger.handlers[:]:
-    if isinstance(handler, logging.StreamHandler) and handler.stream in (sys.stdout, sys.stderr):
-        root_logger.removeHandler(handler)
-
-logger = logging.getLogger(__name__)
+    root_logger = logging.getLogger()
+    root_logger.addHandler(file_handler)
+    root_logger.setLevel(logging.INFO)
+    
+    # Disable console handlers by setting their level to CRITICAL+1 (effectively silencing them)
+    # This avoids closing streams which breaks Click's CliRunner in tests
+    for handler in root_logger.handlers:
+        if isinstance(handler, logging.StreamHandler) and handler.stream in (sys.stdout, sys.stderr):
+            handler.setLevel(logging.CRITICAL + 1)
 
 
 # --- Entrypoint ---
@@ -58,6 +61,7 @@ logger = logging.getLogger(__name__)
 @click.option('--token')
 @click.pass_context
 def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token):
+    _configure_file_logging()  # Configure logging when command actually runs
     try:
         service = WorkflowService()
         if not workflow_name:
