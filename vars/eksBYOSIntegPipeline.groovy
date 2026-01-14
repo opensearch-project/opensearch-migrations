@@ -54,8 +54,8 @@ def call(Map config = [:]) {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         parameters {
-            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/jugal-chauhan/opensearch-migrations.git', description: 'Git repository url')
+            string(name: 'GIT_BRANCH', defaultValue: 'jenkins-pipeline-eks-large-migration', description: 'Git branch to use for repository')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             
             // Snapshot configuration - minimal parameters, bucket name derived from account ID
@@ -321,6 +321,13 @@ def call(Map config = [:]) {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                    // Wait for migration-console pod to be ready
+                                    sh """
+                                      echo "Waiting for migration-console pod to be ready..."
+                                      kubectl wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=600s
+                                      echo "migration-console pod is ready"
+                                    """
+                                    
                                     // Derive bucket name from account ID and region
                                     // Convention: migrations-jenkins-snapshot-{ACCOUNT_ID}-{REGION}
                                     def snapshotBucket = "migrations-jenkins-snapshot-${MIGRATIONS_TEST_ACCOUNT_ID}-${params.SNAPSHOT_REGION}"
