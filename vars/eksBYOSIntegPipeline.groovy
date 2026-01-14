@@ -3,6 +3,7 @@
  * 
  * This pipeline tests migration from an existing S3 snapshot to a target OpenSearch cluster.
  * No source cluster is deployed - only a target cluster in Amazon OpenSearch Service.
+ * Uses public Docker images (no custom image builds).
  * 
  * S3 bucket naming convention: migrations-jenkins-snapshot-{ACCOUNT_ID}-{REGION}
  * Account ID is derived dynamically from AWS credentials.
@@ -222,7 +223,6 @@ def call(Map config = [:]) {
                                                 [(key): value]
                                             }
                                     
-                                    env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']
                                     env.eksClusterName = exportsMap['MIGRATIONS_EKS_CLUSTER_NAME']
                                     env.clusterSecurityGroup = exportsMap['EKS_CLUSTER_SECURITY_GROUP']
 
@@ -299,30 +299,6 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Build Docker Images') {
-                steps {
-                    timeout(time: 1, unit: 'HOURS') {
-                        script {
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                    sh "docker run --privileged --rm tonistiigi/binfmt --install all"
-
-                                    def builderExists = sh(
-                                            script: "docker buildx ls | grep -q '^ecr-builder'",
-                                            returnStatus: true
-                                    ) == 0
-
-                                    if (!builderExists) {
-                                        sh "docker buildx create --name ecr-builder --driver docker-container"
-                                    }
-                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -Pbuilder=ecr-builder"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             stage('Install Helm Chart') {
                 steps {
                     timeout(time: 15, unit: 'MINUTES') {
@@ -330,7 +306,7 @@ def call(Map config = [:]) {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir /home/ec2-user/workspace/${jobName} --use-public-images false --skip-console-exec --stage ${maStageName}"
+                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir /home/ec2-user/workspace/${jobName} --use-public-images true --skip-console-exec --stage ${maStageName}"
                                     }
                                 }
                             }
