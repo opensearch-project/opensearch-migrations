@@ -4,7 +4,7 @@ import io
 import json
 import threading
 import time
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -414,7 +414,7 @@ class TestPodScraperExactApiContract:
         headers = call_args[1]["header_params"]
 
         expected_accept = ("application/json;as=PartialObjectMetadataList;"
-                          "v=v1;g=meta.k8s.io")
+                           "v=v1;g=meta.k8s.io")
         assert headers["Accept"] == expected_accept
 
     def test_fetch_pods_metadata_label_selector(self):

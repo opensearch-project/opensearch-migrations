@@ -199,8 +199,8 @@ def bulk_insert_data(cluster, index_name, num_docs, doc_size_bytes=150, batch_si
                 if response.status_code == 200:
                     result = response.json()
                     # Count successful insertions
-                    successful = sum(1 for item in result.get('items', []) 
-                                   if item.get('index', {}).get('status') in [200, 201])
+                    successful = sum(1 for item in result.get('items', [])
+                                     if item.get('index', {}).get('status') in [200, 201])
                     total_inserted += successful
                     total_errors += (batch_docs - successful)
                 else:
@@ -224,13 +224,6 @@ def bulk_insert_data(cluster, index_name, num_docs, doc_size_bytes=150, batch_si
         'docs_per_sec': total_inserted / elapsed_time if elapsed_time > 0 else 0,
         'estimated_size_mb': (total_inserted * doc_size_bytes) / (1024 * 1024)
     }
-
-
-def get_cluster_and_auth(config_file, cluster_type):
-    env = Environment(config_file=config_file)
-    cluster: Cluster = env.source_cluster if cluster_type == "source" else env.target_cluster
-    auth = cluster._generate_auth_object()
-    return cluster.endpoint, auth
 
 
 def main():
