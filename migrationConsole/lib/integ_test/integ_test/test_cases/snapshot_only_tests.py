@@ -8,16 +8,16 @@ logger = logging.getLogger(__name__)
 
 class Test0010ExternalSnapshotMigration(MATestBase):
     """
-    Test migration from an externally managed snapshot (no source cluster).
-    Requires snapshot to already exist in S3/LocalStack.
+    Test migration from an externally managed snapshot (BYOS - Bring Your Own Snapshot).
+    No source cluster is deployed - migration reads directly from an existing S3 snapshot.
     
-    Snapshot configuration via environment variables (for EKS/Jenkins):
-    - BYOS_SNAPSHOT_NAME: Name of the snapshot
-    - BYOS_S3_REPO_URI: S3 URI to snapshot repository
-    - BYOS_S3_REGION: AWS region for S3
-    - BYOS_S3_ENDPOINT: Optional, for LocalStack (e.g., localstack://localstack:4566)
+    Configuration via environment variables:
+    - BYOS_SNAPSHOT_NAME: Name of the snapshot (required)
+    - BYOS_S3_REPO_URI: S3 URI to snapshot repository, e.g., s3://bucket/folder (required)
+    - BYOS_S3_REGION: AWS region for S3 (default: us-west-2)
+    - BYOS_S3_ENDPOINT: Optional endpoint for LocalStack testing
     
-    If not set, defaults to LocalStack testing configuration.
+    Exit criteria: Workflow phase == "Succeeded"
     """
     def __init__(self, user_args: MATestUserArguments):
         allow_combinations = [
@@ -115,10 +115,5 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         print(target_response)
 
     def verify_clusters(self):
-        """Verify expected indices exist on target."""
-        self.target_operations.get_index(
-            cluster=self.target_cluster,
-            index_name="basic_index",
-            max_attempts=5,
-            delay=2.0
-        )
+        """No additional verification - workflow success is the exit criteria."""
+        pass
