@@ -11,6 +11,10 @@ class Test0010ExternalSnapshotMigration(MATestBase):
     Test migration from an externally managed snapshot (BYOS - Bring Your Own Snapshot).
     No source cluster is deployed - migration reads directly from an existing S3 snapshot.
     
+    This test requires explicit selection via --test_ids=0010 because:
+    - It requires an existing snapshot in S3/Localstack (not created by the test)
+    - It requires specific environment variables or pre-configured snapshot location
+    
     Configuration via environment variables:
     - BYOS_SNAPSHOT_NAME: Name of the snapshot (required)
     - BYOS_S3_REPO_URI: S3 URI to snapshot repository, e.g., s3://bucket/folder (required)
@@ -19,6 +23,9 @@ class Test0010ExternalSnapshotMigration(MATestBase):
     
     Exit criteria: Workflow phase == "Succeeded"
     """
+    # Exclude from default test runs - requires explicit --test_ids=0010
+    requires_explicit_selection = True
+
     def __init__(self, user_args: MATestUserArguments):
         allow_combinations = [
             (ElasticsearchV5_X, OpensearchV2_X),
