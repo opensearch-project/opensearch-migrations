@@ -32,7 +32,7 @@ def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eksbyos"
     def jobName = config.jobName ?: "byos-eks-integ-test"
     def clusterContextFilePath = "tmp/cluster-context-byos-${currentBuild.number}.json"
-    
+
     // Target cluster size configurations
     def targetClusterSizes = [
         'default': [
@@ -60,7 +60,8 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/jugal-chauhan/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'jenkins-pipeline-eks-large-migration', description: 'Git branch to use for repository')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
-            
+            string(name: 'RFS_WORKERS', defaultValue: '1', description: 'Number of RFS worker pods for document backfill (podReplicas)')
+
             // Snapshot configuration
             string(name: 'SNAPSHOT_BUCKET', defaultValue: 'migrations-snapshots-library-us-west-2', description: 'S3 bucket containing the snapshot')
             string(name: 'SNAPSHOT_REGION', defaultValue: 'us-west-2', description: 'AWS region where snapshot bucket is located')
@@ -83,7 +84,7 @@ def call(Map config = [:]) {
                 choices: ['default', 'large'],
                 description: 'Target cluster size (default: 2x r6g.large, large: 6x r6g.4xlarge with dedicated masters)'
             )
-            
+
             // Build options
             booleanParam(name: 'BUILD_IMAGES', defaultValue: false, description: 'Build container images from source instead of using public images')
         }
@@ -225,7 +226,7 @@ def call(Map config = [:]) {
                                           --principal-arn $principalArn \
                                           --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
                                           --access-scope type=cluster
-                                        
+
                                         aws eks update-kubeconfig --region ${params.SNAPSHOT_REGION} --name $env.eksClusterName
 
                                         for i in {1..10}; do
@@ -239,11 +240,11 @@ def call(Map config = [:]) {
                                     """
 
                                     sh 'kubectl create namespace ma --dry-run=client -o yaml | kubectl apply -f -'
-                                    
+
                                     def clusterDetails = readJSON text: env.clusterDetailsJson
                                     def targetCluster = clusterDetails.target
                                     def targetVersionExpanded = expandVersionString("${params.TARGET_VERSION}")
-                                    
+
                                     // Target configmap only (no source cluster)
                                     writeJSON file: '/tmp/target-cluster-config.json', json: [
                                             endpoint: targetCluster.endpoint,
@@ -266,7 +267,7 @@ def call(Map config = [:]) {
                                         --group-ids $targetCluster.securityGroupId \
                                         --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
                                         --output text)
-                                    
+
                                       if [ -z "\$exists" ]; then
                                         echo "Ingress rule not found. Adding..."
                                         aws ec2 authorize-security-group-ingress \
@@ -337,7 +338,7 @@ def call(Map config = [:]) {
                                       kubectl wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=600s
                                       echo "migration-console pod is ready"
                                     """
-                                    
+
                                     // Copy test files when using public images (they don't have our branch code)
                                     if (!params.BUILD_IMAGES) {
                                         sh """
@@ -349,14 +350,14 @@ def call(Map config = [:]) {
                                           echo "Test files copied"
                                         """
                                     }
-                                    
+
                                     // Apply the workflow template to the cluster
                                     sh """
                                       echo "Applying workflow template..."
                                       kubectl apply -f ${WORKSPACE}/migrationConsole/lib/integ_test/testWorkflows/fullMigrationImportedClusters.yaml -n ma
                                       echo "Workflow template applied"
                                     """
-                                    
+
                                     def s3RepoUri = "s3://${params.SNAPSHOT_BUCKET}/${params.SNAPSHOT_FOLDER}"
                                     
                                     // Run the BYOS test with env vars passed via file to avoid logging
@@ -365,6 +366,7 @@ def call(Map config = [:]) {
 export BYOS_SNAPSHOT_NAME='${params.SNAPSHOT_NAME}'
 export BYOS_S3_REPO_URI='${s3RepoUri}'
 export BYOS_S3_REGION='${params.SNAPSHOT_REGION}'
+export BYOS_POD_REPLICAS='${params.RFS_WORKERS}'
 ENVEOF
                                       kubectl cp /tmp/byos-env.sh ma/migration-console-0:/tmp/byos-env.sh
                                       kubectl exec migration-console-0 -n ma -- bash -c '
@@ -396,13 +398,13 @@ ENVEOF
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 4500, roleSessionName: 'jenkins-session') {
                                     sh "kubectl -n ma get pods || true"
-                                    
+
                                     // Cleanup MA namespace
                                     sh """
                                       helm uninstall ma -n ma --wait --timeout 300s || true
                                       kubectl delete namespace ma --ignore-not-found --timeout=60s || true
                                     """
-                                    
+
                                     // Remove security group rule
                                     sh """
                                       if aws ec2 describe-security-groups --group-ids $targetCluster.securityGroupId >/dev/null 2>&1; then
@@ -410,7 +412,7 @@ ENVEOF
                                           --group-ids $targetCluster.securityGroupId \
                                           --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
                                           --output json)
-                                      
+
                                         if [ "\$exists" != "[]" ]; then
                                           aws ec2 revoke-security-group-ingress \
                                             --group-id $targetCluster.securityGroupId \
@@ -420,10 +422,10 @@ ENVEOF
                                         fi
                                       fi
                                     """
-                                    
+
                                     // Destroy MA CDK stack
                                     sh "cd $WORKSPACE/deployment/migration-assistant-solution && cdk destroy Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} --force --concurrency 3 || true"
-                                    
+
                                     // Destroy target cluster
                                     sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json || true"
                                 }
