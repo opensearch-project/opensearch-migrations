@@ -338,7 +338,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --reuse-clusters --skip-delete "
+                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --reuse-clusters --skip-delete --skip-install"
                                     }
                                 }
                             }
@@ -358,11 +358,11 @@ def call(Map config = [:]) {
                                 def targetCluster = clusterDetails.target
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 4500, roleSessionName: 'jenkins-session') {
-                                        sh "kubectl -n ma get pods"
+                                        sh "kubectl -n ma get pods || true"
                                         sh "pipenv run app --delete-only"
                                         echo "List resources not removed by helm uninstall:"
-                                        sh "kubectl get all,pvc,configmap,secret,workflow -n ma -o wide || true"
-                                        sh "kubectl -n ma delete namespace ma"
+                                        sh "kubectl get all,pvc,configmap,secret,workflow -n ma -o wide --ignore-not-found || true"
+                                        sh "kubectl delete namespace ma --ignore-not-found --timeout=60s || true"
                                         // Remove added security group rule to allow proper cleanup of stacks
                                         sh """
                                           echo "Checking if source/target security group $targetCluster.securityGroupId exists..."
