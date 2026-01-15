@@ -462,4 +462,85 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             assertEquals(42, source.get("excluded_field").asInt());
         }
     }
+
+    /**
+     * Tests that documents with no recoverable fields are skipped.
+     * Uses binary field with store:false (no doc_values, no Points, no stored field).
+     */
+    @ParameterizedTest(name = "unrecoverable: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testUnrecoverableDocumentSkipped(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
+        // Binary type only available ES 5+
+        if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
+            return;
+        }
+
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "unrecoverable_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+
+            // Binary field: no doc_values, no Points - only way to recover is stored field
+            String indexBody;
+            if (needsDocType(sourceVersion)) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}," +
+                    "\"mappings\":{\"%s\":{\"_source\":{\"enabled\":false}," +
+                    "\"properties\":{\"binary_field\":{\"type\":\"binary\",\"store\":false}}}}}",
+                    docType
+                );
+            } else {
+                indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}," +
+                    "\"mappings\":{\"_source\":{\"enabled\":false}," +
+                    "\"properties\":{\"binary_field\":{\"type\":\"binary\",\"store\":false}}}}";
+            }
+
+            String doc = "{\"binary_field\": \"dGVzdA==\"}";  // base64 "test"
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, docType);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}," +
+                "\"mappings\":{\"properties\":{\"binary_field\":{\"type\":\"binary\"}}}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> migrateDocumentsSequentially(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion(), null
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            JsonNode root = MAPPER.readTree(response);
+            
+            // Document should be skipped - no hits
+            int totalHits = root.path("hits").path("total").isInt() 
+                ? root.path("hits").path("total").asInt()
+                : root.path("hits").path("total").path("value").asInt();
+            assertEquals(0, totalHits, "Document with unrecoverable fields should be skipped");
+        }
+    }
 }
