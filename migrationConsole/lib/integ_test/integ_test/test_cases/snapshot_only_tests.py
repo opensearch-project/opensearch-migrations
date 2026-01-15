@@ -50,12 +50,14 @@ class Test0010ExternalSnapshotMigration(MATestBase):
             self.s3_repo_uri = os.environ['BYOS_S3_REPO_URI']
             self.s3_region = os.environ.get('BYOS_S3_REGION', 'us-west-2')
             self.s3_endpoint = os.environ.get('BYOS_S3_ENDPOINT', '')
+            self.pod_replicas = int(os.environ.get('BYOS_POD_REPLICAS', '1'))
         else:
             logger.info("Using default LocalStack BYOS config")
             self.snapshot_name = "large-snapshot"
             self.s3_repo_uri = "s3://test-snapshots/large-snapshot-es6x"
             self.s3_endpoint = "localstack://localstack:4566"
             self.s3_region = "us-east-2"
+            self.pod_replicas = 1
 
     def import_existing_clusters(self):
         """Override - only import target cluster, no source needed."""
@@ -84,7 +86,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
             },
             "migrations": [{
                 "metadataMigrationConfig": {},
-                "documentBackfillConfig": {"podReplicas": 1}
+                "documentBackfillConfig": {"podReplicas": self.pod_replicas}
             }]
         }]
 
