@@ -51,62 +51,56 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         String sourceType,
         String targetType,
         Object testValue,
-        boolean supportsDocValues,
         VersionRange availability,
-        Map<String, Object> extraProps  // Additional mapping properties (e.g., format, scaling_factor)
+        boolean supportsDocValues,  // Can use doc_values
+        boolean supportsPoints,     // Can use Points (BKD tree) - ES 5+ for numerics/IP/date
+        Map<String, Object> extraProps  // Additional mapping properties
     ) {
-        // Convenience constructor without extra props
-        FieldTypeConfig(String fieldName, String sourceType, String targetType, Object testValue, 
-                       boolean supportsDocValues, VersionRange availability) {
-            this(fieldName, sourceType, targetType, testValue, supportsDocValues, availability, Map.of());
+        FieldTypeConfig(String fieldName, String sourceType, String targetType, Object testValue,
+                       VersionRange availability, boolean supportsDocValues, boolean supportsPoints) {
+            this(fieldName, sourceType, targetType, testValue, availability, supportsDocValues, supportsPoints, Map.of());
+        }
+        FieldTypeConfig(String fieldName, String sourceType, String targetType, Object testValue,
+                       VersionRange availability, boolean supportsDocValues) {
+            this(fieldName, sourceType, targetType, testValue, availability, supportsDocValues, false, Map.of());
         }
     }
 
     private static final List<FieldTypeConfig> FIELD_TYPES = List.of(
         // String (not_analyzed) for ES 1.x-4.x, maps to keyword on target
-        new FieldTypeConfig("string", "string", "keyword", "test_str", true, VersionRange.ES_1_TO_4, Map.of("index", "not_analyzed")),
+        new FieldTypeConfig("string", "string", "keyword", "test_str", VersionRange.ES_1_TO_4, true, false, Map.of("index", "not_analyzed")),
         // Keyword - ES 5.x+ only
-        new FieldTypeConfig("keyword", "keyword", "keyword", "test_kw", true, VersionRange.ES_5_PLUS),
-        // Boolean - ES 2.x+ supports doc_values
-        new FieldTypeConfig("boolean", "boolean", "boolean", true, true, VersionRange.ES_2_PLUS),
+        new FieldTypeConfig("keyword", "keyword", "keyword", "test_kw", VersionRange.ES_5_PLUS, true, false),
+        // Boolean - ES 2.x+ supports doc_values, no Points
+        new FieldTypeConfig("boolean", "boolean", "boolean", true, VersionRange.ES_2_PLUS, true, false),
         // Boolean for ES 1.x - no doc_values, recovered via terms index
-        new FieldTypeConfig("boolean_es1", "boolean", "boolean", false, false, VersionRange.ES_1_TO_4),
-        // Binary - stored as base64 in ES, doc_values not supported
-        new FieldTypeConfig("binary", "binary", "binary", "dGVzdA==", false, VersionRange.ES_5_PLUS),
-        // Integer/Long - work correctly with doc_values and points
-        new FieldTypeConfig("integer", "integer", "integer", 42, true, VersionRange.ALL),
-        new FieldTypeConfig("long", "long", "long", 9999L, true, VersionRange.ALL),
-        // Float/Double - ES 5+ supports points
-        new FieldTypeConfig("float", "float", "float", 3.14f, true, VersionRange.ES_5_PLUS),
-        new FieldTypeConfig("double", "double", "double", 2.71828, true, VersionRange.ES_5_PLUS),
-        // IP - ES 2.x+ supports doc_values for IP (test IPv4)
-        new FieldTypeConfig("ip", "ip", "ip", "192.168.1.1", true, VersionRange.ES_2_PLUS),
+        new FieldTypeConfig("boolean_es1", "boolean", "boolean", false, VersionRange.ES_1_TO_4, false, false),
+        // Binary - stored as base64 in ES, no doc_values, no Points
+        new FieldTypeConfig("binary", "binary", "binary", "dGVzdA==", VersionRange.ES_5_PLUS, false, false),
+        // Integer/Long - doc_values + Points on ES 5+
+        new FieldTypeConfig("integer", "integer", "integer", 42, VersionRange.ALL, true, true),
+        new FieldTypeConfig("long", "long", "long", 9999L, VersionRange.ALL, true, true),
+        // Float/Double - doc_values + Points on ES 5+
+        new FieldTypeConfig("float", "float", "float", 3.14f, VersionRange.ES_5_PLUS, true, true),
+        new FieldTypeConfig("double", "double", "double", 2.71828, VersionRange.ES_5_PLUS, true, true),
+        // IP - doc_values + Points on ES 5+
+        new FieldTypeConfig("ip", "ip", "ip", "192.168.1.1", VersionRange.ES_2_PLUS, true, true),
         // IP with IPv6 - ES 5.x+ (test full IPv6 address)
-        new FieldTypeConfig("ipv6", "ip", "ip", "2001:db8:85a3::8a2e:370:7334", true, VersionRange.ES_5_PLUS),
-        // Date - ES 2.x+ supports doc_values (ISO format)
-        new FieldTypeConfig("date", "date", "date", "2024-01-15T10:30:00.000Z", true, VersionRange.ES_2_PLUS),
-        // Date with epoch_millis format - tests the epoch_millis branch
-        new FieldTypeConfig("date_epoch", "date", "date", 1705315800000L, true, VersionRange.ES_2_PLUS, Map.of("format", "epoch_millis")),
-        // Scaled float - ES 5.x+ only, requires scaling_factor
-        new FieldTypeConfig("scaled_float", "scaled_float", "scaled_float", 123.45, true, VersionRange.ES_5_PLUS, Map.of("scaling_factor", 100)),
-        // Date nanos - ES 7.x+ (nanosecond precision)
-        new FieldTypeConfig("date_nanos", "date_nanos", "date_nanos", "2024-01-15T10:30:00.123456789Z", true, VersionRange.ES_7_PLUS),
-        // Geo point - ES 2.x+ supports doc_values
-        new FieldTypeConfig("geo_point", "geo_point", "geo_point", Map.of("lat", 40.7128, "lon", -74.006), true, VersionRange.ES_2_PLUS),
-        // Unsigned long - OpenSearch 2.8+ (positive value, no overflow)
-        new FieldTypeConfig("unsigned_long", "unsigned_long", "unsigned_long", 9223372036854775807L, true, VersionRange.OS_2_8_PLUS),
-        // Unsigned long overflow - OpenSearch 2.8+ (value > Long.MAX_VALUE, tests overflow handling)
-        new FieldTypeConfig("unsigned_long_big", "unsigned_long", "unsigned_long", new BigInteger("10000000000000000000"), true, VersionRange.OS_2_8_PLUS),
-        
-        // === Stored-only variants (no doc_values) to test stored field recovery paths ===
-        // IP stored-only on ES 2.x (no Points) - tests stored field IP path
-        new FieldTypeConfig("ip_stored", "ip", "ip", "10.0.0.1", false, VersionRange.ES_2_PLUS),
-        // Date stored-only on ES 2.x (no Points) - tests stored field date path  
-        new FieldTypeConfig("date_stored", "date", "date", "2024-06-01T12:00:00.000Z", false, VersionRange.ES_2_PLUS),
-        // Integer stored-only on ES 1.x/2.x (no Points) - tests stored field numeric path
-        new FieldTypeConfig("integer_stored", "integer", "integer", 123, false, VersionRange.ES_1_TO_4),
-        // Long stored-only on ES 1.x/2.x (no Points) - tests stored field numeric path
-        new FieldTypeConfig("long_stored", "long", "long", 456789L, false, VersionRange.ES_1_TO_4)
+        new FieldTypeConfig("ipv6", "ip", "ip", "2001:db8:85a3::8a2e:370:7334", VersionRange.ES_5_PLUS, true, true),
+        // Date - doc_values + Points on ES 5+
+        new FieldTypeConfig("date", "date", "date", "2024-01-15T10:30:00.000Z", VersionRange.ES_2_PLUS, true, true),
+        // Date with epoch_millis format
+        new FieldTypeConfig("date_epoch", "date", "date", 1705315800000L, VersionRange.ES_2_PLUS, true, true, Map.of("format", "epoch_millis")),
+        // Scaled float - doc_values + Points
+        new FieldTypeConfig("scaled_float", "scaled_float", "scaled_float", 123.45, VersionRange.ES_5_PLUS, true, true, Map.of("scaling_factor", 100)),
+        // Date nanos - doc_values + Points
+        new FieldTypeConfig("date_nanos", "date_nanos", "date_nanos", "2024-01-15T10:30:00.123456789Z", VersionRange.ES_7_PLUS, true, true),
+        // Geo point - doc_values only, no Points
+        new FieldTypeConfig("geo_point", "geo_point", "geo_point", Map.of("lat", 40.7128, "lon", -74.006), VersionRange.ES_2_PLUS, true, false),
+        // Unsigned long - doc_values + Points
+        new FieldTypeConfig("unsigned_long", "unsigned_long", "unsigned_long", 9223372036854775807L, VersionRange.OS_2_8_PLUS, true, true),
+        // Unsigned long overflow - tests overflow handling
+        new FieldTypeConfig("unsigned_long_big", "unsigned_long", "unsigned_long", new BigInteger("10000000000000000000"), VersionRange.OS_2_8_PLUS, true, true)
     );
 
     /** Field storage permutations - _source is disabled, so we test recovery via doc_values */
@@ -322,12 +316,8 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                     String fieldName = fieldName(config, p);
                     JsonNode fieldValue = source.get(fieldName);
 
-                    // Points can recover numeric/IP fields even without doc_values or store
-                    boolean canRecoverFromPoints = pointsSupported && 
-                        (config.targetType.equals("integer") || config.targetType.equals("long") || 
-                         config.targetType.equals("float") || config.targetType.equals("double") ||
-                         config.targetType.equals("ip") || config.targetType.equals("date") ||
-                         config.targetType.equals("date_nanos"));
+                    // Points can recover fields if type supports it AND version has Points (ES 5+)
+                    boolean canRecoverFromPoints = pointsSupported && config.supportsPoints;
                     // Boolean fields can be recovered via terms index (all versions)
                     boolean canRecoverFromTerms = config.targetType.equals("boolean");
                     boolean shouldRecover = p.hasStore || p.hasDv || canRecoverFromPoints || canRecoverFromTerms;
