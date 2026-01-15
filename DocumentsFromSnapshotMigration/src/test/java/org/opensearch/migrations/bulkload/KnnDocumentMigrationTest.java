@@ -66,13 +66,13 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
         }
     }
 
-    /** Index codec availability - zstd only works in specific OS 2.x versions before custom-codecs plugin conflict */
+    /** Index codec availability - zstd only works in OS 2.9 (custom-codecs plugin conflicts with KNN in 2.10+) */
     enum IndexCodec {
         DEFAULT(null, v -> true),
         BEST_COMPRESSION("best_compression", v -> true),
-        // zstd codecs only available in OS 2.9-2.16 (before custom-codecs plugin conflict with KNN)
-        ZSTD("zstd", v -> isAtLeast(v, 2, 9) && !isAtLeast(v, 2, 17)),
-        ZSTD_NO_DICT("zstd_no_dict", v -> isAtLeast(v, 2, 9) && !isAtLeast(v, 2, 17));
+        // zstd codecs only available in OS 2.9 (custom-codecs plugin conflicts with KNN starting in 2.10)
+        ZSTD("zstd", v -> isAtLeast(v, 2, 9) && !isAtLeast(v, 2, 10)),
+        ZSTD_NO_DICT("zstd_no_dict", v -> isAtLeast(v, 2, 9) && !isAtLeast(v, 2, 10));
 
         final String name;
         final java.util.function.Predicate<Version> isAvailable;
