@@ -53,10 +53,12 @@ Each tier has different precision characteristics and version support.
 
 | Source Version | Stored Fields | Doc Values | Points |
 |----------------|---------------|------------|--------|
-| ES 1.x | ✅ | ❌ | ❌ |
+| ES 1.x | ✅ | ✅* | ❌ |
 | ES 2.x | ✅ | ✅ | ❌ |
 | ES 5.x+ | ✅ | ✅ | ✅ |
 | OS 1.x+ | ✅ | ✅ | ✅ |
+
+*ES 1.x requires explicit `doc_values: true` in mapping (not enabled by default)
 
 ## Mapping Requirements
 
