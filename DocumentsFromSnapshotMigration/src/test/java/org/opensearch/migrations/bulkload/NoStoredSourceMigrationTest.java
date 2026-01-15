@@ -376,4 +376,90 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             }
         }
     }
+
+    /**
+     * Tests mergeWithDocValues() - when _source exists but has excluded fields.
+     * This covers the code path where we merge doc_values into existing _source.
+     */
+    @ParameterizedTest(name = "mergeWithDocValues: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testMergeWithDocValues(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "merge_docvalues_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+            boolean prEs5 = UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion());
+
+            // Use string type for ES 1.x/2.x, keyword for ES 5+
+            String stringFieldType = prEs5 ? "string\", \"index\": \"not_analyzed" : "keyword";
+
+            // Create index with _source includes (only "included_field"), excluding "excluded_field"
+            String indexBody;
+            if (needsDocType(sourceVersion)) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}," +
+                    "\"mappings\":{\"%s\":{\"_source\":{\"includes\":[\"included_field\"]}," +
+                    "\"properties\":{\"included_field\":{\"type\":\"%s\"},\"excluded_field\":{\"type\":\"integer\",\"doc_values\":true}}}}}",
+                    docType, stringFieldType
+                );
+            } else {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}," +
+                    "\"mappings\":{\"_source\":{\"includes\":[\"included_field\"]}," +
+                    "\"properties\":{\"included_field\":{\"type\":\"%s\"},\"excluded_field\":{\"type\":\"integer\",\"doc_values\":true}}}}",
+                    stringFieldType
+                );
+            }
+
+            String doc = "{\"included_field\": \"included_value\", \"excluded_field\": 42}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, docType);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            // Target index with both fields
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}," +
+                "\"mappings\":{\"properties\":{\"included_field\":{\"type\":\"keyword\"},\"excluded_field\":{\"type\":\"integer\"}}}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> migrateDocumentsSequentially(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion(), null
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode source = root.path("hits").path("hits").get(0).path("_source");
+
+            log.info("Migrated _source: {}", source);
+
+            // included_field should be from _source
+            assertEquals("included_value", source.get("included_field").asText());
+            // excluded_field should be recovered from doc_values via mergeWithDocValues
+            assertEquals(42, source.get("excluded_field").asInt());
+        }
+    }
 }
