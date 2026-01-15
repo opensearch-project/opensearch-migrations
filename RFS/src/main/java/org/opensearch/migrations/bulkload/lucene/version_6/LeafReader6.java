@@ -12,14 +12,12 @@ import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import shadow.lucene6.org.apache.lucene.index.BinaryDocValues;
 import shadow.lucene6.org.apache.lucene.index.FieldInfo;
 import shadow.lucene6.org.apache.lucene.index.LeafReader;
 import shadow.lucene6.org.apache.lucene.index.NumericDocValues;
 import shadow.lucene6.org.apache.lucene.index.PointValues;
 import shadow.lucene6.org.apache.lucene.index.PostingsEnum;
 import shadow.lucene6.org.apache.lucene.index.SegmentReader;
-import shadow.lucene6.org.apache.lucene.index.SortedDocValues;
 import shadow.lucene6.org.apache.lucene.index.SortedNumericDocValues;
 import shadow.lucene6.org.apache.lucene.index.SortedSetDocValues;
 import shadow.lucene6.org.apache.lucene.index.Terms;
@@ -135,11 +133,9 @@ public class LeafReader6 implements LuceneLeafReader {
             shadow.lucene6.org.apache.lucene.index.DocValuesType luceneType) {
         return switch (luceneType) {
             case NUMERIC -> DocValueFieldInfo.DocValueType.NUMERIC;
-            case BINARY -> DocValueFieldInfo.DocValueType.BINARY;
-            case SORTED -> DocValueFieldInfo.DocValueType.SORTED;
             case SORTED_NUMERIC -> DocValueFieldInfo.DocValueType.SORTED_NUMERIC;
             case SORTED_SET -> DocValueFieldInfo.DocValueType.SORTED_SET;
-            case NONE -> DocValueFieldInfo.DocValueType.NONE;
+            case BINARY, SORTED, NONE -> DocValueFieldInfo.DocValueType.NONE;
         };
     }
 
@@ -149,18 +145,6 @@ public class LeafReader6 implements LuceneLeafReader {
         NumericDocValues dv = wrapped.getNumericDocValues(fieldName);
         if (dv != null) {
             return dv.get(docId);
-        }
-        return null;
-    }
-
-    @Override
-    public Object getSortedValue(int docId, String fieldName) throws IOException {
-        SortedDocValues dv = wrapped.getSortedDocValues(fieldName);
-        if (dv != null) {
-            int ord = dv.getOrd(docId);
-            if (ord >= 0) {
-                return bytesRefToString(dv.lookupOrd(ord));
-            }
         }
         return null;
     }
@@ -200,20 +184,6 @@ public class LeafReader6 implements LuceneLeafReader {
                     values.add(dv.valueAt(i));
                 }
                 return values;
-            }
-        }
-        return null;
-    }
-
-    @Override
-    public Object getBinaryValue(int docId, String fieldName) throws IOException {
-        BinaryDocValues dv = wrapped.getBinaryDocValues(fieldName);
-        log.atDebug().setMessage("getBinaryValue for field {} docId {}: dv={}").addArgument(fieldName).addArgument(docId).addArgument(dv != null).log();
-        if (dv != null) {
-            BytesRef value = dv.get(docId);
-            log.atDebug().setMessage("getBinaryValue {} got BytesRef length={}").addArgument(fieldName).addArgument(value != null ? value.length : -1).log();
-            if (value != null && value.length > 0) {
-                return bytesRefToString(value);
             }
         }
         return null;
