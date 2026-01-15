@@ -47,7 +47,7 @@ export function makeClusterParamDict(clusterType: string, clusterConfig: BaseExp
 }
 
 export function makeTargetParamDict(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
-    return makeClusterParamDict("target", targetConfig);
+    return makeClusterParamDict("foo", targetConfig);
 }
 
 export function makeRfsCoordinatorParamDict(rfsCoordinatorConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
