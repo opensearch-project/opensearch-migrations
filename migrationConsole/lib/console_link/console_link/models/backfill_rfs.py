@@ -358,7 +358,7 @@ class ShardStatusCounts:
 
 
 def get_detailed_status_obj(target_cluster: Cluster,
-                            session_name: str,
+                            session_name: str = None,
                             active_workers: bool = True) -> BackfillOverallStatus:
     # Check whether the working state index exists. If not, we can't run queries.
     index_to_check = ".migrations_working_state" + (("_" + session_name) if session_name else "")
