@@ -17,6 +17,7 @@ import shadow.lucene6.org.apache.lucene.index.FieldInfo;
 import shadow.lucene6.org.apache.lucene.index.LeafReader;
 import shadow.lucene6.org.apache.lucene.index.NumericDocValues;
 import shadow.lucene6.org.apache.lucene.index.PointValues;
+import shadow.lucene6.org.apache.lucene.index.PostingsEnum;
 import shadow.lucene6.org.apache.lucene.index.SegmentReader;
 import shadow.lucene6.org.apache.lucene.index.SortedDocValues;
 import shadow.lucene6.org.apache.lucene.index.SortedNumericDocValues;
@@ -261,5 +262,22 @@ public class LeafReader6 implements LuceneLeafReader {
         });
         
         return result.isEmpty() ? null : result;
+    }
+
+    @Override
+    public String getValueFromTerms(int docId, String fieldName) throws IOException {
+        Terms terms = wrapped.terms(fieldName);
+        if (terms == null) return null;
+        TermsEnum termsEnum = terms.iterator();
+        BytesRef term;
+        while ((term = termsEnum.next()) != null) {
+            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.NONE);
+            int doc;
+            while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
+                if (doc == docId) return term.utf8ToString();
+                if (doc > docId) break;
+            }
+        }
+        return null;
     }
 }

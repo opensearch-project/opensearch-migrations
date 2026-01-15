@@ -11,10 +11,12 @@ import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import shadow.lucene5.org.apache.lucene.index.BinaryDocValues;
 import shadow.lucene5.org.apache.lucene.index.FieldInfo;
 import shadow.lucene5.org.apache.lucene.index.LeafReader;
 import shadow.lucene5.org.apache.lucene.index.NumericDocValues;
+import shadow.lucene5.org.apache.lucene.index.PostingsEnum;
 import shadow.lucene5.org.apache.lucene.index.SegmentReader;
 import shadow.lucene5.org.apache.lucene.index.SortedDocValues;
 import shadow.lucene5.org.apache.lucene.index.SortedNumericDocValues;
@@ -26,6 +28,7 @@ import shadow.lucene5.org.apache.lucene.util.BytesRef;
 import shadow.lucene5.org.apache.lucene.util.FixedBitSet;
 import shadow.lucene5.org.apache.lucene.util.SparseFixedBitSet;
 
+@Slf4j
 public class LeafReader5 implements LuceneLeafReader {
 
     private final LeafReader wrapped;
@@ -211,6 +214,48 @@ public class LeafReader5 implements LuceneLeafReader {
                 return bytesRefToString(value);
             }
         }
+        return null;
+    }
+
+    @Override
+    public String getValueFromTerms(int docId, String fieldName) throws IOException {
+        Terms terms = wrapped.terms(fieldName);
+        if (terms == null) {
+            log.debug("[Terms] Field {} has no terms index", fieldName);
+            return null;
+        }
+
+        log.debug("[Terms] Scanning terms for field {} docId {} (approx {} unique terms)", 
+            fieldName, docId, terms.size());
+        
+        TermsEnum termsEnum = terms.iterator();
+        BytesRef term;
+        int termCount = 0;
+        int totalPostingsScanned = 0;
+        
+        while ((term = termsEnum.next()) != null) {
+            termCount++;
+            String termStr = term.utf8ToString();
+            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.NONE);
+            int doc;
+            int postingsForThisTerm = 0;
+            while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
+                postingsForThisTerm++;
+                totalPostingsScanned++;
+                if (doc == docId) {
+                    log.debug("[Terms] Found value '{}' for field {} docId {} after scanning {} terms, {} total postings", 
+                        termStr, fieldName, docId, termCount, totalPostingsScanned);
+                    return termStr;
+                }
+                if (doc > docId) {
+                    break; // Postings are sorted by docId
+                }
+            }
+            log.trace("[Terms] Term '{}' scanned {} postings, not found", termStr, postingsForThisTerm);
+        }
+        
+        log.debug("[Terms] No value found for field {} docId {} after scanning {} terms, {} total postings", 
+            fieldName, docId, termCount, totalPostingsScanned);
         return null;
     }
 

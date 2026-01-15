@@ -73,19 +73,21 @@ public class SourceReconstructor {
                 }
             }
             
-            // Finally, try Points (BKD tree) for fields not yet recovered
+            // Finally, try Points or Terms fallback for fields not yet recovered
             if (mappingContext != null) {
                 for (String fieldName : mappingContext.getFieldNames()) {
                     if (shouldSkipField(fieldName) || reconstructed.containsKey(fieldName)) {
                         continue;
                     }
                     FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
-                    if (mappingInfo != null && isPointsRecoverable(mappingInfo.type())) {
-                        log.debug("[Points] Attempting recovery for field {} type {}", fieldName, mappingInfo.type());
-                        Object value = getPointValue(reader, docId, fieldName, mappingInfo);
-                        if (value != null) {
-                            log.debug("[Points] Recovered field {} = {}", fieldName, value);
-                            reconstructed.put(fieldName, value);
+                    if (mappingInfo != null) {
+                        var fallbackValue = reader.getValueFromPointsOrTerms(docId, fieldName, mappingInfo.type());
+                        if (fallbackValue.isPresent()) {
+                            Object converted = convertFallbackValue(fallbackValue.get(), mappingInfo);
+                            if (converted != null) {
+                                log.debug("[Fallback] Recovered field {} = {}", fieldName, converted);
+                                reconstructed.put(fieldName, converted);
+                            }
                         }
                     }
                 }
@@ -415,81 +417,46 @@ public class SourceReconstructor {
         return encoded / (double)(1 << 31) * 360.0;
     }
 
-    /** Check if field type can be recovered from Points (BKD tree) */
-    private static boolean isPointsRecoverable(EsFieldType type) {
-        return type == EsFieldType.IP || type == EsFieldType.NUMERIC || 
-               type == EsFieldType.DATE || type == EsFieldType.DATE_NANOS;
+    /** Convert fallback value from Points (List<byte[]>) or Terms (String) */
+    @SuppressWarnings("unchecked")
+    private static Object convertFallbackValue(Object value, FieldMappingInfo mappingInfo) {
+        // Terms fallback returns String (for boolean)
+        if (value instanceof String termValue) {
+            if (mappingInfo.type() == EsFieldType.BOOLEAN) {
+                return "T".equals(termValue) || "true".equals(termValue) || "1".equals(termValue);
+            }
+            return termValue;
+        }
+        // Points fallback returns List<byte[]>
+        if (value instanceof java.util.List<?> pointValues) {
+            return decodePointValue((java.util.List<byte[]>) pointValues, mappingInfo);
+        }
+        return null;
     }
 
-    /** Extract value from Points (BKD tree) - used as fallback when doc_values/stored not available */
-    private static Object getPointValue(LuceneLeafReader reader, int docId, String fieldName, FieldMappingInfo mappingInfo) {
-        try {
-            java.util.List<byte[]> pointValues = reader.getPointValues(docId, fieldName);
-            if (pointValues == null || pointValues.isEmpty()) {
-                log.debug("[Points] No point values found for field {} docId {}", fieldName, docId);
-                return null;
+    /** Decode point value from packed bytes */
+    private static Object decodePointValue(java.util.List<byte[]> pointValues, FieldMappingInfo mappingInfo) {
+        if (pointValues.isEmpty()) return null;
+        byte[] packed = pointValues.get(0);
+        
+        return switch (mappingInfo.type()) {
+            case IP -> packed.length == 16 ? convertIpBytes(packed) : null;
+            case NUMERIC -> {
+                String mappingType = mappingInfo.mappingType();
+                if (("float".equals(mappingType) || "half_float".equals(mappingType)) && packed.length == 4) {
+                    yield Float.intBitsToFloat(decodeIntPoint(packed));
+                }
+                if ("double".equals(mappingType) && packed.length == 8) {
+                    yield Double.longBitsToDouble(decodeLongPoint(packed));
+                }
+                if (packed.length == 8) yield decodeLongPoint(packed);
+                if (packed.length == 4) yield decodeIntPoint(packed);
+                yield null;
             }
-            
-            // For now, handle single value (first point)
-            byte[] packed = pointValues.get(0);
-            log.debug("[Points] Decoding {} bytes for field {} type {}", packed.length, fieldName, mappingInfo.type());
-            
-            return switch (mappingInfo.type()) {
-                case IP -> {
-                    // IP stored as 16-byte InetAddressPoint
-                    if (packed.length == 16) {
-                        yield convertIpBytes(packed);
-                    }
-                    log.warn("[Points] Unexpected IP point length: {} for field {}", packed.length, fieldName);
-                    yield null;
-                }
-                case NUMERIC -> {
-                    String mappingType = mappingInfo.mappingType();
-                    // Float: 4 bytes, sortable int encoding
-                    if ("float".equals(mappingType) || "half_float".equals(mappingType)) {
-                        if (packed.length == 4) {
-                            int sortableInt = decodeIntPoint(packed);
-                            yield Float.intBitsToFloat(sortableInt);
-                        }
-                    }
-                    // Double: 8 bytes, sortable long encoding
-                    if ("double".equals(mappingType)) {
-                        if (packed.length == 8) {
-                            long sortableLong = decodeLongPoint(packed);
-                            yield Double.longBitsToDouble(sortableLong);
-                        }
-                    }
-                    // Long: 8 bytes
-                    if (packed.length == 8) {
-                        yield decodeLongPoint(packed);
-                    }
-                    // Int/Short/Byte: 4 bytes
-                    if (packed.length == 4) {
-                        yield decodeIntPoint(packed);
-                    }
-                    log.warn("[Points] Unexpected numeric point length: {} for field {} type {}", packed.length, fieldName, mappingType);
-                    yield null;
-                }
-                case DATE -> {
-                    if (packed.length == 8) {
-                        long epochMillis = decodeLongPoint(packed);
-                        yield formatDate(epochMillis, mappingInfo.format());
-                    }
-                    yield null;
-                }
-                case DATE_NANOS -> {
-                    if (packed.length == 8) {
-                        long epochNanos = decodeLongPoint(packed);
-                        yield formatDateNanos(epochNanos);
-                    }
-                    yield null;
-                }
-                default -> null;
-            };
-        } catch (IOException e) {
-            log.warn("[Points] Failed to get point values for field {}: {}", fieldName, e.getMessage());
-            return null;
-        }
+            case DATE -> packed.length == 8 ? formatDate(decodeLongPoint(packed), mappingInfo.format()) : null;
+            case DATE_NANOS -> packed.length == 8 ? formatDateNanos(decodeLongPoint(packed)) : null;
+            default -> null;
+        };
     }
 
     /** Decode 8-byte packed long point value (Lucene sortable format - sign bit flipped) */
