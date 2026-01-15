@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload;
 
 import java.io.File;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -51,12 +52,19 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         String targetType,
         Object testValue,
         boolean supportsDocValues,
-        VersionRange availability
-    ) {}
+        VersionRange availability,
+        Map<String, Object> extraProps  // Additional mapping properties (e.g., format, scaling_factor)
+    ) {
+        // Convenience constructor without extra props
+        FieldTypeConfig(String fieldName, String sourceType, String targetType, Object testValue, 
+                       boolean supportsDocValues, VersionRange availability) {
+            this(fieldName, sourceType, targetType, testValue, supportsDocValues, availability, Map.of());
+        }
+    }
 
     private static final List<FieldTypeConfig> FIELD_TYPES = List.of(
         // String (not_analyzed) for ES 1.x-4.x, maps to keyword on target
-        new FieldTypeConfig("string", "string", "keyword", "test_str", true, VersionRange.ES_1_TO_4),
+        new FieldTypeConfig("string", "string", "keyword", "test_str", true, VersionRange.ES_1_TO_4, Map.of("index", "not_analyzed")),
         // Keyword - ES 5.x+ only
         new FieldTypeConfig("keyword", "keyword", "keyword", "test_kw", true, VersionRange.ES_5_PLUS),
         // Boolean - ES 2.x+ supports doc_values
@@ -73,16 +81,20 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         new FieldTypeConfig("ip", "ip", "ip", "192.168.1.1", true, VersionRange.ES_2_PLUS),
         // IP with IPv6 - ES 5.x+ (test full IPv6 address)
         new FieldTypeConfig("ipv6", "ip", "ip", "2001:db8:85a3::8a2e:370:7334", true, VersionRange.ES_5_PLUS),
-        // Date - ES 2.x+ supports doc_values
+        // Date - ES 2.x+ supports doc_values (ISO format)
         new FieldTypeConfig("date", "date", "date", "2024-01-15T10:30:00.000Z", true, VersionRange.ES_2_PLUS),
+        // Date with epoch_millis format - tests the epoch_millis branch
+        new FieldTypeConfig("date_epoch", "date", "date", 1705315800000L, true, VersionRange.ES_2_PLUS, Map.of("format", "epoch_millis")),
         // Scaled float - ES 5.x+ only, requires scaling_factor
-        new FieldTypeConfig("scaled_float", "scaled_float", "scaled_float", 123.45, true, VersionRange.ES_5_PLUS),
+        new FieldTypeConfig("scaled_float", "scaled_float", "scaled_float", 123.45, true, VersionRange.ES_5_PLUS, Map.of("scaling_factor", 100)),
         // Date nanos - ES 7.x+ (nanosecond precision)
         new FieldTypeConfig("date_nanos", "date_nanos", "date_nanos", "2024-01-15T10:30:00.123456789Z", true, VersionRange.ES_7_PLUS),
         // Geo point - ES 2.x+ supports doc_values
         new FieldTypeConfig("geo_point", "geo_point", "geo_point", Map.of("lat", 40.7128, "lon", -74.006), true, VersionRange.ES_2_PLUS),
-        // Unsigned long - OpenSearch 2.8+
-        new FieldTypeConfig("unsigned_long", "unsigned_long", "unsigned_long", 9223372036854775807L, true, VersionRange.OS_2_8_PLUS)
+        // Unsigned long - OpenSearch 2.8+ (positive value, no overflow)
+        new FieldTypeConfig("unsigned_long", "unsigned_long", "unsigned_long", 9223372036854775807L, true, VersionRange.OS_2_8_PLUS),
+        // Unsigned long overflow - OpenSearch 2.8+ (value > Long.MAX_VALUE, tests overflow handling)
+        new FieldTypeConfig("unsigned_long_big", "unsigned_long", "unsigned_long", new BigInteger("10000000000000000000"), true, VersionRange.OS_2_8_PLUS)
     );
 
     /** Field storage permutations - _source is disabled, so we test recovery via doc_values */
@@ -188,12 +200,14 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
 
                     String fieldName = fieldName(config, p);
                     props.append("\"").append(fieldName).append("\": {\"type\": \"").append(config.sourceType).append("\"");
-                    // String type in ES 1.x/2.x needs index: not_analyzed to behave like keyword
-                    if (config.sourceType.equals("string")) props.append(", \"index\": \"not_analyzed\"");
-                    // scaled_float requires scaling_factor
-                    if (config.sourceType.equals("scaled_float")) props.append(", \"scaling_factor\": 100");
-                    // date_epoch uses epoch_millis format
-                    if (config.fieldName.equals("date_epoch")) props.append(", \"format\": \"epoch_millis\"");
+                    for (var entry : config.extraProps().entrySet()) {
+                        props.append(", \"").append(entry.getKey()).append("\": ");
+                        if (entry.getValue() instanceof String) {
+                            props.append("\"").append(entry.getValue()).append("\"");
+                        } else {
+                            props.append(entry.getValue());
+                        }
+                    }
                     if (!p.hasDv && config.supportsDocValues) props.append(", \"doc_values\": false");
                     if (p.hasStore) props.append(", \"store\": true");
                     props.append("},\n");
@@ -248,7 +262,15 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                     if (!isValidCombo(config, p)) continue;
                     String fieldName = fieldName(config, p);
                     targetProps.append("\"").append(fieldName).append("\": {\"type\": \"").append(config.targetType).append("\"");
-                    if (config.targetType.equals("scaled_float")) targetProps.append(", \"scaling_factor\": 100");
+                    for (var entry : config.extraProps().entrySet()) {
+                        if ("index".equals(entry.getKey())) continue; // source-only prop
+                        targetProps.append(", \"").append(entry.getKey()).append("\": ");
+                        if (entry.getValue() instanceof String) {
+                            targetProps.append("\"").append(entry.getValue()).append("\"");
+                        } else {
+                            targetProps.append(entry.getValue());
+                        }
+                    }
                     targetProps.append("},\n");
                 }
             }
@@ -298,16 +320,6 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                     if (shouldRecover) {
                         assertEquals(true, fieldValue != null, fieldName + " should be recovered but was null");
                         
-                        // Skip value check for keyword stored fields in ES 5+ (stored as binary)
-                        // TODO: Fix keyword stored field handling in SourceReconstructor
-                        boolean isKeywordStoredInES5Plus = config.targetType.equals("keyword") 
-                            && p.hasStore 
-                            && !UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion());
-                        if (isKeywordStoredInES5Plus && !p.hasDv) {
-                            log.info("Skipping value check for {} (keyword stored field in ES 5+)", fieldName);
-                            continue;
-                        }
-                        
                         // Compare string representations to handle type differences 
                         String expected = String.valueOf(config.testValue);
                         String actual = fieldValue.isTextual() ? fieldValue.asText() : String.valueOf(
@@ -319,6 +331,11 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                         if (config.sourceType.equals("ip") && expected.contains(":")) {
                             expected = normalizeIpv6(expected);
                             actual = normalizeIpv6(actual);
+                        }
+                        // Date with epoch_millis format returns raw long
+                        if ("epoch_millis".equals(config.extraProps().get("format"))) {
+                            assertEquals(config.testValue, fieldValue.asLong(), fieldName + " value mismatch");
+                            continue;
                         }
                         // Normalize dates for comparison (2024-01-15T10:30:00.000Z vs 2024-01-15T10:30:00Z)
                         if (config.sourceType.equals("date") || config.sourceType.equals("date_nanos")) {
@@ -336,6 +353,15 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                             double expectedVal = ((Number) config.testValue).doubleValue();
                             double actualVal = fieldValue.asDouble();
                             assertEquals(expectedVal, actualVal, 0.01, fieldName + " value mismatch");
+                            continue;
+                        }
+                        // Unsigned long comparison - use BigInteger for values > Long.MAX_VALUE
+                        if (config.sourceType.equals("unsigned_long")) {
+                            BigInteger expectedVal = config.testValue instanceof BigInteger 
+                                ? (BigInteger) config.testValue 
+                                : BigInteger.valueOf((Long) config.testValue);
+                            BigInteger actualVal = new BigInteger(fieldValue.asText());
+                            assertEquals(expectedVal, actualVal, fieldName + " value mismatch");
                             continue;
                         }
                         assertEquals(expected, actual, fieldName + " value mismatch");
