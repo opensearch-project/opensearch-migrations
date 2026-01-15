@@ -3,10 +3,13 @@
  * 
  * This pipeline tests migration from an existing S3 snapshot to a target OpenSearch cluster.
  * No source cluster is deployed - only a target cluster in Amazon OpenSearch Service.
- * Uses public Docker images (no custom image builds).
  * 
- * S3 bucket naming convention: migrations-jenkins-snapshot-{ACCOUNT_ID}-{REGION}
- * Account ID is derived dynamically from AWS credentials.
+ * Required parameters:
+ * - SNAPSHOT_BUCKET: S3 bucket containing the snapshot
+ * - SNAPSHOT_FOLDER: Folder/base_path within the bucket
+ * - SNAPSHOT_NAME: Name of the snapshot
+ * - SOURCE_VERSION: Version of the cluster that created the snapshot (ES_5.6, ES_6.8, ES_7.10)
+ * - TARGET_VERSION: Target OpenSearch version (OS_2.19, OS_3.1)
  */
 
 import groovy.json.JsonOutput
@@ -54,12 +57,13 @@ def call(Map config = [:]) {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         parameters {
-            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/jugal-chauhan/opensearch-migrations.git', description: 'Git repository url')
+            string(name: 'GIT_BRANCH', defaultValue: 'jenkins-pipeline-eks-large-migration', description: 'Git branch to use for repository')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             
-            // Snapshot configuration - minimal parameters, bucket name derived from account ID
-            string(name: 'SNAPSHOT_REGION', defaultValue: 'us-west-2', description: 'AWS region where snapshot bucket is located (also part of bucket name)')
+            // Snapshot configuration
+            string(name: 'SNAPSHOT_BUCKET', defaultValue: 'migrations-snapshots-library-us-west-2', description: 'S3 bucket containing the snapshot')
+            string(name: 'SNAPSHOT_REGION', defaultValue: 'us-west-2', description: 'AWS region where snapshot bucket is located')
             string(name: 'SNAPSHOT_FOLDER', defaultValue: 'large-snapshot-es6x', description: 'Folder name in the snapshot bucket')
             string(name: 'SNAPSHOT_NAME', defaultValue: 'large-snapshot', description: 'Name of the snapshot within the folder')
             choice(
@@ -353,10 +357,7 @@ def call(Map config = [:]) {
                                       echo "Workflow template applied"
                                     """
                                     
-                                    // Derive bucket name from account ID and region
-                                    // Convention: migrations-jenkins-snapshot-{ACCOUNT_ID}-{REGION}
-                                    def snapshotBucket = "migrations-jenkins-snapshot-${MIGRATIONS_TEST_ACCOUNT_ID}-${params.SNAPSHOT_REGION}"
-                                    def s3RepoUri = "s3://${snapshotBucket}/${params.SNAPSHOT_FOLDER}"
+                                    def s3RepoUri = "s3://${params.SNAPSHOT_BUCKET}/${params.SNAPSHOT_FOLDER}"
                                     
                                     // Run the BYOS test with env vars passed via file to avoid logging
                                     sh """
