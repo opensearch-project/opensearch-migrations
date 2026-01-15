@@ -1,22 +1,28 @@
 codecov:
   max_report_age: off
+  # Wait for all CI jobs to complete before sending codecov status
+  require_ci_to_pass: yes
 coverage:
   status:
     project:
       default:
         # Only fail if the coverage decreases by more than 1%
         threshold: 1%
+        # Adjusts base to account for removed code - encourages cleanup
+        removed_code_behavior: adjust_base
     patch:
       default:
         target: 80%
 
+# Disable carryforward so coverage reflects what's actually tested in each commit.
+# With carryforward enabled, removing a test would still show code as covered (stale data).
 flags:
   python:
-    carryforward: true
+    carryforward: false
   gradle:
-    carryforward: true
+    carryforward: false
   node:
-    carryforward: true
+    carryforward: false
 
 ignore:
   - "**/build/**"
