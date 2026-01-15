@@ -91,8 +91,8 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         new FieldTypeConfig("date", "date", "date", "2024-01-15T10:30:00.000Z", VersionRange.ES_2_PLUS, true, true),
         // Date with epoch_millis format
         new FieldTypeConfig("date_epoch", "date", "date", 1705315800000L, VersionRange.ES_2_PLUS, true, true, Map.of("format", "epoch_millis")),
-        // Scaled float - doc_values + Points
-        new FieldTypeConfig("scaled_float", "scaled_float", "scaled_float", 123.45, VersionRange.ES_5_PLUS, true, true, Map.of("scaling_factor", 100)),
+        // Scaled float - doc_values only (stored as scaled long), no Points
+        new FieldTypeConfig("scaled_float", "scaled_float", "scaled_float", 123.45, VersionRange.ES_5_PLUS, true, false, Map.of("scaling_factor", 100)),
         // Date nanos - doc_values + Points
         new FieldTypeConfig("date_nanos", "date_nanos", "date_nanos", "2024-01-15T10:30:00.123456789Z", VersionRange.ES_7_PLUS, true, true),
         // Geo point - doc_values only, no Points
