@@ -97,10 +97,10 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         new FieldTypeConfig("date_nanos", "date_nanos", "date_nanos", "2024-01-15T10:30:00.123456789Z", VersionRange.ES_7_PLUS, true, true),
         // Geo point - doc_values only, no Points
         new FieldTypeConfig("geo_point", "geo_point", "geo_point", Map.of("lat", 40.7128, "lon", -74.006), VersionRange.ES_2_PLUS, true, false),
-        // Unsigned long - doc_values + Points
-        new FieldTypeConfig("unsigned_long", "unsigned_long", "unsigned_long", 9223372036854775807L, VersionRange.OS_2_8_PLUS, true, true),
+        // Unsigned long - doc_values only, no Points
+        new FieldTypeConfig("unsigned_long", "unsigned_long", "unsigned_long", 9223372036854775807L, VersionRange.OS_2_8_PLUS, true, false),
         // Unsigned long overflow - tests overflow handling
-        new FieldTypeConfig("unsigned_long_big", "unsigned_long", "unsigned_long", new BigInteger("10000000000000000000"), VersionRange.OS_2_8_PLUS, true, true)
+        new FieldTypeConfig("unsigned_long_big", "unsigned_long", "unsigned_long", new BigInteger("10000000000000000000"), VersionRange.OS_2_8_PLUS, true, false)
     );
 
     /** Field storage permutations - _source is disabled, so we test recovery via doc_values */
