@@ -208,6 +208,8 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                             props.append(entry.getValue());
                         }
                     }
+                    // ES 1.x needs explicit doc_values: true for string fields
+                    if (p.hasDv && config.supportsDocValues) props.append(", \"doc_values\": true");
                     if (!p.hasDv && config.supportsDocValues) props.append(", \"doc_values\": false");
                     if (p.hasStore) props.append(", \"store\": true");
                     props.append("},\n");
@@ -298,8 +300,6 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
 
             log.info("Migrated _source: {}", source);
 
-            // ES 1.x doc_values reconstruction not supported - only stored fields work
-            boolean docValuesSupported = !VersionMatchers.isES_1_X.test(sourceVersion.getVersion());
             // ES 5+ supports Points (BKD tree) for numeric/IP fields
             boolean pointsSupported = !UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion());
 
@@ -316,7 +316,7 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                          config.targetType.equals("float") || config.targetType.equals("double") ||
                          config.targetType.equals("ip") || config.targetType.equals("date") ||
                          config.targetType.equals("date_nanos"));
-                    boolean shouldRecover = p.hasStore || (p.hasDv && docValuesSupported) || canRecoverFromPoints;
+                    boolean shouldRecover = p.hasStore || p.hasDv || canRecoverFromPoints;
                     if (shouldRecover) {
                         assertEquals(true, fieldValue != null, fieldName + " should be recovered but was null");
                         

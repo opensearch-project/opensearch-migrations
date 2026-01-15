@@ -54,6 +54,7 @@ public class SourceReconstructor {
             // Then, read from doc_values (for fields not already in stored fields)
             for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
                 String fieldName = fieldInfo.name();
+                log.debug("[DocValues] Found field {} with type {}", fieldName, fieldInfo.docValueType());
                 if (shouldSkipField(fieldName) || reconstructed.containsKey(fieldName)) {
                     continue;
                 }
@@ -63,6 +64,7 @@ public class SourceReconstructor {
                     continue;
                 }
                 Object value = reader.getDocValue(docId, fieldInfo);
+                log.debug("[DocValues] Field {} raw value: {}", fieldName, value);
                 if (value != null) {
                     Object converted = convertDocValue(value, fieldInfo, mappingInfo);
                     if (converted != null) {
