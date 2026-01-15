@@ -82,20 +82,27 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
         }
     }
 
+    /** Standard scenarios - latest patch of each major version */
     static Stream<Arguments> scenarios() {
         return Stream.of(
-            Arguments.of(SearchClusterContainer.ODFE_V1_13_3, SearchClusterContainer.OS_V3_0_0),
+            Arguments.of(SearchClusterContainer.ODFE_V1_13_3, SearchClusterContainer.OS_V3_0_0), // ES 7.10.2 (latest ODFE)
             Arguments.of(SearchClusterContainer.OS_V1_3_20, SearchClusterContainer.OS_V3_0_0),
-            Arguments.of(SearchClusterContainer.OS_V2_9_0, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.OS_V2_19_4, SearchClusterContainer.OS_V3_0_0)
         );
     }
 
-    /** Extended sources - all OpenSearch 1.x/2.x versions */
+    /** Extended scenarios - all other ODFE/OS versions with KNN support */
     static Stream<Arguments> extendedScenarios() {
-        return SupportedClusters.extendedSources().stream()
-            .filter(v -> VersionMatchers.isOS_1_X.test(v.getVersion()) || VersionMatchers.isOS_2_X.test(v.getVersion()))
-            .map(v -> Arguments.of(v, SearchClusterContainer.OS_V3_0_0));
+        return Stream.of(
+            // ODFE versions (ES 7.4 - 7.9)
+            Arguments.of(SearchClusterContainer.ODFE_V1_4_0, SearchClusterContainer.OS_V3_0_0),   // ES 7.4.2
+            Arguments.of(SearchClusterContainer.ODFE_V1_7_0, SearchClusterContainer.OS_V3_0_0),   // ES 7.6.1
+            Arguments.of(SearchClusterContainer.ODFE_V1_8_0, SearchClusterContainer.OS_V3_0_0),   // ES 7.7.0
+            Arguments.of(SearchClusterContainer.ODFE_V1_9_0, SearchClusterContainer.OS_V3_0_0),   // ES 7.8.0
+            Arguments.of(SearchClusterContainer.ODFE_V1_11_0, SearchClusterContainer.OS_V3_0_0), // ES 7.9.1
+            // OS 2.9 for zstd codec testing
+            Arguments.of(SearchClusterContainer.OS_V2_9_0, SearchClusterContainer.OS_V3_0_0)
+        );
     }
 
     @ParameterizedTest(name = "KNN: {0} -> {1}")

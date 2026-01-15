@@ -148,7 +148,14 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static final ContainerVersion ES_V1_6 = OlderElasticsearchVersion.fromTag("1.6.2");
     public static final ContainerVersion ES_V1_5 = OlderElasticsearchVersion.fromTag("1.5.2");
 
-    public static final ContainerVersion ODFE_V1_13_3 = OpenDistroVersion.fromTag("1.13.3");
+    // Open Distro for Elasticsearch versions - latest patch for each ES minor version with KNN support
+    // ODFE 1.4.0+ includes KNN plugin. Version mapping: https://opendistro.github.io/for-elasticsearch-docs/version-history/
+    public static final ContainerVersion ODFE_V1_4_0 = OpenDistroVersion.fromTag("1.4.0", "7.4.2");   // First version with KNN
+    public static final ContainerVersion ODFE_V1_7_0 = OpenDistroVersion.fromTag("1.7.0", "7.6.1");   // Latest for ES 7.6.x
+    public static final ContainerVersion ODFE_V1_8_0 = OpenDistroVersion.fromTag("1.8.0", "7.7.0");   // Latest for ES 7.7.x
+    public static final ContainerVersion ODFE_V1_9_0 = OpenDistroVersion.fromTag("1.9.0", "7.8.0");   // Latest for ES 7.8.x
+    public static final ContainerVersion ODFE_V1_11_0 = OpenDistroVersion.fromTag("1.11.0", "7.9.1"); // Latest for ES 7.9.x
+    public static final ContainerVersion ODFE_V1_13_3 = OpenDistroVersion.fromTag("1.13.3", "7.10.2"); // Latest for ES 7.10.x
 
     public static final ContainerVersion OS_V1_0_1 = OpenSearchVersion.fromTag("1.0.1");
     public static final ContainerVersion OS_V1_1_0 = OpenSearchVersion.fromTag("1.1.0");
@@ -493,16 +500,16 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     }
 
     /**
-     * Open Distro for Elasticsearch - uses ES 7.10.2 internally with KNN plugin
+     * Open Distro for Elasticsearch - maps ODFE versions to their underlying ES versions
+     * Version history: https://opendistro.github.io/for-elasticsearch-docs/version-history/
      */
     public static class OpenDistroVersion extends ContainerVersion {
         public OpenDistroVersion(String imageName, Version version) {
             super(imageName, version, INITIALIZATION_FLAVOR.OPENDISTRO, "elasticsearch");
         }
-        public static OpenDistroVersion fromTag(String tag) {
-            String imageName = "amazon/opendistro-for-elasticsearch:" + tag;
-            // ODFE uses ES 7.10.2 internally
-            Version version = Version.fromString("ES 7.10.2");
+        public static OpenDistroVersion fromTag(String odfeTag, String esVersion) {
+            String imageName = "amazon/opendistro-for-elasticsearch:" + odfeTag;
+            Version version = Version.fromString("ES " + esVersion);
             return new OpenDistroVersion(imageName, version);
         }
     }
