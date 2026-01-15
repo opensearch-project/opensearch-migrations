@@ -316,7 +316,7 @@ def call(Map config = [:]) {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                         def usePublicImages = params.BUILD_IMAGES ? "false" : "true"
-                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir /home/ec2-user/workspace/${jobName} --use-public-images ${usePublicImages} --skip-console-exec --stage ${maStageName}"
+                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir ${WORKSPACE} --use-public-images ${usePublicImages} --skip-console-exec --stage ${maStageName}"
                                     }
                                 }
                             }
