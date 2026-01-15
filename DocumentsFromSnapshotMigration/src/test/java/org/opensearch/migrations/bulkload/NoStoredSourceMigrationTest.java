@@ -69,6 +69,8 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         new FieldTypeConfig("keyword", "keyword", "keyword", "test_kw", true, VersionRange.ES_5_PLUS),
         // Boolean - ES 2.x+ supports doc_values
         new FieldTypeConfig("boolean", "boolean", "boolean", true, true, VersionRange.ES_2_PLUS),
+        // Boolean for ES 1.x - no doc_values, recovered via terms index
+        new FieldTypeConfig("boolean_es1", "boolean", "boolean", false, false, VersionRange.ES_1_TO_4),
         // Binary - stored as base64 in ES, doc_values not supported
         new FieldTypeConfig("binary", "binary", "binary", "dGVzdA==", false, VersionRange.ES_5_PLUS),
         // Integer/Long - work correctly with doc_values and points
@@ -316,7 +318,9 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                          config.targetType.equals("float") || config.targetType.equals("double") ||
                          config.targetType.equals("ip") || config.targetType.equals("date") ||
                          config.targetType.equals("date_nanos"));
-                    boolean shouldRecover = p.hasStore || p.hasDv || canRecoverFromPoints;
+                    // Boolean fields can be recovered via terms index (all versions)
+                    boolean canRecoverFromTerms = config.targetType.equals("boolean");
+                    boolean shouldRecover = p.hasStore || p.hasDv || canRecoverFromPoints || canRecoverFromTerms;
                     if (shouldRecover) {
                         assertEquals(true, fieldValue != null, fieldName + " should be recovered but was null");
                         
