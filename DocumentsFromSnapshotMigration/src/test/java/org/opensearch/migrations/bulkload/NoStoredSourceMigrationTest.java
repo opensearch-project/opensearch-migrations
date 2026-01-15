@@ -96,7 +96,17 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         // Unsigned long - OpenSearch 2.8+ (positive value, no overflow)
         new FieldTypeConfig("unsigned_long", "unsigned_long", "unsigned_long", 9223372036854775807L, true, VersionRange.OS_2_8_PLUS),
         // Unsigned long overflow - OpenSearch 2.8+ (value > Long.MAX_VALUE, tests overflow handling)
-        new FieldTypeConfig("unsigned_long_big", "unsigned_long", "unsigned_long", new BigInteger("10000000000000000000"), true, VersionRange.OS_2_8_PLUS)
+        new FieldTypeConfig("unsigned_long_big", "unsigned_long", "unsigned_long", new BigInteger("10000000000000000000"), true, VersionRange.OS_2_8_PLUS),
+        
+        // === Stored-only variants (no doc_values) to test stored field recovery paths ===
+        // IP stored-only on ES 2.x (no Points) - tests stored field IP path
+        new FieldTypeConfig("ip_stored", "ip", "ip", "10.0.0.1", false, VersionRange.ES_2_PLUS),
+        // Date stored-only on ES 2.x (no Points) - tests stored field date path  
+        new FieldTypeConfig("date_stored", "date", "date", "2024-06-01T12:00:00.000Z", false, VersionRange.ES_2_PLUS),
+        // Integer stored-only on ES 1.x/2.x (no Points) - tests stored field numeric path
+        new FieldTypeConfig("integer_stored", "integer", "integer", 123, false, VersionRange.ES_1_TO_4),
+        // Long stored-only on ES 1.x/2.x (no Points) - tests stored field numeric path
+        new FieldTypeConfig("long_stored", "long", "long", 456789L, false, VersionRange.ES_1_TO_4)
     );
 
     /** Field storage permutations - _source is disabled, so we test recovery via doc_values */
