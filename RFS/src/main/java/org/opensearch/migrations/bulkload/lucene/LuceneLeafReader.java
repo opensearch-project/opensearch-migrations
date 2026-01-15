@@ -48,9 +48,31 @@ public interface LuceneLeafReader {
 
     /**
      * Gets point values for a field at the given document ID.
-     * Used as fallback when doc_values and stored fields are not available.
      * @return List of byte arrays (packed point values) or null if not available
      */
     default java.util.List<byte[]> getPointValues(int docId, String fieldName) throws IOException { return null; }
+
+    /**
+     * Gets a field value by scanning the terms index. Very slow for fields with many unique values,
+     * but viable for boolean fields (only 2 possible terms: T/F).
+     */
+    default String getValueFromTerms(int docId, String fieldName) throws IOException { return null; }
+
+    /**
+     * Fallback recovery: tries Points (for numerics/IP/date) or terms (for boolean).
+     * Used when doc_values and stored fields are not available.
+     */
+    default java.util.Optional<Object> getValueFromPointsOrTerms(int docId, String fieldName, EsFieldType fieldType) throws IOException {
+        return switch (fieldType) {
+            case BOOLEAN -> {
+                String term = getValueFromTerms(docId, fieldName);
+                yield term != null ? java.util.Optional.of(term) : java.util.Optional.empty();
+            }
+            default -> {
+                var points = getPointValues(docId, fieldName);
+                yield (points != null && !points.isEmpty()) ? java.util.Optional.of(points) : java.util.Optional.empty();
+            }
+        };
+    }
 
 }
