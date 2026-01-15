@@ -54,9 +54,9 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
 
     /** KNN engine availability by OpenSearch version */
     enum KnnEngine {
-        NMSLIB("nmslib", v -> true),                                    // All OS versions
+        NMSLIB("nmslib", v -> true),                                    // All versions with KNN
         FAISS("faiss", VersionMatchers.isOS_2_X::test),                 // OS 2.x+
-        LUCENE("lucene", v -> isAtLeast(v, 2, 4));                      // OS 2.4+
+        LUCENE("lucene", v -> VersionMatchers.isOS_2_X.test(v) && isAtLeast(v, 2, 4));  // OS 2.4+
 
         final String name;
         final java.util.function.Predicate<Version> isAvailable;
@@ -84,6 +84,7 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
 
     static Stream<Arguments> scenarios() {
         return Stream.of(
+            Arguments.of(SearchClusterContainer.ODFE_V1_13_3, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.OS_V1_3_20, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.OS_V2_9_0, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.OS_V2_19_4, SearchClusterContainer.OS_V3_0_0)
@@ -158,10 +159,18 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
         var configs = new ArrayList<KnnConfig>();
         int dim = 4;
 
+        // ODFE/ES 7.10 uses simpler KNN format without method parameter
+        boolean isOdfeOrEs7 = VersionMatchers.isES_7_X.test(v);
+
         // Test each available engine with its supported space types
         if (KnnEngine.NMSLIB.isAvailable.test(v)) {
-            for (var space : List.of("l2", "cosinesimil", "innerproduct")) {
-                configs.add(knnConfig("knn-nmslib-" + space, "nmslib", space, dim, null));
+            if (isOdfeOrEs7) {
+                // ODFE uses simpler format
+                configs.add(knnConfigSimple("knn-nmslib-l2", dim));
+            } else {
+                for (var space : List.of("l2", "cosinesimil", "innerproduct")) {
+                    configs.add(knnConfig("knn-nmslib-" + space, "nmslib", space, dim, null));
+                }
             }
         }
 
@@ -177,15 +186,17 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
             }
         }
 
-        // Test available codecs
-        if (IndexCodec.BEST_COMPRESSION.isAvailable.test(v)) {
-            configs.add(knnConfig("knn-best-compression", "nmslib", "l2", dim, "best_compression"));
-        }
-        if (IndexCodec.ZSTD.isAvailable.test(v)) {
-            configs.add(knnConfig("knn-zstd", "faiss", "l2", dim, "zstd"));
-        }
-        if (IndexCodec.ZSTD_NO_DICT.isAvailable.test(v)) {
-            configs.add(knnConfig("knn-zstd-nodict", "faiss", "l2", dim, "zstd_no_dict"));
+        // Test available codecs (not for ODFE/ES7)
+        if (!isOdfeOrEs7) {
+            if (IndexCodec.BEST_COMPRESSION.isAvailable.test(v)) {
+                configs.add(knnConfig("knn-best-compression", "nmslib", "l2", dim, "best_compression"));
+            }
+            if (IndexCodec.ZSTD.isAvailable.test(v)) {
+                configs.add(knnConfig("knn-zstd", "faiss", "l2", dim, "zstd"));
+            }
+            if (IndexCodec.ZSTD_NO_DICT.isAvailable.test(v)) {
+                configs.add(knnConfig("knn-zstd-nodict", "faiss", "l2", dim, "zstd_no_dict"));
+            }
         }
 
         return configs;
@@ -193,6 +204,16 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
 
     private static boolean isAtLeast(Version v, int major, int minor) {
         return v.getMajor() > major || (v.getMajor() == major && v.getMinor() >= minor);
+    }
+
+    /** Simple KNN config for ODFE/ES 7.x (no method parameter) */
+    private KnnConfig knnConfigSimple(String name, int dim) {
+        String body = String.format(
+            "{\"settings\":{\"index\":{\"knn\":true,\"number_of_shards\":1,\"number_of_replicas\":0}}," +
+            "\"mappings\":{\"properties\":{\"my_vector\":{\"type\":\"knn_vector\",\"dimension\":%d}}}}",
+            dim);
+        String doc = "{\"my_vector\":[0.1,0.2,0.3,0.4],\"title\":\"test\"}";
+        return new KnnConfig(name, body, doc);
     }
 
     private KnnConfig knnConfig(String name, String engine, String spaceType, int dim, String codec) {
