@@ -150,8 +150,7 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
 
     static Stream<Arguments> versionPairs() {
         return Stream.of(
-            // ES 1.x has a pre-existing bug with geo_point/binary field parsing
-            // Arguments.of(SearchClusterContainer.ES_V1_7_6, SearchClusterContainer.OS_V3_0_0),
+            Arguments.of(SearchClusterContainer.ES_V1_7_6, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.ES_V2_4_6, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V3_0_0),
