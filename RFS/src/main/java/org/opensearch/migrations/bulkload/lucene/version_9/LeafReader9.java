@@ -1,18 +1,36 @@
 package org.opensearch.migrations.bulkload.lucene.version_9;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.List;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
+import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
+import shadow.lucene9.org.apache.lucene.index.BinaryDocValues;
+import shadow.lucene9.org.apache.lucene.index.FieldInfo;
 import shadow.lucene9.org.apache.lucene.index.FilterCodecReader;
 import shadow.lucene9.org.apache.lucene.index.LeafReader;
+import shadow.lucene9.org.apache.lucene.index.NumericDocValues;
+import shadow.lucene9.org.apache.lucene.index.PointValues;
+import shadow.lucene9.org.apache.lucene.index.PostingsEnum;
 import shadow.lucene9.org.apache.lucene.index.SegmentReader;
+import shadow.lucene9.org.apache.lucene.index.SortedNumericDocValues;
+import shadow.lucene9.org.apache.lucene.index.SortedSetDocValues;
+import shadow.lucene9.org.apache.lucene.index.Terms;
+import shadow.lucene9.org.apache.lucene.index.TermsEnum;
+import shadow.lucene9.org.apache.lucene.store.ByteArrayDataInput;
 import shadow.lucene9.org.apache.lucene.util.Bits;
+import shadow.lucene9.org.apache.lucene.util.BytesRef;
 import shadow.lucene9.org.apache.lucene.util.FixedBitSet;
 import shadow.lucene9.org.apache.lucene.util.SparseFixedBitSet;
 
+@Slf4j
 public class LeafReader9 implements LuceneLeafReader {
 
     private final LeafReader wrapped;
@@ -34,6 +52,20 @@ public class LeafReader9 implements LuceneLeafReader {
             Bits::get,
             sparseBits -> sparseBits::nextSetBit
         );
+    }
+
+    /**
+     * Safely convert BytesRef to String, handling binary data.
+     */
+    private static String bytesRefToString(BytesRef ref) {
+        if (ref == null || ref.length == 0) return null;
+        try {
+            return ref.utf8ToString();
+        } catch (AssertionError | Exception e) {
+            byte[] bytes = new byte[ref.length];
+            System.arraycopy(ref.bytes, ref.offset, bytes, 0, ref.length);
+            return Base64.getEncoder().encodeToString(bytes);
+        }
     }
 
     public Document9 document(int luceneDocId) throws IOException {
@@ -70,5 +102,159 @@ public class LeafReader9 implements LuceneLeafReader {
         return getSegmentReader()
             .getSegmentInfo()
             .toString();
+    }
+
+    @Override
+    public Iterable<DocValueFieldInfo> getDocValueFields() {
+        List<DocValueFieldInfo> fields = new ArrayList<>();
+        for (FieldInfo fieldInfo : wrapped.getFieldInfos()) {
+            DocValueFieldInfo.DocValueType dvType = convertDocValuesType(fieldInfo.getDocValuesType());
+            if (dvType != DocValueFieldInfo.DocValueType.NONE) {
+                boolean isBoolean = dvType == DocValueFieldInfo.DocValueType.SORTED_NUMERIC 
+                    && DocValueFieldInfo.hasOnlyBooleanTerms(getFieldTermsInternal(fieldInfo.name));
+                fields.add(new DocValueFieldInfo.Simple(fieldInfo.name, dvType, isBoolean));
+            }
+        }
+        return fields;
+    }
+
+    private List<String> getFieldTermsInternal(String fieldName) {
+        try {
+            Terms terms = wrapped.terms(fieldName);
+            if (terms == null) return Collections.emptyList();
+            List<String> result = new ArrayList<>();
+            TermsEnum termsEnum = terms.iterator();
+            BytesRef term;
+            while ((term = termsEnum.next()) != null) {
+                String termStr = bytesRefToString(term);
+                if (termStr != null) {
+                    result.add(termStr);
+                }
+            }
+            return result;
+        } catch (IOException e) {
+            return Collections.emptyList();
+        }
+    }
+
+    private static DocValueFieldInfo.DocValueType convertDocValuesType(
+            shadow.lucene9.org.apache.lucene.index.DocValuesType luceneType) {
+        return switch (luceneType) {
+            case NUMERIC -> DocValueFieldInfo.DocValueType.NUMERIC;
+            case BINARY -> DocValueFieldInfo.DocValueType.BINARY;
+            case SORTED_NUMERIC -> DocValueFieldInfo.DocValueType.SORTED_NUMERIC;
+            case SORTED_SET -> DocValueFieldInfo.DocValueType.SORTED_SET;
+            case SORTED, NONE -> DocValueFieldInfo.DocValueType.NONE;
+        };
+    }
+
+    @Override
+    public Object getNumericValue(int docId, String fieldName) throws IOException {
+        NumericDocValues dv = wrapped.getNumericDocValues(fieldName);
+        if (dv != null && dv.advanceExact(docId)) {
+            return dv.longValue();
+        }
+        return null;
+    }
+
+    @Override
+    public Object getBinaryValue(int docId, String fieldName) throws IOException {
+        BinaryDocValues dv = wrapped.getBinaryDocValues(fieldName);
+        if (dv != null && dv.advanceExact(docId)) {
+            BytesRef value = dv.binaryValue();
+            if (value != null && value.length > 0) {
+                // Binary doc values use VInt encoding: count + (len + bytes)*
+                ByteArrayDataInput in = new ByteArrayDataInput(value.bytes, value.offset, value.length);
+                int count = in.readVInt();
+                if (count > 0) {
+                    int len = in.readVInt();
+                    byte[] data = new byte[len];
+                    in.readBytes(data, 0, len);
+                    return Base64.getEncoder().encodeToString(data);
+                }
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public Object getSortedSetValues(int docId, String fieldName) throws IOException {
+        SortedSetDocValues dv = wrapped.getSortedSetDocValues(fieldName);
+        if (dv != null && dv.advanceExact(docId)) {
+            List<String> values = new ArrayList<>();
+            long ord;
+            while ((ord = dv.nextOrd()) != SortedSetDocValues.NO_MORE_ORDS) {
+                String val = bytesRefToString(dv.lookupOrd(ord));
+                if (val != null) {
+                    values.add(val);
+                }
+            }
+            return values.size() == 1 ? values.get(0) : values;
+        }
+        return null;
+    }
+
+    @Override
+    public Object getSortedNumericValues(int docId, String fieldName) throws IOException {
+        SortedNumericDocValues dv = wrapped.getSortedNumericDocValues(fieldName);
+        if (dv != null && dv.advanceExact(docId)) {
+            int count = dv.docValueCount();
+            if (count == 1) {
+                return dv.nextValue();
+            }
+            List<Long> values = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) {
+                values.add(dv.nextValue());
+            }
+            return values;
+        }
+        return null;
+    }
+
+    @Override
+    public List<byte[]> getPointValues(int docId, String fieldName) throws IOException {
+        PointValues pointValues = wrapped.getPointValues(fieldName);
+        if (pointValues == null) {
+            return null;
+        }
+        
+        List<byte[]> result = new ArrayList<>();
+        
+        pointValues.intersect(new PointValues.IntersectVisitor() {
+            @Override
+            public void visit(int visitDocId) {
+            }
+            
+            @Override
+            public void visit(int visitDocId, byte[] packedValue) {
+                if (visitDocId == docId) {
+                    result.add(packedValue.clone());
+                }
+            }
+            
+            @Override
+            public PointValues.Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
+                return PointValues.Relation.CELL_CROSSES_QUERY;
+            }
+        });
+        
+        return result.isEmpty() ? null : result;
+    }
+
+    @Override
+    public String getValueFromTerms(int docId, String fieldName) throws IOException {
+        Terms terms = wrapped.terms(fieldName);
+        if (terms == null) return null;
+        TermsEnum termsEnum = terms.iterator();
+        BytesRef term;
+        while ((term = termsEnum.next()) != null) {
+            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.NONE);
+            int doc;
+            while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
+                if (doc == docId) return term.utf8ToString();
+                if (doc > docId) break;
+            }
+        }
+        return null;
     }
 }

@@ -5,6 +5,7 @@ import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.NoArgsConstructor;
 
@@ -37,8 +38,8 @@ public class IndexMetadataData_OS_2_11 implements IndexMetadata {
     }
 
     @Override
-    public ObjectNode getMappings() {
-        return (ObjectNode) root.get("mappings");
+    public JsonNode getMappings() {
+        return root.get("mappings");
     }
 
     @Override

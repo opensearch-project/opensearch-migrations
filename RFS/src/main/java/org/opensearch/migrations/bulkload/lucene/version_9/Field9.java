@@ -29,9 +29,25 @@ public class Field9 implements LuceneField {
     @Override
     public String utf8ToStringValue() {
         var bytesRef = wrapped.binaryValue();
-        if (bytesRef.bytes != null && bytesRef.bytes.length != 0) {
+        if (bytesRef != null && bytesRef.bytes != null && bytesRef.bytes.length != 0) {
             return bytesRef.utf8ToString();
         }
         return null;
+    }
+
+    @Override
+    public byte[] binaryValue() {
+        var bytesRef = wrapped.binaryValue();
+        if (bytesRef != null && bytesRef.bytes != null && bytesRef.length > 0) {
+            byte[] result = new byte[bytesRef.length];
+            System.arraycopy(bytesRef.bytes, bytesRef.offset, result, 0, bytesRef.length);
+            return result;
+        }
+        return null;
+    }
+
+    @Override
+    public Number numericValue() {
+        return wrapped.numericValue();
     }
 }
