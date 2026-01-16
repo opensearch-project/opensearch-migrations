@@ -55,18 +55,26 @@ public class SourceReconstructor {
             for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
                 String fieldName = fieldInfo.name();
                 log.debug("[DocValues] Found field {} with type {}", fieldName, fieldInfo.docValueType());
-                if (shouldSkipField(fieldName) || reconstructed.containsKey(fieldName)) {
+                if (shouldSkipField(fieldName)) {
+                    log.debug("[DocValues] Skipping internal field {}", fieldName);
+                    continue;
+                }
+                if (reconstructed.containsKey(fieldName)) {
+                    log.debug("[DocValues] Skipping {} - already reconstructed from stored field", fieldName);
                     continue;
                 }
                 FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
+                log.debug("[DocValues] Field {} mappingInfo: {}", fieldName, mappingInfo);
                 // Skip if mapping says doc_values is disabled (ES 2.x may still have them internally)
                 if (mappingInfo != null && !mappingInfo.docValues()) {
+                    log.debug("[DocValues] Skipping {} - doc_values disabled in mapping", fieldName);
                     continue;
                 }
                 Object value = reader.getDocValue(docId, fieldInfo);
                 log.debug("[DocValues] Field {} raw value: {}", fieldName, value);
                 if (value != null) {
                     Object converted = convertDocValue(value, fieldInfo, mappingInfo);
+                    log.debug("[DocValues] Field {} converted value: {}", fieldName, converted);
                     if (converted != null) {
                         reconstructed.put(fieldName, converted);
                     }
@@ -272,7 +280,13 @@ public class SourceReconstructor {
             case NUMERIC -> {
                 // Float/double doc_values are stored as sortable int/long
                 String mappingType = mappingInfo.mappingType();
-                if ("float".equals(mappingType) || "half_float".equals(mappingType)) {
+                if ("half_float".equals(mappingType)) {
+                    if (value instanceof Long longVal) {
+                        // half_float uses 16-bit encoding - convert sortable short back to half float
+                        yield sortableShortToHalfFloat(longVal.shortValue());
+                    }
+                }
+                if ("float".equals(mappingType)) {
                     if (value instanceof Long longVal) {
                         yield Float.intBitsToFloat(longVal.intValue());
                     }
@@ -349,6 +363,19 @@ public class SourceReconstructor {
                 }
                 yield value;
             }
+            case STRING -> {
+                // Wildcard type stores values as binary doc_values (base64 encoded)
+                String mappingType = mappingInfo.mappingType();
+                if ("wildcard".equals(mappingType) && value instanceof String strVal) {
+                    try {
+                        byte[] bytes = Base64.getDecoder().decode(strVal);
+                        yield new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+                    } catch (IllegalArgumentException e) {
+                        // Not valid base64, return as-is
+                    }
+                }
+                yield value;
+            }
             default -> value;
         };
     }
@@ -386,20 +413,38 @@ public class SourceReconstructor {
         }
     }
 
+    // Constants for Morton decoding (ES 2.x geo_point format)
+    private static final long[] MAGIC = {
+        0x5555555555555555L, 0x3333333333333333L, 0x0F0F0F0F0F0F0F0FL,
+        0x00FF00FF00FF00FFL, 0x0000FFFF0000FFFFL, 0x00000000FFFFFFFFL
+    };
+    private static final int[] SHIFT = { 1, 2, 4, 8, 16 };
+    private static final double LAT_SCALE = (0x1L << 31) / 180.0D;
+    private static final double LON_SCALE = (0x1L << 31) / 360.0D;
+
     private static Map<String, Double> decodeGeoPoint(long encoded) {
-        int latBits = (int) (encoded >> 32);
-        int lonBits = (int) encoded;
-        double lat = decodeLatitude(latBits);
-        double lon = decodeLongitude(lonBits);
+        // ES 2.x uses Morton encoding (geohash format) for geo_point doc_values
+        double lon = decodeLongitude(encoded);
+        double lat = decodeLatitude(encoded);
         return Map.of("lat", lat, "lon", lon);
     }
 
-    private static double decodeLatitude(int encoded) {
-        return encoded / (double)(1 << 31) * 180.0;
+    private static double decodeLatitude(long hash) {
+        return (deinterleave(hash >>> 1) / LAT_SCALE) - 90;
     }
 
-    private static double decodeLongitude(int encoded) {
-        return encoded / (double)(1 << 31) * 360.0;
+    private static double decodeLongitude(long hash) {
+        return (deinterleave(hash) / LON_SCALE) - 180;
+    }
+
+    private static long deinterleave(long b) {
+        b &= MAGIC[0];
+        b = (b ^ (b >>> SHIFT[0])) & MAGIC[1];
+        b = (b ^ (b >>> SHIFT[1])) & MAGIC[2];
+        b = (b ^ (b >>> SHIFT[2])) & MAGIC[3];
+        b = (b ^ (b >>> SHIFT[3])) & MAGIC[4];
+        b = (b ^ (b >>> SHIFT[4])) & MAGIC[5];
+        return b;
     }
 
     /** Convert fallback value from Points (List<byte[]>) or Terms (String) */
@@ -428,7 +473,13 @@ public class SourceReconstructor {
             case IP -> packed.length == 16 ? convertIpBytes(packed) : null;
             case NUMERIC -> {
                 String mappingType = mappingInfo.mappingType();
-                if (("float".equals(mappingType) || "half_float".equals(mappingType)) && packed.length == 4) {
+                if ("half_float".equals(mappingType) && packed.length == 2) {
+                    // half_float Points: read big-endian short, flip sign bit, then decode
+                    short s = (short) (((packed[0] & 0xFF) << 8) | (packed[1] & 0xFF));
+                    s ^= 0x8000; // flip sign bit (sortableBytesToShort)
+                    yield sortableShortToHalfFloat(s);
+                }
+                if ("float".equals(mappingType) && packed.length == 4) {
                     yield Float.intBitsToFloat(decodeIntPoint(packed));
                 }
                 if ("double".equals(mappingType) && packed.length == 8) {
@@ -466,5 +517,33 @@ public class SourceReconstructor {
                (packed[3] & 0xFF);
         // Flip sign bit back (Lucene sortable encoding)
         return raw ^ 0x80000000;
+    }
+
+    /** Convert sortable short to half-precision float (IEEE 754 binary16) */
+    private static float sortableShortToHalfFloat(short sortableShort) {
+        // Reverse the sortable encoding: s ^ (s >> 15) & 0x7fff
+        short bits = (short) (sortableShort ^ (sortableShort >> 15) & 0x7fff);
+        // Convert half-float bits to float using shortBitsToHalfFloat logic
+        int sign = bits >>> 15;
+        int exp = (bits >>> 10) & 0x1f;
+        int mantissa = bits & 0x3ff;
+        
+        if (exp == 0x1f) {
+            // NaN or infinities
+            exp = 0xff;
+            mantissa <<= (23 - 10);
+        } else if (mantissa == 0 && exp == 0) {
+            // zero - just return with sign
+        } else {
+            if (exp == 0) {
+                // denormal half float becomes a normal float
+                int shift = Integer.numberOfLeadingZeros(mantissa) - (32 - 11);
+                mantissa = (mantissa << shift) & 0x3ff;
+                exp = exp - shift + 1;
+            }
+            exp = exp + 127 - 15;
+            mantissa <<= (23 - 10);
+        }
+        return Float.intBitsToFloat((sign << 31) | (exp << 23) | mantissa);
     }
 }
