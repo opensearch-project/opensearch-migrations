@@ -75,8 +75,8 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         new FieldTypeConfig("boolean", "boolean", "boolean", true, VersionRange.ES_2_PLUS, true, false),
         // Boolean for ES 1.x - no doc_values, recovered via terms index
         new FieldTypeConfig("boolean_es1", "boolean", "boolean", false, VersionRange.ES_1_TO_4, false, false),
-        // Binary - stored as base64 in ES, no doc_values, no Points
-        new FieldTypeConfig("binary", "binary", "binary", "dGVzdA==", VersionRange.ES_5_PLUS, false, false),
+        // Binary - supports doc_values (ES 2+), no Points
+        new FieldTypeConfig("binary", "binary", "binary", "dGVzdA==", VersionRange.ALL, true, false),
         // Integer/Long - doc_values + Points on ES 5+
         new FieldTypeConfig("integer", "integer", "integer", 42, VersionRange.ALL, true, true),
         new FieldTypeConfig("long", "long", "long", 9999L, VersionRange.ALL, true, true),

@@ -12,6 +12,7 @@ import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import shadow.lucene9.org.apache.lucene.index.BinaryDocValues;
 import shadow.lucene9.org.apache.lucene.index.FieldInfo;
 import shadow.lucene9.org.apache.lucene.index.FilterCodecReader;
 import shadow.lucene9.org.apache.lucene.index.LeafReader;
@@ -23,6 +24,7 @@ import shadow.lucene9.org.apache.lucene.index.SortedNumericDocValues;
 import shadow.lucene9.org.apache.lucene.index.SortedSetDocValues;
 import shadow.lucene9.org.apache.lucene.index.Terms;
 import shadow.lucene9.org.apache.lucene.index.TermsEnum;
+import shadow.lucene9.org.apache.lucene.store.ByteArrayDataInput;
 import shadow.lucene9.org.apache.lucene.util.Bits;
 import shadow.lucene9.org.apache.lucene.util.BytesRef;
 import shadow.lucene9.org.apache.lucene.util.FixedBitSet;
@@ -139,9 +141,10 @@ public class LeafReader9 implements LuceneLeafReader {
             shadow.lucene9.org.apache.lucene.index.DocValuesType luceneType) {
         return switch (luceneType) {
             case NUMERIC -> DocValueFieldInfo.DocValueType.NUMERIC;
+            case BINARY -> DocValueFieldInfo.DocValueType.BINARY;
             case SORTED_NUMERIC -> DocValueFieldInfo.DocValueType.SORTED_NUMERIC;
             case SORTED_SET -> DocValueFieldInfo.DocValueType.SORTED_SET;
-            case BINARY, SORTED, NONE -> DocValueFieldInfo.DocValueType.NONE;
+            case SORTED, NONE -> DocValueFieldInfo.DocValueType.NONE;
         };
     }
 
@@ -150,6 +153,26 @@ public class LeafReader9 implements LuceneLeafReader {
         NumericDocValues dv = wrapped.getNumericDocValues(fieldName);
         if (dv != null && dv.advanceExact(docId)) {
             return dv.longValue();
+        }
+        return null;
+    }
+
+    @Override
+    public Object getBinaryValue(int docId, String fieldName) throws IOException {
+        BinaryDocValues dv = wrapped.getBinaryDocValues(fieldName);
+        if (dv != null && dv.advanceExact(docId)) {
+            BytesRef value = dv.binaryValue();
+            if (value != null && value.length > 0) {
+                // Binary doc values use VInt encoding: count + (len + bytes)*
+                ByteArrayDataInput in = new ByteArrayDataInput(value.bytes, value.offset, value.length);
+                int count = in.readVInt();
+                if (count > 0) {
+                    int len = in.readVInt();
+                    byte[] data = new byte[len];
+                    in.readBytes(data, 0, len);
+                    return Base64.getEncoder().encodeToString(data);
+                }
+            }
         }
         return null;
     }
