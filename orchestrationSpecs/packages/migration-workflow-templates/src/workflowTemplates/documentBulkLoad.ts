@@ -311,7 +311,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     .addTemplate("runBulkLoad", t => t
         .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addRequiredInput("coordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("sessionName", typeToken<string>())
         .addOptionalInput("indices", c => [] as readonly string[])
@@ -324,11 +323,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c)
                 }))
             .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c =>
-                c.register({
-                    ...selectInputsForRegister(b,c),
-                    targetConfig: b.inputs.coordinatorConfig,
-                }),
-            )
+                c.register(selectInputsForRegister(b, c)))
             .addStep("waitForCompletion", INTERNAL, "waitForCompletion", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),

@@ -47,7 +47,7 @@ export function makeClusterParamDict(clusterType: string, clusterConfig: BaseExp
 }
 
 export function makeTargetParamDict(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
-    return makeClusterParamDict("foo", targetConfig);
+    return makeClusterParamDict("target", targetConfig);
 }
 
 // The functions below are still used by the replaer, but they should probably be replaced with the ones above
