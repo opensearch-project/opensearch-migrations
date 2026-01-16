@@ -105,11 +105,6 @@ public class SourceReconstructor {
         }
     }
 
-    /** Backwards-compatible overload without mapping context */
-    public static String reconstructSource(LuceneLeafReader reader, int docId, LuceneDocument document) {
-        return reconstructSource(reader, docId, document, null);
-    }
-
     /**
      * Merges reconstructed fields into existing source JSON.
      */
@@ -150,11 +145,6 @@ public class SourceReconstructor {
             log.atWarn().setCause(e).setMessage("Failed to merge fields for document {}").addArgument(docId).log();
             return existingSource;
         }
-    }
-
-    /** Backwards-compatible overload without mapping context */
-    public static String mergeWithDocValues(String existingSource, LuceneLeafReader reader, int docId, LuceneDocument document) {
-        return mergeWithDocValues(existingSource, reader, docId, document, null);
     }
 
     /** Extracts value from stored field, converting booleans stored as T/F and binary as base64 */
@@ -260,11 +250,6 @@ public class SourceReconstructor {
             }
         }
         return value;
-    }
-
-    /** Backwards-compatible overload */
-    private static Object getStoredFieldValue(LuceneField field) {
-        return getStoredFieldValue(field, null);
     }
 
     /** Converts doc_value using mapping info when available, falling back to heuristics */
@@ -475,14 +460,10 @@ public class SourceReconstructor {
 
     /** Decode 4-byte packed int point value (Lucene sortable format - sign bit flipped) */
     private static int decodeIntPoint(byte[] packed) {
-        return decodeIntPoint(packed, 0);
-    }
-
-    private static int decodeIntPoint(byte[] packed, int offset) {
-        int raw = ((packed[offset] & 0xFF) << 24) |
-               ((packed[offset + 1] & 0xFF) << 16) |
-               ((packed[offset + 2] & 0xFF) << 8) |
-               (packed[offset + 3] & 0xFF);
+        int raw = ((packed[0] & 0xFF) << 24) |
+               ((packed[1] & 0xFF) << 16) |
+               ((packed[2] & 0xFF) << 8) |
+               (packed[3] & 0xFF);
         // Flip sign bit back (Lucene sortable encoding)
         return raw ^ 0x80000000;
     }
