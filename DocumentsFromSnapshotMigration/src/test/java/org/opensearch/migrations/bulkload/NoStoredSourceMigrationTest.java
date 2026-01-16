@@ -622,4 +622,89 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             assertEquals(0, totalHits, "Document with unrecoverable fields should be skipped");
         }
     }
+
+    /**
+     * Tests mergeWithDocValues() stored field path - when _source exists but has excluded fields
+     * that are recovered from stored fields (not doc_values).
+     */
+    @ParameterizedTest(name = "mergeStoredFields: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testMergeWithStoredFields(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "merge_stored_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+            boolean prEs5 = UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion());
+
+            String stringFieldType = prEs5 ? "string\", \"index\": \"not_analyzed" : "keyword";
+
+            // Create index with _source includes, excluded_field uses store:true, doc_values:false
+            String indexBody;
+            if (needsDocType(sourceVersion)) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}," +
+                    "\"mappings\":{\"%s\":{\"_source\":{\"includes\":[\"included_field\"]}," +
+                    "\"properties\":{\"included_field\":{\"type\":\"%s\"},\"excluded_field\":{\"type\":\"%s\",\"store\":true,\"doc_values\":false}}}}}",
+                    docType, stringFieldType, stringFieldType
+                );
+            } else {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}," +
+                    "\"mappings\":{\"_source\":{\"includes\":[\"included_field\"]}," +
+                    "\"properties\":{\"included_field\":{\"type\":\"%s\"},\"excluded_field\":{\"type\":\"%s\",\"store\":true,\"doc_values\":false}}}}",
+                    stringFieldType, stringFieldType
+                );
+            }
+
+            String doc = "{\"included_field\": \"included_value\", \"excluded_field\": \"stored_value\"}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, docType);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}," +
+                "\"mappings\":{\"properties\":{\"included_field\":{\"type\":\"keyword\"},\"excluded_field\":{\"type\":\"keyword\"}}}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> migrateDocumentsSequentially(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion(), null
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "No documents migrated. Response: " + response);
+            JsonNode source = hits.get(0).path("_source");
+
+            log.info("Migrated _source: {}", source);
+
+            assertEquals("included_value", source.get("included_field").asText());
+            // excluded_field should be recovered from stored field via mergeWithDocValues
+            assertEquals("stored_value", source.get("excluded_field").asText());
+        }
+    }
 }
