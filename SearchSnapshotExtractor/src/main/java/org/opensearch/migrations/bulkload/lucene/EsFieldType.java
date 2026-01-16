@@ -14,9 +14,9 @@ public enum EsFieldType {
     DATE_NANOS,     // date_nanos
     IP,             // ip
     GEO_POINT,      // geo_point
-    STRING,         // keyword, text, constant_keyword, version, wildcard, match_only_text
+    STRING,         // keyword, text, constant_keyword, version, wildcard, match_only_text, flat_object
     BINARY,         // binary
-    UNSUPPORTED;    // object, nested, geo_shape, vectors, etc.
+    UNSUPPORTED;    // object, nested, geo_shape, vectors, range types, etc.
 
     private static final Map<String, EsFieldType> MAPPING_TYPE_TO_FIELD_TYPE = Map.ofEntries(
         // NUMERIC
@@ -50,8 +50,16 @@ public enum EsFieldType {
         Map.entry("version", STRING),
         Map.entry("wildcard", STRING),
         Map.entry("match_only_text", STRING),
+        Map.entry("flat_object", STRING),  // OpenSearch flat_object stores as keyword-like
         // BINARY
-        Map.entry("binary", BINARY)
+        Map.entry("binary", BINARY),
+        // RANGE - stored as binary, complex format - treat as unsupported for now
+        Map.entry("integer_range", UNSUPPORTED),
+        Map.entry("long_range", UNSUPPORTED),
+        Map.entry("float_range", UNSUPPORTED),
+        Map.entry("double_range", UNSUPPORTED),
+        Map.entry("date_range", UNSUPPORTED),
+        Map.entry("ip_range", UNSUPPORTED)
     );
 
     public static EsFieldType fromMappingType(String mappingType) {
