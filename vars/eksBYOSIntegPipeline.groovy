@@ -137,7 +137,7 @@ def call(Map config = [:]) {
 
             stage('Deploy Target Cluster') {
                 steps {
-                    timeout(time: 60, unit: 'MINUTES') {
+                    timeout(time: 45, unit: 'MINUTES') {
                         dir('test') {
                             script {
                                 def sizeConfig = targetClusterSizes[params.TARGET_CLUSTER_SIZE]
@@ -185,7 +185,7 @@ def call(Map config = [:]) {
 
             stage('Configure EKS') {
                 steps {
-                    timeout(time: 30, unit: 'MINUTES') {
+                    timeout(time: 10, unit: 'MINUTES') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 1200, roleSessionName: 'jenkins-session') {
@@ -311,7 +311,7 @@ def call(Map config = [:]) {
 
             stage('Install Helm Chart') {
                 steps {
-                    timeout(time: 15, unit: 'MINUTES') {
+                    timeout(time: 10, unit: 'MINUTES') {
                         dir('deployment/k8s/aws') {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
@@ -328,7 +328,7 @@ def call(Map config = [:]) {
 
             stage('Run BYOS Migration Test') {
                 steps {
-                    timeout(time: 2, unit: 'HOURS') {
+                    timeout(time: 4, unit: 'HOURS') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
@@ -390,45 +390,133 @@ ENVEOF
 
         post {
             always {
-                timeout(time: 75, unit: 'MINUTES') {
+                timeout(time: 90, unit: 'MINUTES') {
                     script {
-                        if (env.eksClusterName) {
-                            def clusterDetails = readJSON text: env.clusterDetailsJson
-                            def targetCluster = clusterDetails.target
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 4500, roleSessionName: 'jenkins-session') {
-                                    sh "kubectl -n ma get pods || true"
+                        def region = params.SNAPSHOT_REGION
+                        def networkStackName = "NetworkInfra-${maStageName}-${region}"
+                        def domainStackName = "OpenSearchDomain-target-${maStageName}-${region}"
+                        def maStackName = "Migration-Assistant-Infra-Import-VPC-eks-${maStageName}-${region}"
 
-                                    // Cleanup MA namespace
+                        withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: region, duration: 4500, roleSessionName: 'jenkins-session') {
+                                // Stage 1: Cleanup MA resources
+                                stage('Cleanup MA Resources') {
+                                    sh "kubectl -n ma get pods || true"
                                     sh """
                                       helm uninstall ma -n ma --wait --timeout 300s || true
                                       kubectl delete namespace ma --ignore-not-found --timeout=60s || true
                                     """
 
-                                    // Remove security group rule
+                                    if (env.clusterDetailsJson && env.clusterSecurityGroup) {
+                                        def clusterDetails = readJSON text: env.clusterDetailsJson
+                                        def targetCluster = clusterDetails.target
+                                        sh """
+                                          if aws ec2 describe-security-groups --group-ids ${targetCluster.securityGroupId} >/dev/null 2>&1; then
+                                            exists=\$(aws ec2 describe-security-groups \
+                                              --group-ids ${targetCluster.securityGroupId} \
+                                              --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='${env.clusterSecurityGroup}']]" \
+                                              --output json)
+                                            if [ "\$exists" != "[]" ]; then
+                                              aws ec2 revoke-security-group-ingress \
+                                                --group-id ${targetCluster.securityGroupId} \
+                                                --protocol -1 --port -1 \
+                                                --source-group ${env.clusterSecurityGroup} || true
+                                            fi
+                                          fi
+                                        """
+                                    }
+
                                     sh """
-                                      if aws ec2 describe-security-groups --group-ids $targetCluster.securityGroupId >/dev/null 2>&1; then
-                                        exists=\$(aws ec2 describe-security-groups \
-                                          --group-ids $targetCluster.securityGroupId \
-                                          --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
-                                          --output json)
-
-                                        if [ "\$exists" != "[]" ]; then
-                                          aws ec2 revoke-security-group-ingress \
-                                            --group-id $targetCluster.securityGroupId \
-                                            --protocol -1 \
-                                            --port -1 \
-                                            --source-group $env.clusterSecurityGroup || true
-                                        fi
-                                      fi
+                                      cd $WORKSPACE/deployment/migration-assistant-solution
+                                      cdk destroy ${maStackName} --force || true
                                     """
-
-                                    // Destroy MA CDK stack
-                                    sh "cd $WORKSPACE/deployment/migration-assistant-solution && cdk destroy Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} --force --concurrency 3 || true"
-
-                                    // Destroy target cluster
-                                    sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json || true"
                                 }
+
+                                // Stage 2: Destroy OpenSearch domain stack
+                                stage('Destroy OpenSearch Domain') {
+                                    sh """
+                                      set -euo pipefail
+                                      cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk
+                                      echo "Destroying stack: ${domainStackName}"
+                                      cdk destroy ${domainStackName} --force --concurrency 1
+                                    """
+                                    sh """
+                                      set -euo pipefail
+                                      echo "Waiting for stack deletion: ${domainStackName}"
+                                      aws cloudformation wait stack-delete-complete --stack-name ${domainStackName}
+                                    """
+                                }
+
+                                // Stage 3: Wait for VPC dependencies to drain
+                                stage('Wait for VPC Dependencies') {
+                                    sh """
+                                      set -euo pipefail
+                                      VPC_ID=\$(aws cloudformation describe-stacks --stack-name ${networkStackName} \
+                                        --query 'Stacks[0].Outputs[?OutputKey==`VpcIdExport${maStageName}`].OutputValue' --output text)
+                                      echo "VPC_ID=\$VPC_ID"
+
+                                      deadline=\$((SECONDS + 3600))
+                                      while [ \$SECONDS -lt \$deadline ]; do
+                                        eni_count=\$(aws ec2 describe-network-interfaces \
+                                          --filters Name=vpc-id,Values="\$VPC_ID" \
+                                          --query 'length(NetworkInterfaces)' --output text)
+                                        vpce_count=\$(aws ec2 describe-vpc-endpoints \
+                                          --filters Name=vpc-id,Values="\$VPC_ID" \
+                                          --query 'length(VpcEndpoints)' --output text 2>/dev/null || echo 0)
+                                        subnet_count=\$(aws ec2 describe-subnets \
+                                          --filters Name=vpc-id,Values="\$VPC_ID" \
+                                          --query 'length(Subnets)' --output text)
+                                        igw_count=\$(aws ec2 describe-internet-gateways \
+                                          --filters Name=attachment.vpc-id,Values="\$VPC_ID" \
+                                          --query 'length(InternetGateways)' --output text)
+                                        eigw_count=\$(aws ec2 describe-egress-only-internet-gateways \
+                                          --query "length(EgressOnlyInternetGateways[?Attachments[?VpcId=='\$VPC_ID']])" \
+                                          --output text 2>/dev/null || echo 0)
+                                        nat_count=\$(aws ec2 describe-nat-gateways \
+                                          --filter Name=vpc-id,Values="\$VPC_ID" \
+                                          --query 'length(NatGateways[?State!=`deleted`])' --output text)
+                                        lb_count=\$(aws elbv2 describe-load-balancers \
+                                          --query "length(LoadBalancers[?VpcId=='\$VPC_ID'])" --output text 2>/dev/null || echo 0)
+
+                                        echo "Waiting for VPC dependencies... ENIs=\$eni_count VPCEs=\$vpce_count Subnets=\$subnet_count IGWs=\$igw_count EIGWs=\$eigw_count NATs=\$nat_count LBs=\$lb_count"
+
+                                        if [ "\$eni_count" = "0" ] && [ "\$vpce_count" = "0" ] && [ "\$subnet_count" = "0" ] && \
+                                           [ "\$igw_count" = "0" ] && [ "\$eigw_count" = "0" ] && [ "\$nat_count" = "0" ] && [ "\$lb_count" = "0" ]; then
+                                          echo "VPC dependencies drained."
+                                          exit 0
+                                        fi
+                                        sleep 30
+                                      done
+
+                                      echo "Timed out waiting for VPC dependencies. Dumping remaining:"
+                                      aws ec2 describe-network-interfaces --filters Name=vpc-id,Values="\$VPC_ID" \
+                                        --query 'NetworkInterfaces[*].{Id:NetworkInterfaceId,Status:Status,Desc:Description}' --output table || true
+                                      aws ec2 describe-vpc-endpoints --filters Name=vpc-id,Values="\$VPC_ID" --output table || true
+                                      aws ec2 describe-subnets --filters Name=vpc-id,Values="\$VPC_ID" --output table || true
+                                      aws ec2 describe-nat-gateways --filter Name=vpc-id,Values="\$VPC_ID" \
+                                        --query 'NatGateways[?State!=`deleted`]' --output table || true
+                                      aws elbv2 describe-load-balancers --query "LoadBalancers[?VpcId=='\$VPC_ID']" --output table || true
+                                      exit 1
+                                    """
+                                }
+
+                                // Stage 4: Destroy network stack
+                                stage('Destroy Network Stack') {
+                                    sh """
+                                      set -euo pipefail
+                                      cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk
+                                      echo "Destroying stack: ${networkStackName}"
+                                      cdk destroy ${networkStackName} --force --concurrency 1
+                                    """
+                                    sh """
+                                      set -euo pipefail
+                                      echo "Waiting for stack deletion: ${networkStackName}"
+                                      aws cloudformation wait stack-delete-complete --stack-name ${networkStackName}
+                                    """
+                                }
+
+                                // Cleanup context file
+                                sh "rm -f $WORKSPACE/test/amazon-opensearch-service-sample-cdk/cdk.context.json || true"
                             }
                         }
                     }
