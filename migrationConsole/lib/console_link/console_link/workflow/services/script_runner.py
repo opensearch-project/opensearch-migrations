@@ -45,7 +45,8 @@ class ScriptRunner:
             self,
             program_name: str,
             input_data: Optional[str] = None,
-            *args: str
+            *args: str,
+            direct_output: bool = False
     ) -> str:
         """
         Run a program with standard interface.
@@ -54,6 +55,7 @@ class ScriptRunner:
             program_name: Name of command
             input_data: Optional data to pass via stdin
             *args: Additional command line arguments
+            direct_output: If True, output errors directly to stderr instead of using logger
 
         Returns:
             stripped output (stdout) from running program_name
@@ -85,15 +87,25 @@ class ScriptRunner:
             return result.stdout.strip()
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"Script failed with exit code {e.returncode}")
-            logger.error(f"stderr: {e.stderr}")
-            raise
+            if direct_output:
+                import sys
+                print(f"Script failed with exit code {e.returncode}", file=sys.stderr)
+                if e.stderr:
+                    print(f"stderr: {e.stderr}", file=sys.stderr)
+            else:
+                logger.error(f"Script failed with exit code {e.returncode}")
+                if e.stderr:
+                    logger.error(f"stderr: {e.stderr}")
+            raise subprocess.CalledProcessError(
+                e.returncode, e.cmd, e.stdout, e.stderr
+            ) from None
 
     def run_script(
             self,
             script_name: str,
             input_data: Optional[str] = None,
-            *args: str
+            *args: str,
+            direct_output: bool = False
     ) -> str:
         """
         Run a script with standard interface.
@@ -102,6 +114,7 @@ class ScriptRunner:
             script_name: Name of script (e.g., 'createMigrationWorkflowFromUserConfiguration.sh')
             input_data: Optional data to pass via stdin
             *args: Additional command line arguments
+            direct_output: If True, output errors directly to stderr instead of using logger
 
         Returns:
             Script stdout output
@@ -110,7 +123,7 @@ class ScriptRunner:
             FileNotFoundError: If script doesn't exist
             subprocess.CalledProcessError: If script fails
         """
-        return self.run(self.script_dir / script_name, input_data, *args)
+        return self.run(self.script_dir / script_name, input_data, *args, direct_output=direct_output)
 
     def run_config_processor_node_script(
             self,
@@ -203,7 +216,7 @@ class ScriptRunner:
         try:
             logger.debug(f"Config file: {temp_file_path}")
             output = self.run_script("createMigrationWorkflowFromUserConfiguration.sh", None,
-                                     *([temp_file_path] + args))
+                                     *([temp_file_path] + args), direct_output=True)
 
             # Parse kubectl output to extract workflow information
             # The script should output workflow creation details
