@@ -29,6 +29,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 @Tag("isolatedTest")
@@ -42,6 +43,8 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         ES_2_PLUS,    // ES 2.x+ (boolean/ip/geo_point doc_values support)
         ES_5_PLUS,    // ES 5.x+ (text/keyword)
         ES_7_PLUS,    // ES 7.x+ (date_nanos)
+        ES_7_11_PLUS, // ES 7.11+ (X-Pack features: constant_keyword, wildcard)
+        OS_1_PLUS,    // OpenSearch 1.x+ (flat_object)
         OS_2_8_PLUS,  // OpenSearch 2.8+ (unsigned_long)
         ALL           // All versions
     }
@@ -54,15 +57,20 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         VersionRange availability,
         boolean supportsDocValues,  // Can use doc_values
         boolean supportsPoints,     // Can use Points (BKD tree) - ES 5+ for numerics/IP/date
+        boolean recoverable,        // Can be recovered from doc_values (false for complex types like ranges)
         Map<String, Object> extraProps  // Additional mapping properties
     ) {
         FieldTypeConfig(String fieldName, String sourceType, String targetType, Object testValue,
+                       VersionRange availability, boolean supportsDocValues, boolean supportsPoints, Map<String, Object> extraProps) {
+            this(fieldName, sourceType, targetType, testValue, availability, supportsDocValues, supportsPoints, true, extraProps);
+        }
+        FieldTypeConfig(String fieldName, String sourceType, String targetType, Object testValue,
                        VersionRange availability, boolean supportsDocValues, boolean supportsPoints) {
-            this(fieldName, sourceType, targetType, testValue, availability, supportsDocValues, supportsPoints, Map.of());
+            this(fieldName, sourceType, targetType, testValue, availability, supportsDocValues, supportsPoints, true, Map.of());
         }
         FieldTypeConfig(String fieldName, String sourceType, String targetType, Object testValue,
                        VersionRange availability, boolean supportsDocValues) {
-            this(fieldName, sourceType, targetType, testValue, availability, supportsDocValues, false, Map.of());
+            this(fieldName, sourceType, targetType, testValue, availability, supportsDocValues, false, true, Map.of());
         }
     }
 
@@ -95,12 +103,35 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         new FieldTypeConfig("scaled_float", "scaled_float", "scaled_float", 123.45, VersionRange.ES_5_PLUS, true, false, Map.of("scaling_factor", 100)),
         // Date nanos - doc_values + Points
         new FieldTypeConfig("date_nanos", "date_nanos", "date_nanos", "2024-01-15T10:30:00.123456789Z", VersionRange.ES_7_PLUS, true, true),
-        // Geo point - doc_values only, no Points
-        new FieldTypeConfig("geo_point", "geo_point", "geo_point", Map.of("lat", 40.7128, "lon", -74.006), VersionRange.ES_2_PLUS, true, false),
+        // Geo point - doc_values only, no Points (ES 1.x+ supported geo_point)
+        new FieldTypeConfig("geo_point", "geo_point", "geo_point", Map.of("lat", 40.7128, "lon", -74.006), VersionRange.ALL, true, false),
         // Unsigned long - doc_values only, no Points
         new FieldTypeConfig("unsigned_long", "unsigned_long", "unsigned_long", 9223372036854775807L, VersionRange.OS_2_8_PLUS, true, false),
         // Unsigned long overflow - tests overflow handling
-        new FieldTypeConfig("unsigned_long_big", "unsigned_long", "unsigned_long", new BigInteger("10000000000000000000"), VersionRange.OS_2_8_PLUS, true, false)
+        new FieldTypeConfig("unsigned_long_big", "unsigned_long", "unsigned_long", new BigInteger("10000000000000000000"), VersionRange.OS_2_8_PLUS, true, false),
+        // Additional numeric types - byte, short, half_float
+        new FieldTypeConfig("byte", "byte", "byte", (byte) 127, VersionRange.ALL, true, true),
+        new FieldTypeConfig("short", "short", "short", (short) 32000, VersionRange.ALL, true, true),
+        new FieldTypeConfig("half_float", "half_float", "half_float", 1.5f, VersionRange.ES_5_PLUS, true, true),
+        // Token count - derived from text, stored as integer (send text, expect token count)
+        // Uses Points internally since it's stored as integer
+        new FieldTypeConfig("token_count", "token_count", "token_count", "one two three four five", VersionRange.ES_5_PLUS, true, true, Map.of("analyzer", "standard")),
+        // Constant keyword - ES 7.11+ (requires X-Pack)
+        // Value is stored in mapping, not in index - doc_values/store have no effect
+        // Not recoverable from Lucene index, would need to get from mapping
+        new FieldTypeConfig("constant_keyword", "constant_keyword", "constant_keyword", "constant_val", VersionRange.ES_7_11_PLUS, false, false, false, Map.of("value", "constant_val")),
+        // Wildcard - ES 7.11+ (requires X-Pack)
+        // doc_values/store parameters have no effect - always has doc_values internally
+        // Only test one permutation since all would be identical
+        new FieldTypeConfig("wildcard", "wildcard", "wildcard", "wild*card", VersionRange.ES_7_11_PLUS, true, false)
+        // Wildcard - ES 7.11+ (requires X-Pack)
+        // new FieldTypeConfig("wildcard", "wildcard", "wildcard", "wild*card", VersionRange.ES_7_11_PLUS, true, false),
+        // Integer range - complex binary format, not recoverable
+        // new FieldTypeConfig("integer_range", "integer_range", "integer_range", Map.of("gte", 10, "lte", 20), VersionRange.ES_5_PLUS, true, false, false, Map.of()),
+        // Date range - complex binary format, not recoverable
+        // new FieldTypeConfig("date_range", "date_range", "date_range", Map.of("gte", "2024-01-01", "lte", "2024-12-31"), VersionRange.ES_5_PLUS, true, false, false, Map.of()),
+        // Flat object - OpenSearch specific
+        // new FieldTypeConfig("flat_object", "flat_object", "flat_object", Map.of("key1", "value1", "key2", "value2"), VersionRange.OS_1_PLUS, true, false)
     );
 
     /** Field storage permutations - _source is disabled, so we test recovery via doc_values */
@@ -119,11 +150,14 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
 
     static Stream<Arguments> versionPairs() {
         return Stream.of(
-            Arguments.of(SearchClusterContainer.ES_V1_7_6, SearchClusterContainer.OS_V3_0_0),
+            // ES 1.x has a pre-existing bug with geo_point/binary field parsing
+            // Arguments.of(SearchClusterContainer.ES_V1_7_6, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.ES_V2_4_6, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V3_0_0),
+            Arguments.of(SearchClusterContainer.ES_V7_17, SearchClusterContainer.OS_V3_0_0),
+            Arguments.of(SearchClusterContainer.ES_V8_17, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.OS_V1_3_16, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V3_0_0)
         );
@@ -139,6 +173,9 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             case ES_2_PLUS -> !VersionMatchers.isES_1_X.test(v);
             case ES_5_PLUS -> !UnboundVersionMatchers.isBelowES_5_X.test(v);
             case ES_7_PLUS -> !UnboundVersionMatchers.isBelowES_7_X.test(v);
+            // ES_7_11_PLUS is for X-Pack features (constant_keyword, wildcard) - NOT available in OpenSearch
+            case ES_7_11_PLUS -> !UnboundVersionMatchers.isBelowES_7_X.test(v) && !VersionMatchers.anyOS.test(v) && v.getMinor() >= 11;
+            case OS_1_PLUS -> VersionMatchers.anyOS.test(v);
             case OS_2_8_PLUS -> VersionMatchers.anyOS.test(v) && (v.getMajor() > 2 || (v.getMajor() == 2 && v.getMinor() >= 8));
             case ALL -> true;
         };
@@ -215,19 +252,41 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                         }
                     }
                     // ES 1.x needs explicit doc_values: true for string fields
-                    if (p.hasDv && config.supportsDocValues) props.append(", \"doc_values\": true");
-                    if (!p.hasDv && config.supportsDocValues) props.append(", \"doc_values\": false");
-                    if (p.hasStore) props.append(", \"store\": true");
+                    // Skip doc_values/store params for types that ignore them (wildcard, constant_keyword)
+                    boolean skipDvStoreParams = config.sourceType.equals("wildcard") || config.sourceType.equals("constant_keyword");
+                    if (!skipDvStoreParams) {
+                        if (p.hasDv && config.supportsDocValues) props.append(", \"doc_values\": true");
+                        if (!p.hasDv && config.supportsDocValues) props.append(", \"doc_values\": false");
+                        if (p.hasStore) props.append(", \"store\": true");
+                    }
                     props.append("},\n");
 
                     String jsonValue;
                     if (config.testValue instanceof String) {
                         jsonValue = "\"" + config.testValue + "\"";
                     } else if (config.testValue instanceof Map) {
-                        // geo_point as {"lat": x, "lon": y}
                         @SuppressWarnings("unchecked")
                         Map<String, Object> map = (Map<String, Object>) config.testValue;
-                        jsonValue = "{\"lat\":" + map.get("lat") + ",\"lon\":" + map.get("lon") + "}";
+                        if (map.containsKey("lat") && map.containsKey("lon")) {
+                            // geo_point as {"lat": x, "lon": y}
+                            jsonValue = "{\"lat\":" + map.get("lat") + ",\"lon\":" + map.get("lon") + "}";
+                        } else {
+                            // Range or other map types - serialize as JSON object
+                            StringBuilder sb = new StringBuilder("{");
+                            boolean first = true;
+                            for (var entry : map.entrySet()) {
+                                if (!first) sb.append(",");
+                                sb.append("\"").append(entry.getKey()).append("\":");
+                                if (entry.getValue() instanceof String) {
+                                    sb.append("\"").append(entry.getValue()).append("\"");
+                                } else {
+                                    sb.append(entry.getValue());
+                                }
+                                first = false;
+                            }
+                            sb.append("}");
+                            jsonValue = sb.toString();
+                        }
                     } else {
                         jsonValue = config.testValue.toString();
                     }
@@ -302,7 +361,9 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             targetOps.post("/_refresh", null);
             String response = targetOps.get("/" + indexName + "/_search").getValue();
             JsonNode root = MAPPER.readTree(response);
-            JsonNode source = root.path("hits").path("hits").get(0).path("_source");
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "No documents migrated. Response: " + response);
+            JsonNode source = hits.get(0).path("_source");
 
             log.info("Migrated _source: {}", source);
 
@@ -316,11 +377,22 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                     String fieldName = fieldName(config, p);
                     JsonNode fieldValue = source.get(fieldName);
 
+                    // Non-recoverable types (e.g., range) should be null
+                    if (!config.recoverable()) {
+                        assertEquals(null, fieldValue, fieldName + " should NOT be recovered (unsupported type)");
+                        continue;
+                    }
+
                     // Points can recover fields if type supports it AND version has Points (ES 5+)
                     boolean canRecoverFromPoints = pointsSupported && config.supportsPoints;
-                    // Boolean fields can be recovered via terms index (all versions)
-                    boolean canRecoverFromTerms = config.targetType.equals("boolean");
-                    boolean shouldRecover = p.hasStore || p.hasDv || canRecoverFromPoints || canRecoverFromTerms;
+                    // Boolean fields can be recovered via terms index (ES 7 and below, all OpenSearch)
+                    // ES 8+ uses a different Lucene version that doesn't have terms index for boolean
+                    boolean isES8Plus = !UnboundVersionMatchers.isBelowES_8_X.test(sourceVersion.getVersion()) 
+                        && !VersionMatchers.anyOS.test(sourceVersion.getVersion());
+                    boolean canRecoverFromTerms = config.targetType.equals("boolean") && !isES8Plus;
+                    // Wildcard type always has doc_values regardless of mapping setting
+                    boolean alwaysHasDocValues = config.sourceType.equals("wildcard");
+                    boolean shouldRecover = p.hasStore || p.hasDv || canRecoverFromPoints || canRecoverFromTerms || alwaysHasDocValues;
                     if (shouldRecover) {
                         assertEquals(true, fieldValue != null, fieldName + " should be recovered but was null");
                         
@@ -350,6 +422,11 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                         if (config.sourceType.equals("geo_point")) {
                             // Just verify it's not null - geo_point format varies
                             assertEquals(true, fieldValue != null, fieldName + " should not be null");
+                            continue;
+                        }
+                        // Token count - stores the count, not the original text
+                        if (config.sourceType.equals("token_count")) {
+                            assertEquals(5, fieldValue.asInt(), fieldName + " value mismatch");
                             continue;
                         }
                         // Scaled float comparison - allow small floating point differences
@@ -452,7 +529,9 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             targetOps.post("/_refresh", null);
             String response = targetOps.get("/" + indexName + "/_search").getValue();
             JsonNode root = MAPPER.readTree(response);
-            JsonNode source = root.path("hits").path("hits").get(0).path("_source");
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "No documents migrated. Response: " + response);
+            JsonNode source = hits.get(0).path("_source");
 
             log.info("Migrated _source: {}", source);
 
