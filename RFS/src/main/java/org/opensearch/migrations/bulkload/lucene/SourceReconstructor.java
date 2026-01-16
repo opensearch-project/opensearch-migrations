@@ -209,54 +209,6 @@ public class SourceReconstructor {
         // Lucene stores booleans as "T"/"F" in stored fields
         if ("T".equals(value)) return true;
         if ("F".equals(value)) return false;
-        
-        // Use mapping info to convert string-stored values back to proper types
-        if (mappingInfo != null) {
-            try {
-                return switch (mappingInfo.type()) {
-                    case NUMERIC -> {
-                        if (value.contains(".")) {
-                            yield Double.parseDouble(value);
-                        }
-                        yield Long.parseLong(value);
-                    }
-                    case BOOLEAN -> Boolean.parseBoolean(value);
-                    case DATE -> {
-                        // Date stored as epoch millis string - convert to ISO format
-                        if (value.matches("\\d+")) {
-                            yield formatDate(Long.parseLong(value), mappingInfo.format());
-                        }
-                        yield value; // Already in date format
-                    }
-                    case DATE_NANOS -> {
-                        // Date nanos stored as epoch nanos string
-                        if (value.matches("\\d+")) {
-                            yield formatDateNanos(Long.parseLong(value));
-                        }
-                        yield value;
-                    }
-                    case SCALED_FLOAT -> {
-                        if (mappingInfo.scalingFactor() != null && value.matches("\\d+")) {
-                            yield Long.parseLong(value) / mappingInfo.scalingFactor();
-                        }
-                        yield Double.parseDouble(value);
-                    }
-                    case IP -> {
-                        // ES 2.x stores IP as numeric string - convert to dotted decimal
-                        if (value.matches("\\d+")) {
-                            long ipLong = Long.parseLong(value);
-                            yield String.format("%d.%d.%d.%d",
-                                (ipLong >> 24) & 0xFF, (ipLong >> 16) & 0xFF,
-                                (ipLong >> 8) & 0xFF, ipLong & 0xFF);
-                        }
-                        yield value; // Already in IP format
-                    }
-                    default -> value;
-                };
-            } catch (NumberFormatException e) {
-                // Fall through to return as string
-            }
-        }
         return value;
     }
 
