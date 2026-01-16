@@ -209,6 +209,33 @@ public class SourceReconstructor {
         // Lucene stores booleans as "T"/"F" in stored fields
         if ("T".equals(value)) return true;
         if ("F".equals(value)) return false;
+        // DATE fields may store epoch millis as string
+        if (mappingInfo != null && mappingInfo.type() == EsFieldType.DATE) {
+            try {
+                return formatDate(Long.parseLong(value), mappingInfo.format());
+            } catch (NumberFormatException e) {
+                return value; // Already formatted or custom format
+            }
+        }
+        // SCALED_FLOAT stored as string needs scaling factor division
+        if (mappingInfo != null && mappingInfo.type() == EsFieldType.SCALED_FLOAT && mappingInfo.scalingFactor() != null) {
+            try {
+                return Long.parseLong(value) / mappingInfo.scalingFactor();
+            } catch (NumberFormatException e) {
+                return value;
+            }
+        }
+        // IP fields in ES 2.x may store IPv4 as numeric string
+        if (mappingInfo != null && mappingInfo.type() == EsFieldType.IP) {
+            try {
+                long ipLong = Long.parseLong(value);
+                return String.format("%d.%d.%d.%d",
+                    (ipLong >> 24) & 0xFF, (ipLong >> 16) & 0xFF,
+                    (ipLong >> 8) & 0xFF, ipLong & 0xFF);
+            } catch (NumberFormatException e) {
+                return value; // Already an IP string
+            }
+        }
         return value;
     }
 
@@ -402,10 +429,10 @@ public class SourceReconstructor {
     /** Convert fallback value from Points (List<byte[]>) or Terms (String) */
     @SuppressWarnings("unchecked")
     private static Object convertFallbackValue(Object value, FieldMappingInfo mappingInfo) {
-        // Terms fallback returns String (for boolean)
+        // Terms fallback returns String (for boolean - stored as "T"/"F" in Lucene)
         if (value instanceof String termValue) {
             if (mappingInfo.type() == EsFieldType.BOOLEAN) {
-                return "T".equals(termValue) || "true".equals(termValue) || "1".equals(termValue);
+                return "T".equals(termValue);
             }
             return termValue;
         }
