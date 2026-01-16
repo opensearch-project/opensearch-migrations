@@ -24,6 +24,7 @@ import shadow.lucene7.org.apache.lucene.index.SortedNumericDocValues;
 import shadow.lucene7.org.apache.lucene.index.SortedSetDocValues;
 import shadow.lucene7.org.apache.lucene.index.Terms;
 import shadow.lucene7.org.apache.lucene.index.TermsEnum;
+import shadow.lucene7.org.apache.lucene.store.ByteArrayDataInput;
 import shadow.lucene7.org.apache.lucene.util.Bits;
 import shadow.lucene7.org.apache.lucene.util.BytesRef;
 import shadow.lucene7.org.apache.lucene.util.FixedBitSet;
@@ -202,7 +203,17 @@ public class LeafReader7 implements LuceneLeafReader {
     public Object getBinaryValue(int docId, String fieldName) throws IOException {
         BinaryDocValues dv = wrapped.getBinaryDocValues(fieldName);
         if (dv != null && dv.advanceExact(docId)) {
-            return bytesRefToString(dv.binaryValue());
+            BytesRef value = dv.binaryValue();
+            if (value != null && value.length > 0) {
+                ByteArrayDataInput in = new ByteArrayDataInput(value.bytes, value.offset, value.length);
+                int count = in.readVInt();
+                if (count > 0) {
+                    int len = in.readVInt();
+                    byte[] data = new byte[len];
+                    in.readBytes(data, 0, len);
+                    return Base64.getEncoder().encodeToString(data);
+                }
+            }
         }
         return null;
     }
