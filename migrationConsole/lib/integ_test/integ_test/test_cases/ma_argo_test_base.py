@@ -29,6 +29,10 @@ class MATestUserArguments:
 
 
 class MATestBase:
+    # Tests with requires_explicit_selection=True are excluded from default runs.
+    # They only run when explicitly specified via --test_ids.
+    requires_explicit_selection = False
+
     def __init__(self, user_args: MATestUserArguments, description: str, migrations_required=None,
                  allow_source_target_combinations=None):
         self.allow_source_target_combinations = allow_source_target_combinations or []
