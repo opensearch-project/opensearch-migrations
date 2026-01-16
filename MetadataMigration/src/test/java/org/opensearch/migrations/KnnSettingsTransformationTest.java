@@ -32,8 +32,8 @@ class KnnSettingsTransformationTest extends BaseMigrationTest {
     protected File localDirectory;
 
     private static Stream<Arguments> scenarios() {
-        var source = SearchClusterContainer.OS_V1_3_16;
-        var target = SearchClusterContainer.OS_V2_19_1;
+        var source = SearchClusterContainer.OS_V1_3_20;
+        var target = SearchClusterContainer.OS_V2_19_4;
         return Stream.of(Arguments.of(source, target));
     }
 

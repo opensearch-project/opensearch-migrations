@@ -68,6 +68,17 @@ public class MetadataTransformationRegistry {
                 .build())
             .build(),
         TransformerConfigs.builder()
+            .filename("js/knn-nmslib-to-faiss-metadata.js")
+            .isRelevantForVersions(andSourceTargetVersionPredicate(
+                    UnboundVersionMatchers.anyOS.and(UnboundVersionMatchers.isGreaterOrEqualOS_3_x.negate()),
+                    UnboundVersionMatchers.isGreaterOrEqualOS_3_x
+            ))
+            .transformerInfo(Transformers.TransformerInfo.builder()
+                .name("nmslib to faiss engine")
+                .descriptionLine("Convert nmslib knn_vector engine to faiss (nmslib deprecated in OS 3.0)")
+                .build())
+            .build(),
+        TransformerConfigs.builder()
             .filename("js/metadataUpdater.js")
             .context(
                 "{" +

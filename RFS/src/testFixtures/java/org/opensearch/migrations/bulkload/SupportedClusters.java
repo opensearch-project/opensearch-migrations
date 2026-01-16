@@ -19,7 +19,7 @@ import lombok.experimental.UtilityClass;
 public class SupportedClusters {
     private static List<ContainerVersion> sources() {
         return List.of(
-            SearchClusterContainer.OS_V1_3_16,
+            SearchClusterContainer.OS_V1_3_20,
             SearchClusterContainer.ES_V8_19,
             SearchClusterContainer.ES_V7_17,
             SearchClusterContainer.ES_V7_10_2,
@@ -32,6 +32,33 @@ public class SupportedClusters {
 
     public static List<ContainerVersion> extendedSources() {
         return List.of(
+            // OpenSearch 1.x
+            SearchClusterContainer.OS_V1_0_1,
+            SearchClusterContainer.OS_V1_1_0,
+            SearchClusterContainer.OS_V1_2_4,
+            SearchClusterContainer.OS_V1_3_20,
+            // OpenSearch 2.x
+            SearchClusterContainer.OS_V2_0_1,
+            SearchClusterContainer.OS_V2_1_0,
+            SearchClusterContainer.OS_V2_2_1,
+            SearchClusterContainer.OS_V2_3_0,
+            SearchClusterContainer.OS_V2_4_1,
+            SearchClusterContainer.OS_V2_5_0,
+            SearchClusterContainer.OS_V2_6_0,
+            SearchClusterContainer.OS_V2_7_0,
+            SearchClusterContainer.OS_V2_8_0,
+            SearchClusterContainer.OS_V2_9_0,
+            SearchClusterContainer.OS_V2_10_0,
+            SearchClusterContainer.OS_V2_11_1,
+            SearchClusterContainer.OS_V2_12_0,
+            SearchClusterContainer.OS_V2_13_0,
+            SearchClusterContainer.OS_V2_14_0,
+            SearchClusterContainer.OS_V2_15_0,
+            SearchClusterContainer.OS_V2_16_0,
+            SearchClusterContainer.OS_V2_17_1,
+            SearchClusterContainer.OS_V2_18_0,
+            SearchClusterContainer.OS_V2_19_4,
+            // Elasticsearch
             SearchClusterContainer.ES_V8_18,
             SearchClusterContainer.ES_V8_17,
             SearchClusterContainer.ES_V8_16,
@@ -92,8 +119,8 @@ public class SupportedClusters {
 
     private static List<ContainerVersion> targets() {
         return List.of(
-            SearchClusterContainer.OS_V1_3_16,
-            SearchClusterContainer.OS_V2_19_1,
+            SearchClusterContainer.OS_V1_3_20,
+            SearchClusterContainer.OS_V2_19_4,
             SearchClusterContainer.OS_V3_0_0
         );
     }
@@ -119,7 +146,7 @@ public class SupportedClusters {
                 .toList());
 
         // Individual Pairs
-        matrix.add(new MigrationPair(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1));
+        matrix.add(new MigrationPair(SearchClusterContainer.OS_V2_19_4, SearchClusterContainer.OS_V2_19_4));
         matrix.add(new MigrationPair(SearchClusterContainer.ES_V7_17, SearchClusterContainer.ES_V7_10_2));
 
         if (includeRFSOnly) {

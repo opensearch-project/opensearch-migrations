@@ -70,7 +70,7 @@ public class EndToEndTest extends SourceTestBase {
             final SearchClusterContainer.ContainerVersion sourceVersion) {
         try (
                 final var sourceCluster = new SearchClusterContainer(sourceVersion);
-                final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_1)
+                final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
         ) {
             migrationDocumentsWithClusters(sourceCluster, targetCluster);
         }
