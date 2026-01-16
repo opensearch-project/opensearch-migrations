@@ -12,6 +12,7 @@ import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import shadow.lucene5.org.apache.lucene.index.BinaryDocValues;
 import shadow.lucene5.org.apache.lucene.index.FieldInfo;
 import shadow.lucene5.org.apache.lucene.index.LeafReader;
 import shadow.lucene5.org.apache.lucene.index.NumericDocValues;
@@ -21,6 +22,7 @@ import shadow.lucene5.org.apache.lucene.index.SortedNumericDocValues;
 import shadow.lucene5.org.apache.lucene.index.SortedSetDocValues;
 import shadow.lucene5.org.apache.lucene.index.Terms;
 import shadow.lucene5.org.apache.lucene.index.TermsEnum;
+import shadow.lucene5.org.apache.lucene.store.ByteArrayDataInput;
 import shadow.lucene5.org.apache.lucene.util.Bits;
 import shadow.lucene5.org.apache.lucene.util.BytesRef;
 import shadow.lucene5.org.apache.lucene.util.FixedBitSet;
@@ -133,10 +135,30 @@ public class LeafReader5 implements LuceneLeafReader {
             shadow.lucene5.org.apache.lucene.index.DocValuesType luceneType) {
         return switch (luceneType) {
             case NUMERIC -> DocValueFieldInfo.DocValueType.NUMERIC;
+            case BINARY -> DocValueFieldInfo.DocValueType.BINARY;
             case SORTED_NUMERIC -> DocValueFieldInfo.DocValueType.SORTED_NUMERIC;
             case SORTED_SET -> DocValueFieldInfo.DocValueType.SORTED_SET;
-            case BINARY, SORTED, NONE -> DocValueFieldInfo.DocValueType.NONE;
+            case SORTED, NONE -> DocValueFieldInfo.DocValueType.NONE;
         };
+    }
+
+    @Override
+    public Object getBinaryValue(int docId, String fieldName) throws IOException {
+        BinaryDocValues dv = wrapped.getBinaryDocValues(fieldName);
+        if (dv != null) {
+            BytesRef value = dv.get(docId);
+            if (value != null && value.length > 0) {
+                ByteArrayDataInput in = new ByteArrayDataInput(value.bytes, value.offset, value.length);
+                int count = in.readVInt();
+                if (count > 0) {
+                    int len = in.readVInt();
+                    byte[] data = new byte[len];
+                    in.readBytes(data, 0, len);
+                    return Base64.getEncoder().encodeToString(data);
+                }
+            }
+        }
+        return null;
     }
 
     // Lucene 5 uses get(docId) for random access
