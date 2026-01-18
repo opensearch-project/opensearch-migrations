@@ -1,0 +1,36 @@
+[
+  {
+    "id": "root",
+    "display_name": "workflow",
+    "phase": "Running",
+    "type": "Steps",
+    "boundary_id": null,
+    "children": [
+      {
+        "id": "wrapper",
+        "display_name": "[0]",
+        "phase": "Running",
+        "type": "StepGroup",
+        "boundary_id": "root",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "index",
+              "value": "0"
+            }
+          ]
+        },
+        "children": [
+          {
+            "id": "pod",
+            "display_name": "actualWork",
+            "phase": "Succeeded",
+            "type": "Pod",
+            "boundary_id": "wrapper",
+            "children": []
+          }
+        ]
+      }
+    ]
+  }
+]

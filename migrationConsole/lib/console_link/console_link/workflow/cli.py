@@ -12,6 +12,7 @@ from .commands.stop import stop_command
 from .commands.approve import approve_command
 from .commands.status import status_command
 from .commands.output import output_command
+from .commands.manage import manage_command
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +28,12 @@ def workflow_cli(ctx, verbose):
         click.echo(workflow_cli.get_help(ctx))
         ctx.exit(ExitCode.INVALID_INPUT.value)
 
-    # Configure logging
-    logging.basicConfig(level=logging.WARN - (10 * verbose))
+    # Configure logging - only if no handlers exist to avoid issues with Click's CliRunner in tests
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        logging.basicConfig(level=logging.WARN - (10 * verbose))
+    else:
+        root_logger.setLevel(logging.WARN - (10 * verbose))
     logger.info(f"Logging set to {logging.getLevelName(logger.getEffectiveLevel())}")
 
     # Initialize ctx.obj as a dictionary before assigning to it
@@ -87,6 +92,7 @@ workflow_cli.add_command(stop_command)
 workflow_cli.add_command(approve_command)
 workflow_cli.add_command(status_command)
 workflow_cli.add_command(output_command)
+workflow_cli.add_command(manage_command)
 workflow_cli.add_command(util_group)
 
 

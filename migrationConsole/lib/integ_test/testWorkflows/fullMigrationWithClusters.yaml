@@ -21,7 +21,13 @@ spec:
           [{
             "migrations": [{
               "metadataMigrationConfig": {},
-              "documentBackfillConfig": {}
+              "documentBackfillConfig": {
+                "maxShardSizeBytes": 16000000,
+                "resources": {
+                  requests: { cpu: "25m",   memory: "1Gi", ephemeral-storage: "5Gi" },
+                  limits:   { cpu: "1000m", memory: "2Gi", ephemeral-storage: "5Gi" }
+                }
+              }
             }]
           }]
       - name: replayer-config
@@ -312,10 +318,14 @@ spec:
               SNAPSHOT_REPO=$(echo "$SNAPSHOT_REPO" | jq --arg roleArn "$SNAPSHOT_ROLE_ARN" '. + {"s3RoleArn": $roleArn}')
             fi
             
-            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" '. + {"snapshotRepo": $repo}')
+            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" '
+              # Add snapshot repos with default key
+              . + {"snapshotRepos": {"default": $repo}}
+            ')
             
             SNAPSHOT_EXTRACT_CONFIGS=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '[.[] | {
               "snapshotConfig": {
+                "repoName": "default",
                 "snapshotNameConfig": {
                   "snapshotNamePrefix": "testsnapshot"
                 }

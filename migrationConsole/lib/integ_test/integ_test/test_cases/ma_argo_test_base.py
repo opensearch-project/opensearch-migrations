@@ -119,7 +119,13 @@ class MATestBase:
         snapshot_and_migration_configs = [{
             "migrations": [{
                 "metadataMigrationConfig": {},
-                "documentBackfillConfig": {}
+                "documentBackfillConfig": {
+                    "maxShardSizeBytes": 16000000,
+                    "resources": {
+                        "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},
+                        "limits": {"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"}
+                    }
+                }
             }]
         }]
         self.workflow_snapshot_and_migration_config = snapshot_and_migration_configs

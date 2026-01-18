@@ -18,7 +18,7 @@ class KubectlRunner:
         try:
             config.load_incluster_config()
         except config.ConfigException:
-            logger.warning("Unable to load in-cluster config, falling back to local kubeconfig")
+            logger.debug("Unable to load in-cluster config, falling back to local kubeconfig")
             config.load_kube_config()
         self.k8s_core = client.CoreV1Api()
         self.k8s_apps = client.AppsV1Api()
@@ -35,8 +35,11 @@ class KubectlRunner:
             return CommandResult(success=False, value=f"Kubernetes action failed: {e}")
 
     def retrieve_deployment_status(self) -> Optional[DeploymentStatus]:
+        logger.info(f"Listing namespaced pods for {self.namespace} "
+                    f"label_selector=deployment-name={self.deployment_name}")
         try:
-            pods = self.k8s_core.list_namespaced_pod(self.namespace, label_selector=f"app={self.deployment_name}")
+            pods = self.k8s_core.list_namespaced_pod(
+                self.namespace, label_selector=f"deployment-name={self.deployment_name}")
         except Exception as e:
             logger.error(f"Error faced when performing k8s list_namespaced_pod(): {e}")
             return None

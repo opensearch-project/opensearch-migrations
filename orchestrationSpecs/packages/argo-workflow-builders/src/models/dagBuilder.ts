@@ -32,6 +32,7 @@ import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "./template
 import {NonSerializedPlainObject, PlainObject} from "./plainObject";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {NamedTask} from "./sharedTypes";
+import {SynchronizationConfig} from "./synchronization";
 
 export type DagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends NonSerializedPlainObject> =
     TaskOpts<TasksOutputsScope, "tasks", LoopT> & { dependencies?: ReadonlyArray<Extract<keyof TaskScope, string>> };
@@ -95,7 +96,8 @@ export class DagBuilder<
         bodyScope: TaskScope,
         orderedTasks: NamedTask[],
         outputs: OutputParamsScope,
-        retryParameters: RetryParameters
+        retryParameters: RetryParameters,
+        synchronization: SynchronizationConfig | undefined
     ) {
         // Trick: capture a mutable selfRef within a closure for use inside the rebinder
         let selfRef: DagBuilder<ContextualScope, InputParamsScope, any, any> | undefined;
@@ -105,21 +107,21 @@ export class DagBuilder<
             InputParamsScope,
             TasksOutputsScope,
             DagExpressionContext<InputParamsScope, any>
-        > = (ctx, inScope, body, outScope, retry: RetryParameters) => {
+        > = (ctx, inScope, body, outScope, retry: RetryParameters, synchronization?: SynchronizationConfig) => {
             const currentTasks =
                 selfRef ? selfRef.taskBuilder.getTasks().taskList : orderedTasks;
             return new DagBuilder(
-                ctx, inScope, body, currentTasks, outScope, retry
+                ctx, inScope, body, currentTasks, outScope, retry, synchronization
             ) as any;
         };
 
-        super(contextualScope, inputs, bodyScope, outputs, retryParameters, templateRebind);
+        super(contextualScope, inputs, bodyScope, outputs, retryParameters, synchronization, templateRebind);
 
         // This rebinder produces a NEW DagBuilder with the NEW task scope when tasks change
         const tasksRebind: TaskRebinder<ContextualScope> =
             <NS extends TasksOutputsScope>(ctx: ContextualScope, scope: NS, tasks: NamedTask[]) =>
                 new DagBuilder<ContextualScope, InputParamsScope, NS, OutputParamsScope>(
-                    ctx, this.inputsScope, scope, tasks, this.outputsScope, this.retryParameters
+                    ctx, this.inputsScope, scope, tasks, this.outputsScope, this.retryParameters, this.synchronization
                 );
 
         this.taskBuilder = new DagTaskBuilder(contextualScope, bodyScope, orderedTasks, tasksRebind);

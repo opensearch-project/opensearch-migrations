@@ -1,0 +1,35 @@
+[
+  {
+    "id": "meaningful_container",
+    "display_name": "bulkLoadDocuments",
+    "phase": "Running",
+    "type": "Steps",
+    "boundary_id": "wrapper",
+    "inputs": {
+      "parameters": [
+        {
+          "name": "groupName",
+          "value": "meaningful_work"
+        }
+      ]
+    },
+    "children": [
+      {
+        "id": "pod1",
+        "display_name": "startBackfill",
+        "phase": "Succeeded",
+        "type": "Pod",
+        "boundary_id": "meaningful_container",
+        "children": []
+      },
+      {
+        "id": "pod2",
+        "display_name": "checkStatus",
+        "phase": "Running",
+        "type": "Pod",
+        "boundary_id": "meaningful_container",
+        "children": []
+      }
+    ]
+  }
+]

@@ -1,5 +1,6 @@
 import {
     CLUSTER_CONFIG,
+    CREATE_SNAPSHOT_OPTIONS,
     KAFKA_SERVICES_CONFIG,
     NORMALIZED_COMPLETE_SNAPSHOT_CONFIG,
     NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
@@ -79,7 +80,8 @@ export const NAMED_TARGET_CLUSTER_CONFIG =
 
 export const DENORMALIZED_S3_REPO_CONFIG =
     makeOptionalDefaultedFieldsRequired(S3_REPO_CONFIG.extend({
-        useLocalStack: z.boolean().default(false)
+        useLocalStack: z.boolean().default(false),
+        repoName: z.string(),
     }));
 
 export const COMPLETE_SNAPSHOT_CONFIG =
@@ -88,12 +90,21 @@ export const COMPLETE_SNAPSHOT_CONFIG =
     }));
 
 export const DYNAMIC_SNAPSHOT_CONFIG =
-    makeOptionalDefaultedFieldsRequired(NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG.extend({
-        repoConfig: DENORMALIZED_S3_REPO_CONFIG  // Replace string reference with actual config
+    makeOptionalDefaultedFieldsRequired(NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG
+        .omit({repoName: true})
+        .extend({
+            repoConfig: DENORMALIZED_S3_REPO_CONFIG  // Replace string reference with actual config
     }));
 
 export const METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_METADATA_OPTIONS.omit({skipEvaluateApproval: true, skipMigrateApproval: true})
+);
+
+export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
+    CREATE_SNAPSHOT_OPTIONS.extend({
+        semaphoreConfigMapName: z.string(),
+        semaphoreKey: z.string()
+    })
 );
 
 export const RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
@@ -114,10 +125,11 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG =
 
 export const SNAPSHOT_MIGRATION_CONFIG =
     makeOptionalDefaultedFieldsRequired(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG
-        .omit({name: true, snapshotConfig: true, migrations: true}).extend({
+        .omit({createSnapshotConfig: true, migrations: true, name: true, snapshotConfig: true}).extend({
+            createSnapshotConfig: ARGO_CREATE_SNAPSHOT_OPTIONS,
+            migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1),
             name: z.string(),
-            snapshotConfig: DYNAMIC_SNAPSHOT_CONFIG,
-            migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
+            snapshotConfig: DYNAMIC_SNAPSHOT_CONFIG
         }));
 
 export const PARAMETERIZED_MIGRATION_CONFIG =

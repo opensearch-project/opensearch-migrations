@@ -8,6 +8,9 @@ import urllib3
 from collections import deque
 import logging
 import json
+import random
+import string
+import uuid
 from console_link.environment import Environment
 from console_link.models.cluster import Cluster
 
@@ -127,6 +130,100 @@ def get_cluster_and_auth(config_file, cluster_type):
     cluster: Cluster = env.source_cluster if cluster_type == "source" else env.target_cluster
     auth = cluster._generate_auth_object()
     return cluster.endpoint, auth
+
+
+def generate_small_doc(doc_size_bytes=150):
+    """Generate a small document of approximately the specified size"""
+    # Base document structure
+    doc = {
+        "id": str(uuid.uuid4()),
+        "timestamp": datetime.now().isoformat(),
+        "user": ''.join(random.choices(string.ascii_lowercase, k=8)),
+        "value": random.randint(1, 1000),
+        "category": random.choice(['A', 'B', 'C', 'D', 'E'])
+    }
+    
+    # Calculate remaining bytes needed for message field
+    base_size = len(json.dumps(doc))
+    remaining_bytes = max(20, doc_size_bytes - base_size - 20)  # Leave room for "message" field overhead
+    
+    doc["message"] = ''.join(random.choices(string.ascii_letters + ' ', k=remaining_bytes))
+    return doc
+
+
+def bulk_insert_data(cluster, index_name, num_docs, doc_size_bytes=150, batch_size=100):
+    """
+    Insert bulk data into a cluster using the bulk API.
+    
+    Args:
+        cluster: Cluster object with endpoint and auth
+        index_name: Name of the index to insert into
+        num_docs: Total number of documents to insert
+        doc_size_bytes: Approximate size of each document in bytes
+        batch_size: Number of documents per batch request
+    
+    Returns:
+        dict: Results including total_inserted, errors, and timing info
+    """
+    session = requests.Session()
+    total_inserted = 0
+    total_errors = 0
+    start_time = time.time()
+    
+    try:
+        while total_inserted < num_docs:
+            # Generate batch of documents
+            batch_docs = min(batch_size, num_docs - total_inserted)
+            docs = [generate_small_doc(doc_size_bytes) for _ in range(batch_docs)]
+            
+            # Prepare bulk request
+            bulk_data = []
+            for doc in docs:
+                bulk_data.append(json.dumps({"index": {"_index": index_name}}))
+                bulk_data.append(json.dumps(doc))
+            
+            bulk_body = '\n'.join(bulk_data) + '\n'
+            headers = {'Content-Type': 'application/x-ndjson'}
+            
+            # Send bulk request
+            try:
+                response = session.post(
+                    f"{cluster.endpoint}/_bulk",
+                    data=bulk_body,
+                    headers=headers,
+                    auth=cluster._generate_auth_object(),
+                    verify=False,
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    # Count successful insertions
+                    successful = sum(1 for item in result.get('items', [])
+                                     if item.get('index', {}).get('status') in [200, 201])
+                    total_inserted += successful
+                    total_errors += (batch_docs - successful)
+                else:
+                    total_errors += batch_docs
+                    logger.error(f"Bulk insert failed with status {response.status_code}")
+                    
+            except Exception as e:
+                total_errors += batch_docs
+                logger.error(f"Error during bulk insert: {e}")
+                
+    except KeyboardInterrupt:
+        logger.info("Bulk insert interrupted by user")
+    finally:
+        session.close()
+    
+    elapsed_time = time.time() - start_time
+    return {
+        'total_inserted': total_inserted,
+        'total_errors': total_errors,
+        'elapsed_time': elapsed_time,
+        'docs_per_sec': total_inserted / elapsed_time if elapsed_time > 0 else 0,
+        'estimated_size_mb': (total_inserted * doc_size_bytes) / (1024 * 1024)
+    }
 
 
 def main():

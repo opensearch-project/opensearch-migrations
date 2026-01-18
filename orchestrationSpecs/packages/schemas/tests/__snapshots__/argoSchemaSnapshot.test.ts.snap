@@ -95,39 +95,39 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   }
                 ]
               },
-              "snapshotRepo": {
+              "snapshotRepos": {
                 "type": "object",
-                "properties": {
-                  "awsRegion": {
-                    "type": "string",
-                    "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "awsRegion": {
+                      "type": "string",
+                      "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                    },
+                    "endpoint": {
+                      "type": "string",
+                      "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                      "default": "",
+                      "description": "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
+                    },
+                    "s3RepoPathUri": {
+                      "type": "string",
+                      "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                      "description": "s3://BUCKETNAME/PATH"
+                    },
+                    "s3RoleArn": {
+                      "type": "string",
+                      "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                      "default": "",
+                      "description": "IAM role ARN to assume when accessing S3 for snapshot operations"
+                    }
                   },
-                  "endpoint": {
-                    "type": "string",
-                    "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
-                    "default": "",
-                    "description": "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
-                  },
-                  "s3RepoPathUri": {
-                    "type": "string",
-                    "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                    "description": "s3://BUCKETNAME/PATH"
-                  },
-                  "repoName": {
-                    "type": "string",
-                    "default": "migration_assistant_repo"
-                  },
-                  "s3RoleArn": {
-                    "type": "string",
-                    "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
-                    "default": "",
-                    "description": "IAM role ARN to assume when accessing S3 for snapshot operations"
-                  }
+                  "required": [
+                    "awsRegion",
+                    "s3RepoPathUri"
+                  ]
                 },
-                "required": [
-                  "awsRegion",
-                  "s3RepoPathUri"
-                ]
+                "description": "Keys are the repository names that are managed by the source cluster"
               },
               "proxy": {
                 "type": "object",
@@ -275,81 +275,17 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
                       "default": ""
-                    }
-                  }
-                },
-                "name": {
-                  "type": "string"
-                },
-                "snapshotConfig": {
-                  "type": "object",
-                  "properties": {
-                    "snapshotNameConfig": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "externallyManagedSnapshot": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "externallyManagedSnapshot"
-                          ]
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "snapshotNamePrefix": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "snapshotNamePrefix"
-                          ]
-                        }
-                      ]
                     },
-                    "repoConfig": {
-                      "type": "object",
-                      "properties": {
-                        "awsRegion": {
-                          "type": "string",
-                          "description": "The AWS region that the bucket reside in (us-east-2, etc)"
-                        },
-                        "endpoint": {
-                          "type": "string",
-                          "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
-                          "default": ""
-                        },
-                        "s3RepoPathUri": {
-                          "type": "string",
-                          "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "s3://BUCKETNAME/PATH"
-                        },
-                        "repoName": {
-                          "type": "string",
-                          "default": "migration_assistant_repo"
-                        },
-                        "s3RoleArn": {
-                          "type": "string",
-                          "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
-                          "default": ""
-                        },
-                        "useLocalStack": {
-                          "type": "boolean",
-                          "default": false
-                        }
-                      },
-                      "required": [
-                        "awsRegion",
-                        "s3RepoPathUri"
-                      ]
+                    "semaphoreConfigMapName": {
+                      "type": "string"
+                    },
+                    "semaphoreKey": {
+                      "type": "string"
                     }
                   },
                   "required": [
-                    "snapshotNameConfig",
-                    "repoConfig"
+                    "semaphoreConfigMapName",
+                    "semaphoreKey"
                   ]
                 },
                 "migrations": {
@@ -561,12 +497,87 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "name"
                     ]
                   }
+                },
+                "name": {
+                  "type": "string"
+                },
+                "snapshotConfig": {
+                  "type": "object",
+                  "properties": {
+                    "snapshotNameConfig": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "externallyManagedSnapshot": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "externallyManagedSnapshot"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "snapshotNamePrefix": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "snapshotNamePrefix"
+                          ]
+                        }
+                      ]
+                    },
+                    "repoConfig": {
+                      "type": "object",
+                      "properties": {
+                        "awsRegion": {
+                          "type": "string",
+                          "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                        },
+                        "endpoint": {
+                          "type": "string",
+                          "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                          "default": ""
+                        },
+                        "s3RepoPathUri": {
+                          "type": "string",
+                          "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "s3://BUCKETNAME/PATH"
+                        },
+                        "s3RoleArn": {
+                          "type": "string",
+                          "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "default": ""
+                        },
+                        "useLocalStack": {
+                          "type": "boolean",
+                          "default": false
+                        },
+                        "repoName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "awsRegion",
+                        "s3RepoPathUri",
+                        "repoName"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "snapshotNameConfig",
+                    "repoConfig"
+                  ]
                 }
               },
               "required": [
+                "createSnapshotConfig",
+                "migrations",
                 "name",
-                "snapshotConfig",
-                "migrations"
+                "snapshotConfig"
               ]
             }
           },
@@ -771,39 +782,39 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               }
             ]
           },
-          "snapshotRepo": {
+          "snapshotRepos": {
             "type": "object",
-            "properties": {
-              "awsRegion": {
-                "type": "string",
-                "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "awsRegion": {
+                  "type": "string",
+                  "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                },
+                "endpoint": {
+                  "type": "string",
+                  "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                  "default": "",
+                  "description": "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
+                },
+                "s3RepoPathUri": {
+                  "type": "string",
+                  "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                  "description": "s3://BUCKETNAME/PATH"
+                },
+                "s3RoleArn": {
+                  "type": "string",
+                  "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                  "default": "",
+                  "description": "IAM role ARN to assume when accessing S3 for snapshot operations"
+                }
               },
-              "endpoint": {
-                "type": "string",
-                "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
-                "default": "",
-                "description": "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
-              },
-              "s3RepoPathUri": {
-                "type": "string",
-                "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                "description": "s3://BUCKETNAME/PATH"
-              },
-              "repoName": {
-                "type": "string",
-                "default": "migration_assistant_repo"
-              },
-              "s3RoleArn": {
-                "type": "string",
-                "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
-                "default": "",
-                "description": "IAM role ARN to assume when accessing S3 for snapshot operations"
-              }
+              "required": [
+                "awsRegion",
+                "s3RepoPathUri"
+              ]
             },
-            "required": [
-              "awsRegion",
-              "s3RepoPathUri"
-            ]
+            "description": "Keys are the repository names that are managed by the source cluster"
           },
           "proxy": {
             "type": "object",
@@ -997,10 +1008,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           ]
                         }
                       ]
+                    },
+                    "repoName": {
+                      "type": "string"
                     }
                   },
                   "required": [
-                    "snapshotNameConfig"
+                    "snapshotNameConfig",
+                    "repoName"
                   ]
                 },
                 "migrations": {
