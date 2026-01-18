@@ -1,6 +1,5 @@
 """Submit command for workflow CLI - submits workflows to Argo Workflows."""
 
-import copy
 import logging
 import os
 import subprocess
@@ -8,7 +7,6 @@ import click
 
 from ..models.utils import ExitCode
 from ..models.workflow_config_store import WorkflowConfigStore
-from ..models.config import WorkflowConfig
 from ..services.workflow_service import WorkflowService
 from ..services.script_runner import ScriptRunner
 
@@ -159,7 +157,7 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
             click.echo("\nEnsure CONFIG_PROCESSOR_DIR is set correctly and contains:", err=True)
             click.echo("  - createMigrationWorkflowFromUserConfiguration.sh", err=True)
             ctx.exit(ExitCode.FAILURE.value)
-        except subprocess.CalledProcessError as e:
+        except subprocess.CalledProcessError:
             # Error details already printed by script_runner with direct_output=True
             ctx.exit(ExitCode.FAILURE.value)
         except Exception as e:
