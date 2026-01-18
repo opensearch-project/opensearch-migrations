@@ -51,8 +51,8 @@ class Test0004MultiTypeUnionMigration(MATestBase):
                     "docTransformerConfigBase64": transformation_b64,
                     "maxShardSizeBytes": 16000000,
                     "resources": {
-                        "requests": { "cpu": "25m",   "memory": "1Gi", "ephemeral-storage": "5Gi" },
-                        "limits":   { "cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi" }
+                        "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},
+                        "limits": {"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"}
                     }
                 }
             }]
@@ -131,8 +131,8 @@ class Test0005MultiTypeSplitMigration(MATestBase):
                     "docTransformerConfigBase64": transformation_b64,
                     "maxShardSizeBytes": 16000000,
                     "resources": {
-                        "requests": { "cpu": "25m",   "memory": "1Gi", "ephemeral-storage": "5Gi" },
-                        "limits":   { "cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi" }
+                        "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},
+                        "limits": {"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"}
                     }
                 }
             }]

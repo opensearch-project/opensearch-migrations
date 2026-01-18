@@ -84,7 +84,11 @@ class StatusCommandHandler:
         sorted_workflows = self.sorter.sort_workflows_chronologically(workflow_list)
         logger.info(f"Processing {len(sorted_workflows)} sorted workflows")
         for i, workflow_data in enumerate(sorted_workflows):
-            logger.info(f"Processing workflow {i+1}/{len(sorted_workflows)}: {self._get_workflow_name(workflow_data)}")
+            workflow_name = self._get_workflow_name(workflow_data)
+            logger.info(
+                f"Processing workflow {i + 1}/{len(sorted_workflows)}: "
+                f"{workflow_name}"
+            )
             self._display_workflow_with_tree(workflow_data, live_check)
 
     def _handle_no_workflows(self, show_all: bool, argo_server: str, namespace: str,

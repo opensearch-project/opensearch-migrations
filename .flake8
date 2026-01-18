@@ -8,7 +8,7 @@
 # W504 - Line break occurred after a binary operator
 ignore = E265,E402,E999,W293,W504
 max-line-length = 120
-exclude = .tox,.git,*/migrations/*,*/static/CACHE/*,docs,node_modules,.venv,*/cdk.out/*,*/build/*,.gradle
+exclude = .tox,.git,*/migrations/*,*/static/CACHE/*,docs,node_modules,.venv,venv,test_env,*/cdk.out/*,*/build/*,.gradle
 
 # F401 - Unused imports -- this is the only way to have a file-wide rule exception
 per-file-ignores =
