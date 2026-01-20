@@ -5,7 +5,7 @@
  * No source cluster is deployed - only a target cluster in Amazon OpenSearch Service.
  * 
  * Required parameters:
- * - S3_REPO_URI: Full S3 URI to snapshot repository (e.g., s3://bucket/folder/)
+ * - S3_REPO_URI: Full S3 URI to snapshot repository (example: s3://bucket/folder/)
  * - SNAPSHOT_NAME: Name of the snapshot
  * - SOURCE_VERSION: Version of the cluster that created the snapshot (ES_5.6, ES_6.8, ES_7.10)
  * - TARGET_VERSION: Target OpenSearch version (OS_2.19, OS_3.1)
@@ -31,8 +31,6 @@ def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eksbyos"
     def jobName = config.jobName ?: "byos-eks-integ-test"
     def clusterContextFilePath = "tmp/cluster-context-byos-${currentBuild.number}.json"
-
-    // Target cluster size configurations
     def targetClusterSizes = [
         'default': [
             dataNodeType: "r6g.large.search",
@@ -51,7 +49,6 @@ def call(Map config = [:]) {
             ebsVolumeSize: 1024
         ]
     ]
-
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
@@ -82,9 +79,6 @@ def call(Map config = [:]) {
                 choices: ['default', 'large'],
                 description: 'Target cluster size (default: 2x r6g.large, large: 6x r6g.4xlarge with dedicated masters)'
             )
-
-            // Build options
-            booleanParam(name: 'BUILD_IMAGES', defaultValue: false, description: 'Build container images from source instead of using public images')
         }
 
         options {
@@ -311,18 +305,25 @@ def call(Map config = [:]) {
             }
 
             stage('Build Docker Images') {
-                when {
-                    expression { return params.BUILD_IMAGES }
-                }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                    // Install QEMU for cross-architecture builds (arm64 on x86_64 host)
                                     sh "docker run --privileged --rm tonistiigi/binfmt --install all"
 
-                                    // Remove and recreate builder to ensure fresh credentials are used
-                                    sh "docker buildx rm ecr-builder || true"
+                                    def builderExists = sh(
+                                        script: "docker buildx ls | grep -q '^ecr-builder'",
+                                        returnStatus: true
+                                    ) == 0
+
+                                    if (builderExists) {
+                                        echo "Removing existing buildx builder 'ecr-builder'"
+                                        sh "docker buildx rm ecr-builder"
+                                    }
+                                    
+                                    echo "Creating new buildx builder 'ecr-builder'"
                                     sh "docker buildx create --name ecr-builder --driver docker-container --bootstrap"
                                     sh "docker buildx use ecr-builder"
                                     sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -Pbuilder=ecr-builder"
@@ -340,8 +341,7 @@ def call(Map config = [:]) {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                        def usePublicImages = params.BUILD_IMAGES ? "false" : "true"
-                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir ${WORKSPACE} --use-public-images ${usePublicImages} --skip-console-exec --stage ${maStageName}"
+                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir ${WORKSPACE} --use-public-images false --skip-console-exec --stage ${maStageName}"
                                     }
                                 }
                             }
@@ -363,19 +363,6 @@ def call(Map config = [:]) {
                                       echo "migration-console pod is ready"
                                     """
 
-                                    // Copy test files when using public images (they don't have our branch code)
-                                    if (!params.BUILD_IMAGES) {
-                                        sh """
-                                          echo "Copying test files to migration-console (using public images)..."
-                                          kubectl cp ${WORKSPACE}/migrationConsole/lib/integ_test/integ_test/test_cases/snapshot_only_tests.py \
-                                            ma/migration-console-0:/root/lib/integ_test/integ_test/test_cases/snapshot_only_tests.py
-                                          kubectl cp ${WORKSPACE}/migrationConsole/lib/integ_test/integ_test/conftest.py \
-                                            ma/migration-console-0:/root/lib/integ_test/integ_test/conftest.py
-                                          echo "Test files copied"
-                                        """
-                                    }
-
-                                    // Apply the workflow template to the cluster
                                     sh """
                                       echo "Applying workflow template..."
                                       kubectl apply -f ${WORKSPACE}/migrationConsole/lib/integ_test/testWorkflows/fullMigrationImportedClusters.yaml -n ma
