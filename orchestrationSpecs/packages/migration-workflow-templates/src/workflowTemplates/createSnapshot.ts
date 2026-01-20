@@ -136,7 +136,8 @@ export const CreateSnapshot = WorkflowBuilder.create({
                 labels: {
                     'migrations.opensearch.org/source': expr.jsonPathStrict(inputs.sourceConfig, "label"),
                     'migrations.opensearch.org/target': inputs.targetLabel,
-                    'migrations.opensearch.org/snapshot': expr.jsonPathStrict(inputs.snapshotConfig, "label")
+                    'migrations.opensearch.org/snapshot': expr.jsonPathStrict(inputs.snapshotConfig, "label"),
+                    'migrations.opensearch.org/task': 'snapshot'
                 }
             }))
         )
@@ -145,20 +146,22 @@ export const CreateSnapshot = WorkflowBuilder.create({
 
     .addTemplate("checkSnapshotStatus", t => t
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
+        .addRequiredInput("sourceLabel", typeToken<string>())
+        .addRequiredInput("targetLabel", typeToken<string>())
+        .addRequiredInput("snapshotLabel", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
             .addStep("checkSnapshotCompletion", MigrationConsole, "runMigrationCommandForStatus", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    command: checkScript
+                    command: checkScript,
+                    task: "snapshotStatusCheck"
                 }))
         )
         .addRetryParameters({
             limit: "200", retryPolicy: "Always",
             backoff: {duration: "5", factor: "2", cap: "300"}
         })
-        // .addExpressionOutput("statusOutput", b => b.steps.checkSnapshotCompletion.outputs.statusOutput)
-        // .addExpressionOutput("overriddenPhase", b => b.steps.checkSnapshotCompletion.outputs.overriddenPhase)
     )
 
 
@@ -181,7 +184,9 @@ export const CreateSnapshot = WorkflowBuilder.create({
             .addStep("checkSnapshotStatus", INTERNAL, "checkSnapshotStatus", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    configContents: c.steps.getConsoleConfig.outputs.configContents
+                    configContents: c.steps.getConsoleConfig.outputs.configContents,
+                    sourceLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
+                    snapshotLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
                 }))
         )
         .addSynchronization(c => ({

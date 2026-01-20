@@ -763,6 +763,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
             "migrations.opensearch.org/snapshot": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}",
             "migrations.opensearch.org/source": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')}}",
             "migrations.opensearch.org/target": "{{inputs.parameters.targetLabel}}",
+            "migrations.opensearch.org/task": "snapshot",
           },
         },
         "name": "runcreatesnapshot",
@@ -775,6 +776,15 @@ exports[`test workflow template renderings create-snapshot 1`] = `
           "parameters": [
             {
               "name": "configContents",
+            },
+            {
+              "name": "sourceLabel",
+            },
+            {
+              "name": "targetLabel",
+            },
+            {
+              "name": "snapshotLabel",
             },
             {
               "name": "imageMigrationConsoleLocation",
@@ -805,6 +815,18 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                   {
                     "name": "configContents",
                     "value": "{{inputs.parameters.configContents}}",
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}",
+                  },
+                  {
+                    "name": "targetLabel",
+                    "value": "{{inputs.parameters.targetLabel}}",
+                  },
+                  {
+                    "name": "snapshotLabel",
+                    "value": "{{inputs.parameters.snapshotLabel}}",
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -858,6 +880,10 @@ exports[`test workflow template renderings create-snapshot 1`] = `
   echo Checked > /tmp/phase-output.txt
   
   exit 1",
+                  },
+                  {
+                    "name": "task",
+                    "value": "snapshotStatusCheck",
                   },
                 ],
               },
@@ -965,6 +991,10 @@ exports[`test workflow template renderings create-snapshot 1`] = `
               "arguments": {
                 "parameters": [
                   {
+                    "name": "targetLabel",
+                    "value": "{{inputs.parameters.targetLabel}}",
+                  },
+                  {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
                   },
@@ -975,6 +1005,14 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                   {
                     "name": "configContents",
                     "value": "{{steps.getConsoleConfig.outputs.parameters.configContents}}",
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "snapshotLabel",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}",
                   },
                 ],
               },
@@ -1073,6 +1111,18 @@ metadata:
               "name": "sessionName",
             },
             {
+              "name": "sourceLabel",
+            },
+            {
+              "name": "targetLabel",
+            },
+            {
+              "name": "snapshotLabel",
+            },
+            {
+              "name": "migrationLabel",
+            },
+            {
               "name": "imageMigrationConsoleLocation",
             },
             {
@@ -1101,6 +1151,22 @@ metadata:
                   {
                     "name": "configContents",
                     "value": "{{inputs.parameters.configContents}}",
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}",
+                  },
+                  {
+                    "name": "targetLabel",
+                    "value": "{{inputs.parameters.targetLabel}}",
+                  },
+                  {
+                    "name": "snapshotLabel",
+                    "value": "{{inputs.parameters.snapshotLabel}}",
+                  },
+                  {
+                    "name": "migrationLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}",
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -1154,6 +1220,10 @@ END {
   }
 }' || (echo Checked > /tmp/phase-output.txt && exit 1)
 ",
+                  },
+                  {
+                    "name": "task",
+                    "value": "reindexFromSnapshotStatusCheck",
                   },
                 ],
               },
@@ -1243,7 +1313,8 @@ spec:
         migrations.opensearch.org/source: "{{inputs.parameters.sourceLabel}}"
         migrations.opensearch.org/target: "{{inputs.parameters.targetLabel}}"
         migrations.opensearch.org/snapshot: "{{inputs.parameters.snapshotLabel}}"
-        migrations.opensearch.org/migration: "{{inputs.parameters.migrationLabel}}"
+        migrations.opensearch.org/from-snapshot-migration: "{{inputs.parameters.migrationLabel}}"
+        migrations.opensearch.org/task: reindexFromSnapshot
     spec:
       serviceAccountName: argo-workflow-executor
       containers:
@@ -1526,6 +1597,14 @@ spec:
                     "value": "{{inputs.parameters.sessionName}}",
                   },
                   {
+                    "name": "sourceLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}",
+                  },
+                  {
+                    "name": "migrationLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}",
+                  },
+                  {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
                   },
@@ -1536,6 +1615,14 @@ spec:
                   {
                     "name": "configContents",
                     "value": "{{steps.setupWaitForCompletion.outputs.parameters.configContents}}",
+                  },
+                  {
+                    "name": "targetLabel",
+                    "value": "{{=jsonpath(inputs.parameters.targetConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "snapshotLabel",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}",
                   },
                 ],
               },
@@ -2857,10 +2944,11 @@ exports[`test workflow template renderings metadata-migration 1`] = `
         },
         "metadata": {
           "labels": {
-            "migrations.opensearch.org/migration": "{{inputs.parameters.migrationLabel}}",
+            "migrations.opensearch.org/from-snapshot-migration": "{{inputs.parameters.migrationLabel}}",
             "migrations.opensearch.org/snapshot": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}",
             "migrations.opensearch.org/source": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')}}",
             "migrations.opensearch.org/target": "{{=jsonpath(inputs.parameters.targetConfig, '$.label')}}",
+            "migrations.opensearch.org/task": "{{=((inputs.parameters.commandMode == 'evaluate') ? ('metadataEvaluate') : ('metadataMigrate'))}}",
           },
         },
         "name": "runmetadata",
@@ -3232,12 +3320,41 @@ echo ---
               "name": "configContents",
             },
             {
+              "name": "sourceLabel",
+              "value": "",
+            },
+            {
+              "name": "targetLabel",
+              "value": "",
+            },
+            {
+              "name": "snapshotLabel",
+              "value": "",
+            },
+            {
+              "name": "migrationLabel",
+              "value": "",
+            },
+            {
+              "name": "task",
+              "value": "",
+            },
+            {
               "name": "imageMigrationConsoleLocation",
             },
             {
               "name": "imageMigrationConsolePullPolicy",
             },
           ],
+        },
+        "metadata": {
+          "labels": {
+            "migrations.opensearch.org/from-snapshot-migration": "{{inputs.parameters.migrationLabel}}",
+            "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotLabel}}",
+            "migrations.opensearch.org/source": "{{inputs.parameters.sourceLabel}}",
+            "migrations.opensearch.org/target": "{{inputs.parameters.targetLabel}}",
+            "migrations.opensearch.org/task": "{{inputs.parameters.task}}",
+          },
         },
         "name": "runmigrationcommandforstatus",
         "outputs": {

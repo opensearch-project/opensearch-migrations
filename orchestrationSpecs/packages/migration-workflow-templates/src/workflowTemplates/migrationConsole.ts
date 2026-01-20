@@ -131,6 +131,11 @@ export const MigrationConsole = WorkflowBuilder.create({
     .addTemplate("runMigrationCommandForStatus", t => t
         .addRequiredInput("command", typeToken<string>())
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
+        .addOptionalInput("sourceLabel", c => "")
+        .addOptionalInput("targetLabel", c => "")
+        .addOptionalInput("snapshotLabel", c => "")
+        .addOptionalInput("migrationLabel", c => "")
+        .addOptionalInput("task", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(c => c
@@ -147,6 +152,15 @@ export const MigrationConsole = WorkflowBuilder.create({
                     "COMMAND": c.inputs.command
                 })]
             )
+            .addPodMetadata(({ inputs }) => ({
+                labels: {
+                    'migrations.opensearch.org/source': inputs.sourceLabel,
+                    'migrations.opensearch.org/target': inputs.targetLabel,
+                    'migrations.opensearch.org/snapshot': inputs.snapshotLabel,
+                    'migrations.opensearch.org/from-snapshot-migration': inputs.migrationLabel,
+                    'migrations.opensearch.org/task': inputs.task
+                }
+            }))
         )
         .addPathOutput("statusOutput", "/tmp/status-output.txt", typeToken<string>())
         .addPathOutput("overriddenPhase", "/tmp/phase-output.txt", typeToken<string>())

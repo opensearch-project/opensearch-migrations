@@ -149,7 +149,12 @@ export const MetadataMigration = WorkflowBuilder.create({
                     'migrations.opensearch.org/source': expr.jsonPathStrict(inputs.sourceConfig, "label"),
                     'migrations.opensearch.org/target': expr.jsonPathStrict(inputs.targetConfig, "label"),
                     'migrations.opensearch.org/snapshot': expr.jsonPathStrict(inputs.snapshotConfig, "label"),
-                    'migrations.opensearch.org/migration': inputs.migrationLabel
+                    'migrations.opensearch.org/from-snapshot-migration': inputs.migrationLabel,
+                    'migrations.opensearch.org/task': expr.ternary(
+                        expr.equals(inputs.commandMode, expr.literal("evaluate")),
+                        expr.literal("metadataEvaluate"),
+                        expr.literal("metadataMigrate")
+                    )
                 }
             }))
         )

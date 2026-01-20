@@ -190,7 +190,8 @@ function getRfsDeploymentManifest
                         "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceLabel),
                         "migrations.opensearch.org/target": makeStringTypeProxy(args.targetLabel),
                         "migrations.opensearch.org/snapshot": makeStringTypeProxy(args.snapshotLabel),
-                        "migrations.opensearch.org/migration": makeStringTypeProxy(args.migrationLabel),
+                        "migrations.opensearch.org/from-snapshot-migration": makeStringTypeProxy(args.migrationLabel),
+                        "migrations.opensearch.org/task": "reindexFromSnapshot",
                     },
                 },
                 spec: {
@@ -277,12 +278,17 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     .addTemplate("waitForCompletion", t => t
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
         .addRequiredInput("sessionName", typeToken<string>())
+        .addRequiredInput("sourceLabel", typeToken<string>())
+        .addRequiredInput("targetLabel", typeToken<string>())
+        .addRequiredInput("snapshotLabel", typeToken<string>())
+        .addRequiredInput("migrationLabel", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
             .addStep("checkBackfillStatus", MigrationConsole, "runMigrationCommandForStatus", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    command: getCheckBackfillStatusScript(b.inputs.sessionName)
+                    command: getCheckBackfillStatusScript(b.inputs.sessionName),
+                    task: "reindexFromSnapshotStatusCheck"
                 }))
         )
         .addRetryParameters({
@@ -392,7 +398,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             .addStep("waitForCompletion", INTERNAL, "waitForCompletion", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    configContents: c.steps.setupWaitForCompletion.outputs.configContents
+                    configContents: c.steps.setupWaitForCompletion.outputs.configContents,
+                    targetLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
+                    snapshotLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
                 }))
             .addStep("stopHistoricalBackfill", INTERNAL, "stopHistoricalBackfill", c =>
                 c.register({sessionName: b.inputs.sessionName}))
