@@ -5,8 +5,7 @@
  * No source cluster is deployed - only a target cluster in Amazon OpenSearch Service.
  * 
  * Required parameters:
- * - SNAPSHOT_BUCKET: S3 bucket containing the snapshot
- * - SNAPSHOT_FOLDER: Folder/base_path within the bucket
+ * - S3_REPO_URI: Full S3 URI to snapshot repository (e.g., s3://bucket/folder/)
  * - SNAPSHOT_NAME: Name of the snapshot
  * - SOURCE_VERSION: Version of the cluster that created the snapshot (ES_5.6, ES_6.8, ES_7.10)
  * - TARGET_VERSION: Target OpenSearch version (OS_2.19, OS_3.1)
@@ -63,10 +62,9 @@ def call(Map config = [:]) {
             string(name: 'RFS_WORKERS', defaultValue: '1', description: 'Number of RFS worker pods for document backfill (podReplicas)')
 
             // Snapshot configuration
-            string(name: 'SNAPSHOT_BUCKET', defaultValue: 'migrations-snapshots-library-us-west-2', description: 'S3 bucket containing the snapshot')
+            string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-west-2/large-snapshot-es6x/', description: 'Full S3 URI to snapshot repository (e.g., s3://bucket/folder/)')
             string(name: 'SNAPSHOT_REGION', defaultValue: 'us-west-2', description: 'AWS region where snapshot bucket is located')
-            string(name: 'SNAPSHOT_FOLDER', defaultValue: 'large-snapshot-es6x', description: 'Folder name in the snapshot bucket')
-            string(name: 'SNAPSHOT_NAME', defaultValue: 'large-snapshot', description: 'Name of the snapshot within the folder')
+            string(name: 'SNAPSHOT_NAME', defaultValue: 'large-snapshot', description: 'Name of the snapshot')
             choice(
                 name: 'SOURCE_VERSION',
                 choices: ['ES_5.6', 'ES_6.8', 'ES_7.10'],
@@ -384,7 +382,11 @@ def call(Map config = [:]) {
                                       echo "Workflow template applied"
                                     """
 
-                                    def s3RepoUri = "s3://${params.SNAPSHOT_BUCKET}/${params.SNAPSHOT_FOLDER}"
+                                    // Normalize S3 URI - ensure it ends with /
+                                    def s3RepoUri = params.S3_REPO_URI
+                                    if (!s3RepoUri.endsWith('/')) {
+                                        s3RepoUri = s3RepoUri + '/'
+                                    }
                                     
                                     // Run the BYOS test with env vars passed via file to avoid logging
                                     sh """
