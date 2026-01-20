@@ -516,47 +516,32 @@ ENVEOF
                                         --query 'Stacks[0].Outputs[?OutputKey==`VpcIdExport${maStageName}`].OutputValue' --output text)
                                       echo "VPC_ID=\$VPC_ID"
 
-                                      deadline=\$((SECONDS + 3600))
+                                      deadline=\$((SECONDS + 600))
                                       while [ \$SECONDS -lt \$deadline ]; do
-                                        eni_count=\$(aws ec2 describe-network-interfaces \
-                                          --filters Name=vpc-id,Values="\$VPC_ID" \
-                                          --query 'length(NetworkInterfaces)' --output text)
                                         vpce_count=\$(aws ec2 describe-vpc-endpoints \
                                           --filters Name=vpc-id,Values="\$VPC_ID" \
                                           --query 'length(VpcEndpoints)' --output text 2>/dev/null || echo 0)
-                                        subnet_count=\$(aws ec2 describe-subnets \
-                                          --filters Name=vpc-id,Values="\$VPC_ID" \
-                                          --query 'length(Subnets)' --output text)
-                                        igw_count=\$(aws ec2 describe-internet-gateways \
-                                          --filters Name=attachment.vpc-id,Values="\$VPC_ID" \
-                                          --query 'length(InternetGateways)' --output text)
-                                        eigw_count=\$(aws ec2 describe-egress-only-internet-gateways \
-                                          --query "length(EgressOnlyInternetGateways[?Attachments[?VpcId=='\$VPC_ID']])" \
-                                          --output text 2>/dev/null || echo 0)
-                                        nat_count=\$(aws ec2 describe-nat-gateways \
-                                          --filter Name=vpc-id,Values="\$VPC_ID" \
-                                          --query 'length(NatGateways[?State!=`deleted`])' --output text)
                                         lb_count=\$(aws elbv2 describe-load-balancers \
                                           --query "length(LoadBalancers[?VpcId=='\$VPC_ID'])" --output text 2>/dev/null || echo 0)
+                                        external_eni_count=\$(aws ec2 describe-network-interfaces \
+                                          --filters Name=vpc-id,Values="\$VPC_ID" \
+                                          --query 'length(NetworkInterfaces[?InterfaceType!=`nat_gateway` && InterfaceType!=`vpc_endpoint` && InterfaceType!=`gateway_load_balancer` && InterfaceType!=`gateway_load_balancer_endpoint`])' \
+                                          --output text 2>/dev/null || echo 0)
 
-                                        echo "Waiting for VPC dependencies... ENIs=\$eni_count VPCEs=\$vpce_count Subnets=\$subnet_count IGWs=\$igw_count EIGWs=\$eigw_count NATs=\$nat_count LBs=\$lb_count"
+                                        echo "Waiting for external VPC dependencies... VPCEs=\$vpce_count LBs=\$lb_count External_ENIs=\$external_eni_count"
 
-                                        if [ "\$eni_count" = "0" ] && [ "\$vpce_count" = "0" ] && [ "\$subnet_count" = "0" ] && \
-                                           [ "\$igw_count" = "0" ] && [ "\$eigw_count" = "0" ] && [ "\$nat_count" = "0" ] && [ "\$lb_count" = "0" ]; then
-                                          echo "VPC dependencies drained."
+                                        if [ "\$vpce_count" = "0" ] && [ "\$lb_count" = "0" ] && [ "\$external_eni_count" = "0" ]; then
+                                          echo "External VPC dependencies drained."
                                           exit 0
                                         fi
                                         sleep 30
                                       done
 
-                                      echo "Timed out waiting for VPC dependencies. Dumping remaining:"
-                                      aws ec2 describe-network-interfaces --filters Name=vpc-id,Values="\$VPC_ID" \
-                                        --query 'NetworkInterfaces[*].{Id:NetworkInterfaceId,Status:Status,Desc:Description}' --output table || true
+                                      echo "Timed out waiting for external VPC dependencies. Dumping remaining:"
                                       aws ec2 describe-vpc-endpoints --filters Name=vpc-id,Values="\$VPC_ID" --output table || true
-                                      aws ec2 describe-subnets --filters Name=vpc-id,Values="\$VPC_ID" --output table || true
-                                      aws ec2 describe-nat-gateways --filter Name=vpc-id,Values="\$VPC_ID" \
-                                        --query 'NatGateways[?State!=`deleted`]' --output table || true
                                       aws elbv2 describe-load-balancers --query "LoadBalancers[?VpcId=='\$VPC_ID']" --output table || true
+                                      aws ec2 describe-network-interfaces --filters Name=vpc-id,Values="\$VPC_ID" \
+                                        --query 'NetworkInterfaces[*].{Id:NetworkInterfaceId,Type:InterfaceType,Status:Status,Desc:Description}' --output table || true
                                       exit 1
                                     """
                                 }
