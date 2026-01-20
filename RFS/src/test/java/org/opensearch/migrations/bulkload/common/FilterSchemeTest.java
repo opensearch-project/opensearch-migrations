@@ -99,14 +99,16 @@ public class FilterSchemeTest {
     void testExcludedKibanaIndexTemplates() {
         var filter = FilterScheme.filterByAllowList(null);
 
-        // Should be excluded due to prefix
+        // Kibana index templates and indices should be excluded
         assertThat(filter.test("kibana_index_template:.kibana"), equalTo(false));
-        // This template has name containing '*' which is invalid in OpenSearch 2.x+
         assertThat(filter.test("kibana_index_template:.kibana_*"), equalTo(false));
+        assertThat(filter.test("kibana_logs"), equalTo(false));
+        assertThat(filter.test("kibana"), equalTo(false));
+        assertThat(filter.test(".kibana"), equalTo(false));
 
-        // User indices with kibana in the name should not be excluded
+        // User indices with kibana elsewhere in the name should not be excluded
         assertThat(filter.test("my_kibana_data"), equalTo(true));
-        assertThat(filter.test("kibana_index_logs"), equalTo(true));
+        assertThat(filter.test("my_kibana_logs"), equalTo(true));
     }
 
     @Test
