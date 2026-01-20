@@ -1,6 +1,17 @@
 import logging
 import os
-from ..cluster_version import ElasticsearchV5_X, ElasticsearchV6_X, ElasticsearchV7_X, OpensearchV2_X, OpensearchV3_X
+from console_link.middleware.clusters import cat_indices
+from ..cluster_version import (
+    ElasticsearchV1_X,
+    ElasticsearchV2_X,
+    ElasticsearchV5_X,
+    ElasticsearchV6_X,
+    ElasticsearchV7_X,
+    ElasticsearchV8_X,
+    OpensearchV1_X,
+    OpensearchV2_X,
+    OpensearchV3_X,
+)
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
 logger = logging.getLogger(__name__)
@@ -11,29 +22,31 @@ class Test0010ExternalSnapshotMigration(MATestBase):
     Test migration from an externally managed snapshot (BYOS - Bring Your Own Snapshot).
     No source cluster is deployed - migration reads directly from an existing S3 snapshot.
     
-    This test requires explicit selection via --test_ids=0010 because:
-    - It requires an existing snapshot in S3/Localstack (not created by the test)
-    - It requires specific environment variables or pre-configured snapshot location
-    
-    Configuration via environment variables:
-    - BYOS_SNAPSHOT_NAME: Name of the snapshot (required)
-    - BYOS_S3_REPO_URI: S3 URI to snapshot repository, e.g., s3://bucket/folder (required)
+    Required environment variables:
+    - BYOS_SNAPSHOT_NAME: Name of the snapshot
+    - BYOS_S3_REPO_URI: S3 URI to snapshot repository (e.g., s3://bucket/folder/)
     - BYOS_S3_REGION: AWS region for S3 (default: us-west-2)
-    - BYOS_S3_ENDPOINT: Optional endpoint for LocalStack testing
-    
-    Exit criteria: Workflow phase == "Succeeded"
+    - BYOS_S3_ENDPOINT: S3 endpoint (optional, for custom endpoints)
+    - BYOS_POD_REPLICAS: Number of RFS worker pods (default: 1)
     """
-    # Exclude from default test runs - requires explicit --test_ids=0010
     requires_explicit_selection = True
 
     def __init__(self, user_args: MATestUserArguments):
         allow_combinations = [
+            (ElasticsearchV1_X, OpensearchV2_X),
+            (ElasticsearchV1_X, OpensearchV3_X),
+            (ElasticsearchV2_X, OpensearchV2_X),
+            (ElasticsearchV2_X, OpensearchV3_X),
             (ElasticsearchV5_X, OpensearchV2_X),
             (ElasticsearchV5_X, OpensearchV3_X),
             (ElasticsearchV6_X, OpensearchV2_X),
             (ElasticsearchV6_X, OpensearchV3_X),
             (ElasticsearchV7_X, OpensearchV2_X),
             (ElasticsearchV7_X, OpensearchV3_X),
+            (ElasticsearchV8_X, OpensearchV2_X),
+            (ElasticsearchV8_X, OpensearchV3_X),
+            (OpensearchV1_X, OpensearchV2_X),
+            (OpensearchV1_X, OpensearchV3_X),
         ]
         description = "Performs migration from an existing S3 snapshot (no source cluster)."
         super().__init__(user_args=user_args,
@@ -43,24 +56,15 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         self._load_snapshot_config()
 
     def _load_snapshot_config(self):
-        """Load snapshot configuration from environment variables or defaults."""
-        if os.environ.get('BYOS_SNAPSHOT_NAME'):
-            logger.info("Loading BYOS config from environment variables")
-            self.snapshot_name = os.environ['BYOS_SNAPSHOT_NAME']
-            self.s3_repo_uri = os.environ['BYOS_S3_REPO_URI']
-            self.s3_region = os.environ.get('BYOS_S3_REGION', 'us-west-2')
-            self.s3_endpoint = os.environ.get('BYOS_S3_ENDPOINT', '')
-            self.pod_replicas = int(os.environ.get('BYOS_POD_REPLICAS', '1'))
-        else:
-            logger.info("Using default LocalStack BYOS config")
-            self.snapshot_name = "large-snapshot"
-            self.s3_repo_uri = "s3://test-snapshots/large-snapshot-es6x"
-            self.s3_endpoint = "localstack://localstack:4566"
-            self.s3_region = "us-east-2"
-            self.pod_replicas = 1
+        """Load snapshot configuration from environment variables."""
+        self.snapshot_name = os.environ['BYOS_SNAPSHOT_NAME']
+        self.s3_repo_uri = os.environ['BYOS_S3_REPO_URI']
+        self.s3_region = os.environ.get('BYOS_S3_REGION', 'us-west-2')
+        self.s3_endpoint = os.environ.get('BYOS_S3_ENDPOINT', '')
+        self.pod_replicas = int(os.environ.get('BYOS_POD_REPLICAS', '1'))
 
     def import_existing_clusters(self):
-        """Override - only import target cluster, no source needed."""
+        """Import target cluster from configmap."""
         if self.reuse_clusters:
             configmap_prefix = (f"target-{self.target_version.full_cluster_type}-"
                                 f"{self.target_version.major_version}-{self.target_version.minor_version}")
@@ -73,11 +77,10 @@ class Test0010ExternalSnapshotMigration(MATestBase):
                 self.source_cluster = None
             else:
                 raise ValueError(f"BYOS test requires existing target cluster. "
-                                 f"No configmap found with prefix '{configmap_prefix}'. "
-                                 f"Ensure the target cluster configmap exists in namespace 'ma'.")
+                                 f"No configmap found with prefix '{configmap_prefix}'.")
 
     def prepare_workflow_snapshot_and_migration_config(self):
-        """Configure for external snapshot - use externallyManagedSnapshot to skip snapshot creation."""
+        """Configure for external snapshot with template exclusion for invalid names."""
         self.workflow_snapshot_and_migration_config = [{
             "snapshotConfig": {
                 "snapshotNameConfig": {
@@ -91,7 +94,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         }]
 
     def prepare_workflow_parameters(self):
-        """Build parameters for snapshot-only migration using full-migration-imported-clusters."""
+        """Build workflow parameters for snapshot-only migration."""
         snapshot_repo = {"awsRegion": self.s3_region, "s3RepoPathUri": self.s3_repo_uri}
         if self.s3_endpoint:
             snapshot_repo["endpoint"] = self.s3_endpoint
@@ -112,17 +115,16 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         self.parameters["target-config"] = self.target_cluster.config
 
     def prepare_clusters(self):
-        """No source cluster to prepare - snapshot already exists."""
+        """No source cluster to prepare."""
         pass
 
     def display_final_cluster_state(self):
-        """Only show target cluster (no source)."""
-        from console_link.middleware.clusters import cat_indices
+        """Display target cluster indices."""
         target_response = cat_indices(cluster=self.target_cluster, refresh=True).decode("utf-8")
         logger.info("Target cluster indices after migration:")
-        print("TARGET CLUSTER")
-        print(target_response)
+        logger.info("TARGET CLUSTER")
+        logger.info(target_response)
 
     def verify_clusters(self):
-        """No additional verification - workflow success is the exit criteria."""
+        """Workflow success is the exit criteria."""
         pass

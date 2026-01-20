@@ -69,7 +69,7 @@ def call(Map config = [:]) {
             string(name: 'TEST_IDS', defaultValue: '0010', description: 'Test IDs to execute (comma separated, e.g., "0010" or "0010,0011")')
             choice(
                 name: 'SOURCE_VERSION',
-                choices: ['ES_5.6', 'ES_6.8', 'ES_7.10'],
+                choices: ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10', 'ES_8.19', 'OS_1.3', 'OS_2.19'],
                 description: 'Version of the cluster that created the snapshot'
             )
             
@@ -88,7 +88,7 @@ def call(Map config = [:]) {
 
         options {
             lock(label: params.STAGE, quantity: 1, variable: 'maStageName')
-            timeout(time: 12, unit: 'HOURS')
+            timeout(time: 18, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
         }
@@ -108,6 +108,37 @@ def call(Map config = [:]) {
         }
 
         stages {
+            stage('Print Configuration') {
+                steps {
+                    script {
+                        echo """
+================================================================================
+BYOS Migration Pipeline Configuration
+================================================================================
+Git Configuration:
+  Repository:        ${params.GIT_REPO_URL}
+  Branch:            ${params.GIT_BRANCH}
+  Stage:             ${params.STAGE}
+
+Snapshot Configuration:
+  S3 URI:            ${params.S3_REPO_URI}
+  Region:            ${params.REGION}
+  Snapshot Name:     ${params.SNAPSHOT_NAME}
+  Source Version:    ${params.SOURCE_VERSION}
+
+Target Cluster Configuration:
+  Target Version:    ${params.TARGET_VERSION}
+  Cluster Size:      ${params.TARGET_CLUSTER_SIZE}
+
+Migration Configuration:
+  RFS Workers:       ${params.RFS_WORKERS}
+  Test IDs:          ${params.TEST_IDS}
+================================================================================
+"""
+                    }
+                }
+            }
+
             stage('Checkout') {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
@@ -361,7 +392,7 @@ def call(Map config = [:]) {
 
             stage('Run BYOS Migration Test') {
                 steps {
-                    timeout(time: 4, unit: 'HOURS') {
+                    timeout(time: 12, unit: 'HOURS') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
