@@ -148,13 +148,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   }
                 }
               },
-              "name": {
+              "label": {
                 "type": "string"
               }
             },
             "required": [
               "version",
-              "name"
+              "label"
             ]
           },
           "targetConfig": {
@@ -242,7 +242,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   }
                 ]
               },
-              "name": {
+              "label": {
                 "type": "string",
                 "pattern": "^[a-zA-Z0-9_]+$"
               }
@@ -250,7 +250,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             "required": [
               "endpoint",
               "version",
-              "name"
+              "label"
             ]
           },
           "snapshotExtractAndLoadConfigArray": {
@@ -293,7 +293,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "items": {
                     "type": "object",
                     "properties": {
-                      "name": {
+                      "label": {
                         "type": "string"
                       },
                       "metadataMigrationConfig": {
@@ -494,11 +494,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       }
                     },
                     "required": [
-                      "name"
+                      "label"
                     ]
                   }
                 },
-                "name": {
+                "label": {
                   "type": "string"
                 },
                 "snapshotConfig": {
@@ -565,18 +565,22 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "s3RepoPathUri",
                         "repoName"
                       ]
+                    },
+                    "label": {
+                      "type": "string"
                     }
                   },
                   "required": [
                     "snapshotNameConfig",
-                    "repoConfig"
+                    "repoConfig",
+                    "label"
                   ]
                 }
               },
               "required": [
                 "createSnapshotConfig",
                 "migrations",
-                "name",
+                "label",
                 "snapshotConfig"
               ]
             }
@@ -955,7 +959,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "items": {
               "type": "object",
               "properties": {
-                "name": {
+                "label": {
                   "type": "string",
                   "pattern": "^[a-zA-Z][a-zA-Z0-9]*",
                   "default": ""
@@ -1023,7 +1027,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "items": {
                     "type": "object",
                     "properties": {
-                      "name": {
+                      "label": {
                         "type": "string",
                         "pattern": "^[a-zA-Z][a-zA-Z0-9]*",
                         "default": ""

@@ -43,6 +43,7 @@
 
       "snapshotExtractAndLoadConfigs": [
         {
+          label: "t2Migration",
           "snapshotConfig": {
             "repoName": "default",
             "snapshotNameConfig": {
@@ -58,6 +59,7 @@
                 "skipEvaluateApproval" : true,
                 "skipMigrateApproval" : true
               },
+              "label": "everything",
               "documentBackfillConfig": {
                 "documentsPerBulkRequest": 1000,
                 "maxShardSizeBytes": 16000000,

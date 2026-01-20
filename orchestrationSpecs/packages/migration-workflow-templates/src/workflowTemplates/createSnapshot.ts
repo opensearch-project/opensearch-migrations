@@ -117,6 +117,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
+        .addRequiredInput("targetLabel", typeToken<string>())
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
@@ -131,6 +132,13 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     makeParamsDict(b.inputs.sourceConfig, b.inputs.snapshotConfig, b.inputs.createSnapshotConfig)
                 ))
             ])
+            .addPodMetadata(({ inputs }) => ({
+                labels: {
+                    'migrations.opensearch.org/source': expr.jsonPathStrict(inputs.sourceConfig, "label"),
+                    'migrations.opensearch.org/target': inputs.targetLabel,
+                    'migrations.opensearch.org/snapshot': expr.jsonPathStrict(inputs.snapshotConfig, "label")
+                }
+            }))
         )
 
     )
@@ -158,6 +166,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
+        .addRequiredInput("targetLabel", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b

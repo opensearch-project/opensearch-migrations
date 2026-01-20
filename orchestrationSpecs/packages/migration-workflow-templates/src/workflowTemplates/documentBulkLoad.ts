@@ -78,7 +78,12 @@ function getRfsDeploymentManifest
 
     rfsImageName: BaseExpression<string>,
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
-    resources: BaseExpression<ResourceRequirementsType>
+    resources: BaseExpression<ResourceRequirementsType>,
+
+    sourceLabel: BaseExpression<string>,
+    targetLabel: BaseExpression<string>,
+    snapshotLabel: BaseExpression<string>,
+    migrationLabel: BaseExpression<string>
 }): Deployment {
     const basicCredsSecretName = expr.ternary(
         expr.isEmpty(args.basicCredsSecretNameOrEmpty),
@@ -182,6 +187,10 @@ function getRfsDeploymentManifest
                         app: "bulk-loader",
                         "deployment-name": makeStringTypeProxy(deploymentName),
                         "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
+                        "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceLabel),
+                        "migrations.opensearch.org/target": makeStringTypeProxy(args.targetLabel),
+                        "migrations.opensearch.org/snapshot": makeStringTypeProxy(args.snapshotLabel),
+                        "migrations.opensearch.org/migration": makeStringTypeProxy(args.migrationLabel),
                     },
                 },
                 spec: {
@@ -292,6 +301,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
+        .addRequiredInput("sourceLabel", typeToken<string>())
+        .addRequiredInput("targetLabel", typeToken<string>())
+        .addRequiredInput("snapshotLabel", typeToken<string>())
+        .addRequiredInput("migrationLabel", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addResourceTask(b => b
@@ -309,6 +322,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     workflowName: expr.getWorkflowValue("name"),
                     jsonConfig: expr.toBase64(b.inputs.rfsJsonConfig),
                     resources: expr.deserializeRecord(b.inputs.resources),
+                    sourceLabel: b.inputs.sourceLabel,
+                    targetLabel: b.inputs.targetLabel,
+                    snapshotLabel: b.inputs.snapshotLabel,
+                    migrationLabel: b.inputs.migrationLabel,
                 })
             }))
     )
@@ -317,10 +334,11 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     .addTemplate("startHistoricalBackfillFromConfig", t => t
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
-
+        .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
+        .addRequiredInput("migrationLabel", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addSteps(b => b
@@ -338,7 +356,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             b.inputs.documentBackfillConfig,
                             b.inputs.sessionName)
                     )),
-                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources"))
+                    resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),
+                    targetLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
+                    snapshotLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
                 })
             )
         )
@@ -347,11 +367,13 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
 
     .addTemplate("runBulkLoad", t => t
         .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
+        .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("sessionName", typeToken<string>())
         .addOptionalInput("indices", c => [] as readonly string[])
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
+        .addRequiredInput("migrationLabel", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
 
         .addSteps(b => b

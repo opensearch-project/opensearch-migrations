@@ -92,8 +92,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
-        .addRequiredInput("perSnapshotName", typeToken<string>())
-        .addRequiredInput("name", typeToken<string>())
+        .addRequiredInput("migrationLabel", typeToken<string>())
+        // groupName facilitates grouping within the python `workflow` tools
         .addRequiredInput("groupName", typeToken<string>())
         .addOptionalInput("metadataMigrationConfig", c=>
             expr.empty<z.infer<typeof METADATA_OPTIONS>>())
@@ -107,8 +107,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("idGenerator", INTERNAL, "doNothing")
             .addStep("metadataMigrate", MetadataMigration, "migrateMetaData", c => {
                     return c.register({
-                        ...selectInputsForRegister(b, c),
-                        perMigrationName: b.inputs.name
+                        ...selectInputsForRegister(b, c)
                     });
                 },
                 { when: { templateExp: expr.not(expr.isEmpty(b.inputs.metadataMigrationConfig)) }}
@@ -117,7 +116,8 @@ export const FullMigration = WorkflowBuilder.create({
                     c.register({
                         ...(selectInputsForRegister(b, c)),
                         sessionName: c.steps.idGenerator.id,
-                        sourceVersion: expr.jsonPathStrict(b.inputs.sourceConfig, "version")
+                        sourceVersion: expr.jsonPathStrict(b.inputs.sourceConfig, "version"),
+                        sourceLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label")
                     }),
                 { when: { templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)) }}
             )
@@ -142,7 +142,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['snapshotConfig']>())
         .addRequiredInput("migrations", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['migrations']>())
-        .addRequiredInput("name", typeToken<string>())
+        // groupName facilitates grouping within the python `workflow` tools
         .addRequiredInput("groupName", typeToken<string>())
         .addOptionalInput("createSnapshotConfig",
                 c=> expr.empty<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
@@ -153,7 +153,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addSteps(b => b
             .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
                 c => c.register({
-                    ...selectInputsForRegister(b, c)
+                    ...selectInputsForRegister(b, c),
+                    targetLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label")
                 }))
 
             .addStep("migrateFromSnapshot", INTERNAL, "migrateFromSnapshot", c=> {
@@ -165,8 +166,8 @@ export const FullMigration = WorkflowBuilder.create({
                         ...selectInputsFieldsAsExpressionRecord(c.item, c,
                             getZodKeys(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)),
                         snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
-                        perSnapshotName: b.inputs.name,
-                        groupName: expr.get(c.item, "name")
+                        migrationLabel: expr.get(c.item, "label"),
+                        groupName: expr.get(c.item, "label")
                     });
                 },
                 {loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.migrations))}
@@ -179,10 +180,11 @@ export const FullMigration = WorkflowBuilder.create({
     .addTemplate("migration", t=>t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        // groupName facilitates grouping within the python `workflow` tools
         .addOptionalInput("groupName", c => expr.concat(
-            expr.get(expr.deserializeRecord(c.inputParameters.sourceConfig), "name"),
+            expr.get(expr.deserializeRecord(c.inputParameters.sourceConfig), "label"),
             expr.literal(" to "),
-            expr.get(expr.deserializeRecord(c.inputParameters.targetConfig), "name"),
+            expr.get(expr.deserializeRecord(c.inputParameters.targetConfig), "label"),
         ))
         .addOptionalInput("snapshotExtractAndLoadConfigArray",
             c => expr.empty<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>[]>())
@@ -198,7 +200,7 @@ export const FullMigration = WorkflowBuilder.create({
                     return c.register({
                         ...rest,
                         ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(SNAPSHOT_MIGRATION_CONFIG)),
-                        groupName: expr.get(c.item, "name")
+                        groupName: expr.get(c.item, "label")
 
                     })
                 },

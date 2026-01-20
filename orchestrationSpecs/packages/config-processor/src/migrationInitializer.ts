@@ -84,17 +84,17 @@ export class MigrationInitializer {
             );
 
             const targetsMap =
-                Object.groupBy(workflows, w=> w.targetConfig.name);
+                Object.groupBy(workflows, w=> w.targetConfig.label);
 
             // Initialize target latches
-            for (const [targetName, list] of Object.entries(targetsMap)) {
+            for (const [targetLabel, list] of Object.entries(targetsMap)) {
                 const processorCount = list ? this.calculateProcessorCount(list) : 0;
                 console.log(`Total processor count: ${processorCount}`);
 
-                await this.client.put(`/${this.uniqueRunNonce}/workflow/targets/${targetName}/latch`)
+                await this.client.put(`/${this.uniqueRunNonce}/workflow/targets/${targetLabel}/latch`)
                     .value(processorCount.toString());
 
-                console.log(`Target ${targetName} (${targetName}) latch initialized with count ${processorCount}`);
+                console.log(`Target ${targetLabel} latch initialized with count ${processorCount}`);
             }
 
             console.log(`Etcd keys initialized with prefix: ${this.uniqueRunNonce}`);

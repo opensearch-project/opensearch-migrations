@@ -63,9 +63,9 @@ function namePerIndexSnapshotMigration(
     data: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>,
     idx: number) :
 z.infer<typeof PER_INDICES_SNAPSHOT_MIGRATION_CONFIG> {
-    const {name, ...rest} = data;
+    const {label, ...rest} = data;
     return {
-        ...({ name: name? name : idx.toString() }),
+        ...({ label: label? label : idx.toString() }),
         ...rest
     };
 }
@@ -79,11 +79,11 @@ export function setNamesInUserConfig(userConfig: InputConfig): InputConfig {
 
             const newSnapshotConfig = snapshotExtractAndLoadConfigs === undefined ? undefined :
                 snapshotExtractAndLoadConfigs.map((sc, idx) => {
-                    const {name, migrations, ...rest} = sc;
+                    const {label, migrations, ...rest} = sc;
                     return {
                         ...rest,
                         ...(migrations ? { migrations: migrations.flatMap(namePerIndexSnapshotMigration) } : {}),
-                        ...({ name: name? name : idx.toString() }),
+                        ...({ label: label? label : idx.toString() }),
                     } as z.infer<typeof NORMALIZED_SNAPSHOT_MIGRATION_CONFIG>;
                 });
 
@@ -226,7 +226,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
             const newSnapshotConfig = snapshotExtractAndLoadConfigs === undefined ? undefined :
                 snapshotExtractAndLoadConfigs.map((sc, idx) => {
-                    const {snapshotConfig, createSnapshotConfig, ...rest} = sc;
+                    const {snapshotConfig, createSnapshotConfig, label, ...rest} = sc;
                     if (sourceCluster.snapshotRepos === undefined) {
                         throw Error(`Configured a snapshot repo with ${snapshotConfig}, for ${fromSource}. but the source cluster definition does not define a repo.`);
                     }
@@ -241,10 +241,12 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     
                     return {
                         ...rest,
+                        label,
                         ...(snapshotConfig !== undefined && {
                             snapshotConfig: {
                                 snapshotNameConfig: snapshotConfig.snapshotNameConfig,
-                                repoConfig: sourceCluster.snapshotRepos[snapshotConfig.repoName] ?? {}
+                                repoConfig: sourceCluster.snapshotRepos[snapshotConfig.repoName] ?? {},
+                                label
                             }
                         }),
                         ...(enhancedCreateSnapshotConfig !== undefined && {
@@ -255,8 +257,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
             const { snapshotRepos, ...restOfSourceCluster } = sourceCluster; // drop the normalized form of the repos
             return {
-                sourceConfig: {...restOfSourceCluster, name: fromSource},
-                targetConfig: {...userConfig.targetClusters[toTarget], name: toTarget},
+                sourceConfig: {...restOfSourceCluster, label: fromSource},
+                targetConfig: {...userConfig.targetClusters[toTarget], label: toTarget},
                 ...(newSnapshotConfig === undefined ? {} : { snapshotExtractAndLoadConfigArray: newSnapshotConfig }),
                 ...(replayerConfig === undefined ? {} : { replayerConfig})
             };

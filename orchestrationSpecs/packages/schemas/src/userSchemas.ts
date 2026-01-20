@@ -314,7 +314,7 @@ export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
 });
 
 export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    name: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional(),
+    label: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional(),
     metadataMigrationConfig: USER_METADATA_OPTIONS.optional(),
     documentBackfillConfig: USER_RFS_OPTIONS.optional(),
 }).refine(data =>
@@ -323,15 +323,15 @@ export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     {message: "At least one of metadataMigrationConfig or documentBackfillConfig must be provided"});
 
 export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    name: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional(),
+    label: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional(),
     createSnapshotConfig: CREATE_SNAPSHOT_OPTIONS.optional(),
     snapshotConfig: NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
     migrations: z.array(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
 }).refine(data => {
-    const names = data.migrations.map(m => m.name).filter(s => s);
-    return names.length == new Set(names).size;
+    const labels = data.migrations.map(m => m.label).filter(s => s);
+    return labels.length == new Set(labels).size;
 },
-    {message: "names of migration items must be unique when they are provided"});
+    {message: "labels of migration items must be unique when they are provided"});
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     skipApprovals : z.boolean().default(false).optional(), // TODO - format
@@ -340,10 +340,10 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).min(1).optional(),
     replayerConfig: REPLAYER_OPTIONS.optional()
 }).refine(data => {
-        const names = data.snapshotExtractAndLoadConfigs?.map(m => m.name).filter(s => s);
-        return names ? names.length == new Set(names).size : true;
+        const labels = data.snapshotExtractAndLoadConfigs?.map(m => m.label).filter(s => s);
+        return labels ? labels.length == new Set(labels).size : true;
     },
-    {message: "names of snapshotExtractAndLoadConfigs items must be unique when they are provided"});
+    {message: "labels of snapshotExtractAndLoadConfigs items must be unique when they are provided"});
 
 export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);

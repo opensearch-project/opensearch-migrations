@@ -70,12 +70,12 @@ function makeOptionalDefaultedFieldsRequired<T extends z.ZodTypeAny>(schema: T):
 
 export const NAMED_SOURCE_CLUSTER_CONFIG =
     makeOptionalDefaultedFieldsRequired(SOURCE_CLUSTER_CONFIG.extend({
-        name: z.string(), // override to required
+        label: z.string(), // override to required
     }));
 
 export const NAMED_TARGET_CLUSTER_CONFIG =
     makeOptionalDefaultedFieldsRequired(TARGET_CLUSTER_CONFIG.extend({
-        name: z.string().regex(/^[a-zA-Z0-9_]+$/), // override to required
+        label: z.string().regex(/^[a-zA-Z0-9_]+$/), // override to required
     }));
 
 export const DENORMALIZED_S3_REPO_CONFIG =
@@ -86,14 +86,16 @@ export const DENORMALIZED_S3_REPO_CONFIG =
 
 export const COMPLETE_SNAPSHOT_CONFIG =
     makeOptionalDefaultedFieldsRequired(NORMALIZED_COMPLETE_SNAPSHOT_CONFIG.extend({
-        repoConfig: DENORMALIZED_S3_REPO_CONFIG  // Replace string reference with actual config
+        repoConfig: DENORMALIZED_S3_REPO_CONFIG,  // Replace string reference with actual config
+        label: z.string()
     }));
 
 export const DYNAMIC_SNAPSHOT_CONFIG =
     makeOptionalDefaultedFieldsRequired(NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG
         .omit({repoName: true})
         .extend({
-            repoConfig: DENORMALIZED_S3_REPO_CONFIG  // Replace string reference with actual config
+            repoConfig: DENORMALIZED_S3_REPO_CONFIG,  // Replace string reference with actual config
+            label: z.string()
     }));
 
 export const METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
@@ -113,8 +115,8 @@ export const RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG =
     makeOptionalDefaultedFieldsRequired(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG
-        .omit({name: true, metadataMigrationConfig: true, documentBackfillConfig: true}).safeExtend({
-            name: z.string(),
+        .omit({label: true, metadataMigrationConfig: true, documentBackfillConfig: true}).safeExtend({
+            label: z.string(),
             metadataMigrationConfig: METADATA_OPTIONS.optional(),
             documentBackfillConfig: RFS_OPTIONS.optional()
         })
@@ -125,10 +127,10 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG =
 
 export const SNAPSHOT_MIGRATION_CONFIG =
     makeOptionalDefaultedFieldsRequired(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG
-        .omit({createSnapshotConfig: true, migrations: true, name: true, snapshotConfig: true}).extend({
+        .omit({createSnapshotConfig: true, migrations: true, label: true, snapshotConfig: true}).extend({
             createSnapshotConfig: ARGO_CREATE_SNAPSHOT_OPTIONS,
             migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1),
-            name: z.string(),
+            label: z.string(),
             snapshotConfig: DYNAMIC_SNAPSHOT_CONFIG
         }));
 

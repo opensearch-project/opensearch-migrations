@@ -33,12 +33,8 @@ const COMMON_METADATA_PARAMETERS = {
             "Snapshot storage details (region, endpoint, etc)"}),
     sourceConfig: defineRequiredParam<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>(),
     targetConfig: defineRequiredParam<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
+    migrationLabel: defineRequiredParam<string>(),
     ...makeRequiredImageParametersForKeys(["MigrationConsole"])
-};
-
-const IDENTIFIER_PARAMETERS = {
-    perSnapshotName: defineRequiredParam<string>(),
-    perMigrationName: defineRequiredParam<string>()
 };
 
 export function makeRepoParamDict(
@@ -88,8 +84,7 @@ function makeParamsDict(
 }
 
 function makeApprovalCheck<
-    IPR extends InputParamsToExpressions<typeof COMMON_METADATA_PARAMETERS, InputParameterSource> &
-        InputParamsToExpressions<typeof IDENTIFIER_PARAMETERS, InputParameterSource>
+    IPR extends InputParamsToExpressions<typeof COMMON_METADATA_PARAMETERS, InputParameterSource>
 >(
     inputs: IPR,
     skipApprovalMap: BaseExpression<any>,
@@ -98,8 +93,8 @@ function makeApprovalCheck<
     return new FunctionExpression<boolean, any, any, "complicatedExpression">("sprig.dig", [
         ...getSourceTargetPathAndSnapshotAndMigrationIndex(inputs.sourceConfig,
             inputs.targetConfig,
-            inputs.perSnapshotName,
-            inputs.perMigrationName
+            expr.jsonPathStrict(inputs.snapshotConfig, "label"),
+            inputs.migrationLabel
         ),
         ...(innerSkipFlags !== undefined ? innerSkipFlags.map(f=>expr.literal(f)) : []),
         expr.literal(false),
@@ -149,6 +144,14 @@ export const MetadataMigration = WorkflowBuilder.create({
                     )
                 ))
             ])
+            .addPodMetadata(({ inputs }) => ({
+                labels: {
+                    'migrations.opensearch.org/source': expr.jsonPathStrict(inputs.sourceConfig, "label"),
+                    'migrations.opensearch.org/target': expr.jsonPathStrict(inputs.targetConfig, "label"),
+                    'migrations.opensearch.org/snapshot': expr.jsonPathStrict(inputs.snapshotConfig, "label"),
+                    'migrations.opensearch.org/migration': inputs.migrationLabel
+                }
+            }))
         )
     )
 
@@ -160,7 +163,6 @@ export const MetadataMigration = WorkflowBuilder.create({
     .addTemplate("migrateMetaData", t => t
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof METADATA_OPTIONS>>())
         .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
-        .addInputsFromRecord(IDENTIFIER_PARAMETERS)
         .addInputsFromRecord(
             getApprovalMap(t.inputs.workflowParameters.approvalConfigMapName, typeToken<{}>()))
         .addOptionalInput("skipEvaluateApproval", c=>
