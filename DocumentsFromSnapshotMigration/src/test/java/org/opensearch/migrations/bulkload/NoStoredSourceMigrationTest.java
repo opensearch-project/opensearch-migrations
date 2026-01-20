@@ -157,8 +157,8 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             Arguments.of(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.ES_V7_17, SearchClusterContainer.OS_V3_0_0),
             Arguments.of(SearchClusterContainer.ES_V8_17, SearchClusterContainer.OS_V3_0_0),
-            Arguments.of(SearchClusterContainer.OS_V1_3_16, SearchClusterContainer.OS_V3_0_0),
-            Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V3_0_0)
+            Arguments.of(SearchClusterContainer.OS_V1_3_20, SearchClusterContainer.OS_V3_0_0),
+            Arguments.of(SearchClusterContainer.OS_V2_19_4, SearchClusterContainer.OS_V3_0_0)
         );
     }
 

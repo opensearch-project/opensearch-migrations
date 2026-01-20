@@ -334,6 +334,20 @@ public class SourceReconstructor {
                 if (value instanceof Long longVal) {
                     yield decodeGeoPoint(longVal);
                 }
+                // ES 1.x stores geo_point as binary doc_values (2 doubles: lat, lon)
+                if (value instanceof String strVal) {
+                    try {
+                        byte[] bytes = Base64.getDecoder().decode(strVal);
+                        if (bytes.length == 16) {
+                            java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                            double lat = buf.getDouble();
+                            double lon = buf.getDouble();
+                            yield Map.of("lat", lat, "lon", lon);
+                        }
+                    } catch (IllegalArgumentException e) {
+                        // Not valid base64
+                    }
+                }
                 yield value;
             }
             case BINARY -> {
