@@ -153,27 +153,53 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Synth MA Stack') {
+                steps {
+                    timeout(time: 20, unit: 'MINUTES') {
+                        dir('deployment/migration-assistant-solution') {
+                            script {
+                                echo "Synthesizing CloudFormation templates via CDK..."
+                                sh "npm install --dev"
+                                sh "npx cdk synth '*'"
+                                echo "CDK synthesis completed. EKS CFN Templates should be available in cdk.out/"
+                            }
+                        }
+                    }
+                }
+            }
+
             stage('Deploy MA Stack') {
                 steps {
                     timeout(time: 30, unit: 'MINUTES') {
                         dir('deployment/migration-assistant-solution') {
                             script {
                                 env.STACK_NAME_SUFFIX = "${maStageName}-${params.SNAPSHOT_REGION}"
+                                env.MA_STACK_NAME = "Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}"
                                 def clusterDetails = readJSON text: env.clusterDetailsJson
                                 def targetCluster = clusterDetails.target
                                 def vpcId = targetCluster.vpcId
                                 def subnetIds = "${targetCluster.subnetIds}"
 
-                                sh "npm install"
+                                echo "Deploying CloudFormation stack: ${env.MA_STACK_NAME} in region ${params.SNAPSHOT_REGION}"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh """
-                                            cdk deploy Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} \
-                                              --parameters Stage=${maStageName} \
-                                              --parameters VPCId=${vpcId} \
-                                              --parameters VPCSubnetIds=${subnetIds} \
-                                              --require-approval never \
-                                              --concurrency 3
+                                            set -euo pipefail
+                                            aws cloudformation create-stack \
+                                              --stack-name "${env.MA_STACK_NAME}" \
+                                              --template-body file://cdk.out/Migration-Assistant-Infra-Import-VPC-eks.template.json \
+                                              --parameters ParameterKey=Stage,ParameterValue=${maStageName} \
+                                                           ParameterKey=VPCId,ParameterValue=${vpcId} \
+                                                           ParameterKey=VPCSubnetIds,ParameterValue=\\"${subnetIds}\\" \
+                                              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+                                              --region "${params.SNAPSHOT_REGION}"
+
+                                            echo "Waiting for stack CREATE_COMPLETE..."
+                                            aws cloudformation wait stack-create-complete \
+                                              --stack-name "${env.MA_STACK_NAME}" \
+                                              --region "${params.SNAPSHOT_REGION}"
+
+                                            echo "CloudFormation stack ${env.MA_STACK_NAME} is CREATE_COMPLETE."
                                         """
                                     }
                                 }
@@ -427,8 +453,29 @@ ENVEOF
                                     }
 
                                     sh """
-                                      cd $WORKSPACE/deployment/migration-assistant-solution
-                                      cdk destroy ${maStackName} --force || true
+                                      set -euo pipefail
+                                      echo "Deleting stack: ${maStackName}"
+                                      aws cloudformation delete-stack --stack-name ${maStackName} || true
+                                    """
+                                    sh """
+                                      set -euo pipefail
+                                      echo "Waiting for stack deletion: ${maStackName}"
+                                      deadline=\$((SECONDS + 1800))  # 30 minute timeout
+                                      while [ \$SECONDS -lt \$deadline ]; do
+                                        status=\$(aws cloudformation describe-stacks --stack-name ${maStackName} \
+                                          --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DELETED")
+                                        echo "Stack status: \$status"
+                                        if [ "\$status" = "DELETED" ] || [ "\$status" = "DELETE_COMPLETE" ]; then
+                                          echo "Stack deleted successfully"
+                                          exit 0
+                                        elif [ "\$status" = "DELETE_FAILED" ]; then
+                                          echo "Stack deletion failed"
+                                          exit 1
+                                        fi
+                                        sleep 30
+                                      done
+                                      echo "Timeout waiting for stack deletion"
+                                      exit 1
                                     """
                                 }
 
@@ -436,14 +483,28 @@ ENVEOF
                                 stage('Destroy OpenSearch Domain') {
                                     sh """
                                       set -euo pipefail
-                                      cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk
-                                      echo "Destroying stack: ${domainStackName}"
-                                      cdk destroy ${domainStackName} --force --concurrency 1
+                                      echo "Deleting stack: ${domainStackName}"
+                                      aws cloudformation delete-stack --stack-name ${domainStackName} || true
                                     """
                                     sh """
                                       set -euo pipefail
                                       echo "Waiting for stack deletion: ${domainStackName}"
-                                      aws cloudformation wait stack-delete-complete --stack-name ${domainStackName}
+                                      deadline=\$((SECONDS + 5400))  # 90 minute timeout
+                                      while [ \$SECONDS -lt \$deadline ]; do
+                                        status=\$(aws cloudformation describe-stacks --stack-name ${domainStackName} \
+                                          --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DELETED")
+                                        echo "Stack status: \$status"
+                                        if [ "\$status" = "DELETED" ] || [ "\$status" = "DELETE_COMPLETE" ]; then
+                                          echo "Stack deleted successfully"
+                                          exit 0
+                                        elif [ "\$status" = "DELETE_FAILED" ]; then
+                                          echo "Stack deletion failed"
+                                          exit 1
+                                        fi
+                                        sleep 30
+                                      done
+                                      echo "Timeout waiting for stack deletion"
+                                      exit 1
                                     """
                                 }
 
@@ -504,19 +565,30 @@ ENVEOF
                                 stage('Destroy Network Stack') {
                                     sh """
                                       set -euo pipefail
-                                      cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk
-                                      echo "Destroying stack: ${networkStackName}"
-                                      cdk destroy ${networkStackName} --force --concurrency 1
+                                      echo "Deleting stack: ${networkStackName}"
+                                      aws cloudformation delete-stack --stack-name ${networkStackName} || true
                                     """
                                     sh """
                                       set -euo pipefail
                                       echo "Waiting for stack deletion: ${networkStackName}"
-                                      aws cloudformation wait stack-delete-complete --stack-name ${networkStackName}
+                                      deadline=\$((SECONDS + 1800))  # 30 minute timeout
+                                      while [ \$SECONDS -lt \$deadline ]; do
+                                        status=\$(aws cloudformation describe-stacks --stack-name ${networkStackName} \
+                                          --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DELETED")
+                                        echo "Stack status: \$status"
+                                        if [ "\$status" = "DELETED" ] || [ "\$status" = "DELETE_COMPLETE" ]; then
+                                          echo "Stack deleted successfully"
+                                          exit 0
+                                        elif [ "\$status" = "DELETE_FAILED" ]; then
+                                          echo "Stack deletion failed"
+                                          exit 1
+                                        fi
+                                        sleep 30
+                                      done
+                                      echo "Timeout waiting for stack deletion"
+                                      exit 1
                                     """
                                 }
-
-                                // Cleanup context file
-                                sh "rm -f $WORKSPACE/test/amazon-opensearch-service-sample-cdk/cdk.context.json || true"
                             }
                         }
                     }
