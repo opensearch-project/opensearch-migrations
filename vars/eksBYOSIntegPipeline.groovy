@@ -31,6 +31,10 @@ def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eksbyos"
     def jobName = config.jobName ?: "byos-eks-integ-test"
     def clusterContextFilePath = "tmp/cluster-context-byos-${currentBuild.number}.json"
+    def testIds = config.testIds ?: "0010"
+    def sourceVersion = config.sourceVersion ?: ""
+    def targetVersion = config.targetVersion ?: ""
+    def targetClusterSize = config.targetClusterSize ?: ""
     def targetClusterSizes = [
         'default': [
             dataNodeType: "r6g.large.search",
@@ -59,9 +63,10 @@ def call(Map config = [:]) {
             string(name: 'RFS_WORKERS', defaultValue: '1', description: 'Number of RFS worker pods for document backfill (podReplicas)')
 
             // Snapshot configuration
-            string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-west-2/large-snapshot-es6x/', description: 'Full S3 URI to snapshot repository (e.g., s3://bucket/folder/)')
-            string(name: 'SNAPSHOT_REGION', defaultValue: 'us-west-2', description: 'AWS region where snapshot bucket is located')
+            string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es5x/', description: 'Full S3 URI to snapshot repository (e.g., s3://bucket/folder/)')
+            string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment and snapshot bucket')
             string(name: 'SNAPSHOT_NAME', defaultValue: 'large-snapshot', description: 'Name of the snapshot')
+            string(name: 'TEST_IDS', defaultValue: '0010', description: 'Test IDs to execute (comma separated, e.g., "0010" or "0010,0011")')
             choice(
                 name: 'SOURCE_VERSION',
                 choices: ['ES_5.6', 'ES_6.8', 'ES_7.10'],
@@ -83,7 +88,7 @@ def call(Map config = [:]) {
 
         options {
             lock(label: params.STAGE, quantity: 1, variable: 'maStageName')
-            timeout(time: 3, unit: 'HOURS')
+            timeout(time: 12, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
         }
@@ -132,11 +137,15 @@ def call(Map config = [:]) {
                     timeout(time: 45, unit: 'MINUTES') {
                         dir('test') {
                             script {
-                                def sizeConfig = targetClusterSizes[params.TARGET_CLUSTER_SIZE]
+                                env.sourceVer = sourceVersion ?: params.SOURCE_VERSION
+                                env.targetVer = targetVersion ?: params.TARGET_VERSION
+                                env.targetClusterSize = targetClusterSize ?: params.TARGET_CLUSTER_SIZE
+                                
+                                def sizeConfig = targetClusterSizes[env.targetClusterSize]
                                 deployTargetClusterOnly(
                                     stage: "${maStageName}",
                                     clusterContextFilePath: "${clusterContextFilePath}",
-                                    targetVer: params.TARGET_VERSION,
+                                    targetVer: env.targetVer,
                                     sizeConfig: sizeConfig
                                 )
                             }
@@ -160,21 +169,21 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Deploy MA Stack') {
+            stage('Deploy EKS CFN Stack') {
                 steps {
                     timeout(time: 30, unit: 'MINUTES') {
                         dir('deployment/migration-assistant-solution') {
                             script {
-                                env.STACK_NAME_SUFFIX = "${maStageName}-${params.SNAPSHOT_REGION}"
+                                env.STACK_NAME_SUFFIX = "${maStageName}-${params.REGION}"
                                 env.MA_STACK_NAME = "Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}"
                                 def clusterDetails = readJSON text: env.clusterDetailsJson
                                 def targetCluster = clusterDetails.target
                                 def vpcId = targetCluster.vpcId
                                 def subnetIds = "${targetCluster.subnetIds}"
 
-                                echo "Deploying CloudFormation stack: ${env.MA_STACK_NAME} in region ${params.SNAPSHOT_REGION}"
+                                echo "Deploying CloudFormation stack: ${env.MA_STACK_NAME} in region ${params.REGION}"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh """
                                             set -euo pipefail
                                             aws cloudformation create-stack \
@@ -184,12 +193,12 @@ def call(Map config = [:]) {
                                                            ParameterKey=VPCId,ParameterValue=${vpcId} \
                                                            ParameterKey=VPCSubnetIds,ParameterValue=\\"${subnetIds}\\" \
                                               --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-                                              --region "${params.SNAPSHOT_REGION}"
+                                              --region "${params.REGION}"
 
                                             echo "Waiting for stack CREATE_COMPLETE..."
                                             aws cloudformation wait stack-create-complete \
                                               --stack-name "${env.MA_STACK_NAME}" \
-                                              --region "${params.SNAPSHOT_REGION}"
+                                              --region "${params.REGION}"
 
                                             echo "CloudFormation stack ${env.MA_STACK_NAME} is CREATE_COMPLETE."
                                         """
@@ -206,7 +215,7 @@ def call(Map config = [:]) {
                     timeout(time: 10, unit: 'MINUTES') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 1200, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 1200, roleSessionName: 'jenkins-session') {
                                     def rawOutput = sh(
                                         script: """
                                           aws cloudformation describe-stacks \
@@ -245,7 +254,7 @@ def call(Map config = [:]) {
                                           --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
                                           --access-scope type=cluster
 
-                                        aws eks update-kubeconfig --region ${params.SNAPSHOT_REGION} --name $env.eksClusterName
+                                        aws eks update-kubeconfig --region ${params.REGION} --name $env.eksClusterName
 
                                         for i in {1..10}; do
                                           if kubectl get namespace default >/dev/null 2>&1; then
@@ -268,7 +277,7 @@ def call(Map config = [:]) {
                                             endpoint: targetCluster.endpoint,
                                             allow_insecure: true,
                                             sigv4: [
-                                                    region: params.SNAPSHOT_REGION,
+                                                    region: params.REGION,
                                                     service: "es"
                                             ],
                                             version: params.TARGET_VERSION
@@ -309,7 +318,7 @@ def call(Map config = [:]) {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                     // Install QEMU for cross-architecture builds (arm64 on x86_64 host)
                                     sh "docker run --privileged --rm tonistiigi/binfmt --install all"
 
@@ -340,7 +349,7 @@ def call(Map config = [:]) {
                         dir('deployment/k8s/aws') {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "./aws-bootstrap.sh --skip-git-pull --base-dir ${WORKSPACE} --use-public-images false --skip-console-exec --stage ${maStageName}"
                                     }
                                 }
@@ -355,7 +364,7 @@ def call(Map config = [:]) {
                     timeout(time: 4, unit: 'HOURS') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                     // Wait for migration-console pod to be ready
                                     sh """
                                       echo "Waiting for migration-console pod to be ready..."
@@ -374,13 +383,16 @@ def call(Map config = [:]) {
                                     if (!s3RepoUri.endsWith('/')) {
                                         s3RepoUri = s3RepoUri + '/'
                                     }
+
+                                    // Resolve test IDs
+                                    def testIdsResolved = testIds ?: params.TEST_IDS
                                     
                                     // Run the BYOS test with env vars passed via file to avoid logging
                                     sh """
                                       cat > /tmp/byos-env.sh << 'ENVEOF'
 export BYOS_SNAPSHOT_NAME='${params.SNAPSHOT_NAME}'
 export BYOS_S3_REPO_URI='${s3RepoUri}'
-export BYOS_S3_REGION='${params.SNAPSHOT_REGION}'
+export BYOS_S3_REGION='${params.REGION}'
 export BYOS_POD_REPLICAS='${params.RFS_WORKERS}'
 ENVEOF
                                       kubectl cp /tmp/byos-env.sh ma/migration-console-0:/tmp/byos-env.sh
@@ -388,9 +400,9 @@ ENVEOF
                                         source /tmp/byos-env.sh && \
                                         cd /root/lib/integ_test && \
                                         pipenv run pytest integ_test/ma_workflow_test.py \
-                                          --source_version=${params.SOURCE_VERSION} \
-                                          --target_version=${params.TARGET_VERSION} \
-                                          --test_ids=0010 \
+                                          --source_version=${env.sourceVer} \
+                                          --target_version=${env.targetVer} \
+                                          --test_ids=${testIdsResolved} \
                                           --reuse_clusters \
                                           -s
                                       '
@@ -407,7 +419,7 @@ ENVEOF
             always {
                 timeout(time: 90, unit: 'MINUTES') {
                     script {
-                        def region = params.SNAPSHOT_REGION
+                        def region = params.REGION
                         def networkStackName = "NetworkInfra-${maStageName}-${region}"
                         def domainStackName = "OpenSearchDomain-target-${maStageName}-${region}"
                         def maStackName = "Migration-Assistant-Infra-Import-VPC-eks-${maStageName}-${region}"
@@ -602,7 +614,7 @@ def deployTargetClusterOnly(Map config) {
     sh "echo 'Using cluster context file options:' && cat ${config.clusterContextFilePath}"
 
     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-        withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.SNAPSHOT_REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+        withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
             sh "./awsDeployCluster.sh --stage ${config.stage} --context-file ${config.clusterContextFilePath}"
         }
     }
