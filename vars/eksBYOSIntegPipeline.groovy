@@ -118,7 +118,7 @@ BYOS Migration Pipeline Configuration
 Git Configuration:
   Repository:        ${params.GIT_REPO_URL}
   Branch:            ${params.GIT_BRANCH}
-  Stage:             ${params.STAGE}
+  Stage:             ${maStageName}
 
 Snapshot Configuration:
   S3 URI:            ${params.S3_REPO_URI}
