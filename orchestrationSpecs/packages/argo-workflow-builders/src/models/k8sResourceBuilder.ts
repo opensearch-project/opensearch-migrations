@@ -33,20 +33,20 @@ export type ResourceWorkflowDefinition = {
 };
 
 export class K8sResourceBuilder<
-    ContextualScope extends WorkflowAndTemplatesScope,
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
     ResourceScope extends GenericScope,
     OutputParamsScope extends OutputParametersRecord
 > extends TemplateBodyBuilder<
-    ContextualScope,
+    ParentWorkflowScope,
     InputParamsScope,
     ResourceScope,
     OutputParamsScope,
-    K8sResourceBuilder<ContextualScope, InputParamsScope, ResourceScope, any>,
+    K8sResourceBuilder<ParentWorkflowScope, InputParamsScope, ResourceScope, any>,
     GenericScope // BodyBound
 > {
     constructor(
-        contextualScope: ContextualScope,
+        parentWorkflowScope: ParentWorkflowScope,
         inputsScope: InputParamsScope,
         bodyScope: ResourceScope,
         outputsScope: OutputParamsScope,
@@ -54,14 +54,14 @@ export class K8sResourceBuilder<
         synchronization?: SynchronizationConfig
     ) {
         const templateRebind: TemplateRebinder<
-            ContextualScope,
+            ParentWorkflowScope,
             InputParamsScope,
             GenericScope
         > = <
             NewBodyScope extends GenericScope,
             NewOutputScope extends OutputParametersRecord,
             Self extends TemplateBodyBuilder<
-                ContextualScope,
+                ParentWorkflowScope,
                 InputParamsScope,
                 NewBodyScope,
                 NewOutputScope,
@@ -69,20 +69,20 @@ export class K8sResourceBuilder<
                 GenericScope
             >
         >(
-            ctx: ContextualScope,
+            ctx: ParentWorkflowScope,
             inputs: InputParamsScope,
             body: NewBodyScope,
             outputs: NewOutputScope,
             retry: RetryParameters
         ) =>
             new K8sResourceBuilder<
-                ContextualScope,
+                ParentWorkflowScope,
                 InputParamsScope,
                 NewBodyScope,
                 NewOutputScope
             >(ctx, inputs, body, outputs, retry) as unknown as Self;
 
-        super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, templateRebind);
+        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, templateRebind);
     }
 
     protected getBody() {
@@ -93,7 +93,7 @@ export class K8sResourceBuilder<
     public setDefinition(
         workflowDefinition: ResourceWorkflowDefinition
     ): K8sResourceBuilder<
-        ContextualScope,
+        ParentWorkflowScope,
         InputParamsScope,
         ResourceScope & ResourceWorkflowDefinition,
         OutputParamsScope
@@ -104,7 +104,7 @@ export class K8sResourceBuilder<
 
         // Return a concrete instance (not rebind), like DagBuilder does in its own methods
         return new K8sResourceBuilder(
-            this.contextualScope,
+            this.parentWorkflowScope,
             this.inputsScope,
             newBody,
             this.outputsScope,
@@ -118,7 +118,7 @@ export class K8sResourceBuilder<
         _t: TypeToken<T>,
         descriptionValue?: string
     ): K8sResourceBuilder<
-        ContextualScope,
+        ParentWorkflowScope,
         InputParamsScope,
         ResourceScope,
         ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>
@@ -134,7 +134,7 @@ export class K8sResourceBuilder<
         } as ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>;
 
         return new K8sResourceBuilder(
-            this.contextualScope,
+            this.parentWorkflowScope,
             this.inputsScope,
             this.bodyScope,
             newOutputs,

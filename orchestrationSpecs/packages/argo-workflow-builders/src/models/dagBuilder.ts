@@ -47,9 +47,9 @@ function isDagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends NonSer
 }
 
 class DagTaskBuilder<
-    ContextualScope extends WorkflowAndTemplatesScope,
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
     TaskScope extends TasksOutputsScope
-> extends TaskBuilder<ContextualScope, TaskScope, "tasks", TaskRebinder<ContextualScope>> {
+> extends TaskBuilder<ParentWorkflowScope, TaskScope, "tasks", TaskRebinder<ParentWorkflowScope>> {
     protected readonly label = "tasks";
 
     protected onTaskPushed<
@@ -75,23 +75,23 @@ type DagExpressionContext<
 } & LabelledAllTasksAsOutputReferenceable<TaskScope, "tasks">;
 
 export class DagBuilder<
-    ContextualScope extends WorkflowAndTemplatesScope,
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
     TaskScope extends TasksOutputsScope,
     OutputParamsScope extends OutputParametersRecord
 > extends TemplateBodyBuilder<
-    ContextualScope,
+    ParentWorkflowScope,
     InputParamsScope,
     TaskScope,
     OutputParamsScope,
-    DagBuilder<ContextualScope, InputParamsScope, TaskScope, any>, // Self
+    DagBuilder<ParentWorkflowScope, InputParamsScope, TaskScope, any>, // Self
     TasksOutputsScope, // BodyBound
     DagExpressionContext<InputParamsScope, TaskScope>
 > {
-    private readonly taskBuilder: DagTaskBuilder<ContextualScope, TaskScope>;
+    private readonly taskBuilder: DagTaskBuilder<ParentWorkflowScope, TaskScope>;
 
     constructor(
-        contextualScope: ContextualScope,
+        parentWorkflowScope: ParentWorkflowScope,
         inputs: InputParamsScope,
         bodyScope: TaskScope,
         orderedTasks: NamedTask[],
@@ -100,10 +100,10 @@ export class DagBuilder<
         synchronization: SynchronizationConfig | undefined
     ) {
         // Trick: capture a mutable selfRef within a closure for use inside the rebinder
-        let selfRef: DagBuilder<ContextualScope, InputParamsScope, any, any> | undefined;
+        let selfRef: DagBuilder<ParentWorkflowScope, InputParamsScope, any, any> | undefined;
 
         const templateRebind: TemplateRebinder<
-            ContextualScope,
+            ParentWorkflowScope,
             InputParamsScope,
             TasksOutputsScope,
             DagExpressionContext<InputParamsScope, any>
@@ -115,16 +115,16 @@ export class DagBuilder<
             ) as any;
         };
 
-        super(contextualScope, inputs, bodyScope, outputs, retryParameters, synchronization, templateRebind);
+        super(parentWorkflowScope, inputs, bodyScope, outputs, retryParameters, synchronization, templateRebind);
 
         // This rebinder produces a NEW DagBuilder with the NEW task scope when tasks change
-        const tasksRebind: TaskRebinder<ContextualScope> =
-            <NS extends TasksOutputsScope>(ctx: ContextualScope, scope: NS, tasks: NamedTask[]) =>
-                new DagBuilder<ContextualScope, InputParamsScope, NS, OutputParamsScope>(
+        const tasksRebind: TaskRebinder<ParentWorkflowScope> =
+            <NS extends TasksOutputsScope>(ctx: ParentWorkflowScope, scope: NS, tasks: NamedTask[]) =>
+                new DagBuilder<ParentWorkflowScope, InputParamsScope, NS, OutputParamsScope>(
                     ctx, this.inputsScope, scope, tasks, this.outputsScope, this.retryParameters, this.synchronization
                 );
 
-        this.taskBuilder = new DagTaskBuilder(contextualScope, bodyScope, orderedTasks, tasksRebind);
+        this.taskBuilder = new DagTaskBuilder(parentWorkflowScope, bodyScope, orderedTasks, tasksRebind);
 
         // finalize selfRef after fields are initialized
         selfRef = this;
@@ -140,14 +140,14 @@ export class DagBuilder<
     public addTask<
         Name extends string,
         TemplateSource,
-        K extends KeyFor<ContextualScope, TemplateSource>,
+        K extends KeyFor<ParentWorkflowScope, TemplateSource>,
         LoopT extends NonSerializedPlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, TaskScope>,
         source: UniqueNameConstraintOutsideDeclaration<Name, TaskScope, TemplateSource>,
         key: UniqueNameConstraintOutsideDeclaration<Name, TaskScope, K>,
         ...args: ParamsTuple<
-            InputsFrom<ContextualScope, TemplateSource, K>,
+            InputsFrom<ParentWorkflowScope, TemplateSource, K>,
             Name,
             TaskScope,
             "tasks",
@@ -158,11 +158,11 @@ export class DagBuilder<
         Name,
         TaskScope,
         DagBuilder<
-            ContextualScope,
+            ParentWorkflowScope,
             InputParamsScope,
             ExtendScope<
                 TaskScope,
-                { [P in Name]: TasksWithOutputs<Name, OutputsFrom<ContextualScope, TemplateSource, K>> }
+                { [P in Name]: TasksWithOutputs<Name, OutputsFrom<ParentWorkflowScope, TemplateSource, K>> }
             >,
             OutputParamsScope
         >
