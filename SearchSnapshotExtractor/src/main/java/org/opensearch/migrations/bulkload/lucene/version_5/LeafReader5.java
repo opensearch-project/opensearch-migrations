@@ -148,13 +148,20 @@ public class LeafReader5 implements LuceneLeafReader {
         if (dv != null) {
             BytesRef value = dv.get(docId);
             if (value != null && value.length > 0) {
-                ByteArrayDataInput in = new ByteArrayDataInput(value.bytes, value.offset, value.length);
-                int count = in.readVInt();
-                if (count > 0) {
-                    int len = in.readVInt();
-                    byte[] data = new byte[len];
-                    in.readBytes(data, 0, len);
-                    return Base64.getEncoder().encodeToString(data);
+                try {
+                    ByteArrayDataInput in = new ByteArrayDataInput(value.bytes, value.offset, value.length);
+                    int count = in.readVInt();
+                    if (count > 0) {
+                        int len = in.readVInt();
+                        byte[] data = new byte[len];
+                        in.readBytes(data, 0, len);
+                        return Base64.getEncoder().encodeToString(data);
+                    }
+                } catch (ArrayIndexOutOfBoundsException e) {
+                    // Different binary encoding (e.g., geo_point in ES 1.x) - return raw bytes
+                    byte[] raw = new byte[value.length];
+                    System.arraycopy(value.bytes, value.offset, raw, 0, value.length);
+                    return Base64.getEncoder().encodeToString(raw);
                 }
             }
         }
