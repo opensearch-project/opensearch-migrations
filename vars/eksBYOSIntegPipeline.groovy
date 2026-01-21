@@ -40,16 +40,14 @@ def call(Map config = [:]) {
             dataNodeType: "r6g.large.search",
             dedicatedManagerNodeType: "m6g.large.search",
             dataNodeCount: 2,
-            dedicatedMasterEnabled: false,
-            masterNodeCount: 0,
+            dedicatedManagerNodeCount: 0,
             ebsVolumeSize: 100
         ],
         'large': [
             dataNodeType: "r6g.4xlarge.search",
             dedicatedManagerNodeType: "m6g.xlarge.search",
             dataNodeCount: 12,
-            dedicatedMasterEnabled: true,
-            masterNodeCount: 4,
+            dedicatedManagerNodeCount: 4,
             ebsVolumeSize: 2048
         ]
     ]
@@ -506,7 +504,7 @@ ENVEOF
                                           echo "Stack deletion failed"
                                           exit 1
                                         fi
-                                        sleep 30
+                                        sleep 60
                                       done
                                       echo "Timeout waiting for stack deletion"
                                       exit 1
@@ -535,7 +533,7 @@ ENVEOF
                                           echo "Stack deletion failed"
                                           exit 1
                                         fi
-                                        sleep 30
+                                        sleep 60
                                       done
                                       echo "Timeout waiting for stack deletion"
                                       exit 1
@@ -609,7 +607,7 @@ ENVEOF
                                           echo "Stack deletion failed"
                                           exit 1
                                         fi
-                                        sleep 30
+                                        sleep 60
                                       done
                                       echo "Timeout waiting for stack deletion"
                                       exit 1
@@ -640,8 +638,7 @@ def deployTargetClusterOnly(Map config) {
             dataNodeType: config.sizeConfig.dataNodeType,
             dedicatedManagerNodeType: config.sizeConfig.dedicatedManagerNodeType,
             dataNodeCount: config.sizeConfig.dataNodeCount,
-            dedicatedMasterEnabled: config.sizeConfig.dedicatedMasterEnabled,
-            masterNodeCount: config.sizeConfig.masterNodeCount,
+            dedicatedManagerNodeCount: config.sizeConfig.dedicatedManagerNodeCount,
             ebsEnabled: true,
             ebsVolumeSize: config.sizeConfig.ebsVolumeSize,
             nodeToNodeEncryption: true
