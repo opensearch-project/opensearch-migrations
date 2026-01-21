@@ -2,6 +2,7 @@ package org.opensearch.migrations.parsing;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
@@ -72,6 +73,68 @@ public class BulkResponseParser {
             }
         }
         return successfulDocumentIds;
+    }
+
+    /**
+     * Returns a BitSet where bit i is set if item i FAILED (and not allowlisted).
+     * Use with nextSetBit() to iterate only over failures.
+     * If response can't be parsed, returns null to indicate all docs should be retried.
+     */
+    public static BitSet getFailedPositions(String bulkResponse, DocumentExceptionAllowlist allowlist) {
+        var failedPositions = new BitSet();
+        boolean foundItems = false;
+        try (var parser = jsonFactory.createParser(bulkResponse)) {
+            if (parser.nextToken() != JsonToken.START_OBJECT) {
+                return null; // Can't parse - retry all
+            }
+            while (parser.nextToken() != JsonToken.END_OBJECT) {
+                if ("items".equals(parser.currentName())) {
+                    scanItemPositions(parser, failedPositions, allowlist);
+                    foundItems = true;
+                } else {
+                    parser.skipChildren();
+                }
+            }
+        } catch (IOException e) {
+            log.warn("Unable to parse bulk response", e);
+            return null; // Can't parse - retry all
+        }
+        if (!foundItems) {
+            return null; // No items field - retry all
+        }
+        return failedPositions;
+    }
+
+    private static void scanItemPositions(JsonParser parser, BitSet failedPositions, DocumentExceptionAllowlist allowlist) throws IOException {
+        if (parser.nextToken() != JsonToken.START_ARRAY) {
+            throw new IOException("Expected 'items' to be an array");
+        }
+        int position = 0;
+        while (parser.nextToken() != JsonToken.END_ARRAY) {
+            if (parser.getCurrentToken() == JsonToken.START_OBJECT) {
+                if (isFailedItem(parser, allowlist)) {
+                    failedPositions.set(position);
+                }
+                position++;
+            }
+        }
+    }
+
+    private static boolean isFailedItem(JsonParser parser, DocumentExceptionAllowlist allowlist) throws IOException {
+        parser.nextToken(); // Move to action field name (e.g., "index")
+        boolean failed;
+        if (parser.nextToken() == JsonToken.START_OBJECT) {
+            var docInfo = extractDocInfo(parser);
+            failed = docInfo.getResult() == null && !isAllowedFailure(docInfo, allowlist);
+        } else {
+            // Unexpected structure - treat as failure
+            failed = true;
+            parser.skipChildren();
+        }
+        if (parser.nextToken() != JsonToken.END_OBJECT) {
+            throw new IOException("Expected END_OBJECT after action object");
+        }
+        return failed;
     }
 
     private static void scanItems(JsonParser parser, List<String> successfulDocumentIds, DocumentExceptionAllowlist allowlist) throws IOException {
