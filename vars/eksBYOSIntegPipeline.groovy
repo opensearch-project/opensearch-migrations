@@ -544,9 +544,16 @@ ENVEOF
                                 stage('Wait for VPC Dependencies') {
                                     sh """
                                       set -euo pipefail
-                                      VPC_ID=\$(aws cloudformation describe-stacks --stack-name ${networkStackName} \
-                                        --query 'Stacks[0].Outputs[?OutputKey==`VpcIdExport${maStageName}`].OutputValue' --output text)
+                                      
+                                      # Get VPC ID from stack resources which is more reliable than outputs
+                                      VPC_ID=\$(aws cloudformation describe-stack-resources --stack-name ${networkStackName} \
+                                        --query 'StackResources[?ResourceType==`AWS::EC2::VPC`].PhysicalResourceId' --output text 2>/dev/null || echo "")
                                       echo "VPC_ID=\$VPC_ID"
+
+                                      if [ -z "\$VPC_ID" ]; then
+                                        echo "No VPC found in stack, skipping dependency check"
+                                        exit 0
+                                      fi
 
                                       deadline=\$((SECONDS + 600))
                                       while [ \$SECONDS -lt \$deadline ]; do
