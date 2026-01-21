@@ -13,6 +13,7 @@ RUN ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
 ARG HELM_VERSION="3.14.0"
 ARG KUBECTL_VERSION="1.32.1"
 ARG KAFKA_VERSION="3.9.1"
+ARG STERN_VERSION="1.33.1"
 
 # Get kafka distribution and unpack to 'kafka'
 RUN mkdir -p /root/kafka-tools/kafka && \
@@ -36,6 +37,13 @@ RUN ARCH=$(cat /arch.env) && \
 RUN ARCH=$(cat /arch.env) && \
     curl --retry 5 --retry-delay 5 --retry-connrefused -fSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz" | tar -xz && \
     mv linux-${ARCH}/helm /k8s/bin/
+
+# Install stern
+RUN ARCH=$(cat /arch.env) && \
+    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL \
+        "https://github.com/stern/stern/releases/download/v${STERN_VERSION}/stern_${STERN_VERSION}_linux_${ARCH}.tar.gz" | tar -xz && \
+    mv stern /k8s/bin/ && \
+    chmod +x /k8s/bin/stern
 
 # Install etcdctl
 RUN ARCH=$(cat /arch.env) && \

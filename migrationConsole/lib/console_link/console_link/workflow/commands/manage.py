@@ -5,11 +5,11 @@ import os
 import sys
 import tempfile
 import click
+from kubernetes import client
 
 # Internal imports
-from ..models.utils import ExitCode
+from ..models.utils import ExitCode, load_k8s_config
 from ..services.workflow_service import WorkflowService
-from .output import _initialize_k8s_client
 from .utils import auto_detect_workflow
 
 import psutil
@@ -47,6 +47,35 @@ def _configure_file_logging():
     for handler in root_logger.handlers:
         if isinstance(handler, logging.StreamHandler) and handler.stream in (sys.stdout, sys.stderr):
             handler.setLevel(logging.CRITICAL + 1)
+
+
+def _initialize_k8s_client(ctx):
+    """Initialize Kubernetes client with appropriate configuration.
+
+    Attempts to load in-cluster config first (for pods), then falls back to kubeconfig.
+
+    Args:
+        ctx: Click context for exit handling
+
+    Returns:
+        client.CoreV1Api: Kubernetes Core V1 API client
+
+    Exits:
+        If neither configuration method succeeds
+    """
+    try:
+        load_k8s_config()
+    except Exception as e:
+        click.echo(
+            f"Error: Could not load Kubernetes configuration. "
+            f"Make sure kubectl is configured or you're running inside a cluster.\n"
+            f"Details: {e}",
+            err=True
+        )
+        ctx.exit(ExitCode.FAILURE.value)
+    # Explicitly use the loaded configuration to avoid threading/global state issues
+    api_client = client.ApiClient(client.Configuration.get_default_copy())
+    return client.CoreV1Api(api_client)
 
 
 # --- Entrypoint ---
