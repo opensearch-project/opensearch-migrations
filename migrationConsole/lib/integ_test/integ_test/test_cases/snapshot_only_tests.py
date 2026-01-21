@@ -28,6 +28,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
     - BYOS_S3_REGION: AWS region for S3 (default: us-west-2)
     - BYOS_S3_ENDPOINT: S3 endpoint (optional, for custom endpoints)
     - BYOS_POD_REPLICAS: Number of RFS worker pods (default: 1)
+    - BYOS_MONITOR_RETRY_LIMIT: Max retries for workflow monitoring (default: 900 ≈ 15 hours)
     """
     requires_explicit_selection = True
 
@@ -62,6 +63,8 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         self.s3_region = os.environ.get('BYOS_S3_REGION', 'us-west-2')
         self.s3_endpoint = os.environ.get('BYOS_S3_ENDPOINT', '')
         self.pod_replicas = int(os.environ.get('BYOS_POD_REPLICAS', '1'))
+        # Monitor retry limit: ~1 retry/min after backoff cap. Default 33 (~30 min), 900 for ~15 hours
+        self.monitor_retry_limit = int(os.environ.get('BYOS_MONITOR_RETRY_LIMIT', '900'))
 
     def import_existing_clusters(self):
         """Import target cluster from configmap."""
@@ -113,10 +116,14 @@ class Test0010ExternalSnapshotMigration(MATestBase):
             "snapshot-and-migration-configs": self.workflow_snapshot_and_migration_config
         }]
         self.parameters["target-config"] = self.target_cluster.config
+        self.parameters["monitor-retry-limit"] = str(self.monitor_retry_limit)
 
     def prepare_clusters(self):
         """No source cluster to prepare."""
         pass
+
+    def workflow_perform_migrations(self, timeout_seconds: int = 50400):  # 14 hours for large snapshots
+        super().workflow_perform_migrations(timeout_seconds=timeout_seconds)
 
     def display_final_cluster_state(self):
         """Display target cluster indices."""
