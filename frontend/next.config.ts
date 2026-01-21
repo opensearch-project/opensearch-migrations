@@ -10,6 +10,7 @@ function getGitMostRecentTag() {
     }
     return execSync('git describe --tags --abbrev=0 HEAD').toString().trim();
   } catch (e) {
+    console.error(`Failed to get git tag: ${e}`);
     return 'unknown';
   }
 }
