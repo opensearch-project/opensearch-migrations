@@ -67,8 +67,6 @@ spec:
                   value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
                 - name: imageMigrationConsolePullPolicy
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                - name: monitorRetryLimit
-                  value: "{{workflow.parameters.monitor-retry-limit}}"
 
     - name: generate-migration-configs
       inputs:
