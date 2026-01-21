@@ -20,6 +20,8 @@ spec:
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
+      - name: monitor-retry-limit
+        value: "33"  # Default ~30 min, use 900 for ~15 hours
 
   templates:
     - name: main
@@ -65,6 +67,8 @@ spec:
                   value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
                 - name: imageMigrationConsolePullPolicy
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                - name: monitorRetryLimit
+                  value: "{{workflow.parameters.monitor-retry-limit}}"
 
     - name: generate-migration-configs
       inputs:
