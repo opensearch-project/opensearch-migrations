@@ -47,10 +47,10 @@ def call(Map config = [:]) {
         'large': [
             dataNodeType: "r6g.4xlarge.search",
             dedicatedManagerNodeType: "m6g.xlarge.search",
-            dataNodeCount: 6,
+            dataNodeCount: 12,
             dedicatedMasterEnabled: true,
             masterNodeCount: 4,
-            ebsVolumeSize: 1024
+            ebsVolumeSize: 2048
         ]
     ]
     pipeline {
@@ -67,6 +67,7 @@ def call(Map config = [:]) {
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment and snapshot bucket')
             string(name: 'SNAPSHOT_NAME', defaultValue: 'large-snapshot', description: 'Name of the snapshot')
             string(name: 'TEST_IDS', defaultValue: '0010', description: 'Test IDs to execute (comma separated, e.g., "0010" or "0010,0011")')
+            string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '900', description: 'Max retries for workflow monitoring (~1/min). 33=~30min, 900=~15hrs')
             choice(
                 name: 'SOURCE_VERSION',
                 choices: ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10', 'ES_8.19', 'OS_1.3', 'OS_2.19'],
@@ -395,7 +396,7 @@ Migration Configuration:
                     timeout(time: 12, unit: 'HOURS') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 43200, roleSessionName: 'jenkins-session') {
                                     // Wait for migration-console pod to be ready
                                     sh """
                                       echo "Waiting for migration-console pod to be ready..."
@@ -425,6 +426,7 @@ export BYOS_SNAPSHOT_NAME='${params.SNAPSHOT_NAME}'
 export BYOS_S3_REPO_URI='${s3RepoUri}'
 export BYOS_S3_REGION='${params.REGION}'
 export BYOS_POD_REPLICAS='${params.RFS_WORKERS}'
+export BYOS_MONITOR_RETRY_LIMIT='${params.MONITOR_RETRY_LIMIT}'
 ENVEOF
                                       kubectl cp /tmp/byos-env.sh ma/migration-console-0:/tmp/byos-env.sh
                                       kubectl exec migration-console-0 -n ma -- bash -c '
