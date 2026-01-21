@@ -19,7 +19,7 @@ def normalizeClusterAuthConfig:
   else
     .no_auth = {}
   end
-  | del(.name, .proxy, .snapshotRepo);
+  | del(.label, .proxy, .snapshotRepo);
 
 def normalizeAllowInsecure:
   if has("allowInsecure") then
@@ -78,7 +78,7 @@ def normalizeCluster:
 
 # Normalize snapshot config
 def normalizeSnapshot:
-  normalizeSnapshotName | normalizeSnapshotRepo | normalizeRepoConfig;
+  normalizeSnapshotName | normalizeSnapshotRepo | normalizeRepoConfig | del(.label);
 
 # Apply transformations to specific top-level keys
 (if has("source_cluster") then .source_cluster |= normalizeCluster else . end)
