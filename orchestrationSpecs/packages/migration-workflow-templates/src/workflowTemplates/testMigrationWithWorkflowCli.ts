@@ -25,7 +25,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
     .addParams({
         // Max retries for monitoring workflow (~1 retry/min after backoff cap)
         // Default 33 (~30 min), use 900 for ~15 hours
-        monitorRetryLimit: defineParam({expression: "33"})
+        "monitor-retry-limit": defineParam({expression: "33"})
     })
 
     .addTemplate("configureAndSubmitWorkflow", t => t
@@ -63,7 +63,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             )
         )
         .addRetryParameters({
-            limit: "{{workflow.parameters.monitorRetryLimit}}",
+            limit: "{{workflow.parameters.monitor-retry-limit}}",
             retryPolicy: "Always",
             backoff: {
                 duration: "5",     // Start at 5 seconds

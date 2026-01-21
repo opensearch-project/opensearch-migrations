@@ -2182,7 +2182,7 @@ exports[`test workflow template renderings full-migration-with-workflow-cli 1`] 
           "value": "approval-config",
         },
         {
-          "name": "monitorRetryLimit",
+          "name": "monitor-retry-limit",
           "value": "33",
         },
       ],
@@ -2367,7 +2367,7 @@ exit 0
             "duration": "5",
             "factor": "2",
           },
-          "limit": "{{workflow.parameters.monitorRetryLimit}}",
+          "limit": "{{workflow.parameters.monitor-retry-limit}}",
           "retryPolicy": "Always",
         },
       },
