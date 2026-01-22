@@ -44,9 +44,9 @@ def call(Map config = [:]) {
             ebsVolumeSize: 100
         ],
         'large': [
-            dataNodeType: "r6g.4xlarge.search",
-            dedicatedManagerNodeType: "m6g.xlarge.search",
-            dataNodeCount: 12,
+            dataNodeType: "r6g.8xlarge.search",
+            dedicatedManagerNodeType: "m6g.2xlarge.search",
+            dataNodeCount: 24,
             dedicatedManagerNodeCount: 4,
             ebsVolumeSize: 2048
         ]
