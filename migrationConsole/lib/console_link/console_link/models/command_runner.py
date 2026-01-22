@@ -13,7 +13,7 @@ FlagOnlyArgument = None
 
 class CommandRunner:
     def __init__(self, command_root: str, command_args: Dict[str, Any], sensitive_fields: Optional[List[str]] = None,
-                 run_as_detatched: bool = False, log_file: Optional[str] = None):
+                 run_as_detached: bool = False, log_file: Optional[str] = None):
         self.command_args = command_args
         self.command = [command_root]
         for key, value in command_args.items():
@@ -24,7 +24,7 @@ class CommandRunner:
                 self.command.append(value)
 
         self.sensitive_fields = sensitive_fields
-        self.run_as_detached = run_as_detatched
+        self.run_as_detached = run_as_detached
         self.log_file = log_file
 
     def run(self, print_to_console=True, print_on_error=False, stream_output=False) -> CommandResult:
