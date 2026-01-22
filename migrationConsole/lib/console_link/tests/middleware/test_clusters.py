@@ -16,7 +16,7 @@ def test_connection_check_with_exception(mocker):
     assert not result.connection_established
 
 
-def test_connection_check_succesful(requests_mock):
+def test_connection_check_successful(requests_mock):
     cluster = create_valid_cluster()
     requests_mock.get(f"{cluster.endpoint}/", json={'version': {'number': '2.15'}})
 

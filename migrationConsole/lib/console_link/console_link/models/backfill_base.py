@@ -38,7 +38,7 @@ class Backfill(ABC):
 
     @abstractmethod
     def create(self, *args, **kwargs) -> CommandResult[str]:
-        """If necessary, create/deploy the backfill mechanism iteslf. After create succesfully completes,
+        """If necessary, create/deploy the backfill mechanism itself. After create successfully completes,
         the backfill should be ready to start."""
         pass
 

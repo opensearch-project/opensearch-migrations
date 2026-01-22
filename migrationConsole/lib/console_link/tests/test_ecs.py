@@ -36,7 +36,7 @@ def test_ecs_created_with_and_without_region():
     assert without_region.client is not None
 
 
-def test_ecs_update_service_succesful(ecs_stubber, ecs_service):
+def test_ecs_update_service_successful(ecs_stubber, ecs_service):
     with open(TEST_DATA_DIRECTORY / "ecs_update_service_response.json") as f:
         ecs_stubber.add_response("update_service", json.load(f))
     ecs_stubber.activate()

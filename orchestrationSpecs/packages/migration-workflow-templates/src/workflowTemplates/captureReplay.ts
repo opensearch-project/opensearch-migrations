@@ -157,7 +157,7 @@ export const CaptureReplay = WorkflowBuilder.create({
             /**
              * See the notes for deployConsole - it won't work as it is.
              * We might have some easy fixes in hand - but this part of the replayer workflow should
-             * be entirely superceded by the workflow focus command once that comes into being.
+             * be entirely superseded by the workflow focus command once that comes into being.
              */
             // .addTask("runMigrationConsole", MigrationConsole, "deployConsole", c =>
             //         c.register({
