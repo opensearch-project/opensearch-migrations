@@ -460,10 +460,10 @@ ENVEOF
                                 // Stage 1: Cleanup MA resources
                                 stage('Cleanup MA Resources') {
                                     sh "kubectl -n ma get pods || true"
-                                    sh """
-                                      helm uninstall ma -n ma --wait --timeout 300s || true
-                                      kubectl delete namespace ma --ignore-not-found --timeout=60s || true
-                                    """
+                                    
+                                    // Note: We skip helm uninstall and 'ma' namespace deletion because:
+                                    // 1. The MA stack deletion (via CFN) will delete the entire EKS cluster anyway
+                                    // 2. Deleting the namespace triggers EKS internal updates that can block cluster deletion
 
                                     if (env.clusterDetailsJson && env.clusterSecurityGroup) {
                                         def clusterDetails = readJSON text: env.clusterDetailsJson
