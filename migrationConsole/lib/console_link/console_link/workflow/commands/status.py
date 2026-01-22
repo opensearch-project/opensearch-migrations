@@ -24,6 +24,7 @@ from ..tree_utils import (
     get_node_input_parameter,
     WorkflowDisplayer
 )
+from .utils import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from console_link.environment import Environment
 from console_link.middleware import snapshot as snapshot_middleware
 from console_link.middleware import backfill as backfill_middleware
@@ -435,7 +436,8 @@ class LiveCheckProcessor:
 
 
 @click.command(name="status")
-@click.argument('workflow_name', required=False)
+@click.option('--workflow-name', default=DEFAULT_WORKFLOW_NAME, shell_complete=get_workflow_completions)
+@click.option('--all-workflows', is_flag=True, default=False, help='Show status for all workflows')
 @click.option(
     '--argo-server',
     default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
@@ -450,7 +452,7 @@ class LiveCheckProcessor:
 @click.option('--live-status', is_flag=True, default=False,
               help='Run a current status check for each snapshot and backfill still running')
 @click.pass_context
-def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, show_all, live_status):
+def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, insecure, token, show_all, live_status):
     """Show detailed status of workflows.
 
     Displays workflow progress, completed steps, and approval status.
@@ -458,39 +460,24 @@ def status_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
 
     Example:
         workflow status
-        workflow status my-workflow
+        workflow status --workflow-name my-workflow
+        workflow status --all-workflows
         workflow status --all
     """
+    if all_workflows and ctx.get_parameter_source('workflow_name') != click.core.ParameterSource.DEFAULT:
+        click.echo("Error: --workflow-name and --all-workflows are mutually exclusive", err=True)
+        ctx.exit(ExitCode.FAILURE.value)
+
     try:
         service = WorkflowService()
         handler = StatusCommandHandler(service, token)
 
-        handler.handle_status_command(
-            workflow_name, argo_server, namespace, insecure, show_all, live_status)
+        if all_workflows:
+            handler.handle_status_command(None, argo_server, namespace, insecure, show_all, live_status)
+        else:
+            handler.handle_status_command(workflow_name, argo_server, namespace, insecure, show_all, live_status)
 
     except Exception as e:
         logger.error(f"Status command failed: {e}", exc_info=True)
         click.echo(f"Error: {str(e)}", err=True)
         ctx.exit(ExitCode.FAILURE.value)
-
-
-# Compatibility function for output.py
-def _display_workflow_status(workflow_result: dict, show_output_hint: bool = True, workflow_data: dict = None):
-    """Compatibility function for output.py - displays workflow status using new classes."""
-    displayer = StatusWorkflowDisplayer()
-
-    # If no workflow_data provided, create minimal tree from step_tree in result
-    if not workflow_data and 'step_tree' in workflow_result:
-        tree_nodes = workflow_result['step_tree']
-    else:
-        # Build tree from workflow_data if available
-        tree_nodes = build_nested_workflow_tree(workflow_data) if workflow_data else []
-        tree_nodes = filter_tree_nodes(tree_nodes)
-
-    displayer.display_workflow_status(
-        workflow_result['workflow_name'], workflow_result['phase'], workflow_result['started_at'],
-        workflow_result['finished_at'], tree_nodes, workflow_data)
-
-    if show_output_hint and workflow_result['phase'] in ('Running', 'Pending'):
-        click.echo("")
-        click.echo(f"To view step outputs, run: workflow output {workflow_result['workflow_name']}")

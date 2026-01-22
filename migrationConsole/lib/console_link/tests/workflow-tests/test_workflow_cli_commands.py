@@ -139,7 +139,7 @@ class TestWorkflowCLICommands:
         }
         mock_requests_get.return_value = mock_response
 
-        result = runner.invoke(workflow_cli, ['status', 'test-workflow'])
+        result = runner.invoke(workflow_cli, ['status', '--workflow-name', 'test-workflow'])
 
         assert result.exit_code == 0
         assert 'test-workflow' in result.output
@@ -209,7 +209,7 @@ class TestWorkflowCLICommands:
         
         mock_requests_get.side_effect = mock_get_response
 
-        result = runner.invoke(workflow_cli, ['status'])
+        result = runner.invoke(workflow_cli, ['status', '--all-workflows'])
 
         assert result.exit_code == 0
         assert 'Found 2 workflow(s)' in result.output
@@ -217,57 +217,40 @@ class TestWorkflowCLICommands:
         assert 'workflow-2' in result.output
 
     @patch('console_link.workflow.commands.stop.WorkflowService')
-    def test_stop_command_auto_detect(self, mock_service_class):
-        """Test stop command with auto-detection."""
+    def test_stop_command(self, mock_service_class):
+        """Test stop command with default workflow name."""
         runner = CliRunner()
 
         # Mock the service
         mock_service = Mock()
         mock_service_class.return_value = mock_service
 
-        # Mock list_workflows to return single workflow
-        mock_service.list_workflows.return_value = {
-            'success': True,
-            'workflows': ['test-workflow'],
-            'count': 1,
-            'error': None
-        }
-
         mock_service.stop_workflow.return_value = {
             'success': True,
-            'workflow_name': 'test-workflow',
+            'workflow_name': 'migration-workflow',
             'namespace': 'ma',
-            'message': 'Workflow test-workflow stopped successfully',
+            'message': 'Workflow migration-workflow stopped successfully',
             'error': None
         }
 
         result = runner.invoke(workflow_cli, ['stop'])
 
         assert result.exit_code == 0
-        assert 'Auto-detected workflow' in result.output
         assert 'stopped successfully' in result.output
 
     @patch('console_link.workflow.commands.approve.WorkflowService')
-    def test_approve_command_auto_detect(self, mock_service_class):
-        """Test approve command with auto-detection."""
+    def test_approve_command(self, mock_service_class):
+        """Test approve command with default workflow name."""
         runner = CliRunner()
 
         # Mock the service
         mock_service = Mock()
         mock_service_class.return_value = mock_service
 
-        # Mock list_workflows to return single workflow
-        mock_service.list_workflows.return_value = {
-            'success': True,
-            'workflows': ['test-workflow'],
-            'count': 1,
-            'error': None
-        }
-
         # Mock get_workflow_status to return workflow details
         mock_service.get_workflow_status.return_value = {
             'success': True,
-            'workflow_name': 'test-workflow',
+            'workflow_name': 'migration-workflow',
             'namespace': 'ma',
             'phase': 'Running',
             'progress': '1/2',
@@ -282,18 +265,16 @@ class TestWorkflowCLICommands:
 
         mock_service.approve_workflow.return_value = {
             'success': True,
-            'workflow_name': 'test-workflow',
+            'workflow_name': 'migration-workflow',
             'namespace': 'ma',
-            'message': 'Workflow test-workflow resumed successfully',
+            'message': 'Workflow migration-workflow resumed successfully',
             'error': None
         }
 
         result = runner.invoke(workflow_cli, ['approve', '--acknowledge'])
 
         assert result.exit_code == 0
-        assert 'Auto-detected workflow' in result.output
         assert 'resumed successfully' in result.output
-        # Note: output suggestion is not shown when --acknowledge flag is used
 
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')

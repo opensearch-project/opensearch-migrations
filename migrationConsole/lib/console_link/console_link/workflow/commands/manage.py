@@ -9,8 +9,7 @@ from kubernetes import client
 
 # Internal imports
 from ..models.utils import ExitCode, load_k8s_config
-from ..services.workflow_service import WorkflowService
-from .utils import auto_detect_workflow
+from .utils import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 
 import psutil
 
@@ -80,7 +79,7 @@ def _initialize_k8s_client(ctx):
 
 # --- Entrypoint ---
 @click.command(name="manage")
-@click.option('--workflow-name', required=False)
+@click.option('--workflow-name', default=DEFAULT_WORKFLOW_NAME, shell_complete=get_workflow_completions)
 @click.option(
     '--argo-server',
     default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
@@ -94,12 +93,6 @@ def _initialize_k8s_client(ctx):
 def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token):
     _configure_file_logging()  # Configure logging when command actually runs
     try:
-        service = WorkflowService()
-        if not workflow_name:
-            workflow_name = auto_detect_workflow(service, namespace, argo_server, token, insecure, ctx)
-            if not workflow_name:
-                click.echo("No workflows found.  Use --workflow-name to wait for a specific workflow to start.")
-                return
         app = WorkflowTreeApp(namespace, workflow_name,
                               make_argo_service(argo_server, insecure, token),
                               make_k8s_pod_scraper(_initialize_k8s_client(ctx)),

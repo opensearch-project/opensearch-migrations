@@ -6,13 +6,13 @@ import click
 
 from ..models.utils import ExitCode
 from ..services.workflow_service import WorkflowService
-from .utils import auto_detect_workflow
+from .utils import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 
 logger = logging.getLogger(__name__)
 
 
 @click.command(name="approve")
-@click.argument('workflow_name', required=False)
+@click.option('--workflow-name', default=DEFAULT_WORKFLOW_NAME, shell_complete=get_workflow_completions)
 @click.option(
     '--argo-server',
     default=lambda: os.environ.get(
@@ -47,26 +47,15 @@ logger = logging.getLogger(__name__)
 def approve_command(ctx, workflow_name, argo_server, namespace, insecure, token, acknowledge):
     """Approve/resume a suspended workflow in Argo Workflows.
 
-    If workflow_name is not provided, auto-detects the single workflow
-    in the specified namespace.
-
     Example:
         workflow approve
-        workflow approve my-workflow
+        workflow approve --workflow-name my-workflow
         workflow approve --acknowledge
         workflow approve --argo-server https://10.105.13.185:2746 --insecure
     """
 
     try:
         service = WorkflowService()
-
-        # Auto-detect workflow if name not provided
-        if not workflow_name:
-            workflow_name = auto_detect_workflow(
-                service, namespace, argo_server, token, insecure, ctx, phase_filter='Running'
-            )
-            if not workflow_name:
-                ctx.exit(ExitCode.FAILURE.value)
 
         # Get workflow status to display details
         status_result = service.get_workflow_status(

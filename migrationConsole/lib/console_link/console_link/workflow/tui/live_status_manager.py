@@ -45,7 +45,8 @@ class LiveStatusManager:
         config_children = [
             c for c in node.children
             if c.data and not c.data.get("is_ephemeral") and
-            get_node_input_parameter(c.data, 'configContents') is not None
+            get_node_input_parameter(c.data, 'configContents') is not None and
+               c.data['display_name'].endswith("Status")
         ]
         live_status_node = next(
             (c for c in node.children if c.data and c.data.get("ephemeral_node_type") == "live-status-check"), None
