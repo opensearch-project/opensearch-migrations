@@ -371,7 +371,7 @@ def get_detailed_status_obj(target_cluster,
     started_iso = datetime.fromtimestamp(started_epoch, tz=timezone.utc).isoformat() if started_epoch else None
 
     # finished: only if everything is done, take max completedAt
-    finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(target_cluster,
+    finished_iso, percentage_completed, eta_ms, status = compute_derived_values(target_cluster,
                                                                                  index_to_check,
                                                                                  counts.total,
                                                                                  counts.completed,
@@ -391,7 +391,7 @@ def get_detailed_status_obj(target_cluster,
     )
 
 
-def compute_dervived_values(target_cluster, index_to_check, total, completed, started_epoch, active_workers: bool):
+def compute_derived_values(target_cluster, index_to_check, total, completed, started_epoch, active_workers: bool):
     # Consider it completed if there's nothing to do (total = 0) or we've completed all shards
     if total == 0 or (total > 0 and completed >= total):
         max_completed_epoch = _get_max_completed_epoch(target_cluster, index_to_check)

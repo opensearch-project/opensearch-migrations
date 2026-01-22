@@ -11,7 +11,7 @@ from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.step_state import StepStateWithPause
 from console_link.models.backfill_rfs import (DockerRFSBackfill, ECSRFSBackfill, RfsWorkersInProgress,
-                                              WorkingIndexDoesntExist, compute_dervived_values)
+                                              WorkingIndexDoesntExist, compute_derived_values)
 from console_link.models.ecs_service import ECSService
 from console_link.models.factories import UnsupportedBackfillTypeError, get_backfill
 from console_link.models.utils import DeploymentStatus
@@ -341,14 +341,14 @@ class TestComputeDerivedValues:
         self.test_index = ".migrations_working_state"
 
     def test_zero_indices(self):
-        """Test compute_dervived_values when there are 0 indices to migrate."""
+        """Test compute_derived_values when there are 0 indices to migrate."""
         # When total=0, it should report as COMPLETED
         total = 0
         completed = 0
         started_epoch = None
         active_workers = False
 
-        finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
+        finished_iso, percentage_completed, eta_ms, status = compute_derived_values(
             self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
         )
 
@@ -358,13 +358,13 @@ class TestComputeDerivedValues:
         assert finished_iso is not None  # Should have a timestamp for completion
 
     def test_all_completed(self):
-        """Test compute_dervived_values when all indices are completed."""
+        """Test compute_derived_values when all indices are completed."""
         total = 10
         completed = 10
         started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600  # Started 1 hour ago
         active_workers = False
 
-        finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
+        finished_iso, percentage_completed, eta_ms, status = compute_derived_values(
             self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
         )
 
@@ -374,13 +374,13 @@ class TestComputeDerivedValues:
         assert finished_iso is not None
 
     def test_partially_completed(self):
-        """Test compute_dervived_values when some indices are still in progress."""
+        """Test compute_derived_values when some indices are still in progress."""
         total = 10
         completed = 5
         started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600  # Started 1 hour ago
         active_workers = True
 
-        finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
+        finished_iso, percentage_completed, eta_ms, status = compute_derived_values(
             self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
         )
 
@@ -390,13 +390,13 @@ class TestComputeDerivedValues:
         assert finished_iso is None  # Not completed yet
 
     def test_partially_completed_paused(self):
-        """Test compute_dervived_values when some indices are completed but workers are paused."""
+        """Test compute_derived_values when some indices are completed but workers are paused."""
         total = 10
         completed = 5
         started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600  # Started 1 hour ago
         active_workers = False
 
-        finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
+        finished_iso, percentage_completed, eta_ms, status = compute_derived_values(
             self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
         )
 
