@@ -275,8 +275,7 @@ class ScriptRunner:
         finally:
             # Clean up temporary file
             try:
-                # os.unlink(temp_file_path)
+                os.unlink(temp_file_path)
                 logger.debug(f"Cleaned up temporary file: {temp_file_path}")
             except OSError as e:
                 logger.warning(f"Failed to clean up temporary file {temp_file_path}: {e}")
-                raise e
