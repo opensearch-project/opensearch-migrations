@@ -102,7 +102,7 @@ class AuthDetails(NamedTuple):
 
 class Cluster:
     """
-    An elasticcsearch or opensearch cluster.
+    An Elasticsearch or OpenSearch cluster.
     """
 
     config: Dict
@@ -158,7 +158,7 @@ class Cluster:
             kubectl_runner = KubectlRunner("ma", "")
             secret_dict = kubectl_runner.read_secret(self.auth_details["k8s_secret_name"])
 
-        if not secret_dict or type(secret_dict) is not dict:
+        if not secret_dict or not isinstance(secret_dict, dict):
             raise ValueError("Secret is not a valid object containing a username and password.")
 
         missing_keys = [k for k in ("username", "password") if k not in secret_dict]
