@@ -1,10 +1,10 @@
 ## Overview
 
-The Cluster Tools is a unified command-line interface designed to manage and execute various utilities related to Opensearch Migrations. The cluster tools dynamically detects available tools in the `tools` directory, allowing for easy extension with new functionalities.
+The Cluster Tools is a unified command-line interface designed to manage and execute various utilities related to OpenSearch Migrations. The cluster tools dynamically detects available tools in the `tools` directory, allowing for easy extension with new functionalities.
 
 ## Tools
 
-The Cluster Tools provides a range of tools to facilitate efficient and reliable Opensearch Migrations.
+The Cluster Tools provides a range of tools to facilitate efficient and reliable OpenSearch Migrations.
 
 For a list of available tools run:
 

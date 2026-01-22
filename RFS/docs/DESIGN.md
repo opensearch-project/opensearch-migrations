@@ -25,7 +25,7 @@
 * **Elasticsearch Cluster (Cluster)**: A collection of nodes, of various types, that store and provide access to some number of Elasticsearch Indexes
 * **Elasticsearch Template (Template)**: A metadata setting on an Elasticsearch Cluster used to pre-populate, route, change, or otherwise enrich the Elasticsearch Documents stored in the Elasticsearch Cluster
 * **Snapshot**: A copy of the Elasticsearch Indexes and Elasticsearch Templates in an Elasticsearch Cluster that can be stored and then restored to stand up a new Elasticsearch Cluster with the data/metadata of the original
-* **Indexing/Ingestion**: The process of taking the raw Elasticsearch Document and transforming it into one or more Lucene Documents for storage in a Lucene Index within a single Shard of an Elastisearch Cluster
+* **Indexing/Ingestion**: The process of taking the raw Elasticsearch Document and transforming it into one or more Lucene Documents for storage in a Lucene Index within a single Shard of an Elasticsearch Cluster
 
 ## Background - General
 
@@ -61,7 +61,7 @@ RFS Workers perform the work of migrating the data from a source cluster to a ta
 
 ### Coordinating Metadata Store (CMS)
 
-The Coordinating Metadata Store (CMS) is the source of truth for the status of the overall Reindex-from-Snapshot operation.  For the first iteration, the target Elasticsearch/Opensearch cluster is used for this purpose (see A1 in [Appendix: Assumptions](#appendix-assumptions)), but it could just as easily be a PostgreSQL instance, Dynamo DB, etc.  The schema for this metadata can be found in [Appendix: CMS Schema](#appendix-cms-schema).
+The Coordinating Metadata Store (CMS) is the source of truth for the status of the overall Reindex-from-Snapshot operation.  For the first iteration, the target Elasticsearch/OpenSearch cluster is used for this purpose (see A1 in [Appendix: Assumptions](#appendix-assumptions)), but it could just as easily be a PostgreSQL instance, Dynamo DB, etc.  The schema for this metadata can be found in [Appendix: CMS Schema](#appendix-cms-schema).
 
 RFS Workers query the CMS to infer what work they should next attempt, and update the CMS with any progress they have made.  RFS Workers interact with the CMS without making assumptions about how many other RFS Workers are doing the same thing.
 
