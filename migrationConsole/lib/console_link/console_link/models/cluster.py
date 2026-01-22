@@ -102,7 +102,7 @@ class AuthDetails(NamedTuple):
 
 class Cluster:
     """
-    An elasticcsearch or opensearch cluster.
+    An Elasticsearch or OpenSearch cluster.
     """
 
     config: Dict
