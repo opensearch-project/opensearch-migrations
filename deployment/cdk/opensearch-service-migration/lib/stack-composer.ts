@@ -95,8 +95,8 @@ export class StackComposer {
         return version
     }
 
-    private addDependentStacks(primaryStack: Stack, dependantStacks: (Stack|undefined)[]) {
-        for (const stack of dependantStacks) {
+    private addDependentStacks(primaryStack: Stack, dependentStacks: (Stack|undefined)[]) {
+        for (const stack of dependentStacks) {
             if (stack) {
                 primaryStack.addDependency(stack)
             }
