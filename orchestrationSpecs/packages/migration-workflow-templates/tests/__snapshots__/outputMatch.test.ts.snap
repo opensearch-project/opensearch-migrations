@@ -2363,9 +2363,8 @@ exit 0
         },
         "retryStrategy": {
           "backoff": {
-            "cap": "60",
-            "duration": "5",
-            "factor": "2",
+            "duration": "60",
+            "factor": "1",
           },
           "limit": "{{workflow.parameters.monitor-retry-limit}}",
           "retryPolicy": "Always",
