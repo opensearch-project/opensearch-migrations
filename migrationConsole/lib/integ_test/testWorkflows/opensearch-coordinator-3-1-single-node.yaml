@@ -3,20 +3,23 @@ kind: Service
 metadata:
   name: opensearch-coordination
   namespace: ma
+  labels:
+    app: opensearch-coordination
 spec:
   selector:
     app: opensearch-coordination
   ports:
     - name: http
       port: 9200
-      targetPort: 9200
+      targetPort: http
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: opensearch-coordination
   namespace: ma
 spec:
+  serviceName: opensearch-coordination
   replicas: 1
   selector:
     matchLabels:
@@ -30,28 +33,28 @@ spec:
         - name: opensearch
           image: opensearchproject/opensearch:3.1.0
           ports:
-            - containerPort: 9200
+            - name: http
+              containerPort: 9200
           env:
             - name: discovery.type
-              value: "single-node"
+              value: single-node
             - name: plugins.security.disabled
               value: "true"
             - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
-              value: "MyStr0ngP@ssw0rd!"
+              value: myStrongPassword123!
             - name: OPENSEARCH_JAVA_OPTS
-              value: "-Xms512m -Xmx512m"
+              value: -Xms512m -Xmx512m
           resources:
             requests:
-              cpu: "500m"
-              memory: "1Gi"
+              cpu: 500m
+              memory: 1Gi
             limits:
               cpu: "1"
-              memory: "2Gi"
+              memory: 2Gi
           readinessProbe:
             httpGet:
               path: /
-              port: 9200
-              scheme: HTTP
+              port: http
             initialDelaySeconds: 20
             periodSeconds: 10
             timeoutSeconds: 3
