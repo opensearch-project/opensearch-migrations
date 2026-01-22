@@ -46,7 +46,7 @@ if [ -f "$TEMP_DIR/concurrencyConfigMaps.yaml" ]; then
 fi
 
 # Set the name field based on environment variable
-if [ -n "$USE_GENERATE_NAME" ]; then
+if [ -n "$USE_GENERATE_NAME" ] && [ "$USE_GENERATE_NAME" != "false" ] && [ "$USE_GENERATE_NAME" != "0" ]; then
   # Keeping this as 'full-migration' so that it's intentionally different than the
   # one-single default migration that we will normally be using
   NAME_FIELD="generateName: full-migration-${UUID}-"

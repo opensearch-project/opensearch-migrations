@@ -131,11 +131,11 @@ export const MigrationConsole = WorkflowBuilder.create({
     .addTemplate("runMigrationCommandForStatus", t => t
         .addRequiredInput("command", typeToken<string>())
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
-        .addOptionalInput("sourceLabel", c => "")
-        .addOptionalInput("targetLabel", c => "")
-        .addOptionalInput("snapshotLabel", c => "")
-        .addOptionalInput("migrationLabel", c => "")
-        .addOptionalInput("task", c => "")
+        .addOptionalInput("sourceK8sLabel", c => "")
+        .addOptionalInput("targetK8sLabel", c => "")
+        .addOptionalInput("snapshotK8sLabel", c => "")
+        .addOptionalInput("fromSnapshotMigrationK8sLabel", c => "")
+        .addOptionalInput("taskK8sLabel", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(c => c
@@ -154,11 +154,11 @@ export const MigrationConsole = WorkflowBuilder.create({
             )
             .addPodMetadata(({ inputs }) => ({
                 labels: {
-                    'migrations.opensearch.org/source': inputs.sourceLabel,
-                    'migrations.opensearch.org/target': inputs.targetLabel,
-                    'migrations.opensearch.org/snapshot': inputs.snapshotLabel,
-                    'migrations.opensearch.org/from-snapshot-migration': inputs.migrationLabel,
-                    'migrations.opensearch.org/task': inputs.task
+                    'migrations.opensearch.org/source': inputs.sourceK8sLabel,
+                    'migrations.opensearch.org/target': inputs.targetK8sLabel,
+                    'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
+                    'migrations.opensearch.org/from-snapshot-migration': inputs.fromSnapshotMigrationK8sLabel,
+                    'migrations.opensearch.org/task': inputs.taskK8sLabel
                 }
             }))
         )

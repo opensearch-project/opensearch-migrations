@@ -112,8 +112,20 @@ export const MetadataMigration = WorkflowBuilder.create({
 
     .addTemplate("runMetadata", t=>t
         .addRequiredInput("commandMode", typeToken<"evaluate"|"migrate">())
-        .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
+        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof METADATA_OPTIONS>>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addRequiredInput("targetK8sLabel", typeToken<string>())
+        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
+        .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
+        .addOptionalInput("taskK8sLabel", c => expr.ternary(
+            expr.equals(c.inputParameters.commandMode, expr.literal("evaluate")),
+            expr.literal("metadataEvaluate"),
+            expr.literal("metadataMigrate")
+        ))
 
         .addContainer(b=>b
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
@@ -146,15 +158,11 @@ export const MetadataMigration = WorkflowBuilder.create({
             ])
             .addPodMetadata(({ inputs }) => ({
                 labels: {
-                    'migrations.opensearch.org/source': expr.jsonPathStrict(inputs.sourceConfig, "label"),
-                    'migrations.opensearch.org/target': expr.jsonPathStrict(inputs.targetConfig, "label"),
-                    'migrations.opensearch.org/snapshot': expr.jsonPathStrict(inputs.snapshotConfig, "label"),
-                    'migrations.opensearch.org/from-snapshot-migration': inputs.migrationLabel,
-                    'migrations.opensearch.org/task': expr.ternary(
-                        expr.equals(inputs.commandMode, expr.literal("evaluate")),
-                        expr.literal("metadataEvaluate"),
-                        expr.literal("metadataMigrate")
-                    )
+                    'migrations.opensearch.org/source': inputs.sourceK8sLabel,
+                    'migrations.opensearch.org/target': inputs.targetK8sLabel,
+                    'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
+                    'migrations.opensearch.org/from-snapshot-migration': inputs.fromSnapshotMigrationK8sLabel,
+                    'migrations.opensearch.org/task': inputs.taskK8sLabel
                 }
             }))
         )
@@ -179,7 +187,11 @@ export const MetadataMigration = WorkflowBuilder.create({
             .addStep("evaluateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    commandMode: "evaluate"
+                    commandMode: "evaluate",
+                    sourceK8sLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
+                    targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
+                    snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
+                    fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
                 })
             )
             .addStep("approveEvaluate", INTERNAL, "approveEvaluate",
@@ -187,7 +199,11 @@ export const MetadataMigration = WorkflowBuilder.create({
             .addStep("migrateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    commandMode: "migrate"
+                    commandMode: "migrate",
+                    sourceK8sLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
+                    targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
+                    snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
+                    fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
                 })
             )
             .addStep("approveMigrate", INTERNAL, "approveMigrate",

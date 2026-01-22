@@ -80,10 +80,11 @@ function getRfsDeploymentManifest
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
     resources: BaseExpression<ResourceRequirementsType>,
 
-    sourceLabel: BaseExpression<string>,
-    targetLabel: BaseExpression<string>,
-    snapshotLabel: BaseExpression<string>,
-    migrationLabel: BaseExpression<string>
+    sourceK8sLabel: BaseExpression<string>,
+    targetK8sLabel: BaseExpression<string>,
+    snapshotK8sLabel: BaseExpression<string>,
+    fromSnapshotMigrationK8sLabel: BaseExpression<string>,
+    taskK8sLabel: BaseExpression<string>
 }): Deployment {
     const basicCredsSecretName = expr.ternary(
         expr.isEmpty(args.basicCredsSecretNameOrEmpty),
@@ -163,7 +164,12 @@ function getRfsDeploymentManifest
         metadata: {
             name: makeStringTypeProxy(deploymentName),
             labels: {
-                "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName)
+                "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
+                "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
+                "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
+                "migrations.opensearch.org/snapshot": makeStringTypeProxy(args.snapshotK8sLabel),
+                "migrations.opensearch.org/from-snapshot-migration": makeStringTypeProxy(args.fromSnapshotMigrationK8sLabel),
+                "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel)
             },
         },
         spec: {
@@ -187,11 +193,11 @@ function getRfsDeploymentManifest
                         app: "bulk-loader",
                         "deployment-name": makeStringTypeProxy(deploymentName),
                         "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
-                        "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceLabel),
-                        "migrations.opensearch.org/target": makeStringTypeProxy(args.targetLabel),
-                        "migrations.opensearch.org/snapshot": makeStringTypeProxy(args.snapshotLabel),
-                        "migrations.opensearch.org/from-snapshot-migration": makeStringTypeProxy(args.migrationLabel),
-                        "migrations.opensearch.org/task": "reindexFromSnapshot",
+                        "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
+                        "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
+                        "migrations.opensearch.org/snapshot": makeStringTypeProxy(args.snapshotK8sLabel),
+                        "migrations.opensearch.org/from-snapshot-migration": makeStringTypeProxy(args.fromSnapshotMigrationK8sLabel),
+                        "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel)
                     },
                 },
                 spec: {
@@ -278,17 +284,17 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     .addTemplate("waitForCompletion", t => t
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
         .addRequiredInput("sessionName", typeToken<string>())
-        .addRequiredInput("sourceLabel", typeToken<string>())
-        .addRequiredInput("targetLabel", typeToken<string>())
-        .addRequiredInput("snapshotLabel", typeToken<string>())
-        .addRequiredInput("migrationLabel", typeToken<string>())
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addRequiredInput("targetK8sLabel", typeToken<string>())
+        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
+        .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
+        .addOptionalInput("taskK8sLabel", c => "reindexFromSnapshotStatusCheck")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
             .addStep("checkBackfillStatus", MigrationConsole, "runMigrationCommandForStatus", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    command: getCheckBackfillStatusScript(b.inputs.sessionName),
-                    task: "reindexFromSnapshotStatusCheck"
+                    command: getCheckBackfillStatusScript(b.inputs.sessionName)
                 }))
         )
         .addRetryParameters({
@@ -307,10 +313,11 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
-        .addRequiredInput("sourceLabel", typeToken<string>())
-        .addRequiredInput("targetLabel", typeToken<string>())
-        .addRequiredInput("snapshotLabel", typeToken<string>())
-        .addRequiredInput("migrationLabel", typeToken<string>())
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addRequiredInput("targetK8sLabel", typeToken<string>())
+        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
+        .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
+        .addOptionalInput("taskK8sLabel", c => "reindexFromSnapshot")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addResourceTask(b => b
@@ -328,10 +335,11 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     workflowName: expr.getWorkflowValue("name"),
                     jsonConfig: expr.toBase64(b.inputs.rfsJsonConfig),
                     resources: expr.deserializeRecord(b.inputs.resources),
-                    sourceLabel: b.inputs.sourceLabel,
-                    targetLabel: b.inputs.targetLabel,
-                    snapshotLabel: b.inputs.snapshotLabel,
-                    migrationLabel: b.inputs.migrationLabel,
+                    sourceK8sLabel: b.inputs.sourceK8sLabel,
+                    targetK8sLabel: b.inputs.targetK8sLabel,
+                    snapshotK8sLabel: b.inputs.snapshotK8sLabel,
+                    fromSnapshotMigrationK8sLabel: b.inputs.fromSnapshotMigrationK8sLabel,
+                    taskK8sLabel: b.inputs.taskK8sLabel,
                 })
             }))
     )
@@ -363,8 +371,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             b.inputs.sessionName)
                     )),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),
-                    targetLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
-                    snapshotLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
+                    sourceK8sLabel: b.inputs.sourceLabel,
+                    targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
+                    snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
+                    fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
                 })
             )
         )
@@ -399,8 +409,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     configContents: c.steps.setupWaitForCompletion.outputs.configContents,
-                    targetLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
-                    snapshotLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
+                    sourceK8sLabel: b.inputs.sourceLabel,
+                    targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
+                    snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
+                    fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
                 }))
             .addStep("stopHistoricalBackfill", INTERNAL, "stopHistoricalBackfill", c =>
                 c.register({sessionName: b.inputs.sessionName}))

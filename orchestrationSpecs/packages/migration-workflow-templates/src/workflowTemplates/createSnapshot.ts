@@ -117,7 +117,10 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
-        .addRequiredInput("targetLabel", typeToken<string>())
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addRequiredInput("targetK8sLabel", typeToken<string>())
+        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
+        .addOptionalInput("taskK8sLabel", c => "snapshot")
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
@@ -134,10 +137,10 @@ export const CreateSnapshot = WorkflowBuilder.create({
             ])
             .addPodMetadata(({ inputs }) => ({
                 labels: {
-                    'migrations.opensearch.org/source': expr.jsonPathStrict(inputs.sourceConfig, "label"),
-                    'migrations.opensearch.org/target': inputs.targetLabel,
-                    'migrations.opensearch.org/snapshot': expr.jsonPathStrict(inputs.snapshotConfig, "label"),
-                    'migrations.opensearch.org/task': 'snapshot'
+                    'migrations.opensearch.org/source': inputs.sourceK8sLabel,
+                    'migrations.opensearch.org/target': inputs.targetK8sLabel,
+                    'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
+                    'migrations.opensearch.org/task': inputs.taskK8sLabel
                 }
             }))
         )
@@ -146,16 +149,16 @@ export const CreateSnapshot = WorkflowBuilder.create({
 
     .addTemplate("checkSnapshotStatus", t => t
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
-        .addRequiredInput("sourceLabel", typeToken<string>())
-        .addRequiredInput("targetLabel", typeToken<string>())
-        .addRequiredInput("snapshotLabel", typeToken<string>())
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addRequiredInput("targetK8sLabel", typeToken<string>())
+        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
+        .addOptionalInput("taskK8sLabel", c => "snapshotStatusCheck")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
             .addStep("checkSnapshotCompletion", MigrationConsole, "runMigrationCommandForStatus", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    command: checkScript,
-                    task: "snapshotStatusCheck"
+                    command: checkScript
                 }))
         )
         .addRetryParameters({
@@ -174,7 +177,12 @@ export const CreateSnapshot = WorkflowBuilder.create({
 
         .addSteps(b => b
             .addStep("createSnapshot", INTERNAL, "runCreateSnapshot", c =>
-                c.register(selectInputsForRegister(b, c)))
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    sourceK8sLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
+                    targetK8sLabel: b.inputs.targetLabel,
+                    snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
+                }))
 
             .addStep("getConsoleConfig", MigrationConsole, "getConsoleConfig", c =>
                 c.register({
@@ -185,8 +193,9 @@ export const CreateSnapshot = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     configContents: c.steps.getConsoleConfig.outputs.configContents,
-                    sourceLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
-                    snapshotLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
+                    sourceK8sLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
+                    targetK8sLabel: b.inputs.targetLabel,
+                    snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
                 }))
         )
         .addSynchronization(c => ({
