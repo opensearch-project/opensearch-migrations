@@ -242,7 +242,7 @@ SHARD SETUP
 ID: shard_setup
 FIELDS:
     * creatorId (string): Unique id of the worker who created the task
-    * leaseHolderId (string): Unique id of the worker who has aquired the lease for the task
+    * leaseHolderId (string): Unique id of the worker who has acquired the lease for the task
     * expiration (timestamp): When the current lease expires
     * nextAcquisitionLeaseExponent (integer): Times the task has been attempted
     * completedAt (timestamp): If present, when the task was completed.
