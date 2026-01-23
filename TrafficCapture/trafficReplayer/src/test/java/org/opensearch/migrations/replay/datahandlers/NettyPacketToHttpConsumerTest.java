@@ -453,8 +453,8 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     public void testTimeBetweenRequestsLongerThanResponseTimeout(boolean useTls) throws Exception {
         var responseTimeout = Duration.ofSeconds(1);
         var timeBetweenRequests = responseTimeout.plus(Duration.ofMillis(10));
-        log.atInfo().setMessage("Running testTimeBetweenRequestsLongerThanResponseTimeout with responseTimeout {}" +
-                " and timeBetweenRequests {}")
+        log.atInfo()
+            .setMessage("Running testTimeBetweenRequestsLongerThanResponseTimeout with responseTimeout {} and timeBetweenRequests {}")
             .addArgument(responseTimeout)
             .addArgument(timeBetweenRequests)
             .log();

@@ -21,9 +21,9 @@ public interface LuceneDirectoryReader extends AutoCloseable {
                     } catch (IOException e) {
                         LoggerFactory.getLogger(LuceneDirectoryReader.class)
                             .atWarn()
+                            .setCause(e)
                             .setMessage("{}")
                             .addArgument(() -> "Unable to close reader for " + reader.getIndexDirectoryPath())
-                            .setCause(e)
                             .log();
                     }
                 }

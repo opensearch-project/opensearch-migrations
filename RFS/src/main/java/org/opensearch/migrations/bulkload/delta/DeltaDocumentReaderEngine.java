@@ -84,8 +84,8 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
             return new DocumentChangeset(deletions, additions, LuceneDirectoryReader.getCleanupRunnable(previousReader, currentReader));
         } catch (Exception e) {
             log.atError()
-                .setMessage("Exception during delta prepareChangeset")
                 .setCause(e)
+                .setMessage("Exception during delta prepareChangeset")
                 .log();
             LuceneDirectoryReader.getCleanupRunnable(previousReader, currentReader).run();
             throw e;

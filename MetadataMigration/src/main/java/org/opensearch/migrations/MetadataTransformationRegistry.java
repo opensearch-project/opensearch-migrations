@@ -165,7 +165,7 @@ public class MetadataTransformationRegistry {
                 .addArgument(title)
                 .addArgument(formattedTransformConfig).log();
         } catch (Exception e) {
-            TRANSFORM_LOGGER.atError().setMessage("Unable to format transform config").setCause(e).log();
+            TRANSFORM_LOGGER.atError().setCause(e).setMessage("Unable to format transform config").log();
         }
     }
 }

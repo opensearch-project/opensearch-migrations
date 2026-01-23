@@ -80,16 +80,13 @@ public class IndexMappingTypeRemovalWithMergedSupport extends IndexMappingTypeRe
     }
 
     private void logFieldConflict(Index index, String fieldName, String type, JsonNode existing, JsonNode incoming) {
-        log.atWarn().setMessage("Conflict during type union with index: {}\n" +
-                        "field: {}\n" +
-                        "existingFieldType: {}\n" +
-                        "type: {}\n" +
-                        "secondFieldType: {}")
-                .addArgument(index.getName())
-                .addArgument(fieldName)
-                .addArgument(existing)
-                .addArgument(type)
-                .addArgument(incoming)
-                .log();
+        log.atWarn()
+            .setMessage("Conflict during type union with index: {}\nfield: {}\nexistingFieldType: {}\ntype: {}\nsecondFieldType: {}")
+            .addArgument(index.getName())
+            .addArgument(fieldName)
+            .addArgument(existing)
+            .addArgument(type)
+            .addArgument(incoming)
+            .log();
     }
 }

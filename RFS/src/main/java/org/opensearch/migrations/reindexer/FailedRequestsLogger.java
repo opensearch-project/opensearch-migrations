@@ -43,9 +43,7 @@ public class FailedRequestsLogger {
         // Do not include failedItems in log to prevent customer data leakage
         log.atError()
             .setCause(error)
-            .setMessage("Bulk request failed for {} index on {} items. Response body: {}." +
-                    "Request body logged to DLQ (FailedRequests logger) for manual investigation and retry." +
-                    "With root cause {}")
+            .setMessage("Bulk request failed for {} index on {} items. Response body: {}. Request body logged to DLQ (FailedRequests logger) for manual investigation and retry. With root cause {}")
             .addArgument(indexName)
             .addArgument(failedItemCount)
             .addArgument(responseBody)

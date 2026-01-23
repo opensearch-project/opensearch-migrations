@@ -725,9 +725,11 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     // there's no reason to not try at least a few times
                     if (malformedDocRetries > MAX_MALFORMED_ASSIGNED_WORK_DOC_RETRIES) {
                         ctx.addTraceException(e, true);
-                        log.atError().setCause(e).setMessage(
-                            "Throwing exception because max tries (" + MAX_MALFORMED_ASSIGNED_WORK_DOC_RETRIES + ")" +
-                                " have been exhausted").log();
+                        log.atError()
+                            .setCause(e)
+                            .setMessage("Throwing exception because max tries ({}) have been exhausted")
+                            .addArgument(MAX_MALFORMED_ASSIGNED_WORK_DOC_RETRIES)
+                            .log();
                         throw new RetriesExceededException(e, malformedDocRetries);
                     }
                     retries = ++malformedDocRetries;

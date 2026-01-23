@@ -602,7 +602,11 @@ public class RfsMigrateDocuments {
             return;
         }
         var workItemAndDuration = workItemRef.get();
-        log.atInfo().setMessage("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
+        log.atInfo()
+            .setMessage("Marking progress: {}, at doc {}")
+            .addArgument(() -> workItemAndDuration.getWorkItem().toString())
+            .addArgument(() -> progressCursor.get().getProgressCheckpointNum())
+            .log();
         var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, progressCursor.get());
 
         coordinator.createSuccessorWorkItemsAndMarkComplete(
@@ -657,8 +661,9 @@ public class RfsMigrateDocuments {
                     );
                 }
             } else {
-                log.atWarn().setMessage("No progress cursor to create successor work items from. This can happen when" +
-                        "downloading and unpacking shard takes longer than the lease").log();
+                log.atWarn()
+                    .setMessage("No progress cursor to create successor work items from. This can happen when downloading and unpacking shard takes longer than the lease")
+                    .log();
                 log.atWarn().setMessage("Skipping creation of successor work item to retry the existing one with more time")
                         .log();
             }
@@ -695,34 +700,27 @@ public class RfsMigrateDocuments {
         if (shardSetupDurationFactor < DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD && successorShardNextAcquisitionLeaseExponent > 0) {
             // This can happen after a period of slow shard downloads e.g. S3 throttling/slow workers
             // that caused leases to grow larger than desired
-            log.atInfo().setMessage("Shard setup took {}% of lease time which is less than target lower threshold of {}%." +
-                    "Decreasing successor lease duration exponent.")
-                    .addArgument(String.format("%.2f", shardSetupDurationFactor * 100))
-                    .addArgument(String.format("%.2f", DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD * 100))
-                    .log();
+            log.atInfo()
+                .setMessage("Shard setup took {}% of lease time which is less than target lower threshold of {}%. Decreasing successor lease duration exponent.")
+                .addArgument(() -> String.format("%.2f", shardSetupDurationFactor * 100))
+                .addArgument(() -> String.format("%.2f", DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD * 100))
+                .log();
             successorShardNextAcquisitionLeaseExponent = successorShardNextAcquisitionLeaseExponent - 1;
         } else if (shardSetupDurationFactor > INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD) {
-            log.atInfo().setMessage("Shard setup took {}% of lease time which is more than target upper threshold of {}%." +
-                            "Increasing successor lease duration exponent.")
-                    .addArgument(String.format("%.2f", shardSetupDurationFactor * 100))
-                    .addArgument(String.format("%.2f", INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD * 100))
+            log.atInfo()
+                .setMessage("Shard setup took {}% of lease time which is more than target upper threshold of {}%. Increasing successor lease duration exponent.")
+                .addArgument(() -> String.format("%.2f", shardSetupDurationFactor * 100))
+                .addArgument(() -> String.format("%.2f", INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD * 100))
                     .log();
             successorShardNextAcquisitionLeaseExponent = successorShardNextAcquisitionLeaseExponent + 1;
         }
 
-        log.atDebug().setMessage("SuccessorNextAcquisitionLeaseExponent calculated values:" +
-                        "\nleaseAcquisitionTime:{}" +
-                        "\ndocumentMigrationStartTime:{}" +
-                        "\nleaseDuration:{}" +
-                        "\nleaseDurationFactor:{}" +
-                        "\nexistingNextAcquisitionLeaseExponent:{}" +
-                        "\nshardSetupDuration:{}" +
-                        "\nshardSetupDurationFactor:{}" +
-                        "\nsuccessorShardNextAcquisitionLeaseExponent:{}")
-                .addArgument(leaseAcquisitionTime)
-                .addArgument(documentMigrationStartTime)
-                .addArgument(leaseDuration)
-                .addArgument(leaseDurationFactor)
+        log.atDebug()
+            .setMessage("SuccessorNextAcquisitionLeaseExponent calculated values:\nleaseAcquisitionTime:{}\ndocumentMigrationStartTime:{}\nleaseDuration:{}\nleaseDurationFactor:{}\nexistingNextAcquisitionLeaseExponent:{}\nshardSetupDuration:{}\nshardSetupDurationFactor:{}\nsuccessorShardNextAcquisitionLeaseExponent:{}")
+            .addArgument(leaseAcquisitionTime)
+            .addArgument(documentMigrationStartTime)
+            .addArgument(leaseDuration)
+            .addArgument(leaseDurationFactor)
                 .addArgument(existingNextAcquisitionLeaseExponent)
                 .addArgument(shardSetupDuration)
                 .addArgument(shardSetupDurationFactor)
@@ -847,8 +845,8 @@ public class RfsMigrateDocuments {
                 );
                 return;
             } catch (IWorkCoordinator.LeaseLockHeldElsewhereException e) {
-                log.atInfo().setMessage("After {} another process holds the lock for setting up the shard work items." +
-                        "  Waiting {} ms before trying again.")
+                log.atInfo()
+                    .setMessage("After {} another process holds the lock for setting up the shard work items. Waiting {} ms before trying again.")
                     .addArgument(shardSetupAttemptNumber)
                     .addArgument(lockRenegotiationMillis)
                     .log();

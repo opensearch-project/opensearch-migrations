@@ -39,9 +39,10 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource, AutoCl
             try {
                 isr.close();
             } catch (Exception e2) {
-                log.atError().setCause(e2).setMessage("Caught exception while closing InputStreamReader that " +
-                    "was in response to an earlier thrown exception.  Swallowing the inner exception and " +
-                    "throwing the original one.").log();
+                log.atError()
+                    .setCause(e2)
+                    .setMessage("Caught exception while closing InputStreamReader that was in response to an earlier thrown exception. Swallowing the inner exception and throwing the original one.")
+                    .log();
             }
             throw e;
         }

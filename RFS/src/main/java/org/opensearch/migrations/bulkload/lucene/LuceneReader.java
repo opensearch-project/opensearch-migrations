@@ -130,10 +130,11 @@ public class LuceneReader {
                         return Mono.justOrEmpty(document); // Emit only non-null documents
                     } catch (Exception e) {
                         // Handle individual document read failures gracefully
-                        log.atError().setMessage("Error reading document from reader {} with index: {}")
+                        log.atError()
+                            .setCause(e)
+                            .setMessage("Error reading document from reader {} with index: {}")
                             .addArgument(getSegmentReaderDebugInfo)
                             .addArgument(docIdx)
-                            .setCause(e)
                             .log();
                         return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));

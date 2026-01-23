@@ -124,8 +124,7 @@ public class InMemoryInstrumentationBundle implements AutoCloseable {
             } else {
                 try {
                     log.atInfo()
-                        .setMessage("Waiting {}ms because the last test for metrics from {} on {} " +
-                            "did not satisfy the predicate")
+                        .setMessage("Waiting {}ms because the last test for metrics from {} on {} did not satisfy the predicate")
                         .addArgument(sleepAmount)
                         .addArgument(metricName)
                         .addArgument(matchingMetrics::get)
