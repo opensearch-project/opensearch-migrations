@@ -19,6 +19,7 @@ public class FilterScheme {
             "elastic-connectors-",
             "elastic_agent.",
             "ilm-history-",
+            "kibana",
             "logs-elastic_agent",
             "logs-endpoint.",
             "logs-index_pattern",
