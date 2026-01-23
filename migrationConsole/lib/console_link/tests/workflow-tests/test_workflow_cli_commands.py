@@ -239,42 +239,114 @@ class TestWorkflowCLICommands:
         assert 'stopped successfully' in result.output
 
     @patch('console_link.workflow.commands.approve.WorkflowService')
-    def test_approve_command(self, mock_service_class):
-        """Test approve command with default workflow name."""
+    @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
+    def test_approve_command_with_exact_key(self, mock_fetch, mock_service_class):
+        """Test approve command with exact key match."""
         runner = CliRunner()
 
-        # Mock the service
+        mock_fetch.return_value = [
+            ('node-1', 'source.target.metadataMigrate', 'metadata-migrate'),
+            ('node-2', 'source.target.backfill', 'backfill-step')
+        ]
+
         mock_service = Mock()
         mock_service_class.return_value = mock_service
-
-        # Mock get_workflow_status to return workflow details
-        mock_service.get_workflow_status.return_value = {
-            'success': True,
-            'workflow_name': 'migration-workflow',
-            'namespace': 'ma',
-            'phase': 'Running',
-            'progress': '1/2',
-            'started_at': '2024-01-01T10:00:00Z',
-            'finished_at': None,
-            'steps': [
-                {'name': 'step1', 'phase': 'Succeeded', 'type': 'Pod', 'started_at': '2024-01-01T10:00:00Z'},
-                {'name': 'approval', 'phase': 'Running', 'type': 'Suspend', 'started_at': '2024-01-01T10:01:00Z'}
-            ],
-            'error': None
-        }
-
         mock_service.approve_workflow.return_value = {
-            'success': True,
-            'workflow_name': 'migration-workflow',
-            'namespace': 'ma',
-            'message': 'Workflow migration-workflow resumed successfully',
-            'error': None
+            'success': True, 'workflow_name': 'migration-workflow',
+            'namespace': 'ma', 'message': 'Approved', 'error': None
         }
 
-        result = runner.invoke(workflow_cli, ['approve', '--acknowledge'])
+        result = runner.invoke(workflow_cli, ['approve', 'source.target.metadataMigrate'])
 
         assert result.exit_code == 0
-        assert 'resumed successfully' in result.output
+        assert 'Approved 1 step' in result.output
+        mock_service.approve_workflow.assert_called_once()
+        call_kwargs = mock_service.approve_workflow.call_args[1]
+        assert call_kwargs['node_field_selector'] == 'id=node-1'
+
+    @patch('console_link.workflow.commands.approve.WorkflowService')
+    @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
+    def test_approve_command_with_glob_pattern(self, mock_fetch, mock_service_class):
+        """Test approve command with glob pattern matching multiple steps."""
+        runner = CliRunner()
+
+        mock_fetch.return_value = [
+            ('node-1', 'a.b.metadataMigrate', 'meta-1'),
+            ('node-2', 'x.y.metadataMigrate', 'meta-2'),
+            ('node-3', 'a.b.backfill', 'backfill')
+        ]
+
+        mock_service = Mock()
+        mock_service_class.return_value = mock_service
+        mock_service.approve_workflow.return_value = {
+            'success': True, 'workflow_name': 'migration-workflow',
+            'namespace': 'ma', 'message': 'Approved', 'error': None
+        }
+
+        result = runner.invoke(workflow_cli, ['approve', '*.metadataMigrate'])
+
+        assert result.exit_code == 0
+        assert 'Approved 2 step' in result.output
+        assert mock_service.approve_workflow.call_count == 2
+
+    @patch('console_link.workflow.commands.approve.WorkflowService')
+    @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
+    def test_approve_command_with_multiple_task_names(self, mock_fetch, mock_service_class):
+        """Test approve command with multiple task names."""
+        runner = CliRunner()
+
+        mock_fetch.return_value = [
+            ('node-1', 'step1', 'step-1'),
+            ('node-2', 'step2', 'step-2'),
+            ('node-3', 'step3', 'step-3')
+        ]
+
+        mock_service = Mock()
+        mock_service_class.return_value = mock_service
+        mock_service.approve_workflow.return_value = {
+            'success': True, 'workflow_name': 'migration-workflow',
+            'namespace': 'ma', 'message': 'Approved', 'error': None
+        }
+
+        result = runner.invoke(workflow_cli, ['approve', 'step1', 'step3'])
+
+        assert result.exit_code == 0
+        assert 'Approved 2 step' in result.output
+        assert mock_service.approve_workflow.call_count == 2
+
+    @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
+    def test_approve_command_no_matches(self, mock_fetch):
+        """Test approve command when key matches no suspended steps."""
+        runner = CliRunner()
+
+        mock_fetch.return_value = [('node-1', 'source.target.backfill', 'backfill')]
+
+        result = runner.invoke(workflow_cli, ['approve', 'nonexistent'])
+
+        assert result.exit_code != 0
+        assert "No suspended steps match" in result.output
+        assert 'source.target.backfill' in result.output
+
+    @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
+    def test_approve_command_no_suspended_steps(self, mock_fetch):
+        """Test approve command fails when no steps are suspended."""
+        runner = CliRunner()
+
+        mock_fetch.return_value = []
+
+        result = runner.invoke(workflow_cli, ['approve', 'anykey'])
+
+        assert result.exit_code != 0
+        assert 'No suspended steps found' in result.output
+
+    def test_approve_command_missing_task_names(self):
+        """Test approve command fails without required task names."""
+        runner = CliRunner()
+
+        result = runner.invoke(workflow_cli, ['approve'])
+
+        assert result.exit_code != 0
+        assert "Missing argument 'TASK_NAMES...'" in result.output
 
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
@@ -327,3 +399,55 @@ class TestConfigureCommands:
         assert 'Sample configuration loaded successfully' in result.output
         # Verify save_config was called
         assert mock_store.save_config.called
+
+
+class TestApprovalCompletions:
+    """Test suite for approval key autocompletion."""
+
+    @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
+    def test_get_approval_key_completions(self, mock_fetch):
+        """Test autocompletion returns suspended step names."""
+        from console_link.workflow.commands.approve import get_approval_task_name_completions, _get_cache_file
+
+        mock_fetch.return_value = [
+            ('node-1', 'source.target.metadataMigrate', 'meta'),
+            ('node-2', 'source.target.backfill', 'backfill')
+        ]
+
+        # Clear cache
+        cache_file = _get_cache_file('migration-workflow')
+        if cache_file.exists():
+            cache_file.unlink()
+
+        ctx = Mock()
+        ctx.params = {'workflow_name': 'migration-workflow', 'namespace': 'ma'}
+
+        completions = get_approval_task_name_completions(ctx, None, 'source')
+
+        assert len(completions) == 2
+        values = [c.value for c in completions]
+        assert 'source.target.metadataMigrate' in values
+        assert 'source.target.backfill' in values
+
+    @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
+    def test_get_approval_key_completions_caching(self, mock_fetch):
+        """Test that completions are cached."""
+        from console_link.workflow.commands.approve import get_approval_task_name_completions, _get_cache_file
+
+        mock_fetch.return_value = [('node-1', 'step.name', 'step')]
+
+        # Clear cache
+        cache_file = _get_cache_file('migration-workflow')
+        if cache_file.exists():
+            cache_file.unlink()
+
+        ctx = Mock()
+        ctx.params = {'workflow_name': 'migration-workflow', 'namespace': 'ma'}
+
+        # First call - should fetch
+        get_approval_task_name_completions(ctx, None, '')
+        assert mock_fetch.call_count == 1
+
+        # Second call - should use cache
+        get_approval_task_name_completions(ctx, None, '')
+        assert mock_fetch.call_count == 1  # Still 1, used cache

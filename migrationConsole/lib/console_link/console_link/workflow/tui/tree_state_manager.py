@@ -77,4 +77,4 @@ class TreeStateManager:
 
     def _get_label(self, node: Dict):
         status_output = get_step_status_output(self._workflow_data, node['id'])
-        return get_step_rich_label(node, status_output)
+        return get_step_rich_label(node, status_output, show_approval_name=False)

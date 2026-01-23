@@ -199,12 +199,13 @@ def get_node_phase(node: dict) -> str:
     return node['phase']
 
 
-def get_step_rich_label(node: dict, status_output: str) -> str:
+def get_step_rich_label(node: dict, status_output: str, show_approval_name: bool = True) -> str:
     """Get rich-formatted label for a workflow step node.
 
     Args:
         node: WorkflowNode dictionary
         status_output: Additional status output to append
+        show_approval_name: Whether to show the approval name for Suspend nodes
 
     Returns:
         Rich-formatted string with color and styling
@@ -253,20 +254,29 @@ def get_step_rich_label(node: dict, status_output: str) -> str:
 
     step_name_and_timestamp_str = f"{timestamp_str}: {step_name}"
 
-    full_unformatted_line = _construct_full_label_line(step_name, step_name_and_timestamp_str, step_phase, step_type)
+    # Extract 'name' input parameter for Suspend nodes (only if showing)
+    approval_name = None
+    if show_approval_name and step_type == 'Suspend':
+        for p in node.get('inputs', {}).get('parameters', []):
+            if p.get('name') == 'name':
+                approval_name = p.get('value')
+                break
+
+    full_unformatted_line = _construct_full_label_line(step_name_and_timestamp_str, step_phase, step_type, approval_name)
     return f"[{color}]{symbol} {full_unformatted_line}{': ' + status_output if status_output else ''} [/{color}]"
 
 
-def _construct_full_label_line(step_name, step_name_and_timestamp_str, step_phase, step_type):
+def _construct_full_label_line(step_name_and_timestamp_str, step_phase, step_type, approval_name=None):
     if step_type == 'Suspend':
         if step_phase == 'Running':
-            return f"{step_name_and_timestamp_str} - WAITING FOR APPROVAL"
+            suffix = f" OF '{approval_name}'" if approval_name else ""
+            return f"{step_name_and_timestamp_str} - WAITING FOR APPROVAL{suffix}"
         elif step_phase == 'Succeeded':
             return f"{step_name_and_timestamp_str} (Approved)"
         else:
             return f"{step_name_and_timestamp_str} ({step_phase})"
     # Special handling for Skipped steps with approval-related names
-    elif step_phase == 'Skipped' and 'approval' in step_name.lower():
+    elif step_phase == 'Skipped' and 'approval' in step_name_and_timestamp_str.lower():
         return f"{step_name_and_timestamp_str} (Not Required)"
     else:
         return f"{step_name_and_timestamp_str} ({step_phase})"

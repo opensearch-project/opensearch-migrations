@@ -253,6 +253,13 @@ class WorkflowTreeApp(App):
             node_id = self.current_node_data.get('id')
             name = self._pods.get_name(node_id) if node_id else None
             status_bar.update(f"Pod: [bold green]{name}[/]" if name else "Pod: (not available)")
+        elif node_type == NODE_TYPE_SUSPEND:
+            name_param = None
+            for p in self.current_node_data.get('inputs', {}).get('parameters', []):
+                if p.get('name') == 'name':
+                    name_param = p.get('value')
+                    break
+            status_bar.update(f"Name: [bold cyan]{name_param}[/]" if name_param else "")
         else:
             status_bar.update("")
 

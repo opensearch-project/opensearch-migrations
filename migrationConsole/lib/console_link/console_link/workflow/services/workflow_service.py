@@ -761,7 +761,8 @@ class WorkflowService:
                     "name": node.get("displayName", ""),
                     "phase": node.get("phase", "Unknown"),
                     "type": node_type,
-                    "started_at": node.get("startedAt", "")
+                    "started_at": node.get("startedAt", ""),
+                    "inputs": node.get('inputs')
                 })
 
         # Sort chronologically by start time

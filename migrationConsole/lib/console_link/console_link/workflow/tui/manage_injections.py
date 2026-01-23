@@ -132,7 +132,7 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
                     "finishedAt": node.get("finishedAt"),
                     # Only keep inputs/outputs if they contain specific UI keys
                     "inputs": {"parameters": [p for p in node.get("inputs", {}).get("parameters", []) if
-                                              p['name'] in ('groupName', 'configContents')]},
+                                              p['name'] in ('groupName', 'configContents', 'name')]},
                     "outputs": {"parameters": [p for p in node.get("outputs", {}).get("parameters", []) if
                                                p['name'] in ('statusOutput', 'overriddenPhase')]}
                 }
