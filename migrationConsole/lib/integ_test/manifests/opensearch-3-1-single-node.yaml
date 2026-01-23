@@ -2,7 +2,6 @@ apiVersion: v1
 kind: Service
 metadata:
   name: opensearch-3-1-single-node
-  namespace: ma
   labels:
     app: opensearch-3-1-single-node
 spec:
@@ -17,7 +16,6 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: opensearch-3-1-single-node
-  namespace: ma
 spec:
   serviceName: opensearch-3-1-single-node
   replicas: 1
