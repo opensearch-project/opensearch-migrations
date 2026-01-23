@@ -2,7 +2,6 @@
 
 import logging
 
-import click
 from click.shell_completion import CompletionItem
 
 from kubernetes import client

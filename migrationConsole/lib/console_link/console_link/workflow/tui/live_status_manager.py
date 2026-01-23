@@ -63,11 +63,13 @@ class LiveStatusManager:
         live_node = self._find_live_node(parent)
 
         if not config_children:
-            if live_node: live_node.remove()
+            if live_node:
+                live_node.remove()
             return
 
         if any(c.data.get('phase') == "Succeeded" for c in config_children):
-            if live_node: live_node.remove()
+            if live_node:
+                live_node.remove()
         else:
             if not live_node:
                 live_node = parent.add("[bold cyan]Live Status:[/]", data={
@@ -91,11 +93,13 @@ class LiveStatusManager:
         live_node = self._find_live_node(node)
 
         if not config_children:
-            if live_node: live_node.remove()
+            if live_node:
+                live_node.remove()
             return
 
         if any(c.data.get('phase') == "Succeeded" for c in config_children):
-            if live_node: live_node.remove()
+            if live_node:
+                live_node.remove()
         else:
             if not live_node:
                 live_node = node.add("[bold cyan]Live Status:[/]", data={
@@ -133,7 +137,6 @@ class LiveStatusManager:
         current_active.add(live_node)
         if live_node not in self._active_live_check_group_nodes:
             self._start_live_loop(app, live_node)
-
 
     def _extract_check_config(self, node_data: Dict) -> LiveCheckConfig:
         """Extract immutable check config from node data."""

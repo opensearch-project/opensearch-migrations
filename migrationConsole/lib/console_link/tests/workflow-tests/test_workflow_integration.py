@@ -927,7 +927,6 @@ class TestArgoWorkflows:
 
         logger.info(f"\n✓ Argo Workflows {argo_version} is successfully installed and running!")
 
-
     def test_workflow_submit_hello_world(self, argo_workflows):
         """Test submitting a hello-world workflow to Argo via Kubernetes API with output verification"""
         argo_namespace = argo_workflows["namespace"]
@@ -1239,7 +1238,8 @@ def _test_output_command_for_workflow(workflow_name, namespace, expected_message
         AssertionError: If output command fails or output is not retrieved
     """
     # Run CLI as subprocess to capture kubectl output (which bypasses Click's stdout capture)
-    cmd = f"workflow output --workflow-name {workflow_name} --namespace {namespace} --argo-server https://localhost:2746 --insecure --prefix '' -l test-workflow=hello-world"
+    cmd = (f"workflow output --workflow-name {workflow_name} --namespace {namespace} "
+           f"--argo-server https://localhost:2746 --insecure --prefix '' -l test-workflow=hello-world")
     result = subprocess.run(cmd, shell=True, executable='/bin/bash', capture_output=True, text=True, timeout=30)
 
     assert result.returncode == 0, f"Output command failed with exit code {result.returncode}. stderr: {result.stderr}"
@@ -1269,7 +1269,8 @@ def _test_status_command_for_workflow(runner, workflow_name, namespace):
     # Invoke status command with explicit argo-server URL (HTTPS with insecure flag for self-signed cert)
     result = runner.invoke(
         workflow_cli,
-        ['status', '--workflow-name', workflow_name, '--namespace', namespace, '--argo-server', 'https://localhost:2746', '--insecure']
+        ['status', '--workflow-name', workflow_name, '--namespace', namespace,
+         '--argo-server', 'https://localhost:2746', '--insecure']
     )
 
     # Verify command succeeded

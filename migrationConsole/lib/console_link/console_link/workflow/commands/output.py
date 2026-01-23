@@ -1,10 +1,12 @@
+import heapq
+from contextlib import ExitStack
+
 import click
 from click.shell_completion import CompletionItem
 import json
 import logging
 import os
 import re
-import shlex
 import subprocess
 import tempfile
 import time
@@ -255,7 +257,6 @@ def output_command(ctx, workflow_name, all_workflows, argo_server, namespace, in
         logger.info(f"Executing: {' '.join(cmd)}")
         subprocess.run(cmd)
     else:
-        # historical, use kubectl through sort -m in case there are multiple results
         try:
             load_k8s_config()
             v1 = client.CoreV1Api()
@@ -268,27 +269,47 @@ def output_command(ctx, workflow_name, all_workflows, argo_server, namespace, in
             click.echo("No pods found matching the selector.")
             return
 
-        # Ensure --timestamps is present for internal sorting logic
-        internal_args = list(clean_args)
-        if not user_requested_ts:
-            internal_args.append('--timestamps')
+        # ExitStack ensures all processes are killed when we exit the block
+        with ExitStack() as stack:
+            processes = []
+            streams = []
 
-        # Build the Bash process substitution string
-        log_streams = []
-        for pod in pods.items:
-            pod_name = pod.metadata.name
-            args_str = " ".join(shlex.quote(a) for a in internal_args)
-            stream = f"<(stdbuf -oL kubectl logs --timestamps {pod_name} -n {namespace} {args_str})"
-            log_streams.append(stream)
+            for pod in pods.items:
+                p_name = pod.metadata.name
+                # Always use --timestamps for the internal merge logic
+                cmd = ["kubectl", "logs", "--timestamps", p_name, "-n", namespace] + clean_args
 
-        # Build the final pipeline
-        # sort -m: merge pre-sorted streams
-        # cut: if user didn't want timestamps, strip the first field (the timestamp)
-        final_cmd = f"sort -m --stable {' '.join(log_streams)}"
-        if not user_requested_ts:
-            final_cmd += " | cut -d' ' -f2-"
+                # We pipe stderr so we can report failures
+                p = stack.enter_context(subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1  # Line buffered
+                ))
+                processes.append((p_name, p))
+                streams.append(p.stdout)
 
-        logger.info(f"Executing: /bin/bash -c \"{final_cmd}\"")
+            # heapq.merge is a generator; it doesn't load everything into memory
+            merged_logs = heapq.merge(*streams)
 
-        # Must use executable='/bin/bash' because <() is not standard sh
-        subprocess.run(final_cmd, shell=True, executable='/bin/bash')
+            try:
+                for line in merged_logs:
+                    if not user_requested_ts:
+                        # Strip RFC3339 timestamp (everything before the first space)
+                        parts = line.split(" ", 1)
+                        output_line = parts[1] if len(parts) > 1 else line
+                    else:
+                        output_line = line
+
+                    click.echo(output_line.rstrip())
+            except KeyboardInterrupt:
+                click.echo("\nInterrupted by user.", err=True)
+            finally:
+                # After logs finish, check if any process failed
+                for name, p in processes:
+                    # Non-blocking check for process exit
+                    if p.poll() is not None and p.returncode != 0:
+                        err_out = p.stderr.read().strip()
+                        if err_out:
+                            click.echo(f"[{name}] Error: {err_out}", err=True)

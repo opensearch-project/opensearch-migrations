@@ -29,7 +29,7 @@ def _get_cache_file(workflow_name: str) -> Path:
 
 
 def _fetch_suspended_step_names(workflow_name: str, namespace: str, argo_server: str,
-                                 token: str, insecure: bool) -> list[tuple[str, str, str]]:
+                                token: str, insecure: bool) -> list[tuple[str, str, str]]:
     """Fetch suspended steps from workflow. Returns list of (node_id, name_param, display_name)."""
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
@@ -152,7 +152,7 @@ def approve_command(ctx, task_names, workflow_name, argo_server, namespace, inse
             )
 
             if result['success']:
-                click.echo(f"  ✓ Approved")
+                click.echo("  ✓ Approved")
             else:
                 click.echo(f"  ✗ Failed: {result['message']}", err=True)
                 ctx.exit(ExitCode.FAILURE.value)

@@ -262,7 +262,9 @@ def get_step_rich_label(node: dict, status_output: str, show_approval_name: bool
                 approval_name = p.get('value')
                 break
 
-    full_unformatted_line = _construct_full_label_line(step_name_and_timestamp_str, step_phase, step_type, approval_name)
+    full_unformatted_line = _construct_full_label_line(
+        step_name_and_timestamp_str, step_phase, step_type, approval_name
+    )
     return f"[{color}]{symbol} {full_unformatted_line}{': ' + status_output if status_output else ''} [/{color}]"
 
 
