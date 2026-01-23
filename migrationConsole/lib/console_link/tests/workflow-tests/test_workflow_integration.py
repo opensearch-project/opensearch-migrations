@@ -1104,7 +1104,8 @@ class TestArgoWorkflows:
 
             # Test output command with the completed workflow
             logger.info("\nTesting output command for completed workflow...")
-            _test_output_command_for_workflow(workflow_name, argo_namespace, test_message)
+            runner = CliRunner()
+            _test_output_command_for_workflow(runner, workflow_name, argo_namespace, test_message)
 
         except ApiException as e:
             pytest.fail(f"Failed to submit workflow via Kubernetes API: {e}")
@@ -1223,13 +1224,14 @@ def test_k3s_container_support():
         pytest.skip("testcontainers not installed - run: pip install testcontainers")
 
 
-def _test_output_command_for_workflow(workflow_name, namespace, expected_message):
+def _test_output_command_for_workflow(runner, workflow_name, namespace, expected_message):
     """
     Helper function to test output command for a given workflow.
 
     Tests that the output command can retrieve output from a completed workflow.
 
     Args:
+        runner: Click test runner
         workflow_name: Name of the workflow to get output for
         namespace: Kubernetes namespace
         expected_message: The message that should appear in the workflow output
@@ -1237,15 +1239,17 @@ def _test_output_command_for_workflow(workflow_name, namespace, expected_message
     Raises:
         AssertionError: If output command fails or output is not retrieved
     """
-    # Run CLI as subprocess to capture kubectl output (which bypasses Click's stdout capture)
-    cmd = (f"workflow output --workflow-name {workflow_name} --namespace {namespace} "
-           f"--argo-server https://localhost:2746 --insecure --prefix '' -l test-workflow=hello-world")
-    result = subprocess.run(cmd, shell=True, executable='/bin/bash', capture_output=True, text=True, timeout=30)
+    result = runner.invoke(
+        workflow_cli,
+        ['output', '--workflow-name', workflow_name, '--namespace', namespace,
+         '--argo-server', 'https://localhost:2746', '--insecure',
+         '--prefix', '', '-l', 'test-workflow=hello-world'],
+    )
 
-    assert result.returncode == 0, f"Output command failed with exit code {result.returncode}. stderr: {result.stderr}"
+    assert result.exit_code == 0, f"Output command failed with exit code {result.exit_code}. Output: {result.output}"
 
-    assert expected_message in result.stdout, \
-        f"Expected message '{expected_message}' not found in output: {result.stdout}"
+    assert expected_message in result.output, \
+        f"Expected message '{expected_message}' not found in output: {result.output}"
 
     logger.info(f"✓ Output command successfully executed for workflow {workflow_name}")
     logger.info(f"✓ Verified output contains expected message: {expected_message}")
