@@ -117,7 +117,7 @@ public class RfsMigrateDocuments {
     }
 
     public enum ServerGeneratedIdMode {
-        AUTO,   // Auto-detect serverless TIMESERIES and enable
+        AUTO,   // Auto-detect serverless TIMESERIES/VECTOR collections and enable
         ALWAYS, // Always use server-generated IDs
         NEVER   // Always preserve source IDs
     }
@@ -232,9 +232,9 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--server-generated-ids" },
             description = "Optional. Controls document ID generation on target. " +
-                "AUTO (default): auto-detect serverless TIMESERIES collections and enable server-generated IDs. " +
+                "AUTO (default): auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
                 "ALWAYS: always use server-generated IDs. " +
-                "NEVER: always preserve source IDs (may fail on serverless TIMESERIES).")
+                "NEVER: always preserve source IDs (may fail on serverless TIMESERIES/VECTOR).")
         public ServerGeneratedIdMode serverGeneratedIds = ServerGeneratedIdMode.AUTO;
 
         @Parameter(required = true,
