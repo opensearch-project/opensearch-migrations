@@ -28,7 +28,7 @@ import {
     TaskOpts,
     TaskRebinder
 } from "./taskBuilder";
-import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "./templateBodyBuilder";
+import {RetryParameters, RetryableTemplateBodyBuilder, RetryableTemplateRebinder} from "./templateBodyBuilder";
 import {NonSerializedPlainObject, PlainObject} from "./plainObject";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {NamedTask} from "./sharedTypes";
@@ -79,7 +79,7 @@ export class DagBuilder<
     InputParamsScope extends InputParametersRecord,
     TaskScope extends TasksOutputsScope,
     OutputParamsScope extends OutputParametersRecord
-> extends TemplateBodyBuilder<
+> extends RetryableTemplateBodyBuilder<
     ParentWorkflowScope,
     InputParamsScope,
     TaskScope,
@@ -99,20 +99,18 @@ export class DagBuilder<
         retryParameters: RetryParameters,
         synchronization: SynchronizationConfig | undefined
     ) {
-        // Trick: capture a mutable selfRef within a closure for use inside the rebinder
         let selfRef: DagBuilder<ParentWorkflowScope, InputParamsScope, any, any> | undefined;
 
-        const templateRebind: TemplateRebinder<
+        const templateRebind: RetryableTemplateRebinder<
             ParentWorkflowScope,
             InputParamsScope,
+            // This builder only exposes and needs to expose its task outputs, not the whole body.
+            // That's why we ONLY bind the body to the task outputs
             TasksOutputsScope,
             DagExpressionContext<InputParamsScope, any>
-        > = (ctx, inScope, body, outScope, retry: RetryParameters, synchronization?: SynchronizationConfig) => {
-            const currentTasks =
-                selfRef ? selfRef.taskBuilder.getTasks().taskList : orderedTasks;
-            return new DagBuilder(
-                ctx, inScope, body, currentTasks, outScope, retry, synchronization
-            ) as any;
+        > = (ctx, inScope, body, outScope, retry, synchronization) => {
+            const currentTasks = selfRef ? selfRef.taskBuilder.getTasks().taskList : orderedTasks;
+            return new DagBuilder(ctx, inScope, body, currentTasks, outScope, retry, synchronization) as any;
         };
 
         super(parentWorkflowScope, inputs, bodyScope, outputs, retryParameters, synchronization, templateRebind);

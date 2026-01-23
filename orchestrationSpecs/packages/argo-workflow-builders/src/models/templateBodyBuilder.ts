@@ -18,7 +18,7 @@ import {SynchronizationConfig} from "./synchronization";
 
 export type RetryParameters = GenericScope;
 
-/** Rebinder type the concrete subclass provides to the base. */
+/** Rebinder type for non-retryable templates */
 export type TemplateRebinder<
     ParentWorkflowScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
@@ -28,6 +28,32 @@ export type TemplateRebinder<
     NewBodyScope extends BodyBound,
     NewOutputScope extends OutputParametersRecord,
     Self extends TemplateBodyBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        NewBodyScope,
+        NewOutputScope,
+        Self,
+        BodyBound,
+        ExpressionBuilderContext
+    >
+>(
+    ctx: ParentWorkflowScope,
+    inputs: InputParamsScope,
+    body: NewBodyScope,
+    outputs: NewOutputScope,
+    synchronization: SynchronizationConfig | undefined
+) => Self;
+
+/** Rebinder type for retryable templates */
+export type RetryableTemplateRebinder<
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
+    InputParamsScope extends InputParametersRecord,
+    BodyBound extends GenericScope,
+    ExpressionBuilderContext = { inputs: InputParamsToExpressions<InputParamsScope> }
+> = <
+    NewBodyScope extends BodyBound,
+    NewOutputScope extends OutputParametersRecord,
+    Self extends RetryableTemplateBodyBuilder<
         ParentWorkflowScope,
         InputParamsScope,
         NewBodyScope,
@@ -87,7 +113,6 @@ export abstract class TemplateBodyBuilder<
         public readonly inputsScope: InputParamsScope,
         protected readonly bodyScope: BodyScope,
         public readonly outputsScope: OutputParamsScope,
-        protected readonly retryParameters: GenericScope,
         protected readonly synchronization: SynchronizationConfig | undefined,
         protected readonly rebind: TemplateRebinder<ParentWorkflowScope, InputParamsScope, BodyBound, ExpressionBuilderContext>
     ) {}
@@ -113,24 +138,12 @@ export abstract class TemplateBodyBuilder<
         >;
     }
 
-    public addRetryParameters(retryParameters: GenericScope) {
-        return this.rebind(
-            this.parentWorkflowScope,
-            this.inputsScope,
-            this.bodyScope,
-            this.outputsScope,
-            retryParameters,
-            this.synchronization
-        );
-    }
-
     public addSynchronization(synchronizationBuilderFn: (b: ExpressionBuilderContext) => SynchronizationConfig) {
         return this.rebind(
             this.parentWorkflowScope,
             this.inputsScope,
             this.bodyScope,
             this.outputsScope,
-            this.retryParameters,
             synchronizationBuilderFn(this.getExpressionBuilderContext())
         );
     }
@@ -175,7 +188,6 @@ export abstract class TemplateBodyBuilder<
             this.inputsScope,
             this.bodyScope,
             newOutputs,
-            this.retryParameters,
             this.synchronization
         ) as unknown as ReplaceOutputTypedMembers<
             ParentWorkflowScope,
@@ -198,11 +210,82 @@ export abstract class TemplateBodyBuilder<
         return rval as WorkflowInputsToExpressions<ParentWorkflowScope>;
     }
 
-    // Type-erasure is fine here.  This is only used for getFullTemplate, where we don't want to allow
-    // others to reach into the body anyway.  They should interface through the inputs and outputs exclusively
     protected abstract getBody(): Record<string, any>;
 
-    // used by the TemplateBuilder!
+    getFullTemplateScope() {
+        return {
+            inputs: this.inputsScope,
+            outputs: this.outputsScope,
+            body: this.getBody(),
+            synchronization: this.synchronization
+        };
+    }
+}
+
+/** Extended builder for templates that support retry strategies */
+export abstract class RetryableTemplateBodyBuilder<
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
+    InputParamsScope extends InputParametersRecord,
+    BodyScope extends BodyBound,
+    OutputParamsScope extends OutputParametersRecord,
+    Self extends RetryableTemplateBodyBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        BodyScope,
+        any,
+        Self,
+        BodyBound,
+        ExpressionBuilderContext
+    >,
+    BodyBound extends GenericScope = GenericScope,
+    ExpressionBuilderContext = { inputs: InputParamsToExpressions<InputParamsScope> }
+> extends TemplateBodyBuilder<
+    ParentWorkflowScope,
+    InputParamsScope,
+    BodyScope,
+    OutputParamsScope,
+    Self,
+    BodyBound,
+    ExpressionBuilderContext
+> {
+    constructor(
+        parentWorkflowScope: ParentWorkflowScope,
+        inputsScope: InputParamsScope,
+        bodyScope: BodyScope,
+        outputsScope: OutputParamsScope,
+        protected readonly retryParameters: RetryParameters,
+        synchronization: SynchronizationConfig | undefined,
+        protected readonly retryableRebind: RetryableTemplateRebinder<ParentWorkflowScope, InputParamsScope, BodyBound, ExpressionBuilderContext>
+    ) {
+        const baseRebind: TemplateRebinder<ParentWorkflowScope, InputParamsScope, BodyBound, ExpressionBuilderContext> = (
+            ctx, inputs, body, outputs, sync
+        ) => retryableRebind(ctx, inputs, body, outputs, this.retryParameters, sync) as any;
+        
+        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, synchronization, baseRebind);
+    }
+
+    public addRetryParameters(retryParameters: GenericScope) {
+        return this.retryableRebind(
+            this.parentWorkflowScope,
+            this.inputsScope,
+            this.bodyScope,
+            this.outputsScope,
+            retryParameters,
+            this.synchronization
+        );
+    }
+
+    public addSynchronization(synchronizationBuilderFn: (b: ExpressionBuilderContext) => SynchronizationConfig) {
+        return this.retryableRebind(
+            this.parentWorkflowScope,
+            this.inputsScope,
+            this.bodyScope,
+            this.outputsScope,
+            this.retryParameters,
+            synchronizationBuilderFn(this.getExpressionBuilderContext())
+        );
+    }
+
     getFullTemplateScope() {
         return {
             inputs: this.inputsScope,

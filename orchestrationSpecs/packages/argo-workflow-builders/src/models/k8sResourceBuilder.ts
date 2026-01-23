@@ -12,7 +12,7 @@
 
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {ExtendScope, GenericScope, WorkflowAndTemplatesScope} from "./workflowTypes";
-import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "./templateBodyBuilder";
+import {RetryParameters, RetryableTemplateBodyBuilder, RetryableTemplateRebinder} from "./templateBodyBuilder";
 import {PlainObject} from "./plainObject";
 import {UniqueNameConstraintAtDeclaration} from "./scopeConstraints";
 import {AllowLiteralOrExpression} from "./expression";
@@ -37,7 +37,7 @@ export class K8sResourceBuilder<
     InputParamsScope extends InputParametersRecord,
     ResourceScope extends GenericScope,
     OutputParamsScope extends OutputParametersRecord
-> extends TemplateBodyBuilder<
+> extends RetryableTemplateBodyBuilder<
     ParentWorkflowScope,
     InputParamsScope,
     ResourceScope,
@@ -53,34 +53,9 @@ export class K8sResourceBuilder<
         retryParameters: RetryParameters,
         synchronization?: SynchronizationConfig
     ) {
-        const templateRebind: TemplateRebinder<
-            ParentWorkflowScope,
-            InputParamsScope,
-            GenericScope
-        > = <
-            NewBodyScope extends GenericScope,
-            NewOutputScope extends OutputParametersRecord,
-            Self extends TemplateBodyBuilder<
-                ParentWorkflowScope,
-                InputParamsScope,
-                NewBodyScope,
-                NewOutputScope,
-                any,
-                GenericScope
-            >
-        >(
-            ctx: ParentWorkflowScope,
-            inputs: InputParamsScope,
-            body: NewBodyScope,
-            outputs: NewOutputScope,
-            retry: RetryParameters
-        ) =>
-            new K8sResourceBuilder<
-                ParentWorkflowScope,
-                InputParamsScope,
-                NewBodyScope,
-                NewOutputScope
-            >(ctx, inputs, body, outputs, retry) as unknown as Self;
+        const templateRebind: RetryableTemplateRebinder<ParentWorkflowScope, InputParamsScope, GenericScope> = (
+            ctx, inputs, body, outputs, retry, sync
+        ) => new K8sResourceBuilder(ctx, inputs, body, outputs, retry, sync) as any;
 
         super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, templateRebind);
     }

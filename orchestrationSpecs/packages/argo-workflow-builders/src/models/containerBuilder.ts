@@ -21,7 +21,7 @@ import {
     WorkflowInputsToExpressions
 } from "./workflowTypes";
 import {inputsToEnvVars, TypescriptError} from "../utils";
-import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "./templateBodyBuilder"; // <-- import TemplateRebinder
+import {RetryParameters, RetryableTemplateBodyBuilder, RetryableTemplateRebinder} from "./templateBodyBuilder";
 import {extendScope, FieldGroupConstraint, ScopeIsEmptyConstraint} from "./scopeConstraints";
 import {PlainObject} from "./plainObject";
 import {AllowLiteralOrExpression, BaseExpression, expr, toExpression} from "./expression";
@@ -165,7 +165,7 @@ export class ContainerBuilder<
     EnvScope extends DataOrConfigMapScope,
     OutputParamsScope extends OutputParametersRecord,
     PodConfigBrands extends {} = {}
-> extends TemplateBodyBuilder<
+> extends RetryableTemplateBodyBuilder<
     ParentWorkflowScope,
     InputParamsScope,
     ContainerScope,
@@ -184,41 +184,16 @@ export class ContainerBuilder<
         synchronization: SynchronizationConfig | undefined,
         public readonly podConfig: PodConfigData = {}
     ) {
-        // REBINDER: must accept any NewBodyScope extends GenericScope and return ContainerBuilder
-        const rebind: TemplateRebinder<
+        const templateRebind: RetryableTemplateRebinder<
             ParentWorkflowScope,
             InputParamsScope,
             GenericScope
-        > = <
-            NewBodyScope extends GenericScope,
-            NewOutputScope extends OutputParametersRecord,
-            Self extends TemplateBodyBuilder<
-                ParentWorkflowScope,
-                InputParamsScope,
-                NewBodyScope,
-                NewOutputScope,
-                any,
-                GenericScope
-            >
-        >(
-            ctx: ParentWorkflowScope,
-            inputs: InputParamsScope,
-            body: NewBodyScope,
-            outputs: NewOutputScope,
-            retry: RetryParameters,
-            synchronization: SynchronizationConfig | undefined
-        ) =>
-            new ContainerBuilder<
-                ParentWorkflowScope,
-                InputParamsScope,
-                NewBodyScope,
-                VolumeScope,
-                EnvScope,
-                NewOutputScope,
-                PodConfigBrands
-            >(ctx, inputs, body, this.volumeScope, this.envScope, outputs, retry, synchronization, this.podConfig) as unknown as Self;
+        > = (ctx, inputs, body, outputs, retry, synchronization) =>
+            new ContainerBuilder(
+                ctx, inputs, body, this.volumeScope, this.envScope, outputs, retry, synchronization, this.podConfig
+            ) as any;
 
-        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, rebind);
+        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, templateRebind);
     }
 
     /** Helper to create a new builder with updated fields */

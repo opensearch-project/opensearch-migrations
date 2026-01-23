@@ -36,6 +36,7 @@ import {ContainerBuilder} from "./containerBuilder";
 import {DeepWiden, PlainObject} from "./plainObject";
 import {DagBuilder} from "./dagBuilder";
 import {K8sResourceBuilder} from "./k8sResourceBuilder";
+import {SuspendTemplateBuilder, DurationInSeconds} from "./suspendTemplateBuilder";
 import {AllowLiteralOrExpression, expr, isExpression} from "./expression";
 import {typeToken, TypeToken} from "./sharedTypes";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
@@ -276,6 +277,16 @@ export class TemplateBuilder<
             ((c, i) => new ContainerBuilder(c, i, {}, {}, {}, {}, {}, undefined)))
         (this.parentWorkflowScope, this.inputScope));
         return result;
+    }
+
+    addSuspend(duration?: DurationInSeconds): SuspendTemplateBuilder<ParentWorkflowScope, InputParamsScope, {}> {
+        return new SuspendTemplateBuilder(
+            this.parentWorkflowScope,
+            this.inputScope,
+            duration !== undefined ? { duration } : {},
+            {},
+            undefined
+        );
     }
 
     getTemplateSignatureScope(): InputParamsScope {

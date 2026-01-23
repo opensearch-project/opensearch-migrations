@@ -169,8 +169,14 @@ export const MetadataMigration = WorkflowBuilder.create({
     )
 
 
-    .addSuspendTemplate("approveEvaluate")
-    .addSuspendTemplate("approveMigrate")
+    .addTemplate("approveEvaluate", t => t
+        .addRequiredInput("name", typeToken<string>())
+        .addSuspend()
+    )
+    .addTemplate("approveMigrate", t => t
+        .addRequiredInput("name", typeToken<string>())
+        .addSuspend()
+    )
 
 
     .addTemplate("migrateMetaData", t => t
@@ -182,6 +188,14 @@ export const MetadataMigration = WorkflowBuilder.create({
             makeApprovalCheck(c.inputParameters, c.inputParameters.skipApprovalMap, "evaluateMetadata"))
         .addOptionalInput("skipMigrateApproval", c=>
             makeApprovalCheck(c.inputParameters, c.inputParameters.skipApprovalMap, "migrateMetadata"))
+        .addOptionalInput("approvalNamePrefix", c=>
+            expr.concat(
+                expr.jsonPathStrict(c.inputParameters.sourceConfig, "label"), expr.literal("."),
+                expr.jsonPathStrict(c.inputParameters.targetConfig, "label"),  expr.literal("."),
+                expr.jsonPathStrict(c.inputParameters.snapshotConfig, "label"),  expr.literal("."),
+                c.inputParameters.migrationLabel,  expr.literal(".")
+            )
+        )
 
         .addSteps(b => b
             .addStep("evaluateMetadata", INTERNAL, "runMetadata", c =>
@@ -194,7 +208,10 @@ export const MetadataMigration = WorkflowBuilder.create({
                     fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
                 })
             )
-            .addStep("approveEvaluate", INTERNAL, "approveEvaluate",
+            .addStep("approveEvaluate", INTERNAL, "approveEvaluate", c =>
+                c.register({
+                    "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("evaluateMetadata"))
+                }),
                 { when: expr.not(expr.cast(b.inputs.skipEvaluateApproval).to<boolean>()) })
             .addStep("migrateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
@@ -206,7 +223,10 @@ export const MetadataMigration = WorkflowBuilder.create({
                     fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
                 })
             )
-            .addStep("approveMigrate", INTERNAL, "approveMigrate",
+            .addStep("approveMigrate", INTERNAL, "approveMigrate", c=>
+                c.register({
+                    "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("migrateMetadata"))
+                }),
                 { when:  { templateExp: expr.not(expr.deserializeRecord(b.inputs.skipMigrateApproval))}})
         )
     )

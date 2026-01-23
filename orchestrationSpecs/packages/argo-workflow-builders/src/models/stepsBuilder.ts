@@ -19,7 +19,7 @@ import {
     TasksWithOutputs,
     WorkflowAndTemplatesScope
 } from "./workflowTypes";
-import {TemplateBodyBuilder} from "./templateBodyBuilder";
+import {RetryableTemplateBodyBuilder, RetryableTemplateRebinder} from "./templateBodyBuilder";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {NonSerializedPlainObject, PlainObject} from "./plainObject";
 import {
@@ -55,10 +55,10 @@ class StepGroupBuilder<
         tasksScope: TasksScope,
         tasks: NamedTask[]
     ) {
-        const rebind: TaskRebinder<ParentWorkflowScope> =
+        const templateRebind: TaskRebinder<ParentWorkflowScope> =
             <NS extends TasksOutputsScope>(ctx: ParentWorkflowScope, scope: NS, t: NamedTask[]) =>
                 new StepGroupBuilder<ParentWorkflowScope, NS>(ctx, scope, t);
-        super(parentWorkflowScope, tasksScope, tasks, rebind);
+        super(parentWorkflowScope, tasksScope, tasks, templateRebind);
     }
 }
 
@@ -77,13 +77,13 @@ export class StepsBuilder<
     InputParamsScope extends InputParametersRecord,
     StepsScope extends TasksOutputsScope,
     OutputParamsScope extends OutputParametersRecord
-> extends TemplateBodyBuilder<
+> extends RetryableTemplateBodyBuilder<
     ParentWorkflowScope,
     InputParamsScope,
     StepsScope,
     OutputParamsScope,
     StepsBuilder<ParentWorkflowScope, InputParamsScope, StepsScope, any>,
-    TasksOutputsScope, // <-- BodyBound for this subclass
+    TasksOutputsScope,
     StepsExpressionContext<InputParamsScope, StepsScope>
 > {
     constructor(
@@ -92,25 +92,20 @@ export class StepsBuilder<
         public readonly bodyScope: StepsScope,
         readonly stepGroups: StepGroup[],
         public readonly outputsScope: OutputParamsScope,
-        protected readonly retryParameters: GenericScope,
+        retryParameters: GenericScope,
         public readonly synchronization: SynchronizationConfig | undefined
     ) {
-        const rebind = <
-            NewBodyScope extends TasksOutputsScope,
-            NewOutputScope extends OutputParametersRecord,
-            Self extends TemplateBodyBuilder<any, any, any, any, any, any, any>
-        >(
-            ctx: ParentWorkflowScope,
-            inputs: InputParamsScope,
-            body: NewBodyScope,
-            outputs: NewOutputScope,
-            retry: GenericScope,
-            synchronization?: SynchronizationConfig
-        ): Self => {
-            return new StepsBuilder(ctx, inputs, body, this.stepGroups, outputs, retry, synchronization) as any;
-        };
+        const templateRebind: RetryableTemplateRebinder<
+            ParentWorkflowScope,
+            InputParamsScope,
+            // This builder only exposes and needs to expose its task outputs, not the whole body.
+            // That's why we ONLY bind the body to the task outputs
+            TasksOutputsScope,
+            StepsExpressionContext<InputParamsScope, StepsScope>
+        > = (ctx, inputs, body, outputs, retry, synchronization) =>
+            new StepsBuilder(ctx, inputs, body, this.stepGroups, outputs, retry, synchronization) as any;
 
-        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, rebind);
+        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, templateRebind);
     }
 
     protected getExpressionBuilderContext(): StepsExpressionContext<InputParamsScope, StepsScope> {

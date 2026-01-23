@@ -159,8 +159,13 @@ exports[`test workflow template renderings capture-replay 1`] = `
         ],
       },
       {
+        "inputs": {
+          "parameters": [],
+        },
         "name": "getuserapproval",
-        "outputs": undefined,
+        "outputs": {
+          "parameters": [],
+        },
         "suspend": {},
       },
       {
@@ -3163,13 +3168,31 @@ exports[`test workflow template renderings metadata-migration 1`] = `
         ],
       },
       {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "name",
+            },
+          ],
+        },
         "name": "approveevaluate",
-        "outputs": undefined,
+        "outputs": {
+          "parameters": [],
+        },
         "suspend": {},
       },
       {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "name",
+            },
+          ],
+        },
         "name": "approvemigrate",
-        "outputs": undefined,
+        "outputs": {
+          "parameters": [],
+        },
         "suspend": {},
       },
       {
@@ -3215,6 +3238,10 @@ exports[`test workflow template renderings metadata-migration 1`] = `
             {
               "name": "skipMigrateApproval",
               "value": "{{=sprig.dig(fromJSON(inputs.parameters.sourceConfig)['label'], fromJSON(inputs.parameters.targetConfig)['label'], jsonpath(inputs.parameters.snapshotConfig, '$.label'), inputs.parameters.migrationLabel, 'migrateMetadata', false, fromJSON(inputs.parameters.skipApprovalMap))}}",
+            },
+            {
+              "name": "approvalNamePrefix",
+              "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')+'.'+jsonpath(inputs.parameters.targetConfig, '$.label')+'.'+jsonpath(inputs.parameters.snapshotConfig, '$.label')+'.'+inputs.parameters.migrationLabel+'.'}}",
             },
           ],
         },
@@ -3280,7 +3307,12 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           [
             {
               "arguments": {
-                "parameters": [],
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "{{=inputs.parameters.approvalNamePrefix+'evaluateMetadata'}}",
+                  },
+                ],
               },
               "name": "approveEvaluate",
               "template": "approveevaluate",
@@ -3344,7 +3376,12 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           [
             {
               "arguments": {
-                "parameters": [],
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "{{=inputs.parameters.approvalNamePrefix+'migrateMetadata'}}",
+                  },
+                ],
               },
               "name": "approveMigrate",
               "template": "approvemigrate",

@@ -180,7 +180,10 @@ function formatBody(body: GenericScope) {
                 ...transformExpressionsDeep(restOfBody)
             };
         } else if (body.suspend !== undefined) {
-            return {suspend: {}};
+            const { duration } = body.suspend;
+            return duration !== undefined
+                ? { suspend: { duration: String(Math.floor(duration / 1000)) } }
+                : { suspend: {} };
         } else {
             return transformExpressionsDeep(body);
         }
