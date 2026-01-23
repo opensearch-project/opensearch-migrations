@@ -536,6 +536,71 @@ async def test_node_phase_update_preserves_tree_structure():
         assert len(tree.root.children) == 2, "Tree structure changed unexpectedly"
 
 
+@pytest.mark.asyncio
+async def test_live_check_lifecycle_with_group():
+    """
+    Test that Live Status appears as a sibling AFTER a group node with groupName=checks,
+    not inside the group.
+    """
+    workflow = {
+        "metadata": {"name": "test-wf", "resourceVersion": "123"},
+        "status": {
+            "startedAt": "2023-01-01T00:00:00Z",
+            "nodes": {
+                "group-1": {
+                    "id": "group-1", "displayName": "waitingBlock", "type": "StepGroup",
+                    "phase": PHASE_RUNNING, "children": ["node-1", "node-2"],
+                    "inputs": {"parameters": [{"name": "groupName", "value": "checks"}]}
+                },
+                "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": "Failed",
+                           "children": [], "startedAt": "2023-01-01T00:01:00Z",
+                           "boundaryID": "group-1",
+                           "inputs": {"parameters": [{"name": "configContents", "value": "cfg"}]}},
+                "node-2": {"id": "node-2", "displayName": "step-2", "type": "Pod", "phase": PHASE_RUNNING,
+                           "children": [], "startedAt": "2023-01-01T00:02:00Z",
+                           "boundaryID": "group-1",
+                           "inputs": {"parameters": [{"name": "configContents", "value": "cfg"}]}}
+            }
+        }
+    }
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.side_effect = lambda *a, **kw: ({"success": True}, copy.deepcopy(workflow))
+
+    app = WorkflowTreeApp(
+        namespace="default", name="test",
+        argo_service=argo_service,
+        pod_scraper=MagicMock(),
+        workflow_waiter=MagicMock(),
+        refresh_interval=0.10
+    )
+
+    async with app.run_test() as pilot:
+        tree = app.query_one("#workflow-tree")
+
+        def has_live_status_at_root():
+            return any("Live Status" in str(c.label) for c in tree.root.children)
+
+        def has_live_status_in_group():
+            for c in tree.root.children:
+                if "waiting block" in str(c.label).lower():
+                    return any("Live Status" in str(gc.label) for gc in c.children)
+            return False
+
+        await pilot.pause()
+        assert await wait_until(pilot, has_live_status_at_root), \
+            "Live Status should appear as sibling to group node"
+        assert not has_live_status_in_group(), \
+            "Live Status should NOT appear inside the checks group"
+
+        # Verify Live Status is positioned after the group node
+        root_labels = [str(c.label) for c in tree.root.children]
+        group_idx = next((i for i, lbl in enumerate(root_labels) if "waiting block" in lbl.lower()), None)
+        assert group_idx is not None, f"waiting block not found in root. Labels: {root_labels}"
+        live_idx = next(i for i, lbl in enumerate(root_labels) if "Live Status" in lbl)
+        assert live_idx > group_idx, "Live Status should appear after the group node"
+
+
 @pytest.mark.parametrize("env_updates, expected_wrapper", [
     ({"SSH_TTY": "/dev/pts/0", "TERM": "xterm-256color"}, "{osc}"),
     ({"SSH_TTY": "/dev/pts/0", "TERM": "xterm-256color", "TMUX": "1"}, "\x1bPtmux;\x1b{osc}\x1b\\")

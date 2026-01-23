@@ -281,7 +281,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         ))
 
 
-    .addTemplate("waitForCompletion", t => t
+    .addTemplate("waitForCompletionInternal", t => t
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
@@ -302,6 +302,29 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             retryPolicy: "Always",
             backoff: {duration: "5", factor: "2", cap: "300"}
         })
+    )
+
+    .addTemplate("waitForCompletion", t => t
+        .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addRequiredInput("targetK8sLabel", typeToken<string>())
+        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
+        .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
+        .addOptionalInput("groupName", c => "checks")
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addSteps(b => b
+            .addStep("runStatusChecks", INTERNAL, "waitForCompletionInternal", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    configContents: b.inputs.configContents,
+                    sessionName: b.inputs.sessionName,
+                    sourceK8sLabel: b.inputs.sourceK8sLabel,
+                    targetK8sLabel: b.inputs.targetK8sLabel,
+                    snapshotK8sLabel: b.inputs.snapshotK8sLabel,
+                    fromSnapshotMigrationK8sLabel: b.inputs.fromSnapshotMigrationK8sLabel
+                }))
+        )
     )
 
 

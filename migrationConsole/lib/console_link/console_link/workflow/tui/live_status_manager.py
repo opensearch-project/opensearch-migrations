@@ -2,7 +2,7 @@ import datetime
 import logging
 import yaml
 from dataclasses import dataclass
-from typing import Dict, Set
+from typing import Dict, Set, Optional, List
 
 from textual.widgets._tree import TreeNode
 
@@ -33,68 +33,107 @@ class LiveStatusManager:
     def reconcile_tree_for_live_status_checks(self, app, root: TreeNode) -> None:
         """Recursively reconcile live status nodes throughout the tree."""
         logger.info("Starting live status reconciliation")
-        current_live_check_group_nodes: Set[TreeNode] = set()
-        self._reconcile_node(app, root, current_live_check_group_nodes)
-        if removed := self._active_live_check_group_nodes - current_live_check_group_nodes:
+        current_active: Set[TreeNode] = set()
+        self._reconcile_node(app, root, current_active)
+
+        if removed := self._active_live_check_group_nodes - current_active:
             logger.info(f"Removing {len(removed)} stale live status headers")
-        self._active_live_check_group_nodes = current_live_check_group_nodes
-        logger.info(f"Reconciliation complete: {len(current_live_check_group_nodes)} active headers")
 
-    def _reconcile_node(self, app, node: TreeNode, current_live_check_group_nodes: Set[TreeNode]) -> None:
-        """Process a node: manage live status based on configContents children."""
-        config_children = [
-            c for c in node.children
-            if c.data and not c.data.get("is_ephemeral") and
-            get_node_input_parameter(c.data, 'configContents') is not None and
-               c.data['display_name'].endswith("Status")
-        ]
-        live_status_node = next(
-            (c for c in node.children if c.data and c.data.get("ephemeral_node_type") == "live-status-check"), None
-        )
+        self._active_live_check_group_nodes = current_active
+        logger.info(f"Reconciliation complete: {len(current_active)} active headers")
 
-        if config_children:
-            any_succeeded = any(c.data.get('phase') == "Succeeded" for c in config_children)
-            logger.info(
-                f"config_children={len(config_children)}, any_succeeded={any_succeeded}, "
-                f"phases={[c.data.get('phase') for c in config_children]}"
-            )
+    def _reconcile_node(self, app, node: TreeNode, current_active: Set[TreeNode]) -> None:
+        """Process a node: branching between group-level and direct-level status."""
+        checks_group = self._find_checks_group(node)
 
-            if any_succeeded:
-                if live_status_node:
-                    logger.info("Removing live status: a config child succeeded")
-                    live_status_node.remove()
-            else:
-                if not live_status_node:
-                    first = config_children[0]
-                    logger.info(f"Creating live status header for: {first.data.get('display_name')}")
-                    live_status_node = node.add("[bold cyan]Live Status:[/]", data={
-                        "is_ephemeral": True,
-                        "ephemeral_node_type": "live-status-check",
-                        "check_config": self._extract_check_config(first.data)
-                    })
+        if checks_group:
+            self._reconcile_checks_group(app, node, checks_group, current_active)
+        else:
+            self._reconcile_direct_config_children(app, node, current_active)
 
-                # Move non-ephemeral nodes after live_status to before it
-                children = list(node.children)
-                idx = children.index(live_status_node)
-                for child in children[idx + 1:]:
-                    assert child.data and not child.data.get("is_ephemeral"), \
-                        "Only non-ephemeral nodes should appear after live status header"
-                    logger.debug(f"Reordering node {child.data.get('display_name')} before live status")
+        # Recurse, but skip the checks_group if we just handled it
+        for child in node.children:
+            if child.data and not child.data.get("is_ephemeral") and child is not checks_group:
+                self._reconcile_node(app, child, current_active)
+
+    def _reconcile_checks_group(self, app, parent: TreeNode, checks_group: TreeNode,
+                                current_active: Set[TreeNode]) -> None:
+        """Handle live status as a sibling immediately following the checks group."""
+        config_children = self._get_config_children(checks_group)
+        live_node = self._find_live_node(parent)
+
+        if not config_children:
+            if live_node: live_node.remove()
+            return
+
+        if any(c.data.get('phase') == "Succeeded" for c in config_children):
+            if live_node: live_node.remove()
+        else:
+            if not live_node:
+                live_node = parent.add("[bold cyan]Live Status:[/]", data={
+                    "is_ephemeral": True,
+                    "ephemeral_node_type": "live-status-check",
+                    "check_config": self._extract_check_config(config_children[0].data)
+                }, after=checks_group)
+
+            # Sibling positioning logic
+            children = list(parent.children)
+            if children.index(live_node) != children.index(checks_group) + 1:
+                label, data = live_node.label, live_node.data
+                live_node.remove()
+                live_node = parent.add(label, data=data, after=checks_group)
+
+            self._track_and_start(app, live_node, current_active)
+
+    def _reconcile_direct_config_children(self, app, node: TreeNode, current_active: Set[TreeNode]) -> None:
+        """Handle live status as a child of the current node."""
+        config_children = self._get_config_children(node)
+        live_node = self._find_live_node(node)
+
+        if not config_children:
+            if live_node: live_node.remove()
+            return
+
+        if any(c.data.get('phase') == "Succeeded" for c in config_children):
+            if live_node: live_node.remove()
+        else:
+            if not live_node:
+                live_node = node.add("[bold cyan]Live Status:[/]", data={
+                    "is_ephemeral": True,
+                    "ephemeral_node_type": "live-status-check",
+                    "check_config": self._extract_check_config(config_children[0].data)
+                })
+
+            # Reordering logic: ensure non-ephemerals are before the live node
+            children = list(node.children)
+            live_idx = children.index(live_node)
+            for child in children[live_idx + 1:]:
+                if child.data and not child.data.get("is_ephemeral"):
                     label, data = child.label, child.data
                     child.remove()
-                    node.add(label, data=data, before=live_status_node)
+                    node.add(label, data=data, before=live_node)
 
-                current_live_check_group_nodes.add(live_status_node)
-                if live_status_node not in self._active_live_check_group_nodes:
-                    logger.debug("Starting live loop")
-                    self._start_live_loop(app, live_status_node)
-        elif live_status_node:
-            logger.debug("Removing orphaned live status (no config children)")
-            live_status_node.remove()
+            self._track_and_start(app, live_node, current_active)
 
-        for child in node.children:
-            if child.data and not child.data.get("is_ephemeral"):
-                self._reconcile_node(app, child, current_live_check_group_nodes)
+    def _find_checks_group(self, node: TreeNode) -> Optional[TreeNode]:
+        return next((c for c in node.children if
+                     c.data and not c.data.get("is_ephemeral") and c.data.get("group_name") == "checks"), None)
+
+    def _find_live_node(self, container: TreeNode) -> Optional[TreeNode]:
+        return next(
+            (c for c in container.children if c.data and c.data.get("ephemeral_node_type") == "live-status-check"),
+            None)
+
+    def _get_config_children(self, node: TreeNode) -> List[TreeNode]:
+        return [c for c in node.children if
+                c.data and not c.data.get("is_ephemeral") and get_node_input_parameter(c.data,
+                                                                                       'configContents') is not None]
+
+    def _track_and_start(self, app, live_node: TreeNode, current_active: Set[TreeNode]) -> None:
+        current_active.add(live_node)
+        if live_node not in self._active_live_check_group_nodes:
+            self._start_live_loop(app, live_node)
+
 
     def _extract_check_config(self, node_data: Dict) -> LiveCheckConfig:
         """Extract immutable check config from node data."""
@@ -142,9 +181,9 @@ class LiveStatusManager:
                 logger.debug(f"Running status check for {config.node_id} (type={config.check_type})")
                 result = StatusCheckRunner.run_status_check(env, {"check_type": config.check_type})
                 app.call_from_thread(self._update_ui_result, header, result)
-                return
-            logger.warning(f"Config conversion failed for {config.node_id}")
-            app.call_from_thread(self._update_ui_result, header, {"error": "Config conversion failed"})
+            else:
+                logger.warning(f"Config conversion failed for {config.node_id}")
+                app.call_from_thread(self._update_ui_result, header, {"error": "Config conversion failed"})
         except Exception as e:
             logger.exception(f"_perform_check_worker: exception for {config.node_id}")
             app.call_from_thread(self._update_ui_result, header, {"error": str(e)})

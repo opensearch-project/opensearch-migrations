@@ -65,7 +65,7 @@ function namePerIndexSnapshotMigration(
 z.infer<typeof PER_INDICES_SNAPSHOT_MIGRATION_CONFIG> {
     const {label, ...rest} = data;
     return {
-        ...({ label: label? label : idx.toString() }),
+        ...({ label: label? label : `snapshot-migration-${idx.toString()}` }),
         ...rest
     };
 }
@@ -83,7 +83,7 @@ export function setNamesInUserConfig(userConfig: InputConfig): InputConfig {
                     return {
                         ...rest,
                         ...(migrations ? { migrations: migrations.flatMap(namePerIndexSnapshotMigration) } : {}),
-                        ...({ label: label? label : idx.toString() }),
+                        ...({ label: label? label : `snapshot-${idx.toString()}` }),
                     } as z.infer<typeof NORMALIZED_SNAPSHOT_MIGRATION_CONFIG>;
                 });
 

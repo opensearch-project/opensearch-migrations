@@ -808,7 +808,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
             },
           ],
         },
-        "name": "checksnapshotstatus",
+        "name": "checksnapshotstatusinternal",
         "outputs": {
           "parameters": [],
         },
@@ -906,6 +906,74 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                 "name": "migration-console",
                 "template": "runmigrationcommandforstatus",
               },
+            },
+          ],
+        ],
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "configContents",
+            },
+            {
+              "name": "sourceK8sLabel",
+            },
+            {
+              "name": "targetK8sLabel",
+            },
+            {
+              "name": "snapshotK8sLabel",
+            },
+            {
+              "name": "groupName",
+              "value": "checks",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "checksnapshotstatus",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "configContents",
+                    "value": "{{inputs.parameters.configContents}}",
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}",
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetK8sLabel}}",
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{inputs.parameters.snapshotK8sLabel}}",
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                ],
+              },
+              "name": "runStatusChecks",
+              "template": "checksnapshotstatusinternal",
             },
           ],
         ],
@@ -1038,7 +1106,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                   },
                 ],
               },
-              "name": "checkSnapshotStatus",
+              "name": "waitForCompletion",
               "template": "checksnapshotstatus",
             },
           ],
@@ -1156,7 +1224,7 @@ metadata:
             },
           ],
         },
-        "name": "waitforcompletion",
+        "name": "waitforcompletioninternal",
         "outputs": {
           "parameters": [],
         },
@@ -1258,6 +1326,88 @@ END {
                 "name": "migration-console",
                 "template": "runmigrationcommandforstatus",
               },
+            },
+          ],
+        ],
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "configContents",
+            },
+            {
+              "name": "sessionName",
+            },
+            {
+              "name": "sourceK8sLabel",
+            },
+            {
+              "name": "targetK8sLabel",
+            },
+            {
+              "name": "snapshotK8sLabel",
+            },
+            {
+              "name": "fromSnapshotMigrationK8sLabel",
+            },
+            {
+              "name": "groupName",
+              "value": "checks",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "waitforcompletion",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "configContents",
+                    "value": "{{inputs.parameters.configContents}}",
+                  },
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}",
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}",
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetK8sLabel}}",
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{inputs.parameters.snapshotK8sLabel}}",
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}",
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                ],
+              },
+              "name": "runStatusChecks",
+              "template": "waitforcompletioninternal",
             },
           ],
         ],

@@ -147,7 +147,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
 
     )
 
-    .addTemplate("checkSnapshotStatus", t => t
+    .addTemplate("checkSnapshotStatusInternal", t => t
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("targetK8sLabel", typeToken<string>())
@@ -165,6 +165,25 @@ export const CreateSnapshot = WorkflowBuilder.create({
             limit: "200", retryPolicy: "Always",
             backoff: {duration: "5", factor: "2", cap: "300"}
         })
+    )
+
+    .addTemplate("checkSnapshotStatus", t => t
+        .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addRequiredInput("targetK8sLabel", typeToken<string>())
+        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
+        .addOptionalInput("groupName", c => "checks")
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addSteps(b => b
+            .addStep("runStatusChecks", INTERNAL, "checkSnapshotStatusInternal", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    configContents: b.inputs.configContents,
+                    sourceK8sLabel: b.inputs.sourceK8sLabel,
+                    targetK8sLabel: b.inputs.targetK8sLabel,
+                    snapshotK8sLabel: b.inputs.snapshotK8sLabel
+                }))
+        )
     )
 
 
@@ -189,7 +208,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c)
                 }))
 
-            .addStep("checkSnapshotStatus", INTERNAL, "checkSnapshotStatus", c =>
+            .addStep("waitForCompletion", INTERNAL, "checkSnapshotStatus", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     configContents: c.steps.getConsoleConfig.outputs.configContents,
