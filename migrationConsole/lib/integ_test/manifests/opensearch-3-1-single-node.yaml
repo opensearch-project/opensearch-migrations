@@ -51,7 +51,7 @@ spec:
               memory: 2Gi
           readinessProbe:
             httpGet:
-              path: /
+              path: /_cluster/health?wait_for_status=yellow&timeout=1s
               port: https
               scheme: HTTPS
             initialDelaySeconds: 0
