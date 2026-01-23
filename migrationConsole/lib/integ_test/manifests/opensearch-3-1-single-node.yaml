@@ -50,14 +50,17 @@ spec:
               cpu: "1"
               memory: 2Gi
           readinessProbe:
-            httpGet:
-              path: /_cluster/health?wait_for_status=yellow&timeout=1s
-              port: https
-              scheme: HTTPS
+            exec:
+              command:
+                - curl
+                - -sk
+                - -u
+                - admin:myStrongPassword123!
+                - https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s
             initialDelaySeconds: 0
             periodSeconds: 5
             timeoutSeconds: 3
-            failureThreshold: 12
+            failureThreshold: 24
           volumeMounts:
             - name: data
               mountPath: /usr/share/opensearch/data
