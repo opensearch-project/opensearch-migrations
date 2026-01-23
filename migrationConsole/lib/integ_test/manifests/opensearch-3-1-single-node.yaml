@@ -54,8 +54,8 @@ spec:
               path: /
               port: https
               scheme: HTTPS
-            initialDelaySeconds: 5
-            periodSeconds: 10
+            initialDelaySeconds: 0
+            periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 12
           volumeMounts:
