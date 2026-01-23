@@ -6,7 +6,7 @@ import click
 
 from ..models.utils import ExitCode
 from ..services.workflow_service import WorkflowService
-from .utils import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 
 logger = logging.getLogger(__name__)
 

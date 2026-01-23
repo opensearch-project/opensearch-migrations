@@ -24,7 +24,7 @@ from ..tree_utils import (
     get_node_input_parameter,
     WorkflowDisplayer
 )
-from .utils import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from console_link.environment import Environment
 from console_link.middleware import snapshot as snapshot_middleware
 from console_link.middleware import backfill as backfill_middleware

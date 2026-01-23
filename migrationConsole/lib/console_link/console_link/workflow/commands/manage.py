@@ -9,7 +9,7 @@ from kubernetes import client
 
 # Internal imports
 from ..models.utils import ExitCode, load_k8s_config
-from .utils import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 
 import psutil
 

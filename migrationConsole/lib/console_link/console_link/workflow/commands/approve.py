@@ -15,7 +15,7 @@ import requests
 
 from ..models.utils import ExitCode
 from ..services.workflow_service import WorkflowService
-from .utils import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ def _get_cached_suspended_names(ctx) -> list[tuple[Any]] | list[tuple[str, str, 
         return []
 
 
-def get_approval_task_name_completions(ctx, param, incomplete):
+def get_approval_task_name_completions(ctx, _, incomplete):
     """Shell completion for approval step names."""
     suspended = _get_cached_suspended_names(ctx)
     return [

@@ -1,11 +1,8 @@
 """Shared utility functions for workflow commands."""
-
 import logging
 
 from click.shell_completion import CompletionItem
-
 from kubernetes import client
-
 from ..models.utils import load_k8s_config
 
 logger = logging.getLogger(__name__)
@@ -13,7 +10,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_WORKFLOW_NAME = "migration-workflow"
 
 
-def get_workflow_completions(ctx, param, incomplete):
+def get_workflow_completions(ctx, _, incomplete):
     """Shell completion for workflow names via k8s API."""
     try:
         load_k8s_config()
@@ -36,3 +33,4 @@ def get_workflow_completions(ctx, param, incomplete):
     except Exception:
         pass
     return []
+
