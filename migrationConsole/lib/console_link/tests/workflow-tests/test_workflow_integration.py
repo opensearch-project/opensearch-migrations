@@ -1105,8 +1105,7 @@ class TestArgoWorkflows:
 
             # Test output command with the completed workflow
             logger.info("\nTesting output command for completed workflow...")
-            runner = CliRunner()
-            _test_output_command_for_workflow(runner, workflow_name, argo_namespace, test_message)
+            _test_output_command_for_workflow(workflow_name, argo_namespace, test_message)
 
         except ApiException as e:
             pytest.fail(f"Failed to submit workflow via Kubernetes API: {e}")
@@ -1225,14 +1224,13 @@ def test_k3s_container_support():
         pytest.skip("testcontainers not installed - run: pip install testcontainers")
 
 
-def _test_output_command_for_workflow(runner, workflow_name, namespace, expected_message):
+def _test_output_command_for_workflow(workflow_name, namespace, expected_message):
     """
     Helper function to test output command for a given workflow.
 
     Tests that the output command can retrieve output from a completed workflow.
 
     Args:
-        runner: Click test runner
         workflow_name: Name of the workflow to get output for
         namespace: Kubernetes namespace
         expected_message: The message that should appear in the workflow output
@@ -1240,19 +1238,14 @@ def _test_output_command_for_workflow(runner, workflow_name, namespace, expected
     Raises:
         AssertionError: If output command fails or output is not retrieved
     """
-    # Invoke output command with explicit argo-server URL (HTTPS with insecure flag for self-signed cert)
-    result = runner.invoke(
-        workflow_cli,
-        ['output', '--workflow-name', workflow_name, '--namespace', namespace, '--argo-server', 'https://localhost:2746', '--insecure',
-         '--prefix', '', '-l', 'test-workflow=hello-world'],
-    )
+    # Run CLI as subprocess to capture kubectl output (which bypasses Click's stdout capture)
+    cmd = f"workflow output --workflow-name {workflow_name} --namespace {namespace} --argo-server https://localhost:2746 --insecure --prefix '' -l test-workflow=hello-world"
+    result = subprocess.run(cmd, shell=True, executable='/bin/bash', capture_output=True, text=True, timeout=30)
 
-    # Verify command succeeded (exit code 0 means it found pods and attempted to show output)
-    assert result.exit_code == 0, f"Output command failed with exit code {result.exit_code}. Output: {result.output}"
+    assert result.returncode == 0, f"Output command failed with exit code {result.returncode}. stderr: {result.stderr}"
 
-    # Verify the expected message appears in the output
-    assert expected_message in result.output, \
-        f"Expected message '{expected_message}' not found in output: {result.output}"
+    assert expected_message in result.stdout, \
+        f"Expected message '{expected_message}' not found in output: {result.stdout}"
 
     logger.info(f"✓ Output command successfully executed for workflow {workflow_name}")
     logger.info(f"✓ Verified output contains expected message: {expected_message}")
@@ -1276,7 +1269,7 @@ def _test_status_command_for_workflow(runner, workflow_name, namespace):
     # Invoke status command with explicit argo-server URL (HTTPS with insecure flag for self-signed cert)
     result = runner.invoke(
         workflow_cli,
-        ['status', workflow_name, '--namespace', namespace, '--argo-server', 'https://localhost:2746', '--insecure']
+        ['status', '--workflow-name', workflow_name, '--namespace', namespace, '--argo-server', 'https://localhost:2746', '--insecure']
     )
 
     # Verify command succeeded
