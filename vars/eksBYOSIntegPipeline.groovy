@@ -277,7 +277,7 @@ def call(Map config = [:]) {
                                                 echo "kubectl configured and ready"
                                                 break
                                             fi
-                                            echo "Waiting for kubectl to be ready (attempt $i of 10)"
+                                            echo "Waiting for kubectl to be ready (attempt \$i of 10)"
                                             sleep 5
                                         done
                                     """
@@ -467,13 +467,13 @@ def call(Map config = [:]) {
                                         MAX_ATTEMPTS=3
                                         ATTEMPT=1
                                         while [ \$ATTEMPT -le \$MAX_ATTEMPTS ]; do
-                                            echo "CLEANUP: Attempt $ATTEMPT of $MAX_ATTEMPTS - Deleting MA stack ${maStackName}"
+                                            echo "CLEANUP: Attempt \$ATTEMPT of \$MAX_ATTEMPTS - Deleting MA stack ${maStackName}"
                                             aws cloudformation delete-stack --stack-name ${maStackName} || true
                                             deadline=\$((SECONDS + 1800))  # 30 min per attempt
                                             while [ \$SECONDS -lt \$deadline ]; do
                                                 status=\$(aws cloudformation describe-stacks --stack-name ${maStackName} \
                                                     --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DELETED")
-                                                echo "CLEANUP: MA stack status: $status"
+                                                echo "CLEANUP: MA stack status: \$status"
                                                 if [ "\$status" = "DELETED" ] || [ "\$status" = "DELETE_COMPLETE" ]; then
                                                     echo "CLEANUP: MA stack ${maStackName} deleted successfully"
                                                     exit 0
@@ -494,7 +494,7 @@ def call(Map config = [:]) {
                                             fi
                                             ATTEMPT=\$((ATTEMPT + 1))
                                         done
-                                        echo "CLEANUP: FAILED - MA stack ${maStackName} deletion failed after $MAX_ATTEMPTS attempts"
+                                        echo "CLEANUP: FAILED - MA stack ${maStackName} deletion failed after \$MAX_ATTEMPTS attempts"
                                         exit 1
                                     """
                                 }
@@ -506,13 +506,13 @@ def call(Map config = [:]) {
                                         MAX_ATTEMPTS=2
                                         ATTEMPT=1
                                         while [ \$ATTEMPT -le \$MAX_ATTEMPTS ]; do
-                                            echo "CLEANUP: Attempt $ATTEMPT of $MAX_ATTEMPTS - Deleting Domain stack ${domainStackName}"
+                                            echo "CLEANUP: Attempt \$ATTEMPT of \$MAX_ATTEMPTS - Deleting Domain stack ${domainStackName}"
                                             aws cloudformation delete-stack --stack-name ${domainStackName} || true
                                             deadline=\$((SECONDS + 3600))  # 60 min per attempt (domain deletions can be slow)
                                             while [ \$SECONDS -lt \$deadline ]; do
                                                 status=\$(aws cloudformation describe-stacks --stack-name ${domainStackName} \
                                                     --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DELETED")
-                                                echo "CLEANUP: Domain stack status: $status"
+                                                echo "CLEANUP: Domain stack status: \$status"
                                                 if [ "\$status" = "DELETED" ] || [ "\$status" = "DELETE_COMPLETE" ]; then
                                                     echo "CLEANUP: Domain stack ${domainStackName} deleted successfully"
                                                     exit 0
@@ -533,7 +533,7 @@ def call(Map config = [:]) {
                                             fi
                                             ATTEMPT=\$((ATTEMPT + 1))
                                         done
-                                        echo "CLEANUP: FAILED - Domain stack ${domainStackName} deletion failed after $MAX_ATTEMPTS attempts"
+                                        echo "CLEANUP: FAILED - Domain stack ${domainStackName} deletion failed after \$MAX_ATTEMPTS attempts"
                                         exit 1
                                     """
                                 }
@@ -544,7 +544,7 @@ def call(Map config = [:]) {
                                         set -euo pipefail
                                         VPC_ID=\$(aws cloudformation describe-stack-resources --stack-name ${networkStackName} \
                                             --query 'StackResources[?ResourceType==\\`AWS::EC2::VPC\\`].PhysicalResourceId' --output text 2>/dev/null || echo "")
-                                        echo "CLEANUP: VPC ID: $VPC_ID"
+                                        echo "CLEANUP: VPC ID: \$VPC_ID"
                                         if [ -z "\$VPC_ID" ]; then
                                             echo "CLEANUP: No VPC found in stack, skipping dependency check"
                                             exit 0
@@ -565,9 +565,9 @@ def call(Map config = [:]) {
                                                 --query "length(LoadBalancers[?VpcId=='\$VPC_ID'])" --output text 2>/dev/null || echo 0)
                                             classic_elb_count=\$(aws elb describe-load-balancers \
                                                 --query "length(LoadBalancerDescriptions[?VPCId=='\$VPC_ID'])" --output text 2>/dev/null || echo 0)
-                                            echo "CLEANUP: VPC dependencies - ENIs: $total_enis, NAT gateways: $nat_count, VPC endpoints: $vpce_count, ELBv2: $elbv2_count, Classic ELB: $classic_elb_count"
+                                            echo "CLEANUP: VPC dependencies - ENIs: \$total_enis, NAT gateways: \$nat_count, VPC endpoints: \$vpce_count, ELBv2: \$elbv2_count, Classic ELB: \$classic_elb_count"
                                             if [ "\$total_enis" = "0" ] && [ "\$nat_count" = "0" ] && [ "\$vpce_count" = "0" ] && [ "\$elbv2_count" = "0" ] && [ "\$classic_elb_count" = "0" ]; then
-                                                echo "CLEANUP: VPC dependencies drained for VPC $VPC_ID"
+                                                echo "CLEANUP: VPC dependencies drained for VPC \$VPC_ID"
                                                 exit 0
                                             fi
                                             sleep 60
@@ -597,19 +597,19 @@ def call(Map config = [:]) {
                                         MAX_ATTEMPTS=3
                                         ATTEMPT=1
                                         while [ \$ATTEMPT -le \$MAX_ATTEMPTS ]; do
-                                            echo "CLEANUP: Attempt $ATTEMPT of $MAX_ATTEMPTS - Deleting Network stack ${networkStackName}"
+                                            echo "CLEANUP: Attempt \$ATTEMPT of \$MAX_ATTEMPTS - Deleting Network stack ${networkStackName}"
                                             aws cloudformation delete-stack --stack-name ${networkStackName} || true
                                             deadline=\$((SECONDS + 1800))
                                             while [ \$SECONDS -lt \$deadline ]; do
                                                 status=\$(aws cloudformation describe-stacks --stack-name ${networkStackName} \
                                                     --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DELETED")
-                                                echo "CLEANUP: Network stack status: $status"
+                                                echo "CLEANUP: Network stack status: \$status"
                                                 if [ "\$status" = "DELETED" ] || [ "\$status" = "DELETE_COMPLETE" ]; then
-                                                    echo "CLEANUP: Network stack ${networkStackName} deleted successfully on attempt $ATTEMPT"
+                                                    echo "CLEANUP: Network stack ${networkStackName} deleted successfully on attempt \$ATTEMPT"
                                                     exit 0
                                                 fi
                                                 if [ "\$status" = "DELETE_FAILED" ]; then
-                                                    echo "CLEANUP: Network stack ${networkStackName} deletion failed on attempt $ATTEMPT"
+                                                    echo "CLEANUP: Network stack ${networkStackName} deletion failed on attempt \$ATTEMPT"
                                                     echo "CLEANUP: Recent stack events:"
                                                     aws cloudformation describe-stack-events --stack-name ${networkStackName} \
                                                         --query 'StackEvents[0:15].[Timestamp,ResourceStatus,LogicalResourceId,ResourceStatusReason]' \
@@ -626,7 +626,7 @@ def call(Map config = [:]) {
                                                     --query 'StackResources[?ResourceType==\\`AWS::EC2::VPC\\`].PhysicalResourceId' \
                                                     --output text 2>/dev/null || echo "")
                                                 if [ -n "\$VPC_ID" ]; then
-                                                    echo "CLEANUP: VPC ID: $VPC_ID"
+                                                    echo "CLEANUP: VPC ID: \$VPC_ID"
                                                     aws ec2 describe-network-interfaces --filters Name=vpc-id,Values="\$VPC_ID" \
                                                         --query 'NetworkInterfaces[*].{Id:NetworkInterfaceId,Type:InterfaceType,Status:Status,Desc:Description}' \
                                                         --output table || true
@@ -650,7 +650,7 @@ def call(Map config = [:]) {
                                             fi
                                             ATTEMPT=\$((ATTEMPT + 1))
                                         done
-                                        echo "CLEANUP: FAILED - Network stack ${networkStackName} deletion failed after $MAX_ATTEMPTS attempts"
+                                        echo "CLEANUP: FAILED - Network stack ${networkStackName} deletion failed after \$MAX_ATTEMPTS attempts"
                                         echo "CLEANUP: Manual cleanup required - see CloudFormation console for details"
                                         exit 1
                                     """
