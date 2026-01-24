@@ -942,73 +942,140 @@ spec:
         command: [sh, -c]
         args:
           - |
-            helm repo add opensearch https://opensearch-project.github.io/helm-charts/
-            helm repo update
-            
-            cat > /tmp/opensearch.yml << EOF
-            cluster.name: {{inputs.parameters.cluster-name}}
-            network.host: 0.0.0.0
-            discovery.type: single-node
+            set -euo pipefail
+            CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
+            NAMESPACE='{{inputs.parameters.namespace}}'
+            ADMIN_PASSWORD='myStrongPassword123!'
+
+            # Apply the StatefulSet + Service
+            cat <<EOF | kubectl apply -f -
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              selector:
+                app: ${CLUSTER_NAME}
+              ports:
+                - name: https
+                  port: 9200
+                  targetPort: https
+            ---
+            apiVersion: apps/v1
+            kind: StatefulSet
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                app.kubernetes.io/instance: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              serviceName: ${CLUSTER_NAME}
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: ${CLUSTER_NAME}
+              template:
+                metadata:
+                  labels:
+                    app: ${CLUSTER_NAME}
+                    app.kubernetes.io/instance: ${CLUSTER_NAME}
+                    migration-test: "true"
+                    cluster-name: ${CLUSTER_NAME}
+                spec:
+                  serviceAccountName: migration-console-access-role
+                  initContainers:
+                    - name: install-plugins
+                      image: opensearchproject/opensearch:3.1.0
+                      command:
+                        - sh
+                        - -c
+                        - |
+                          cp -r /usr/share/opensearch/plugins/* /plugins/
+                          bin/opensearch-plugin install --batch repository-s3
+                          cp -r /usr/share/opensearch/plugins/repository-s3 /plugins/
+                      volumeMounts:
+                        - name: plugins
+                          mountPath: /plugins
+                  containers:
+                    - name: opensearch
+                      image: opensearchproject/opensearch:3.1.0
+                      ports:
+                        - name: https
+                          containerPort: 9200
+                      env:
+                        - name: cluster.name
+                          value: ${CLUSTER_NAME}
+                        - name: discovery.type
+                          value: single-node
+                        - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+                          value: ${ADMIN_PASSWORD}
+                        - name: OPENSEARCH_JAVA_OPTS
+                          value: -Xms512m -Xmx512m
+                      resources:
+                        requests:
+                          cpu: "1"
+                          memory: 2Gi
+                        limits:
+                          cpu: "1"
+                          memory: 2Gi
+                      readinessProbe:
+                        exec:
+                          command:
+                            - sh
+                            - -c
+                            - curl -sk -u admin:${ADMIN_PASSWORD} https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s
+                        initialDelaySeconds: 5
+                        periodSeconds: 5
+                        timeoutSeconds: 3
+                        failureThreshold: 24
+                      volumeMounts:
+                        - name: data
+                          mountPath: /usr/share/opensearch/data
+                        - name: plugins
+                          mountPath: /usr/share/opensearch/plugins
+                  volumes:
+                    - name: data
+                      emptyDir: {}
+                    - name: plugins
+                      emptyDir: {}
             EOF
-            
-            cat > /tmp/opensearch-values.yaml << 'EOF'
-            fullnameOverride: {{inputs.parameters.cluster-name}}
-            nodeGroup: ""
-            image:
-              repository: "opensearchproject/opensearch"
-              tag: "3.1.0"
-            singleNode: true
-            replicas: 1
-            extraEnvs:
-              - name: "OPENSEARCH_INITIAL_ADMIN_PASSWORD"
-                value: "MyStr0ngPassw0rd!"
-            resources:
-              requests:
-                cpu: "500m"
-                memory: "1Gi"
-              limits:
-                cpu: "1000m"
-                memory: "2Gi"
-            persistence:
-              enabled: false
-            opensearchJavaOpts: "-Xmx1g -Xms1g"
-            plugins:
-              enabled: true
-              installList:
-                - "repository-s3"
-            EOF
-            
-            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch --set rbac.create=false --set rbac.serviceAccountName=migration-console-access-role \
-              --namespace {{inputs.parameters.namespace}} \
-              --values /tmp/opensearch-values.yaml \
-              --set-file config."opensearch\.yml"=/tmp/opensearch.yml
-            
-            # Create cluster credentials secret (OpenSearch 3.1 password set via OPENSEARCH_INITIAL_ADMIN_PASSWORD)
-            kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
+
+            # Create cluster credentials secret
+            kubectl create secret generic "${CLUSTER_NAME}-creds" \
               --from-literal=username=admin \
-              --from-literal=password="MyStr0ngPassw0rd!" \
-              -n "{{inputs.parameters.namespace}}" \
+              --from-literal=password="${ADMIN_PASSWORD}" \
+              -n "${NAMESPACE}" \
               --dry-run=client -o yaml | \
-              kubectl label --local -f - migration-test=true cluster-name={{inputs.parameters.cluster-name}} -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
               kubectl apply -f -
-            
+
+            # Generate cluster configuration output
             cat > /tmp/cluster-config.json << EOF
             {
-              "endpoint": "https://{{inputs.parameters.cluster-name}}:9200",
+              "endpoint": "https://${CLUSTER_NAME}:9200",
               "allowInsecure": true,
               "version": "OS 3.1",
               "authConfig": {
                 "basic": {
-                  "secretName": "{{inputs.parameters.cluster-name}}-creds"
+                  "secretName": "${CLUSTER_NAME}-creds"
                 }
               }
             }
             EOF
-            
-            kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
+
+            kubectl create configmap ${CLUSTER_NAME}-migration-config \
               --from-file=cluster-config=/tmp/cluster-config.json \
-              --namespace {{inputs.parameters.namespace}}
-            
+              -n ${NAMESPACE} \
+              --dry-run=client -o yaml | kubectl apply -f -
+
             echo "OpenSearch 3.1.0 cluster created successfully"
             echo "Cluster config:"
             cat /tmp/cluster-config.json
