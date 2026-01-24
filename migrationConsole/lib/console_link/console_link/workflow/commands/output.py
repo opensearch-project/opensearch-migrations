@@ -10,9 +10,11 @@ from kubernetes import client
 
 from .autocomplete_k8s_labels import _get_label_selector, get_label_completions
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
-from ..models.utils import ExitCode, load_k8s_config
+from ..models.utils import load_k8s_config
+
 
 logger = logging.getLogger(__name__)
+
 
 @click.command(name="output", context_settings={
     "ignore_unknown_options": True,

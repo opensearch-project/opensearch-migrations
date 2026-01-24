@@ -33,4 +33,3 @@ def get_workflow_completions(ctx, _, incomplete):
     except Exception:
         pass
     return []
-

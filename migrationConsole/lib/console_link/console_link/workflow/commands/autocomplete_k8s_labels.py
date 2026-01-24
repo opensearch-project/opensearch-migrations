@@ -202,6 +202,7 @@ def _get_key_completions(prefix, active_part, selected_keys, all_labels, valid_c
                     results.append(suggestion)
     return results
 
+
 def _get_label_selector(selector_str, prefix, workflow_name):
     """Parses and prefixes label selectors."""
     parts = selector_str.split(',') if selector_str else []
