@@ -53,6 +53,8 @@ class StatusCommandHandler:
             else:
                 self._handle_workflow_list(show_all, argo_server, namespace,
                                            insecure, live_check)
+        except click.Abort:
+            raise
         except Exception as e:
             click.echo(f"Error: {str(e)}", err=True)
             raise click.Abort()
@@ -64,7 +66,7 @@ class StatusCommandHandler:
             workflow_name, argo_server, namespace, insecure)
 
         if not workflow_data:
-            click.echo(f"Error: Could not fetch workflow {workflow_name}", err=True)
+            click.echo(f"Error: Could not find workflow {workflow_name}", err=True)
             raise click.Abort()
 
         self._display_workflow_with_tree(workflow_data, live_check)
@@ -478,7 +480,8 @@ def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, in
         else:
             handler.handle_status_command(workflow_name, argo_server, namespace, insecure, show_all, live_status)
 
+    except click.Abort:
+        ctx.exit(ExitCode.FAILURE.value)
     except Exception as e:
-        logger.error(f"Status command failed: {e}", exc_info=True)
         click.echo(f"Error: {str(e)}", err=True)
         ctx.exit(ExitCode.FAILURE.value)
