@@ -458,6 +458,7 @@ def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, in
     Displays workflow progress, completed steps, and approval status.
     By default, only shows running workflows. Use --all to see completed workflows too.
 
+    \b
     Example:
         workflow status
         workflow status --workflow-name my-workflow
