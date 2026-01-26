@@ -116,6 +116,12 @@ public class RfsMigrateDocuments {
         }
     }
 
+    public enum ServerGeneratedIdMode {
+        AUTO,   // Auto-detect serverless TIMESERIES/VECTOR collections and enable
+        ALWAYS, // Always use server-generated IDs
+        NEVER   // Always preserve source IDs
+    }
+
     public static class Args {
         @Parameter(
             names = {"--help", "-h"},
@@ -222,6 +228,14 @@ public class RfsMigrateDocuments {
             description = "Optional.  The maximum number of connections to simultaneously " +
                 "used to communicate to the target, default 10")
         int maxConnections = 10;
+
+        @Parameter(required = false,
+            names = { "--server-generated-ids" },
+            description = "Optional. Controls document ID generation on target. " +
+                "AUTO (default): auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
+                "ALWAYS: always use server-generated IDs. " +
+                "NEVER: always preserve source IDs (may fail on serverless TIMESERIES/VECTOR).")
+        public ServerGeneratedIdMode serverGeneratedIds = ServerGeneratedIdMode.AUTO;
 
         @Parameter(required = true,
             names = { "--source-version", "--sourceVersion" },
@@ -400,8 +414,23 @@ public class RfsMigrateDocuments {
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
         var targetConnectionContext = arguments.targetArgs.toConnectionContext();
-        OpenSearchClient targetClient = new OpenSearchClientFactory(targetConnectionContext).determineVersionAndCreate();
+        var targetClientFactory = new OpenSearchClientFactory(targetConnectionContext);
+        OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate();
         var targetVersion = targetClient.getClusterVersion();
+        
+        // Determine if server-generated IDs should be used
+        boolean useServerGeneratedIds = switch (arguments.serverGeneratedIds) {
+            case ALWAYS -> true;
+            case NEVER -> false;
+            case AUTO -> {
+                var collectionType = targetClientFactory.detectServerlessCollectionType();
+                if (collectionType.requiresServerGeneratedIds()) {
+                    log.info("Auto-enabling server-generated IDs for {} serverless collection", collectionType);
+                    yield true;
+                }
+                yield false;
+            }
+        };
 
         // Determine coordinator connection and version
         var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
@@ -475,6 +504,7 @@ public class RfsMigrateDocuments {
                 arguments.numBytesPerBulkRequest,
                 arguments.maxConnections,
                 docTransformerSupplier,
+                useServerGeneratedIds,
                 allowlist);
 
             var finder = ClusterProviderRegistry.getSnapshotFileFinder(
