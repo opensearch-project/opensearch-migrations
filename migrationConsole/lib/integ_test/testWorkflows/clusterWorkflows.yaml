@@ -979,6 +979,9 @@ spec:
             spec:
               serviceName: ${CLUSTER_NAME}
               replicas: 1
+              persistentVolumeClaimRetentionPolicy:
+                whenDeleted: Delete
+                whenScaled: Retain
               selector:
                 matchLabels:
                   app: ${CLUSTER_NAME}
@@ -1042,10 +1045,16 @@ spec:
                         - name: plugins
                           mountPath: /usr/share/opensearch/plugins
                   volumes:
-                    - name: data
-                      emptyDir: {}
                     - name: plugins
                       emptyDir: {}
+              volumeClaimTemplates:
+                - metadata:
+                    name: data
+                  spec:
+                    accessModes: ["ReadWriteOnce"]
+                    resources:
+                      requests:
+                        storage: 1Gi
             EOF
 
             # Create cluster credentials secret
