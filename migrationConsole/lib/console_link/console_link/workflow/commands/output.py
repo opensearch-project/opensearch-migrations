@@ -8,12 +8,28 @@ import subprocess
 
 from kubernetes import client
 
-from .autocomplete_k8s_labels import _get_label_selector, get_label_completions
+from .autocomplete_k8s_labels import get_label_completions
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from ..models.utils import load_k8s_config
 
 
 logger = logging.getLogger(__name__)
+
+
+def _get_label_selector(selector_str, prefix, workflow_name):
+    """Parses and prefixes label selectors."""
+    parts = selector_str.split(',') if selector_str else []
+    prefixed_parts = []
+    for part in parts:
+        if '=' in part:
+            k, v = part.split('=', 1)
+            key = f"{prefix}{k}" if '/' not in k else k
+            prefixed_parts.append(f"{key}={v}")
+        else:
+            prefixed_parts.append(part)
+    if workflow_name:
+        prefixed_parts.append(f"workflows.argoproj.io/workflow={workflow_name}")
+    return ",".join(prefixed_parts)
 
 
 @click.command(name="output", context_settings={
@@ -43,10 +59,8 @@ logger = logging.getLogger(__name__)
 @click.pass_context
 def output_command(ctx, workflow_name, all_workflows, namespace, prefix, selector, **kwargs):
     """View or tail workflow logs."""
-    # 1. Validation
     _validate_inputs(ctx, all_workflows)
 
-    # 2. Setup
     effective_name = None if all_workflows else workflow_name
     full_selector = _get_label_selector(selector, prefix, effective_name)
     is_follow = ctx.get_parameter_source('follow') != click.core.ParameterSource.DEFAULT

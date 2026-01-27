@@ -201,19 +201,3 @@ def _get_key_completions(prefix, active_part, selected_keys, all_labels, valid_c
                 if _is_valid_combo(suggestion, valid_combos):
                     results.append(suggestion)
     return results
-
-
-def _get_label_selector(selector_str, prefix, workflow_name):
-    """Parses and prefixes label selectors."""
-    parts = selector_str.split(',') if selector_str else []
-    prefixed_parts = []
-    for part in parts:
-        if '=' in part:
-            k, v = part.split('=', 1)
-            key = f"{prefix}{k}" if '/' not in k else k
-            prefixed_parts.append(f"{key}={v}")
-        else:
-            prefixed_parts.append(part)
-    if workflow_name:
-        prefixed_parts.append(f"workflows.argoproj.io/workflow={workflow_name}")
-    return ",".join(prefixed_parts)
