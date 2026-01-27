@@ -22,10 +22,6 @@ class WorkflowDisplayer:
         """Get symbol for workflow phase. Must be implemented by subclasses."""
         raise NotImplementedError
 
-    def get_step_symbol(self, step_phase: str, step_type: str) -> str:
-        """Get symbol for workflow step. Must be implemented by subclasses."""
-        raise NotImplementedError
-
     def display_workflow_header(self, name: str, phase: str, started_at: str, finished_at: str) -> None:
         """Display workflow header. Must be implemented by subclasses."""
         raise NotImplementedError

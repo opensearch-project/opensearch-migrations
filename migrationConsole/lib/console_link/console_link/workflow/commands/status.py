@@ -325,20 +325,6 @@ class StatusWorkflowDisplayer(WorkflowDisplayer):
         }
         return symbols.get(phase, '?')
 
-    def get_step_symbol(self, step_phase: str, step_type: str) -> str:
-        """Get symbol for workflow step."""
-        if step_phase == 'Succeeded':
-            return '  +'
-        elif step_phase == 'Running':
-            return '  |' if step_type == 'Suspend' else '  *'
-        elif step_phase in ('Failed', 'Error'):
-            return '  -'
-        elif step_phase == 'Pending':
-            return '  >'
-        elif step_phase == 'Skipped':
-            return '  ~'
-        return '  ?'
-
 
 class LiveCheckProcessor:
     """Processes live status checks for workflow nodes using injected status runner."""

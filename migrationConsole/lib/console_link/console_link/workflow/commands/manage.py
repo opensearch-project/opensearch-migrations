@@ -1,18 +1,17 @@
 """Interactive manage command for workflow CLI - interactive tree navigation for log viewing."""
+import click
 import datetime
 import logging
 import os
+import psutil
 import sys
 import tempfile
-import click
+
 from kubernetes import client
 
 # Internal imports
-from ..models.utils import ExitCode, load_k8s_config
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
-
-import psutil
-
+from ..models.utils import ExitCode, load_k8s_config
 from ..tui.manage_injections import make_argo_service, make_k8s_pod_scraper, WaiterInterface
 from ..tui.workflow_manage_app import WorkflowTreeApp
 
