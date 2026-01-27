@@ -943,9 +943,19 @@ spec:
         args:
           - |
             set -euo pipefail
+            # Shell vars used here since this is a single container template. Argo workflow steps would need {{inputs.parameters.*}} inlined
             CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
             NAMESPACE='{{inputs.parameters.namespace}}'
             ADMIN_PASSWORD='myStrongPassword123!'
+
+            # Create cluster credentials secret first
+            kubectl create secret generic "${CLUSTER_NAME}-creds" \
+              --from-literal=username=admin \
+              --from-literal=password="${ADMIN_PASSWORD}" \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
 
             # Apply the StatefulSet + Service
             cat <<EOF | kubectl apply -f -
@@ -1001,6 +1011,10 @@ spec:
                         - sh
                         - -c
                         - |
+                          # InitContainer mounts the shared volume at /plugins, not /usr/share/opensearch/plugins.
+                          # We copy bundled plugins there first, then install repository-s3 (which goes to the
+                          # default path), and copy it to /plugins. The main container mounts this shared volume
+                          # at /usr/share/opensearch/plugins, so OpenSearch sees all plugins on startup.
                           cp -r /usr/share/opensearch/plugins/* /plugins/
                           bin/opensearch-plugin install --batch repository-s3
                           cp -r /usr/share/opensearch/plugins/repository-s3 /plugins/
@@ -1018,8 +1032,18 @@ spec:
                           value: ${CLUSTER_NAME}
                         - name: discovery.type
                           value: single-node
+                        - name: OPENSEARCH_INITIAL_ADMIN_USERNAME
+                          valueFrom:
+                            secretKeyRef:
+                              name: ${CLUSTER_NAME}-creds
+                              key: username
+                              optional: true
                         - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
-                          value: ${ADMIN_PASSWORD}
+                          valueFrom:
+                            secretKeyRef:
+                              name: ${CLUSTER_NAME}-creds
+                              key: password
+                              optional: true
                         - name: OPENSEARCH_JAVA_OPTS
                           value: -Xms512m -Xmx512m
                       resources:
@@ -1034,7 +1058,7 @@ spec:
                           command:
                             - sh
                             - -c
-                            - curl -sk -u admin:${ADMIN_PASSWORD} https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s
+                            - curl -sk -u \$(OPENSEARCH_INITIAL_ADMIN_USERNAME):\$(OPENSEARCH_INITIAL_ADMIN_PASSWORD) https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s
                         initialDelaySeconds: 5
                         periodSeconds: 5
                         timeoutSeconds: 3
@@ -1056,15 +1080,6 @@ spec:
                       requests:
                         storage: 1Gi
             EOF
-
-            # Create cluster credentials secret
-            kubectl create secret generic "${CLUSTER_NAME}-creds" \
-              --from-literal=username=admin \
-              --from-literal=password="${ADMIN_PASSWORD}" \
-              -n "${NAMESPACE}" \
-              --dry-run=client -o yaml | \
-              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
-              kubectl apply -f -
 
             # Generate cluster configuration output
             cat > /tmp/cluster-config.json << EOF
