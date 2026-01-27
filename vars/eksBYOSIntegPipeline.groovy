@@ -487,11 +487,11 @@ ENVEOF
                                         MAX_ATTEMPTS=3
                                         ATTEMPT=1
                                         while [ \$ATTEMPT -le \$MAX_ATTEMPTS ]; do
-                                            echo "CLEANUP: Attempt \$ATTEMPT/\$MAX_ATTEMPTS - Deleting MA stack ${maStackName}"
-                                            aws cloudformation delete-stack --stack-name ${maStackName} || true
+                                            echo "CLEANUP: Attempt \$ATTEMPT/\$MAX_ATTEMPTS - Deleting MA stack \${maStackName}"
+                                            aws cloudformation delete-stack --stack-name \${maStackName} || true
                                             deadline=\$((SECONDS + 1800))
                                             while [ \$SECONDS -lt \$deadline ]; do
-                                                status=\$(stack_status "${maStackName}") || rc=\$?
+                                                status=\$(stack_status "\${maStackName}") || rc=\$?
                                                 if [ "\${rc:-0}" -eq 2 ]; then
                                                     echo "CLEANUP: describe-stacks transient failure; retrying in 20s"
                                                     sleep 20
@@ -504,14 +504,14 @@ ENVEOF
                                                 fi
                                                 if [ "\$status" = "DELETE_FAILED" ]; then
                                                     echo "CLEANUP: MA stack DELETE_FAILED; recent events:"
-                                                    aws cloudformation describe-stack-events --stack-name ${maStackName} \
+                                                    aws cloudformation describe-stack-events --stack-name \${maStackName} \
                                                         --query 'StackEvents[0:10].[Timestamp,ResourceStatus,LogicalResourceId,ResourceStatusReason]' --output table || true
                                                     break
                                                 fi
                                                 sleep 60
                                             done
                                             # If deleted, stop retry loop
-                                            status=\$(stack_status "${maStackName}") || status="ERROR"
+                                            status=\$(stack_status "\${maStackName}") || status="ERROR"
                                             if [ "\$status" = "DELETED" ] || [ "\$status" = "DELETE_COMPLETE" ]; then
                                                 break
                                             fi
@@ -523,8 +523,8 @@ ENVEOF
                                         final=""
                                         for i in 1 2 3 4 5; do
                                             rc=0
-                                            final=$(stack_status "${maStackName}") || rc=$?
-                                            if [ "${rc:-0}" -eq 2 ]; then
+                                            final=\$(stack_status "\${maStackName}") || rc=\$?
+                                            if [ "\${rc:-0}" -eq 2 ]; then
                                                 echo "CLEANUP: transient describe-stacks failure during final check; retrying..."
                                                 sleep 10
                                                 continue
@@ -540,10 +540,10 @@ ENVEOF
                                     // Wait for EKS cluster to be truly gone
                                     sh """
                                         set -euo pipefail
-                                        echo "CLEANUP: Waiting for EKS cluster to disappear (best-effort): ${eksClusterName}"
+                                        echo "CLEANUP: Waiting for EKS cluster to disappear (best-effort): \${eksClusterName}"
                                         deadline=\$((SECONDS + 900)) # 15 min best effort gate
                                         while [ \$SECONDS -lt \$deadline ]; do
-                                            if aws eks describe-cluster --name "${eksClusterName}" >/dev/null 2>&1; then
+                                            if aws eks describe-cluster --name "\${eksClusterName}" >/dev/null 2>&1; then
                                                 echo "CLEANUP: EKS cluster still exists; waiting..."
                                                 sleep 30
                                             else
@@ -556,9 +556,9 @@ ENVEOF
                                     // Delete orphaned EKS security groups by tag (EKS creates SGs that may not be cleaned up and often throw DependencyViolation until ENIs drain)
                                     sh """
                                         set -euo pipefail
-                                        echo "CLEANUP: Finding EKS security groups by tag aws:eks:cluster-name=${eksClusterName}"
+                                        echo "CLEANUP: Finding EKS security groups by tag aws:eks:cluster-name=\${eksClusterName}"
                                         eks_sgs=\$(aws ec2 describe-security-groups \
-                                            --filters "Name=tag:aws:eks:cluster-name,Values=${eksClusterName}" \
+                                            --filters "Name=tag:aws:eks:cluster-name,Values=\${eksClusterName}" \
                                             --query 'SecurityGroups[*].GroupId' --output text 2>/dev/null || echo "")
                                         
                                         if [ -z "\$eks_sgs" ]; then
@@ -606,11 +606,11 @@ ENVEOF
                                         MAX_ATTEMPTS=2
                                         ATTEMPT=1
                                         while [ \$ATTEMPT -le \$MAX_ATTEMPTS ]; do
-                                            echo "CLEANUP: Attempt \$ATTEMPT/\$MAX_ATTEMPTS - Deleting domain stack ${domainStackName}"
-                                            aws cloudformation delete-stack --stack-name ${domainStackName} || true
+                                            echo "CLEANUP: Attempt \$ATTEMPT/\$MAX_ATTEMPTS - Deleting domain stack \${domainStackName}"
+                                            aws cloudformation delete-stack --stack-name \${domainStackName} || true
                                             deadline=\$((SECONDS + 3600))
                                             while [ \$SECONDS -lt \$deadline ]; do
-                                                status=\$(stack_status "${domainStackName}") || rc=\$?
+                                                status=\$(stack_status "\${domainStackName}") || rc=\$?
                                                 if [ "\${rc:-0}" -eq 2 ]; then
                                                     echo "CLEANUP: describe-stacks transient failure; retrying in 20s"
                                                     sleep 20
@@ -623,7 +623,7 @@ ENVEOF
                                                 fi
                                                 if [ "\$status" = "DELETE_FAILED" ]; then
                                                     echo "CLEANUP: Domain stack DELETE_FAILED; recent events:"
-                                                    aws cloudformation describe-stack-events --stack-name ${domainStackName} \
+                                                    aws cloudformation describe-stack-events --stack-name \${domainStackName} \
                                                         --query 'StackEvents[0:10].[Timestamp,ResourceStatus,LogicalResourceId,ResourceStatusReason]' --output table || true
                                                     break
                                                 fi
@@ -635,8 +635,8 @@ ENVEOF
                                         final=""
                                         for i in 1 2 3 4 5; do
                                             rc=0
-                                            final=$(stack_status "${domainStackName}") || rc=$?
-                                            if [ "${rc:-0}" -eq 2 ]; then
+                                            final=\$(stack_status "\${domainStackName}") || rc=\$?
+                                            if [ "\${rc:-0}" -eq 2 ]; then
                                                 echo "CLEANUP: transient describe-stacks failure during final check; retrying..."
                                                 sleep 10
                                                 continue
@@ -673,13 +673,13 @@ ENVEOF
                                         # Get VPC ID from CFN resources or parse from error message
                                         get_vpc_id() {
                                             echo "CLEANUP: Looking up VPC ID from CloudFormation resources" >&2
-                                            aws cloudformation describe-stack-resources --stack-name "${networkStackName}" \
+                                            aws cloudformation describe-stack-resources --stack-name "\${networkStackName}" \
                                                 --query 'StackResources[?ResourceType==`AWS::EC2::VPC`].PhysicalResourceId' \
                                                 --output text 2>/dev/null || true
                                         }
 
                                         list_private_subnets_from_stack() {
-                                            aws cloudformation describe-stack-resources --stack-name "${networkStackName}" \
+                                            aws cloudformation describe-stack-resources --stack-name "\${networkStackName}" \
                                                 --query 'StackResources[?ResourceType==`AWS::EC2::Subnet`].PhysicalResourceId' \
                                                 --output text 2>/dev/null || true
                                         }
@@ -701,7 +701,7 @@ ENVEOF
 
                                         # Parse failing subnet from CFN events
                                         get_failed_subnet_id() {
-                                            aws cloudformation describe-stack-events --stack-name "${networkStackName}" \
+                                            aws cloudformation describe-stack-events --stack-name "\${networkStackName}" \
                                                 --query 'StackEvents[?ResourceStatus==`DELETE_FAILED`].ResourceStatusReason' \
                                                 --output text 2>/dev/null | grep -oE 'subnet-[a-f0-9]+' | head -1 || true
                                         }
@@ -739,11 +739,11 @@ ENVEOF
                                         MAX_ATTEMPTS=5
                                         ATTEMPT=1
                                         while [ \$ATTEMPT -le \$MAX_ATTEMPTS ]; do
-                                            echo "CLEANUP: Attempt \$ATTEMPT/\$MAX_ATTEMPTS - Deleting network stack ${networkStackName}"
-                                            aws cloudformation delete-stack --stack-name ${networkStackName} || true
+                                            echo "CLEANUP: Attempt \$ATTEMPT/\$MAX_ATTEMPTS - Deleting network stack \${networkStackName}"
+                                            aws cloudformation delete-stack --stack-name \${networkStackName} || true
                                             deadline=\$((SECONDS + 1800))
                                             while [ \$SECONDS -lt \$deadline ]; do
-                                                status=\$(stack_status "${networkStackName}") || rc=\$?
+                                                status=\$(stack_status "\${networkStackName}") || rc=\$?
                                                 if [ "\${rc:-0}" -eq 2 ]; then
                                                     echo "CLEANUP: describe-stacks transient failure; retrying in 20s"
                                                     sleep 20
@@ -757,7 +757,7 @@ ENVEOF
 
                                                 if [ "\$status" = "DELETE_FAILED" ]; then
                                                     echo "CLEANUP: Network stack DELETE_FAILED; recent events:"
-                                                    aws cloudformation describe-stack-events --stack-name ${networkStackName} \
+                                                    aws cloudformation describe-stack-events --stack-name \${networkStackName} \
                                                         --query 'StackEvents[0:10].[Timestamp,ResourceStatus,LogicalResourceId,ResourceStatusReason]' --output table || true
                                                     break
                                                 fi
@@ -788,8 +788,8 @@ ENVEOF
                                         final=""
                                         for i in 1 2 3 4 5; do
                                             rc=0
-                                            final=$(stack_status "${networkStackName}") || rc=$?
-                                            if [ "${rc:-0}" -eq 2 ]; then
+                                            final=\$(stack_status "\${networkStackName}") || rc=\$?
+                                            if [ "\${rc:-0}" -eq 2 ]; then
                                                 echo "CLEANUP: transient describe-stacks failure during final check; retrying..."
                                                 sleep 10
                                                 continue
@@ -799,7 +799,7 @@ ENVEOF
                                         if [ "\$final" != "DELETED" ] && [ "\$final" != "DELETE_COMPLETE" ]; then
                                             echo "CLEANUP: FINAL ASSERT FAILED - Network stack still exists (status=\$final)"
                                             echo "CLEANUP: Dumping remaining stack resources:"
-                                            aws cloudformation describe-stack-resources --stack-name "${networkStackName}" --output table || true
+                                            aws cloudformation describe-stack-resources --stack-name "\${networkStackName}" --output table || true
                                             exit 1
                                         fi
                                         echo "CLEANUP: FINAL ASSERT PASSED - NetworkInfra stack removed"
