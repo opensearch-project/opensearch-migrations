@@ -932,179 +932,243 @@ spec:
               path: /tmp/cluster-config.json
 
     # OpenSearch 3.1 Single Node Template
+    # - Uses Argo "resource" templates (no image / no kubectl container)
+    # - Creates: Secret, Service, StatefulSet, ConfigMap
+    # - Outputs: cluster-config parameter (string JSON)
     - name: opensearch-3-1-single-node
       inputs:
         parameters:
           - name: cluster-name
           - name: namespace
-      container:
-        image: dtzar/helm-kubectl:3.18.6
-        command: [sh, -c]
-        args:
-          - |
-            set -euo pipefail
-            # Shell vars used here since this is a single container template. Argo workflow steps would need {{inputs.parameters.*}} inlined
-            CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
-            NAMESPACE='{{inputs.parameters.namespace}}'
-            ADMIN_PASSWORD='myStrongPassword123!'
-
-            # Create cluster credentials secret first
-            kubectl create secret generic "${CLUSTER_NAME}-creds" \
-              --from-literal=username=admin \
-              --from-literal=password="${ADMIN_PASSWORD}" \
-              -n "${NAMESPACE}" \
-              --dry-run=client -o yaml | \
-              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
-              kubectl apply -f -
-
-            # Apply the StatefulSet + Service
-            cat <<EOF | kubectl apply -f -
-            apiVersion: v1
-            kind: Service
-            metadata:
-              name: ${CLUSTER_NAME}
-              namespace: ${NAMESPACE}
-              labels:
-                app: ${CLUSTER_NAME}
-                migration-test: "true"
-                cluster-name: ${CLUSTER_NAME}
-            spec:
-              selector:
-                app: ${CLUSTER_NAME}
-              ports:
-                - name: https
-                  port: 9200
-                  targetPort: https
-            ---
-            apiVersion: apps/v1
-            kind: StatefulSet
-            metadata:
-              name: ${CLUSTER_NAME}
-              namespace: ${NAMESPACE}
-              labels:
-                app: ${CLUSTER_NAME}
-                app.kubernetes.io/instance: ${CLUSTER_NAME}
-                migration-test: "true"
-                cluster-name: ${CLUSTER_NAME}
-            spec:
-              serviceName: ${CLUSTER_NAME}
-              replicas: 1
-              persistentVolumeClaimRetentionPolicy:
-                whenDeleted: Delete
-                whenScaled: Retain
-              selector:
-                matchLabels:
-                  app: ${CLUSTER_NAME}
-              template:
-                metadata:
-                  labels:
-                    app: ${CLUSTER_NAME}
-                    app.kubernetes.io/instance: ${CLUSTER_NAME}
-                    migration-test: "true"
-                    cluster-name: ${CLUSTER_NAME}
-                spec:
-                  serviceAccountName: migration-console-access-role
-                  initContainers:
-                    - name: install-plugins
-                      image: opensearchproject/opensearch:3.1.0
-                      command:
-                        - sh
-                        - -c
-                        - |
-                          # InitContainer mounts the shared volume at /plugins, not /usr/share/opensearch/plugins.
-                          # We copy bundled plugins there first, then install repository-s3 (which goes to the
-                          # default path), and copy it to /plugins. The main container mounts this shared volume
-                          # at /usr/share/opensearch/plugins, so OpenSearch sees all plugins on startup.
-                          cp -r /usr/share/opensearch/plugins/* /plugins/
-                          bin/opensearch-plugin install --batch repository-s3
-                          cp -r /usr/share/opensearch/plugins/repository-s3 /plugins/
-                      volumeMounts:
-                        - name: plugins
-                          mountPath: /plugins
-                  containers:
-                    - name: opensearch
-                      image: opensearchproject/opensearch:3.1.0
-                      ports:
-                        - name: https
-                          containerPort: 9200
-                      env:
-                        - name: cluster.name
-                          value: ${CLUSTER_NAME}
-                        - name: discovery.type
-                          value: single-node
-                        - name: OPENSEARCH_INITIAL_ADMIN_USERNAME
-                          valueFrom:
-                            secretKeyRef:
-                              name: ${CLUSTER_NAME}-creds
-                              key: username
-                              optional: true
-                        - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
-                          valueFrom:
-                            secretKeyRef:
-                              name: ${CLUSTER_NAME}-creds
-                              key: password
-                              optional: true
-                        - name: OPENSEARCH_JAVA_OPTS
-                          value: -Xms512m -Xmx512m
-                      resources:
-                        requests:
-                          cpu: "1"
-                          memory: 2Gi
-                        limits:
-                          cpu: "1"
-                          memory: 2Gi
-                      readinessProbe:
-                        exec:
-                          command:
-                            - sh
-                            - -c
-                            - curl -sk -u \$(OPENSEARCH_INITIAL_ADMIN_USERNAME):\$(OPENSEARCH_INITIAL_ADMIN_PASSWORD) https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s
-                        initialDelaySeconds: 5
-                        periodSeconds: 5
-                        timeoutSeconds: 3
-                        failureThreshold: 24
-                      volumeMounts:
-                        - name: data
-                          mountPath: /usr/share/opensearch/data
-                        - name: plugins
-                          mountPath: /usr/share/opensearch/plugins
-                  volumes:
-                    - name: plugins
-                      emptyDir: {}
-              volumeClaimTemplates:
-                - metadata:
-                    name: data
-                  spec:
-                    accessModes: ["ReadWriteOnce"]
-                    resources:
-                      requests:
-                        storage: 1Gi
-            EOF
-
-            # Generate cluster configuration output
-            cat > /tmp/cluster-config.json << EOF
-            {
-              "endpoint": "https://${CLUSTER_NAME}:9200",
-              "allowInsecure": true,
-              "version": "OS 3.1",
-              "authConfig": {
-                "basic": {
-                  "secretName": "${CLUSTER_NAME}-creds"
-                }
-              }
-            }
-            EOF
-
-            kubectl create configmap ${CLUSTER_NAME}-migration-config \
-              --from-file=cluster-config=/tmp/cluster-config.json \
-              -n ${NAMESPACE} \
-              --dry-run=client -o yaml | kubectl apply -f -
-
-            echo "OpenSearch 3.1.0 cluster created successfully"
-            echo "Cluster config:"
-            cat /tmp/cluster-config.json
+      steps:
+        - - name: create-secret
+            template: opensearch-3-1-create-secret
+            arguments:
+              parameters:
+                - name: cluster-name
+                  value: "{{inputs.parameters.cluster-name}}"
+                - name: namespace
+                  value: "{{inputs.parameters.namespace}}"
+        - - name: create-service
+            template: opensearch-3-1-create-service
+            arguments:
+              parameters:
+                - name: cluster-name
+                  value: "{{inputs.parameters.cluster-name}}"
+                - name: namespace
+                  value: "{{inputs.parameters.namespace}}"
+        - - name: create-statefulset
+            template: opensearch-3-1-create-statefulset
+            arguments:
+              parameters:
+                - name: cluster-name
+                  value: "{{inputs.parameters.cluster-name}}"
+                - name: namespace
+                  value: "{{inputs.parameters.namespace}}"
+        - - name: create-migration-config
+            template: opensearch-3-1-migration-configmap
+            arguments:
+              parameters:
+                - name: cluster-name
+                  value: "{{inputs.parameters.cluster-name}}"
+                - name: namespace
+                  value: "{{inputs.parameters.namespace}}"
       outputs:
         parameters:
           - name: cluster-config
             valueFrom:
-              path: /tmp/cluster-config.json
+              parameter: "{{steps.create-migration-config.outputs.parameters.cluster-config}}"
+
+    # Secret (creds)
+    - name: opensearch-3-1-create-secret
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+      resource:
+        action: apply
+        manifest: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{inputs.parameters.cluster-name}}-creds"
+            namespace: "{{inputs.parameters.namespace}}"
+            labels:
+              migration-test: "true"
+              cluster-name: "{{inputs.parameters.cluster-name}}"
+          type: Opaque
+          stringData:
+            username: admin
+            password: myStrongPassword123!
+
+    # Service
+    - name: opensearch-3-1-create-service
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+      resource:
+        action: apply
+        manifest: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{inputs.parameters.cluster-name}}"
+            namespace: "{{inputs.parameters.namespace}}"
+            labels:
+              app: "{{inputs.parameters.cluster-name}}"
+              migration-test: "true"
+              cluster-name: "{{inputs.parameters.cluster-name}}"
+          spec:
+            selector:
+              app: "{{inputs.parameters.cluster-name}}"
+            ports:
+              - name: https
+                port: 9200
+                targetPort: https
+
+    # StatefulSet
+    - name: opensearch-3-1-create-statefulset
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+      resource:
+        action: apply
+        manifest: |
+          apiVersion: apps/v1
+          kind: StatefulSet
+          metadata:
+            name: "{{inputs.parameters.cluster-name}}"
+            namespace: "{{inputs.parameters.namespace}}"
+            labels:
+              app: "{{inputs.parameters.cluster-name}}"
+              app.kubernetes.io/instance: "{{inputs.parameters.cluster-name}}"
+              migration-test: "true"
+              cluster-name: "{{inputs.parameters.cluster-name}}"
+          spec:
+            serviceName: "{{inputs.parameters.cluster-name}}"
+            replicas: 1
+            persistentVolumeClaimRetentionPolicy:
+              whenDeleted: Delete
+              whenScaled: Retain
+            selector:
+              matchLabels:
+                app: "{{inputs.parameters.cluster-name}}"
+            template:
+              metadata:
+                labels:
+                  app: "{{inputs.parameters.cluster-name}}"
+                  app.kubernetes.io/instance: "{{inputs.parameters.cluster-name}}"
+                  migration-test: "true"
+                  cluster-name: "{{inputs.parameters.cluster-name}}"
+              spec:
+                serviceAccountName: migration-console-access-role
+                initContainers:
+                  - name: install-plugins
+                    image: opensearchproject/opensearch:3.1.0
+                    command:
+                      - sh
+                      - -c
+                      - |
+                        set -euo pipefail
+                        # Copy bundled plugins to shared volume, install repository-s3, then copy it over
+                        cp -r /usr/share/opensearch/plugins/* /plugins/ 2>/dev/null || true
+                        bin/opensearch-plugin install --batch repository-s3
+                        cp -r /usr/share/opensearch/plugins/repository-s3 /plugins/
+                    volumeMounts:
+                      - name: plugins
+                        mountPath: /plugins
+                containers:
+                  - name: opensearch
+                    image: opensearchproject/opensearch:3.1.0
+                    ports:
+                      - name: https
+                        containerPort: 9200
+                    env:
+                      - name: cluster.name
+                        value: "{{inputs.parameters.cluster-name}}"
+                      - name: discovery.type
+                        value: single-node
+                      - name: OPENSEARCH_INITIAL_ADMIN_USERNAME
+                        valueFrom:
+                          secretKeyRef:
+                            name: "{{inputs.parameters.cluster-name}}-creds"
+                            key: username
+                            optional: false
+                      - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+                        valueFrom:
+                          secretKeyRef:
+                            name: "{{inputs.parameters.cluster-name}}-creds"
+                            key: password
+                            optional: false
+                      - name: OPENSEARCH_JAVA_OPTS
+                        value: -Xms512m -Xmx512m
+                    resources:
+                      requests:
+                        cpu: "1"
+                        memory: 2Gi
+                      limits:
+                        cpu: "1"
+                        memory: 2Gi
+                    readinessProbe:
+                      exec:
+                        command:
+                          - sh
+                          - -c
+                          - curl -sk -u "${OPENSEARCH_INITIAL_ADMIN_USERNAME}:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" "https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s"
+                      initialDelaySeconds: 5
+                      periodSeconds: 5
+                      timeoutSeconds: 3
+                      failureThreshold: 24
+                    volumeMounts:
+                      - name: data
+                        mountPath: /usr/share/opensearch/data
+                      - name: plugins
+                        mountPath: /usr/share/opensearch/plugins
+                volumes:
+                  - name: plugins
+                    emptyDir: {}
+            volumeClaimTemplates:
+              - metadata:
+                  name: data
+                spec:
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 1Gi
+
+    # ConfigMap holding cluster-config.json
+    - name: opensearch-3-1-migration-configmap
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+      resource:
+        action: apply
+        manifest: |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: "{{inputs.parameters.cluster-name}}-migration-config"
+            namespace: "{{inputs.parameters.namespace}}"
+            labels:
+              migration-test: "true"
+              cluster-name: "{{inputs.parameters.cluster-name}}"
+          data:
+            cluster-config: |
+              {
+                "endpoint": "https://{{inputs.parameters.cluster-name}}:9200",
+                "allowInsecure": true,
+                "version": "OS 3.1",
+                "authConfig": {
+                  "basic": {
+                    "secretName": "{{inputs.parameters.cluster-name}}-creds"
+                  }
+                }
+              }
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              jsonPath: '{.data.cluster-config}'
