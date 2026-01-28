@@ -61,7 +61,7 @@ include 'TrafficCapture:dockerSolution'
 include 'TrafficCapture:nettyWireLogging'
 include 'TrafficCapture:trafficCaptureProxyServer'
 include 'TrafficCapture:trafficReplayer'
-// include 'frontend'  // Temporarily disabled - generated files need update
+include 'frontend'
 include 'buildImages'
 include 'kiro-cli'
 include ':console_link'
