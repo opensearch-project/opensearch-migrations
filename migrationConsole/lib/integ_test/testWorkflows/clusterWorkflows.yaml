@@ -149,11 +149,11 @@ spec:
                         failureThreshold: 20
                       resources:
                         requests:
-                          cpu: "500m"
-                          memory: "1Gi"
+                          cpu: "2"
+                          memory: "4Gi"
                         limits:
-                          cpu: "1000m"
-                          memory: "2Gi"
+                          cpu: "2"
+                          memory: "4Gi"
                       volumeMounts:
                         # Mount ONLY the file (ConfigMap is read-only; avoids scripts/dir creation error)
                         - name: elasticsearch-config
@@ -341,11 +341,11 @@ spec:
                         failureThreshold: 20
                       resources:
                         requests:
-                          cpu: "500m"
-                          memory: "1Gi"
+                          cpu: "2"
+                          memory: "4Gi"
                         limits:
-                          cpu: "1000m"
-                          memory: "2Gi"
+                          cpu: "2"
+                          memory: "4Gi"
                       volumeMounts:
                         # Mount ONLY the file (ConfigMap is read-only; avoids scripts/dir creation error)
                         - name: elasticsearch-config
@@ -445,11 +445,18 @@ spec:
             image: "docker.elastic.co/elasticsearch/elasticsearch"
             imageTag: "5.6.16"
             antiAffinity: "soft"
-            esJavaOpts: "-Xmx512m -Xms512m"
+            esJavaOpts: "-Xms1g -Xmx2g"
             protocol: "http"
             replicas: 1
             createCert: false
             clusterHealthCheckParams: "wait_for_status=yellow&timeout=3s"
+            resources:
+              requests:
+                cpu: "2"
+                memory: "4Gi"
+              limits:
+                cpu: "2"
+                memory: "4Gi"
             readinessProbe:
               failureThreshold: 5
               successThreshold: 2
@@ -537,7 +544,7 @@ spec:
             image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
             imageTag: "6.8.23"
             antiAffinity: "soft"
-            esJavaOpts: "-Xmx512m -Xms512m -XX:UseAVX=0 -Dcom.amazonaws.sdk.disableMBeans=true"
+            esJavaOpts: "-Xms1g -Xmx2g -XX:UseAVX=0 -Dcom.amazonaws.sdk.disableMBeans=true"
             protocol: "http"
             replicas: 1
             createCert: false
@@ -545,6 +552,14 @@ spec:
             clusterHealthCheckParams: "wait_for_status=yellow&timeout=1s"
             
             masterService: ""
+            
+            resources:
+              requests:
+                cpu: "2"
+                memory: "4Gi"
+              limits:
+                cpu: "2"
+                memory: "4Gi"
             
             # Disable probes to avoid transient warnings
             readinessProbe: {}
@@ -662,11 +677,18 @@ spec:
             image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
             imageTag: "7.10.2"
             antiAffinity: "soft"
-            esJavaOpts: "-Xmx512m -Xms512m"
+            esJavaOpts: "-Xms1g -Xmx2g"
             protocol: "http"
             replicas: 1
             createCert: false
             clusterHealthCheckParams: "wait_for_status=yellow&timeout=3s"
+            resources:
+              requests:
+                cpu: "2"
+                memory: "4Gi"
+              limits:
+                cpu: "2"
+                memory: "4Gi"
             readinessProbe:
               failureThreshold: 5
               successThreshold: 2
@@ -783,14 +805,14 @@ spec:
             replicas: 1
             resources:
               requests:
-                cpu: "500m"
-                memory: "1Gi"
+                cpu: "2"
+                memory: "4Gi"
               limits:
-                cpu: "1000m"
-                memory: "2Gi"
+                cpu: "2"
+                memory: "4Gi"
             persistence:
               enabled: false
-            opensearchJavaOpts: "-Xmx1g -Xms1g"
+            opensearchJavaOpts: "-Xms1g -Xmx2g"
             plugins:
               enabled: true
               installList:
@@ -798,10 +820,14 @@ spec:
             EOF
             
             # Install OpenSearch 1.3
-            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch --set rbac.create=false --set rbac.serviceAccountName=migration-console-access-role \
+            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch \
               --namespace {{inputs.parameters.namespace}} \
               --values /tmp/opensearch-values.yaml \
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
+            
+            kubectl patch statefulset {{inputs.parameters.cluster-name}} -n {{inputs.parameters.namespace}} \
+              --type='json' -p='[{"op": "add", "path": "/spec/template/spec/serviceAccountName", "value": "migration-console-access-role"}]'
+            kubectl rollout restart statefulset {{inputs.parameters.cluster-name}} -n {{inputs.parameters.namespace}}
             
             # Create cluster credentials secret (OpenSearch 1.3 default: admin/admin)
             kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
@@ -875,14 +901,14 @@ spec:
                 value: "myStrongPassword123!"
             resources:
               requests:
-                cpu: "500m"
-                memory: "1Gi"
+                cpu: "2"
+                memory: "4Gi"
               limits:
-                cpu: "1000m"
-                memory: "2Gi"
+                cpu: "2"
+                memory: "4Gi"
             persistence:
               enabled: false
-            opensearchJavaOpts: "-Xmx1g -Xms1g"
+            opensearchJavaOpts: "-Xms1g -Xmx2g"
             plugins:
               enabled: true
               installList:
@@ -890,10 +916,14 @@ spec:
             EOF
             
             # Install OpenSearch 2.19.1
-            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch --set rbac.create=false --set rbac.serviceAccountName=migration-console-access-role \
+            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch \
               --namespace {{inputs.parameters.namespace}} \
               --values /tmp/opensearch-values.yaml \
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
+            
+            kubectl patch statefulset {{inputs.parameters.cluster-name}} -n {{inputs.parameters.namespace}} \
+              --type='json' -p='[{"op": "add", "path": "/spec/template/spec/serviceAccountName", "value": "migration-console-access-role"}]'
+            kubectl rollout restart statefulset {{inputs.parameters.cluster-name}} -n {{inputs.parameters.namespace}}
             
             # Create cluster credentials secret (OpenSearch 2.19 password set via OPENSEARCH_INITIAL_ADMIN_PASSWORD)
             kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
@@ -964,24 +994,28 @@ spec:
                 value: "MyStr0ngPassw0rd!"
             resources:
               requests:
-                cpu: "500m"
-                memory: "1Gi"
+                cpu: "2"
+                memory: "4Gi"
               limits:
-                cpu: "1000m"
-                memory: "2Gi"
+                cpu: "2"
+                memory: "4Gi"
             persistence:
               enabled: false
-            opensearchJavaOpts: "-Xmx1g -Xms1g"
+            opensearchJavaOpts: "-Xms1g -Xmx2g"
             plugins:
               enabled: true
               installList:
                 - "repository-s3"
             EOF
             
-            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch --set rbac.create=false --set rbac.serviceAccountName=migration-console-access-role \
+            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch \
               --namespace {{inputs.parameters.namespace}} \
               --values /tmp/opensearch-values.yaml \
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
+            
+            kubectl patch statefulset {{inputs.parameters.cluster-name}} -n {{inputs.parameters.namespace}} \
+              --type='json' -p='[{"op": "add", "path": "/spec/template/spec/serviceAccountName", "value": "migration-console-access-role"}]'
+            kubectl rollout restart statefulset {{inputs.parameters.cluster-name}} -n {{inputs.parameters.namespace}}
             
             # Create cluster credentials secret (OpenSearch 3.1 password set via OPENSEARCH_INITIAL_ADMIN_PASSWORD)
             kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
