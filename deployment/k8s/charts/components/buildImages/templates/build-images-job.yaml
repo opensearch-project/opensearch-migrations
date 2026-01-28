@@ -72,8 +72,9 @@ spec:
               {{- end }}
               cd /workspace
 
-              # This created builder uses the buildkitd-pod that this chart also deploys to build images
-              docker buildx create --name local-remote-builder --driver remote tcp://buildkitd:1234
+              # Set up kubernetes buildx builder
+              export BUILDKIT_NAMESPACE={{ .Values.namespace }}
+              ./buildImages/setupK8sBuilders.sh
 
               # Build without configuration cache since this will be run once on a new container
               GRADLE_CMD="./gradlew buildImagesToRegistry -PregistryEndpoint='{{ .Values.registryEndpoint }}' -x test --no-configuration-cache --no-build-cache --no-daemon"

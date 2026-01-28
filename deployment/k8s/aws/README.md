@@ -1,6 +1,6 @@
 # Deployment of the Migration Assistant into EKS
 
-This guide is for developers that are interested in building everything and
+This guide is for **developers** that are interested in building everything and
 deploying those artifacts directly to EKS themselves.
 
 For a more details about Kubernetes, see the [README](../README.md)
@@ -69,11 +69,11 @@ developers from their own workspace with
 
 ```bash
 pushd $(git rev-parse --show-toplevel)
-echo "Setting up buildkit to perform builds but should use ECR for image pushes"
-export USE_LOCAL_REGISTRY=false
-./buildImages/setUpK8sImageBuildServices.sh
+export AWS_CFN_REGION=us-east-2
 ./deployment/k8s/aws/aws-bootstrap.sh --skip-git-pull --build-images-locally --base-dir "$(git rev-parse --show-toplevel)"
 ```
+
+### Building locally to EKS
 
 Notice that the `aws-bootstrap.sh` script normally clones the git repo and uses
 public ECR images. These flags build the code from the current code 
@@ -82,3 +82,57 @@ otherwise performs the same initialization actions as users perform.
 To update images see [buildImages](../../../buildImages/README.md).
 To update the K8s deployment (other than images, configmaps, workflow templates,
 resource settings, etc.) see the [k8s README](../README.md).
+
+When building images (`--build-images` or `--build-images-locally`), the script,
+by default, automatically configures cross-platform builds for amd64 and arm64.
+
+1. A `general-work-pool` NodePool is pre-created from the Migration Assistant  
+   chart.  By default, both `amd64` and `arm64` are enabled 
+   (see `valuesEks.yaml` to adjust).  * If that has been overridden so that only
+   one architecture is enabled, the nodepool set up for the  migration-console
+   would need to be adjusted since it includes both architectures. 
+2. The aws-bootstrap.sh script, when configuring --build-local* queries
+   this nodepool to determine which architectures that it can build
+3. When multiple architectures are configured, native buildkit pods are deployed 
+   on each architecture for parallel docker builds.
+4. If only one architecture is configured, we should only build for one 
+   architecture.
+
+To change the general-work-pool that will be used by default, 
+change these values in within the `--helm-values` passed into the script.
+
+```yaml
+workloadsNodePool:
+  architectures: ["arm64"]
+  limits:
+    cpu: "128"
+    memory: "256Gi"
+```
+
+Or to use only amd64:
+
+```yaml
+workloadsNodePool:
+  architectures: ["amd64"]
+```
+
+### In-K8s Source/Target Test Clusters
+
+Integ tests spin up a number of Elasticsearch/OpenSearch clusters through argo
+to test various workflows.  In many development scenarios, it can be helpful
+to have a warm source and target cluster that are ready immediately.  To spin
+up an ES 7.10 and OS 2.11 (no reason it's that version), install the following
+chart with the specified overrides
+
+
+```bash
+pushd $(git rev-parse --show-toplevel)/deployment/k8s/charts/aggregates/
+eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`MigrationsExportString\`)].[Value]" --output text) 
+export ELASTIC_SEARCH_IMAGE_TAG=migrations_elasticsearch_searchguard_latest
+helm upgrade --install -n ma tc testClusters \
+  -f testClusters/valuesEks.yaml \
+  --set "source.image=$MIGRATIONS_ECR_REGISTRY" \
+  --set "source.imageTag=$ELASTIC_SEARCH_IMAGE_TAG" \
+  --set "source.extraInitContainers[0].image=$MIGRATIONS_ECR_REGISTRY:$ELASTIC_SEARCH_IMAGE_TAG" \
+  --set "source.extraContainers[0].image=$MIGRATIONS_ECR_REGISTRY:$ELASTIC_SEARCH_IMAGE_TAG"
+```

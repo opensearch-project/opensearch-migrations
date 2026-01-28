@@ -28,6 +28,8 @@ use_existing_built_images=false
 use_public_images=true
 skip_console_exec=false
 stage_filter=""
+extra_helm_values=""
+disable_general_purpose_pool=false
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -48,6 +50,8 @@ while [[ $# -gt 0 ]]; do
     --keep-build-images-job-alive) keep_build_images_job_alive=true; shift 1 ;;
     --skip-console-exec) skip_console_exec=true; shift 1 ;;
     --stage) stage_filter="$2"; shift 2 ;;
+    --helm-values) extra_helm_values="$2"; shift 2 ;;
+    --disable-general-purpose-pool) disable_general_purpose_pool=true; shift 1 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo "Options:"
@@ -67,6 +71,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --keep-build-images-job-alive             (default: $keep_build_images_job_alive)"
       echo "  --skip-console-exec                       (default: $skip_console_exec)"
       echo "  --stage <val>                             Filter CFN exports by stage name"
+      echo "  --helm-values <path>                      Extra values file for helm install"
+      echo "  --disable-general-purpose-pool            Disable EKS Auto Mode general-purpose pool (cost control)"
       exit 0
       ;;
     *)
@@ -78,6 +84,11 @@ done
 
 if [[ "$build_images_locally" == "true" ]]; then
   build_images="true"
+fi
+
+if [[ "$use_existing_built_images" == "true" && "$build_images" == "true" ]]; then
+  echo "Error: --use-existing-built-images and --build-images/--build-images-locally are mutually exclusive."
+  exit 1
 fi
 
 # --- validation ---
@@ -305,6 +316,29 @@ MA_QUALIFIER="${MA_QUALIFIER:-${MIGRATIONS_QUALIFIER:-default}}"
 
 aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
 
+# Check if general-purpose pool is disabled and re-enable if needed for installation
+# Skip this if building images locally, since we'll pre-create general-work-pool
+CURRENT_NODEPOOLS=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
+  --query 'cluster.computeConfig.nodePools' --output text 2>/dev/null)
+if [[ "$CURRENT_NODEPOOLS" != *"general-purpose"* ]] && [[ "$build_images_locally" != "true" ]]; then
+  echo "general-purpose nodepool is currently disabled."
+  echo "Re-enabling it temporarily to allow pod scheduling during installation..."
+  NODE_ROLE_ARN=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
+    --query 'cluster.computeConfig.nodeRoleArn' --output text)
+  aws eks update-cluster-config \
+    --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --region "${AWS_CFN_REGION}" \
+    --compute-config "{\"enabled\": true, \"nodePools\": [\"system\", \"general-purpose\"], \"nodeRoleArn\": \"${NODE_ROLE_ARN}\"}" \
+    --kubernetes-network-config '{"elasticLoadBalancing":{"enabled": true}}' \
+    --storage-config '{"blockStorage":{"enabled": true}}'
+  echo "Waiting for cluster update to complete..."
+  aws eks wait cluster-active --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}"
+  echo "general-purpose nodepool re-enabled"
+  if [[ "$disable_general_purpose_pool" == "true" ]]; then
+    echo "Note: --disable-general-purpose-pool was specified, will disable it again after installation completes"
+  fi
+fi
+
 kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace "$namespace"
 kubectl config set-context --current --namespace="$namespace" >/dev/null 2>&1
 
@@ -330,16 +364,28 @@ if [[ "$skip_git_pull" == "false" ]]; then
   popd > /dev/null || exit
 fi
 
-if [[ "$build_images" == "true" ]]; then
-  if [[ "$use_existing_built_images" == "true" ]]; then
-    echo "skipping all builds - assuming that images are already built to the private registry"
-  elif [[ "$build_images_locally" == "true" ]]; then
-    echo "Expecting a build-images service to have already been deployed such that it will push images to ECR."
-    echo "See ${base_dir}/buildImages/README-Minikube.md"
-    echo "Building amd64 images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"
+EXTRA_VALUES_FLAG=""
+if [[ -n "$extra_helm_values" ]]; then
+  EXTRA_VALUES_FLAG="-f $extra_helm_values"
+fi
 
-    pushd $base_dir || exit
-    ./gradlew :buildImages:buildImagesToRegistry -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
+if [[ "$build_images" == "true" ]]; then
+  # Always build for both architectures on EKS - buildImages chart creates its own nodepool
+  MULTI_ARCH_NATIVE=true
+  BUILD_TARGET="buildImagesToRegistry"
+  export MULTI_ARCH_NATIVE
+
+  if [[ "$build_images_locally" == "true" ]]; then
+    if docker buildx inspect k8s-builder --bootstrap &>/dev/null; then
+      echo "Buildkit already configured and healthy, skipping setup"
+    else
+      echo "Setting up buildkit for local builds..."
+      "${base_dir}/buildImages/setUpK8sImageBuildServices.sh"
+    fi
+
+    echo "Building images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"
+    pushd "$base_dir" || exit
+    ./gradlew :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
     popd > /dev/null || exit
   else
     if helm status build-images -n "$namespace" >/dev/null 2>&1; then
@@ -356,6 +402,7 @@ if [[ "$build_images" == "true" ]]; then
       --namespace "$namespace" \
       --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
       --set awsEKSEnabled=true \
+      --set multiArchNative="${MULTI_ARCH_NATIVE}" \
       --set keepJobAlive="${keep_build_images_job_alive}" \
       --set repositoryUrl="https://github.com/${org_name}/${repo_name}.git" \
       --set repositoryBranch="${branch}" \
@@ -430,6 +477,7 @@ helm install "$namespace" "${ma_chart_dir}" \
   --namespace $namespace \
   -f "${ma_chart_dir}/values.yaml" \
   -f "${ma_chart_dir}/valuesEks.yaml" \
+  $EXTRA_VALUES_FLAG \
   --set stageName="${STAGE}" \
   --set aws.region="${AWS_CFN_REGION}" \
   --set aws.account="${AWS_ACCOUNT}" \
@@ -441,6 +489,21 @@ echo "Deploying CloudWatch dashboards..."
 deploy_dashboard "CaptureReplay" "${base_dir}/deployment/k8s/dashboards/capture-replay-dashboard.json"
 deploy_dashboard "ReindexFromSnapshot" "${base_dir}/deployment/k8s/dashboards/reindex-from-snapshot-dashboard.json"
 echo "All dashboards deployed to CloudWatch"
+
+if [[ "$disable_general_purpose_pool" == "true" ]]; then
+  echo "Disabling EKS Auto Mode general-purpose nodepool..."
+  NODE_ROLE_ARN=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
+    --query 'cluster.computeConfig.nodeRoleArn' --output text)
+  aws eks update-cluster-config \
+    --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --region "${AWS_CFN_REGION}" \
+    --compute-config "{\"enabled\": true, \"nodePools\": [\"system\"], \"nodeRoleArn\": \"${NODE_ROLE_ARN}\"}" \
+    --kubernetes-network-config '{"elasticLoadBalancing":{"enabled": true}}' \
+    --storage-config '{"blockStorage":{"enabled": true}}'
+  echo "Waiting for cluster update to complete (this may take a few minutes)..."
+  aws eks wait cluster-active --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}"
+  echo "general-purpose nodepool disabled"
+fi
 
 if [[ "$skip_console_exec" == "false" ]]; then
   kubectl -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s

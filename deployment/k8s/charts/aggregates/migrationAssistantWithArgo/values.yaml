@@ -71,9 +71,20 @@ aws:
 # EKS cluster configuration for Karpenter NodeClass
 cluster:
   # Set to true for EKS clusters with Karpenter, false for other cluster types
-  isEKS: false
-  name: ""  # Set this to your EKS cluster name (required when isEKS: true)
-  nodeInstanceProfile: "KarpenterNodeInstanceProfile"  # Default Karpenter node instance profile
+  dedicatedKarpenterNodePoolForMigrationConsole: false
+  useCustomKarpenterNodePool: false
+# Don't think that these are used
+#  name: ""  # Set this to your EKS cluster name (required when isEKS: true)
+#  nodeInstanceProfile: "KarpenterNodeInstanceProfile"  # Default Karpenter node instance profile
+
+# Migrations NodePool configuration (EKS only)
+workloadsNodePool:
+  architectures: []  # Empty = no constraint (Karpenter picks). Set ["amd64"] or ["arm64"] to restrict.
+  # These limits are keep the entire aggregate compute size under these values.
+  # This is an arbiter on total cost that a deployment can consume per unit of time
+  limits:
+    cpu: "64000m"
+    memory: "128Gi"
 
 stageName: dev
 
