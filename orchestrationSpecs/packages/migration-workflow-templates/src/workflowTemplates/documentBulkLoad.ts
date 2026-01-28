@@ -350,7 +350,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addSteps(b => b.addStepGroup(c => c)))
 
 
-    .addTemplate("setupAndRunBulkload", t => t
+    .addTemplate("setupAndRunBulkLoad", t => t
         .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
