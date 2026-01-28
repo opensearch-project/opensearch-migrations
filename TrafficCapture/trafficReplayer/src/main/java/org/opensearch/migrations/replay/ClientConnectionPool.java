@@ -104,8 +104,7 @@ public class ClientConnectionPool {
             connectionId2ChannelCache.invalidate(connId);
         } else {
             log.atTrace()
-                .setMessage("No ChannelFuture for {} in closeConnection.  " +
-                        "The connection may have already been closed")
+                .setMessage("No ChannelFuture for {} in closeConnection. The connection may have already been closed")
                 .addArgument(ctx)
                 .log();
         }
@@ -123,8 +122,8 @@ public class ClientConnectionPool {
             .getChannelFutureInAnyState() // this could throw, especially if the even loop has begun to shut down
             .thenCompose(channelFuture -> {
                 if (channelFuture == null) {
-                    log.atTrace().setMessage("Couldn't find the channel for {} to close it.  " +
-                            "It may have already been reset.")
+                    log.atTrace()
+                        .setMessage("Couldn't find the channel for {} to close it. It may have already been reset.")
                         .addArgument(session::getChannelKeyContext)
                         .log();
                     return TextTrackedFuture.completedFuture(null, () -> "");
@@ -142,8 +141,8 @@ public class ClientConnectionPool {
                             .addArgument(v)
                             .log();
                         if (session.hasWorkRemaining()) {
-                            log.atWarn().setMessage("Work items are still remaining for this connection session " +
-                                    "(last associated with connection={}). {} requests that were enqueued won't be run")
+                            log.atWarn()
+                                .setMessage("Work items are still remaining for this connection session (last associated with connection={}). {} requests that were enqueued won't be run")
                                 .addArgument(session::getChannelKeyContext)
                                 .addArgument(session::calculateSizeSlowly)
                                 .log();

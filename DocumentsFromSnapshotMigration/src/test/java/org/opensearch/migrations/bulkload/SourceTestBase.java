@@ -298,8 +298,10 @@ public class SourceTestBase {
                 );
                 throw new ExpectedMigrationWorkTerminationException(e, runNumber);
             } catch (Exception e) {
-                log.atError().setCause(e).setMessage("Caught an exception, " +
-                    "but just going to run again with this worker to simulate task/container recycling").log();
+                log.atError()
+                    .setCause(e)
+                    .setMessage("Caught an exception, but just going to run again with this worker to simulate task/container recycling")
+                    .log();
             }
         }
         throw new AssertionError("Migration did not complete within " + maxRuns + " runs");

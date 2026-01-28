@@ -55,8 +55,9 @@ public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
         boolean messageFlushed = flushDownstream(ctx);
         if (messageFlushed) {
-            log.atWarn().setMessage("Failed to sign message due to handler removed " +
-                    "before the end of the http contents were received").log();
+            log.atWarn()
+                .setMessage("Failed to sign message due to handler removed before the end of the http contents were received")
+                .log();
         }
         super.handlerRemoved(ctx);
     }

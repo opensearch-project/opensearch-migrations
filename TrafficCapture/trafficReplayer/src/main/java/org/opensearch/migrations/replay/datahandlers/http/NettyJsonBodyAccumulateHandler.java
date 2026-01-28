@@ -99,8 +99,9 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
                 log.atLevel(hasRequestContentTypeMatching(capturedHttpJsonMessage,
                         // a JacksonException for non-json data doesn't need to be surfaced to a user
                         v -> v.startsWith("application/json")) ?  Level.INFO : Level.TRACE)
-                    .setCause(e).setMessage("Error parsing json body.  " +
-                    "Will pass all payload bytes directly as a ByteBuf within the payload map").log();
+                    .setCause(e)
+                    .setMessage("Error parsing json body. Will pass all payload bytes directly as a ByteBuf within the payload map")
+                    .log();
                 jsonWasInvalid = true;
                 parsedJsonObjects.clear();
             }

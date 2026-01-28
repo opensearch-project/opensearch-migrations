@@ -351,8 +351,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 trafficStreams = this.nextChunkFutureRef.get().get();
             } catch (ExecutionException ex) {
                 if (ex.getCause() instanceof EOFException) {
-                    log.atWarn().setCause(ex.getCause())
-                        .setMessage("Got an EOF on the stream.  " + "Done reading traffic streams.").log();
+                    log.atWarn()
+                        .setCause(ex.getCause())
+                        .setMessage("Got an EOF on the stream. Done reading traffic streams.")
+                        .log();
                     break;
                 } else {
                     log.atWarn().setCause(ex).setMessage("Done reading traffic streams due to exception.").log();

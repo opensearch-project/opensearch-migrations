@@ -129,8 +129,7 @@ public class ReplayEngine {
                 })
                 .whenComplete((v, t) -> contentTimeController.stopReadsPast(timestamp))
                 .whenComplete((v, t) -> log.atDebug()
-                    .setMessage("work finished and used timestamp={} " +
-                        "to update contentTimeController (tasksOutstanding={})")
+                    .setMessage("work finished and used timestamp={} to update contentTimeController (tasksOutstanding={})")
                     .addArgument(timestamp)
                     .addArgument(totalCountOfScheduledTasksOutstanding::get)
                     .log()

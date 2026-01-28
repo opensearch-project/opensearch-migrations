@@ -145,17 +145,14 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
             if (resolvedProperties.has(fieldName)) {
                 var existingFieldType = resolvedProperties.get(fieldName);
                 if (!existingFieldType.equals(fieldType)) {
-                    log.atWarn().setMessage("Conflict during type union with index: {}\n" +
-                                    "field: {}\n" +
-                                    "existingFieldType: {}\n" +
-                                    "type: {}\n" +
-                                    "secondFieldType: {}")
-                            .addArgument(index.getName())
-                            .addArgument(fieldName)
-                            .addArgument(existingFieldType)
-                            .addArgument(type)
-                            .addArgument(fieldType)
-                            .log();
+                    log.atWarn()
+                        .setMessage("Conflict during type union with index: {}\nfield: {}\nexistingFieldType: {}\ntype: {}\nsecondFieldType: {}")
+                        .addArgument(index.getName())
+                        .addArgument(fieldName)
+                        .addArgument(existingFieldType)
+                        .addArgument(type)
+                        .addArgument(fieldType)
+                        .log();
                     throw new IllegalArgumentException("Conflicting definitions for property during union "
                         + fieldName + " (" + existingFieldType + " and " + fieldType + ")");
                 }

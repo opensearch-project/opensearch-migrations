@@ -227,10 +227,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         if (key.getTrafficStreamIndex() == 0
             && (stream.getPriorRequestsReceived() > 0 || stream.getLastObservationWasUnterminatedRead())) {
             log.atWarn()
-                .setMessage("Encountered a TrafficStream object with inconsistent values between " +
-                    "the prior request count ({}, lastObservationWasUnterminatedRead ({}) and the index ({}).  " +
-                    "Traffic Observations will be ignored until Reads after the next EndOfMessage" +
-                    " are encountered.   Full stream object={}")
+                .setMessage("Encountered a TrafficStream object with inconsistent values between the prior request count ({}, lastObservationWasUnterminatedRead ({}) and the index ({}). Traffic Observations will be ignored until Reads after the next EndOfMessage are encountered. Full stream object={}")
                 .addArgument(stream::getPriorRequestsReceived)
                 .addArgument(stream::getLastObservationWasUnterminatedRead)
                 .addArgument(key::getTrafficStreamIndex)

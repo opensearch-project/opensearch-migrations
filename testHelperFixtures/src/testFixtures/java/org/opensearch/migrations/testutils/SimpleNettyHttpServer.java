@@ -183,12 +183,14 @@ public class SimpleNettyHttpServer implements AutoCloseable {
                         convertHeaders(specifiedResponse.headers),
                         new DefaultHttpHeaders()
                     );
-                    log.atInfo().setMessage(() -> "writing " + fullResponse).log();
+                    log.atInfo().setMessage("writing {}").addArgument(fullResponse).log();
                     var cf = ctx.writeAndFlush(fullResponse);
-                    log.atInfo().setMessage(() -> "wrote " + fullResponse).log();
+                    log.atInfo().setMessage("wrote {}").addArgument(fullResponse).log();
                     cf.addListener(
                         f -> log.atInfo()
-                            .setMessage(() -> "success=" + f.isSuccess() + " finished writing " + fullResponse)
+                            .setMessage("success={} finished writing {}")
+                            .addArgument(f::isSuccess)
+                            .addArgument(fullResponse)
                             .log()
                     );
                 } catch (Exception e) {

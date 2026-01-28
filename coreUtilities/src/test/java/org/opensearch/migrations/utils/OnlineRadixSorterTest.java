@@ -47,7 +47,7 @@ class OnlineRadixSorterTest {
         Assertions.assertEquals("", add(radixSorter, futureMap, receiverList, 3));
         Assertions.assertEquals("", add(radixSorter, futureMap, receiverList, 4));
         Assertions.assertEquals("1", add(radixSorter, futureMap, receiverList, 1));
-        log.atInfo().setMessage("after adding work for '1'... future[3]={}").addArgument(()->futureMap.get(3)).log();
+        log.atInfo().setMessage("after adding work for '1'... future[3]={}").addArgument(() -> futureMap.get(3)).log();
         log.atInfo().setMessage("after adding work for '1'... future[4]={}").addArgument(() -> futureMap.get(4)).log();
         receiverList.clear();
         Assertions.assertEquals("2,3,4", add(radixSorter, futureMap, receiverList, 2));
