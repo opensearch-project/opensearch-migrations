@@ -4,8 +4,8 @@ This library provides integration testing for Kubernetes-based migrations betwee
 
 ## Prerequisites
 
-- Minikube running with a local registry
-- Python 3.x with pipenv installed
+- Kubernetes cluster (for example: Minikube) with a local registry
+- Python 3.11+ with pipenv installed
 
 ## Setup
 
@@ -24,11 +24,10 @@ pipenv run app
 
 **Test specific version combinations:**
 ```bash
-# Single migration path
 pipenv run app --source-version=ES_7.10 --target-version=OS_2.19 \
   --test-reports-dir='./reports' --copy-logs
 
-# All sources to OpenSearch 3.1
+# Test all source versions against a target
 pipenv run app --source-version=all --target-version=OS_3.1 \
   --test-reports-dir='./reports' --copy-logs
 ```
@@ -39,89 +38,61 @@ Supported versions:
 
 **Run specific tests:**
 ```bash
-# Single test
 pipenv run app --test-ids=0001 --source-version=ES_7.10 --target-version=OS_2.19
-
-# Multiple tests
 pipenv run app --test-ids=0001,0004 --source-version=ES_7.10 --target-version=OS_2.19
 ```
 
-**Development mode** (skips cleanup, reuses clusters, keeps workflows):
+## Development Mode
+
+The `--dev` flag combines options for fast iteration: `--skip-delete`, `--reuse-clusters`, `--keep-workflows`.
+
 ```bash
-# Fast iteration - run repeatedly without cleanup overhead
-pipenv run app --dev --source-version=ES_7.10 --target-version=OS_2.19 --test-ids=0001
-```
-
-**Additional options:**
-```bash
-# Reuse existing clusters only
-pipenv run app --reuse-clusters --source-version=ES_7.10 --target-version=OS_2.19
-
-# Keep workflows for debugging
-pipenv run app --keep-workflows --source-version=ES_7.10 --target-version=OS_2.19 \
-  --test-reports-dir='./reports'
-
-# Copy logs locally
-pipenv run app --copy-logs --source-version=ES_7.10 --target-version=OS_2.19
-
-# Skip deletion after tests (for inspection)
-pipenv run app --skip-delete --source-version=ES_7.10 --target-version=OS_2.19
-
-# View existing report summary
-pipenv run app --output-reports-summary-only --test-reports-dir='./reports'
-```
-
-**Cleanup:**
-```bash
-# Delete all resources
-pipenv run app --delete-only
-
-# Delete clusters only
-pipenv run app --delete-clusters-only
-```
-
-## Common Workflows
-
-**Quick single version test:**
-```bash
-pipenv run app --source-version=ES_7.10 --target-version=OS_3.1 \
-  --test-reports-dir='./reports' --copy-logs
-```
-
-**Comprehensive testing (all sources):**
-```bash
-pipenv run app --source-version=all --target-version=OS_3.1 \
-  --test-reports-dir='./reports' --copy-logs
-```
-
-**Development iteration:**
-```bash
-# First run - sets up clusters
+# First run - deploys Helm chart and creates clusters
 pipenv run app --dev --source-version=ES_7.10 --target-version=OS_2.19 --test-ids=0001
 
-# Subsequent runs - reuses clusters
+# Subsequent runs - reuses existing deployment and clusters
 pipenv run app --dev --source-version=ES_7.10 --target-version=OS_2.19 --test-ids=0001
 
 # Cleanup when done
 pipenv run app --delete-only
 ```
 
-**Testing multiple scenarios:**
-```bash
-# Different sources to same target
-pipenv run app --source-version=ES_6.8 --target-version=OS_3.1 --test-reports-dir='./reports'
-pipenv run app --source-version=ES_7.10 --target-version=OS_3.1 --test-reports-dir='./reports'
+**Individual flags (can be used without `--dev`):**
 
-# Same source to different targets
-pipenv run app --source-version=ES_7.10 --target-version=OS_2.19 --test-reports-dir='./reports'
-pipenv run app --source-version=ES_7.10 --target-version=OS_3.1 --test-reports-dir='./reports'
+- `--skip-delete`: Keeps the Migration Assistant Helm deployment and namespace after tests complete
+- `--reuse-clusters`: Reuses existing source/target clusters matching the naming pattern (e.g., `target-opensearch-2-19-*`). On first run, creates clusters and leaves them running; subsequent runs reuse them.
+- `--keep-workflows`: Preserves Argo workflows for debugging instead of deleting them
+
+Note: `--skip-delete` and `--reuse-clusters` are disabled when testing multiple version combinations (`--source-version=all`).
+
+## Output Options
+
+```bash
+# Copy container logs from all pods in the namespace to ./logs directory
+# (collected via FluentBit from /shared-logs-output in the migration console)
+pipenv run app --copy-logs --source-version=ES_7.10 --target-version=OS_2.19
+
+# Save test reports (JSON with pass/fail, duration, errors) to a directory
+pipenv run app --test-reports-dir='./reports' --source-version=ES_7.10 --target-version=OS_2.19
+
+# View summary table of existing reports without running tests
+pipenv run app --output-reports-summary-only --test-reports-dir='./reports'
+```
+
+## Cleanup
+
+```bash
+# Delete entire deployment (namespace, Helm releases, clusters, all resources)
+pipenv run app --delete-only
+
+# Delete only source/target clusters (keeps Migration Assistant deployment)
+pipenv run app --delete-clusters-only
 ```
 
 ## Troubleshooting
 
-If tests fail or hang:
-
-1. Check minikube status: `minikube status`
-2. Review test logs in the `./logs` directory (if `--copy-logs` was used)
-3. Inspect test reports in `./reports` directory
-4. Clean up and retry: `pipenv run app --delete-only`
+1. Check cluster status: `minikube status`
+2. Review container logs in `./logs` (requires `--copy-logs`)
+3. Inspect test reports in `./reports`
+4. Check pod status: `kubectl get pods -n ma`
+5. Clean up and retry: `pipenv run app --delete-only`
