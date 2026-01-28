@@ -30,20 +30,24 @@ import {
 } from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
+import {makeTargetParamDict, makeCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 
 function makeParamsDict(
     sourceVersion: BaseExpression<z.infer<typeof CLUSTER_VERSION_STRING>>,
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
+    coordinatorConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
     options: BaseExpression<Serialized<z.infer<typeof RFS_OPTIONS>>>,
     sessionName: BaseExpression<string>
 ) {
     return expr.mergeDicts(
         expr.mergeDicts(
-            makeTargetParamDict(targetConfig),
+            expr.mergeDicts(
+                makeTargetParamDict(targetConfig),
+                makeCoordinatorParamDict(coordinatorConfig)
+            ),
             expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas", "resources")
         ),
         expr.mergeDicts(
@@ -283,6 +287,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
 
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("coordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
@@ -297,6 +302,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     rfsJsonConfig: expr.asString(expr.serialize(
                         makeParamsDict(b.inputs.sourceVersion,
                             b.inputs.targetConfig,
+                            b.inputs.coordinatorConfig,
                             b.inputs.snapshotConfig,
                             b.inputs.documentBackfillConfig,
                             b.inputs.sessionName)
@@ -311,6 +317,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     .addTemplate("runBulkLoad", t => t
         .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("coordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("sessionName", typeToken<string>())
         .addOptionalInput("indices", c => [] as readonly string[])
@@ -320,10 +327,14 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addSteps(b => b
             .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
                 c.register({
-                    ...selectInputsForRegister(b, c)
+                    ...selectInputsForRegister(b, c),
+                    coordinatorConfig: b.inputs.coordinatorConfig
                 }))
             .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c =>
-                c.register(selectInputsForRegister(b, c)))
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    targetConfig: b.inputs.coordinatorConfig
+                }))
             .addStep("waitForCompletion", INTERNAL, "waitForCompletion", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
@@ -331,6 +342,30 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 }))
             .addStep("stopHistoricalBackfill", INTERNAL, "stopHistoricalBackfill", c =>
                 c.register({sessionName: b.inputs.sessionName}))
+        )
+    )
+
+
+    .addTemplate("doNothing", t => t
+        .addSteps(b => b.addStepGroup(c => c)))
+
+
+    .addTemplate("setupAndRunBulkload", t => t
+        .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addOptionalInput("indices", c => [] as readonly string[])
+        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
+
+        .addSteps(b => b
+            .addStep("configureCoordinator", INTERNAL, "doNothing")
+            .addStep("runBulkLoad", INTERNAL, "runBulkLoad", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    coordinatorConfig: b.inputs.targetConfig
+                }))
         )
     )
 
