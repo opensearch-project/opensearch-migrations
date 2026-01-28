@@ -146,8 +146,8 @@ spec:
                   | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
                   # Move sigv4 under authConfig
                   | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
-                  # Add snapshot repo
-                  | . + {"snapshotRepo": $repo}
+                  # Add snapshot repos with default key
+                  | . + {"snapshotRepos": {"default": $repo}}
                 )
               )')
             
@@ -165,6 +165,7 @@ spec:
             SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '[
               .[0]["snapshot-and-migration-configs"][] | {
                 "snapshotConfig": {
+                  "repoName": "default",
                   "snapshotNameConfig": {
                     "snapshotNamePrefix": "testsnapshot"
                   }

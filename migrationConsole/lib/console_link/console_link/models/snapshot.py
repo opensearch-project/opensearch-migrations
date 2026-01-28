@@ -539,6 +539,7 @@ class SnapshotStatus(BaseModel):
 def convert_snapshot_state_to_step_state(snapshot_state: str) -> StepState:
     state_mapping = {
         "FAILED": StepState.FAILED,
+        "STARTED": StepState.RUNNING,
         "IN_PROGRESS": StepState.RUNNING,
         "PARTIAL": StepState.FAILED,
         "SUCCESS": StepState.COMPLETED,
@@ -572,20 +573,23 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
     if not deep_check:
         return SnapshotStateAndDetails(state, None)
 
+    # For deep check, try status API first (for running snapshots)
     try:
         path = f"/_snapshot/{repository}/{snapshot}/_status"
         response = cluster.call_api(path, HttpMethod.GET)
         logging.debug(f"Raw get snapshot status full response: {response.text}")
         response.raise_for_status()
+        
+        snapshot_data = response.json()
+        snapshots = snapshot_data.get('snapshots', [])
+        if snapshots and snapshots[0]:
+            return SnapshotStateAndDetails(state, snapshots[0])
     except HTTPError:
-        raise SnapshotStatusUnavailable()
-
-    snapshot_data = response.json()
-    snapshots = snapshot_data.get('snapshots', [])
-    if not snapshots or not snapshots[0]:
-        raise SnapshotStatusUnavailable()
-
-    return SnapshotStateAndDetails(state, snapshots[0])
+        # Status API failed, snapshot likely completed - fall back to basic info
+        logging.debug(f"Status API unavailable for snapshot {snapshot}, using basic snapshot info")
+    
+    # Use the basic snapshot info we already have
+    return SnapshotStateAndDetails(state, snapshot_info)
 
 
 def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_check: bool) -> CommandResult:

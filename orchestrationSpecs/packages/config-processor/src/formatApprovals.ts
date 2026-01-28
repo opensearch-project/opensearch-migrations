@@ -39,10 +39,10 @@ export function scrapeApprovalsForSnapshotConfigs(
 ) {
     const skipAll = globalSkipApprovals || perMigrationSkipApprovals;
     return Object.fromEntries(
-        perSnapshotCfgs.map(snapshotCfg=>[snapshotCfg.name,
+        perSnapshotCfgs.map(snapshotCfg=>[snapshotCfg.label,
             Object.fromEntries(
                 snapshotCfg.migrations.map(migrationCfg =>
-                    [migrationCfg.name, {
+                    [migrationCfg.label, {
                     ...( (skipAll || migrationCfg.metadataMigrationConfig?.skipEvaluateApproval) ? { evaluateMetadata: true } : {}),
                     ...( (skipAll || migrationCfg.metadataMigrationConfig?.skipMigrateApproval) ? { migrateMetadata: true } : {}),
                     ...( (skipAll || migrationCfg.documentBackfillConfig?.skipApproval) ? { documentBackfill: true } : {}),

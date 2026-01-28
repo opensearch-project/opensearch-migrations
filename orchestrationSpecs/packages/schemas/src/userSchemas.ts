@@ -104,7 +104,6 @@ export const S3_REPO_CONFIG = z.object({
         .describe("Override the default S3 endpoint for clients to connect to. " +
             "Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"),
     s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\/[a-zA-Z0-9!\-_.*'()/]*)?$/).describe("s3://BUCKETNAME/PATH"),
-    repoName: z.string().default("migration_assistant_repo").optional(),
     s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
         .describe("IAM role ARN to assume when accessing S3 for snapshot operations")
 });
@@ -285,8 +284,11 @@ export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     endpoint:  z.string().regex(/^https?:\/\/[^:\/\s]+(:\d+)?(\/)?$/), // override to required
 });
 
+export const SOURCE_CLUSTER_REPOS_RECORD = z.record(z.string(), S3_REPO_CONFIG)
+    .describe("Keys are the repository names that are managed by the source cluster");
+
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
-    snapshotRepo: S3_REPO_CONFIG.optional(),
+    snapshotRepos: SOURCE_CLUSTER_REPOS_RECORD.optional(),
     proxy: PROXY_OPTIONS.optional()
 });
 
@@ -303,7 +305,8 @@ export const SNAPSHOT_NAME_CONFIG = z.union([
 ]);
 
 export const NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG = z.object({
-    snapshotNameConfig: SNAPSHOT_NAME_CONFIG
+    snapshotNameConfig: SNAPSHOT_NAME_CONFIG,
+    repoName: z.string()
 });
 
 export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
@@ -311,7 +314,7 @@ export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
 });
 
 export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    name: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional(),
+    label: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional(),
     metadataMigrationConfig: USER_METADATA_OPTIONS.optional(),
     documentBackfillConfig: USER_RFS_OPTIONS.optional(),
 }).refine(data =>
@@ -320,15 +323,15 @@ export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     {message: "At least one of metadataMigrationConfig or documentBackfillConfig must be provided"});
 
 export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    name: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional(),
+    label: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional(),
     createSnapshotConfig: CREATE_SNAPSHOT_OPTIONS.optional(),
     snapshotConfig: NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
     migrations: z.array(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
 }).refine(data => {
-    const names = data.migrations.map(m => m.name).filter(s => s);
-    return names.length == new Set(names).size;
+    const labels = data.migrations.map(m => m.label).filter(s => s);
+    return labels.length == new Set(labels).size;
 },
-    {message: "names of migration items must be unique when they are provided"});
+    {message: "labels of migration items must be unique when they are provided"});
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     skipApprovals : z.boolean().default(false).optional(), // TODO - format
@@ -337,10 +340,10 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).min(1).optional(),
     replayerConfig: REPLAYER_OPTIONS.optional()
 }).refine(data => {
-        const names = data.snapshotExtractAndLoadConfigs?.map(m => m.name).filter(s => s);
-        return names ? names.length == new Set(names).size : true;
+        const labels = data.snapshotExtractAndLoadConfigs?.map(m => m.label).filter(s => s);
+        return labels ? labels.length == new Set(labels).size : true;
     },
-    {message: "names of snapshotExtractAndLoadConfigs items must be unique when they are provided"});
+    {message: "labels of snapshotExtractAndLoadConfigs items must be unique when they are provided"});
 
 export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);
@@ -352,5 +355,34 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
         sourceClusters: SOURCE_CLUSTERS_MAP,
         targetClusters: TARGET_CLUSTERS_MAP,
         migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG).min(1)
+    }).superRefine((data, ctx) => {
+        for (const migrationConfig of data.migrationConfigs) {
+            const sourceCluster = data.sourceClusters[migrationConfig.fromSource];
+            if (!sourceCluster) continue;
+
+            const snapshotRepos = sourceCluster.snapshotRepos;
+            const snapshotConfigs = migrationConfig.snapshotExtractAndLoadConfigs ?? [];
+
+            for (let i = 0; i < snapshotConfigs.length; i++) {
+                const snapshotConfig = snapshotConfigs[i];
+                const repoName = snapshotConfig.snapshotConfig.repoName;
+
+                if (repoName) {
+                    if (!snapshotRepos) {
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: `snapshotExtractAndLoadConfig[${i}] references repoName '${repoName}' but source cluster '${migrationConfig.fromSource}' has no snapshotRepos defined`,
+                            path: ['migrationConfigs', data.migrationConfigs.indexOf(migrationConfig), 'snapshotExtractAndLoadConfigs', i, 'snapshotConfig', 'repoName']
+                        });
+                    } else if (!(repoName in snapshotRepos)) {
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: `repoName '${repoName}' does not exist in source cluster '${migrationConfig.fromSource}'. Available repos: ${Object.keys(snapshotRepos).join(', ')}`,
+                            path: ['migrationConfigs', data.migrationConfigs.indexOf(migrationConfig), 'snapshotExtractAndLoadConfigs', i, 'snapshotConfig', 'repoName']
+                        });
+                    }
+                }
+            }
+        }
     })
 );
