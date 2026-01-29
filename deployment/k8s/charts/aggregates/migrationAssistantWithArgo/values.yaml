@@ -281,11 +281,14 @@ charts:
           failureThreshold: 1
 
   argo-workflows:
-    version: "0.45.24"
+    version: "0.47.1"
     repository: "https://argoproj.github.io/argo-helm"
     values:
       fullnameOverride: "argo"
       images:
+        # Override appVersion v3.7.8 to v3.7.9 to incorporate retry delay overflow fix
+        # https://github.com/argoproj/argo-workflows/pull/15277
+        tag: v3.7.9
         pullPolicy: IfNotPresent
       controller:
         pdb:
