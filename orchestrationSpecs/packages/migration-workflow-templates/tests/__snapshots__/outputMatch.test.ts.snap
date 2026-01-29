@@ -1145,6 +1145,18 @@ spec:
                   name: "{{=((0 == len(inputs.parameters.basicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.basicCredsSecretNameOrEmpty))}}"
                   key: password
                   optional: true
+            - name: COORDINATOR_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: "{{=((0 == len(inputs.parameters.basicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.basicCredsSecretNameOrEmpty))}}"
+                  key: username
+                  optional: true
+            - name: COORDINATOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "{{=((0 == len(inputs.parameters.basicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.basicCredsSecretNameOrEmpty))}}"
+                  key: password
+                  optional: true
             - name: FAILED_REQUESTS_LOGGER_LEVEL
               value: "OFF"
             - name: CONSOLE_LOG_FORMAT

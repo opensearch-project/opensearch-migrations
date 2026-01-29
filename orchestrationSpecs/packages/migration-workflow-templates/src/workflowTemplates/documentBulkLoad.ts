@@ -32,7 +32,6 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict, makeCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
-import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 
 function makeParamsDict(
     sourceVersion: BaseExpression<z.infer<typeof CLUSTER_VERSION_STRING>>,
@@ -109,6 +108,10 @@ function getRfsReplicasetManifest
             // As of now, we only have this block (though a couple others will come about too) and it
             // doesn't seem like it's worth the complexity.  There's some readability value to having
             // less normalization here as it benefits readability.
+            //
+            // TODO: When coordinatorConfig differs from targetConfig (separate coordinator cluster),
+            // add a coordinatorBasicCredsSecretName parameter and use different secrets
+            // for TARGET_* vs COORDINATOR_* env vars.
             {
                 name: "TARGET_USERNAME",
                 valueFrom: {
@@ -121,6 +124,26 @@ function getRfsReplicasetManifest
             },
             {
                 name: "TARGET_PASSWORD",
+                valueFrom: {
+                    secretKeyRef: {
+                        name: makeStringTypeProxy(basicCredsSecretName),
+                        key: "password",
+                        optional: true
+                    }
+                }
+            },
+            {
+                name: "COORDINATOR_USERNAME",
+                valueFrom: {
+                    secretKeyRef: {
+                        name: makeStringTypeProxy(basicCredsSecretName),
+                        key: "username",
+                        optional: true
+                    }
+                }
+            },
+            {
+                name: "COORDINATOR_PASSWORD",
                 valueFrom: {
                     secretKeyRef: {
                         name: makeStringTypeProxy(basicCredsSecretName),
