@@ -319,7 +319,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b,c),
                     podReplicas: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["podReplicas"], 1),
-                    basicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.coordinatorConfig),
+                    basicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
                     useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
                     rfsJsonConfig: expr.asString(expr.serialize(
@@ -350,8 +350,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addSteps(b => b
             .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
                 c.register({
-                    ...selectInputsForRegister(b, c),
-                    coordinatorConfig: b.inputs.coordinatorConfig
+                    ...selectInputsForRegister(b, c)
                 }))
             .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c =>
                 c.register({

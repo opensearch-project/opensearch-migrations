@@ -1241,7 +1241,7 @@ spec:
                   },
                   {
                     "name": "basicCredsSecretNameOrEmpty",
-                    "value": "{{=sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.coordinatorConfig))}}",
+                    "value": "{{=sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig))}}",
                   },
                   {
                     "name": "loggingConfigurationOverrideConfigMap",
