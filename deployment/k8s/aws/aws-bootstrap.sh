@@ -26,6 +26,7 @@ build_images_locally=false
 keep_build_images_job_alive=false
 use_existing_built_images=false
 use_public_images=true
+use_packaged_chart=false
 skip_console_exec=false
 stage_filter=""
 
@@ -46,6 +47,7 @@ while [[ $# -gt 0 ]]; do
     --use-existing-built-images) use_existing_built_images=true; shift ;;
     --use-public-images) use_public_images="$2"; shift 2 ;;
     --keep-build-images-job-alive) keep_build_images_job_alive=true; shift 1 ;;
+    --use-packaged-chart) use_packaged_chart=true; shift 1 ;;
     --skip-console-exec) skip_console_exec=true; shift 1 ;;
     --stage) stage_filter="$2"; shift 2 ;;
     -h|--help)
@@ -65,6 +67,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --use-existing-built-images               (default: $use_existing_built_images)"
       echo "  --use-public-images <true|false>          (default: $use_public_images)"
       echo "  --keep-build-images-job-alive             (default: $keep_build_images_job_alive)"
+      echo "  --use-packaged-chart                      Download chart from GitHub release (default: $use_packaged_chart)"
       echo "  --skip-console-exec                       (default: $skip_console_exec)"
       echo "  --stage <val>                             Filter CFN exports by stage name"
       exit 0
@@ -423,23 +426,48 @@ else
     --set images.installer.tag=$RELEASE_VERSION"
 fi
 
+# Download packaged chart and artifacts from release if requested
+if [[ "$use_packaged_chart" == "true" ]]; then
+    RELEASE_BASE_URL="https://github.com/opensearch-project/opensearch-migrations/releases/latest/download"
+    echo "Downloading release artifacts from ${RELEASE_BASE_URL}..."
+    curl -LO "${RELEASE_BASE_URL}/migration-assistant-helm.tgz" || { echo "Failed to download Helm chart"; exit 1; }
+    curl -LO "${RELEASE_BASE_URL}/capture-replay-dashboard.json" || { echo "Failed to download capture-replay-dashboard.json"; exit 1; }
+    curl -LO "${RELEASE_BASE_URL}/reindex-from-snapshot-dashboard.json" || { echo "Failed to download reindex-from-snapshot-dashboard.json"; exit 1; }
+    ma_chart_dir="./migration-assistant-helm.tgz"
+    dashboard_dir="."
+else
+    dashboard_dir="${base_dir}/deployment/k8s/dashboards"
+fi
+
 check_existing_ma_release "$namespace" "$namespace"
 
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
-helm install "$namespace" "${ma_chart_dir}" \
-  --namespace $namespace \
-  -f "${ma_chart_dir}/values.yaml" \
-  -f "${ma_chart_dir}/valuesEks.yaml" \
-  --set stageName="${STAGE}" \
-  --set aws.region="${AWS_CFN_REGION}" \
-  --set aws.account="${AWS_ACCOUNT}" \
-  --set defaultBucketConfiguration.snapshotRoleArn="${SNAPSHOT_ROLE}" \
-  $IMAGE_FLAGS \
-  || { echo "Installing Migration Assistant chart failed..."; exit 1; }
+if [[ "$use_packaged_chart" == "true" ]]; then
+    helm install "$namespace" "${ma_chart_dir}" \
+      --namespace $namespace \
+      --set stageName="${STAGE}" \
+      --set aws.region="${AWS_CFN_REGION}" \
+      --set aws.account="${AWS_ACCOUNT}" \
+      --set aws.eksEnabled=true \
+      --set defaultBucketConfiguration.snapshotRoleArn="${SNAPSHOT_ROLE}" \
+      $IMAGE_FLAGS \
+      || { echo "Installing Migration Assistant chart failed..."; exit 1; }
+else
+    helm install "$namespace" "${ma_chart_dir}" \
+      --namespace $namespace \
+      -f "${ma_chart_dir}/values.yaml" \
+      -f "${ma_chart_dir}/valuesEks.yaml" \
+      --set stageName="${STAGE}" \
+      --set aws.region="${AWS_CFN_REGION}" \
+      --set aws.account="${AWS_ACCOUNT}" \
+      --set defaultBucketConfiguration.snapshotRoleArn="${SNAPSHOT_ROLE}" \
+      $IMAGE_FLAGS \
+      || { echo "Installing Migration Assistant chart failed..."; exit 1; }
+fi
 
 echo "Deploying CloudWatch dashboards..."
-deploy_dashboard "CaptureReplay" "${base_dir}/deployment/k8s/dashboards/capture-replay-dashboard.json"
-deploy_dashboard "ReindexFromSnapshot" "${base_dir}/deployment/k8s/dashboards/reindex-from-snapshot-dashboard.json"
+deploy_dashboard "CaptureReplay" "${dashboard_dir}/capture-replay-dashboard.json"
+deploy_dashboard "ReindexFromSnapshot" "${dashboard_dir}/reindex-from-snapshot-dashboard.json"
 echo "All dashboards deployed to CloudWatch"
 
 if [[ "$skip_console_exec" == "false" ]]; then
