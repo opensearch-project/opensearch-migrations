@@ -2359,11 +2359,11 @@ exit 0
         },
         "retryStrategy": {
           "backoff": {
-            "cap": "60",
-            "duration": "5",
+            "cap": "15",
+            "duration": "2",
             "factor": "2",
           },
-          "limit": "33",
+          "limit": "100",
           "retryPolicy": "Always",
         },
       },
