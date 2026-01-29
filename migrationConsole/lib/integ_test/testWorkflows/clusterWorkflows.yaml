@@ -117,7 +117,7 @@ spec:
                       imagePullPolicy: IfNotPresent
                       env:
                         - name: ES_HEAP_SIZE
-                          value: "512m"
+                          value: "2g"
                       envFrom:
                         - secretRef:
                             name: ${CLUSTER_NAME}-aws
@@ -149,11 +149,11 @@ spec:
                         failureThreshold: 20
                       resources:
                         requests:
-                          cpu: "500m"
-                          memory: "1Gi"
+                          cpu: "2"
+                          memory: "4Gi"
                         limits:
-                          cpu: "1000m"
-                          memory: "2Gi"
+                          cpu: "2"
+                          memory: "4Gi"
                       volumeMounts:
                         # Mount ONLY the file (ConfigMap is read-only; avoids scripts/dir creation error)
                         - name: elasticsearch-config
@@ -313,6 +313,9 @@ spec:
                     - name: elasticsearch
                       image: elasticsearch:2.4.6
                       imagePullPolicy: IfNotPresent
+                      env:
+                        - name: ES_HEAP_SIZE
+                          value: "2g"
                       envFrom:
                         - secretRef:
                             name: ${CLUSTER_NAME}-aws
@@ -341,11 +344,11 @@ spec:
                         failureThreshold: 20
                       resources:
                         requests:
-                          cpu: "500m"
-                          memory: "1Gi"
+                          cpu: "2"
+                          memory: "4Gi"
                         limits:
-                          cpu: "1000m"
-                          memory: "2Gi"
+                          cpu: "2"
+                          memory: "4Gi"
                       volumeMounts:
                         # Mount ONLY the file (ConfigMap is read-only; avoids scripts/dir creation error)
                         - name: elasticsearch-config
@@ -445,11 +448,18 @@ spec:
             image: "docker.elastic.co/elasticsearch/elasticsearch"
             imageTag: "5.6.16"
             antiAffinity: "soft"
-            esJavaOpts: "-Xmx512m -Xms512m"
+            esJavaOpts: "-Xms1g -Xmx2g"
             protocol: "http"
             replicas: 1
             createCert: false
             clusterHealthCheckParams: "wait_for_status=yellow&timeout=3s"
+            resources:
+              requests:
+                cpu: "2"
+                memory: "4Gi"
+              limits:
+                cpu: "2"
+                memory: "4Gi"
             readinessProbe:
               failureThreshold: 5
               successThreshold: 2
@@ -537,7 +547,7 @@ spec:
             image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
             imageTag: "6.8.23"
             antiAffinity: "soft"
-            esJavaOpts: "-Xmx512m -Xms512m -XX:UseAVX=0 -Dcom.amazonaws.sdk.disableMBeans=true"
+            esJavaOpts: "-Xms1g -Xmx2g -XX:UseAVX=0 -Dcom.amazonaws.sdk.disableMBeans=true"
             protocol: "http"
             replicas: 1
             createCert: false
@@ -545,6 +555,14 @@ spec:
             clusterHealthCheckParams: "wait_for_status=yellow&timeout=1s"
             
             masterService: ""
+            
+            resources:
+              requests:
+                cpu: "2"
+                memory: "4Gi"
+              limits:
+                cpu: "2"
+                memory: "4Gi"
             
             # Disable probes to avoid transient warnings
             readinessProbe: {}
@@ -662,11 +680,18 @@ spec:
             image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
             imageTag: "7.10.2"
             antiAffinity: "soft"
-            esJavaOpts: "-Xmx512m -Xms512m"
+            esJavaOpts: "-Xms1g -Xmx2g"
             protocol: "http"
             replicas: 1
             createCert: false
             clusterHealthCheckParams: "wait_for_status=yellow&timeout=3s"
+            resources:
+              requests:
+                cpu: "2"
+                memory: "4Gi"
+              limits:
+                cpu: "2"
+                memory: "4Gi"
             readinessProbe:
               failureThreshold: 5
               successThreshold: 2
@@ -783,14 +808,14 @@ spec:
             replicas: 1
             resources:
               requests:
-                cpu: "500m"
-                memory: "1Gi"
+                cpu: "2"
+                memory: "4Gi"
               limits:
-                cpu: "1000m"
-                memory: "2Gi"
+                cpu: "2"
+                memory: "4Gi"
             persistence:
               enabled: false
-            opensearchJavaOpts: "-Xmx1g -Xms1g"
+            opensearchJavaOpts: "-Xms1g -Xmx2g"
             plugins:
               enabled: true
               installList:
@@ -875,14 +900,14 @@ spec:
                 value: "myStrongPassword123!"
             resources:
               requests:
-                cpu: "500m"
-                memory: "1Gi"
+                cpu: "2"
+                memory: "4Gi"
               limits:
-                cpu: "1000m"
-                memory: "2Gi"
+                cpu: "2"
+                memory: "4Gi"
             persistence:
               enabled: false
-            opensearchJavaOpts: "-Xmx1g -Xms1g"
+            opensearchJavaOpts: "-Xms1g -Xmx2g"
             plugins:
               enabled: true
               installList:
@@ -1103,14 +1128,14 @@ spec:
                             key: password
                             optional: false
                       - name: OPENSEARCH_JAVA_OPTS
-                        value: -Xms512m -Xmx512m
+                        value: -Xms1g -Xmx2g
                     resources:
                       requests:
-                        cpu: "1"
-                        memory: 2Gi
+                        cpu: "2"
+                        memory: 4Gi
                       limits:
-                        cpu: "1"
-                        memory: 2Gi
+                        cpu: "2"
+                        memory: 4Gi
                     readinessProbe:
                       exec:
                         command:
