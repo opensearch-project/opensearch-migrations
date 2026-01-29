@@ -28,7 +28,7 @@ usage() {
   echo ""
   echo "Examples:"
   echo "  # Standard validation with public images"
-  echo "  ./awsRunEksValidation.sh --stage eks-create-vpc --region us-east-1"
+  echo "  ./awsRunEksValidation.sh --stage ekscreatevpc --region us-east-1"
   echo ""
   echo "  # Test from a feature branch"
   echo "  ./awsRunEksValidation.sh --stage dev --region us-east-1 --build-images true --branch feature-xyz"

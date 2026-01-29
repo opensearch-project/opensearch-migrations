@@ -11,11 +11,27 @@ ext {
     dataset = findProperty('dataset') ?: 'skip_dataset'
 }
 
+sourceSets {
+    lucene9 {
+        java {
+            srcDir 'src/lucene9/java'
+        }
+        resources {
+            srcDir 'src/lucene9/resources'
+        }
+    }
+}
+
 configurations {
     lucene5
     lucene6
     lucene7
     lucene9
+    lucene9Implementation.extendsFrom(lucene9)
+}
+
+tasks.named('processLucene9Resources').configure {
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
 }
 
 tasks.register('shadowLucene5', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
@@ -40,10 +56,15 @@ tasks.register('shadowLucene7', com.github.jengelman.gradle.plugins.shadow.tasks
 }
 
 tasks.register('shadowLucene9', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    dependsOn compileLucene9Java, processLucene9Resources
     mergeServiceFiles()
     archiveClassifier.set('lucene9-shadow')
     configurations = [project.configurations.lucene9]
+    from sourceSets.lucene9.output
     relocate 'org.apache.lucene', 'shadow.lucene9.org.apache.lucene'
+    manifest {
+        attributes 'Multi-Release': 'true'
+    }
 }
 
 tasks.register('prepareShadowJars') {
@@ -99,6 +120,7 @@ dependencies {
     lucene9 libs.lucene.v9.analysis.common
     lucene9 libs.lucene.v9.backward.codecs
     lucene9 libs.lucene.v9.suggest
+    lucene9 libs.zstd.jni
 
     implementation shadowLucene5.outputs.files
     implementation shadowLucene6.outputs.files

@@ -29,7 +29,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@hey-api/client-next": "^0.5.1",
-    "@hey-api/openapi-ts": "^0.78.3",
+    "@hey-api/openapi-ts": "^0.90.4",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
     "@types/jest": "^29.5.14",

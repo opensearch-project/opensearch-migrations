@@ -86,7 +86,7 @@ class EndToEndTest extends BaseMigrationTest {
     void extendedMetadata(SearchClusterContainer.ContainerVersion sourceVersion) {
         try (
                 final var sourceCluster = new SearchClusterContainer(sourceVersion);
-                final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_1);
+                final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4);
         ) {
             this.sourceCluster = sourceCluster;
             this.targetCluster = targetCluster;

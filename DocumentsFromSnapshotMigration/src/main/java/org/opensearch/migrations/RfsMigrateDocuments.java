@@ -116,6 +116,12 @@ public class RfsMigrateDocuments {
         }
     }
 
+    public enum ServerGeneratedIdMode {
+        AUTO,   // Auto-detect serverless TIMESERIES/VECTOR collections and enable
+        ALWAYS, // Always use server-generated IDs
+        NEVER   // Always preserve source IDs
+    }
+
     public static class Args {
         @Parameter(
             names = {"--help", "-h"},
@@ -174,6 +180,9 @@ public class RfsMigrateDocuments {
         @ParametersDelegate
         public ConnectionContext.TargetArgs targetArgs = new ConnectionContext.TargetArgs();
 
+        @ParametersDelegate
+        public ConnectionContext.CoordinatorArgs coordinatorArgs = new ConnectionContext.CoordinatorArgs();
+
         @Parameter(required = false,
             names = { "--index-allowlist", "--indexAllowlist" },
             description = ("Optional.  List of index names to migrate (e.g. 'logs_2024_01, logs_2024_02').  " +
@@ -219,6 +228,14 @@ public class RfsMigrateDocuments {
             description = "Optional.  The maximum number of connections to simultaneously " +
                 "used to communicate to the target, default 10")
         int maxConnections = 10;
+
+        @Parameter(required = false,
+            names = { "--server-generated-ids" },
+            description = "Optional. Controls document ID generation on target. " +
+                "AUTO (default): auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
+                "ALWAYS: always use server-generated IDs. " +
+                "NEVER: always preserve source IDs (may fail on serverless TIMESERIES/VECTOR).")
+        public ServerGeneratedIdMode serverGeneratedIds = ServerGeneratedIdMode.AUTO;
 
         @Parameter(required = true,
             names = { "--source-version", "--sourceVersion" },
@@ -362,6 +379,11 @@ public class RfsMigrateDocuments {
             );
         }
 
+        // Validate coordinator args - the ConnectionContext constructor will validate auth param consistency,
+        // but we log here if coordinator is enabled for visibility
+        if (args.coordinatorArgs.isEnabled()) {
+            log.info("Coordinator connection enabled with host: {}", args.coordinatorArgs.host);
+        }
     }
 
     public static void main(String[] args) throws Exception {
@@ -391,9 +413,27 @@ public class RfsMigrateDocuments {
         var luceneDirPath = Paths.get(arguments.luceneDir);
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
-        var connectionContext = arguments.targetArgs.toConnectionContext();
-        OpenSearchClient targetClient = new OpenSearchClientFactory(connectionContext).determineVersionAndCreate();
+        var targetConnectionContext = arguments.targetArgs.toConnectionContext();
+        var targetClientFactory = new OpenSearchClientFactory(targetConnectionContext);
+        OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate();
         var targetVersion = targetClient.getClusterVersion();
+        
+        // Determine if server-generated IDs should be used
+        boolean useServerGeneratedIds = switch (arguments.serverGeneratedIds) {
+            case ALWAYS -> true;
+            case NEVER -> false;
+            case AUTO -> {
+                var collectionType = targetClientFactory.detectServerlessCollectionType();
+                if (collectionType.requiresServerGeneratedIds()) {
+                    log.info("Auto-enabling server-generated IDs for {} serverless collection", collectionType);
+                    yield true;
+                }
+                yield false;
+            }
+        };
+
+        // Determine coordinator connection and version
+        var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
 
         var docTransformerConfig = Optional.ofNullable(TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams))
             .orElse(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
@@ -406,11 +446,11 @@ public class RfsMigrateDocuments {
         var progressCursor = new AtomicReference<WorkItemCursor>();
         var cancellationRunnableRef = new AtomicReference<Runnable>();
         var workItemTimeProvider = new WorkItemTimeProvider();
-        var coordinatorFactory = new WorkCoordinatorFactory(targetVersion, arguments.indexNameSuffix);
+        var coordinatorFactory = new WorkCoordinatorFactory(coordinatorInfo.version(), arguments.indexNameSuffix);
         var cleanShutdownCompleted = new AtomicBoolean(false);
 
         try (var workCoordinator = coordinatorFactory.get(
-                 new CoordinateWorkHttpClient(connectionContext),
+                 new CoordinateWorkHttpClient(coordinatorInfo.connectionContext()),
                  TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                  workerId,
                 Clock.systemUTC(),
@@ -464,6 +504,7 @@ public class RfsMigrateDocuments {
                 arguments.numBytesPerBulkRequest,
                 arguments.maxConnections,
                 docTransformerSupplier,
+                useServerGeneratedIds,
                 allowlist);
 
             var finder = ClusterProviderRegistry.getSnapshotFileFinder(
@@ -515,6 +556,34 @@ public class RfsMigrateDocuments {
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
         }
+    }
+
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
+    private record CoordinatorInfo(ConnectionContext connectionContext, Version version) {}
+
+    private static CoordinatorInfo resolveCoordinatorConnection(Args arguments, ConnectionContext targetConnectionContext, Version targetVersion) {
+        if (arguments.coordinatorArgs.isEnabled()) {
+            var ctx = arguments.coordinatorArgs.toConnectionContext();
+            var version = new OpenSearchClientFactory(ctx).getClusterVersion();
+            if (version.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH) {
+                throw new IllegalArgumentException(
+                    "OpenSearch Serverless cannot be used as a coordinator cluster. " +
+                    "Serverless does not support the work coordination indices required for document migration. " +
+                    "Please use a managed OpenSearch or self-hosted cluster for coordination."
+                );
+            }
+            log.atInfo().setMessage("Using separate coordinator cluster: {} (version: {})")
+                .addArgument(ctx.getUri()).addArgument(version).log();
+            return new CoordinatorInfo(ctx, version);
+        }
+        if (targetVersion.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH) {
+            throw new IllegalArgumentException(
+                "OpenSearch Serverless cannot be used for work coordination. " +
+                "Please specify a separate coordinator cluster using --coordinator-host."
+            );
+        }
+        log.atInfo().setMessage("Using target cluster for coordination").log();
+        return new CoordinatorInfo(targetConnectionContext, targetVersion);
     }
 
     private static void executeCleanShutdownProcess(
