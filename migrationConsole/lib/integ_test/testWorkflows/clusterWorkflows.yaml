@@ -448,7 +448,7 @@ spec:
             image: "docker.elastic.co/elasticsearch/elasticsearch"
             imageTag: "5.6.16"
             antiAffinity: "soft"
-            esJavaOpts: "-Xms1g -Xmx2g"
+            esJavaOpts: "-Xms2g -Xmx2g"
             protocol: "http"
             replicas: 1
             createCert: false
@@ -547,7 +547,7 @@ spec:
             image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
             imageTag: "6.8.23"
             antiAffinity: "soft"
-            esJavaOpts: "-Xms1g -Xmx2g -XX:UseAVX=0 -Dcom.amazonaws.sdk.disableMBeans=true"
+            esJavaOpts: "-Xms2g -Xmx2g -XX:UseAVX=0 -Dcom.amazonaws.sdk.disableMBeans=true"
             protocol: "http"
             replicas: 1
             createCert: false
@@ -680,7 +680,7 @@ spec:
             image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
             imageTag: "7.10.2"
             antiAffinity: "soft"
-            esJavaOpts: "-Xms1g -Xmx2g"
+            esJavaOpts: "-Xms2g -Xmx2g"
             protocol: "http"
             replicas: 1
             createCert: false
@@ -815,7 +815,7 @@ spec:
                 memory: "4Gi"
             persistence:
               enabled: false
-            opensearchJavaOpts: "-Xms1g -Xmx2g"
+            opensearchJavaOpts: "-Xms2g -Xmx2g"
             plugins:
               enabled: true
               installList:
@@ -907,7 +907,7 @@ spec:
                 memory: "4Gi"
             persistence:
               enabled: false
-            opensearchJavaOpts: "-Xms1g -Xmx2g"
+            opensearchJavaOpts: "-Xms2g -Xmx2g"
             plugins:
               enabled: true
               installList:
@@ -1128,7 +1128,7 @@ spec:
                             key: password
                             optional: false
                       - name: OPENSEARCH_JAVA_OPTS
-                        value: -Xms1g -Xmx2g
+                        value: -Xms2g -Xmx2g
                     resources:
                       requests:
                         cpu: "2"
