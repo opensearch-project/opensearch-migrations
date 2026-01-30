@@ -249,7 +249,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             },
             "required": [
               "endpoint",
-              "version",
               "name"
             ]
           },
@@ -919,8 +918,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           }
         },
         "required": [
-          "endpoint",
-          "version"
+          "endpoint"
         ]
       }
     },
