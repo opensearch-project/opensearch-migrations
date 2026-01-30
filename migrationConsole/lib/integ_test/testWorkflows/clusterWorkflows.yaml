@@ -1140,10 +1140,10 @@ spec:
                           - sh
                           - -c
                           - curl -sk -u "${OPENSEARCH_INITIAL_ADMIN_USERNAME}:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" "https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s"
-                      initialDelaySeconds: 5
-                      periodSeconds: 5
-                      timeoutSeconds: 3
-                      failureThreshold: 24
+                      initialDelaySeconds: 30
+                      periodSeconds: 10
+                      timeoutSeconds: 5
+                      failureThreshold: 60
                     volumeMounts:
                       - name: data
                         mountPath: /usr/share/opensearch/data
