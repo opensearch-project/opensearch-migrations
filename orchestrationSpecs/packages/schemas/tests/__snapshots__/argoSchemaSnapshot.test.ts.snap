@@ -492,6 +492,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type": "string",
                             "default": "http://otel-collector:4317"
                           },
+                          "useTargetClusterForWorkCoordination": {
+                            "type": "boolean",
+                            "default": true
+                          },
                           "resources": {
                             "type": "object",
                             "nullable": true,
@@ -1151,6 +1155,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "otelCollectorEndpoint": {
                             "type": "string",
                             "default": "http://otel-collector:4317"
+                          },
+                          "useTargetClusterForWorkCoordination": {
+                            "type": "boolean",
+                            "default": true
                           },
                           "skipApproval": {
                             "type": "boolean",

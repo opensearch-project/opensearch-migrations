@@ -359,6 +359,7 @@ export type TaskOutputSource = { kind: "tasks_output", taskName: string, paramet
 
 export type WORKFLOW_VALUES =
     "name"
+    | "namespace"
     | "mainEntrypoint"
     | "serviceAccountName"
     | "uid"
