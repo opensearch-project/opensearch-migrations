@@ -284,8 +284,7 @@ export const CLUSTER_CONFIG = z.object({
 
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     endpoint:  z.string().regex(/^https?:\/\/[^:\/\s]+(:\d+)?(\/)?$/), // override to required
-    version: CLUSTER_VERSION_STRING.optional(), // override to optional for OpenSearch Serverless support
-});
+}).omit({ version: true }); // Remove version field
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     snapshotRepo: S3_REPO_CONFIG.optional(),
