@@ -112,7 +112,7 @@ export const FullMigration = WorkflowBuilder.create({
                 },
                 { when: { templateExp: expr.not(expr.isEmpty(b.inputs.metadataMigrationConfig)) }}
             )
-            .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoad", c =>
+            .addStep("bulkLoadDocuments", DocumentBulkLoad, "setupAndRunBulkLoad", c =>
                     c.register({
                         ...(selectInputsForRegister(b, c)),
                         sessionName: c.steps.idGenerator.id,

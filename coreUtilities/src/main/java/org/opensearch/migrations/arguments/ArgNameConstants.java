@@ -11,7 +11,7 @@ public class ArgNameConstants {
     }
 
     public static final Pattern POSSIBLE_CREDENTIALS_ARG_FLAG_NAMES =
-        Pattern.compile("--(?:target|source)(?:(?:-u|U)sername|(?:-p|P)assword)");
+        Pattern.compile("--(?:target|source|coordinator)(?:(?:-u|U)sername|(?:-p|P)assword)");
 
     public static final String TARGET_PASSWORD_ARG_KEBAB_CASE = "--target-password";
     public static final String TARGET_PASSWORD_ARG_CAMEL_CASE = "--targetPassword";
