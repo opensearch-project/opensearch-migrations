@@ -30,20 +30,23 @@ import {
 } from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
+import {makeTargetParamDict, makeCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
-import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 
 function makeParamsDict(
     sourceVersion: BaseExpression<z.infer<typeof CLUSTER_VERSION_STRING>>,
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
+    coordinatorConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
     options: BaseExpression<Serialized<z.infer<typeof RFS_OPTIONS>>>,
     sessionName: BaseExpression<string>
 ) {
     return expr.mergeDicts(
         expr.mergeDicts(
-            makeTargetParamDict(targetConfig),
+            expr.mergeDicts(
+                makeTargetParamDict(targetConfig),
+                makeCoordinatorParamDict(coordinatorConfig)
+            ),
             expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas", "resources")
         ),
         expr.mergeDicts(
@@ -71,7 +74,8 @@ function getRfsReplicasetManifest
     jsonConfig: BaseExpression<string>
     sessionName: BaseExpression<string>,
     podReplicas: BaseExpression<number>,
-    basicCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
+    targetBasicCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
+    coordinatorBasicCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
 
     useLocalstackAwsCreds: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
@@ -80,10 +84,15 @@ function getRfsReplicasetManifest
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
     resources: BaseExpression<ResourceRequirementsType>
 }): ReplicaSet {
-    const basicCredsSecretName = expr.ternary(
-        expr.isEmpty(args.basicCredsSecretNameOrEmpty),
+    const targetBasicCredsSecretName = expr.ternary(
+        expr.isEmpty(args.targetBasicCredsSecretNameOrEmpty),
         expr.literal("empty"),
-        args.basicCredsSecretNameOrEmpty
+        args.targetBasicCredsSecretNameOrEmpty
+    );
+    const coordinatorBasicCredsSecretName = expr.ternary(
+        expr.isEmpty(args.coordinatorBasicCredsSecretNameOrEmpty),
+        expr.literal("empty"),
+        args.coordinatorBasicCredsSecretNameOrEmpty
     );
     const useCustomLogging = expr.not(expr.isEmpty(args.loggingConfigMap));
     const baseContainerDefinition = {
@@ -105,11 +114,12 @@ function getRfsReplicasetManifest
             // As of now, we only have this block (though a couple others will come about too) and it
             // doesn't seem like it's worth the complexity.  There's some readability value to having
             // less normalization here as it benefits readability.
+            //
             {
                 name: "TARGET_USERNAME",
                 valueFrom: {
                     secretKeyRef: {
-                        name: makeStringTypeProxy(basicCredsSecretName),
+                        name: makeStringTypeProxy(targetBasicCredsSecretName),
                         key: "username",
                         optional: true
                     }
@@ -119,7 +129,27 @@ function getRfsReplicasetManifest
                 name: "TARGET_PASSWORD",
                 valueFrom: {
                     secretKeyRef: {
-                        name: makeStringTypeProxy(basicCredsSecretName),
+                        name: makeStringTypeProxy(targetBasicCredsSecretName),
+                        key: "password",
+                        optional: true
+                    }
+                }
+            },
+            {
+                name: "COORDINATOR_USERNAME",
+                valueFrom: {
+                    secretKeyRef: {
+                        name: makeStringTypeProxy(coordinatorBasicCredsSecretName),
+                        key: "username",
+                        optional: true
+                    }
+                }
+            },
+            {
+                name: "COORDINATOR_PASSWORD",
+                valueFrom: {
+                    secretKeyRef: {
+                        name: makeStringTypeProxy(coordinatorBasicCredsSecretName),
                         key: "password",
                         optional: true
                     }
@@ -250,7 +280,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     .addTemplate("startHistoricalBackfill", t => t
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("rfsJsonConfig", typeToken<string>())
-        .addRequiredInput("basicCredsSecretNameOrEmpty", typeToken<string>())
+        .addRequiredInput("targetBasicCredsSecretNameOrEmpty", typeToken<string>())
+        .addRequiredInput("coordinatorBasicCredsSecretNameOrEmpty", typeToken<string>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
@@ -266,7 +297,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     useLocalstackAwsCreds: expr.deserializeRecord(b.inputs.useLocalStack),
                     sessionName: b.inputs.sessionName,
-                    basicCredsSecretNameOrEmpty: b.inputs.basicCredsSecretNameOrEmpty,
+                    targetBasicCredsSecretNameOrEmpty: b.inputs.targetBasicCredsSecretNameOrEmpty,
+                    coordinatorBasicCredsSecretNameOrEmpty: b.inputs.coordinatorBasicCredsSecretNameOrEmpty,
                     rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
                     rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
                     workflowName: expr.getWorkflowValue("name"),
@@ -283,6 +315,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
 
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("coordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
@@ -291,12 +324,14 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b,c),
                     podReplicas: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["podReplicas"], 1),
-                    basicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
+                    targetBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
+                    coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.coordinatorConfig),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
                     useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
                     rfsJsonConfig: expr.asString(expr.serialize(
                         makeParamsDict(b.inputs.sourceVersion,
                             b.inputs.targetConfig,
+                            b.inputs.coordinatorConfig,
                             b.inputs.snapshotConfig,
                             b.inputs.documentBackfillConfig,
                             b.inputs.sessionName)
@@ -311,6 +346,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     .addTemplate("runBulkLoad", t => t
         .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("coordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("sessionName", typeToken<string>())
         .addOptionalInput("indices", c => [] as readonly string[])
@@ -323,7 +359,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c)
                 }))
             .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c =>
-                c.register(selectInputsForRegister(b, c)))
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    targetConfig: b.inputs.coordinatorConfig
+                }))
             .addStep("waitForCompletion", INTERNAL, "waitForCompletion", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
@@ -331,6 +370,30 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 }))
             .addStep("stopHistoricalBackfill", INTERNAL, "stopHistoricalBackfill", c =>
                 c.register({sessionName: b.inputs.sessionName}))
+        )
+    )
+
+
+    .addTemplate("doNothing", t => t
+        .addSteps(b => b.addStepGroup(c => c)))
+
+
+    .addTemplate("setupAndRunBulkLoad", t => t
+        .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addOptionalInput("indices", c => [] as readonly string[])
+        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
+
+        .addSteps(b => b
+            .addStep("configureCoordinator", INTERNAL, "doNothing")
+            .addStep("runBulkLoad", INTERNAL, "runBulkLoad", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    coordinatorConfig: b.inputs.targetConfig
+                }))
         )
     )
 
