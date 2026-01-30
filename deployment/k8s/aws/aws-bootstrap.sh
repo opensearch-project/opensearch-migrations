@@ -387,6 +387,10 @@ if [[ "$build_images" == "true" ]]; then
     pushd "$base_dir" || exit
     ./gradlew :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
     popd > /dev/null || exit
+
+    echo "Cleaning up docker buildx builder to free buildkit pods..."
+    docker buildx rm local-remote-builder 2>/dev/null || true
+    echo "Builder removed. Buildkit pods will be terminated by kubernetes driver."
   else
     if helm status build-images -n "$namespace" >/dev/null 2>&1; then
       read -rp "Helm release 'build-images' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
