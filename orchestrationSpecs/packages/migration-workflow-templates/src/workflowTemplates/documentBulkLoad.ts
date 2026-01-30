@@ -74,7 +74,8 @@ function getRfsReplicasetManifest
     jsonConfig: BaseExpression<string>
     sessionName: BaseExpression<string>,
     podReplicas: BaseExpression<number>,
-    basicCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
+    targetBasicCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
+    coordinatorBasicCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
 
     useLocalstackAwsCreds: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
@@ -83,10 +84,15 @@ function getRfsReplicasetManifest
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
     resources: BaseExpression<ResourceRequirementsType>
 }): ReplicaSet {
-    const basicCredsSecretName = expr.ternary(
-        expr.isEmpty(args.basicCredsSecretNameOrEmpty),
+    const targetBasicCredsSecretName = expr.ternary(
+        expr.isEmpty(args.targetBasicCredsSecretNameOrEmpty),
         expr.literal("empty"),
-        args.basicCredsSecretNameOrEmpty
+        args.targetBasicCredsSecretNameOrEmpty
+    );
+    const coordinatorBasicCredsSecretName = expr.ternary(
+        expr.isEmpty(args.coordinatorBasicCredsSecretNameOrEmpty),
+        expr.literal("empty"),
+        args.coordinatorBasicCredsSecretNameOrEmpty
     );
     const useCustomLogging = expr.not(expr.isEmpty(args.loggingConfigMap));
     const baseContainerDefinition = {
@@ -109,14 +115,11 @@ function getRfsReplicasetManifest
             // doesn't seem like it's worth the complexity.  There's some readability value to having
             // less normalization here as it benefits readability.
             //
-            // TODO: When coordinatorConfig differs from targetConfig (separate coordinator cluster),
-            // add a coordinatorBasicCredsSecretName parameter and use different secrets
-            // for TARGET_* vs COORDINATOR_* env vars.
             {
                 name: "TARGET_USERNAME",
                 valueFrom: {
                     secretKeyRef: {
-                        name: makeStringTypeProxy(basicCredsSecretName),
+                        name: makeStringTypeProxy(targetBasicCredsSecretName),
                         key: "username",
                         optional: true
                     }
@@ -126,7 +129,7 @@ function getRfsReplicasetManifest
                 name: "TARGET_PASSWORD",
                 valueFrom: {
                     secretKeyRef: {
-                        name: makeStringTypeProxy(basicCredsSecretName),
+                        name: makeStringTypeProxy(targetBasicCredsSecretName),
                         key: "password",
                         optional: true
                     }
@@ -136,7 +139,7 @@ function getRfsReplicasetManifest
                 name: "COORDINATOR_USERNAME",
                 valueFrom: {
                     secretKeyRef: {
-                        name: makeStringTypeProxy(basicCredsSecretName),
+                        name: makeStringTypeProxy(coordinatorBasicCredsSecretName),
                         key: "username",
                         optional: true
                     }
@@ -146,7 +149,7 @@ function getRfsReplicasetManifest
                 name: "COORDINATOR_PASSWORD",
                 valueFrom: {
                     secretKeyRef: {
-                        name: makeStringTypeProxy(basicCredsSecretName),
+                        name: makeStringTypeProxy(coordinatorBasicCredsSecretName),
                         key: "password",
                         optional: true
                     }
@@ -277,7 +280,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     .addTemplate("startHistoricalBackfill", t => t
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("rfsJsonConfig", typeToken<string>())
-        .addRequiredInput("basicCredsSecretNameOrEmpty", typeToken<string>())
+        .addRequiredInput("targetBasicCredsSecretNameOrEmpty", typeToken<string>())
+        .addRequiredInput("coordinatorBasicCredsSecretNameOrEmpty", typeToken<string>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
@@ -293,7 +297,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     useLocalstackAwsCreds: expr.deserializeRecord(b.inputs.useLocalStack),
                     sessionName: b.inputs.sessionName,
-                    basicCredsSecretNameOrEmpty: b.inputs.basicCredsSecretNameOrEmpty,
+                    targetBasicCredsSecretNameOrEmpty: b.inputs.targetBasicCredsSecretNameOrEmpty,
+                    coordinatorBasicCredsSecretNameOrEmpty: b.inputs.coordinatorBasicCredsSecretNameOrEmpty,
                     rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
                     rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
                     workflowName: expr.getWorkflowValue("name"),
@@ -319,7 +324,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b,c),
                     podReplicas: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["podReplicas"], 1),
-                    basicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
+                    targetBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
+                    coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.coordinatorConfig),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
                     useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
                     rfsJsonConfig: expr.asString(expr.serialize(

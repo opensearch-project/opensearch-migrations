@@ -1074,7 +1074,10 @@ sys.exit(0 if all_finished else 1)'",
               "name": "rfsJsonConfig",
             },
             {
-              "name": "basicCredsSecretNameOrEmpty",
+              "name": "targetBasicCredsSecretNameOrEmpty",
+            },
+            {
+              "name": "coordinatorBasicCredsSecretNameOrEmpty",
             },
             {
               "name": "podReplicas",
@@ -1136,25 +1139,25 @@ spec:
             - name: TARGET_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: "{{=((0 == len(inputs.parameters.basicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.basicCredsSecretNameOrEmpty))}}"
+                  name: "{{=((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty))}}"
                   key: username
                   optional: true
             - name: TARGET_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "{{=((0 == len(inputs.parameters.basicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.basicCredsSecretNameOrEmpty))}}"
+                  name: "{{=((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty))}}"
                   key: password
                   optional: true
             - name: COORDINATOR_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: "{{=((0 == len(inputs.parameters.basicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.basicCredsSecretNameOrEmpty))}}"
+                  name: "{{=((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty))}}"
                   key: username
                   optional: true
             - name: COORDINATOR_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "{{=((0 == len(inputs.parameters.basicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.basicCredsSecretNameOrEmpty))}}"
+                  name: "{{=((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty))}}"
                   key: password
                   optional: true
             - name: FAILED_REQUESTS_LOGGER_LEVEL
@@ -1240,8 +1243,12 @@ spec:
                     "value": "{{=sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.documentBackfillConfig))}}",
                   },
                   {
-                    "name": "basicCredsSecretNameOrEmpty",
+                    "name": "targetBasicCredsSecretNameOrEmpty",
                     "value": "{{=sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig))}}",
+                  },
+                  {
+                    "name": "coordinatorBasicCredsSecretNameOrEmpty",
+                    "value": "{{=sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.coordinatorConfig))}}",
                   },
                   {
                     "name": "loggingConfigurationOverrideConfigMap",
