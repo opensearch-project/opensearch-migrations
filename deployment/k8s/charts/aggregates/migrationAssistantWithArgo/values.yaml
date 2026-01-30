@@ -327,6 +327,8 @@ charts:
         pdb:
           enabled: true
           minAvailable: 1  # Ensures at least 1 pod always running
+        livenessProbe:
+          enabled: true
         affinity:
           podAntiAffinity:
             preferredDuringSchedulingIgnoredDuringExecution:
