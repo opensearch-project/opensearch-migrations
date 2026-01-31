@@ -950,6 +950,11 @@ class TestArgoWorkflows:
             "spec": {
                 # Use default service account which has executor role bound in quickstart
                 # The executor role grants permission to create workflowtaskresults
+                "podMetadata": {
+                    "labels": {
+                        "test-workflow": "hello-world"
+                    }
+                },
                 "templates": [
                     {
                         "name": "hello-world",
@@ -1100,7 +1105,7 @@ class TestArgoWorkflows:
             # Test output command with the completed workflow
             logger.info("\nTesting output command for completed workflow...")
             runner = CliRunner()
-            _test_output_command_for_workflow(runner, workflow_name, argo_namespace)
+            _test_output_command_for_workflow(runner, workflow_name, argo_namespace, test_message)
 
         except ApiException as e:
             pytest.fail(f"Failed to submit workflow via Kubernetes API: {e}")
@@ -1219,44 +1224,35 @@ def test_k3s_container_support():
         pytest.skip("testcontainers not installed - run: pip install testcontainers")
 
 
-def _test_output_command_for_workflow(runner, workflow_name, namespace):
+def _test_output_command_for_workflow(runner, workflow_name, namespace, expected_message):
     """
     Helper function to test output command for a given workflow.
 
     Tests that the output command can retrieve output from a completed workflow.
-    Selects step 0 and verifies that output is actually displayed.
 
     Args:
         runner: Click test runner
         workflow_name: Name of the workflow to get output for
         namespace: Kubernetes namespace
+        expected_message: The message that should appear in the workflow output
 
     Raises:
         AssertionError: If output command fails or output is not retrieved
     """
-    # Invoke output command with explicit argo-server URL (HTTPS with insecure flag for self-signed cert)
     result = runner.invoke(
         workflow_cli,
-        ['output', workflow_name, '--namespace', namespace, '--argo-server', 'https://localhost:2746', '--insecure'],
-        input='0\n'  # Select first step
+        ['output', '--workflow-name', workflow_name, '--namespace', namespace,
+         '--argo-server', 'https://localhost:2746', '--insecure',
+         '--prefix', '', '-l', 'test-workflow=hello-world'],
     )
 
-    # Verify command succeeded
     assert result.exit_code == 0, f"Output command failed with exit code {result.exit_code}. Output: {result.output}"
 
-    # Verify step selection menu was shown
-    assert "Select a step to view output:" in result.output, \
-        f"Step selection menu not found in output: {result.output}"
+    assert expected_message in result.output, \
+        f"Expected message '{expected_message}' not found in output: {result.output}"
 
-    # Verify output section header is present (indicates output was retrieved)
-    assert "Output for:" in result.output, \
-        f"Output header not found in output: {result.output}"
-
-    # Verify container output section is present
-    assert "Container:" in result.output, \
-        f"Container output section not found in output: {result.output}"
-
-    logger.info(f"✓ Output command successfully retrieved output for workflow {workflow_name}")
+    logger.info(f"✓ Output command successfully executed for workflow {workflow_name}")
+    logger.info(f"✓ Verified output contains expected message: {expected_message}")
 
 
 def _test_status_command_for_workflow(runner, workflow_name, namespace):
@@ -1277,7 +1273,8 @@ def _test_status_command_for_workflow(runner, workflow_name, namespace):
     # Invoke status command with explicit argo-server URL (HTTPS with insecure flag for self-signed cert)
     result = runner.invoke(
         workflow_cli,
-        ['status', workflow_name, '--namespace', namespace, '--argo-server', 'https://localhost:2746', '--insecure']
+        ['status', '--workflow-name', workflow_name, '--namespace', namespace,
+         '--argo-server', 'https://localhost:2746', '--insecure']
     )
 
     # Verify command succeeded

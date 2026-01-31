@@ -1,0 +1,57 @@
+[
+  {
+    "id": "root",
+    "display_name": "workflow",
+    "phase": "Running",
+    "type": "Steps",
+    "boundary_id": null,
+    "children": [
+      {
+        "id": "container",
+        "display_name": "container",
+        "phase": "Running",
+        "type": "Steps",
+        "boundary_id": "root",
+        "children": [
+          {
+            "id": "child1",
+            "display_name": "child1",
+            "phase": "Succeeded",
+            "type": "Pod",
+            "boundary_id": "container",
+            "children": [],
+            "inputs": {},
+            "outputs": {},
+            "started_at": null,
+            "finished_at": null
+          },
+          {
+            "id": "child2",
+            "display_name": "child2",
+            "phase": "Running",
+            "type": "Pod",
+            "boundary_id": "container",
+            "children": [],
+            "inputs": {},
+            "outputs": {},
+            "started_at": null,
+            "finished_at": null
+          }
+        ],
+        "inputs": {
+          "parameters": [
+            {"name": "groupName", "value": "rootgroup"}
+          ]
+        },
+        "outputs": {},
+        "started_at": null,
+        "finished_at": null,
+        "group_name": "rootgroup"
+      }
+    ],
+    "inputs": {},
+    "outputs": {},
+    "started_at": null,
+    "finished_at": null
+  }
+]

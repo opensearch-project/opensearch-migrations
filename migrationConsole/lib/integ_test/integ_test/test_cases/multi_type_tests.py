@@ -49,7 +49,12 @@ class Test0004MultiTypeUnionMigration(MATestBase):
                     "transformerConfigBase64": transformation_b64
                 },
                 "documentBackfillConfig": {
-                    "docTransformerConfigBase64": transformation_b64
+                    "docTransformerConfigBase64": transformation_b64,
+                    "maxShardSizeBytes": 16000000,
+                    "resources": {
+                        "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},
+                        "limits": {"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"}
+                    }
                 }
             }]
         }]
@@ -125,7 +130,12 @@ class Test0005MultiTypeSplitMigration(MATestBase):
                     "transformerConfigBase64": transformation_b64
                 },
                 "documentBackfillConfig": {
-                    "docTransformerConfigBase64": transformation_b64
+                    "docTransformerConfigBase64": transformation_b64,
+                    "maxShardSizeBytes": 16000000,
+                    "resources": {
+                        "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},
+                        "limits": {"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"}
+                    }
                 }
             }]
         }]

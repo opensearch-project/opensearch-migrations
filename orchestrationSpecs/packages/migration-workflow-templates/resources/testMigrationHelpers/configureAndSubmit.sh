@@ -33,4 +33,6 @@ cat /tmp/migration_config.json | workflow configure edit --stdin
 # Submit workflow
 echo "Submitting workflow..."
 WORKFLOW_OUTPUT=$(workflow submit 2>&1)
+EXIT_CODE=$?
 echo "Workflow submit output: $WORKFLOW_OUTPUT"
+[ $EXIT_CODE -eq 0 ] || exit $EXIT_CODE

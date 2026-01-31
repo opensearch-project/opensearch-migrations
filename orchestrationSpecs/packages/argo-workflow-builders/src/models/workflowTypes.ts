@@ -126,8 +126,8 @@ export type InputParamsToExpressions<
 };
 
 // Helper type to extract workflow inputs from contextual scope
-export type WorkflowInputsToExpressions<ContextualScope extends { workflowParameters?: InputParametersRecord }> =
-    ContextualScope extends { workflowParameters: infer WP }
+export type WorkflowInputsToExpressions<ParentWorkflowScope extends { workflowParameters?: InputParametersRecord }> =
+    ParentWorkflowScope extends { workflowParameters: infer WP }
         ? WP extends InputParametersRecord
             ? InputParamsToExpressions<WP, WorkflowParameterSource>
             : {}

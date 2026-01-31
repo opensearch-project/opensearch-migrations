@@ -1,6 +1,6 @@
 import {z} from "zod";
 import {CreateSnapshot} from "./createSnapshot";
-import {SNAPSHOT_NAME_CONFIG} from "@opensearch-migrations/schemas";
+import {ARGO_CREATE_SNAPSHOT_OPTIONS, SNAPSHOT_NAME_CONFIG} from "@opensearch-migrations/schemas";
 import {
     COMPLETE_SNAPSHOT_CONFIG,
     CREATE_SNAPSHOT_OPTIONS,
@@ -29,7 +29,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
 
 
     .addTemplate("getSnapshotName", t=>t
-        .addRequiredInput("sourceName", typeToken<string>())
+        .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("snapshotNameConfig", typeToken<z.infer<typeof SNAPSHOT_NAME_CONFIG>>())
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
 
@@ -39,7 +39,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
             expr.ternary(
                 expr.hasKey(expr.deserializeRecord(b.inputs.snapshotNameConfig), "snapshotNamePrefix"),
                 expr.concatWith("_",
-                    b.inputs.sourceName,
+                    b.inputs.sourceLabel,
                     expr.getLoose(expr.deserializeRecord(b.inputs.snapshotNameConfig), "snapshotNamePrefix"),
                     b.inputs.uniqueRunNonce
                 ),
@@ -52,16 +52,17 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
 
 
     .addTemplate("createOrGetSnapshot", t => t
-        .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof CREATE_SNAPSHOT_OPTIONS>>())
+        .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>>())
+        .addRequiredInput("targetLabel", typeToken<string>())
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
             .addStep("getSnapshotName", INTERNAL, "getSnapshotName", c=>c.register({
                     ...selectInputsForRegister(b, c),
-                    sourceName: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "name"),
+                    sourceLabel: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "label"),
                     snapshotNameConfig: expr.serialize(
                         expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "snapshotNameConfig")) as any,
                 })
@@ -74,6 +75,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                         expr.makeDict({
                             repoConfig: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig"),
                             snapshotName: expr.toLowerCase(c.steps.getSnapshotName.outputs.snapshotName),
+                            label: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
                         })
                     ),
                 }), {
@@ -84,7 +86,8 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         .addExpressionOutput("snapshotConfig", c =>
             expr.serialize(expr.makeDict({
                 snapshotName: c.steps.getSnapshotName.outputs.snapshotName,
-                repoConfig: expr.get(expr.deserializeRecord(c.inputs.snapshotConfig), "repoConfig")
+                repoConfig: expr.get(expr.deserializeRecord(c.inputs.snapshotConfig), "repoConfig"),
+                label: expr.get(expr.deserializeRecord(c.inputs.snapshotConfig), "label")
             })))
     )
 
