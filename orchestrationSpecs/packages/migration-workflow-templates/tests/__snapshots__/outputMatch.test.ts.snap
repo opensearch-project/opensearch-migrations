@@ -1436,6 +1436,172 @@ spec:
         ],
       },
       {
+        "container": {
+          "args": [
+            "{{='argo submit -n ma '+'--from workflowtemplate/cluster-templates '+'--name '+inputs.parameters.coordinatorClusterName+'-deploy '+'--parameter cluster-name='+inputs.parameters.coordinatorClusterName+' '+'--parameter namespace='+workflow.namespace+' '+'--entrypoint opensearch-3-1-single-node '+'--wait && '+'kubectl get configmap '+inputs.parameters.coordinatorClusterName+'-migration-config '+'-n '+workflow.namespace+' '+'-o jsonpath='{.data.cluster-config}' > /tmp/coordinator-config.json && cat /tmp/coordinator-config.json'}}",
+          ],
+          "command": [
+            "sh",
+            "-c",
+          ],
+          "env": [],
+          "image": "dtzar/helm-kubectl:3.18.6",
+          "imagePullPolicy": "IfNotPresent",
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "coordinatorClusterName",
+            },
+          ],
+        },
+        "name": "deploycoordinatorcluster",
+        "outputs": {
+          "parameters": [
+            {
+              "name": "coordinatorConfigJson",
+              "valueFrom": {
+                "path": "/tmp/coordinator-config.json",
+              },
+            },
+          ],
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "coordinatorConfig",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "waitforcoordinatorclusterready",
+        "outputs": {
+          "parameters": [],
+        },
+        "retryStrategy": {
+          "backoff": {
+            "cap": "5",
+            "duration": "5",
+            "factor": "1",
+          },
+          "limit": "30",
+          "retryPolicy": "Always",
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.coordinatorConfig}}",
+                  },
+                ],
+              },
+              "name": "getCoordinatorConsoleConfig",
+              "templateRef": {
+                "name": "migration-console",
+                "template": "getconsoleconfig",
+              },
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "configContents",
+                    "value": "{{steps.getCoordinatorConsoleConfig.outputs.parameters.configContents}}",
+                  },
+                  {
+                    "name": "command",
+                    "value": "
+set -e
+python -c '
+import sys
+from lib.console_link.console_link.environment import Environment
+env = Environment(config_file="/config/migration_services.yaml")
+cluster = env.target_cluster
+try:
+    health = cluster.call_api("/_cluster/health", timeout=5)
+    print(f"Cluster health: {health}")
+    sys.exit(0)
+except Exception as e:
+    print(f"Health check failed: {e}")
+    sys.exit(1)'",
+                  },
+                ],
+              },
+              "name": "checkCoordinatorHealth",
+              "templateRef": {
+                "name": "migration-console",
+                "template": "runmigrationcommand",
+              },
+            },
+          ],
+        ],
+      },
+      {
+        "container": {
+          "args": [
+            "{{='kubectl delete statefulset '+inputs.parameters.coordinatorClusterName+' -n '+workflow.namespace+' --ignore-not-found && '+'kubectl delete service '+inputs.parameters.coordinatorClusterName+' -n '+workflow.namespace+' --ignore-not-found && '+'kubectl delete secret '+inputs.parameters.coordinatorClusterName+'-creds -n '+workflow.namespace+' --ignore-not-found && '+'kubectl delete pvc data-'+inputs.parameters.coordinatorClusterName+'-0 -n '+workflow.namespace+' --ignore-not-found && '+'kubectl delete configmap '+inputs.parameters.coordinatorClusterName+'-migration-config -n '+workflow.namespace+' --ignore-not-found'}}",
+          ],
+          "command": [
+            "sh",
+            "-c",
+          ],
+          "env": [],
+          "image": "dtzar/helm-kubectl:3.18.6",
+          "imagePullPolicy": "IfNotPresent",
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "2000Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "coordinatorClusterName",
+            },
+          ],
+        },
+        "name": "deletecoordinatorcluster",
+        "outputs": {
+          "parameters": [],
+        },
+      },
+      {
         "inputs": {
           "parameters": [
             {
@@ -1479,10 +1645,39 @@ spec:
           [
             {
               "arguments": {
-                "parameters": [],
+                "parameters": [
+                  {
+                    "name": "coordinatorClusterName",
+                    "value": "{{=inputs.parameters.sessionName+'-coordinator'}}",
+                  },
+                ],
               },
-              "name": "configureCoordinator",
-              "template": "donothing",
+              "name": "deployCoordinator",
+              "template": "deploycoordinatorcluster",
+              "when": "{{=!(sprig.dig('useTargetClusterForWorkCoordination', true, fromJSON(inputs.parameters.documentBackfillConfig)))}}",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "coordinatorConfig",
+                    "value": "{{=toJSON(fromJSON(steps.deployCoordinator.outputs.parameters.coordinatorConfigJson))}}",
+                  },
+                ],
+              },
+              "name": "waitForCoordinator",
+              "template": "waitforcoordinatorclusterready",
+              "when": "{{=!(sprig.dig('useTargetClusterForWorkCoordination', true, fromJSON(inputs.parameters.documentBackfillConfig)))}}",
             },
           ],
           [
@@ -1531,12 +1726,27 @@ spec:
                   },
                   {
                     "name": "coordinatorConfig",
-                    "value": "{{inputs.parameters.targetConfig}}",
+                    "value": "{{=((sprig.dig('useTargetClusterForWorkCoordination', true, fromJSON(inputs.parameters.documentBackfillConfig))) ? (inputs.parameters.targetConfig) : (toJSON(fromJSON(steps.deployCoordinator.outputs.parameters.coordinatorConfigJson))))}}",
                   },
                 ],
               },
               "name": "runBulkLoad",
               "template": "runbulkload",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "coordinatorClusterName",
+                    "value": "{{=inputs.parameters.sessionName+'-coordinator'}}",
+                  },
+                ],
+              },
+              "name": "deleteCoordinator",
+              "template": "deletecoordinatorcluster",
+              "when": "{{=!(sprig.dig('useTargetClusterForWorkCoordination', true, fromJSON(inputs.parameters.documentBackfillConfig)))}}",
             },
           ],
         ],

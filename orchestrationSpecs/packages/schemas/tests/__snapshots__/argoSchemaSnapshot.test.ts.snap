@@ -249,7 +249,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             },
             "required": [
               "endpoint",
-              "version",
               "name"
             ]
           },
@@ -492,6 +491,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "otelCollectorEndpoint": {
                             "type": "string",
                             "default": "http://otel-collector:4317"
+                          },
+                          "useTargetClusterForWorkCoordination": {
+                            "type": "boolean",
+                            "default": true
                           },
                           "resources": {
                             "type": "object",
@@ -919,8 +922,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           }
         },
         "required": [
-          "endpoint",
-          "version"
+          "endpoint"
         ]
       }
     },
@@ -1153,6 +1155,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "otelCollectorEndpoint": {
                             "type": "string",
                             "default": "http://otel-collector:4317"
+                          },
+                          "useTargetClusterForWorkCoordination": {
+                            "type": "boolean",
+                            "default": true
                           },
                           "skipApproval": {
                             "type": "boolean",

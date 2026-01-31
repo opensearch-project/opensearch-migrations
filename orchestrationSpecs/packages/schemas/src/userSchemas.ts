@@ -195,6 +195,7 @@ export const USER_RFS_OPTIONS = z.object({
     maxConnections: z.number().default(10).optional(),
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional(),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
+    useTargetClusterForWorkCoordination: z.boolean().default(true).optional(),
 
     skipApproval: z.boolean().default(false).optional(),  // TODO - fullmigration
     resources: z.preprocess((v) =>
@@ -283,7 +284,7 @@ export const CLUSTER_CONFIG = z.object({
 
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     endpoint:  z.string().regex(/^https?:\/\/[^:\/\s]+(:\d+)?(\/)?$/), // override to required
-});
+}).omit({ version: true }); // Remove version field
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     snapshotRepo: S3_REPO_CONFIG.optional(),

@@ -3,6 +3,7 @@ import {
     CLUSTER_VERSION_STRING,
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
+    DEFAULT_RESOURCES,
     NAMED_TARGET_CLUSTER_CONFIG,
     ResourceRequirementsType,
     RFS_OPTIONS
@@ -378,6 +379,83 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addSteps(b => b.addStepGroup(c => c)))
 
 
+    .addTemplate("deployCoordinatorCluster", t => t
+        .addRequiredInput("coordinatorClusterName", typeToken<string>())
+        .addContainer(cb => cb
+            .addImageInfo(expr.literal("dtzar/helm-kubectl:3.18.6"), expr.literal("IfNotPresent" as IMAGE_PULL_POLICY))
+            .addCommand(["sh", "-c"])
+            .addArgs([expr.concat(
+                expr.literal("argo submit -n ma "),
+                expr.literal("--from workflowtemplate/cluster-templates "),
+                expr.literal("--name "), cb.inputs.coordinatorClusterName, expr.literal("-deploy "),
+                expr.literal("--parameter cluster-name="), cb.inputs.coordinatorClusterName, expr.literal(" "),
+                expr.literal("--parameter namespace="), expr.getWorkflowValue("namespace"), expr.literal(" "),
+                expr.literal("--entrypoint opensearch-3-1-single-node "),
+                expr.literal("--wait && "),
+                expr.literal("kubectl get configmap "), cb.inputs.coordinatorClusterName, expr.literal("-migration-config "),
+                expr.literal("-n "), expr.getWorkflowValue("namespace"), expr.literal(" "),
+                expr.literal("-o jsonpath='{.data.cluster-config}' > /tmp/coordinator-config.json && cat /tmp/coordinator-config.json")
+            )])
+            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addPathOutput("coordinatorConfigJson", "/tmp/coordinator-config.json", typeToken<string>())
+        )
+    )
+
+
+    .addTemplate("waitForCoordinatorClusterReady", t => t
+        .addRequiredInput("coordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addSteps(b => b
+            .addStep("getCoordinatorConsoleConfig", MigrationConsole, "getConsoleConfig", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    targetConfig: b.inputs.coordinatorConfig
+                }))
+            .addStep("checkCoordinatorHealth", MigrationConsole, "runMigrationCommand", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    configContents: c.steps.getCoordinatorConsoleConfig.outputs.configContents,
+                    command: expr.literal(`
+set -e
+python -c '
+import sys
+from lib.console_link.console_link.environment import Environment
+env = Environment(config_file="/config/migration_services.yaml")
+cluster = env.target_cluster
+try:
+    health = cluster.call_api("/_cluster/health", timeout=5)
+    print(f"Cluster health: {health}")
+    sys.exit(0)
+except Exception as e:
+    print(f"Health check failed: {e}")
+    sys.exit(1)'`)
+                }))
+        )
+        .addRetryParameters({
+            limit: "30",
+            retryPolicy: "Always",
+            backoff: {duration: "5", factor: "1", cap: "5"}
+        })
+    )
+
+
+    .addTemplate("deleteCoordinatorCluster", t => t
+        .addRequiredInput("coordinatorClusterName", typeToken<string>())
+        .addContainer(cb => cb
+            .addImageInfo(expr.literal("dtzar/helm-kubectl:3.18.6"), expr.literal("IfNotPresent" as IMAGE_PULL_POLICY))
+            .addCommand(["sh", "-c"])
+            .addArgs([expr.concat(
+                expr.literal("kubectl delete statefulset "), cb.inputs.coordinatorClusterName, expr.literal(" -n "), expr.getWorkflowValue("namespace"), expr.literal(" --ignore-not-found && "),
+                expr.literal("kubectl delete service "), cb.inputs.coordinatorClusterName, expr.literal(" -n "), expr.getWorkflowValue("namespace"), expr.literal(" --ignore-not-found && "),
+                expr.literal("kubectl delete secret "), cb.inputs.coordinatorClusterName, expr.literal("-creds -n "), expr.getWorkflowValue("namespace"), expr.literal(" --ignore-not-found && "),
+                expr.literal("kubectl delete pvc data-"), cb.inputs.coordinatorClusterName, expr.literal("-0 -n "), expr.getWorkflowValue("namespace"), expr.literal(" --ignore-not-found && "),
+                expr.literal("kubectl delete configmap "), cb.inputs.coordinatorClusterName, expr.literal("-migration-config -n "), expr.getWorkflowValue("namespace"), expr.literal(" --ignore-not-found")
+            )])
+            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+        )
+    )
+
+
     .addTemplate("setupAndRunBulkLoad", t => t
         .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
@@ -388,12 +466,46 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
 
         .addSteps(b => b
-            .addStep("configureCoordinator", INTERNAL, "doNothing")
+            .addStep("deployCoordinator", INTERNAL, "deployCoordinatorCluster", c =>
+                c.register({
+                    coordinatorClusterName: expr.concat(b.inputs.sessionName, expr.literal("-coordinator"))
+                }),
+                {when: {templateExp: expr.not(expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["useTargetClusterForWorkCoordination"], true))}}
+            )
+            .addStep("waitForCoordinator", INTERNAL, "waitForCoordinatorClusterReady", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    coordinatorConfig: expr.serialize(expr.stringToRecord(typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(), c.steps.deployCoordinator.outputs.coordinatorConfigJson))
+                }),
+                {when: {templateExp: expr.not(expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["useTargetClusterForWorkCoordination"], true))}}
+            )
             .addStep("runBulkLoad", INTERNAL, "runBulkLoad", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    coordinatorConfig: b.inputs.targetConfig
-                }))
+                    coordinatorConfig: expr.ternary(
+                        // useTargetClusterForWorkCoordination defaults to true
+                        expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig),
+                            ["useTargetClusterForWorkCoordination"], true),
+                        
+                        // TRUE: use target config
+                        b.inputs.targetConfig,
+
+                        // FALSE: use deployed coordinator config (JSON -> record -> serialized)
+                        expr.serialize(
+                            expr.stringToRecord(
+                            typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
+                            c.steps.deployCoordinator.outputs.coordinatorConfigJson
+                            )
+                        )
+                    )
+                })
+            )
+            .addStep("deleteCoordinator", INTERNAL, "deleteCoordinatorCluster", c =>
+                c.register({
+                    coordinatorClusterName: expr.concat(b.inputs.sessionName, expr.literal("-coordinator"))
+                }),
+                {when: {templateExp: expr.not(expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["useTargetClusterForWorkCoordination"], true))}}
+            )
         )
     )
 

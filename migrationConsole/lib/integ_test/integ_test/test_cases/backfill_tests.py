@@ -54,3 +54,50 @@ class Test0006OpenSearchBenchmarkBackfill(MATestBase):
                                                       expected_index_details=full_indices,
                                                       delay=5,
                                                       max_attempts=30)
+
+
+class Test0007OpenSearchBenchmarkBackfillWithCoordinator(MATestBase):
+    def __init__(self, user_args: MATestUserArguments):
+        allow_combinations = [
+            (ElasticsearchV5_X, OpensearchV1_X),
+            (ElasticsearchV5_X, OpensearchV2_X),
+            (ElasticsearchV5_X, OpensearchV3_X),
+            (ElasticsearchV6_X, OpensearchV1_X),
+            (ElasticsearchV6_X, OpensearchV2_X),
+            (ElasticsearchV6_X, OpensearchV3_X),
+            (ElasticsearchV7_X, OpensearchV1_X),
+            (ElasticsearchV7_X, OpensearchV2_X),
+            (ElasticsearchV7_X, OpensearchV3_X),
+            (ElasticsearchV8_X, OpensearchV1_X),
+            (ElasticsearchV8_X, OpensearchV2_X),
+            (ElasticsearchV8_X, OpensearchV3_X),
+        ]
+        description = "Run OpenSearch Benchmark tests and then runs metadata and backfill with dedicated coordinator cluster."
+        super().__init__(user_args=user_args,
+                         description=description,
+                         allow_source_target_combinations=allow_combinations,
+                         migrations_required=[MigrationType.BACKFILL, MigrationType.METADATA])
+
+    def prepare_workflow_snapshot_and_migration_config(self):
+        snapshot_and_migration_configs = [{
+            "migrations": [{
+                "metadataMigrationConfig": {},
+                "documentBackfillConfig": {
+                    "useTargetClusterForWorkCoordination": False
+                }
+            }]
+        }]
+        self.workflow_snapshot_and_migration_config = snapshot_and_migration_configs
+
+    def prepare_clusters(self):
+        # Run OSB workloads against source cluster
+        self.source_operations.run_test_benchmarks(cluster=self.source_cluster)
+
+    def workflow_perform_migrations(self, timeout_seconds: int = 600):
+        super().workflow_perform_migrations(timeout_seconds=timeout_seconds)
+
+    def verify_clusters(self):
+        self.target_operations.check_doc_counts_match(cluster=self.target_cluster,
+                                                      expected_index_details=full_indices,
+                                                      delay=5,
+                                                      max_attempts=30)

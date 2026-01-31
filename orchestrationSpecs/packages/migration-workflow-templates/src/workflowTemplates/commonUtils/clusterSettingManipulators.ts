@@ -2,7 +2,7 @@ import {BaseExpression, expr, Serialized} from "@opensearch-migrations/argo-work
 import {CLUSTER_CONFIG, SOURCE_CLUSTER_CONFIG, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 
-function makeAuthDict(clusterType: string, targetConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
+function makeAuthDict(clusterType: string, targetConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG> | z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
     const safeAuthConfig = (expr.getLoose(expr.deserializeRecord(targetConfig), "authConfig"));
     return expr.ternary(
         expr.hasKey(expr.deserializeRecord(targetConfig), "authConfig"),
@@ -23,11 +23,11 @@ function makeAuthDict(clusterType: string, targetConfig: BaseExpression<Serializ
         expr.literal({}));
 }
 
-export function getHttpAuthSecretName(clusterConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
+export function getHttpAuthSecretName(clusterConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG> | z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
     return expr.dig(expr.deserializeRecord(clusterConfig), ["authConfig", "basic", "secretName"], "");
 }
 
-export function makeClusterParamDict(clusterType: string, clusterConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
+export function makeClusterParamDict(clusterType: string, clusterConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG> | z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
     const cc = expr.deserializeRecord(clusterConfig);
     return expr.mergeDicts(
         expr.mergeDicts(
@@ -58,7 +58,7 @@ export function makeCoordinatorParamDict(coordinatorConfig: BaseExpression<Seria
 // once we circle back to finalize replayer support
 export function extractConnectionKeysToExpressionMap(
     clusterType: string,
-    targetConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>
+    targetConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG> | z.infer<typeof TARGET_CLUSTER_CONFIG>>>
 ) {
     return {
         [`${clusterType}AwsRegion`]:
