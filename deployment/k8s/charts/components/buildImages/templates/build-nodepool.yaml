@@ -1,0 +1,40 @@
+{{- if .Values.awsEKSEnabled }}
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: build-nodepool
+spec:
+  weight: 50
+  limits:
+    cpu: "32"
+    memory: "64Gi"
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: default
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: eks.amazonaws.com/instance-category
+          operator: In
+          values: ["c", "m"]
+        - key: eks.amazonaws.com/instance-generation
+          operator: Gt
+          values: ["4"]
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64", "arm64"]
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+      taints:
+        - key: "build-nodepool"
+          value: "true"
+          effect: NoSchedule
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 600s
+{{- end }}

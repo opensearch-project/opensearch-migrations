@@ -215,6 +215,16 @@ docker run -it --rm host.docker.internal:5001/migrations/migration_console:lates
 
 ## Cleaning Up
 
+**Important**: When you're done building images, clean up the buildkit resources to free up cluster capacity and avoid unnecessary costs.
+
+### Remove the docker buildx builder (frees buildkit pods)
+```bash
+echo "Remove buildx builder - this will cause kubernetes driver to terminate buildkit pods"
+docker buildx rm local-remote-builder
+```
+
+For EKS deployments using the kubernetes driver, removing the builder will automatically terminate the buildkit pods that were created for the build.
+
 ### Stop port forwards but keep everything running
 ```bash
 echo "Kill port forward processes"
@@ -234,7 +244,7 @@ pkill -f "port-forward.*buildkit"
 echo "Remove registry"
 kubectl delete -f docker-registry.yaml
 
-echo "Uninstall helm chart"
+echo "Uninstall helm chart (removes nodepool and any remaining resources)"
 helm uninstall buildkit -n buildkit
 
 echo "Delete namespace"
