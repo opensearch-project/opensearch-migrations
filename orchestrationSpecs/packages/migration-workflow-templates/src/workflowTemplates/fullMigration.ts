@@ -1,19 +1,21 @@
 import {z} from 'zod';
 import {
     ARGO_CREATE_SNAPSHOT_OPTIONS,
+    ARGO_MIGRATION_CONFIG,
     COMPLETE_SNAPSHOT_CONFIG,
-    CREATE_SNAPSHOT_OPTIONS,
     DEFAULT_RESOURCES,
-    DYNAMIC_SNAPSHOT_CONFIG,
     getZodKeys,
+    KAFKA_CLUSTER_AND_SOURCE_MIGRATION,
     METADATA_OPTIONS,
+    NAMED_KAFKA_CLUSTER_CONFIG,
     NAMED_SOURCE_CLUSTER_CONFIG,
     NAMED_TARGET_CLUSTER_CONFIG,
-    PARAMETERIZED_MIGRATION_CONFIG,
+    PARAMETERIZED_SOURCE_MIGRATION_CONFIG,
     PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     REPLAYER_OPTIONS,
     RFS_OPTIONS,
     SNAPSHOT_MIGRATION_CONFIG,
+    SOURCE_AND_TARGET_MIGRATION_CONFIG, SOURCE_CLUSTER_CONFIG,
     TARGET_CLUSTER_CONFIG
 } from '@opensearch-migrations/schemas'
 import {ConfigManagementHelpers} from "./configManagementHelpers";
@@ -38,6 +40,8 @@ import {CreateOrGetSnapshot} from "./createOrGetSnapshot";
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {SetupKafka} from "./setupKafka";
+import {SetupCapture} from "./setupCapture";
 
 const uniqueRunNonceParam = {
     uniqueRunNonce: defineRequiredParam<string>({description: "Workflow session nonce"})
@@ -177,7 +181,7 @@ export const FullMigration = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("migration", t=>t
+    .addTemplate("sourceToTargetMigration", t=>t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         // groupName facilitates grouping within the python `workflow` tools
@@ -215,24 +219,72 @@ export const FullMigration = WorkflowBuilder.create({
     )
 
 
+    .addTemplate("setupProxyThenMigrate", t => t
+        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
+        .addRequiredInput("targetMigrationConfigs", typeToken<z.infer<typeof SOURCE_AND_TARGET_MIGRATION_CONFIG>["targetMigrationConfigs"]>())
+
+        .addRequiredInput("uniqueRunNonce", typeToken<string>())
+        .addInputsFromRecord(ImageParameters)
+
+        .addSteps(b=>b
+            .addStep("setupProxy", SetupCapture, "setupProxy", c=>c.register({
+                    proxySettings: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "proxySettings") as any,
+                }),
+                {when: { templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.sourceConfig), "proxySettings") } }
+            )
+            .addStep("sourceToTargetMigration", INTERNAL, "sourceToTargetMigration", c=>c.register({
+                    ...selectInputsForRegister(b, c),
+                    ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(PARAMETERIZED_SOURCE_MIGRATION_CONFIG)),
+                    sourceConfig: b.inputs.sourceConfig,
+                }),
+                {loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.targetMigrationConfigs))})
+        )
+    )
+
+
+    .addTemplate("setupKafkaClusterThenSources", t=>t
+        .addRequiredInput("kafkaConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
+        .addRequiredInput("sourceMigrationConfigs", typeToken<z.infer<typeof KAFKA_CLUSTER_AND_SOURCE_MIGRATION>["sourceMigrationConfigs"]>())
+
+        .addRequiredInput("uniqueRunNonce", typeToken<string>())
+        .addInputsFromRecord(ImageParameters)
+
+        .addSteps(b=>b
+            .addStep("setupKafka", SetupKafka, "deployKafkaCluster", c=>c.register({
+                    clusterName: "test"
+                }),
+                {when: { templateExp: expr.not(expr.isEmpty(b.inputs.kafkaConfig)) } }
+            )
+            .addStep("setupProxy", INTERNAL, "setupProxyThenMigrate", c=>c.register({
+                    ...selectInputsForRegister(b, c),
+                    ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(SOURCE_AND_TARGET_MIGRATION_CONFIG))
+                }),
+                {
+                    loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.sourceMigrationConfigs))
+                })
+        )
+    )
+
 
     .addTemplate("main", t => t
-        .addRequiredInput("migrationConfigs", typeToken<z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG>[]>(),
+        .addRequiredInput("config", typeToken<z.infer<typeof ARGO_MIGRATION_CONFIG>>(),
             "List of server configurations to direct migrated traffic toward") // expand
 
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
 
         .addSteps(b => b
-            .addStep("migration", INTERNAL, "migration",
+            .addStep("setupKafkaClusterThenSources", INTERNAL, "setupKafkaClusterThenSources",
                 c => {
                     return c.register({
                         ...selectInputsForRegister(b, c),
-                        ...selectInputsFieldsAsExpressionRecord(c.item, c,
-                            getZodKeys(PARAMETERIZED_MIGRATION_CONFIG))
+                        ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(KAFKA_CLUSTER_AND_SOURCE_MIGRATION))
                     });
                 },
-                {loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.migrationConfigs))})
+                {
+                    loopWith:
+                        makeParameterLoop(expr.deserializeRecord(b.inputs.config))
+                })
             .addStep("cleanup", ConfigManagementHelpers, "cleanup",
                 c => c.register({
                     ...selectInputsForRegister(b, c),

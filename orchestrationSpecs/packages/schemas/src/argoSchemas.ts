@@ -1,6 +1,6 @@
 import {
     CLUSTER_CONFIG,
-    CREATE_SNAPSHOT_OPTIONS,
+    CREATE_SNAPSHOT_OPTIONS, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTERS_MAP,
     KAFKA_SERVICES_CONFIG,
     NORMALIZED_COMPLETE_SNAPSHOT_CONFIG,
     NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
@@ -68,6 +68,11 @@ function makeOptionalDefaultedFieldsRequired<T extends z.ZodTypeAny>(schema: T):
     return schema;
 }
 
+export const NAMED_KAFKA_CLUSTER_CONFIG =
+    makeOptionalDefaultedFieldsRequired(KAFKA_CLUSTER_CONFIG.extend({
+        name: z.string()
+    }));
+
 export const NAMED_SOURCE_CLUSTER_CONFIG =
     makeOptionalDefaultedFieldsRequired(SOURCE_CLUSTER_CONFIG.extend({
         label: z.string(), // override to required
@@ -134,15 +139,21 @@ export const SNAPSHOT_MIGRATION_CONFIG =
             snapshotConfig: DYNAMIC_SNAPSHOT_CONFIG
         }));
 
-export const PARAMETERIZED_MIGRATION_CONFIG =
+export const PARAMETERIZED_SOURCE_MIGRATION_CONFIG =
     z.object({
-        sourceConfig: NAMED_SOURCE_CLUSTER_CONFIG,
         targetConfig: NAMED_TARGET_CLUSTER_CONFIG,
         snapshotExtractAndLoadConfigArray: z.array(SNAPSHOT_MIGRATION_CONFIG).optional(),
         replayerConfig: makeOptionalDefaultedFieldsRequired(REPLAYER_OPTIONS.optional()),
     });
 
-export const PARAMETERIZED_MIGRATION_CONFIG_ARRAYS =
-    z.array(PARAMETERIZED_MIGRATION_CONFIG);
+export const SOURCE_AND_TARGET_MIGRATION_CONFIG = z.object({
+    sourceConfig: NAMED_SOURCE_CLUSTER_CONFIG,
+    targetMigrationConfigs: z.array(PARAMETERIZED_SOURCE_MIGRATION_CONFIG)
+})
 
-export type ARGO_WORKFLOW_SCHEMA = z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG_ARRAYS>;
+export const KAFKA_CLUSTER_AND_SOURCE_MIGRATION = z.object({
+    kafkaConfig: NAMED_KAFKA_CLUSTER_CONFIG, // TODO - make this optional for BYO?
+    sourceMigrationConfigs: z.array(SOURCE_AND_TARGET_MIGRATION_CONFIG)
+})
+
+export const ARGO_MIGRATION_CONFIG = z.array(KAFKA_CLUSTER_AND_SOURCE_MIGRATION);

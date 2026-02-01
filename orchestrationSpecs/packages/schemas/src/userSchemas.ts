@@ -108,16 +108,27 @@ export const S3_REPO_CONFIG = z.object({
         .describe("IAM role ARN to assume when accessing S3 for snapshot operations")
 });
 
+export const KAFKA_CLIENT_CONFIG = z.object({
+    enableMSKAuth: z.boolean().default(false).optional(),
+    kafkaConnection: z.string()
+        .describe("Sequence of <HOSTNAME:PORT> values delimited by ','.")
+        .regex(/^(?:[a-z.]+:[0-9]+,?)*$/)
+        .default("").optional(),
+    kafkaTopic: z.string().default("logging-traffic-topic"),
+});
+
+export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+
 export const CPU_QUANTITY = z.string()
     .regex(/^[0-9]+m$/)
     .describe("CPU quantity in millicores (e.g., '100m', '500m')");
 
 export const MEMORY_QUANTITY = z.string()
-    .regex(/^[0-9]+((E|P|T|G|M)i?|Ki|k)$/)
+    .regex(/^[0-9]+(([EPTGM])i?|Ki|k)$/)
     .describe("Memory quantity with unit (e.g., '512Mi', '2G')");
 
 export const STORAGE_QUANTITY = z.string()
-    .regex(/^[0-9]+((E|P|T|G|M)i?|Ki|k)$/)
+    .regex(/^[0-9]+(([EPTGM])i?|Ki|k)$/)
     .describe("Storage quantity with unit (e.g., '10Gi', '5G')");
 
 export const CONTAINER_RESOURCES = {
@@ -137,12 +148,30 @@ export type ResourceRequirementsType = z.infer<typeof RESOURCE_REQUIREMENTS>;
 
 export const PROXY_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
+    podReplicas: z.number().default(1).optional(),
+    resources: RESOURCE_REQUIREMENTS
+        .describe("Resource limits and requests for replayer container.")
+        .default(DEFAULT_RESOURCES.REPLAYER).optional(),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
+
     setHeaders: z.array(z.string()).optional(),
-    // TODO: Capture proxy resources non-functional currently
-    // resources: RESOURCE_REQUIREMENTS.optional()
-    //     .describe("Resource limits and requests for proxy container.")
-    //     .default(DEFAULT_RESOURCES.CAPTURE_PROXY),
+    destinationConnectionPoolSize: z.number().default(0).optional(),
+    destinationConnectionPoolTimeout: z.string()
+        .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
+        .default("PT30S").optional(),
+    kafkaClientId: z.string().default("HttpCaptureProxyProducer").optional(),
+    kafkaCluster: KAFKA_CLIENT_CONFIG,
+    listenPort: z.number(),
+    maxTrafficBufferSize: z.number().default(1048576),
+    noCapture: z.boolean().default(false).optional(),
+    numThreads: z.number().default(1),
+    // TODO - this should become a record of different settings...
+    //  we can still create and mount a file, but fof the configuration UX, it should be strongly typed
+    sslConfigSettings: z.string().default("").optional(),
+    suppressCaptureForHeaderMatch: z.array(z.string()).default([]).optional(),
+    suppressCaptureForMethod: z.array(z.string()).default([]).optional(),
+    suppressCaptureForUriPath: z.array(z.string()).default([]).optional(),
+    suppressMethodAndPath: z.string().default("").optional(),
 });
 
 export const REPLAYER_OPTIONS = z.object({
@@ -153,8 +182,6 @@ export const REPLAYER_OPTIONS = z.object({
     resources: RESOURCE_REQUIREMENTS
         .describe("Resource limits and requests for replayer container.")
         .default(DEFAULT_RESOURCES.REPLAYER).optional(),
-    // docTransformerBase64: z.string().default("").optional(),
-    // otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
 });
 
 // Note: noWait is not included here as it is hardcoded to true in the workflow.
@@ -249,7 +276,8 @@ export const USER_RFS_OPTIONS = z.object({
         );
 });
 
-export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+export const KAFKA_CLUSTER_CONFIG = z.object({
+});
 
 export const HTTP_AUTH_BASIC = z.object({
     basic: z.object({
@@ -289,7 +317,7 @@ export const SOURCE_CLUSTER_REPOS_RECORD = z.record(z.string(), S3_REPO_CONFIG)
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     snapshotRepos: SOURCE_CLUSTER_REPOS_RECORD.optional(),
-    proxy: PROXY_OPTIONS.optional()
+    proxySettings: PROXY_OPTIONS.optional()
 });
 
 export const EXTERNALLY_MANAGED_SNAPSHOT = z.object({
@@ -345,6 +373,7 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     },
     {message: "labels of snapshotExtractAndLoadConfigs items must be unique when they are provided"});
 
+export const KAFKA_CLUSTERS_MAP = z.record(z.string(), KAFKA_CLUSTER_CONFIG);
 export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);
 
@@ -352,6 +381,7 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 (
     z.object({
         skipApprovals : z.boolean().default(false).optional(), // TODO - format
+        kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({}).optional(),
         sourceClusters: SOURCE_CLUSTERS_MAP,
         targetClusters: TARGET_CLUSTERS_MAP,
         migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG).min(1)

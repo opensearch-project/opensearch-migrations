@@ -66,13 +66,7 @@ exports[`test workflow template renderings capture-proxy 1`] = `
               "name": "sourceConfig",
             },
             {
-              "name": "listenerPort",
-            },
-            {
-              "name": "kafkaConnection",
-            },
-            {
-              "name": "kafkaTopic",
+              "name": "proxyConfig",
             },
             {
               "name": "imageCaptureProxyLocation",
@@ -89,388 +83,6 @@ exports[`test workflow template renderings capture-proxy 1`] = `
         "steps": [
           [],
         ],
-      },
-    ],
-  },
-}
-`;
-
-exports[`test workflow template renderings capture-replay 1`] = `
-{
-  "apiVersion": "argoproj.io/v1alpha1",
-  "kind": "WorkflowTemplate",
-  "metadata": {
-    "name": "capture-replay",
-  },
-  "spec": {
-    "arguments": {
-      "parameters": [
-        {
-          "name": "etcdEndpoints",
-          "value": "http://etcd.ma.svc.cluster.local:2379",
-        },
-        {
-          "name": "etcdUser",
-          "value": "root",
-        },
-        {
-          "name": "etcdPassword",
-          "value": "password",
-        },
-        {
-          "name": "s3SnapshotConfigMap",
-          "value": "s3-snapshot-config",
-        },
-        {
-          "name": "imageConfigMapName",
-          "value": "migration-image-config",
-        },
-        {
-          "name": "approvalConfigMapName",
-          "value": "approval-config",
-        },
-      ],
-    },
-    "entrypoint": undefined,
-    "parallelism": 100,
-    "serviceAccountName": "argo-workflow-executor",
-    "templates": [
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "proxyEndpoint",
-            },
-          ],
-        },
-        "name": "idgenerator",
-        "outputs": {
-          "parameters": [
-            {
-              "name": "proxyEndpoint",
-              "valueFrom": {
-                "expression": "inputs.parameters.proxyEndpoint",
-              },
-            },
-          ],
-        },
-        "steps": [
-          [],
-        ],
-      },
-      {
-        "inputs": {
-          "parameters": [],
-        },
-        "name": "getuserapproval",
-        "outputs": {
-          "parameters": [],
-        },
-        "suspend": {},
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "createdBootstrapServers",
-            },
-            {
-              "name": "createdKafkaName",
-            },
-            {
-              "name": "providedKafkaBootstrapServers",
-            },
-            {
-              "name": "providedKafkaK8sName",
-            },
-          ],
-        },
-        "name": "getbrokerslist",
-        "outputs": {
-          "parameters": [
-            {
-              "name": "kafkaName",
-              "valueFrom": {
-                "expression": "((0 == len(inputs.parameters.providedKafkaK8sName)) ? (inputs.parameters.createdKafkaName) : (inputs.parameters.providedKafkaK8sName))",
-              },
-            },
-            {
-              "name": "bootstrapServers",
-              "valueFrom": {
-                "expression": "((0 == len(inputs.parameters.providedKafkaBootstrapServers)) ? (inputs.parameters.createdKafkaName) : (inputs.parameters.providedKafkaK8sName))",
-              },
-            },
-          ],
-        },
-        "steps": [
-          [],
-        ],
-      },
-      {
-        "dag": {
-          "tasks": [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "proxyEndpoint",
-                    "value": "{{='http://'+inputs.parameters.sessionName+':'+inputs.parameters.proxyListenPort}}",
-                  },
-                ],
-              },
-              "name": "idGenerator",
-              "template": "idgenerator",
-            },
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "kafkaName",
-                    "value": "{{=inputs.parameters.providedKafkaK8sName+'-'+last(split(tasks.idGenerator.id, '-'))}}",
-                  },
-                ],
-              },
-              "dependencies": [
-                "idGenerator",
-              ],
-              "name": "kafkaClusterSetup",
-              "templateRef": {
-                "name": "setup-kafka",
-                "template": "clusterdeploy",
-              },
-              "when": "{{=0 == len(inputs.parameters.providedKafkaBootstrapServers)}}",
-            },
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "createdBootstrapServers",
-                    "value": "{{tasks.kafkaClusterSetup.outputs.parameters.bootstrapServers}}",
-                  },
-                  {
-                    "name": "createdKafkaName",
-                    "value": "{{tasks.kafkaClusterSetup.outputs.parameters.kafkaName}}",
-                  },
-                  {
-                    "name": "providedKafkaBootstrapServers",
-                    "value": "{{inputs.parameters.providedKafkaBootstrapServers}}",
-                  },
-                  {
-                    "name": "providedKafkaK8sName",
-                    "value": "{{inputs.parameters.providedKafkaK8sName}}",
-                  },
-                ],
-              },
-              "dependencies": [
-                "kafkaClusterSetup",
-              ],
-              "name": "getBrokersList",
-              "template": "getbrokerslist",
-            },
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "kafkaName",
-                    "value": "{{tasks.getBrokersList.outputs.parameters.kafkaName}}",
-                  },
-                  {
-                    "name": "topicName",
-                    "value": "{{=((inputs.parameters.topicName == '') ? (inputs.parameters.sessionName) : (inputs.parameters.topicName))}}",
-                  },
-                  {
-                    "name": "topicPartitions",
-                    "value": "{{inputs.parameters.topicPartitions}}",
-                  },
-                  {
-                    "name": "topicReplicas",
-                    "value": "{{inputs.parameters.topicReplicas}}",
-                  },
-                ],
-              },
-              "dependencies": [
-                "getBrokersList",
-              ],
-              "name": "kafkaTopicSetup",
-              "templateRef": {
-                "name": "setup-kafka",
-                "template": "createkafkatopic",
-              },
-            },
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "sourceConfig",
-                    "value": "{{inputs.parameters.sourceConfig}}",
-                  },
-                  {
-                    "name": "imageCaptureProxyLocation",
-                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}",
-                  },
-                  {
-                    "name": "imageCaptureProxyPullPolicy",
-                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}",
-                  },
-                  {
-                    "name": "listenerPort",
-                    "value": "{{inputs.parameters.proxyListenPort}}",
-                  },
-                  {
-                    "name": "kafkaConnection",
-                    "value": "{{tasks.getBrokersList.outputs.parameters.bootstrapServers}}",
-                  },
-                  {
-                    "name": "kafkaTopic",
-                    "value": "{{tasks.kafkaTopicSetup.outputs.parameters.topicName}}",
-                  },
-                ],
-              },
-              "dependencies": [
-                "getBrokersList",
-                "kafkaTopicSetup",
-              ],
-              "name": "deployCaptureProxy",
-              "templateRef": {
-                "name": "capture-proxy",
-                "template": "deploycaptureproxy",
-              },
-            },
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "serviceName",
-                    "value": "{{inputs.parameters.sessionName}}",
-                  },
-                  {
-                    "name": "port",
-                    "value": "{{inputs.parameters.proxyListenPort}}",
-                  },
-                ],
-              },
-              "dependencies": [
-                "deployCaptureProxy",
-              ],
-              "name": "proxyService",
-              "templateRef": {
-                "name": "capture-proxy",
-                "template": "deployproxyservice",
-              },
-            },
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "targetConfig",
-                    "value": "{{inputs.parameters.targetConfig}}",
-                  },
-                  {
-                    "name": "replayerConfig",
-                    "value": "{{inputs.parameters.replayerConfig}}",
-                  },
-                  {
-                    "name": "imageTrafficReplayerLocation",
-                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}",
-                  },
-                  {
-                    "name": "imageTrafficReplayerPullPolicy",
-                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}",
-                  },
-                  {
-                    "name": "kafkaTrafficBrokers",
-                    "value": "{{tasks.getBrokersList.outputs.parameters.bootstrapServers}}",
-                  },
-                  {
-                    "name": "kafkaTrafficTopic",
-                    "value": "{{tasks.kafkaTopicSetup.outputs.parameters.topicName}}",
-                  },
-                  {
-                    "name": "kafkaGroupId",
-                    "value": "{{tasks.idGenerator.id}}",
-                  },
-                ],
-              },
-              "dependencies": [
-                "getBrokersList",
-                "kafkaTopicSetup",
-              ],
-              "name": "Replayer",
-              "templateRef": {
-                "name": "replayer",
-                "template": "createdeploymentfromconfig",
-              },
-            },
-          ],
-        },
-        "inputs": {
-          "parameters": [
-            {
-              "name": "sessionName",
-            },
-            {
-              "name": "sourceConfig",
-            },
-            {
-              "name": "proxyDestination",
-            },
-            {
-              "name": "proxyListenPort",
-            },
-            {
-              "name": "targetConfig",
-            },
-            {
-              "name": "replayerConfig",
-            },
-            {
-              "name": "providedKafkaBootstrapServers",
-              "value": "",
-            },
-            {
-              "name": "providedKafkaK8sName",
-              "value": "",
-            },
-            {
-              "name": "kafkaPrefix",
-              "value": "capturetraffic",
-            },
-            {
-              "name": "topicName",
-              "value": "",
-            },
-            {
-              "name": "topicPartitions",
-              "value": "0",
-            },
-            {
-              "name": "topicReplicas",
-              "value": "0",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-            {
-              "name": "imageTrafficReplayerLocation",
-            },
-            {
-              "name": "imageTrafficReplayerPullPolicy",
-            },
-            {
-              "name": "imageCaptureProxyLocation",
-            },
-            {
-              "name": "imageCaptureProxyPullPolicy",
-            },
-          ],
-        },
-        "name": "runall",
-        "outputs": {
-          "parameters": [],
-        },
       },
     ],
   },
@@ -2495,7 +2107,7 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
           ],
         },
-        "name": "migration",
+        "name": "sourcetotargetmigration",
         "outputs": {
           "parameters": [],
         },
@@ -2582,8 +2194,252 @@ exports[`test workflow template renderings full-migration 1`] = `
         "inputs": {
           "parameters": [
             {
+              "name": "sourceConfig",
+            },
+            {
+              "name": "targetMigrationConfigs",
+            },
+            {
+              "name": "uniqueRunNonce",
+            },
+            {
+              "name": "imageCaptureProxyLocation",
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy",
+            },
+            {
+              "name": "imageTrafficReplayerLocation",
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy",
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation",
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "setupproxythenmigrate",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxySettings",
+                    "value": "{{=fromJSON(inputs.parameters.sourceConfig)['proxySettings']}}",
+                  },
+                ],
+              },
+              "name": "setupProxy",
+              "templateRef": {
+                "name": "setup-capture",
+                "template": "setupproxy",
+              },
+              "when": "{{='proxySettings' in fromJSON(inputs.parameters.sourceConfig)}}",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}",
+                  },
+                  {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}",
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}",
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}",
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}",
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}",
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}",
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{=jsonpath(toJSON(item), '$.targetConfig')}}",
+                  },
+                  {
+                    "name": "snapshotExtractAndLoadConfigArray",
+                    "value": "{{=sprig.dig('snapshotExtractAndLoadConfigArray', '', item)}}",
+                  },
+                  {
+                    "name": "replayerConfig",
+                    "value": "{{=sprig.dig('replayerConfig', '', item)}}",
+                  },
+                ],
+              },
+              "name": "sourceToTargetMigration",
+              "template": "sourcetotargetmigration",
+              "withParam": "{{inputs.parameters.targetMigrationConfigs}}",
+            },
+          ],
+        ],
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "kafkaConfig",
+            },
+            {
+              "name": "sourceMigrationConfigs",
+            },
+            {
+              "name": "uniqueRunNonce",
+            },
+            {
+              "name": "imageCaptureProxyLocation",
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy",
+            },
+            {
+              "name": "imageTrafficReplayerLocation",
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy",
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation",
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "setupkafkaclusterthensources",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "test",
+                  },
+                ],
+              },
+              "name": "setupKafka",
+              "templateRef": {
+                "name": "setup-kafka",
+                "template": "deploykafkacluster",
+              },
+              "when": "{{=!(0 == len(inputs.parameters.kafkaConfig))}}",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}",
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}",
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}",
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}",
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}",
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}",
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{=jsonpath(toJSON(item), '$.sourceConfig')}}",
+                  },
+                  {
+                    "name": "targetMigrationConfigs",
+                    "value": "{{=jsonpath(toJSON(item), '$.targetMigrationConfigs')}}",
+                  },
+                ],
+              },
+              "name": "setupProxy",
+              "template": "setupproxythenmigrate",
+              "withParam": "{{inputs.parameters.sourceMigrationConfigs}}",
+            },
+          ],
+        ],
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
               "description": "List of server configurations to direct migrated traffic toward",
-              "name": "migrationConfigs",
+              "name": "config",
             },
             {
               "name": "uniqueRunNonce",
@@ -2716,26 +2572,18 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
-                    "name": "sourceConfig",
-                    "value": "{{=jsonpath(toJSON(item), '$.sourceConfig')}}",
+                    "name": "kafkaConfig",
+                    "value": "{{=jsonpath(toJSON(item), '$.kafkaConfig')}}",
                   },
                   {
-                    "name": "targetConfig",
-                    "value": "{{=jsonpath(toJSON(item), '$.targetConfig')}}",
-                  },
-                  {
-                    "name": "snapshotExtractAndLoadConfigArray",
-                    "value": "{{=sprig.dig('snapshotExtractAndLoadConfigArray', '', item)}}",
-                  },
-                  {
-                    "name": "replayerConfig",
-                    "value": "{{=sprig.dig('replayerConfig', '', item)}}",
+                    "name": "sourceMigrationConfigs",
+                    "value": "{{=jsonpath(toJSON(item), '$.sourceMigrationConfigs')}}",
                   },
                 ],
               },
-              "name": "migration",
-              "template": "migration",
-              "withParam": "{{inputs.parameters.migrationConfigs}}",
+              "name": "setupKafkaClusterThenSources",
+              "template": "setupkafkaclusterthensources",
+              "withParam": "{{inputs.parameters.config}}",
             },
           ],
           [
@@ -4126,6 +3974,95 @@ spec:
 }
 `;
 
+exports[`test workflow template renderings setup-capture 1`] = `
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "setup-capture",
+  },
+  "spec": {
+    "arguments": {
+      "parameters": [
+        {
+          "name": "etcdEndpoints",
+          "value": "http://etcd.ma.svc.cluster.local:2379",
+        },
+        {
+          "name": "etcdUser",
+          "value": "root",
+        },
+        {
+          "name": "etcdPassword",
+          "value": "password",
+        },
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config",
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config",
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config",
+        },
+      ],
+    },
+    "entrypoint": undefined,
+    "parallelism": 100,
+    "serviceAccountName": "argo-workflow-executor",
+    "templates": [
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxySettings",
+            },
+          ],
+        },
+        "name": "setupproxy",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "test",
+                  },
+                  {
+                    "name": "topicName",
+                    "value": "test",
+                  },
+                  {
+                    "name": "topicPartitions",
+                    "value": 1,
+                  },
+                  {
+                    "name": "topicReplicas",
+                    "value": 1,
+                  },
+                ],
+              },
+              "name": "createKafkaTopic",
+              "templateRef": {
+                "name": "setup-kafka",
+                "template": "createkafkatopic",
+              },
+            },
+          ],
+        ],
+      },
+    ],
+  },
+}
+`;
+
 exports[`test workflow template renderings setup-kafka 1`] = `
 {
   "apiVersion": "argoproj.io/v1alpha1",
@@ -4170,7 +4107,7 @@ exports[`test workflow template renderings setup-kafka 1`] = `
         "inputs": {
           "parameters": [
             {
-              "name": "kafkaName",
+              "name": "clusterName",
             },
           ],
         },
@@ -4190,7 +4127,7 @@ exports[`test workflow template renderings setup-kafka 1`] = `
           "manifest": "apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
 metadata:
-  name: "{{inputs.parameters.kafkaName}}"
+  name: "{{inputs.parameters.clusterName}}"
 spec:
   kafka:
     version: 3.9.0
@@ -4225,7 +4162,7 @@ spec:
         "inputs": {
           "parameters": [
             {
-              "name": "kafkaName",
+              "name": "clusterName",
             },
           ],
         },
@@ -4240,7 +4177,7 @@ kind: KafkaNodePool
 metadata:
   name: dual-role
   labels:
-    strimzi.io/cluster: "{{inputs.parameters.kafkaName}}"
+    strimzi.io/cluster: "{{inputs.parameters.clusterName}}"
 spec:
   replicas: 1
   roles:
@@ -4262,7 +4199,7 @@ spec:
         "inputs": {
           "parameters": [
             {
-              "name": "kafkaName",
+              "name": "clusterName",
             },
           ],
         },
@@ -4282,7 +4219,7 @@ spec:
           "manifest": "apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
 metadata:
-  name: "{{inputs.parameters.kafkaName}}"
+  name: "{{inputs.parameters.clusterName}}"
   annotations:
     strimzi.io/node-pools: enabled
     strimzi.io/kraft: enabled
@@ -4331,8 +4268,8 @@ spec:
               "arguments": {
                 "parameters": [
                   {
-                    "name": "kafkaName",
-                    "value": "{{inputs.parameters.kafkaName}}",
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
                   },
                 ],
               },
@@ -4344,8 +4281,8 @@ spec:
               "arguments": {
                 "parameters": [
                   {
-                    "name": "kafkaName",
-                    "value": "{{inputs.parameters.kafkaName}}",
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
                   },
                 ],
               },
@@ -4357,8 +4294,8 @@ spec:
               "arguments": {
                 "parameters": [
                   {
-                    "name": "kafkaName",
-                    "value": "{{inputs.parameters.kafkaName}}",
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
                   },
                 ],
               },
@@ -4371,7 +4308,7 @@ spec:
         "inputs": {
           "parameters": [
             {
-              "name": "kafkaName",
+              "name": "clusterName",
             },
             {
               "name": "useKraft",
@@ -4379,13 +4316,13 @@ spec:
             },
           ],
         },
-        "name": "clusterdeploy",
+        "name": "deploykafkacluster",
         "outputs": {
           "parameters": [
             {
-              "name": "kafkaName",
+              "name": "clusterName",
               "valueFrom": {
-                "expression": "inputs.parameters.kafkaName",
+                "expression": "inputs.parameters.clusterName",
               },
             },
             {
@@ -4401,7 +4338,7 @@ spec:
         "inputs": {
           "parameters": [
             {
-              "name": "kafkaName",
+              "name": "clusterName",
             },
             {
               "name": "topicName",
@@ -4432,7 +4369,7 @@ kind: KafkaTopic
 metadata:
   name: "{{inputs.parameters.topicName}}"
   labels:
-    strimzi.io/cluster: "{{inputs.parameters.kafkaName}}"
+    strimzi.io/cluster: "{{inputs.parameters.clusterName}}"
 spec:
   partitions: "{{inputs.parameters.topicPartitions}}"
   replicas: "{{inputs.parameters.topicReplicas}}"

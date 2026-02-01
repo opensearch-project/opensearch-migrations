@@ -3,7 +3,8 @@ import {
     OVERALL_MIGRATION_CONFIG,
     PARAMETERIZED_MIGRATION_CONFIG_ARRAYS, PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     S3_REPO_CONFIG,
-    SNAPSHOT_MIGRATION_CONFIG, SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG
+    SNAPSHOT_MIGRATION_CONFIG, SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
+    NAMED_SOURCE_CLUSTER_CONFIG
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -11,6 +12,7 @@ import {promises as dns} from "dns";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG_ARRAYS>;
+type ProxySourcesOutput = z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>[];
 
 async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string> {
     // Determine protocol based on localstack vs localstacks
@@ -184,6 +186,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         return this.transformSync(processedInput);
     }
 
+    async getSourcesWithProxies(input: InputConfig): Promise<ProxySourcesOutput> {
+        const processedInput = await this.preprocessInput(input);
+        return this.extractSourcesWithProxies(processedInput);
+    }
+
     // This actually returns a promise of an InputConfig+a couple modifications around snapshot repos
     private async preprocessInput(input: InputConfig): Promise<InputConfig> {
         const processedSourceClusters = {...input.sourceClusters};
@@ -297,5 +304,14 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             semaphoreConfigMapName: 'concurrency-config',
             semaphoreKey: semaphoreKey
         };
+    }
+
+    private extractSourcesWithProxies(userConfig: InputConfig): ProxySourcesOutput {
+        return Object.entries(userConfig.sourceClusters)
+            .filter(([_, cluster]) => cluster.proxy !== undefined)
+            .map(([name, cluster]) => {
+                const { snapshotRepos, ...restOfCluster } = cluster;
+                return { ...restOfCluster, label: name };
+            });
     }
 }

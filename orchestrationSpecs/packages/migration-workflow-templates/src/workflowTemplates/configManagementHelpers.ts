@@ -1,10 +1,5 @@
-import {z} from 'zod';
 import {
     DEFAULT_RESOURCES,
-    NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
-    PARAMETERIZED_MIGRATION_CONFIG,
-    SOURCE_CLUSTERS_MAP,
-    TARGET_CLUSTERS_MAP
 } from '@opensearch-migrations/schemas'
 import {TemplateBuilder, typeToken, WorkflowBuilder} from "@opensearch-migrations/argo-workflow-builders";
 
