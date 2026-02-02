@@ -281,7 +281,7 @@ export const CLUSTER_CONFIG = z.object({
     authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
 });
 
-export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
+export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.omit({ version: true }).extend({
     endpoint:  z.string().regex(/^https?:\/\/[^:\/\s]+(:\d+)?(\/)?$/), // override to required
 });
 

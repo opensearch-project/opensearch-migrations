@@ -23,8 +23,8 @@ function makeAuthDict(clusterType: string, targetConfig: BaseExpression<Serializ
         expr.literal({}));
 }
 
-export function getHttpAuthSecretName(clusterConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
-    return expr.dig(expr.deserializeRecord(clusterConfig), ["authConfig", "basic", "secretName"], "");
+export function getHttpAuthSecretName(clusterConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>> | BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
+    return expr.dig(expr.deserializeRecord(clusterConfig as BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>), ["authConfig", "basic", "secretName"], "");
 }
 
 export function makeClusterParamDict(clusterType: string, clusterConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
@@ -47,11 +47,11 @@ export function makeClusterParamDict(clusterType: string, clusterConfig: BaseExp
 }
 
 export function makeTargetParamDict(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
-    return makeClusterParamDict("target", targetConfig);
+    return makeClusterParamDict("target", targetConfig as BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>);
 }
 
 export function makeCoordinatorParamDict(coordinatorConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
-    return makeClusterParamDict("coordinator", coordinatorConfig);
+    return makeClusterParamDict("coordinator", coordinatorConfig as BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>);
 }
 
 // The functions below are still used by the replaer, but they should probably be replaced with the ones above
@@ -79,5 +79,5 @@ export function extractSourceKeysToExpressionMap(sourceConfig: BaseExpression<Se
 }
 
 export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
-    return extractConnectionKeysToExpressionMap("target", targetConfig);
+    return extractConnectionKeysToExpressionMap("target", targetConfig as BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>);
 }

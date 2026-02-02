@@ -168,10 +168,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "type": "boolean",
                 "default": false
               },
-              "version": {
-                "type": "string",
-                "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
-              },
               "authConfig": {
                 "anyOf": [
                   {
@@ -249,7 +245,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             },
             "required": [
               "endpoint",
-              "version",
               "name"
             ]
           },
@@ -843,10 +838,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "type": "boolean",
             "default": false
           },
-          "version": {
-            "type": "string",
-            "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
-          },
           "authConfig": {
             "anyOf": [
               {
@@ -919,8 +910,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           }
         },
         "required": [
-          "endpoint",
-          "version"
+          "endpoint"
         ]
       }
     },
