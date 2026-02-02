@@ -50,6 +50,10 @@ export function makeTargetParamDict(targetConfig: BaseExpression<Serialized<z.in
     return makeClusterParamDict("target", targetConfig);
 }
 
+export function makeCoordinatorParamDict(coordinatorConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
+    return makeClusterParamDict("coordinator", coordinatorConfig);
+}
+
 // The functions below are still used by the replaer, but they should probably be replaced with the ones above
 // once we circle back to finalize replayer support
 export function extractConnectionKeysToExpressionMap(
