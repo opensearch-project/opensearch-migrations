@@ -184,7 +184,7 @@ export async function main() {
             console.error('JSON parsing error:', error.message);
             process.exit(1);
         } else if (error instanceof Error) {
-            console.error('Error:', error.message);
+            console.error('Error:', error);
             process.exit(1);
         } else {
             console.error('Unknown error:', error);

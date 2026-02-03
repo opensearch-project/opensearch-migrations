@@ -151,6 +151,27 @@ charts:
           mountPath: /fluentbit/scripts
           readOnly: true
 
+  strimzi-kafka-operator:
+     # Use EKS-specific node selectors or tolerations if you have dedicated infra
+#    nodeSelector:
+#    workload-type: "operator-control-plane"
+
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "2000m"
+        memory: "2Gi"
+
+    # Handle higher latency that might happen at greater scale
+    env:
+      - name: STRIMZI_OPERATION_TIMEOUT_MS
+        value: "600000"  # This is for orchestration events, like syncing reconciling nodes
+      - name: STRIMZI_FULL_RECONCILIATION_INTERVAL_MS
+        value: "120000" # 2 minutes (slows down background chatter)
+      - name: KUBERNETES_CLIENT_READ_TIMEOUT_MS
+        value: "30000"  # Avoid timing out on heavy K8s API responses
 
 # Higher resources for EKS production
 etcdCluster:

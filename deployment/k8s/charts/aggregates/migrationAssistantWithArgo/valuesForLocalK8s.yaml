@@ -47,6 +47,53 @@ charts:
           registry: ""
           repository: localhost:5000/migrations/migration_console
           tag: latest
+
+
+  strimzi-kafka-operator:
+    values:
+      # Decrease probe thresholds to make deployment times faster (but less reliable under stress)
+      readinessProbe:
+        initialDelaySeconds: 5
+        periodSeconds: 2
+        timeoutSeconds: 5
+        failureThreshold: 1
+      livenessProbe:
+        initialDelaySeconds: 5
+        periodSeconds: 2
+        timeoutSeconds: 3
+        failureThreshold: 1
+
+      # Recommended baseline resources to ensure the JVM has enough heap for metadata
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+        limits:
+          cpu: "1000m"
+          memory: "1Gi"
+
+      # Similar to the timeouts for the operator, clock some probes way down to speed up deployments
+      kafka:
+        template:
+          pod:
+            readinessProbe:
+              initialDelaySeconds: 5
+              periodSeconds: 5
+              timeoutSeconds: 3
+              failureThreshold: 1
+
+        readinessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 2
+          timeoutSeconds: 3
+          failureThreshold: 1
+        livenessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 2
+          timeoutSeconds: 3
+          failureThreshold: 1
+
+
   argo-workflows:
     values:
       controller:

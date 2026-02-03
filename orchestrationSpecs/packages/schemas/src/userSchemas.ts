@@ -111,10 +111,11 @@ export const S3_REPO_CONFIG = z.object({
 export const KAFKA_CLIENT_CONFIG = z.object({
     enableMSKAuth: z.boolean().default(false).optional(),
     kafkaConnection: z.string()
-        .describe("Sequence of <HOSTNAME:PORT> values delimited by ','.")
+        .describe("Sequence of <HOSTNAME:PORT> values delimited by ','.  " +
+            "If empty, the cluster is automatically created and this is filled in.")
         .regex(/^(?:[a-z.]+:[0-9]+,?)*$/)
         .default("").optional(),
-    kafkaTopic: z.string().default("logging-traffic-topic"),
+    kafkaTopic: z.string().describe("Empty defaults to the name of the target label").default(""),
 });
 
 export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
@@ -160,7 +161,7 @@ export const PROXY_OPTIONS = z.object({
         .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
         .default("PT30S").optional(),
     kafkaClientId: z.string().default("HttpCaptureProxyProducer").optional(),
-    kafkaCluster: KAFKA_CLIENT_CONFIG,
+    kafkaCluster: KAFKA_CLIENT_CONFIG.optional(),
     listenPort: z.number(),
     maxTrafficBufferSize: z.number().default(1048576),
     noCapture: z.boolean().default(false).optional(),
@@ -277,6 +278,7 @@ export const USER_RFS_OPTIONS = z.object({
 });
 
 export const KAFKA_CLUSTER_CONFIG = z.object({
+    autoCreate: z.boolean().default(true).optional()
 });
 
 export const HTTP_AUTH_BASIC = z.object({
@@ -315,9 +317,14 @@ export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
 export const SOURCE_CLUSTER_REPOS_RECORD = z.record(z.string(), S3_REPO_CONFIG)
     .describe("Keys are the repository names that are managed by the source cluster");
 
+export const PROXY_CONFIG = z.object({
+    kafkaConfig: z.string().default("default").optional(),
+    proxySettings: PROXY_OPTIONS.optional()
+})
+
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     snapshotRepos: SOURCE_CLUSTER_REPOS_RECORD.optional(),
-    proxySettings: PROXY_OPTIONS.optional()
+    proxy:
 });
 
 export const EXTERNALLY_MANAGED_SNAPSHOT = z.object({

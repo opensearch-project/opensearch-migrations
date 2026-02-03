@@ -4,7 +4,7 @@ import {
     PARAMETERIZED_MIGRATION_CONFIG_ARRAYS, PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     S3_REPO_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG, SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
-    NAMED_SOURCE_CLUSTER_CONFIG
+    NAMED_SOURCE_CLUSTER_CONFIG, ARGO_MIGRATION_CONFIG
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -215,7 +215,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const seen = new Set<string>();
         const duplicates = new Set<string>();
 
-        const output = userConfig.migrationConfigs.map(mc => {
+        const migrationConfigs = userConfig.migrationConfigs.map(mc => {
             let {fromSource, toTarget, snapshotExtractAndLoadConfigs, replayerConfig} = mc;
 
             const keyPair = `${fromSource} => ${toTarget}`;
@@ -225,7 +225,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             seen.add(keyPair);
 
             const sourceCluster = userConfig.sourceClusters[fromSource];
-            if (sourceCluster.proxy === undefined) {
+            if (sourceCluster.proxySettings === undefined && replayerConfig) {
                 console.warn(`Replayer is configured for ${fromSource} but a proxy is not. ` +
                     `A replayer won't be configured for the target (${toTarget})`);
                 replayerConfig = undefined;
@@ -277,8 +277,14 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 "Duplicates: " + [...duplicates].join(","));
         }
 
+        const kafkaGroupNamesToSource = Object.groupBy(Object.values(userConfig.sourceClusters), (v) => {
+            if (v.proxySettings) {
+                if (v.proxySettings)
+            }
+        migrationConfigs
+
         try {
-            return PARAMETERIZED_MIGRATION_CONFIG_ARRAYS.parse(output);
+            return ARGO_MIGRATION_CONFIG.parse(output);
         } catch (error) {
             throw new Error("Error while safely parsing the transformed workflow " +
                 "as a configuration for the argo workflow.", { cause: error} );

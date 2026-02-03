@@ -238,47 +238,33 @@ charts:
 
 
   strimzi-kafka-operator:
-    version: 0.47.0
+    version: 0.50.0
     repository: "https://strimzi.io/charts/"
     values:
-      replicas: 1
-      storageType: ephemeral
-      storageSize: 100Gi
-      storageDeleteClaim: true
-      dedicatedController:
-        replicas: 1
-        storageSize: 10Gi
+      storageType: ephemeral # strimzi is stateless
+      storageSize: 5Gi
 
+      # Increase probe thresholds to prevent unnecessary restarts during high API load.
       readinessProbe:
-        initialDelaySeconds: 5
-        periodSeconds: 2
-        timeoutSeconds: 3
-        failureThreshold: 1
+        initialDelaySeconds: 15
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
       livenessProbe:
-        initialDelaySeconds: 5
-        periodSeconds: 2
-        timeoutSeconds: 3
-        failureThreshold: 1
+        initialDelaySeconds: 15
+        periodSeconds: 15
+        timeoutSeconds: 5
+        failureThreshold: 3
 
-      kafka:
-        template:
-          pod:
-            readinessProbe:
-              initialDelaySeconds: 5
-              periodSeconds: 5
-              timeoutSeconds: 3
-              failureThreshold: 1
+      # Recommended baseline resources to ensure the JVM has enough heap for metadata
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+        limits:
+          cpu: "1000m"
+          memory: "1Gi"
 
-        readinessProbe:
-          initialDelaySeconds: 5
-          periodSeconds: 2
-          timeoutSeconds: 3
-          failureThreshold: 1
-        livenessProbe:
-          initialDelaySeconds: 5
-          periodSeconds: 2
-          timeoutSeconds: 3
-          failureThreshold: 1
 
   argo-workflows:
     version: "0.47.1"
