@@ -9,6 +9,8 @@ export * from "./models/plainObject";
 export * from "./models/scopeConstraints";
 export * from "./models/sharedTypes";
 export * from "./models/stepsBuilder";
+export * from "./models/suspendTemplateBuilder";
+export * from "./models/synchronization";
 export * from "./models/taskBuilder";
 export * from "./models/templateBodyBuilder";
 export * from "./models/templateBuilder";

@@ -118,6 +118,7 @@ tasks.register('syncDockerBuildContext', Sync) {
     inputs.file(project.file("msk-iam-auth.properties"))
     inputs.file(project.file("setupVimSchemaChecker.sh"))
     inputs.file(project.file("start-console.sh"))
+    inputs.file(project.file("workflowConfigToServicesConfig.jq"))
     inputs.dir(project.file("cluster_tools"))
     inputs.dir(project.file("lib/console_link/console_link"))
     inputs.file(project.file("lib/console_link/Pipfile"))
@@ -133,6 +134,7 @@ tasks.register('syncDockerBuildContext', Sync) {
     from(project.file("msk-iam-auth.properties"))
     from(project.file("setupVimSchemaChecker.sh"))
     from(project.file("start-console.sh"))
+    from(project.file("workflowConfigToServicesConfig.jq"))
 
     def commonExcludes = [
             "**/.venv/**",

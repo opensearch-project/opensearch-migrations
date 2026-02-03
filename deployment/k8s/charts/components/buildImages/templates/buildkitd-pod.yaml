@@ -60,4 +60,4 @@ spec:
     - name: buildkitd-config
       configMap:
         name: buildkitd-config
-  restartPolicy: Never
+  restartPolicy: Always

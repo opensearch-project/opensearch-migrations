@@ -1,0 +1,38 @@
+{
+  "status": {
+    "nodes": {
+      "root": {
+        "id": "root",
+        "displayName": "workflow",
+        "type": "Steps",
+        "phase": "Running",
+        "inputs": {
+          "parameters": [
+            {"name": "groupName", "value": "rootgroup"}
+          ]
+        }
+      },
+      "level1": {
+        "id": "level1", 
+        "displayName": "level1",
+        "type": "Steps",
+        "phase": "Running",
+        "boundaryID": "root"
+      },
+      "level2": {
+        "id": "level2",
+        "displayName": "level2",
+        "type": "Steps", 
+        "phase": "Running",
+        "boundaryID": "level1"
+      },
+      "leaf": {
+        "id": "leaf",
+        "displayName": "leaf",
+        "type": "Pod",
+        "phase": "Succeeded",
+        "boundaryID": "level2"
+      }
+    }
+  }
+}
