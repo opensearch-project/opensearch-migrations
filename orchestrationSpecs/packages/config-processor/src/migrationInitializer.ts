@@ -18,6 +18,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import {scrapeApprovals} from "./formatApprovals";
 import {setNamesInUserConfig} from "./migrationConfigTransformer";
+import { generateSemaphoreKey } from './semaphoreUtils';
 
 /** etcd connection options */
 export interface EtcdOptions {
@@ -230,21 +231,8 @@ export class MigrationInitializer {
             const sourceVersion = sourceCluster.version || "";
             
             for (const snapshotConfig of migrationConfig.snapshotExtractAndLoadConfigs) {
-                // Apply same logic as generateSemaphoreConfig
-                const isLegacyVersion = /^(?:ES [1-7]|OS 1)(?:\.[0-9]+)*$/.test(sourceVersion);
-                
-                if (isLegacyVersion) {
-                    // Legacy versions: shared semaphore per source cluster
-                    const key = `snapshot-legacy-${sourceName}`;
-                    if (!semaphoreKeys.includes(key)) {
-                        semaphoreKeys.push(key);
-                    }
-                } else {
-                    // Modern versions: unique key per snapshot (no effective limiting)
-                    const snapshotName = snapshotConfig.snapshotConfig?.snapshotNameConfig?.snapshotNamePrefix || 
-                                       snapshotConfig.snapshotConfig?.snapshotNameConfig?.externallyManagedSnapshot || 
-                                       'unknown';
-                    const key = `snapshot-modern-${sourceName}-${snapshotName}`;
+                const key = generateSemaphoreKey(sourceVersion, sourceName, snapshotConfig.snapshotConfig);
+                if (!semaphoreKeys.includes(key)) {
                     semaphoreKeys.push(key);
                 }
             }

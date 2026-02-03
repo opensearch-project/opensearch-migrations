@@ -8,6 +8,7 @@ import {
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
 import {promises as dns} from "dns";
+import { generateSemaphoreKey } from './semaphoreUtils';
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG_ARRAYS>;
@@ -279,23 +280,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     private generateSemaphoreConfig(sourceVersion: string, sourceName: string, snapshotConfig: any) {
-        const isLegacyVersion = /^(?:ES [1-7]|OS 1)(?:\.[0-9]+)*$/.test(sourceVersion);
-        
-        let semaphoreKey: string;
-        if (isLegacyVersion) {
-            // Legacy versions: shared semaphore per source cluster
-            semaphoreKey = `snapshot-legacy-${sourceName}`;
-        } else {
-            // Modern versions: unique key per snapshot (no effective limiting)
-            const snapshotName = snapshotConfig?.snapshotNameConfig?.snapshotNamePrefix || 
-                               snapshotConfig?.snapshotNameConfig?.externallyManagedSnapshot || 
-                               'unknown';
-            semaphoreKey = `snapshot-modern-${sourceName}-${snapshotName}`;
-        }
-
         return {
             semaphoreConfigMapName: 'concurrency-config',
-            semaphoreKey: semaphoreKey
+            semaphoreKey: generateSemaphoreKey(sourceVersion, sourceName, snapshotConfig)
         };
     }
 }
