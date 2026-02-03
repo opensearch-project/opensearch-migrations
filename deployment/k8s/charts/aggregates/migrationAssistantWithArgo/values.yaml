@@ -73,9 +73,6 @@ cluster:
   # Set to true for EKS clusters with Karpenter, false for other cluster types
   dedicatedKarpenterNodePoolForMigrationConsole: false
   useCustomKarpenterNodePool: false
-# Don't think that these are used
-#  name: ""  # Set this to your EKS cluster name (required when isEKS: true)
-#  nodeInstanceProfile: "KarpenterNodeInstanceProfile"  # Default Karpenter node instance profile
 
 # Migrations NodePool configuration (EKS only)
 workloadsNodePool:

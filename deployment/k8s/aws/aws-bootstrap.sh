@@ -364,10 +364,6 @@ if [[ "$skip_git_pull" == "false" ]]; then
   popd > /dev/null || exit
 fi
 
-EXTRA_VALUES_FLAG=""
-if [[ -n "$extra_helm_values" ]]; then
-  EXTRA_VALUES_FLAG="-f $extra_helm_values"
-fi
 
 if [[ "$build_images" == "true" ]]; then
   # Always build for both architectures on EKS - buildImages chart creates its own nodepool
@@ -376,7 +372,7 @@ if [[ "$build_images" == "true" ]]; then
   export MULTI_ARCH_NATIVE
 
   if [[ "$build_images_locally" == "true" ]]; then
-    if docker buildx inspect k8s-builder --bootstrap &>/dev/null; then
+    if docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
       echo "Buildkit already configured and healthy, skipping setup"
     else
       echo "Setting up buildkit for local builds..."
@@ -481,7 +477,7 @@ helm install "$namespace" "${ma_chart_dir}" \
   --namespace $namespace \
   -f "${ma_chart_dir}/values.yaml" \
   -f "${ma_chart_dir}/valuesEks.yaml" \
-  $EXTRA_VALUES_FLAG \
+  ${extra_helm_values:+-f "$extra_helm_values"} \
   --set stageName="${STAGE}" \
   --set aws.region="${AWS_CFN_REGION}" \
   --set aws.account="${AWS_ACCOUNT}" \
