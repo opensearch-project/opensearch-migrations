@@ -42,6 +42,7 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {SetupKafka} from "./setupKafka";
 import {SetupCapture} from "./setupCapture";
+import {Replayer} from "./replayer";
 
 const uniqueRunNonceParam = {
     uniqueRunNonce: defineRequiredParam<string>({description: "Workflow session nonce"})
@@ -82,14 +83,15 @@ export const FullMigration = WorkflowBuilder.create({
         .addSteps(b => b.addStepGroup(c => c)))
 
 
-    .addTemplate("runReplayerForTarget", t => t
+    .addTemplate("signalReplayerForTarget", t => t
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["sh", "-c"])
             .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
-            .addArgs(["echo runReplayerForTarget"])))
+            .addArgs(["echo signal replayer here"])))
 
 
     .addTemplate("migrateFromSnapshot", t => t
@@ -125,18 +127,17 @@ export const FullMigration = WorkflowBuilder.create({
                     }),
                 { when: { templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)) }}
             )
-            // .addStep("targetBackfillCompleteCheck", ConfigManagementHelpers, "decrementLatch", c =>
-            //     c.register({
-            //         ...(selectInputsForRegister(b, c)),
-            //         prefix: b.inputs.uniqueRunNonce,
-            //         targetName: expr.jsonPathStrict(b.inputs.targetConfig, "name"),
-            //         processorId: c.steps.idGenerator.id
-            //     }))
-            // // TODO - move this upward
-            // .addStep("runReplayerForTarget", INTERNAL, "runReplayerForTarget", c =>
-            //     c.register({
-            //         ...selectInputsForRegister(b, c)
-            //     }))
+            .addStep("targetBackfillCompleteCheck", ConfigManagementHelpers, "decrementLatch", c =>
+                c.register({
+                    ...(selectInputsForRegister(b, c)),
+                    prefix: b.inputs.uniqueRunNonce,
+                    targetName: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
+                    processorId: c.steps.idGenerator.id
+                }))
+            .addStep("signalReplayerForTarget", INTERNAL, "signalReplayerForTarget", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c)
+                }))
         )
     )
 
@@ -175,7 +176,34 @@ export const FullMigration = WorkflowBuilder.create({
                     });
                 },
                 {loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.migrations))}
+            )
+        )
+    )
 
+
+    .addTemplate("waitForBackfill", t=>t
+        .addRequiredInput("nameOfReplayerWaiting", typeToken<string>())
+        .addSuspend()
+    )
+
+
+    .addTemplate("runReplayerAfterSignal", t=>t
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("kafkaTopicName", typeToken<string>())
+        .addRequiredInput("kafkaBootstrapServers", typeToken<string>())
+        .addOptionalInput("replayerConfig", c => expr.empty<z.infer<typeof REPLAYER_OPTIONS>>())
+
+        .addInputsFromRecord(ImageParameters)
+
+        .addSteps(b=>b
+            .addStep("waitForBackfill", INTERNAL, "waitForBackfill", c=>c.register({
+                nameOfReplayerWaiting: "waitForBackfill",
+            }))
+            .addStep("replay", Replayer, "createDeploymentFromConfig", c => c.register({
+                    ...selectInputsForRegister(b, c),
+                    kafkaTrafficBrokers: b.inputs.kafkaBootstrapServers,
+                    kafkaGroupId: expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
+                })
             )
         )
     )
@@ -196,10 +224,12 @@ export const FullMigration = WorkflowBuilder.create({
             c => expr.empty<z.infer<typeof REPLAYER_OPTIONS>>())
 
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
+        .addRequiredInput("kafkaBootstrapServers", typeToken<string>())
+
         .addInputsFromRecord(ImageParameters)
 
-        .addSteps(b=>b
-            .addStep("getSnapshotThenMigrateSnapshot", INTERNAL, "getSnapshotThenMigrateSnapshot", c => {
+        .addDag(b=>b
+            .addTask("getSnapshotThenMigrateSnapshot", INTERNAL, "getSnapshotThenMigrateSnapshot", c => {
                     const {groupName, ...rest} = selectInputsForRegister(b, c);
                     return c.register({
                         ...rest,
@@ -214,6 +244,14 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.deserializeRecord(b.inputs.snapshotExtractAndLoadConfigArray))
                 }
             )
+            .addTask("runReplayerAfterSignal", INTERNAL, "runReplayerAfterSignal", c => c.register({
+                ...selectInputsForRegister(b, c),
+                targetConfig: b.inputs.targetConfig,
+                replayerConfig: b.inputs.replayerConfig,
+                kafkaTopicName: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "label")
+            }), {
+                when: { templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.sourceConfig), "proxySettings") }
+            })
             // TODO - add a sensor here to wait for an event
         )
     )
@@ -224,11 +262,16 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("targetMigrationConfigs", typeToken<z.infer<typeof SOURCE_AND_TARGET_MIGRATION_CONFIG>["targetMigrationConfigs"]>())
 
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
+        .addRequiredInput("kafkaName", typeToken<string>())
+        .addRequiredInput("kafkaBootstrapServers", typeToken<string>())
+
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b=>b
             .addStep("setupProxy", SetupCapture, "setupProxy", c=>c.register({
+                    ...selectInputsForRegister(b, c),
                     proxySettings: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "proxySettings") as any,
+                    proxyName: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "label")
                 }),
                 {when: { templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.sourceConfig), "proxySettings") } }
             )
@@ -251,13 +294,15 @@ export const FullMigration = WorkflowBuilder.create({
 
         .addSteps(b=>b
             .addStep("setupKafka", SetupKafka, "deployKafkaCluster", c=>c.register({
-                    clusterName: "test"
+                    clusterName: expr.get(expr.deserializeRecord(b.inputs.kafkaConfig) , "name")
                 }),
                 {when: { templateExp: expr.not(expr.isEmpty(b.inputs.kafkaConfig)) } }
             )
-            .addStep("setupProxy", INTERNAL, "setupProxyThenMigrate", c=>c.register({
+            .addStep("setupProxyThenMigrate", INTERNAL, "setupProxyThenMigrate", c=>c.register({
                     ...selectInputsForRegister(b, c),
-                    ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(SOURCE_AND_TARGET_MIGRATION_CONFIG))
+                    ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(SOURCE_AND_TARGET_MIGRATION_CONFIG)),
+                    kafkaName: expr.get(expr.deserializeRecord(b.inputs.kafkaConfig) , "name"),
+                    kafkaBootstrapServers: c.steps.setupKafka.outputs.bootstrapServers
                 }),
                 {
                     loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.sourceMigrationConfigs))

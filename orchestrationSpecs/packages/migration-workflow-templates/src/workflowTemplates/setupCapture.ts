@@ -23,14 +23,16 @@ export const SetupCapture = WorkflowBuilder.create({
 
     .addTemplate("setupProxy", t => t
         .addRequiredInput("proxySettings", typeToken<z.infer<typeof PROXY_OPTIONS>>())
+        .addRequiredInput("kafkaName", typeToken<string>())
+        .addRequiredInput("proxyName", typeToken<string>())
 
         .addSteps(b=>b
             .addStep("createKafkaTopic", SetupKafka, "createKafkaTopic", c => c.register({
                     ...selectInputsForRegister(b, c),
-                    clusterName: "test",
-                    topicName: "test",
+                    clusterName: b.inputs.kafkaName,
+                    topicName: b.inputs.proxyName,
                     topicPartitions: 1,
-                    topicReplicas: 1
+                    topicReplicas: 3
                 })
             )
         )

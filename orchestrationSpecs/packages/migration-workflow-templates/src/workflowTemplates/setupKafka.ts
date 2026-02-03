@@ -242,6 +242,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 c.tasks.deployKafkaClusterKraft.outputs.brokers))
     )
 
+
     .addTemplate("createKafkaTopic", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("topicName", typeToken<string>())

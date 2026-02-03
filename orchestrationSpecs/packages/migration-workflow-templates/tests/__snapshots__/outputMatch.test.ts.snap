@@ -2061,25 +2061,31 @@ exports[`test workflow template renderings full-migration 1`] = `
         "inputs": {
           "parameters": [
             {
-              "name": "sourceConfig",
+              "name": "nameOfReplayerWaiting",
             },
+          ],
+        },
+        "name": "waitforbackfill",
+        "outputs": {
+          "parameters": [],
+        },
+        "suspend": {},
+      },
+      {
+        "inputs": {
+          "parameters": [
             {
               "name": "targetConfig",
             },
             {
-              "name": "groupName",
-              "value": "{{=fromJSON(inputs.parameters.sourceConfig)['label']+' to '+fromJSON(inputs.parameters.targetConfig)['label']}}",
+              "name": "kafkaTopicName",
             },
             {
-              "name": "snapshotExtractAndLoadConfigArray",
-              "value": "",
+              "name": "kafkaBootstrapServers",
             },
             {
               "name": "replayerConfig",
               "value": "",
-            },
-            {
-              "name": "uniqueRunNonce",
             },
             {
               "name": "imageCaptureProxyLocation",
@@ -2107,12 +2113,71 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
           ],
         },
-        "name": "sourcetotargetmigration",
+        "name": "runreplayeraftersignal",
         "outputs": {
           "parameters": [],
         },
         "steps": [
           [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "nameOfReplayerWaiting",
+                    "value": "waitForBackfill",
+                  },
+                ],
+              },
+              "name": "waitForBackfill",
+              "template": "waitforbackfill",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}",
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}",
+                  },
+                  {
+                    "name": "replayerConfig",
+                    "value": "{{inputs.parameters.replayerConfig}}",
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}",
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}",
+                  },
+                  {
+                    "name": "kafkaTrafficBrokers",
+                    "value": "{{inputs.parameters.kafkaBootstrapServers}}",
+                  },
+                  {
+                    "name": "kafkaGroupId",
+                    "value": "{{=fromJSON(inputs.parameters.targetConfig)['label']}}",
+                  },
+                ],
+              },
+              "name": "replay",
+              "templateRef": {
+                "name": "replayer",
+                "template": "createdeploymentfromconfig",
+              },
+            },
+          ],
+        ],
+      },
+      {
+        "dag": {
+          "tasks": [
             {
               "arguments": {
                 "parameters": [
@@ -2187,8 +2252,121 @@ exports[`test workflow template renderings full-migration 1`] = `
               "when": "{{=!(0 == len(inputs.parameters.snapshotExtractAndLoadConfigArray))}}",
               "withParam": "{{inputs.parameters.snapshotExtractAndLoadConfigArray}}",
             },
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}",
+                  },
+                  {
+                    "name": "kafkaBootstrapServers",
+                    "value": "{{inputs.parameters.kafkaBootstrapServers}}",
+                  },
+                  {
+                    "name": "replayerConfig",
+                    "value": "{{inputs.parameters.replayerConfig}}",
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}",
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}",
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}",
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}",
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}",
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{=fromJSON(inputs.parameters.sourceConfig)['label']}}",
+                  },
+                ],
+              },
+              "name": "runReplayerAfterSignal",
+              "template": "runreplayeraftersignal",
+              "when": "{{='proxySettings' in fromJSON(inputs.parameters.sourceConfig)}}",
+            },
           ],
-        ],
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceConfig",
+            },
+            {
+              "name": "targetConfig",
+            },
+            {
+              "name": "groupName",
+              "value": "{{=fromJSON(inputs.parameters.sourceConfig)['label']+' to '+fromJSON(inputs.parameters.targetConfig)['label']}}",
+            },
+            {
+              "name": "snapshotExtractAndLoadConfigArray",
+              "value": "",
+            },
+            {
+              "name": "replayerConfig",
+              "value": "",
+            },
+            {
+              "name": "uniqueRunNonce",
+            },
+            {
+              "name": "kafkaBootstrapServers",
+            },
+            {
+              "name": "imageCaptureProxyLocation",
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy",
+            },
+            {
+              "name": "imageTrafficReplayerLocation",
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy",
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation",
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "sourcetotargetmigration",
+        "outputs": {
+          "parameters": [],
+        },
       },
       {
         "inputs": {
@@ -2201,6 +2379,12 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
             {
               "name": "uniqueRunNonce",
+            },
+            {
+              "name": "kafkaName",
+            },
+            {
+              "name": "kafkaBootstrapServers",
             },
             {
               "name": "imageCaptureProxyLocation",
@@ -2238,8 +2422,16 @@ exports[`test workflow template renderings full-migration 1`] = `
               "arguments": {
                 "parameters": [
                   {
+                    "name": "kafkaName",
+                    "value": "{{inputs.parameters.kafkaName}}",
+                  },
+                  {
                     "name": "proxySettings",
                     "value": "{{=fromJSON(inputs.parameters.sourceConfig)['proxySettings']}}",
+                  },
+                  {
+                    "name": "proxyName",
+                    "value": "{{=fromJSON(inputs.parameters.sourceConfig)['label']}}",
                   },
                 ],
               },
@@ -2262,6 +2454,10 @@ exports[`test workflow template renderings full-migration 1`] = `
                   {
                     "name": "uniqueRunNonce",
                     "value": "{{inputs.parameters.uniqueRunNonce}}",
+                  },
+                  {
+                    "name": "kafkaBootstrapServers",
+                    "value": "{{inputs.parameters.kafkaBootstrapServers}}",
                   },
                   {
                     "name": "imageCaptureProxyLocation",
@@ -2365,7 +2561,7 @@ exports[`test workflow template renderings full-migration 1`] = `
                 "parameters": [
                   {
                     "name": "clusterName",
-                    "value": "test",
+                    "value": "{{=fromJSON(inputs.parameters.kafkaConfig)['name']}}",
                   },
                 ],
               },
@@ -2425,9 +2621,17 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "name": "targetMigrationConfigs",
                     "value": "{{=jsonpath(toJSON(item), '$.targetMigrationConfigs')}}",
                   },
+                  {
+                    "name": "kafkaName",
+                    "value": "{{=fromJSON(inputs.parameters.kafkaConfig)['name']}}",
+                  },
+                  {
+                    "name": "kafkaBootstrapServers",
+                    "value": "{{steps.setupKafka.outputs.parameters.bootstrapServers}}",
+                  },
                 ],
               },
-              "name": "setupProxy",
+              "name": "setupProxyThenMigrate",
               "template": "setupproxythenmigrate",
               "withParam": "{{inputs.parameters.sourceMigrationConfigs}}",
             },
@@ -3873,7 +4077,7 @@ spec:
               "name": "kafkaTrafficBrokers",
             },
             {
-              "name": "kafkaTrafficTopic",
+              "name": "kafkaTopicName",
             },
             {
               "name": "kafkaGroupId",
@@ -4020,6 +4224,12 @@ exports[`test workflow template renderings setup-capture 1`] = `
             {
               "name": "proxySettings",
             },
+            {
+              "name": "kafkaName",
+            },
+            {
+              "name": "proxyName",
+            },
           ],
         },
         "name": "setupproxy",
@@ -4033,11 +4243,11 @@ exports[`test workflow template renderings setup-capture 1`] = `
                 "parameters": [
                   {
                     "name": "clusterName",
-                    "value": "test",
+                    "value": "{{inputs.parameters.kafkaName}}",
                   },
                   {
                     "name": "topicName",
-                    "value": "test",
+                    "value": "{{inputs.parameters.proxyName}}",
                   },
                   {
                     "name": "topicPartitions",
@@ -4045,7 +4255,7 @@ exports[`test workflow template renderings setup-capture 1`] = `
                   },
                   {
                     "name": "topicReplicas",
-                    "value": 1,
+                    "value": 3,
                   },
                 ],
               },
