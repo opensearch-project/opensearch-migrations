@@ -41,6 +41,10 @@ apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
   name: dedicated-small-instance-migration-console-pool
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   limits:
     cpu: 4000m
