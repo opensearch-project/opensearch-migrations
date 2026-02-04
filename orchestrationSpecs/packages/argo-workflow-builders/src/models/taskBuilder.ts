@@ -309,7 +309,7 @@ export abstract class TaskBuilder<
     protected abstract readonly label: Label;
 
     constructor(
-        protected readonly contextualScope: C,
+        protected readonly parentWorkflowScope: C,
         protected readonly tasksScope: S,
         protected readonly orderedTaskList: NamedTask[],
         /** the rebinder function that constructs the next instance (subclass, wrapper, etc.) */
@@ -369,7 +369,7 @@ export abstract class TaskBuilder<
     > {
         const keyStr = key as unknown as string;
         const inputs = (source === INTERNAL) ?
-            (this.contextualScope.templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K> :
+            (this.parentWorkflowScope.templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K> :
             (((source as Workflow<any, any, any>).templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K>);
         const {paramsFn, opts} = unpackParams<InputsFrom<C, TemplateSource, K>, S, Label, LoopT>(args);
         const loopWith = reduceLoopWith(opts?.loopWith, this.getTaskOutputsByTaskName());
@@ -377,7 +377,7 @@ export abstract class TaskBuilder<
             this.getParamsFromCallback<InputsFrom<C, TemplateSource, K>, LoopT>(inputs, paramsFn as any, loopWith);
 
         if (source === INTERNAL) {
-            const outputs = (this.contextualScope.templates as any)?.[keyStr]?.outputs as OutputsFrom<C, TemplateSource, K>;
+            const outputs = (this.parentWorkflowScope.templates as any)?.[keyStr]?.outputs as OutputsFrom<C, TemplateSource, K>;
             const templateCall = this.callTemplate(name as string, keyStr, params, loopWith);
             return this.addTaskHelper(name, templateCall as any, outputs, opts);
         } else {
@@ -415,7 +415,7 @@ export abstract class TaskBuilder<
         } as ExtendScope<S, { [K in TKey]: TasksWithOutputs<TKey, OUT> }>;
 
         // Use the rebinder to produce the precise next instance
-        return this.rebind(this.contextualScope, nextScope, this.orderedTaskList) as any;
+        return this.rebind(this.parentWorkflowScope, nextScope, this.orderedTaskList) as any;
     }
 
     public getTaskOutputsByTaskName() {

@@ -39,7 +39,6 @@ if [ "${USE_LOCAL_REGISTRY}" = "true" ]; then
 
   if ! pgrep -f "kubectl port-forward.*docker-registry.*5001:5000" >/dev/null; then
     nohup kubectl port-forward -n buildkit svc/docker-registry 5001:5000 --address 0.0.0.0 > /tmp/registry-forward.log 2>&1 &
-    sleep 2
   else
     echo "registry port-forward already running"
   fi

@@ -90,7 +90,7 @@ def get_backfill(config: Dict, target_cluster: Cluster,
                                   target_cluster=target_cluster,
                                   client_options=client_options)
         elif 'k8s' in config[BackfillType.reindex_from_snapshot.name]:
-            logger.debug("Creating K8s RFS backfill instance")
+            logger.debug("Creating K8s RFS backfill instance with config=" + str(config))
             return K8sRFSBackfill(config=config,
                                   target_cluster=target_cluster,
                                   client_options=client_options)
