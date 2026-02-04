@@ -1,5 +1,9 @@
 # Deployment Guide
 
+This document is a reference. The default, end-to-end workflow is defined in:
+
+- `.kiro/steering/opensearch-migration-assistant-eks.sop.md`
+
 ## Best Practices
 - Use `--wait` flags to block until operations complete (reduces polling):
   - `helm install/uninstall --wait --timeout 60s`
@@ -22,6 +26,40 @@
 - EKS cluster deployed via CloudFormation (migration-assistant-eks stack)
 - AWS CLI configured with appropriate credentials
 - kubectl installed
+
+## Pick An MA Environment (Stage)
+
+You have two supported paths:
+
+1) **Use an existing stage** by reading CloudFormation exports (`MigrationsExportString*`) and connecting to the exported EKS cluster.
+2) **Deploy a new stage** via CloudFormation (from synthesized templates) or CDK (high risk; requires explicit confirmation in interactive workflows).
+
+### Use Existing Stage (Exports)
+
+The EKS solution exports an `export ...; export ...;` string via CloudFormation output `MigrationsExportString`.
+
+Reference (no stage filter):
+
+```bash
+eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`MigrationsExportString\`)].[Value]" --output text)
+aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
+kubectl get pods -n ma
+```
+
+If multiple exports exist, prefer using `deployment/k8s/aws/aws-bootstrap.sh --stage <stage>` to select the right one.
+
+### Deploy New Stage (CloudFormation)
+
+For developers, you can synthesize templates and deploy a new EKS stage:
+
+```bash
+./gradlew :deployment:migration-assistant-solution:cdkSynthMinified
+aws cloudformation deploy \
+  --template-file deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json \
+  --stack-name "MA-EKS-<STAGE>-<REGION>" \
+  --parameter-overrides Stage=<stage> \
+  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
+```
 
 ## Find All Migration Stacks (All Regions)
 ```bash

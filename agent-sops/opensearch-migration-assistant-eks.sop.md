@@ -20,6 +20,16 @@ This SOP guides an agent through running an OpenSearch Migration Assistant (MA) 
 - **allow_insecure** (optional, default: false): If true, allow TLS without verification for cluster connections.
 - **index_allowlist** (optional): List of index names to migrate (exact names). If omitted, migrate all non-system indices.
 - **allow_destructive** (optional, default: false): If true, the agent may run destructive operations without additional confirmation when `hands_on_level=auto`.
+- **ma_environment_mode** (optional, default: "use_existing_stage"): How to acquire the MA EKS environment.
+  - `use_existing_stage`: Read CloudFormation exports (`MigrationsExportString*`) and connect to the exported EKS cluster.
+  - `deploy_new_stage`: Deploy a new stage via CloudFormation/CDK (creates/updates AWS resources; high risk).
+- **stage** (optional): Stage identifier used by the EKS solution (e.g., `dev`, `test`, `prod`). Required when `ma_environment_mode=use_existing_stage` or when deploying a stage.
+- **aws_region** (optional): AWS region for the MA EKS environment. Required when deploying a stage; recommended for `use_existing_stage` to narrow discovery.
+- **cfn_stack_name** (optional): If deploying a stage with CloudFormation, the explicit stack name to create/update.
+- **vpc_mode** (optional, default: "create_vpc"): Only used for `deploy_new_stage`.
+  - `create_vpc`: Deploy the "Create VPC" EKS template.
+  - `import_vpc`: Deploy the "Import VPC" EKS template.
+- **cfn_template_path** (optional): Template file path to deploy (for `deploy_new_stage`), e.g. `deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json`.
 - **artifacts_dir** (optional, default: ".agents/migration/{run_id}"): Directory for run artifacts.
 - **run_id** (optional): Identifier for this run. If omitted, generate `YYYY-MM-DD-HHMM-opensearch-migration`.
 
@@ -50,6 +60,27 @@ Apply these patterns throughout all steps based on the selected `hands_on_level`
 - You MUST document all decisions, assumptions, and command outputs in the run log.
 
 ## Steps
+
+### 0. Acquire/Select MA EKS Environment (Stage)
+
+Ensure there is a reachable EKS cluster that can host MA.
+
+**Constraints:**
+- You MUST support both `use_existing_stage` and `deploy_new_stage` paths.
+- You MUST treat `deploy_new_stage` as high risk because it creates/updates AWS infrastructure.
+- In `guided` and `semi_auto`, you MUST ask for explicit confirmation before starting any deployment that creates/updates AWS resources.
+- In `auto`, you MUST NOT deploy a new stage unless the user explicitly provided `ma_environment_mode=deploy_new_stage`.
+
+**use_existing_stage procedure (reference approach):**
+- You MUST read CloudFormation exports whose names start with `MigrationsExportString`.
+- You SHOULD use `deployment/k8s/aws/aws-bootstrap.sh --stage <stage> --skip-console-exec` when available because it already implements stage selection.
+- After exports are applied, you MUST connect kubectl to the exported EKS cluster:
+  - `aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"`
+
+**deploy_new_stage procedure (developer approach):**
+- You MUST prefer deploying from an explicit CloudFormation template path (synthesized from source) and record it.
+- You MUST document the selected `vpc_mode`, `stage`, `aws_region`, and resulting stack name.
+- After the stack is CREATE/UPDATE complete, you MUST fetch exports and connect kubectl as in the existing-stage path.
 
 ### 1. Initialize Run Workspace
 

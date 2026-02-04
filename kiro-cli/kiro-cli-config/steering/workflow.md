@@ -1,5 +1,9 @@
 # Workflow CLI Reference
 
+This file is a command reference and safety checklist. The default end-to-end workflow is defined in:
+
+- `.kiro/steering/opensearch-migration-assistant-eks.sop.md`
+
 ## ⛔ NEVER Modify Without User Confirmation
 **STOP and ASK the user before running ANY of these operations:**
 
