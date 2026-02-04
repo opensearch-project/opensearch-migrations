@@ -41,7 +41,8 @@ The EKS solution exports an `export ...; export ...;` string via CloudFormation 
 Reference (no stage filter):
 
 ```bash
-eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`MigrationsExportString\`)].[Value]" --output text)
+EXPORT_NAME="<one export name starting with MigrationsExportString>"
+eval "$(aws cloudformation list-exports --query \"Exports[?Name=='${EXPORT_NAME}'].Value\" --output text)"
 aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
 kubectl get pods -n ma
 ```
@@ -69,7 +70,7 @@ for r in $(aws ec2 describe-regions --query 'Regions[].RegionName' --output text
 
 ## Connect to EKS Cluster
 ```bash
-aws eks update-kubeconfig --region <REGION> --name migration-eks-cluster-<STAGE>-<REGION>
+aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
 kubectl get pods -n ma
 ```
 
@@ -102,7 +103,7 @@ kubectl exec -it migration-console-0 -n ma -- /bin/bash
 ## Cleanup EKS Cluster Resources
 ```bash
 # Connect to cluster
-aws eks update-kubeconfig --region <REGION> --name migration-eks-cluster-<STAGE>-<REGION>
+aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
 
 # Uninstall helm release and delete namespace
 helm uninstall -n ma ma

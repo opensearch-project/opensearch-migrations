@@ -247,8 +247,7 @@ aws opensearch describe-domain --domain-name <domain> --region <region> \
   --query 'DomainStatus.AccessPolicies' --output text | jq .
 
 # Migration role must be allowed (for SigV4 auth):
-# - migration-eks-cluster-<STAGE>-<REGION>-migrations-role (for API access)
-# - migration-eks-cluster-<STAGE>-<REGION>-snapshot-role (for snapshots)
+# - MIGRATIONS_EKS_CLUSTER_NAME + exported role ARNs (preferred)
 ```
 
 ### 3. List migration roles
@@ -288,7 +287,7 @@ for r in $(aws ec2 describe-regions --query 'Regions[].RegionName' --output text
 ## Authentication Requirements
 
 ### Source Cluster
-- **AWS Managed (OpenSearch Service)**: Use SigV4 auth. Must allow the migration snapshot role (`migration-eks-cluster-<STAGE>-<REGION>-snapshot-role`) access to the domain.
+- **AWS Managed (OpenSearch Service)**: Use SigV4 auth. Must allow the exported migration snapshot role ARN access to the domain (obtain from CloudFormation exports / bootstrap output; do not guess role names).
 - **Self-managed**: Use basic auth. Provide endpoint URL and create K8s secret with credentials.
 
 ### Target Cluster  
@@ -439,7 +438,7 @@ kubectl get configmap migrations-default-s3-config -n ma -o yaml
         {
           "name": "default-snapshot-migration",
           "createSnapshotConfig": {
-            "s3RoleArn": "arn:aws:iam::<account>:role/migration-eks-cluster-<stage>-<region>-snapshot-role"
+            "s3RoleArn": "<snapshot role ARN from CloudFormation exports / bootstrap output>"
           },
           "snapshotConfig": {
             "snapshotNameConfig": {"snapshotNamePrefix": "migration-snapshot"}

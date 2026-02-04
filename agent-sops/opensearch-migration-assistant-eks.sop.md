@@ -71,11 +71,47 @@ Ensure there is a reachable EKS cluster that can host MA.
 - In `guided` and `semi_auto`, you MUST ask for explicit confirmation before starting any deployment that creates/updates AWS resources.
 - In `auto`, you MUST NOT deploy a new stage unless the user explicitly provided `ma_environment_mode=deploy_new_stage`.
 
-**use_existing_stage procedure (reference approach):**
-- You MUST read CloudFormation exports whose names start with `MigrationsExportString`.
-- You SHOULD use `deployment/k8s/aws/aws-bootstrap.sh --stage <stage> --skip-console-exec` when available because it already implements stage selection.
-- After exports are applied, you MUST connect kubectl to the exported EKS cluster:
-  - `aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"`
+**Non-negotiable (runtime-discovery-first):**
+- You MUST NOT construct or guess the EKS cluster name (for example, do not use patterns like `migration-eks-cluster-<STAGE>-<REGION>`). You MUST obtain the cluster name from CloudFormation exports (preferred), from the bootstrap script output, or from an explicit user-provided value.
+- You MUST treat any example values as placeholders only and require runtime discovery before execution.
+
+**use_existing_stage procedure (recommended):**
+
+Run these commands on the operator machine (local shell), not inside the Migration Console.
+
+1) Prefer the bootstrap script for stage selection:
+
+```bash
+deployment/k8s/aws/aws-bootstrap.sh --stage <stage> --skip-console-exec
+```
+
+2) If the bootstrap script is not available, select the export by export *Name* (not by `Value` content):
+
+```bash
+# If aws_region is known, use it. Otherwise, iterate regions and stop once found.
+
+# List candidate exports (Name only)
+aws cloudformation list-exports --region "<region>" \
+  --query "Exports[?starts_with(Name, 'MigrationsExportString')].Name" --output text
+
+# Choose the correct export NAME (often stage-specific). If multiple match, stop and ask the user to pick one.
+EXPORT_NAME="<one export name from the list>"
+
+# Fetch and apply the export Value (this is typically a shell 'export ...; export ...' string)
+EXPORT_VALUE=$(aws cloudformation list-exports --region "<region>" \
+  --query "Exports[?Name=='${EXPORT_NAME}'].Value" --output text)
+eval "${EXPORT_VALUE}"
+
+# Sanity-check required variables exist before continuing
+test -n "${AWS_CFN_REGION}" && test -n "${MIGRATIONS_EKS_CLUSTER_NAME}"
+```
+
+3) After exports are applied, connect kubectl to the exported EKS cluster:
+
+```bash
+aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
+kubectl config current-context
+```
 
 **deploy_new_stage procedure (developer approach):**
 - You MUST prefer deploying from an explicit CloudFormation template path (synthesized from source) and record it.
@@ -111,6 +147,10 @@ Identify the active Kubernetes context, confirm MA is deployed, and locate the M
 - You MUST verify you can exec into the console pod (or provide remediation if you cannot).
 - If MA is not healthy (pods CrashLooping, Pending, or critical services absent), you MUST stop and propose remediation steps rather than attempting migration actions.
 
+**Command context separation (MUST follow):**
+- `kubectl`, `helm`, `aws` commands run on the operator machine (local shell).
+- `workflow` and `console` commands typically run inside the Migration Console pod via `kubectl exec`.
+
 ### 3. Source and Target Cluster Selection
 
 Determine source/target endpoints and auth strategy with minimal hardcoding.
@@ -134,6 +174,14 @@ Use the Migration Console to run connectivity checks and capture baseline state.
   - reported cluster versions
   - a concise index list summary for source and target
   - whether target has indices that would conflict with migration
+
+**Recommended exec pattern (reference):**
+
+```bash
+# Local shell
+kubectl -n {namespace} exec <migration-console-pod> -- bash -lc \
+  "source /.venv/bin/activate && <command>"
+```
 
 ### 5. Acquire Snapshot and Migration Configuration at Runtime
 
