@@ -1,3 +1,4 @@
+{{- if .Values.deployBuildkitPods }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,6 +8,71 @@ data:
   buildkitd.toml: |
     [registry."docker-registry:5000"]
     http = true
+{{- if .Values.multiArchNative }}
+{{- range $arch := list "amd64" "arm64" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: buildkitd-{{ $arch }}
+  namespace: {{ $.Values.namespace }}
+spec:
+  selector:
+    app: buildkitd-{{ $arch }}
+  ports:
+    - name: buildkit
+      protocol: TCP
+      port: 1234
+      targetPort: 1234
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: buildkitd-{{ $arch }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app: buildkitd-{{ $arch }}
+spec:
+  serviceAccountName: {{ $.Values.serviceAccountName }}
+  nodeSelector:
+    kubernetes.io/arch: {{ $arch }}
+  tolerations:
+    - key: "build-nodepool"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+  containers:
+    - name: buildkitd
+      image: moby/buildkit:v0.22.0
+      args: [
+        "--addr", "tcp://0.0.0.0:1234",
+        "--config", "/etc/buildkit/buildkitd.toml"
+      ]
+      ports:
+        - containerPort: 1234
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: buildkitd-config
+          mountPath: /etc/buildkit
+          readOnly: true
+      resources:
+        requests:
+          cpu: "4000m"
+          memory: "8Gi"
+          ephemeral-storage: "30Gi"
+        limits:
+          cpu: "8000m"
+          memory: "12Gi"
+          ephemeral-storage: "80Gi"
+  volumes:
+    - name: buildkitd-config
+      configMap:
+        name: buildkitd-config
+  restartPolicy: Always
+{{- end }}
+{{- else }}
 ---
 apiVersion: v1
 kind: Service
@@ -49,15 +115,17 @@ spec:
           readOnly: true
       resources:
         requests:
-          cpu: "1000m"
-          memory: "5Gi"
-          ephemeral-storage: "10Gi"
-        limits:
-          cpu: "6000m"
+          cpu: "4000m"
           memory: "8Gi"
-          ephemeral-storage: "40Gi"
+          ephemeral-storage: "30Gi"
+        limits:
+          cpu: "8000m"
+          memory: "12Gi"
+          ephemeral-storage: "80Gi"
   volumes:
     - name: buildkitd-config
       configMap:
         name: buildkitd-config
-  restartPolicy: Never
+  restartPolicy: Always
+{{- end }}
+{{- end }}

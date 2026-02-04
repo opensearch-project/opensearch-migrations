@@ -19,8 +19,8 @@ export function getSourceTargetPath(
     target: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>
 ) {
     return [
-        expr.get(expr.deserializeRecord(source), "name"),
-        expr.get(expr.deserializeRecord(target), "name")
+        expr.get(expr.deserializeRecord(source), "label"),
+        expr.get(expr.deserializeRecord(target), "label")
     ];
 }
 

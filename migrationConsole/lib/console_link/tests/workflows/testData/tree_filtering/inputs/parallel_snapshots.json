@@ -1,0 +1,86 @@
+[
+  {
+    "id": "root",
+    "display_name": "workflow",
+    "phase": "Running",
+    "type": "Steps",
+    "boundary_id": null,
+    "children": [
+      {
+        "id": "migration_pair",
+        "display_name": "foreachMigrationPair(...)",
+        "phase": "Running",
+        "type": "Steps",
+        "boundary_id": "root",
+        "children": [
+          {
+            "id": "snapshot_extract_1",
+            "display_name": "foreachSnapshotExtraction(0:test_data2)",
+            "phase": "Succeeded",
+            "type": "Steps",
+            "boundary_id": "migration_pair",
+            "inputs": {
+              "parameters": [
+                {
+                  "name": "groupName",
+                  "value": "test_data2_extraction"
+                }
+              ]
+            },
+            "children": [
+              {
+                "id": "create_snap_1",
+                "display_name": "createSnapshot",
+                "phase": "Succeeded",
+                "type": "Pod",
+                "boundary_id": "snapshot_extract_1",
+                "children": []
+              },
+              {
+                "id": "migrate_1",
+                "display_name": "migrateMetadata",
+                "phase": "Succeeded",
+                "type": "Pod",
+                "boundary_id": "snapshot_extract_1",
+                "children": []
+              }
+            ]
+          },
+          {
+            "id": "snapshot_extract_2",
+            "display_name": "foreachSnapshotExtraction(1:test_data4)",
+            "phase": "Running",
+            "type": "Steps",
+            "boundary_id": "migration_pair",
+            "inputs": {
+              "parameters": [
+                {
+                  "name": "groupName", 
+                  "value": "test_data4_extraction"
+                }
+              ]
+            },
+            "children": [
+              {
+                "id": "create_snap_2",
+                "display_name": "createSnapshot",
+                "phase": "Succeeded",
+                "type": "Pod",
+                "boundary_id": "snapshot_extract_2",
+                "children": []
+              },
+              {
+                "id": "migrate_2",
+                "display_name": "migrateMetadata",
+                "phase": "Running",
+                "type": "Pod",
+                "boundary_id": "snapshot_extract_2",
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

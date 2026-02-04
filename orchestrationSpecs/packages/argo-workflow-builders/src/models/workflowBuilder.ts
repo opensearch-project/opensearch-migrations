@@ -22,12 +22,14 @@ import {TypescriptError} from "../utils";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {TemplateBuilder} from "./templateBuilder";
 import {PlainObject} from "./plainObject";
+import {SynchronizationConfig} from "./synchronization";
 
 type MetadataScopeBase = {
     k8sMetadata: { name: string } & GenericScope,
     entrypoint?: string,
     serviceAccountName?: string,
-    parallelism?: number
+    parallelism?: number,
+    synchronization?: SynchronizationConfig
 };
 
 type SuspendTemplateBodyT = { body: { suspend: {} }, inputs: [], outputs?: [] };
@@ -79,6 +81,22 @@ export class WorkflowBuilder<
         );
     }
 
+    addSynchronization(
+        synchronization: SynchronizationConfig
+    ): WorkflowBuilder<
+        ExtendScope<MetadataScope, { synchronization: SynchronizationConfig }>,
+        WorkflowInputsScope,
+        TemplateSigScope,
+        TemplateFullScope
+    > {
+        return new WorkflowBuilder(
+            {...this.metadataScope, synchronization},
+            this.inputsScope,
+            this.templateSigScope,
+            this.templateFullScope
+        );
+    }
+
     addParams<P extends InputParametersRecord>(
         params: P
     ): keyof WorkflowInputsScope & keyof P extends never
@@ -95,31 +113,6 @@ export class WorkflowBuilder<
             newInputs,
             this.templateSigScope,
             this.templateFullScope
-        ) as any;
-    }
-
-    addSuspendTemplate<
-        Name extends string
-    >(
-        name: Name
-    ): UniqueNameConstraintOutsideDeclaration<Name, TemplateSigScope,
-        WorkflowBuilder<
-            MetadataScope,
-            WorkflowInputsScope,
-            ExtendScope<TemplateSigScope, { [K in Name]: (Name extends keyof TemplateSigScope ? Exclude<TemplateSigEntry<SuspendTemplateBodyT>, Name> : TemplateSigEntry<SuspendTemplateBodyT>) }>,
-            ExtendScope<TemplateFullScope, { [K in Name]: SuspendTemplateBodyT }>
-        >
-    > {
-        const newSig = {[name as string]: {}} as { [K in Name]: TemplateSigEntry<SuspendTemplateBodyT> };
-        const newTemplate = {body: {suspend: {}}};
-
-        const newFull = {[name as string]: newTemplate} as { [K in Name]: SuspendTemplateBodyT };
-
-        return new WorkflowBuilder(
-            this.metadataScope,
-            this.inputsScope,
-            {...this.templateSigScope, ...newSig},
-            {...this.templateFullScope, ...newFull}
         ) as any;
     }
 

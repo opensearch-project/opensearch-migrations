@@ -1,4 +1,5 @@
-import {deepStrict, StreamSchemaParser} from "./streamSchemaTransformer";
+import {StreamSchemaParser} from "./streamSchemaTransformer";
+import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {
     ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN,
     PARAMETERIZED_MIGRATION_CONFIG,
@@ -12,6 +13,12 @@ import {
 } from "cockatiel";
 import { ExponentialBackoff } from "cockatiel/dist/backoff/ExponentialBackoff"; // path may vary
 import {z} from "zod";
+import {stringify} from "yaml";
+import * as fs from "fs/promises";
+import * as path from "path";
+import {scrapeApprovals} from "./formatApprovals";
+import {setNamesInUserConfig} from "./migrationConfigTransformer";
+import { generateSemaphoreKey } from './semaphoreUtils';
 
 /** etcd connection options */
 export interface EtcdOptions {
@@ -25,6 +32,7 @@ export interface EtcdOptions {
 export class MigrationInitializer {
     readonly client: Etcd3;
     readonly loader: StreamSchemaParser<typeof PARAMETERIZED_MIGRATION_CONFIG_ARRAYS>;
+    readonly transformer: MigrationConfigTransformer;
     constructor(etcdSettings: EtcdOptions, public readonly uniqueRunNonce: string) {
         if (!K8S_NAMING_PATTERN.test(uniqueRunNonce)) {
             throw new Error(`Illegal uniqueRunNonce argument.  Must match regex pattern ${K8S_NAMING_PATTERN}.`);
@@ -46,7 +54,8 @@ export class MigrationInitializer {
                 })
             }
         });
-        this.loader = new StreamSchemaParser(deepStrict(PARAMETERIZED_MIGRATION_CONFIG_ARRAYS));
+        this.loader = new StreamSchemaParser(PARAMETERIZED_MIGRATION_CONFIG_ARRAYS);
+        this.transformer = new MigrationConfigTransformer();
     }
 
     private calculateProcessorCount(targetMigrations: z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG>[]): number {
@@ -76,17 +85,17 @@ export class MigrationInitializer {
             );
 
             const targetsMap =
-                Object.groupBy(workflows, w=> w.targetConfig.name);
+                Object.groupBy(workflows, w=> w.targetConfig.label);
 
             // Initialize target latches
-            for (const [targetName, list] of Object.entries(targetsMap)) {
+            for (const [targetLabel, list] of Object.entries(targetsMap)) {
                 const processorCount = list ? this.calculateProcessorCount(list) : 0;
                 console.log(`Total processor count: ${processorCount}`);
 
-                await this.client.put(`/${this.uniqueRunNonce}/workflow/targets/${targetName}/latch`)
+                await this.client.put(`/${this.uniqueRunNonce}/workflow/targets/${targetLabel}/latch`)
                     .value(processorCount.toString());
 
-                console.log(`Target ${targetName} (${targetName}) latch initialized with count ${processorCount}`);
+                console.log(`Target ${targetLabel} latch initialized with count ${processorCount}`);
             }
 
             console.log(`Etcd keys initialized with prefix: ${this.uniqueRunNonce}`);
@@ -101,5 +110,134 @@ export class MigrationInitializer {
      */
     async close(): Promise<void> {
         await this.client.close();
+    }
+
+    /**
+     * Generate output files including workflow config, approval ConfigMaps, and concurrency ConfigMaps with semaphores
+     */
+    async generateOutputFiles(workflows: ARGO_WORKFLOW_SCHEMA, outputDir: string, userConfig: any): Promise<void> {
+        const bundle = await this.generateMigrationBundle(userConfig);
+        await this.writeBundleToFiles(bundle, outputDir);
+    }
+
+    /**
+     * Generate all migration artifacts from user config
+     */
+    async generateMigrationBundle(userConfig: any) {
+        // Transform user config to workflow config
+        const workflows = await this.transformer.processFromObject(userConfig);
+        
+        // Generate ConfigMaps
+        const approvalConfigMaps = this.generateApprovalConfigMaps(userConfig);
+        const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
+        
+        return {
+            workflows,
+            approvalConfigMaps,
+            concurrencyConfigMaps
+        };
+    }
+
+    /**
+     * Write bundle to output files
+     */
+    private async writeBundleToFiles(bundle: any, outputDir: string): Promise<void> {
+        await fs.mkdir(outputDir, { recursive: true });
+
+        // 1. Write workflow configuration
+        const workflowPath = path.join(outputDir, 'workflowMigration.config.yaml');
+        await fs.writeFile(workflowPath, JSON.stringify(bundle.workflows, null, 2));
+
+        // 2. Write approval config maps
+        const approvalPath = path.join(outputDir, 'approvalConfigMaps.yaml');
+        await fs.writeFile(approvalPath, stringify(bundle.approvalConfigMaps));
+
+        // 3. Write concurrency config maps
+        const concurrencyPath = path.join(outputDir, 'concurrencyConfigMaps.yaml');
+        await fs.writeFile(concurrencyPath, stringify(bundle.concurrencyConfigMaps));
+    }
+
+    private generateApprovalConfigMaps(userConfig: any) {
+        if (!userConfig) {
+            return { 
+                apiVersion: 'v1',
+                kind: 'List',
+                items: [] 
+            };
+        }
+
+        const approvals = scrapeApprovals(setNamesInUserConfig(userConfig));
+        
+        return {
+            apiVersion: 'v1',
+            kind: 'List',
+            items: [{
+                apiVersion: 'v1',
+                kind: 'ConfigMap',
+                metadata: {
+                    name: 'approval-config',
+                    labels: {
+                        'workflows.argoproj.io/configmap-type': 'Parameter'
+                    }
+                },
+                data: {
+                    'autoApprove': JSON.stringify(approvals)
+                }
+            }]
+        };
+    }
+
+    private generateConcurrencyConfigMaps(userConfig: any) {
+        const semaphoreKeys = this.generateSemaphoreKeys(userConfig);
+        const semaphoreData: Record<string, string> = {};
+        
+        // Add each semaphore key with count=1
+        semaphoreKeys.forEach(key => {
+            semaphoreData[key] = "1";
+        });
+
+        return {
+            apiVersion: 'v1',
+            kind: 'List',
+            items: [{
+                apiVersion: 'v1',
+                kind: 'ConfigMap',
+                metadata: {
+                    name: 'concurrency-config'
+                },
+                data: {
+                    // Semaphore keys with count=1
+                    ...semaphoreData
+                }
+            }]
+        };
+    }
+
+    private generateSemaphoreKeys(userConfig: any): string[] {
+        if (!userConfig?.migrationConfigs) {
+            return [];
+        }
+
+        const semaphoreKeys: string[] = [];
+
+        for (const migrationConfig of userConfig.migrationConfigs) {
+            const sourceName = migrationConfig.fromSource;
+            const sourceCluster = userConfig.sourceClusters?.[sourceName];
+            
+            if (!sourceCluster || !migrationConfig.snapshotExtractAndLoadConfigs) {
+                continue;
+            }
+
+            const sourceVersion = sourceCluster.version || "";
+            
+            for (const snapshotConfig of migrationConfig.snapshotExtractAndLoadConfigs) {
+                const key = generateSemaphoreKey(sourceVersion, sourceName, snapshotConfig.snapshotConfig);
+                if (!semaphoreKeys.includes(key)) {
+                    semaphoreKeys.push(key);
+                }
+            }
+        }
+
+        return semaphoreKeys;
     }
 }
