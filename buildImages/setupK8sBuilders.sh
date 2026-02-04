@@ -27,7 +27,7 @@ if [[ "$CONTEXT" =~ (eks:|gke_|aks-) ]]; then
     --node=builder-amd64 \
     --driver-opt="namespace=${NAMESPACE}" \
     --driver-opt="nodeselector=kubernetes.io/arch=amd64" \
-    --driver-opt="tolerations=key=build-nodepool,value=true,effect=NoSchedule"
+    --driver-opt='"tolerations=key=build-nodepool,value=true,effect=NoSchedule"'
 
   docker buildx create \
     --append \
@@ -37,7 +37,7 @@ if [[ "$CONTEXT" =~ (eks:|gke_|aks-) ]]; then
     --node=builder-arm64 \
     --driver-opt="namespace=${NAMESPACE}" \
     --driver-opt="nodeselector=kubernetes.io/arch=arm64" \
-    --driver-opt="tolerations=key=build-nodepool,value=true,effect=NoSchedule"
+    --driver-opt='"tolerations=key=build-nodepool,value=true,effect=NoSchedule"'
 else
   echo "Detected local K8s, using remote driver with port-forwards"
   

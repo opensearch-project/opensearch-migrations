@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 MIGRATIONS_REPO_ROOT_DIR=$(git rev-parse --show-toplevel)
 
 echo "Installing buildImages helm chart for nodepool..."
@@ -26,7 +28,7 @@ else
   echo "buildkit helm release already exists, skipping install"
 fi
 
-if [ "${USE_LOCAL_REGISTRY}" = "true" ]; then
+if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
   echo "Setting up a local registry"
   if ! kubectl get deployment docker-registry -n buildkit >/dev/null 2>&1; then
     kubectl apply -f "${MIGRATIONS_REPO_ROOT_DIR}/buildImages/docker-registry.yaml" -n buildkit
@@ -43,7 +45,7 @@ if [ "${USE_LOCAL_REGISTRY}" = "true" ]; then
     echo "registry port-forward already running"
   fi
 else
-  echo "Not creating a docker registry. Assuming that one is already running at port 5001."
+  echo "Not creating a docker registry. Assuming that one is already running."
 fi
 
 # Set up the builders

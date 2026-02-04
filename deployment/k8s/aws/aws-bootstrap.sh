@@ -12,6 +12,9 @@
 #   Run directly: curl -s https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh | bash
 #   Save & run:   curl -s -o aws-bootstrap.sh https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh && chmod +x aws-bootstrap.sh && ./aws-bootstrap.sh
 # -----------------------------------------------------------------------------
+
+set -euo pipefail
+
 # --- defaults ---
 org_name="opensearch-project"
 repo_name="opensearch-migrations"
