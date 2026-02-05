@@ -1,0 +1,10 @@
+[
+  {
+    "id": "pod",
+    "display_name": "actualWork",
+    "phase": "Succeeded",
+    "type": "Pod",
+    "boundary_id": "wrapper",
+    "children": []
+  }
+]
