@@ -13,14 +13,13 @@ static def expandVersionString(String input) {
 }
 
 def call(Map config = [:]) {
-    def defaultStageId = config.defaultStageId ?: "eks-integ"
-    def jobName = config.jobName ?: "eks-integ-test"
+    def defaultStageId = config.defaultStageId ?: "kiro-sop"
+    def jobName = config.jobName ?: "kiro-sop-test"
     def sourceVersion = config.sourceVersion ?: ""
     def targetVersion = config.targetVersion ?: ""
     def sourceClusterType = config.sourceClusterType ?: ""
     def targetClusterType = config.targetClusterType ?: ""
-    def testIds = config.testIds ?: "0001"
-    def clusterContextFilePath = "tmp/cluster-context-integ-${currentBuild.number}.json"
+    def clusterContextFilePath = "tmp/cluster-context-kiro-sop-${currentBuild.number}.json"
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
@@ -28,33 +27,17 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
-            choice(
-                    name: 'SOURCE_VERSION',
-                    choices: ['ES_7.10'],
-                    description: 'Pick a specific source version'
-            )
-            choice(
-                    name: 'SOURCE_CLUSTER_TYPE',
-                    choices: ['OPENSEARCH_MANAGED_SERVICE'],
-                    description: 'Pick a source cluster type'
-            )
-            choice(
-                    name: 'TARGET_VERSION',
-                    choices: ['OS_1.3', 'OS_2.19', 'OS_3.1'],
-                    description: 'Pick a specific target version'
-            )
-            choice(
-                    name: 'TARGET_CLUSTER_TYPE',
-                    choices: ['OPENSEARCH_MANAGED_SERVICE'],
-                    description: 'Pick a target cluster type'
-            )
-            string(name: 'TEST_IDS', defaultValue: 'all', description: 'Test IDs to execute. Use comma separated list e.g. "0001,0004" or "all" for all tests')
+            choice(name: 'SOURCE_VERSION', choices: ['ES_7.10'], description: 'Source version')
+            choice(name: 'SOURCE_CLUSTER_TYPE', choices: ['OPENSEARCH_MANAGED_SERVICE'], description: 'Source cluster type')
+            choice(name: 'TARGET_VERSION', choices: ['OS_2.19'], description: 'Target version')
+            choice(name: 'TARGET_CLUSTER_TYPE', choices: ['OPENSEARCH_MANAGED_SERVICE'], description: 'Target cluster type')
+            string(name: 'MODEL_ID', defaultValue: 'us.anthropic.claude-sonnet-4-20250514-v1:0', description: 'Bedrock model ID for agent')
+            string(name: 'MIN_SCORE', defaultValue: '70', description: 'Minimum passing score (0-100)')
         }
 
         options {
-            // Acquire lock on a given deployment stage
             lock(label: params.STAGE, quantity: 1, variable: 'maStageName')
-            timeout(time: 3, unit: 'HOURS')
+            timeout(time: 4, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
         }
@@ -82,18 +65,14 @@ def call(Map config = [:]) {
 
             stage('Test Caller Identity') {
                 steps {
-                    script {
-                        sh 'aws sts get-caller-identity'
-                    }
+                    script { sh 'aws sts get-caller-identity' }
                 }
             }
 
             stage('Build') {
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
-                        script {
-                            sh './gradlew clean build --no-daemon --stacktrace'
-                        }
+                        script { sh './gradlew clean build --no-daemon --stacktrace' }
                     }
                 }
             }
@@ -129,17 +108,14 @@ def call(Map config = [:]) {
                                 env.STACK_NAME_SUFFIX = "${maStageName}-us-east-1"
                                 def clusterDetails = readJSON text: env.clusterDetailsJson
                                 def targetCluster = clusterDetails.target
-                                def vpcId = targetCluster.vpcId
-                                def subnetIds = "${targetCluster.subnetIds}"
-
                                 sh "npm install"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh """
                                             cdk deploy Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} \
                                               --parameters Stage=${maStageName} \
-                                              --parameters VPCId=${vpcId} \
-                                              --parameters VPCSubnetIds=${subnetIds} \
+                                              --parameters VPCId=${targetCluster.vpcId} \
+                                              --parameters VPCSubnetIds=${targetCluster.subnetIds} \
                                               --require-approval never \
                                               --concurrency 3
                                         """
@@ -167,7 +143,7 @@ def call(Map config = [:]) {
                                         returnStdout: true
                                     ).trim()
                                     if (!rawOutput) {
-                                        error("Could not retrieve CloudFormation Output 'MigrationsExportString' from stack Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}")
+                                        error("Could not retrieve MigrationsExportString")
                                     }
                                     def exportsMap = rawOutput.split(';')
                                             .collect { it.trim().replaceFirst(/^export\s+/, '') }
@@ -176,105 +152,75 @@ def call(Map config = [:]) {
                                                 def (key, value) = it.split('=', 2)
                                                 [(key): value]
                                             }
-                                    if (!exportsMap) {
-                                        error("No key=value pairs found in MigrationsExportString output")
-                                    }
-                                    echo "Found ${exportsMap.size()} key=value pairs in MigrationsExportString output"
                                     env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']
                                     env.eksClusterName = exportsMap['MIGRATIONS_EKS_CLUSTER_NAME']
                                     env.clusterSecurityGroup = exportsMap['EKS_CLUSTER_SECURITY_GROUP']
 
-                                    // Add access policy for Jenkins deployment role to perform kubectl commands
                                     def principalArn = 'arn:aws:iam::$MIGRATIONS_TEST_ACCOUNT_ID:role/JenkinsDeploymentRole'
                                     sh """
                                         if aws eks describe-access-entry --cluster-name $env.eksClusterName --principal-arn $principalArn >/dev/null 2>&1; then
-                                          echo "Access entry already exists, skipping create."
+                                          echo "Access entry already exists"
                                         else
                                           aws eks create-access-entry --cluster-name $env.eksClusterName --principal-arn $principalArn --type STANDARD
                                         fi
-                                        
                                         aws eks associate-access-policy \
                                           --cluster-name $env.eksClusterName \
                                           --principal-arn $principalArn \
                                           --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
                                           --access-scope type=cluster
-                                        
-                                        # Update kubeconfig to use this role
                                         aws eks update-kubeconfig --region us-east-1 --name $env.eksClusterName
-
-                                        # Wait until kubectl is fully ready
                                         for i in {1..10}; do
                                           if kubectl get namespace default >/dev/null 2>&1; then
-                                            echo "kubectl is ready for use"
+                                            echo "kubectl ready"
                                             break
                                           fi
-                                          echo "Waiting for kubectl to be ready... (\$i/10)"
+                                          echo "Waiting for kubectl... (\$i/10)"
                                           sleep 5
                                         done
                                     """
 
-                                    // TODO: Remove this source and target cluster configmaps when integ test utilizes workflow CLI to generate
                                     sh 'kubectl create namespace ma --dry-run=client -o yaml | kubectl apply -f -'
                                     def clusterDetails = readJSON text: env.clusterDetailsJson
                                     def sourceCluster = clusterDetails.source
                                     def targetCluster = clusterDetails.target
                                     def sourceVersionExpanded = expandVersionString("${env.sourceVer}")
                                     def targetVersionExpanded = expandVersionString("${env.targetVer}")
-                                    // Source configmap
+
                                     writeJSON file: '/tmp/source-cluster-config.json', json: [
                                             endpoint: sourceCluster.endpoint,
                                             allow_insecure: true,
-                                            sigv4: [
-                                                    region: "us-east-1",
-                                                    service: "es"
-                                            ],
+                                            sigv4: [region: "us-east-1", service: "es"],
                                             version: env.sourceVer
                                     ]
                                     sh """
                                       kubectl create configmap source-${sourceVersionExpanded}-migration-config \
                                         --from-file=cluster-config=/tmp/source-cluster-config.json \
                                         --namespace ma --dry-run=client -o yaml | kubectl apply -f -
-                                    
-                                      kubectl -n ma get configmap source-${sourceVersionExpanded}-migration-config -o yaml
                                     """
-                                    // Target configmap
                                     writeJSON file: '/tmp/target-cluster-config.json', json: [
                                             endpoint: targetCluster.endpoint,
                                             allow_insecure: true,
-                                            sigv4: [
-                                                    region: "us-east-1",
-                                                    service: "es"
-                                            ],
+                                            sigv4: [region: "us-east-1", service: "es"],
                                             version: env.targetVer
                                     ]
                                     sh """
                                       kubectl create configmap target-${targetVersionExpanded}-migration-config \
                                         --from-file=cluster-config=/tmp/target-cluster-config.json \
                                         --namespace ma --dry-run=client -o yaml | kubectl apply -f -
-                                    
-                                      kubectl -n ma get configmap target-${targetVersionExpanded}-migration-config -o yaml
                                     """
 
-                                    // Modify source/target security group to allow EKS cluster security group
                                     sh """
-                                      # Check if the ingress rule from clusterSecurityGroup already exists
                                       exists=\$(aws ec2 describe-security-groups \
                                         --group-ids $targetCluster.securityGroupId \
                                         --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
                                         --output text)
-                                    
                                       if [ -z "\$exists" ]; then
-                                        echo "Ingress rule not found. Adding..."
                                         aws ec2 authorize-security-group-ingress \
                                           --group-id $targetCluster.securityGroupId \
-                                          --protocol -1 \
-                                          --port -1 \
+                                          --protocol -1 --port -1 \
                                           --source-group $env.clusterSecurityGroup
-                                      else
-                                        echo "Ingress rule already exists. Skipping."
                                       fi
                                     """
-
                                 }
                             }
                         }
@@ -288,17 +234,12 @@ def call(Map config = [:]) {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                    // Install QEMU for cross-architecture builds (arm64 on x86_64 host)
                                     sh "docker run --privileged --rm tonistiigi/binfmt --install all"
-
                                     def builderExists = sh(
                                             script: "docker buildx ls | grep -q '^ecr-builder'",
                                             returnStatus: true
                                     ) == 0
-
-                                    if (builderExists) {
-                                        echo "The buildx builder 'ecr-builder' already exists"
-                                    } else {
+                                    if (!builderExists) {
                                         sh "docker buildx create --name ecr-builder --driver docker-container"
                                     }
                                     sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -Pbuilder=ecr-builder"
@@ -316,7 +257,7 @@ def call(Map config = [:]) {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir /home/ec2-user/workspace/eks-integ-test --use-public-images false --skip-console-exec --stage ${maStageName}"
+                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir ${WORKSPACE} --use-public-images false --skip-console-exec --stage ${maStageName}"
                                     }
                                 }
                             }
@@ -331,10 +272,15 @@ def call(Map config = [:]) {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                    sh "kubectl wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=300s"
+                                    // Wait for migration-console pod to be ready
+                                    sh """
+                                        kubectl wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=300s
+                                    """
+                                    // Seed test data on source cluster via migration console
                                     sh """
                                         kubectl exec migration-console-0 -n ma -- bash -c 'source /.venv/bin/activate && console clusters run-test-benchmarks' || echo 'Benchmark seeding attempted'
                                     """
+                                    // Verify source has data
                                     sh """
                                         kubectl exec migration-console-0 -n ma -- bash -c 'source /.venv/bin/activate && console clusters cat-indices'
                                     """
@@ -354,7 +300,7 @@ def call(Map config = [:]) {
                                     sh "python3 -m pip install --user boto3 2>/dev/null || pip3 install --user boto3"
                                     sh """
                                         python3 test/kiroSopTest/run_agent.py \
-                                          --model-id 'us.anthropic.claude-sonnet-4-20250514-v1:0' \
+                                          --model-id '${params.MODEL_ID}' \
                                           --region us-east-1 \
                                           --repo-root '${WORKSPACE}' \
                                           --cluster-details-json '${env.clusterDetailsJson}' \
@@ -362,7 +308,7 @@ def call(Map config = [:]) {
                                           --source-version '${env.sourceVer}' \
                                           --target-version '${env.targetVer}' \
                                           --output '${WORKSPACE}/sop-test-report.json' \
-                                          --min-score 70
+                                          --min-score '${params.MIN_SCORE}'
                                     """
                                 }
                             }
@@ -371,55 +317,41 @@ def call(Map config = [:]) {
                 }
             }
         }
+
         post {
             always {
                 timeout(time: 75, unit: 'MINUTES') {
                     script {
-                        // Archive SOP test reports
+                        // Archive test reports
                         archiveArtifacts artifacts: 'sop-test-report*.json', allowEmptyArchive: true
-                    }
-                    dir('libraries/testAutomation') {
-                        script {
-                            if (env.eksClusterName) {
-                                def clusterDetails = readJSON text: env.clusterDetailsJson
-                                def targetCluster = clusterDetails.target
-                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 4500, roleSessionName: 'jenkins-session') {
-                                        sh "kubectl -n ma get pods || true"
-                                        sh "helm uninstall -n ma ma --wait --timeout 60s || true"
-                                        echo "List resources not removed by helm uninstall:"
-                                        sh "kubectl get all,pvc,configmap,secret,workflow -n ma -o wide --ignore-not-found || true"
-                                        sh "kubectl delete namespace ma --ignore-not-found --timeout=60s || true"
-                                        // Remove added security group rule to allow proper cleanup of stacks
-                                        sh """
-                                          echo "Checking if source/target security group $targetCluster.securityGroupId exists..."
-                                        
-                                          if ! aws ec2 describe-security-groups --group-ids $targetCluster.securityGroupId >/dev/null 2>&1; then
-                                            echo "Security group $targetCluster.securityGroupId does not exist. Skipping cleanup."
-                                            exit 0
-                                          fi
-                                        
-                                          echo "Checking for existing ingress rule to remove..."
-                                        
-                                          exists=\$(aws ec2 describe-security-groups \
-                                            --group-ids $targetCluster.securityGroupId \
-                                            --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
-                                            --output json)
-                                        
-                                          if [ "\$exists" != "[]" ]; then
-                                            echo "Ingress rule found. Revoking..."
-                                            aws ec2 revoke-security-group-ingress \
-                                              --group-id $targetCluster.securityGroupId \
-                                              --protocol -1 \
-                                              --port -1 \
-                                              --source-group $env.clusterSecurityGroup
-                                          else
-                                            echo "No ingress rule to revoke."
-                                          fi
-                                        """
-                                        sh "cd $WORKSPACE/deployment/migration-assistant-solution && cdk destroy Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} --force --concurrency 3"
-                                        sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json"
-                                    }
+
+                        if (env.eksClusterName) {
+                            def clusterDetails = readJSON text: env.clusterDetailsJson
+                            def targetCluster = clusterDetails.target
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 4500, roleSessionName: 'jenkins-session') {
+                                    sh "kubectl -n ma get pods || true"
+                                    // Cleanup helm and namespace
+                                    sh "helm uninstall -n ma ma --wait --timeout 60s || true"
+                                    sh "kubectl get all,pvc,configmap,secret,workflow -n ma -o wide --ignore-not-found || true"
+                                    sh "kubectl delete namespace ma --ignore-not-found --timeout=60s || true"
+                                    // Remove security group rule
+                                    sh """
+                                      if aws ec2 describe-security-groups --group-ids $targetCluster.securityGroupId >/dev/null 2>&1; then
+                                        exists=\$(aws ec2 describe-security-groups \
+                                          --group-ids $targetCluster.securityGroupId \
+                                          --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
+                                          --output json)
+                                        if [ "\$exists" != "[]" ]; then
+                                          aws ec2 revoke-security-group-ingress \
+                                            --group-id $targetCluster.securityGroupId \
+                                            --protocol -1 --port -1 \
+                                            --source-group $env.clusterSecurityGroup
+                                        fi
+                                      fi
+                                    """
+                                    sh "cd $WORKSPACE/deployment/migration-assistant-solution && cdk destroy Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} --force --concurrency 3"
+                                    sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json"
                                 }
                             }
                         }
