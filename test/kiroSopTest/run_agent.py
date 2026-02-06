@@ -288,7 +288,9 @@ ENVIRONMENT STATUS:
 CRITICAL WORKFLOW SETUP (do this before using console/workflow commands):
 1. Get S3/snapshot config: kubectl get configmap migrations-default-s3-config -n {args.namespace} -o yaml
 2. Build and load workflow config JSON via: workflow configure edit --stdin
-3. After workflow is configured, seed test data: console clusters run-test-benchmarks
+3. After workflow is configured, seed test data on source using console clusters curl (since run-test-benchmarks does NOT work with SigV4 clusters). Example:
+   console clusters curl source_cluster /test-index/_bulk -X POST -H 'Content-Type: application/x-ndjson' --data-binary '<ndjson>'
+   Create at least 2-3 indices with 100+ docs each so the migration has real data to validate against.
 4. Then run the full migration workflow
 
 Begin the migration now. Do not ask any questions."""
