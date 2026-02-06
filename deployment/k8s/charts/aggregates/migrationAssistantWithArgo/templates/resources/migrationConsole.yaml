@@ -72,9 +72,9 @@ spec:
         - key: "migration-console" # Taint to ensure only migration console pods land here
           value: "dedicated"
           effect: NoSchedule
-    disruption:
-      consolidationPolicy: WhenEmpty
-      consolidateAfter: 5m  # No reason to wait long if the console exits
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 5m  # No reason to wait long if the console exits
 ---
 {{- end }}
 {{ $sharedLogsVolumeEnabled := .Values.logs.sharedLogsVolume.enabled }}
