@@ -325,21 +325,45 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Perform Python E2E Tests') {
+            stage('Seed Source Data') {
+                steps {
+                    timeout(time: 15, unit: 'MINUTES') {
+                        script {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    sh "kubectl wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=300s"
+                                    sh """
+                                        kubectl exec migration-console-0 -n ma -- bash -c 'source /.venv/bin/activate && console clusters run-test-benchmarks' || echo 'Benchmark seeding attempted'
+                                    """
+                                    sh """
+                                        kubectl exec migration-console-0 -n ma -- bash -c 'source /.venv/bin/activate && console clusters cat-indices'
+                                    """
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            stage('Run Kiro SOP Agent') {
                 steps {
                     timeout(time: 2, unit: 'HOURS') {
-                        dir('libraries/testAutomation') {
-                            script {
-                                def testIdsArg = ""
-                                def testIdsResolved = testIds ?: params.TEST_IDS
-                                if (testIdsResolved != "" && testIdsResolved != "all") {
-                                    testIdsArg = "--test-ids='$testIdsResolved'"
-                                }
-                                sh "pipenv install --deploy"
-                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --reuse-clusters --skip-delete --skip-install"
-                                    }
+                        script {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 7200, roleSessionName: 'jenkins-session') {
+                                    sh "python3 -m pip install --user boto3 2>/dev/null || pip3 install --user boto3"
+                                    sh """
+                                        python3 test/kiroSopTest/run_agent.py \
+                                          --model-id 'us.anthropic.claude-sonnet-4-20250514-v1:0' \
+                                          --region us-east-1 \
+                                          --repo-root '${WORKSPACE}' \
+                                          --cluster-details-json '${env.clusterDetailsJson}' \
+                                          --stage '${maStageName}' \
+                                          --source-version '${env.sourceVer}' \
+                                          --target-version '${env.targetVer}' \
+                                          --output '${WORKSPACE}/sop-test-report.json' \
+                                          --min-score 70
+                                    """
                                 }
                             }
                         }
@@ -350,16 +374,19 @@ def call(Map config = [:]) {
         post {
             always {
                 timeout(time: 75, unit: 'MINUTES') {
+                    script {
+                        // Archive SOP test reports
+                        archiveArtifacts artifacts: 'sop-test-report*.json', allowEmptyArchive: true
+                    }
                     dir('libraries/testAutomation') {
                         script {
-                            sh "pipenv install --deploy"
                             if (env.eksClusterName) {
                                 def clusterDetails = readJSON text: env.clusterDetailsJson
                                 def targetCluster = clusterDetails.target
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 4500, roleSessionName: 'jenkins-session') {
                                         sh "kubectl -n ma get pods || true"
-                                        sh "pipenv run app --delete-only"
+                                        sh "helm uninstall -n ma ma --wait --timeout 60s || true"
                                         echo "List resources not removed by helm uninstall:"
                                         sh "kubectl get all,pvc,configmap,secret,workflow -n ma -o wide --ignore-not-found || true"
                                         sh "kubectl delete namespace ma --ignore-not-found --timeout=60s || true"
