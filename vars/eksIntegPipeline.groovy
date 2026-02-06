@@ -325,26 +325,6 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Seed Source Data') {
-                steps {
-                    timeout(time: 15, unit: 'MINUTES') {
-                        script {
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                    sh "kubectl wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=300s"
-                                    sh """
-                                        kubectl exec migration-console-0 -n ma -- bash -c 'source /.venv/bin/activate && console clusters run-test-benchmarks' || echo 'Benchmark seeding attempted'
-                                    """
-                                    sh """
-                                        kubectl exec migration-console-0 -n ma -- bash -c 'source /.venv/bin/activate && console clusters cat-indices'
-                                    """
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             stage('Run Kiro SOP Agent') {
                 steps {
                     timeout(time: 2, unit: 'HOURS') {

@@ -282,9 +282,14 @@ ENVIRONMENT STATUS:
 - EKS cluster is deployed and kubectl is configured (current context points to the MA EKS cluster)
 - Helm chart is installed in namespace '{args.namespace}'
 - migration-console-0 pod is running
-- Source and target configmaps exist in namespace '{args.namespace}'
 - You can skip SOP Step 0 (environment acquisition) - it's already done
 - Start from Step 1 (Initialize Run Workspace) and proceed through all remaining steps
+
+CRITICAL WORKFLOW SETUP (do this before using console/workflow commands):
+1. Get S3/snapshot config: kubectl get configmap migrations-default-s3-config -n {args.namespace} -o yaml
+2. Build and load workflow config JSON via: workflow configure edit --stdin
+3. After workflow is configured, seed test data: console clusters run-test-benchmarks
+4. Then run the full migration workflow
 
 Begin the migration now. Do not ask any questions."""
 
