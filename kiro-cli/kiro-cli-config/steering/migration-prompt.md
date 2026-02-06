@@ -1,47 +1,52 @@
-# Migration Assistant Prompt
+# Migration Assistant Prompt (Default)
 
-## Auto-Discovery
+The default workflow for this agent is the SOP shipped with the assistant package:
 
-Let me first discover your AWS managed OpenSearch domains across all regions...
+- `.kiro/steering/opensearch-migration-assistant-eks.sop.md`
+
+This file is intentionally short and only provides quick-start prompts. Use the SOP as the source of truth.
+
+## First Question (Required)
+
+Ask for `hands_on_level` up front:
+
+```text
+hands_on_level: guided | semi_auto | auto
+```
+
+## Environment Selection
+
+Support both:
+
+1) Deploy a new MA EKS stage (CloudFormation/CDK; requires explicit confirmation)
+2) Use an existing MA EKS stage by reading CloudFormation exports (`MigrationsExportString*`)
+
+## Cluster Selection
+
+Then choose:
+
+1) `aws_discover` (discover Amazon OpenSearch Service domains across regions)
+2) `custom` (user provides endpoints + auth)
+
+Discovery snippet (reference):
 
 ```bash
 for r in $(aws ec2 describe-regions --query 'Regions[].RegionName' --output text); do (s=$(aws opensearch list-domain-names --region "$r" --query 'DomainNames[].DomainName' --output text 2>/dev/null) && [ -n "$s" ] && printf "=== %s ===\n%s\n" "$r" "$s") & done; wait
 ```
 
-## Choose Migration Type
+## Quick Start Prompt Template
 
-After discovering your domains, I'll ask:
+```text
+hands_on_level: guided
 
-1. **Migrate between discovered AWS managed domains** (recommended)
-   - I'll show you all discovered domains with their regions
-   - You select source and target from the list
-   - Uses SigV4 authentication automatically
+ma_environment:
+  mode: use_existing_stage
+  stage: <stage>
+  region: <region>
 
-2. **Use custom endpoints** (for self-managed clusters)
-   - Provide source/target endpoints manually
-   - Specify authentication (basic auth or SigV4)
+clusters:
+  source: aws_discover
+  target: aws_discover
 
-## What I'll Do
-
-1. **Auto-discover domains** - Scan all AWS regions for OpenSearch domains
-2. **Present options** - Show discovered domains or ask for custom endpoints
-3. **Verify connectivity** - Test both clusters are reachable
-4. **Get S3/snapshot config** - From EKS configmap
-5. **Check target state** - Show existing indices, ask before proceeding
-6. **Calculate sizing** - Estimate podReplicas and migration time
-7. **PRESENT ESTIMATE** - Show snapshot time + backfill time, ask user to confirm before proceeding
-8. **Generate config** - Create workflow configuration
-9. **Submit & monitor** - Run migration with progress updates
-10. **Verify completion** - Compare doc counts source vs target
-
-## Pre-Flight Checklist (I'll handle this)
-
-- [ ] EKS cluster connected (`kubectl get pods -n ma`)
-- [ ] Migration console running
-- [ ] Source/target connectivity verified
-- [ ] Target indices reviewed (clear if needed)
-- [ ] S3 snapshot role has access to source cluster
-
-## Ready?
-
-I'll start by discovering your AWS OpenSearch domains automatically - no initial input needed!
+indices: all
+```
