@@ -37,6 +37,7 @@ import {DeepWiden, PlainObject} from "./plainObject";
 import {DagBuilder} from "./dagBuilder";
 import {K8sResourceBuilder} from "./k8sResourceBuilder";
 import {SuspendTemplateBuilder, DurationInSeconds} from "./suspendTemplateBuilder";
+import {WaitForResourceBuilder, WaitForResourceOpts} from "./waitForResourceBuilder";
 import {AllowLiteralOrExpression, expr, isExpression} from "./expression";
 import {typeToken, TypeToken} from "./sharedTypes";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
@@ -284,6 +285,18 @@ export class TemplateBuilder<
             this.parentWorkflowScope,
             this.inputScope,
             duration !== undefined ? { duration } : {},
+            {},
+            undefined
+        );
+    }
+
+    addWaitForResource(
+        opts: ScopeIsEmptyConstraint<BodyScope, WaitForResourceOpts>
+    ): WaitForResourceBuilder<ParentWorkflowScope, InputParamsScope, {}> {
+        return new WaitForResourceBuilder(
+            this.parentWorkflowScope,
+            this.inputScope,
+            opts as WaitForResourceOpts,
             {},
             undefined
         );

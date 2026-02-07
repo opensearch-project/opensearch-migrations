@@ -107,6 +107,14 @@ function formatArguments(passedParameters: { parameters?: Record<string, any> | 
     }));
 }
 
+function formatInlineTemplate(inline: Record<string, any>): Record<string, any> {
+    const {retryStrategy, ...bodyContent} = inline;
+    return {
+        ...formatBody(bodyContent),
+        ...(retryStrategy ? {retryStrategy} : {})
+    };
+}
+
 function formatStepOrTask<T extends NamedTask & { withLoop?: unknown }>(step: T) {
     const {
         templateRef: {template: trTemplate, ...trRest} = {},
@@ -114,11 +122,13 @@ function formatStepOrTask<T extends NamedTask & { withLoop?: unknown }>(step: T)
         withLoop,
         when,
         args,
+        inline = undefined,
         ...rest
-    } = step;
+    } = step as T & { inline?: Record<string, any> };
     return {
         ...(undefined === template   ? {} : {template: convertTemplateName(template as string)} ),
         ...(undefined === trTemplate ? {} : {templateRef: { template: convertTemplateName(trTemplate as string), ...trRest}}),
+        ...(undefined === inline     ? {} : {inline: formatInlineTemplate(inline)}),
         ...(undefined === withLoop   ? {} : renderWithLoop(withLoop as LoopWithUnion<any>)),
         ...(undefined === when       ? {} : {
             when:
