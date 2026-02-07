@@ -34,7 +34,11 @@ describe('errorsArePrintedSuccinctly', () => {
             `  sourceClusters.source1.version\n` +
             `Invalid input... at:\n` +
             `  sourceClusters.source1.authConfig\n` +
+            `Invalid input: expected object, received undefined... at:\n` +
+            `  sourceClusters.source1.snapshotInfo\n` +
             `Invalid input: expected array, received undefined... at:\n` +
-            `  migrationConfigs`);
+            `  snapshotMigrationConfigs\n` +
+            `Invalid input: expected object, received undefined... at:\n` +
+            `  traffic`);
     });
 });

@@ -70,7 +70,7 @@ spec:
         value: "$UUID"
       - name: approval-config
         value: "approval-config-0"
-      - name: migrationConfigs
+      - name: snapshotMigrationConfigs
         value: |
 $(sed 's/^/          /' "$TEMP_DIR/workflowMigration.config.yaml")
 EOF

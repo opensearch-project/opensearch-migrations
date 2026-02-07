@@ -1,9 +1,8 @@
 import {StreamSchemaParser} from "./streamSchemaTransformer";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {
-    ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN,
-    PARAMETERIZED_MIGRATION_CONFIG,
-    PARAMETERIZED_MIGRATION_CONFIG_ARRAYS
+    ARGO_MIGRATION_CONFIG,
+    ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN
 } from "@opensearch-migrations/schemas";
 import { Etcd3, isRecoverableError } from "etcd3";
 import {
@@ -30,7 +29,7 @@ export interface EtcdOptions {
 
 export class MigrationInitializer {
     readonly client: Etcd3;
-    readonly loader: StreamSchemaParser<typeof PARAMETERIZED_MIGRATION_CONFIG_ARRAYS>;
+    readonly loader: StreamSchemaParser<typeof ARGO_MIGRATION_CONFIG>;
     readonly transformer: MigrationConfigTransformer;
     constructor(etcdSettings: EtcdOptions, public readonly uniqueRunNonce: string) {
         if (!K8S_NAMING_PATTERN.test(uniqueRunNonce)) {
@@ -53,24 +52,24 @@ export class MigrationInitializer {
                 })
             }
         });
-        this.loader = new StreamSchemaParser(PARAMETERIZED_MIGRATION_CONFIG_ARRAYS);
+        this.loader = new StreamSchemaParser(ARGO_MIGRATION_CONFIG);
         this.transformer = new MigrationConfigTransformer();
     }
 
-    private calculateProcessorCount(targetMigrations: z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG>[]): number {
+    private calculateProcessorCount(targetMigrations: any[]): number {
         let count = 0;
         let hasReplayersConfigured = false;
-        for (const c of targetMigrations) {
-            if (c.replayerConfig !== undefined) {
-                hasReplayersConfigured = true;
-            }
-
-            for (const snapshots of c.snapshotExtractAndLoadConfigArray??[]) {
-                for (const m of snapshots.migrations) {
-                    count += 1;
-                }
-            }
-        }
+        // for (const c of targetMigrations) {
+        //     if (c. !== undefined) {
+        //         hasReplayersConfigured = true;
+        //     }
+        //
+        //     for (const snapshots of c.snapshotExtractAndLoadConfigArray??[]) {
+        //         for (const m of snapshots.migrations) {
+        //             count += 1;
+        //         }
+        //     }
+        // }
 
         return hasReplayersConfigured ? count : 0;
     }
@@ -84,7 +83,7 @@ export class MigrationInitializer {
             );
 
             const targetsMap =
-                Object.groupBy(workflows, w=> w.targetConfig.label);
+                Object.groupBy(workflows.snapshotMigrations, w=> w.targetConfig.label);
 
             // Initialize target latches
             for (const [targetLabel, list] of Object.entries(targetsMap)) {
@@ -213,13 +212,13 @@ export class MigrationInitializer {
     }
 
     private generateSemaphoreKeys(userConfig: any): string[] {
-        if (!userConfig?.migrationConfigs) {
+        if (!userConfig?.snapshotMigrationConfigs) {
             return [];
         }
 
         const semaphoreKeys: string[] = [];
 
-        for (const migrationConfig of userConfig.migrationConfigs) {
+        for (const migrationConfig of userConfig.snapshotMigrationConfigs) {
             const sourceName = migrationConfig.fromSource;
             const sourceCluster = userConfig.sourceClusters?.[sourceName];
             

@@ -37,7 +37,7 @@ describe('semaphore configuration', () => {
                     }
                 }
             },
-            migrationConfigs: [
+            snapshotMigrationConfigs: [
                 {
                     fromSource: "legacy_source",
                     toTarget: "target",
@@ -123,7 +123,7 @@ describe('semaphore configuration', () => {
                     }
                 }
             },
-            migrationConfigs: [
+            snapshotMigrationConfigs: [
                 {
                     fromSource: "modern_source",
                     toTarget: "target",
@@ -226,7 +226,7 @@ describe('semaphore configuration', () => {
                     }
                 }
             },
-            migrationConfigs: [
+            snapshotMigrationConfigs: [
                 {
                     fromSource: "legacy_source",
                     toTarget: "target",

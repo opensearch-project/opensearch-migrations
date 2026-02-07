@@ -91,7 +91,7 @@ describe('scrapeSecrets', () => {
                     version: 'OS 2.5.0'
                 }
             },
-            migrationConfigs: []
+            snapshotMigrationConfigs: []
         };
 
         const secrets = scrapeSecrets(config as any);
@@ -103,7 +103,7 @@ describe('scrapeSecrets', () => {
             skipApprovals: false,
             sourceClusters: {},
             targetClusters: {},
-            migrationConfigs: []
+            snapshotMigrationConfigs: []
         };
 
         const secrets = scrapeSecrets(config as any);
@@ -168,7 +168,7 @@ describe('scrapeAndCategorize', () => {
                 }
             },
             targetClusters: {},
-            migrationConfigs: []
+            snapshotMigrationConfigs: []
         };
 
         const result = getCategorizedCredentialsSecretsFromConfig(config as any);
@@ -217,7 +217,7 @@ describe('scrapeAndCategorize', () => {
                     }
                 }
             },
-            migrationConfigs: []
+            snapshotMigrationConfigs: []
         };
 
         const result = getCategorizedCredentialsSecretsFromConfig(config as any);
