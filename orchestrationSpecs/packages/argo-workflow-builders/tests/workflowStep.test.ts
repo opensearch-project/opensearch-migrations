@@ -1,6 +1,7 @@
-import {CallerParams, INTERNAL, typeToken, WorkflowBuilder} from "../src";
+import {CallerParams, INTERNAL, renderWorkflowTemplate, typeToken, WorkflowBuilder} from "../src";
+import {json} from "node:stream/consumers";
 
-describe("paramsFns runtime validation - comprehensive", () => {
+describe("nested steps test", () => {
     // Shared external templates with different parameter configurations
 
     // Template with no parameters
@@ -73,6 +74,20 @@ describe("paramsFns runtime validation - comprehensive", () => {
             .addSteps(b=>b)
             .addExpressionOutput("result", inputs=>"internal_success" as string)
         );
+
+    describe("paramsFns runtime validation - comprehensive", () => {
+        it("required enum param types work", () => {
+            const tt = baseWorkflow.addTemplate("test", t=>t
+                .addSteps(sb=> sb
+                .addStepGroup(g=> g
+                    .addTask("i1", INTERNAL, "internalNoParams")
+                    .addTask("i2", INTERNAL, "internalNoParams")
+                )
+            )).getFullScope();
+            const rendered = renderWorkflowTemplate(tt);
+            console.log(rendered)
+        });
+    })
 
     // Tests for External Templates - No Parameters
     describe("External Templates - No Parameters", () => {

@@ -309,10 +309,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 const globalSnapshotName = `${sourceName}.${snapshotName}`;
                 const proxyDeps = proxyNamesBySource.get(sourceName);
 
+                const { snapshotPrefix: _sp, ...createSnapshotOpts } = snapshotDef.config.createSnapshotConfig;
                 createConfigs.push({
-                    snapshotPrefix: globalSnapshotName,
+                    snapshotPrefix: snapshotDef.config.createSnapshotConfig.snapshotPrefix || globalSnapshotName,
                     config: {
-                        ...snapshotDef.config.createSnapshotConfig,
+                        ...createSnapshotOpts,
                         ...this.generateSemaphoreConfig(sourceCluster.version, sourceName, snapshotName)
                     },
                     repo: { ...repoConfig, useLocalStack: /^localstacks?:\/\//i.test(repoConfig.endpoint ?? ""), repoName: snapshotDef.repoName },

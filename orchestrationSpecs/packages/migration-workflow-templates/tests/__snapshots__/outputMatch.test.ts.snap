@@ -139,6 +139,9 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
               "name": "snapshotNameConfig",
             },
             {
+              "name": "snapshotPrefix",
+            },
+            {
               "name": "uniqueRunNonce",
             },
           ],
@@ -149,13 +152,13 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
             {
               "name": "snapshotName",
               "valueFrom": {
-                "expression": "(('snapshotNamePrefix' in fromJSON(inputs.parameters.snapshotNameConfig)) ? (inputs.parameters.sourceLabel + '_' + fromJSON(inputs.parameters.snapshotNameConfig)['snapshotNamePrefix'] + '_' + inputs.parameters.uniqueRunNonce) : (fromJSON(inputs.parameters.snapshotNameConfig)['externallyManagedSnapshot']))",
+                "expression": "(('createSnapshotConfig' in fromJSON(inputs.parameters.snapshotNameConfig)) ? (inputs.parameters.sourceLabel + '_' + inputs.parameters.snapshotPrefix + '_' + inputs.parameters.uniqueRunNonce) : (fromJSON(inputs.parameters.snapshotNameConfig)['externallyManagedSnapshotName']))",
               },
             },
             {
               "name": "autoCreate",
               "valueFrom": {
-                "expression": "'snapshotNamePrefix' in fromJSON(inputs.parameters.snapshotNameConfig)",
+                "expression": "'createSnapshotConfig' in fromJSON(inputs.parameters.snapshotNameConfig)",
               },
             },
           ],
@@ -175,6 +178,9 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
             },
             {
               "name": "snapshotConfig",
+            },
+            {
+              "name": "snapshotPrefix",
             },
             {
               "name": "targetLabel",
@@ -207,6 +213,10 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
               "arguments": {
                 "parameters": [
                   {
+                    "name": "snapshotPrefix",
+                    "value": "{{inputs.parameters.snapshotPrefix}}",
+                  },
+                  {
                     "name": "uniqueRunNonce",
                     "value": "{{inputs.parameters.uniqueRunNonce}}",
                   },
@@ -216,7 +226,7 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
                   },
                   {
                     "name": "snapshotNameConfig",
-                    "value": "{{=toJSON(fromJSON(inputs.parameters.snapshotConfig)['snapshotNameConfig'])}}",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.snapshotConfig)['config'])}}",
                   },
                 ],
               },
@@ -1669,7 +1679,7 @@ exports[`test workflow template renderings full-migration 1`] = `
       {
         "container": {
           "args": [
-            "echo runReplayerForTarget",
+            "echo signal replayer here",
           ],
           "command": [
             "sh",
@@ -1702,10 +1712,660 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
           ],
         },
-        "name": "runreplayerfortarget",
+        "name": "signalreplayerfortarget",
         "outputs": {
           "parameters": [],
         },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "topicName",
+            },
+          ],
+        },
+        "name": "waitforkafkatopic",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "get",
+          "manifest": "apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: "{{inputs.parameters.topicName}}"
+",
+          "successCondition": "status.topicName",
+        },
+        "retryStrategy": {
+          "backoff": {
+            "cap": "120",
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": "60",
+          "retryPolicy": "Always",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+          ],
+        },
+        "name": "waitforcapturedtraffic",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "get",
+          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
+kind: CapturedTraffic
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+",
+          "successCondition": "status.phase == Ready",
+        },
+        "retryStrategy": {
+          "backoff": {
+            "cap": "120",
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": "120",
+          "retryPolicy": "Always",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+          ],
+        },
+        "name": "waitfordatasnapshot",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "get",
+          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
+kind: DataSnapshot
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+",
+          "successCondition": "status.phase == Ready",
+        },
+        "retryStrategy": {
+          "backoff": {
+            "cap": "120",
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": "120",
+          "retryPolicy": "Always",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+          ],
+        },
+        "name": "waitforsnapshotmigration",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "get",
+          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
+kind: SnapshotMigration
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+",
+          "successCondition": "status.phase == Ready",
+        },
+        "retryStrategy": {
+          "backoff": {
+            "cap": "120",
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": "120",
+          "retryPolicy": "Always",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+          ],
+        },
+        "name": "createcapturedtrafficresource",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "create",
+          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
+kind: CapturedTraffic
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+spec: {}
+",
+          "setOwnerReference": false,
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+          ],
+        },
+        "name": "createdatasnapshotresource",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "create",
+          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
+kind: DataSnapshot
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+spec: {}
+",
+          "setOwnerReference": false,
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+          ],
+        },
+        "name": "createsnapshotmigrationresource",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "create",
+          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
+kind: SnapshotMigration
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+spec: {}
+",
+          "setOwnerReference": false,
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+          ],
+        },
+        "name": "patchcapturedtrafficready",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+          ],
+          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
+kind: CapturedTraffic
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+status:
+  phase: Ready
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+          ],
+        },
+        "name": "patchdatasnapshotready",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+          ],
+          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
+kind: DataSnapshot
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+status:
+  phase: Ready
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+          ],
+        },
+        "name": "patchsnapshotmigrationready",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+          ],
+          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
+kind: SnapshotMigration
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+status:
+  phase: Ready
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "kafkaClusterConfig",
+            },
+          ],
+        },
+        "name": "setupsinglekafkacluster",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{=fromJSON(inputs.parameters.kafkaClusterConfig)['name']}}",
+                  },
+                ],
+              },
+              "name": "deployCluster",
+              "templateRef": {
+                "name": "setup-kafka",
+                "template": "deploykafkacluster",
+              },
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{=fromJSON(inputs.parameters.kafkaClusterConfig)['name']}}",
+                  },
+                  {
+                    "name": "topicName",
+                    "value": "{{item}}",
+                  },
+                  {
+                    "name": "topicPartitions",
+                    "value": 1,
+                  },
+                  {
+                    "name": "topicReplicas",
+                    "value": 1,
+                  },
+                ],
+              },
+              "name": "createTopics",
+              "templateRef": {
+                "name": "setup-kafka",
+                "template": "createkafkatopic",
+              },
+            },
+          ],
+        ],
+      },
+      {
+        "dag": {
+          "tasks": [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "topicName",
+                    "value": "{{=jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic')}}",
+                  },
+                ],
+              },
+              "name": "waitForTopic",
+              "template": "waitforkafkatopic",
+            },
+            {
+              "arguments": {
+                "parameters": [],
+              },
+              "dependencies": [
+                "waitForTopic",
+              ],
+              "name": "placeholderProxySetup",
+              "template": "donothing",
+            },
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['name']}}",
+                  },
+                ],
+              },
+              "dependencies": [
+                "placeholderProxySetup",
+              ],
+              "name": "createCapturedTraffic",
+              "template": "createcapturedtrafficresource",
+            },
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['name']}}",
+                  },
+                ],
+              },
+              "dependencies": [
+                "createCapturedTraffic",
+              ],
+              "name": "patchCapturedTraffic",
+              "template": "patchcapturedtrafficready",
+            },
+          ],
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxyConfig",
+            },
+          ],
+        },
+        "name": "setupsingleproxy",
+        "outputs": {
+          "parameters": [],
+        },
+      },
+      {
+        "dag": {
+          "tasks": [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{item}}",
+                  },
+                ],
+              },
+              "name": "waitForProxyDeps",
+              "template": "waitforcapturedtraffic",
+              "when": "{{=!(0 == len(fromJSON(inputs.parameters.snapshotItemConfig)['dependsUponProxySetups']))}}",
+              "withParam": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['dependsUponProxySetups']}}",
+            },
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}",
+                  },
+                  {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}",
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "createSnapshotConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.snapshotItemConfig)['config'])}}",
+                  },
+                  {
+                    "name": "snapshotPrefix",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['snapshotPrefix']}}",
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{=toJSON(sprig.dict("config", sprig.dict("createSnapshotConfig", fromJSON(inputs.parameters.snapshotItemConfig)['config']), "repoConfig", fromJSON(inputs.parameters.snapshotItemConfig)['repo'], "label", fromJSON(inputs.parameters.snapshotItemConfig)['snapshotPrefix']))}}",
+                  },
+                  {
+                    "name": "targetLabel",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['snapshotPrefix']}}",
+                  },
+                ],
+              },
+              "dependencies": [
+                "waitForProxyDeps",
+              ],
+              "name": "createOrGetSnapshot",
+              "templateRef": {
+                "name": "create-or-get-snapshot",
+                "template": "createorgetsnapshot",
+              },
+            },
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['snapshotPrefix']}}",
+                  },
+                ],
+              },
+              "dependencies": [
+                "createOrGetSnapshot",
+              ],
+              "name": "createDataSnapshot",
+              "template": "createdatasnapshotresource",
+            },
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['snapshotPrefix']}}",
+                  },
+                ],
+              },
+              "dependencies": [
+                "createDataSnapshot",
+              ],
+              "name": "patchDataSnapshot",
+              "template": "patchdatasnapshotready",
+            },
+          ],
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "snapshotItemConfig",
+            },
+            {
+              "name": "sourceConfig",
+            },
+            {
+              "description": "Workflow session nonce",
+              "name": "uniqueRunNonce",
+            },
+            {
+              "name": "imageCaptureProxyLocation",
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy",
+            },
+            {
+              "name": "imageTrafficReplayerLocation",
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy",
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation",
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "createsinglesnapshot",
+        "outputs": {
+          "parameters": [],
+        },
+        "synchronization": {
+          "semaphores": [
+            {
+              "configMapKeyRef": {
+                "key": "{{=jsonpath(inputs.parameters.snapshotItemConfig, '$.config.semaphoreKey')}}",
+                "name": "{{=jsonpath(inputs.parameters.snapshotItemConfig, '$.config.semaphoreConfigMapName')}}",
+              },
+            },
+          ],
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "snapshotsSourceConfig",
+            },
+            {
+              "description": "Workflow session nonce",
+              "name": "uniqueRunNonce",
+            },
+            {
+              "name": "imageCaptureProxyLocation",
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy",
+            },
+            {
+              "name": "imageTrafficReplayerLocation",
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy",
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation",
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "createsnapshotsforsource",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}",
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}",
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}",
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}",
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}",
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}",
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "snapshotItemConfig",
+                    "value": "{{=toJSON(item)}}",
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.snapshotsSourceConfig)['sourceConfig'])}}",
+                  },
+                ],
+              },
+              "name": "createSnapshot",
+              "template": "createsinglesnapshot",
+              "withParam": "{{=fromJSON(inputs.parameters.snapshotsSourceConfig)['createSnapshotConfig']}}",
+            },
+          ],
+        ],
       },
       {
         "inputs": {
@@ -1877,84 +2537,10 @@ exports[`test workflow template renderings full-migration 1`] = `
               "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig))}}",
             },
           ],
-        ],
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "sourceConfig",
-            },
-            {
-              "name": "targetConfig",
-            },
-            {
-              "name": "snapshotConfig",
-            },
-            {
-              "name": "migrations",
-            },
-            {
-              "name": "groupName",
-            },
-            {
-              "name": "createSnapshotConfig",
-              "value": "",
-            },
-            {
-              "name": "uniqueRunNonce",
-            },
-            {
-              "name": "imageCaptureProxyLocation",
-            },
-            {
-              "name": "imageCaptureProxyPullPolicy",
-            },
-            {
-              "name": "imageTrafficReplayerLocation",
-            },
-            {
-              "name": "imageTrafficReplayerPullPolicy",
-            },
-            {
-              "name": "imageReindexFromSnapshotLocation",
-            },
-            {
-              "name": "imageReindexFromSnapshotPullPolicy",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "getsnapshotthenmigratesnapshot",
-        "outputs": {
-          "parameters": [],
-        },
-        "steps": [
           [
             {
               "arguments": {
                 "parameters": [
-                  {
-                    "name": "createSnapshotConfig",
-                    "value": "{{inputs.parameters.createSnapshotConfig}}",
-                  },
-                  {
-                    "name": "sourceConfig",
-                    "value": "{{inputs.parameters.sourceConfig}}",
-                  },
-                  {
-                    "name": "snapshotConfig",
-                    "value": "{{inputs.parameters.snapshotConfig}}",
-                  },
-                  {
-                    "name": "uniqueRunNonce",
-                    "value": "{{inputs.parameters.uniqueRunNonce}}",
-                  },
                   {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -1964,15 +2550,23 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
-                    "name": "targetLabel",
+                    "name": "prefix",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}",
+                  },
+                  {
+                    "name": "targetName",
                     "value": "{{=jsonpath(inputs.parameters.targetConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "processorId",
+                    "value": "{{steps.idGenerator.id}}",
                   },
                 ],
               },
-              "name": "createOrGetSnapshot",
+              "name": "targetBackfillCompleteCheck",
               "templateRef": {
-                "name": "create-or-get-snapshot",
-                "template": "createorgetsnapshot",
+                "name": "target-latch-helpers",
+                "template": "decrementlatch",
               },
             },
           ],
@@ -1981,13 +2575,43 @@ exports[`test workflow template renderings full-migration 1`] = `
               "arguments": {
                 "parameters": [
                   {
-                    "name": "sourceConfig",
-                    "value": "{{inputs.parameters.sourceConfig}}",
-                  },
-                  {
                     "name": "targetConfig",
                     "value": "{{inputs.parameters.targetConfig}}",
                   },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                ],
+              },
+              "name": "signalReplayerForTarget",
+              "template": "signalreplayerfortarget",
+            },
+          ],
+        ],
+      },
+      {
+        "dag": {
+          "tasks": [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotMigrationConfig, '$.snapshotConfig.label')}}",
+                  },
+                ],
+              },
+              "name": "waitForSnapshot",
+              "template": "waitfordatasnapshot",
+            },
+            {
+              "arguments": {
+                "parameters": [
                   {
                     "name": "uniqueRunNonce",
                     "value": "{{inputs.parameters.uniqueRunNonce}}",
@@ -2037,8 +2661,16 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{=sprig.dig('documentBackfillConfig', '', item)}}",
                   },
                   {
+                    "name": "sourceConfig",
+                    "value": "{{=toJSON(sprig.dict("label", jsonpath(inputs.parameters.snapshotMigrationConfig, '$.snapshotConfig.label'), "version", 'ES 7.10.2'))}}",
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.snapshotMigrationConfig)['targetConfig'])}}",
+                  },
+                  {
                     "name": "snapshotConfig",
-                    "value": "{{steps.createOrGetSnapshot.outputs.parameters.snapshotConfig}}",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotConfig'])}}",
                   },
                   {
                     "name": "migrationLabel",
@@ -2050,42 +2682,53 @@ exports[`test workflow template renderings full-migration 1`] = `
                   },
                 ],
               },
+              "dependencies": [
+                "waitForSnapshot",
+              ],
               "name": "migrateFromSnapshot",
               "template": "migratefromsnapshot",
-              "withParam": "{{inputs.parameters.migrations}}",
+              "withParam": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['migrations']}}",
             },
-          ],
-        ],
-      },
-      {
-        "inputs": {
-          "parameters": [
             {
-              "name": "nameOfReplayerWaiting",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['label']}}",
+                  },
+                ],
+              },
+              "dependencies": [
+                "migrateFromSnapshot",
+              ],
+              "name": "createSnapshotMigration",
+              "template": "createsnapshotmigrationresource",
+            },
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['label']}}",
+                  },
+                ],
+              },
+              "dependencies": [
+                "createSnapshotMigration",
+              ],
+              "name": "patchSnapshotMigration",
+              "template": "patchsnapshotmigrationready",
             },
           ],
         },
-        "name": "waitforbackfill",
-        "outputs": {
-          "parameters": [],
-        },
-        "suspend": {},
-      },
-      {
         "inputs": {
           "parameters": [
             {
-              "name": "targetConfig",
+              "name": "snapshotMigrationConfig",
             },
             {
-              "name": "kafkaTopicName",
-            },
-            {
-              "name": "kafkaBootstrapServers",
-            },
-            {
-              "name": "replayerConfig",
-              "value": "",
+              "description": "Workflow session nonce",
+              "name": "uniqueRunNonce",
             },
             {
               "name": "imageCaptureProxyLocation",
@@ -2113,67 +2756,10 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
           ],
         },
-        "name": "runreplayeraftersignal",
+        "name": "runsinglesnapshotmigration",
         "outputs": {
           "parameters": [],
         },
-        "steps": [
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "nameOfReplayerWaiting",
-                    "value": "waitForBackfill",
-                  },
-                ],
-              },
-              "name": "waitForBackfill",
-              "template": "waitforbackfill",
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "kafkaTopicName",
-                    "value": "{{inputs.parameters.kafkaTopicName}}",
-                  },
-                  {
-                    "name": "targetConfig",
-                    "value": "{{inputs.parameters.targetConfig}}",
-                  },
-                  {
-                    "name": "replayerConfig",
-                    "value": "{{inputs.parameters.replayerConfig}}",
-                  },
-                  {
-                    "name": "imageTrafficReplayerLocation",
-                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}",
-                  },
-                  {
-                    "name": "imageTrafficReplayerPullPolicy",
-                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}",
-                  },
-                  {
-                    "name": "kafkaTrafficBrokers",
-                    "value": "{{inputs.parameters.kafkaBootstrapServers}}",
-                  },
-                  {
-                    "name": "kafkaGroupId",
-                    "value": "{{=fromJSON(inputs.parameters.targetConfig)['label']}}",
-                  },
-                ],
-              },
-              "name": "replay",
-              "templateRef": {
-                "name": "replayer",
-                "template": "createdeploymentfromconfig",
-              },
-            },
-          ],
-        ],
       },
       {
         "dag": {
@@ -2182,398 +2768,70 @@ exports[`test workflow template renderings full-migration 1`] = `
               "arguments": {
                 "parameters": [
                   {
-                    "name": "sourceConfig",
-                    "value": "{{inputs.parameters.sourceConfig}}",
-                  },
-                  {
-                    "name": "targetConfig",
-                    "value": "{{inputs.parameters.targetConfig}}",
-                  },
-                  {
-                    "name": "uniqueRunNonce",
-                    "value": "{{inputs.parameters.uniqueRunNonce}}",
-                  },
-                  {
-                    "name": "imageCaptureProxyLocation",
-                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}",
-                  },
-                  {
-                    "name": "imageCaptureProxyPullPolicy",
-                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}",
-                  },
-                  {
-                    "name": "imageTrafficReplayerLocation",
-                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}",
-                  },
-                  {
-                    "name": "imageTrafficReplayerPullPolicy",
-                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}",
-                  },
-                  {
-                    "name": "imageReindexFromSnapshotLocation",
-                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}",
-                  },
-                  {
-                    "name": "imageReindexFromSnapshotPullPolicy",
-                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
-                  },
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "createSnapshotConfig",
-                    "value": "{{=sprig.dig('createSnapshotConfig', '', item)}}",
-                  },
-                  {
-                    "name": "migrations",
-                    "value": "{{=jsonpath(toJSON(item), '$.migrations')}}",
-                  },
-                  {
-                    "name": "label",
-                    "value": "{{=jsonpath(toJSON(item), '$.label')}}",
-                  },
-                  {
-                    "name": "snapshotConfig",
-                    "value": "{{=jsonpath(toJSON(item), '$.snapshotConfig')}}",
-                  },
-                  {
-                    "name": "groupName",
-                    "value": "{{=item['label']}}",
+                    "name": "resourceName",
+                    "value": "{{=item['source']+'-'+item['snapshot']}}",
                   },
                 ],
               },
-              "name": "getSnapshotThenMigrateSnapshot",
-              "template": "getsnapshotthenmigratesnapshot",
-              "when": "{{=!(0 == len(inputs.parameters.snapshotExtractAndLoadConfigArray))}}",
-              "withParam": "{{inputs.parameters.snapshotExtractAndLoadConfigArray}}",
+              "name": "waitForSnapshotMigrationDeps",
+              "template": "waitforsnapshotmigration",
+              "when": "{{=!(0 == len(fromJSON(inputs.parameters.replayConfig)['dependsOnSnapshotMigrations']))}}",
+              "withParam": "{{=fromJSON(inputs.parameters.replayConfig)['dependsOnSnapshotMigrations']}}",
             },
             {
               "arguments": {
-                "parameters": [
-                  {
-                    "name": "targetConfig",
-                    "value": "{{inputs.parameters.targetConfig}}",
-                  },
-                  {
-                    "name": "kafkaBootstrapServers",
-                    "value": "{{inputs.parameters.kafkaBootstrapServers}}",
-                  },
-                  {
-                    "name": "replayerConfig",
-                    "value": "{{inputs.parameters.replayerConfig}}",
-                  },
-                  {
-                    "name": "imageCaptureProxyLocation",
-                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}",
-                  },
-                  {
-                    "name": "imageCaptureProxyPullPolicy",
-                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}",
-                  },
-                  {
-                    "name": "imageTrafficReplayerLocation",
-                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}",
-                  },
-                  {
-                    "name": "imageTrafficReplayerPullPolicy",
-                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}",
-                  },
-                  {
-                    "name": "imageReindexFromSnapshotLocation",
-                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}",
-                  },
-                  {
-                    "name": "imageReindexFromSnapshotPullPolicy",
-                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
-                  },
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "kafkaTopicName",
-                    "value": "{{=fromJSON(inputs.parameters.sourceConfig)['label']}}",
-                  },
-                ],
+                "parameters": [],
               },
-              "name": "runReplayerAfterSignal",
-              "template": "runreplayeraftersignal",
-              "when": "{{='proxySettings' in fromJSON(inputs.parameters.sourceConfig)}}",
+              "dependencies": [
+                "waitForSnapshotMigrationDeps",
+              ],
+              "name": "placeholderReplay",
+              "template": "donothing",
             },
           ],
         },
         "inputs": {
           "parameters": [
             {
-              "name": "sourceConfig",
-            },
-            {
-              "name": "targetConfig",
-            },
-            {
-              "name": "groupName",
-              "value": "{{=fromJSON(inputs.parameters.sourceConfig)['label']+' to '+fromJSON(inputs.parameters.targetConfig)['label']}}",
-            },
-            {
-              "name": "snapshotExtractAndLoadConfigArray",
-              "value": "",
-            },
-            {
-              "name": "replayerConfig",
-              "value": "",
-            },
-            {
-              "name": "uniqueRunNonce",
-            },
-            {
-              "name": "kafkaBootstrapServers",
-            },
-            {
-              "name": "imageCaptureProxyLocation",
-            },
-            {
-              "name": "imageCaptureProxyPullPolicy",
-            },
-            {
-              "name": "imageTrafficReplayerLocation",
-            },
-            {
-              "name": "imageTrafficReplayerPullPolicy",
-            },
-            {
-              "name": "imageReindexFromSnapshotLocation",
-            },
-            {
-              "name": "imageReindexFromSnapshotPullPolicy",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
+              "name": "replayConfig",
             },
           ],
         },
-        "name": "sourcetotargetmigration",
+        "name": "runsinglereplay",
         "outputs": {
           "parameters": [],
         },
       },
       {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "sourceConfig",
-            },
-            {
-              "name": "targetMigrationConfigs",
-            },
-            {
-              "name": "uniqueRunNonce",
-            },
-            {
-              "name": "kafkaName",
-            },
-            {
-              "name": "kafkaBootstrapServers",
-            },
-            {
-              "name": "imageCaptureProxyLocation",
-            },
-            {
-              "name": "imageCaptureProxyPullPolicy",
-            },
-            {
-              "name": "imageTrafficReplayerLocation",
-            },
-            {
-              "name": "imageTrafficReplayerPullPolicy",
-            },
-            {
-              "name": "imageReindexFromSnapshotLocation",
-            },
-            {
-              "name": "imageReindexFromSnapshotPullPolicy",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "setupproxythenmigrate",
-        "outputs": {
-          "parameters": [],
-        },
-        "steps": [
-          [
+        "dag": {
+          "tasks": [
             {
               "arguments": {
                 "parameters": [
                   {
-                    "name": "kafkaName",
-                    "value": "{{inputs.parameters.kafkaName}}",
-                  },
-                  {
-                    "name": "proxySettings",
-                    "value": "{{=fromJSON(inputs.parameters.sourceConfig)['proxySettings']}}",
-                  },
-                  {
-                    "name": "proxyName",
-                    "value": "{{=fromJSON(inputs.parameters.sourceConfig)['label']}}",
+                    "name": "kafkaClusterConfig",
+                    "value": "{{=toJSON(item)}}",
                   },
                 ],
               },
-              "name": "setupProxy",
-              "templateRef": {
-                "name": "setup-capture",
-                "template": "setupproxy",
-              },
-              "when": "{{='proxySettings' in fromJSON(inputs.parameters.sourceConfig)}}",
+              "name": "setupKafkaClusters",
+              "template": "setupsinglekafkacluster",
+              "when": "{{=!(0 == len(fromJSON(inputs.parameters.config)['kafkaClusters']))}}",
+              "withParam": "{{=fromJSON(inputs.parameters.config)['kafkaClusters']}}",
             },
-          ],
-          [
             {
               "arguments": {
                 "parameters": [
                   {
-                    "name": "sourceConfig",
-                    "value": "{{inputs.parameters.sourceConfig}}",
-                  },
-                  {
-                    "name": "uniqueRunNonce",
-                    "value": "{{inputs.parameters.uniqueRunNonce}}",
-                  },
-                  {
-                    "name": "kafkaBootstrapServers",
-                    "value": "{{inputs.parameters.kafkaBootstrapServers}}",
-                  },
-                  {
-                    "name": "imageCaptureProxyLocation",
-                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}",
-                  },
-                  {
-                    "name": "imageCaptureProxyPullPolicy",
-                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}",
-                  },
-                  {
-                    "name": "imageTrafficReplayerLocation",
-                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}",
-                  },
-                  {
-                    "name": "imageTrafficReplayerPullPolicy",
-                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}",
-                  },
-                  {
-                    "name": "imageReindexFromSnapshotLocation",
-                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}",
-                  },
-                  {
-                    "name": "imageReindexFromSnapshotPullPolicy",
-                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
-                  },
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "targetConfig",
-                    "value": "{{=jsonpath(toJSON(item), '$.targetConfig')}}",
-                  },
-                  {
-                    "name": "snapshotExtractAndLoadConfigArray",
-                    "value": "{{=sprig.dig('snapshotExtractAndLoadConfigArray', '', item)}}",
-                  },
-                  {
-                    "name": "replayerConfig",
-                    "value": "{{=sprig.dig('replayerConfig', '', item)}}",
+                    "name": "proxyConfig",
+                    "value": "{{=toJSON(item)}}",
                   },
                 ],
               },
-              "name": "sourceToTargetMigration",
-              "template": "sourcetotargetmigration",
-              "withParam": "{{inputs.parameters.targetMigrationConfigs}}",
+              "name": "setupProxies",
+              "template": "setupsingleproxy",
+              "withParam": "{{=fromJSON(inputs.parameters.config)['proxies']}}",
             },
-          ],
-        ],
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "kafkaConfig",
-            },
-            {
-              "name": "sourceMigrationConfigs",
-            },
-            {
-              "name": "uniqueRunNonce",
-            },
-            {
-              "name": "imageCaptureProxyLocation",
-            },
-            {
-              "name": "imageCaptureProxyPullPolicy",
-            },
-            {
-              "name": "imageTrafficReplayerLocation",
-            },
-            {
-              "name": "imageTrafficReplayerPullPolicy",
-            },
-            {
-              "name": "imageReindexFromSnapshotLocation",
-            },
-            {
-              "name": "imageReindexFromSnapshotPullPolicy",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "setupkafkaclusterthensources",
-        "outputs": {
-          "parameters": [],
-        },
-        "steps": [
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "clusterName",
-                    "value": "{{=fromJSON(inputs.parameters.kafkaConfig)['name']}}",
-                  },
-                ],
-              },
-              "name": "setupKafka",
-              "templateRef": {
-                "name": "setup-kafka",
-                "template": "deploykafkacluster",
-              },
-              "when": "{{=!(0 == len(inputs.parameters.kafkaConfig))}}",
-            },
-          ],
-          [
             {
               "arguments": {
                 "parameters": [
@@ -2614,35 +2872,83 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
-                    "name": "sourceConfig",
-                    "value": "{{=jsonpath(toJSON(item), '$.sourceConfig')}}",
-                  },
-                  {
-                    "name": "targetMigrationConfigs",
-                    "value": "{{=jsonpath(toJSON(item), '$.targetMigrationConfigs')}}",
-                  },
-                  {
-                    "name": "kafkaName",
-                    "value": "{{=fromJSON(inputs.parameters.kafkaConfig)['name']}}",
-                  },
-                  {
-                    "name": "kafkaBootstrapServers",
-                    "value": "{{steps.setupKafka.outputs.parameters.bootstrapServers}}",
+                    "name": "snapshotsSourceConfig",
+                    "value": "{{=toJSON(item)}}",
                   },
                 ],
               },
-              "name": "setupProxyThenMigrate",
-              "template": "setupproxythenmigrate",
-              "withParam": "{{inputs.parameters.sourceMigrationConfigs}}",
+              "name": "createSnapshots",
+              "template": "createsnapshotsforsource",
+              "withParam": "{{=fromJSON(inputs.parameters.config)['snapshots']}}",
+            },
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}",
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}",
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}",
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}",
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}",
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}",
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "snapshotMigrationConfig",
+                    "value": "{{=toJSON(item)}}",
+                  },
+                ],
+              },
+              "name": "runSnapshotMigrations",
+              "template": "runsinglesnapshotmigration",
+              "withParam": "{{=fromJSON(inputs.parameters.config)['snapshotMigrations']}}",
+            },
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "replayConfig",
+                    "value": "{{=toJSON(item)}}",
+                  },
+                ],
+              },
+              "name": "runTrafficReplays",
+              "template": "runsinglereplay",
+              "withParam": "{{=fromJSON(inputs.parameters.config)['trafficReplays']}}",
             },
           ],
-        ],
-      },
-      {
+        },
         "inputs": {
           "parameters": [
             {
-              "description": "List of server configurations to direct migrated traffic toward",
+              "description": "Full migration configuration",
               "name": "config",
             },
             {
@@ -2734,88 +3040,6 @@ exports[`test workflow template renderings full-migration 1`] = `
         "outputs": {
           "parameters": [],
         },
-        "steps": [
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "uniqueRunNonce",
-                    "value": "{{inputs.parameters.uniqueRunNonce}}",
-                  },
-                  {
-                    "name": "imageCaptureProxyLocation",
-                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}",
-                  },
-                  {
-                    "name": "imageCaptureProxyPullPolicy",
-                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}",
-                  },
-                  {
-                    "name": "imageTrafficReplayerLocation",
-                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}",
-                  },
-                  {
-                    "name": "imageTrafficReplayerPullPolicy",
-                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}",
-                  },
-                  {
-                    "name": "imageReindexFromSnapshotLocation",
-                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}",
-                  },
-                  {
-                    "name": "imageReindexFromSnapshotPullPolicy",
-                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
-                  },
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "kafkaConfig",
-                    "value": "{{=jsonpath(toJSON(item), '$.kafkaConfig')}}",
-                  },
-                  {
-                    "name": "sourceMigrationConfigs",
-                    "value": "{{=jsonpath(toJSON(item), '$.sourceMigrationConfigs')}}",
-                  },
-                ],
-              },
-              "name": "setupKafkaClusterThenSources",
-              "template": "setupkafkaclusterthensources",
-              "withParam": "{{inputs.parameters.config}}",
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "prefix",
-                    "value": "{{inputs.parameters.uniqueRunNonce}}",
-                  },
-                ],
-              },
-              "name": "cleanup",
-              "templateRef": {
-                "name": "target-latch-helpers",
-                "template": "cleanup",
-              },
-            },
-          ],
-        ],
       },
     ],
   },

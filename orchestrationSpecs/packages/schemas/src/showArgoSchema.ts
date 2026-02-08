@@ -1,6 +1,5 @@
-import {z} from "zod";
 import {zodSchemaToJsonSchema} from "./getSchemaFromZod";
-import {ARGO_MIGRATION_CONFIGS_ARRAY} from "./argoSchemas";
+import {ARGO_MIGRATION_CONFIG} from "./argoSchemas";
 
-const userJsonSchema = zodSchemaToJsonSchema(z.array(ARGO_MIGRATION_CONFIGS_ARRAY))
+const userJsonSchema = zodSchemaToJsonSchema(ARGO_MIGRATION_CONFIG)
 console.log(JSON.stringify(userJsonSchema, null, 2));

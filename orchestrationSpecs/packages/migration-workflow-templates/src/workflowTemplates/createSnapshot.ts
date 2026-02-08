@@ -21,7 +21,7 @@ import {makeRepoParamDict} from "./metadataMigration";
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {extractSourceKeysToExpressionMap, makeClusterParamDict} from "./commonUtils/clusterSettingManipulators";
+import {makeClusterParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 

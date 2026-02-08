@@ -1,0 +1,306 @@
+{
+  "kafkaClusters": [
+    {
+      "name": "default",
+      "config": {},
+      "topics": [
+        "proxyA",
+        "proxyB"
+      ]
+    }
+  ],
+  "proxies": [
+    {
+      "name": "proxyA",
+      "kafkaConfig": {
+        "enableMSKAuth": false,
+        "kafkaConnection": "",
+        "kafkaTopic": "proxyA",
+        "label": "default"
+      },
+      "sourceEndpoint": "https://elasticsearch:9200",
+      "proxyConfig": {
+        "loggingConfigurationOverrideConfigMap": "",
+        "podReplicas": 1,
+        "resources": {
+          "limits": {
+            "cpu": "2000m",
+            "memory": "4000Mi"
+          },
+          "requests": {
+            "cpu": "2000m",
+            "memory": "4000Mi"
+          }
+        },
+        "otelCollectorEndpoint": "http://otel-collector:4317",
+        "destinationConnectionPoolSize": 0,
+        "destinationConnectionPoolTimeout": "PT30S",
+        "kafkaClientId": "HttpCaptureProxyProducer",
+        "listenPort": 9201,
+        "maxTrafficBufferSize": 1048576,
+        "noCapture": false,
+        "numThreads": 1,
+        "sslConfigSettings": "",
+        "suppressCaptureForHeaderMatch": [],
+        "suppressCaptureForMethod": [],
+        "suppressCaptureForUriPath": [],
+        "suppressMethodAndPath": ""
+      }
+    },
+    {
+      "name": "proxyB",
+      "kafkaConfig": {
+        "enableMSKAuth": false,
+        "kafkaConnection": "",
+        "kafkaTopic": "proxyB",
+        "label": "default"
+      },
+      "sourceEndpoint": "https://elasticsearch:9200",
+      "proxyConfig": {
+        "loggingConfigurationOverrideConfigMap": "",
+        "podReplicas": 1,
+        "resources": {
+          "limits": {
+            "cpu": "2000m",
+            "memory": "4000Mi"
+          },
+          "requests": {
+            "cpu": "2000m",
+            "memory": "4000Mi"
+          }
+        },
+        "otelCollectorEndpoint": "http://otel-collector:4317",
+        "destinationConnectionPoolSize": 0,
+        "destinationConnectionPoolTimeout": "PT30S",
+        "kafkaClientId": "HttpCaptureProxyProducer",
+        "listenPort": 9202,
+        "maxTrafficBufferSize": 1048576,
+        "noCapture": false,
+        "numThreads": 1,
+        "sslConfigSettings": "",
+        "suppressCaptureForHeaderMatch": [],
+        "suppressCaptureForMethod": [],
+        "suppressCaptureForUriPath": [],
+        "suppressMethodAndPath": ""
+      }
+    }
+  ],
+  "snapshots": [
+    {
+      "createSnapshotConfig": [
+        {
+          "snapshotPrefix": "sourceA.snapA",
+          "config": {
+            "indexAllowlist": [],
+            "maxSnapshotRateMbPerNode": 0,
+            "loggingConfigurationOverrideConfigMap": "",
+            "semaphoreConfigMapName": "concurrency-config",
+            "semaphoreKey": "snapshot-legacy-sourceA"
+          },
+          "repo": {
+            "awsRegion": "us-east-2",
+            "endpoint": "http://localhost:4566",
+            "s3RepoPathUri": "s3://migration-bucket",
+            "s3RoleArn": "",
+            "useLocalStack": false,
+            "repoName": "repoA"
+          },
+          "dependsUponProxySetups": [
+            "proxyA"
+          ]
+        }
+      ],
+      "sourceConfig": {
+        "endpoint": "https://elasticsearch:9200",
+        "allowInsecure": true,
+        "version": "ES 7.10",
+        "authConfig": {
+          "basic": {
+            "secretName": "source-creds"
+          }
+        },
+        "label": "sourceA"
+      }
+    },
+    {
+      "createSnapshotConfig": [
+        {
+          "snapshotPrefix": "sourceB.snapB",
+          "config": {
+            "indexAllowlist": [
+              "index-*"
+            ],
+            "maxSnapshotRateMbPerNode": 0,
+            "loggingConfigurationOverrideConfigMap": "",
+            "semaphoreConfigMapName": "concurrency-config",
+            "semaphoreKey": "snapshot-legacy-sourceB"
+          },
+          "repo": {
+            "awsRegion": "us-east-2",
+            "endpoint": "http://localhost:4566",
+            "s3RepoPathUri": "s3://bucket-b",
+            "s3RoleArn": "",
+            "useLocalStack": false,
+            "repoName": "repoB"
+          },
+          "dependsUponProxySetups": [
+            "proxyB"
+          ]
+        }
+      ],
+      "sourceConfig": {
+        "endpoint": "https://elasticsearch:9200",
+        "allowInsecure": true,
+        "version": "ES 7.10",
+        "authConfig": {
+          "basic": {
+            "secretName": "source-creds"
+          }
+        },
+        "label": "sourceB"
+      }
+    }
+  ],
+  "snapshotMigrations": [
+    {
+      "label": "sourceA.snapA",
+      "migrations": [
+        {
+          "label": "migration-0",
+          "metadataMigrationConfig": {
+            "componentTemplateAllowlist": [],
+            "indexAllowlist": [],
+            "indexTemplateAllowlist": [],
+            "allowLooseVersionMatching": true,
+            "clusterAwarenessAttributes": 1,
+            "loggingConfigurationOverrideConfigMap": "",
+            "multiTypeBehavior": "NONE",
+            "otelCollectorEndpoint": "http://otel-collector:4317",
+            "output": "HUMAN_READABLE",
+            "transformerConfigBase64": ""
+          }
+        }
+      ],
+      "targetConfig": {
+        "endpoint": "https://opensearch:9200",
+        "allowInsecure": true,
+        "version": "OS 2.11",
+        "authConfig": {
+          "basic": {
+            "secretName": "target-creds"
+          }
+        },
+        "label": "targetX"
+      },
+      "snapshotConfig": {
+        "snapshotName": "sourceA.snapA",
+        "label": "sourceA.snapA",
+        "repoConfig": {
+          "awsRegion": "us-east-2",
+          "endpoint": "http://localhost:4566",
+          "s3RepoPathUri": "s3://migration-bucket",
+          "s3RoleArn": "",
+          "useLocalStack": false,
+          "repoName": "repoA"
+        }
+      }
+    },
+    {
+      "label": "sourceB.snapB",
+      "migrations": [
+        {
+          "label": "migration-0",
+          "documentBackfillConfig": {
+            "indexAllowlist": [],
+            "podReplicas": 1,
+            "loggingConfigurationOverrideConfigMap": "",
+            "allowLooseVersionMatching": true,
+            "docTransformerConfigBase64": "",
+            "documentsPerBulkRequest": 2147483647,
+            "initialLeaseDuration": "PT10M",
+            "maxConnections": 10,
+            "maxShardSizeBytes": 85899345920,
+            "otelCollectorEndpoint": "http://otel-collector:4317",
+            "resources": {
+              "limits": {
+                "cpu": "2000m",
+                "memory": "4000Mi",
+                "ephemeral-storage": "209715200Ki"
+              },
+              "requests": {
+                "cpu": "1000m",
+                "memory": "4000Mi",
+                "ephemeral-storage": "209715200Ki"
+              }
+            }
+          }
+        }
+      ],
+      "targetConfig": {
+        "endpoint": "https://opensearch-y:9200",
+        "allowInsecure": true,
+        "version": "OS 2.11",
+        "authConfig": {
+          "basic": {
+            "secretName": "target-creds"
+          }
+        },
+        "label": "targetY"
+      },
+      "snapshotConfig": {
+        "snapshotName": "sourceB.snapB",
+        "label": "sourceB.snapB",
+        "repoConfig": {
+          "awsRegion": "us-east-2",
+          "endpoint": "http://localhost:4566",
+          "s3RepoPathUri": "s3://bucket-b",
+          "s3RoleArn": "",
+          "useLocalStack": false,
+          "repoName": "repoB"
+        }
+      }
+    }
+  ],
+  "trafficReplays": [
+    {
+      "fromProxy": "proxyA",
+      "kafkaConfig": {
+        "enableMSKAuth": false,
+        "kafkaConnection": "",
+        "kafkaTopic": "proxyA",
+        "label": "default"
+      },
+      "toTarget": {
+        "endpoint": "https://opensearch:9200",
+        "allowInsecure": true,
+        "version": "OS 2.11",
+        "authConfig": {
+          "basic": {
+            "secretName": "target-creds"
+          }
+        },
+        "label": "targetX"
+      }
+    },
+    {
+      "fromProxy": "proxyB",
+      "kafkaConfig": {
+        "enableMSKAuth": false,
+        "kafkaConnection": "",
+        "kafkaTopic": "proxyB",
+        "label": "default"
+      },
+      "toTarget": {
+        "endpoint": "https://opensearch-y:9200",
+        "allowInsecure": true,
+        "version": "OS 2.11",
+        "authConfig": {
+          "basic": {
+            "secretName": "target-creds"
+          }
+        },
+        "label": "targetY"
+      }
+    }
+  ]
+}

@@ -1,0 +1,161 @@
+{
+  "kafkaClusters": [
+    {
+      "name": "default",
+      "config": {},
+      "topics": [
+        "proxy1"
+      ]
+    }
+  ],
+  "proxies": [
+    {
+      "name": "proxy1",
+      "kafkaConfig": {
+        "enableMSKAuth": false,
+        "kafkaConnection": "",
+        "kafkaTopic": "proxy1",
+        "label": "default"
+      },
+      "sourceEndpoint": "https://elasticsearch:9200",
+      "proxyConfig": {
+        "loggingConfigurationOverrideConfigMap": "",
+        "podReplicas": 1,
+        "resources": {
+          "limits": {
+            "cpu": "2000m",
+            "memory": "4000Mi"
+          },
+          "requests": {
+            "cpu": "2000m",
+            "memory": "4000Mi"
+          }
+        },
+        "otelCollectorEndpoint": "http://otel-collector:4317",
+        "destinationConnectionPoolSize": 0,
+        "destinationConnectionPoolTimeout": "PT30S",
+        "kafkaClientId": "HttpCaptureProxyProducer",
+        "listenPort": 9201,
+        "maxTrafficBufferSize": 1048576,
+        "noCapture": false,
+        "numThreads": 1,
+        "sslConfigSettings": "",
+        "suppressCaptureForHeaderMatch": [],
+        "suppressCaptureForMethod": [],
+        "suppressCaptureForUriPath": [],
+        "suppressMethodAndPath": ""
+      }
+    }
+  ],
+  "snapshots": [
+    {
+      "createSnapshotConfig": [
+        {
+          "snapshotPrefix": "source.snap1",
+          "config": {
+            "indexAllowlist": [],
+            "maxSnapshotRateMbPerNode": 0,
+            "loggingConfigurationOverrideConfigMap": "",
+            "semaphoreConfigMapName": "concurrency-config",
+            "semaphoreKey": "snapshot-legacy-source"
+          },
+          "repo": {
+            "awsRegion": "us-east-2",
+            "endpoint": "http://localhost:4566",
+            "s3RepoPathUri": "s3://migration-bucket",
+            "s3RoleArn": "",
+            "useLocalStack": false,
+            "repoName": "default"
+          },
+          "dependsUponProxySetups": [
+            "proxy1"
+          ]
+        }
+      ],
+      "sourceConfig": {
+        "endpoint": "https://elasticsearch:9200",
+        "allowInsecure": true,
+        "version": "ES 7.10",
+        "authConfig": {
+          "basic": {
+            "secretName": "source-creds"
+          }
+        },
+        "label": "source"
+      }
+    }
+  ],
+  "snapshotMigrations": [
+    {
+      "label": "source.snap1",
+      "migrations": [
+        {
+          "label": "migration-0",
+          "metadataMigrationConfig": {
+            "componentTemplateAllowlist": [],
+            "indexAllowlist": [],
+            "indexTemplateAllowlist": [],
+            "allowLooseVersionMatching": true,
+            "clusterAwarenessAttributes": 1,
+            "loggingConfigurationOverrideConfigMap": "",
+            "multiTypeBehavior": "NONE",
+            "otelCollectorEndpoint": "http://otel-collector:4317",
+            "output": "HUMAN_READABLE",
+            "transformerConfigBase64": ""
+          }
+        }
+      ],
+      "targetConfig": {
+        "endpoint": "https://opensearch:9200",
+        "allowInsecure": true,
+        "version": "OS 2.11",
+        "authConfig": {
+          "basic": {
+            "secretName": "target-creds"
+          }
+        },
+        "label": "target"
+      },
+      "snapshotConfig": {
+        "snapshotName": "source.snap1",
+        "label": "source.snap1",
+        "repoConfig": {
+          "awsRegion": "us-east-2",
+          "endpoint": "http://localhost:4566",
+          "s3RepoPathUri": "s3://migration-bucket",
+          "s3RoleArn": "",
+          "useLocalStack": false,
+          "repoName": "default"
+        }
+      }
+    }
+  ],
+  "trafficReplays": [
+    {
+      "fromProxy": "proxy1",
+      "kafkaConfig": {
+        "enableMSKAuth": false,
+        "kafkaConnection": "",
+        "kafkaTopic": "proxy1",
+        "label": "default"
+      },
+      "toTarget": {
+        "endpoint": "https://opensearch:9200",
+        "allowInsecure": true,
+        "version": "OS 2.11",
+        "authConfig": {
+          "basic": {
+            "secretName": "target-creds"
+          }
+        },
+        "label": "target"
+      },
+      "dependsOnSnapshotMigrations": [
+        {
+          "source": "source",
+          "snapshot": "snap1"
+        }
+      ]
+    }
+  ]
+}

@@ -31,22 +31,23 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
     .addTemplate("getSnapshotName", t=>t
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("snapshotNameConfig", typeToken<z.infer<typeof SNAPSHOT_NAME_CONFIG>>())
+        .addRequiredInput("snapshotPrefix", typeToken<string>())
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
 
         .addSteps(b => b
             .addStepGroup(c => c))
         .addExpressionOutput("snapshotName", b=>
             expr.ternary(
-                expr.hasKey(expr.deserializeRecord(b.inputs.snapshotNameConfig), "snapshotNamePrefix"),
+                expr.hasKey(expr.deserializeRecord(b.inputs.snapshotNameConfig), "createSnapshotConfig"),
                 expr.concatWith("_",
                     b.inputs.sourceLabel,
-                    expr.getLoose(expr.deserializeRecord(b.inputs.snapshotNameConfig), "snapshotNamePrefix"),
+                    b.inputs.snapshotPrefix,
                     b.inputs.uniqueRunNonce
                 ),
-                expr.getLoose(expr.deserializeRecord(b.inputs.snapshotNameConfig), "externallyManagedSnapshot"))
+                expr.getLoose(expr.deserializeRecord(b.inputs.snapshotNameConfig), "externallyManagedSnapshotName"))
         )
         .addExpressionOutput("autoCreate", b=>
-            expr.hasKey(expr.deserializeRecord(b.inputs.snapshotNameConfig), "snapshotNamePrefix")
+            expr.hasKey(expr.deserializeRecord(b.inputs.snapshotNameConfig), "createSnapshotConfig")
         )
     )
 
@@ -55,6 +56,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>>())
+        .addRequiredInput("snapshotPrefix", typeToken<string>())
         .addRequiredInput("targetLabel", typeToken<string>())
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
@@ -64,7 +66,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c),
                     sourceLabel: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "label"),
                     snapshotNameConfig: expr.serialize(
-                        expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "snapshotNameConfig")) as any,
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "config")) as any,
                 })
             )
             .addStep("createSnapshot", CreateSnapshot, "snapshotWorkflow",

@@ -181,6 +181,7 @@ export const REPLAYER_OPTIONS = z.object({
 // Note: noWait is not included here as it is hardcoded to true in the workflow.
 // The workflow manages snapshot completion polling separately via checkSnapshotStatus.
 export const CREATE_SNAPSHOT_OPTIONS = z.object({
+    snapshotPrefix: z.string().default("").optional(),
     indexAllowlist: z.array(z.string()).default([]).optional(),
     maxSnapshotRateMbPerNode: z.number().default(0).optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
@@ -319,6 +320,8 @@ export const SOURCE_CLUSTER_REPOS_RECORD =
 
 export const CAPTURE_CONFIG = z.object({
     kafka: z.string().default("default").optional(),
+    kafkaTopic: z.string().default("").optional()
+        .describe("Kafka topic for captured traffic. Empty defaults to the proxy name."),
     source: z.string(),
     proxyConfig: PROXY_OPTIONS
 });
@@ -436,8 +439,10 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     toTarget: z.string(),
     perSnapshotConfig: PER_SNAPSHOT_MIGRATION_CONFIG_RECORD.optional(),
 }).refine(data => {
+        // TODO: validate label uniqueness across perSnapshotConfig entries
         // const labels = data.perSnapshotConfig?.map(m => m.label).filter(s => s);
         // return labels ? labels.length == new Set(labels).size : true;
+        return true;
     },
     {message: "labels of perSnapshotConfig items must be unique when they are provided"});
 

@@ -4,19 +4,20 @@ import {
     ARGO_MIGRATION_CONFIG,
     COMPLETE_SNAPSHOT_CONFIG,
     DEFAULT_RESOURCES,
+    DENORMALIZED_CREATE_SNAPSHOTS_CONFIG,
+    DENORMALIZED_PROXY_CONFIG,
+    DENORMALIZED_REPLAY_CONFIG,
     getZodKeys,
-    KAFKA_CLUSTER_AND_SOURCE_MIGRATION,
     METADATA_OPTIONS,
     NAMED_KAFKA_CLUSTER_CONFIG,
     NAMED_SOURCE_CLUSTER_CONFIG,
     NAMED_TARGET_CLUSTER_CONFIG,
-    PARAMETERIZED_SOURCE_MIGRATION_CONFIG,
     PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
-    REPLAYER_OPTIONS,
+    PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
     RFS_OPTIONS,
     SNAPSHOT_MIGRATION_CONFIG,
-    SOURCE_AND_TARGET_MIGRATION_CONFIG, SOURCE_CLUSTER_CONFIG,
-    TARGET_CLUSTER_CONFIG
+    SNAPSHOT_MIGRATION_FILTER,
+    TARGET_CLUSTER_CONFIG,
 } from '@opensearch-migrations/schemas'
 import {ConfigManagementHelpers} from "./configManagementHelpers";
 import {
@@ -41,8 +42,6 @@ import {CreateOrGetSnapshot} from "./createOrGetSnapshot";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {SetupKafka} from "./setupKafka";
-import {SetupCapture} from "./setupCapture";
-import {Replayer} from "./replayer";
 
 const uniqueRunNonceParam = {
     uniqueRunNonce: defineRequiredParam<string>({description: "Workflow session nonce"})
@@ -69,15 +68,18 @@ function defaultImagesMap(imageConfigMapName: AllowLiteralOrExpression<string>) 
         Record<`image${typeof LogicalOciImages[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY, false>>;
 }
 
+const CRD_API_VERSION = "migration.opensearch.org/v1alpha1";
+
 export const FullMigration = WorkflowBuilder.create({
     k8sResourceName: "full-migration",
     parallelism: 100,
     serviceAccountName: "argo-workflow-executor"
 })
 
-
     .addParams(CommonWorkflowParameters)
 
+
+    // ── Utility ──────────────────────────────────────────────────────────
 
     .addTemplate("doNothing", t => t
         .addSteps(b => b.addStepGroup(c => c)))
@@ -94,16 +96,353 @@ export const FullMigration = WorkflowBuilder.create({
             .addArgs(["echo signal replayer here"])))
 
 
+    // ── Wait templates (resource get with retry) ─────────────────────────
+
+    .addTemplate("waitForKafkaTopic", t => t
+        .addRequiredInput("topicName", typeToken<string>())
+        .addWaitForResource(b => b
+            .setDefinition({
+                action: "get",
+                successCondition: "status.topicName",
+                manifest: {
+                    apiVersion: "kafka.strimzi.io/v1beta2",
+                    kind: "KafkaTopic",
+                    metadata: { name: b.inputs.topicName }
+                }
+            }))
+        .addRetryParameters({
+            limit: "60", retryPolicy: "Always",
+            backoff: { duration: "10", factor: "2", cap: "120" }
+        })
+    )
+
+
+    .addTemplate("waitForCapturedTraffic", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addWaitForResource(b => b
+            .setDefinition({
+                action: "get",
+                successCondition: "status.phase == Ready",
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "CapturedTraffic",
+                    metadata: { name: b.inputs.resourceName }
+                }
+            }))
+        .addRetryParameters({
+            limit: "120", retryPolicy: "Always",
+            backoff: { duration: "10", factor: "2", cap: "120" }
+        })
+    )
+
+
+    .addTemplate("waitForDataSnapshot", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addWaitForResource(b => b
+            .setDefinition({
+                action: "get",
+                successCondition: "status.phase == Ready",
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "DataSnapshot",
+                    metadata: { name: b.inputs.resourceName }
+                }
+            }))
+        .addRetryParameters({
+            limit: "120", retryPolicy: "Always",
+            backoff: { duration: "10", factor: "2", cap: "120" }
+        })
+    )
+
+
+    .addTemplate("waitForSnapshotMigration", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addWaitForResource(b => b
+            .setDefinition({
+                action: "get",
+                successCondition: "status.phase == Ready",
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "SnapshotMigration",
+                    metadata: { name: b.inputs.resourceName }
+                }
+            }))
+        .addRetryParameters({
+            limit: "120", retryPolicy: "Always",
+            backoff: { duration: "10", factor: "2", cap: "120" }
+        })
+    )
+
+
+    // ── CRD create templates ─────────────────────────────────────────────
+
+    .addTemplate("createCapturedTrafficResource", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "create",
+                setOwnerReference: false,
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "CapturedTraffic",
+                    metadata: { name: b.inputs.resourceName },
+                    spec: {}
+                }
+            }))
+    )
+
+
+    .addTemplate("createDataSnapshotResource", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "create",
+                setOwnerReference: false,
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "DataSnapshot",
+                    metadata: { name: b.inputs.resourceName },
+                    spec: {}
+                }
+            }))
+    )
+
+
+    .addTemplate("createSnapshotMigrationResource", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "create",
+                setOwnerReference: false,
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "SnapshotMigration",
+                    metadata: { name: b.inputs.resourceName },
+                    spec: {}
+                }
+            }))
+    )
+
+
+    // ── CRD patch-to-ready templates ─────────────────────────────────────
+
+    .addTemplate("patchCapturedTrafficReady", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "CapturedTraffic",
+                    metadata: { name: b.inputs.resourceName },
+                    status: { phase: "Ready" }
+                }
+            }))
+    )
+
+
+    .addTemplate("patchDataSnapshotReady", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "DataSnapshot",
+                    metadata: { name: b.inputs.resourceName },
+                    status: { phase: "Ready" }
+                }
+            }))
+    )
+
+
+    .addTemplate("patchSnapshotMigrationReady", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "SnapshotMigration",
+                    metadata: { name: b.inputs.resourceName },
+                    status: { phase: "Ready" }
+                }
+            }))
+    )
+
+
+    // ── Section 1: Kafka Clusters ────────────────────────────────────────
+
+    .addTemplate("setupSingleKafkaCluster", t => t
+        .addRequiredInput("kafkaClusterConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
+
+        .addSteps(b => b
+            .addStep("deployCluster", SetupKafka, "deployKafkaCluster", c =>
+                c.register({
+                    clusterName: expr.get(
+                        expr.deserializeRecord(b.inputs.kafkaClusterConfig), "name")
+                })
+            )
+            .addStep("createTopics", SetupKafka, "createKafkaTopic", c =>
+                c.register({
+                    clusterName: expr.get(
+                        expr.deserializeRecord(b.inputs.kafkaClusterConfig), "name"),
+                    topicName: expr.asString(c.item),
+                    topicPartitions: 1,
+                    topicReplicas: 1
+                }), {
+                    loopWith: makeParameterLoop(
+                        expr.get(expr.deserializeRecord(b.inputs.kafkaClusterConfig), "topics"))
+                }
+            )
+        )
+    )
+
+
+    // ── Section 2: Proxies ───────────────────────────────────────────────
+
+    .addTemplate("setupSingleProxy", t => t
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+
+        .addDag(b => b
+            .addTask("waitForTopic", INTERNAL, "waitForKafkaTopic", c =>
+                c.register({
+                    topicName: expr.jsonPathStrict(b.inputs.proxyConfig, "kafkaConfig", "kafkaTopic")
+                })
+            )
+            .addTask("placeholderProxySetup", INTERNAL, "doNothing",
+                { dependencies: ["waitForTopic"] as const }
+            )
+            .addTask("createCapturedTraffic", INTERNAL, "createCapturedTrafficResource", c =>
+                c.register({
+                    resourceName: expr.get(
+                        expr.deserializeRecord(b.inputs.proxyConfig), "name")
+                }),
+                { dependencies: ["placeholderProxySetup"] as const }
+            )
+            .addTask("patchCapturedTraffic", INTERNAL, "patchCapturedTrafficReady", c =>
+                c.register({
+                    resourceName: expr.get(
+                        expr.deserializeRecord(b.inputs.proxyConfig), "name")
+                }),
+                { dependencies: ["createCapturedTraffic"] as const }
+            )
+        )
+    )
+
+
+    // ── Section 3: Snapshots ─────────────────────────────────────────────
+
+    .addTemplate("createSingleSnapshot", t => t
+        .addRequiredInput("snapshotItemConfig",
+            typeToken<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>())
+        .addRequiredInput("sourceConfig",
+            typeToken<z.infer<typeof DENORMALIZED_CREATE_SNAPSHOTS_CONFIG>['sourceConfig']>())
+        .addInputsFromRecord(uniqueRunNonceParam)
+        .addInputsFromRecord(ImageParameters)
+
+        .addDag(b => b
+            .addTask("waitForProxyDeps", INTERNAL, "waitForCapturedTraffic", c =>
+                    c.register({
+                        resourceName: expr.asString(c.item)
+                    }), {
+                    loopWith: makeParameterLoop(
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig),
+                            "dependsUponProxySetups") as any),
+                    when: { templateExp: expr.not(expr.isEmpty(
+                        expr.getLoose(expr.deserializeRecord(b.inputs.snapshotItemConfig),
+                            "dependsUponProxySetups")))
+                    }
+                }
+            )
+            .addTask("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    sourceConfig: expr.serialize(b.inputs.sourceConfig) as any,
+                    createSnapshotConfig: expr.serialize(
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "config")) as any,
+                    snapshotPrefix: expr.get(
+                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix"),
+                    snapshotConfig: expr.serialize(expr.makeDict({
+                        config: expr.makeDict({
+                            createSnapshotConfig: expr.get(
+                                expr.deserializeRecord(b.inputs.snapshotItemConfig), "config")
+                        }),
+                        repoConfig: expr.get(
+                            expr.deserializeRecord(b.inputs.snapshotItemConfig), "repo"),
+                        // TODO: label should be the logical snapshot name (record key from user config),
+                        // not snapshotPrefix. PER_SOURCE_CREATE_SNAPSHOTS_CONFIG needs a label field.
+                        label: expr.get(
+                            expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix")
+                    })) as any,
+                    targetLabel: expr.get(
+                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix")
+                }),
+                { dependencies: ["waitForProxyDeps"] as const }
+            )
+            .addTask("createDataSnapshot", INTERNAL, "createDataSnapshotResource", c =>
+                c.register({
+                    resourceName: expr.get(
+                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix")
+                }),
+                { dependencies: ["createOrGetSnapshot"] as const }
+            )
+            .addTask("patchDataSnapshot", INTERNAL, "patchDataSnapshotReady", c =>
+                c.register({
+                    resourceName: expr.get(
+                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix")
+                }),
+                { dependencies: ["createDataSnapshot"] as const }
+            )
+        )
+        .addSynchronization(c => ({
+            semaphores: [{
+                configMapKeyRef: {
+                    name: expr.jsonPathStrict(c.inputs.snapshotItemConfig, "config", "semaphoreConfigMapName"),
+                    key: expr.jsonPathStrict(c.inputs.snapshotItemConfig, "config", "semaphoreKey")
+                }
+            }]
+        }))
+    )
+
+
+    .addTemplate("createSnapshotsForSource", t => t
+        .addRequiredInput("snapshotsSourceConfig",
+            typeToken<z.infer<typeof DENORMALIZED_CREATE_SNAPSHOTS_CONFIG>>())
+        .addInputsFromRecord(uniqueRunNonceParam)
+        .addInputsFromRecord(ImageParameters)
+
+        .addSteps(b => b
+            .addStep("createSnapshot", INTERNAL, "createSingleSnapshot", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    snapshotItemConfig: expr.serialize(c.item),
+                    sourceConfig: expr.serialize(
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotsSourceConfig), "sourceConfig"))
+                }), {
+                    loopWith: makeParameterLoop(
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotsSourceConfig),
+                            "createSnapshotConfig"))
+                }
+            )
+        )
+    )
+
+
+    // ── Section 4: Snapshot Migrations ───────────────────────────────────
+
     .addTemplate("migrateFromSnapshot", t => t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
-        // groupName facilitates grouping within the python `workflow` tools
         .addRequiredInput("groupName", typeToken<string>())
-        .addOptionalInput("metadataMigrationConfig", c=>
+        .addOptionalInput("metadataMigrationConfig", c =>
             expr.empty<z.infer<typeof METADATA_OPTIONS>>())
-        .addOptionalInput("documentBackfillConfig", c=>
+        .addOptionalInput("documentBackfillConfig", c =>
             expr.empty<z.infer<typeof RFS_OPTIONS>>())
 
         .addInputsFromRecord(uniqueRunNonceParam)
@@ -142,199 +481,147 @@ export const FullMigration = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("getSnapshotThenMigrateSnapshot", t => t
-        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
-        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['snapshotConfig']>())
-        .addRequiredInput("migrations", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['migrations']>())
-        // groupName facilitates grouping within the python `workflow` tools
-        .addRequiredInput("groupName", typeToken<string>())
-        .addOptionalInput("createSnapshotConfig",
-                c=> expr.empty<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
-
-        .addRequiredInput("uniqueRunNonce", typeToken<string>())
+    .addTemplate("runSingleSnapshotMigration", t => t
+        .addRequiredInput("snapshotMigrationConfig",
+            typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
+        .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
-        .addSteps(b => b
-            .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
-                c => c.register({
-                    ...selectInputsForRegister(b, c),
-                    targetLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label")
-                }))
-
-            .addStep("migrateFromSnapshot", INTERNAL, "migrateFromSnapshot", c=> {
+        .addDag(b => b
+            .addTask("waitForSnapshot", INTERNAL, "waitForDataSnapshot", c =>
+                c.register({
+                    resourceName: expr.jsonPathStrict(
+                        b.inputs.snapshotMigrationConfig, "snapshotConfig", "label")
+                })
+            )
+            .addTask("migrateFromSnapshot", INTERNAL, "migrateFromSnapshot", c => {
                     return c.register({
-                        ...(() => {
-                            const {snapshotConfig, groupName, ...rest} = selectInputsForRegister(b, c);
-                            return rest;
-                        })(),
+                        ...selectInputsForRegister(b, c),
                         ...selectInputsFieldsAsExpressionRecord(c.item, c,
                             getZodKeys(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)),
-                        snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
+                        sourceConfig: expr.serialize(expr.makeDict({
+                            label: expr.jsonPathStrict(
+                                b.inputs.snapshotMigrationConfig, "snapshotConfig", "label"),
+                            version: expr.literal("ES 7.10.2") // placeholder — will be filled from source
+                        })) as any,
+                        targetConfig: expr.serialize(
+                            expr.get(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "targetConfig")) as any,
+                        snapshotConfig: expr.serialize(
+                            expr.get(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "snapshotConfig")) as any,
                         migrationLabel: expr.get(c.item, "label"),
                         groupName: expr.get(c.item, "label")
                     });
-                },
-                {loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.migrations))}
-            )
-        )
-    )
-
-
-    .addTemplate("waitForBackfill", t=>t
-        .addRequiredInput("nameOfReplayerWaiting", typeToken<string>())
-        .addSuspend()
-    )
-
-
-    .addTemplate("runReplayerAfterSignal", t=>t
-        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addRequiredInput("kafkaTopicName", typeToken<string>())
-        .addRequiredInput("kafkaBootstrapServers", typeToken<string>())
-        .addOptionalInput("replayerConfig", c => expr.empty<z.infer<typeof REPLAYER_OPTIONS>>())
-
-        .addInputsFromRecord(ImageParameters)
-
-        .addSteps(b=>b
-            .addStep("waitForBackfill", INTERNAL, "waitForBackfill", c=>c.register({
-                nameOfReplayerWaiting: "waitForBackfill",
-            }))
-            .addStep("replay", Replayer, "createDeploymentFromConfig", c => c.register({
-                    ...selectInputsForRegister(b, c),
-                    kafkaTrafficBrokers: b.inputs.kafkaBootstrapServers,
-                    kafkaGroupId: expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
-                })
-            )
-        )
-    )
-
-
-    .addTemplate("sourceToTargetMigration", t=>t
-        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
-        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        // groupName facilitates grouping within the python `workflow` tools
-        .addOptionalInput("groupName", c => expr.concat(
-            expr.get(expr.deserializeRecord(c.inputParameters.sourceConfig), "label"),
-            expr.literal(" to "),
-            expr.get(expr.deserializeRecord(c.inputParameters.targetConfig), "label"),
-        ))
-        .addOptionalInput("snapshotExtractAndLoadConfigArray",
-            c => expr.empty<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>[]>())
-        .addOptionalInput("replayerConfig",
-            c => expr.empty<z.infer<typeof REPLAYER_OPTIONS>>())
-
-        .addRequiredInput("uniqueRunNonce", typeToken<string>())
-        .addRequiredInput("kafkaBootstrapServers", typeToken<string>())
-
-        .addInputsFromRecord(ImageParameters)
-
-        .addDag(b=>b
-            .addTask("getSnapshotThenMigrateSnapshot", INTERNAL, "getSnapshotThenMigrateSnapshot", c => {
-                    const {groupName, ...rest} = selectInputsForRegister(b, c);
-                    return c.register({
-                        ...rest,
-                        ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(SNAPSHOT_MIGRATION_CONFIG)),
-                        groupName: expr.get(c.item, "label")
-
-                    })
-                },
-                {
-                    when: { templateExp: expr.not(expr.isEmpty(b.inputs.snapshotExtractAndLoadConfigArray)) },
+                }, {
                     loopWith: makeParameterLoop(
-                        expr.deserializeRecord(b.inputs.snapshotExtractAndLoadConfigArray))
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "migrations")),
+                    dependencies: ["waitForSnapshot"] as const
                 }
             )
-            .addTask("runReplayerAfterSignal", INTERNAL, "runReplayerAfterSignal", c => c.register({
-                ...selectInputsForRegister(b, c),
-                targetConfig: b.inputs.targetConfig,
-                replayerConfig: b.inputs.replayerConfig,
-                kafkaTopicName: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "label")
-            }), {
-                when: { templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.sourceConfig), "proxySettings") }
-            })
-            // TODO - add a sensor here to wait for an event
-        )
-    )
-
-
-    .addTemplate("setupProxyThenMigrate", t => t
-        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
-        .addRequiredInput("targetMigrationConfigs", typeToken<z.infer<typeof SOURCE_AND_TARGET_MIGRATION_CONFIG>["targetMigrationConfigs"]>())
-
-        .addRequiredInput("uniqueRunNonce", typeToken<string>())
-        .addRequiredInput("kafkaName", typeToken<string>())
-        .addRequiredInput("kafkaBootstrapServers", typeToken<string>())
-
-        .addInputsFromRecord(ImageParameters)
-
-        .addSteps(b=>b
-            .addStep("setupProxy", SetupCapture, "setupProxy", c=>c.register({
-                    ...selectInputsForRegister(b, c),
-                    proxySettings: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "proxySettings") as any,
-                    proxyName: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "label")
+            .addTask("createSnapshotMigration", INTERNAL, "createSnapshotMigrationResource", c =>
+                c.register({
+                    resourceName: expr.get(
+                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "label")
                 }),
-                {when: { templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.sourceConfig), "proxySettings") } }
+                { dependencies: ["migrateFromSnapshot"] as const }
             )
-            .addStep("sourceToTargetMigration", INTERNAL, "sourceToTargetMigration", c=>c.register({
-                    ...selectInputsForRegister(b, c),
-                    ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(PARAMETERIZED_SOURCE_MIGRATION_CONFIG)),
-                    sourceConfig: b.inputs.sourceConfig,
+            .addTask("patchSnapshotMigration", INTERNAL, "patchSnapshotMigrationReady", c =>
+                c.register({
+                    resourceName: expr.get(
+                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "label")
                 }),
-                {loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.targetMigrationConfigs))})
-        )
-    )
-
-
-    .addTemplate("setupKafkaClusterThenSources", t=>t
-        .addRequiredInput("kafkaConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
-        .addRequiredInput("sourceMigrationConfigs", typeToken<z.infer<typeof KAFKA_CLUSTER_AND_SOURCE_MIGRATION>["sourceMigrationConfigs"]>())
-
-        .addRequiredInput("uniqueRunNonce", typeToken<string>())
-        .addInputsFromRecord(ImageParameters)
-
-        .addSteps(b=>b
-            .addStep("setupKafka", SetupKafka, "deployKafkaCluster", c=>c.register({
-                    clusterName: expr.get(expr.deserializeRecord(b.inputs.kafkaConfig) , "name")
-                }),
-                {when: { templateExp: expr.not(expr.isEmpty(b.inputs.kafkaConfig)) } }
+                { dependencies: ["createSnapshotMigration"] as const }
             )
-            .addStep("setupProxyThenMigrate", INTERNAL, "setupProxyThenMigrate", c=>c.register({
-                    ...selectInputsForRegister(b, c),
-                    ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(SOURCE_AND_TARGET_MIGRATION_CONFIG)),
-                    kafkaName: expr.get(expr.deserializeRecord(b.inputs.kafkaConfig) , "name"),
-                    kafkaBootstrapServers: c.steps.setupKafka.outputs.bootstrapServers
-                }),
-                {
-                    loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.sourceMigrationConfigs))
-                })
         )
     )
 
+
+    // ── Section 5: Traffic Replays ───────────────────────────────────────
+
+    .addTemplate("runSingleReplay", t => t
+        .addRequiredInput("replayConfig",
+            typeToken<z.infer<typeof DENORMALIZED_REPLAY_CONFIG>>())
+
+        .addDag(b => b
+            .addTask("waitForSnapshotMigrationDeps", INTERNAL, "waitForSnapshotMigration", c => {
+                    return c.register({
+                        resourceName: expr.concat(
+                            expr.asString(expr.get(c.item as any, "source")),
+                            expr.literal("-"),
+                            expr.asString(expr.get(c.item as any, "snapshot"))
+                        )
+                    });
+                }, {
+                    loopWith: makeParameterLoop(
+                        expr.get(expr.deserializeRecord(b.inputs.replayConfig),
+                            "dependsOnSnapshotMigrations") as any),
+                    when: { templateExp: expr.not(expr.isEmpty(
+                        expr.getLoose(expr.deserializeRecord(b.inputs.replayConfig),
+                            "dependsOnSnapshotMigrations")))
+                    }
+                }
+            )
+            .addTask("placeholderReplay", INTERNAL, "doNothing",
+                { dependencies: ["waitForSnapshotMigrationDeps"] as const }
+            )
+        )
+    )
+
+
+    // ── Main ─────────────────────────────────────────────────────────────
 
     .addTemplate("main", t => t
-        .addRequiredInput("config", typeToken<z.infer<typeof ARGO_MIGRATION_CONFIG>>(),
-            "List of server configurations to direct migrated traffic toward") // expand
-
+        .addRequiredInput("config",
+            typeToken<z.infer<typeof ARGO_MIGRATION_CONFIG>>(),
+            "Full migration configuration")
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
 
-        .addSteps(b => b
-            .addStep("setupKafkaClusterThenSources", INTERNAL, "setupKafkaClusterThenSources",
-                c => {
-                    return c.register({
-                        ...selectInputsForRegister(b, c),
-                        ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(KAFKA_CLUSTER_AND_SOURCE_MIGRATION))
-                    });
-                },
-                {
-                    loopWith:
-                        makeParameterLoop(expr.deserializeRecord(b.inputs.config))
-                })
-            .addStep("cleanup", ConfigManagementHelpers, "cleanup",
-                c => c.register({
+        .addDag(b => b
+            .addTask("setupKafkaClusters", INTERNAL, "setupSingleKafkaCluster", c =>
+                c.register({
+                    kafkaClusterConfig: expr.serialize(c.item) as any
+                }), {
+                    loopWith: makeParameterLoop(
+                        expr.get(expr.deserializeRecord(b.inputs.config), "kafkaClusters") as any),
+                    when: { templateExp: expr.not(expr.isEmpty(
+                        expr.getLoose(expr.deserializeRecord(b.inputs.config), "kafkaClusters")))
+                    }
+                }
+            )
+            .addTask("setupProxies", INTERNAL, "setupSingleProxy", c =>
+                c.register({
+                    proxyConfig: expr.serialize(c.item)
+                }), {
+                    loopWith: makeParameterLoop(
+                        expr.get(expr.deserializeRecord(b.inputs.config), "proxies"))
+                }
+            )
+            .addTask("createSnapshots", INTERNAL, "createSnapshotsForSource", c =>
+                c.register({
                     ...selectInputsForRegister(b, c),
-                    prefix: b.inputs.uniqueRunNonce
-                }))
+                    snapshotsSourceConfig: expr.serialize(c.item)
+                }), {
+                    loopWith: makeParameterLoop(
+                        expr.get(expr.deserializeRecord(b.inputs.config), "snapshots"))
+                }
+            )
+            .addTask("runSnapshotMigrations", INTERNAL, "runSingleSnapshotMigration", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    snapshotMigrationConfig: expr.serialize(c.item)
+                }), {
+                    loopWith: makeParameterLoop(
+                        expr.get(expr.deserializeRecord(b.inputs.config), "snapshotMigrations"))
+                }
+            )
+            .addTask("runTrafficReplays", INTERNAL, "runSingleReplay", c =>
+                c.register({
+                    replayConfig: expr.serialize(c.item)
+                }), {
+                    loopWith: makeParameterLoop(
+                        expr.get(expr.deserializeRecord(b.inputs.config), "trafficReplays"))
+                }
+            )
         )
     )
 

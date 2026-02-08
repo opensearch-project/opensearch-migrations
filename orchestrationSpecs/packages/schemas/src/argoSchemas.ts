@@ -109,7 +109,7 @@ export const METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
 );
 
 export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    CREATE_SNAPSHOT_OPTIONS.safeExtend({
+    CREATE_SNAPSHOT_OPTIONS.omit({snapshotPrefix: true}).safeExtend({
         semaphoreConfigMapName: z.string(),
         semaphoreKey: z.string()
     })

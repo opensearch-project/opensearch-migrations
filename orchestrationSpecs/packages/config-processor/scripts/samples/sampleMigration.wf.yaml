@@ -1,9 +1,7 @@
 {
   skipApprovals : true,
   kafkaClusters: {
-    default: {
-      autoCreate: { }
-    }
+    ...
   },
   sourceClusters: {
     "source": {
@@ -33,7 +31,7 @@
       }
     }
   },
-  migrationConfigs: [
+  snapshotMigrationConfigs: [
     {
       "fromSource": "source",
       "toTarget": "target",

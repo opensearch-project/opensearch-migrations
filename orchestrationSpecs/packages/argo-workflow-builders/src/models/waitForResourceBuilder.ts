@@ -1,62 +1,110 @@
-import {GenericScope, WorkflowAndTemplatesScope} from "./workflowTypes";
-import {InputParametersRecord, OutputParametersRecord} from "./parameterSchemas";
-import {TemplateBodyBuilder, TemplateRebinder} from "./templateBodyBuilder";
+import {ExtendScope, GenericScope, WorkflowAndTemplatesScope} from "./workflowTypes";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
+import {RetryableTemplateBodyBuilder, RetryableTemplateRebinder, RetryParameters} from "./templateBodyBuilder";
 import {SynchronizationConfig} from "./synchronization";
+import {ResourceWorkflowDefinition} from "./k8sResourceBuilder";
+import {PlainObject} from "./plainObject";
+import {UniqueNameConstraintAtDeclaration} from "./scopeConstraints";
+import {TypeToken} from "./sharedTypes";
+import {AllowLiteralOrExpression} from "./expression";
 
 export interface WaitForCreationOpts {
-    resourceType: string;
-    resourceName: string;
-    namespace: string;
+    resourceType: AllowLiteralOrExpression<string>;
+    resourceName: AllowLiteralOrExpression<string>;
+    namespace: AllowLiteralOrExpression<string>;
     kubectlImage?: string;
     retryLimit?: number;
     retryBackoffDuration?: string;
     timeout?: string;
 }
 
-export interface WaitForResourceOpts {
-    manifest: Record<string, any>;
-    successCondition?: string;
-    failureCondition?: string;
-    waitForCreation?: WaitForCreationOpts;
-}
-
 export class WaitForResourceBuilder<
     ParentWorkflowScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
+    ResourceScope extends GenericScope,
     OutputParamsScope extends OutputParametersRecord
-> extends TemplateBodyBuilder<
+> extends RetryableTemplateBodyBuilder<
     ParentWorkflowScope,
     InputParamsScope,
-    WaitForResourceOpts,
+    ResourceScope,
     OutputParamsScope,
-    WaitForResourceBuilder<ParentWorkflowScope, InputParamsScope, any>,
+    WaitForResourceBuilder<ParentWorkflowScope, InputParamsScope, ResourceScope, any>,
     GenericScope
 > {
     constructor(
         parentWorkflowScope: ParentWorkflowScope,
         inputsScope: InputParamsScope,
-        bodyScope: WaitForResourceOpts,
+        bodyScope: ResourceScope,
         outputsScope: OutputParamsScope,
-        synchronization: SynchronizationConfig | undefined
+        retryParameters: RetryParameters,
+        synchronization?: SynchronizationConfig,
+        protected readonly waitForCreationOpts?: WaitForCreationOpts
     ) {
-        const templateRebind: TemplateRebinder<ParentWorkflowScope, InputParamsScope, GenericScope> = (
-            ctx, inputs, body, outputs, sync
-        ) => new WaitForResourceBuilder(ctx, inputs, body as unknown as WaitForResourceOpts, outputs, sync) as any;
+        const templateRebind: RetryableTemplateRebinder<ParentWorkflowScope, InputParamsScope, GenericScope> = (
+            ctx, inputs, body, outputs, retry, sync
+        ) => new WaitForResourceBuilder(ctx, inputs, body, outputs, retry, sync, this.waitForCreationOpts) as any;
 
-        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, synchronization, templateRebind);
+        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, templateRebind);
+    }
+
+    public setDefinition(
+        workflowDefinition: ResourceWorkflowDefinition
+    ): WaitForResourceBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        ResourceScope & ResourceWorkflowDefinition,
+        OutputParamsScope
+    > {
+        const newBody = {...(this.bodyScope as object), ...workflowDefinition} as
+            ResourceScope & ResourceWorkflowDefinition;
+        return new WaitForResourceBuilder(
+            this.parentWorkflowScope, this.inputsScope, newBody, this.outputsScope,
+            this.retryParameters, this.synchronization, this.waitForCreationOpts
+        );
+    }
+
+    public setWaitForCreation(
+        opts: WaitForCreationOpts
+    ): WaitForResourceBuilder<ParentWorkflowScope, InputParamsScope, ResourceScope, OutputParamsScope> {
+        return new WaitForResourceBuilder(
+            this.parentWorkflowScope, this.inputsScope, this.bodyScope, this.outputsScope,
+            this.retryParameters, this.synchronization, opts
+        );
+    }
+
+    addJsonPathOutput<T extends PlainObject, Name extends string>(
+        name: UniqueNameConstraintAtDeclaration<Name, OutputParamsScope>,
+        pathValue: string,
+        _t: TypeToken<T>,
+        descriptionValue?: string
+    ): WaitForResourceBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        ResourceScope,
+        ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>
+    > {
+        const newOutputs = {
+            ...this.outputsScope,
+            [name as string]: {
+                fromWhere: "path" as const,
+                path: pathValue,
+                description: descriptionValue
+            }
+        } as ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>;
+
+        return new WaitForResourceBuilder(
+            this.parentWorkflowScope, this.inputsScope, this.bodyScope, newOutputs,
+            this.retryParameters, this.synchronization, this.waitForCreationOpts
+        );
     }
 
     protected getBody() {
-        const {manifest, successCondition, failureCondition, waitForCreation} = this.bodyScope;
-
         const resourceBody = {
             action: "get" as const,
-            ...(successCondition && {successCondition}),
-            ...(failureCondition && {failureCondition}),
-            manifest
+            ...this.bodyScope
         };
 
-        if (!waitForCreation) {
+        if (!this.waitForCreationOpts) {
             return {resource: resourceBody};
         }
 
@@ -68,7 +116,7 @@ export class WaitForResourceBuilder<
             retryLimit = 12,
             retryBackoffDuration = "30s",
             timeout = "60s"
-        } = waitForCreation;
+        } = this.waitForCreationOpts;
 
         return {
             steps: [

@@ -20,9 +20,7 @@ import {
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
-import {
-    ReplicaSet, Deployment
-} from "@opensearch-migrations/argo-workflow-builders";
+import {Deployment} from "@opensearch-migrations/argo-workflow-builders";
 import {makeRepoParamDict} from "./metadataMigration";
 import {
     setupLog4jConfigForContainer,
