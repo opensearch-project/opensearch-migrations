@@ -18,8 +18,12 @@ import {
     TasksWithOutputs,
     WorkflowAndTemplatesScope,
 } from "./workflowTypes";
+import {Workflow} from "./workflowBuilder";
 import {
     LabelledAllTasksAsOutputReferenceable,
+    INLINE,
+    InlineInputsFrom,
+    InlineOutputsFrom,
     InputsFrom,
     KeyFor,
     OutputsFrom,
@@ -137,7 +141,7 @@ export class DagBuilder<
 
     public addTask<
         Name extends string,
-        TemplateSource,
+        TemplateSource extends typeof INTERNAL | Workflow<any, any, any>,
         K extends KeyFor<ParentWorkflowScope, TemplateSource>,
         LoopT extends NonSerializedPlainObject = never
     >(
@@ -164,10 +168,28 @@ export class DagBuilder<
             >,
             OutputParamsScope
         >
-    > {
-        return this.taskBuilder.addTask<Name, TemplateSource, K, LoopT, DagTaskOpts<TasksOutputsScope, LoopT>>(
-            name, source, key, ...args
-        );
+    >;
+    public addTask<
+        Name extends string,
+        InlineFnType extends (builder: any) => { inputsScope: any; outputsScope: any; getBody(): any; retryParameters?: any },
+        LoopT extends NonSerializedPlainObject = never
+    >(
+        name: UniqueNameConstraintAtDeclaration<Name, TaskScope>,
+        source: UniqueNameConstraintOutsideDeclaration<Name, TaskScope, typeof INLINE>,
+        inlineFn: UniqueNameConstraintOutsideDeclaration<Name, TaskScope, InlineFnType>,
+        ...args: ParamsTuple<InlineInputsFrom<InlineFnType>, Name, TaskScope, "tasks", LoopT, DagTaskOpts<TaskScope, LoopT>>
+    ): UniqueNameConstraintOutsideDeclaration<
+        Name,
+        TaskScope,
+        DagBuilder<
+            ParentWorkflowScope,
+            InputParamsScope,
+            ExtendScope<TaskScope, { [P in Name]: TasksWithOutputs<Name, InlineOutputsFrom<InlineFnType>> }>,
+            OutputParamsScope
+        >
+    >;
+    public addTask(name: any, source: any, keyOrFn?: any, ...restArgs: any[]): any {
+        return this.taskBuilder.addTask(name, source, keyOrFn, ...restArgs);
     }
 
     protected getBody() {
