@@ -71,13 +71,16 @@ function makeOptionalDefaultedFieldsRequired<T extends z.ZodTypeAny>(schema: T):
 export const NAMED_KAFKA_CLUSTER_CONFIG = z.object({
     name: z.string(),
     config: makeOptionalDefaultedFieldsRequired(KAFKA_CLUSTER_CREATION_CONFIG),
-    topics: z.array(z.string())
+    topics: z.array(z.string()).readonly()
 });
 
 export const NAMED_SOURCE_CLUSTER_CONFIG =
     makeOptionalDefaultedFieldsRequired(SOURCE_CLUSTER_CONFIG.omit({enabled: true}).safeExtend({
         label: z.string(), // override to required
     }));
+
+export const NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO =
+    NAMED_SOURCE_CLUSTER_CONFIG.omit({snapshotInfo: true});
 
 export const NAMED_TARGET_CLUSTER_CONFIG =
     makeOptionalDefaultedFieldsRequired(TARGET_CLUSTER_CONFIG.omit({enabled: true}).safeExtend({
@@ -109,10 +112,7 @@ export const METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
 );
 
 export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    CREATE_SNAPSHOT_OPTIONS.omit({snapshotPrefix: true}).safeExtend({
-        semaphoreConfigMapName: z.string(),
-        semaphoreKey: z.string()
-    })
+    CREATE_SNAPSHOT_OPTIONS.omit({snapshotPrefix: true})
 );
 
 export const RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
@@ -132,7 +132,10 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
 
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     label: z.string(), // from the record of the user config
+    snapshotLabel: z.string(), // label from snapshotConfig, hoisted for easy access
     migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1),
+    sourceVersion: z.string(),
+    sourceLabel: z.string(),
     targetConfig: NAMED_TARGET_CLUSTER_CONFIG,
     snapshotConfig: COMPLETE_SNAPSHOT_CONFIG
 });
@@ -153,12 +156,14 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     snapshotPrefix: z.string(),
     config: ARGO_CREATE_SNAPSHOT_OPTIONS,
     repo: DENORMALIZED_S3_REPO_CONFIG,
+    semaphoreConfigMapName: z.string(),
+    semaphoreKey: z.string(),
     dependsUponProxySetups: z.array(z.string()).min(1).optional()
 })
 
 export const DENORMALIZED_CREATE_SNAPSHOTS_CONFIG = z.object({
     createSnapshotConfig: z.array(PER_SOURCE_CREATE_SNAPSHOTS_CONFIG).min(1),
-    sourceConfig: NAMED_SOURCE_CLUSTER_CONFIG.omit({snapshotInfo: true})
+    sourceConfig: NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO
 });
 
 export const DENORMALIZED_REPLAY_CONFIG = z.object({

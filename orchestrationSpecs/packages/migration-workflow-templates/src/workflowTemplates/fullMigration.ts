@@ -11,6 +11,7 @@ import {
     METADATA_OPTIONS,
     NAMED_KAFKA_CLUSTER_CONFIG,
     NAMED_SOURCE_CLUSTER_CONFIG,
+    NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
     NAMED_TARGET_CLUSTER_CONFIG,
     PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
@@ -350,8 +351,12 @@ export const FullMigration = WorkflowBuilder.create({
                         resourceName: expr.asString(c.item)
                     }), {
                     loopWith: makeParameterLoop(
-                        expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig),
-                            "dependsUponProxySetups") as any),
+                        expr.ternary(
+                            expr.hasKey(expr.deserializeRecord(b.inputs.snapshotItemConfig),
+                                "dependsUponProxySetups"),
+                            expr.getLoose(expr.deserializeRecord(b.inputs.snapshotItemConfig),
+                                "dependsUponProxySetups"),
+                            expr.literal([]))),
                     when: { templateExp: expr.not(expr.isEmpty(
                         expr.getLoose(expr.deserializeRecord(b.inputs.snapshotItemConfig),
                             "dependsUponProxySetups")))
@@ -361,9 +366,9 @@ export const FullMigration = WorkflowBuilder.create({
             .addTask("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    sourceConfig: expr.serialize(b.inputs.sourceConfig) as any,
+                    sourceConfig: b.inputs.sourceConfig,
                     createSnapshotConfig: expr.serialize(
-                        expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "config")) as any,
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "config")),
                     snapshotPrefix: expr.get(
                         expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix"),
                     snapshotConfig: expr.serialize(expr.makeDict({
@@ -377,9 +382,13 @@ export const FullMigration = WorkflowBuilder.create({
                         // not snapshotPrefix. PER_SOURCE_CREATE_SNAPSHOTS_CONFIG needs a label field.
                         label: expr.get(
                             expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix")
-                    })) as any,
+                    })),
                     targetLabel: expr.get(
-                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix")
+                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix"),
+                    semaphoreConfigMapName: expr.get(
+                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "semaphoreConfigMapName"),
+                    semaphoreKey: expr.get(
+                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "semaphoreKey")
                 }),
                 { dependencies: ["waitForProxyDeps"] as const }
             )
@@ -398,14 +407,6 @@ export const FullMigration = WorkflowBuilder.create({
                 { dependencies: ["createDataSnapshot"] as const }
             )
         )
-        .addSynchronization(c => ({
-            semaphores: [{
-                configMapKeyRef: {
-                    name: expr.jsonPathStrict(c.inputs.snapshotItemConfig, "config", "semaphoreConfigMapName"),
-                    key: expr.jsonPathStrict(c.inputs.snapshotItemConfig, "config", "semaphoreKey")
-                }
-            }]
-        }))
     )
 
 
@@ -420,8 +421,7 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     snapshotItemConfig: expr.serialize(c.item),
-                    sourceConfig: expr.serialize(
-                        expr.get(expr.deserializeRecord(b.inputs.snapshotsSourceConfig), "sourceConfig"))
+                    sourceConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotsSourceConfig, "sourceConfig")
                 }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.snapshotsSourceConfig),
@@ -435,7 +435,8 @@ export const FullMigration = WorkflowBuilder.create({
     // ── Section 4: Snapshot Migrations ───────────────────────────────────
 
     .addTemplate("migrateFromSnapshot", t => t
-        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
+        .addRequiredInput("sourceVersion", typeToken<string>())
+        .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
@@ -461,8 +462,8 @@ export const FullMigration = WorkflowBuilder.create({
                     c.register({
                         ...(selectInputsForRegister(b, c)),
                         sessionName: c.steps.idGenerator.id,
-                        sourceVersion: expr.jsonPathStrict(b.inputs.sourceConfig, "version"),
-                        sourceLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label")
+                        sourceVersion: b.inputs.sourceVersion,
+                        sourceLabel: b.inputs.sourceLabel
                     }),
                 { when: { templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)) }}
             )
@@ -490,8 +491,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addDag(b => b
             .addTask("waitForSnapshot", INTERNAL, "waitForDataSnapshot", c =>
                 c.register({
-                    resourceName: expr.jsonPathStrict(
-                        b.inputs.snapshotMigrationConfig, "snapshotConfig", "label")
+                    resourceName: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "snapshotLabel")
                 })
             )
             .addTask("migrateFromSnapshot", INTERNAL, "migrateFromSnapshot", c => {
@@ -499,15 +499,10 @@ export const FullMigration = WorkflowBuilder.create({
                         ...selectInputsForRegister(b, c),
                         ...selectInputsFieldsAsExpressionRecord(c.item, c,
                             getZodKeys(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)),
-                        sourceConfig: expr.serialize(expr.makeDict({
-                            label: expr.jsonPathStrict(
-                                b.inputs.snapshotMigrationConfig, "snapshotConfig", "label"),
-                            version: expr.literal("ES 7.10.2") // placeholder — will be filled from source
-                        })) as any,
-                        targetConfig: expr.serialize(
-                            expr.get(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "targetConfig")) as any,
-                        snapshotConfig: expr.serialize(
-                            expr.get(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "snapshotConfig")) as any,
+                        sourceVersion: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "sourceVersion"),
+                        sourceLabel: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "sourceLabel"),
+                        targetConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "targetConfig"),
+                        snapshotConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotConfig"),
                         migrationLabel: expr.get(c.item, "label"),
                         groupName: expr.get(c.item, "label")
                     });
@@ -519,15 +514,13 @@ export const FullMigration = WorkflowBuilder.create({
             )
             .addTask("createSnapshotMigration", INTERNAL, "createSnapshotMigrationResource", c =>
                 c.register({
-                    resourceName: expr.get(
-                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "label")
+                    resourceName: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "label")
                 }),
                 { dependencies: ["migrateFromSnapshot"] as const }
             )
             .addTask("patchSnapshotMigration", INTERNAL, "patchSnapshotMigrationReady", c =>
                 c.register({
-                    resourceName: expr.get(
-                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "label")
+                    resourceName: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "label")
                 }),
                 { dependencies: ["createSnapshotMigration"] as const }
             )
@@ -538,22 +531,20 @@ export const FullMigration = WorkflowBuilder.create({
     // ── Section 5: Traffic Replays ───────────────────────────────────────
 
     .addTemplate("runSingleReplay", t => t
-        .addRequiredInput("replayConfig",
-            typeToken<z.infer<typeof DENORMALIZED_REPLAY_CONFIG>>())
+        .addRequiredInput("replayConfig", typeToken<z.infer<typeof DENORMALIZED_REPLAY_CONFIG>>())
 
         .addDag(b => b
             .addTask("waitForSnapshotMigrationDeps", INTERNAL, "waitForSnapshotMigration", c => {
                     return c.register({
                         resourceName: expr.concat(
-                            expr.asString(expr.get(c.item as any, "source")),
+                            expr.asString(expr.get(c.item, "source")),
                             expr.literal("-"),
-                            expr.asString(expr.get(c.item as any, "snapshot"))
+                            expr.asString(expr.get(c.item, "snapshot"))
                         )
                     });
                 }, {
                     loopWith: makeParameterLoop(
-                        expr.get(expr.deserializeRecord(b.inputs.replayConfig),
-                            "dependsOnSnapshotMigrations") as any),
+                        expr.dig(expr.deserializeRecord(b.inputs.replayConfig), ["dependsOnSnapshotMigrations"], [])),
                     when: { templateExp: expr.not(expr.isEmpty(
                         expr.getLoose(expr.deserializeRecord(b.inputs.replayConfig),
                             "dependsOnSnapshotMigrations")))
@@ -579,13 +570,15 @@ export const FullMigration = WorkflowBuilder.create({
         .addDag(b => b
             .addTask("setupKafkaClusters", INTERNAL, "setupSingleKafkaCluster", c =>
                 c.register({
-                    kafkaClusterConfig: expr.serialize(c.item) as any
+                    kafkaClusterConfig: expr.serialize(c.item)
                 }), {
                     loopWith: makeParameterLoop(
-                        expr.get(expr.deserializeRecord(b.inputs.config), "kafkaClusters") as any),
-                    when: { templateExp: expr.not(expr.isEmpty(
-                        expr.getLoose(expr.deserializeRecord(b.inputs.config), "kafkaClusters")))
-                    }
+                        expr.ternary(
+                            expr.hasKey(expr.deserializeRecord(b.inputs.config), "kafkaClusters"),
+                            expr.getLoose(expr.deserializeRecord(b.inputs.config), "kafkaClusters"),
+                            expr.literal([])
+                        )),
+                    when: { templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.config), "kafkaClusters") }
                 }
             )
             .addTask("setupProxies", INTERNAL, "setupSingleProxy", c =>

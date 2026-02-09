@@ -296,10 +296,14 @@ export class TemplateBuilder<
         builderFn: ScopeIsEmptyConstraint<BodyScope,
             (b: WaitForResourceBuilder<ParentWorkflowScope, InputParamsScope, {}, {}>) => FinalBuilder>
     ): FinalBuilder {
-        const fn = builderFn as
-            (b: WaitForResourceBuilder<ParentWorkflowScope, InputParamsScope, {}, {}>) => FinalBuilder;
+        const fn = builderFn as (b: WaitForResourceBuilder<ParentWorkflowScope, InputParamsScope, {}, {}>) => FinalBuilder;
+        const k8sBuilder = new K8sResourceBuilder(this.parentWorkflowScope, this.inputScope, {}, {}, {});
         return fn(new WaitForResourceBuilder(
-            this.parentWorkflowScope, this.inputScope, {}, {}, {}
+            this.parentWorkflowScope,
+            this.inputScope,
+            k8sBuilder,
+            {},
+            undefined
         ));
     }
 

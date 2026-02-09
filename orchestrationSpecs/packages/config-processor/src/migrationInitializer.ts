@@ -212,38 +212,19 @@ export class MigrationInitializer {
     }
 
     private generateSemaphoreKeys(userConfig: any): string[] {
-        if (!userConfig?.snapshotMigrationConfigs) {
-            return [];
-        }
-
         const semaphoreKeys: string[] = [];
+        const sourceClusters = userConfig?.sourceClusters || {};
 
-        for (const migrationConfig of userConfig.snapshotMigrationConfigs) {
-            const sourceName = migrationConfig.fromSource;
-            const sourceCluster = userConfig.sourceClusters?.[sourceName];
-            
-            if (!sourceCluster || !migrationConfig.snapshotExtractAndLoadConfigs) {
-                continue;
-            }
-
+        for (const [sourceName, sourceCluster] of Object.entries<any>(sourceClusters)) {
             const sourceVersion = sourceCluster.version || "";
-            
-            for (const snapshotConfig of migrationConfig.snapshotExtractAndLoadConfigs) {
-                // Apply same logic as generateSemaphoreConfig
-                const isLegacyVersion = /^(?:ES [1-7]|OS 1)(?:\.[0-9]+)*$/.test(sourceVersion);
-                
-                if (isLegacyVersion) {
-                    // Legacy versions: shared semaphore per source cluster
-                    const key = `snapshot-legacy-${sourceName}`;
-                    if (!semaphoreKeys.includes(key)) {
-                        semaphoreKeys.push(key);
-                    }
-                } else {
-                    // Modern versions: unique key per snapshot (no effective limiting)
-                    const snapshotName = snapshotConfig.snapshotConfig?.snapshotNameConfig?.snapshotNamePrefix || 
-                                       snapshotConfig.snapshotConfig?.snapshotNameConfig?.externallyManagedSnapshot || 
-                                       'unknown';
-                    const key = `snapshot-modern-${sourceName}-${snapshotName}`;
+            const isLegacyVersion = /^(?:ES [1-7]|OS 1)(?:\.[0-9]+)*$/.test(sourceVersion);
+            const snapshots = sourceCluster.snapshotInfo?.snapshots || {};
+
+            for (const snapshotName of Object.keys(snapshots)) {
+                const key = isLegacyVersion
+                    ? `snapshot-legacy-${sourceName}`
+                    : `snapshot-modern-${sourceName}-${snapshotName}`;
+                if (!semaphoreKeys.includes(key)) {
                     semaphoreKeys.push(key);
                 }
             }

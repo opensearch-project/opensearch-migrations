@@ -3,7 +3,7 @@ import {
     COMPLETE_SNAPSHOT_CONFIG,
     DEFAULT_RESOURCES,
     METADATA_OPTIONS,
-    NAMED_SOURCE_CLUSTER_CONFIG,
+    NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
     NAMED_TARGET_CLUSTER_CONFIG,
     S3_REPO_CONFIG
 } from "@opensearch-migrations/schemas";
@@ -31,7 +31,8 @@ import {
 const COMMON_METADATA_PARAMETERS = {
     snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({ description:
             "Snapshot storage details (region, endpoint, etc)"}),
-    sourceConfig: defineRequiredParam<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>(),
+    sourceLabel: defineRequiredParam<string>(),
+    sourceVersion: defineRequiredParam<string>(),
     targetConfig: defineRequiredParam<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
     migrationLabel: defineRequiredParam<string>(),
     ...makeRequiredImageParametersForKeys(["MigrationConsole"])
@@ -60,7 +61,7 @@ export function makeRepoParamDict(
 }
 
 function makeParamsDict(
-    sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
+    sourceVersion: BaseExpression<string>,
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
     options: BaseExpression<Serialized<z.infer<typeof METADATA_OPTIONS>>>
@@ -74,7 +75,7 @@ function makeParamsDict(
         expr.mergeDicts(
             expr.makeDict({
                 "snapshotName": expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
-                "sourceVersion": expr.get(expr.deserializeRecord(sourceConfig), "version")
+                "sourceVersion": sourceVersion
             }),
             makeRepoParamDict(
                 expr.omit(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), "s3RoleArn"),
@@ -91,7 +92,7 @@ function makeApprovalCheck<
     ...innerSkipFlags: string[]
 ) {
     return new FunctionExpression<boolean, any, any, "complicatedExpression">("sprig.dig", [
-        ...getSourceTargetPathAndSnapshotAndMigrationIndex(inputs.sourceConfig,
+        ...getSourceTargetPathAndSnapshotAndMigrationIndex(inputs.sourceLabel,
             inputs.targetConfig,
             expr.jsonPathStrict(inputs.snapshotConfig, "label"),
             inputs.migrationLabel
@@ -112,7 +113,7 @@ export const MetadataMigration = WorkflowBuilder.create({
 
     .addTemplate("runMetadata", t=>t
         .addRequiredInput("commandMode", typeToken<"evaluate"|"migrate">())
-        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
+        .addRequiredInput("sourceVersion", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof METADATA_OPTIONS>>())
@@ -152,7 +153,7 @@ export const MetadataMigration = WorkflowBuilder.create({
                 b.inputs.commandMode,
                 expr.literal("---INLINE-JSON"),
                 expr.asString(expr.serialize(
-                    makeParamsDict(b.inputs.sourceConfig, b.inputs.targetConfig, b.inputs.snapshotConfig, b.inputs.metadataMigrationConfig
+                    makeParamsDict(b.inputs.sourceVersion, b.inputs.targetConfig, b.inputs.snapshotConfig, b.inputs.metadataMigrationConfig
                     )
                 ))
             ])
@@ -190,7 +191,7 @@ export const MetadataMigration = WorkflowBuilder.create({
             makeApprovalCheck(c.inputParameters, c.inputParameters.skipApprovalMap, "migrateMetadata"))
         .addOptionalInput("approvalNamePrefix", c=>
             expr.concat(
-                expr.jsonPathStrict(c.inputParameters.sourceConfig, "label"), expr.literal("."),
+                c.inputParameters.sourceLabel, expr.literal("."),
                 expr.jsonPathStrict(c.inputParameters.targetConfig, "label"),  expr.literal("."),
                 expr.jsonPathStrict(c.inputParameters.snapshotConfig, "label"),  expr.literal("."),
                 c.inputParameters.migrationLabel,  expr.literal(".")
@@ -202,7 +203,7 @@ export const MetadataMigration = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     commandMode: "evaluate",
-                    sourceK8sLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
+                    sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
                     fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
@@ -217,7 +218,7 @@ export const MetadataMigration = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     commandMode: "migrate",
-                    sourceK8sLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
+                    sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
                     fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel

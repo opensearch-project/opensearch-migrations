@@ -6,7 +6,7 @@ import {
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
     DEFAULT_RESOURCES,
-    NAMED_SOURCE_CLUSTER_CONFIG,
+    NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
 import {
@@ -75,7 +75,7 @@ export function makeSourceParamDict(sourceConfig: BaseExpression<Serialized<z.in
 }
 
 function makeParamsDict(
-    sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
+    sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
     options: BaseExpression<Serialized<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>>
 ) {
@@ -83,8 +83,7 @@ function makeParamsDict(
         expr.mergeDicts(
             makeSourceParamDict(sourceConfig),
             expr.mergeDicts(
-                expr.omit(expr.deserializeRecord(options),
-                    "loggingConfigurationOverrideConfigMap", "semaphoreConfigMapName", "semaphoreKey"),
+                expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap"),
                 // noWait is essential for workflow logic - the workflow handles polling for snapshot
                 // completion separately via checkSnapshotStatus, so the CreateSnapshot command must
                 // return immediately to allow the workflow to manage the wait/retry behavior
@@ -114,7 +113,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
 
 
     .addTemplate("runCreateSnapshot", t => t
-        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
+        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
@@ -188,10 +187,12 @@ export const CreateSnapshot = WorkflowBuilder.create({
 
 
     .addTemplate("snapshotWorkflow", t => t
-        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
+        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
         .addRequiredInput("targetLabel", typeToken<string>())
+        .addRequiredInput("semaphoreConfigMapName", typeToken<string>())
+        .addRequiredInput("semaphoreKey", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
@@ -220,8 +221,8 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addSynchronization(c => ({
             semaphores: [{
                 configMapKeyRef: {
-                    name: expr.get(expr.deserializeRecord(c.inputs.createSnapshotConfig), "semaphoreConfigMapName"),
-                    key: expr.get(expr.deserializeRecord(c.inputs.createSnapshotConfig), "semaphoreKey")
+                    name: c.inputs.semaphoreConfigMapName,
+                    key: c.inputs.semaphoreKey
                 }
             }]
         }))

@@ -2,16 +2,13 @@ import {ExtendScope, GenericScope, WorkflowAndTemplatesScope} from "./workflowTy
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {RetryableTemplateBodyBuilder, RetryableTemplateRebinder, RetryParameters} from "./templateBodyBuilder";
 import {SynchronizationConfig} from "./synchronization";
-import {ResourceWorkflowDefinition} from "./k8sResourceBuilder";
+import {K8sResourceBuilder, ResourceWorkflowDefinition} from "./k8sResourceBuilder";
 import {PlainObject} from "./plainObject";
 import {UniqueNameConstraintAtDeclaration} from "./scopeConstraints";
 import {TypeToken} from "./sharedTypes";
-import {AllowLiteralOrExpression} from "./expression";
+import {StepsBuilder} from "./stepsBuilder";
 
 export interface WaitForCreationOpts {
-    resourceType: AllowLiteralOrExpression<string>;
-    resourceName: AllowLiteralOrExpression<string>;
-    namespace: AllowLiteralOrExpression<string>;
     kubectlImage?: string;
     retryLimit?: number;
     retryBackoffDuration?: string;
@@ -34,17 +31,27 @@ export class WaitForResourceBuilder<
     constructor(
         parentWorkflowScope: ParentWorkflowScope,
         inputsScope: InputParamsScope,
-        bodyScope: ResourceScope,
-        outputsScope: OutputParamsScope,
+        private readonly k8sResourceBuilder: K8sResourceBuilder<ParentWorkflowScope, InputParamsScope, ResourceScope, OutputParamsScope>,
         retryParameters: RetryParameters,
-        synchronization?: SynchronizationConfig,
-        protected readonly waitForCreationOpts?: WaitForCreationOpts
+        synchronization: SynchronizationConfig | undefined,
+        private readonly waitForCreationOpts?: WaitForCreationOpts
     ) {
         const templateRebind: RetryableTemplateRebinder<ParentWorkflowScope, InputParamsScope, GenericScope> = (
             ctx, inputs, body, outputs, retry, sync
-        ) => new WaitForResourceBuilder(ctx, inputs, body, outputs, retry, sync, this.waitForCreationOpts) as any;
+        ) => {
+            const newK8sBuilder = new K8sResourceBuilder(ctx, inputs, body, outputs, retry, sync);
+            return new WaitForResourceBuilder(ctx, inputs, newK8sBuilder, retry, sync, this.waitForCreationOpts) as any;
+        };
 
-        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, templateRebind);
+        super(
+            parentWorkflowScope,
+            inputsScope,
+            k8sResourceBuilder['bodyScope'],
+            k8sResourceBuilder['outputsScope'],
+            retryParameters,
+            synchronization,
+            templateRebind
+        );
     }
 
     public setDefinition(
@@ -55,11 +62,14 @@ export class WaitForResourceBuilder<
         ResourceScope & ResourceWorkflowDefinition,
         OutputParamsScope
     > {
-        const newBody = {...(this.bodyScope as object), ...workflowDefinition} as
-            ResourceScope & ResourceWorkflowDefinition;
+        const newK8sBuilder = this.k8sResourceBuilder.setDefinition(workflowDefinition);
         return new WaitForResourceBuilder(
-            this.parentWorkflowScope, this.inputsScope, newBody, this.outputsScope,
-            this.retryParameters, this.synchronization, this.waitForCreationOpts
+            this.parentWorkflowScope,
+            this.inputsScope,
+            newK8sBuilder,
+            this.retryParameters,
+            this.synchronization,
+            this.waitForCreationOpts
         );
     }
 
@@ -67,12 +77,16 @@ export class WaitForResourceBuilder<
         opts: WaitForCreationOpts
     ): WaitForResourceBuilder<ParentWorkflowScope, InputParamsScope, ResourceScope, OutputParamsScope> {
         return new WaitForResourceBuilder(
-            this.parentWorkflowScope, this.inputsScope, this.bodyScope, this.outputsScope,
-            this.retryParameters, this.synchronization, opts
+            this.parentWorkflowScope,
+            this.inputsScope,
+            this.k8sResourceBuilder,
+            this.retryParameters,
+            this.synchronization,
+            opts
         );
     }
 
-    addJsonPathOutput<T extends PlainObject, Name extends string>(
+    public addJsonPathOutput<T extends PlainObject, Name extends string>(
         name: UniqueNameConstraintAtDeclaration<Name, OutputParamsScope>,
         pathValue: string,
         _t: TypeToken<T>,
@@ -83,76 +97,78 @@ export class WaitForResourceBuilder<
         ResourceScope,
         ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>
     > {
-        const newOutputs = {
-            ...this.outputsScope,
-            [name as string]: {
-                fromWhere: "path" as const,
-                path: pathValue,
-                description: descriptionValue
-            }
-        } as ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>;
-
+        const newK8sBuilder = this.k8sResourceBuilder.addJsonPathOutput(name, pathValue, _t, descriptionValue);
         return new WaitForResourceBuilder(
-            this.parentWorkflowScope, this.inputsScope, this.bodyScope, newOutputs,
-            this.retryParameters, this.synchronization, this.waitForCreationOpts
+            this.parentWorkflowScope,
+            this.inputsScope,
+            newK8sBuilder,
+            this.retryParameters,
+            this.synchronization,
+            this.waitForCreationOpts
         );
     }
 
     protected getBody() {
-        const resourceBody = {
-            action: "get" as const,
-            ...this.bodyScope
-        };
-
         if (!this.waitForCreationOpts) {
-            return {resource: resourceBody};
+            return this.k8sResourceBuilder['getBody']();
+        }
+
+        const resourceBody = this.k8sResourceBuilder['getBody']().resource;
+        const manifest = resourceBody.manifest;
+        const kind = manifest?.kind;
+        const name = manifest?.metadata?.name;
+        const namespace = manifest?.metadata?.namespace;
+
+        if (!kind || !name) {
+            throw new Error("waitForCreation requires manifest to have kind and metadata.name");
         }
 
         const {
-            resourceType,
-            resourceName,
-            namespace,
             kubectlImage = "bitnami/kubectl:latest",
             retryLimit = 12,
             retryBackoffDuration = "30s",
             timeout = "60s"
         } = this.waitForCreationOpts;
 
-        return {
-            steps: [
-                {
-                    steps: [{
-                        name: "wait-for-create",
-                        inline: {
-                            container: {
-                                name: "main",
-                                image: kubectlImage,
-                                command: ["kubectl"],
-                                args: [
-                                    "wait", "--for=create",
-                                    `${resourceType}/${resourceName}`,
-                                    `-n`, namespace,
-                                    `--timeout=${timeout}`
-                                ],
-                                resources: {}
-                            },
-                            retryStrategy: {
-                                limit: retryLimit,
-                                retryPolicy: "Always",
-                                backoff: {duration: retryBackoffDuration}
-                            }
-                        }
-                    }]
+        let stepsBuilder =
+            new StepsBuilder(this.parentWorkflowScope, this.inputsScope, {}, [], {}, {}, undefined);
+
+        const withSteps = stepsBuilder
+            .addStepGroup(gb => gb)
+            .addStepGroup(gb => gb);
+
+        // Inject inline templates into the step groups
+        const stepGroups = withSteps['stepGroups'];
+        stepGroups[0].steps = [{
+            name: "wait-for-create",
+            inline: {
+                container: {
+                    name: "main",
+                    image: kubectlImage,
+                    command: ["kubectl"],
+                    args: [
+                        "wait", "--for=create",
+                        `${kind}/${name}`,
+                        `--timeout=${timeout}`,
+                        ...(namespace ? ["-n", namespace] : [])
+                    ],
+                    resources: {}
                 },
-                {
-                    steps: [{
-                        name: "check-resource",
-                        inline: {
-                            resource: resourceBody
-                        }
-                    }]
+                retryStrategy: {
+                    limit: retryLimit,
+                    retryPolicy: "Always",
+                    backoff: {duration: retryBackoffDuration}
                 }
-            ]
-        };
+            }
+        } as any];
+        
+        stepGroups[1].steps = [{
+            name: "check-resource",
+            inline: {
+                resource: resourceBody
+            }
+        } as any];
+
+        return withSteps['getBody']();
     }
 }

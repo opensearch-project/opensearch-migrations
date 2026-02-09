@@ -310,13 +310,14 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 const proxyDeps = proxyNamesBySource.get(sourceName);
 
                 const { snapshotPrefix: _sp, ...createSnapshotOpts } = snapshotDef.config.createSnapshotConfig;
+                const semaphore = this.generateSemaphoreConfig(sourceCluster.version, sourceName, snapshotName);
                 createConfigs.push({
                     snapshotPrefix: snapshotDef.config.createSnapshotConfig.snapshotPrefix || globalSnapshotName,
                     config: {
                         ...createSnapshotOpts,
-                        ...this.generateSemaphoreConfig(sourceCluster.version, sourceName, snapshotName)
                     },
                     repo: { ...repoConfig, useLocalStack: /^localstacks?:\/\//i.test(repoConfig.endpoint ?? ""), repoName: snapshotDef.repoName },
+                    ...semaphore,
                     ...(proxyDeps && proxyDeps.length > 0 ? { dependsUponProxySetups: proxyDeps } : {})
                 });
             }
@@ -347,6 +348,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             }
 
             const { enabled: _e2, ...restOfTarget } = targetCluster;
+            const { snapshotInfo: _si, enabled: _e1, ...restOfSource } = sourceCluster;
 
             for (const [snapshotName, migrations] of Object.entries(perSnapshotConfig)) {
                 const snapshotDef = sourceCluster.snapshotInfo.snapshots[snapshotName];
@@ -359,7 +361,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
                 results.push({
                     label: globalSnapshotName,
+                    snapshotLabel: globalSnapshotName,
                     migrations: autoLabelMigrations(migrations),
+                    sourceVersion: sourceCluster.version || "",
+                    sourceLabel: fromSource,
                     targetConfig: { ...restOfTarget, label: toTarget },
                     snapshotConfig: {
                         snapshotName: globalSnapshotName,
