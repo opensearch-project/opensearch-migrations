@@ -1,7 +1,7 @@
 [versions]
-aws-crt = "0.42.2"
+aws-crt = "0.43.1"
 aws-msk-iam-auth = "2.3.4"
-aws-sdk = "2.41.19"
+aws-sdk = "2.41.24"
 bouncycastle = "1.83"
 commons-collections = "4.5.0"
 commons-compress = "1.26.2"
@@ -35,7 +35,7 @@ lucene9 = "9.12.1"
 mockito = "5.21.0"
 netty = "4.1.124.Final"
 opensearch-testcontainers = "2.0.1"
-opentelemetry = "1.58.0"
+opentelemetry = "1.59.0"
 opentelemetry-semconv = "1.23.1-alpha"
 protobuf = "4.33.5"
 reactor-netty = "1.2.11"
@@ -45,7 +45,7 @@ slf4j = "2.0.17"
 testcontainers = "2.0.3"
 testcontainers-modules = "1.21.4"
 toxiproxy = "2.1.11"
-zstd-jni = "1.5.7-6"
+zstd-jni = "1.5.7-7"
 
 [libraries]
 aws-arns = { module = "software.amazon.awssdk:arns", version.ref = "aws-sdk" }
