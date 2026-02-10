@@ -325,22 +325,100 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Install kiro-cli') {
+                steps {
+                    timeout(time: 10, unit: 'MINUTES') {
+                        script {
+                            sh """
+                                curl -fsSL https://desktop-release.q.us-east-1.amazonaws.com/latest/kiro-cli/linux/x64/kiro-cli.tar.gz | tar -xz -C /tmp
+                                sudo mv /tmp/kiro-cli /usr/local/bin/kiro-cli
+                                kiro-cli --version
+                            """
+                        }
+                    }
+                }
+            }
+
+            stage('Setup kiro-cli Auth') {
+                steps {
+                    timeout(time: 5, unit: 'MINUTES') {
+                        script {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    sh "python3 test/kiroSopTest/setup_kiro_auth.py"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             stage('Run Kiro SOP Agent') {
                 steps {
                     timeout(time: 2, unit: 'HOURS') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 7200, roleSessionName: 'jenkins-session') {
-                                    sh "python3 -m pip install --user boto3 2>/dev/null || pip3 install --user boto3"
+                                    def clusterDetails = readJSON text: env.clusterDetailsJson
+                                    def sourceEp = clusterDetails.source.endpoint
+                                    def targetEp = clusterDetails.target.endpoint
+
                                     sh """
-                                        python3 test/kiroSopTest/run_agent.py \
-                                          --model-id 'us.anthropic.claude-sonnet-4-20250514-v1:0' \
-                                          --region us-east-1 \
-                                          --repo-root '${WORKSPACE}' \
-                                          --cluster-details-json '${env.clusterDetailsJson}' \
-                                          --stage '${maStageName}' \
-                                          --source-version '${env.sourceVer}' \
-                                          --target-version '${env.targetVer}' \
+                                        mkdir -p ~/.kiro
+                                        cp -r kiro-cli/kiro-cli-config/* ~/.kiro/
+                                        cp agent-sops/opensearch-migration-assistant-eks.sop.md ~/.kiro/steering/
+                                    """
+
+                                    def prompt = """Execute a complete OpenSearch migration with these parameters:
+
+hands_on_level: auto
+allow_destructive: true
+namespace: ma
+ma_environment_mode: use_existing_stage
+stage: ${maStageName}
+aws_region: us-east-1
+
+source_cluster:
+  endpoint: ${sourceEp}
+  version: ${env.sourceVer}
+  auth: sigv4 (region: us-east-1, service: es)
+
+target_cluster:
+  endpoint: ${targetEp}
+  version: ${env.targetVer}
+  auth: sigv4 (region: us-east-1, service: es)
+
+ENVIRONMENT STATUS:
+- EKS cluster is deployed and kubectl is configured
+- Helm chart is installed in namespace 'ma'
+- migration-console-0 pod is running
+- Skip SOP Step 0 (environment acquisition) - it's already done
+- Start from Step 1 (Initialize Run Workspace)
+
+CRITICAL: When migration is complete, output MIGRATION_COMPLETE. If failed, output MIGRATION_FAILED: <reason>."""
+
+                                    writeFile file: '/tmp/kiro-prompt.txt', text: prompt
+
+                                    sh """
+                                        cd ${WORKSPACE}
+                                        cat /tmp/kiro-prompt.txt | kiro-cli chat --agent opensearch-migration --trust-all-tools 2>&1 | tee ${WORKSPACE}/kiro-cli-output.log || true
+                                    """
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            stage('Evaluate Results') {
+                steps {
+                    timeout(time: 10, unit: 'MINUTES') {
+                        script {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    sh """
+                                        python3 test/kiroSopTest/evaluate.py \
+                                          --namespace ma \
                                           --output '${WORKSPACE}/sop-test-report.json' \
                                           --min-score 70
                                     """
@@ -355,8 +433,8 @@ def call(Map config = [:]) {
             always {
                 timeout(time: 75, unit: 'MINUTES') {
                     script {
-                        // Archive SOP test reports
-                        archiveArtifacts artifacts: 'sop-test-report*.json', allowEmptyArchive: true
+                        // Archive SOP test reports and logs
+                        archiveArtifacts artifacts: 'sop-test-report*.json,kiro-cli-output.log', allowEmptyArchive: true
                     }
                     dir('libraries/testAutomation') {
                         script {
