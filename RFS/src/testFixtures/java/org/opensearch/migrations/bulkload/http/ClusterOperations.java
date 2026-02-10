@@ -262,6 +262,42 @@ public class ClusterOperations {
     }
 
     /**
+     * Creates a legacy template with no mappings but with custom analyzer settings
+     */
+    @SneakyThrows
+    public void createLegacyTemplateNoMappings(final String templateName, final String pattern, final String aliasName) {
+        var matchPatternClause = (UnboundVersionMatchers.isBelowES_6_X)
+            .test(clusterVersion)
+            ? "\"template\":\"" + pattern + "\","
+            : "\"index_patterns\": [\"" + pattern + "\"],";
+
+        final var templateJson = "{\n" +
+            "  " + matchPatternClause + "\n" +
+            "  \"order\": 0,\n" +
+            "  \"settings\": {\n" +
+            "    \"index\": {\n" +
+            "      \"analysis\": {\n" +
+            "        \"analyzer\": {\n" +
+            "          \"default\": {\n" +
+            "            \"filter\": [\"lowercase\"],\n" +
+            "            \"tokenizer\": \"uax_url_email\"\n" +
+            "          }\n" +
+            "        }\n" +
+            "      },\n" +
+            "      \"number_of_shards\": \"1\"\n" +
+            "    }\n" +
+            "  },\n" +
+            "  \"mappings\": {},\n" +
+            "  \"aliases\": {\n" +
+            "    \"" + aliasName + "\": {}\n" +
+            "  }\n" +
+            "}";
+
+        var response = put("/_template/" + templateName, templateJson);
+        assertThat(response.getKey(), equalTo(200));
+    }
+
+    /**
      * Creates a legacy template
      */
     @SneakyThrows

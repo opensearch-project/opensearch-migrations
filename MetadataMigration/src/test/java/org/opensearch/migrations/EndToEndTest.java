@@ -101,6 +101,41 @@ class EndToEndTest extends BaseMigrationTest {
         }
     }
 
+    @ParameterizedTest(name = "Legacy template no mappings from {0} to OS 2.19")
+    @MethodSource(value = "extendedScenarios")
+    void legacyTemplateNoMappings(SearchClusterContainer.ContainerVersion sourceVersion) {
+        try (
+            final var sourceCluster = new SearchClusterContainer(sourceVersion);
+            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
+        ) {
+            this.sourceCluster = sourceCluster;
+            this.targetCluster = targetCluster;
+            startClusters();
+
+            var templateName = "empty-mappings-template";
+            var indexPattern = "test-empty-mappings-*";
+            var aliasName = "test-empty-mappings-alias";
+
+            sourceOperations.createLegacyTemplateNoMappings(templateName, indexPattern, aliasName);
+            sourceOperations.createDocument("test-empty-mappings-2023", "1", "{ \"field\": \"value\" }");
+
+            var snapshotName = "template_no_mappings_snap";
+            var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, snapshotName, testSnapshotContext);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            var arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
+            MigrationItemResult result = executeMigration(arguments, MetadataCommands.MIGRATE);
+
+            assertThat(result.getExitCode(), equalTo(0));
+            assertThat(getNames(getSuccessfulResults(result.getItems().getIndexTemplates())), hasItems(templateName));
+
+            var res = targetOperations.get("/_template/" + templateName);
+            assertThat(res.getKey(), equalTo(200));
+            assertThat(res.getValue(), containsString("uax_url_email"));
+        }
+    }
+
     private enum TransferMedium {
         SnapshotImage,
         Http
