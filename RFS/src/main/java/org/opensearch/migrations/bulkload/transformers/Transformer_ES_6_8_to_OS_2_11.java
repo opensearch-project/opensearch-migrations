@@ -117,6 +117,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
                 break;
             case TEMPLATE:
                 indexTemplateTransformations.forEach(transformer -> transformer.applyTransformation(index));
+                TransformFunctions.removeIntermediateMappingsLevels(newRoot);
                 break;
             default:
                 throw new IllegalArgumentException("Unknown type: " + type);
