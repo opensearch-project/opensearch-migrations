@@ -17,6 +17,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import {scrapeApprovals} from "./formatApprovals";
 import {setNamesInUserConfig} from "./migrationConfigTransformer";
+import { generateSemaphoreKey } from './semaphoreUtils';
 
 /** etcd connection options */
 export interface EtcdOptions {
@@ -217,13 +218,8 @@ export class MigrationInitializer {
 
         for (const [sourceName, sourceCluster] of Object.entries<any>(sourceClusters)) {
             const sourceVersion = sourceCluster.version || "";
-            const isLegacyVersion = /^(?:ES [1-7]|OS 1)(?:\.[0-9]+)*$/.test(sourceVersion);
-            const snapshots = sourceCluster.snapshotInfo?.snapshots || {};
-
-            for (const snapshotName of Object.keys(snapshots)) {
-                const key = isLegacyVersion
-                    ? `snapshot-legacy-${sourceName}`
-                    : `snapshot-modern-${sourceName}-${snapshotName}`;
+            for (const snapshotName of Object.keys(sourceCluster.snapshotInfo?.snapshots || {})) {
+                const key = generateSemaphoreKey(sourceVersion, sourceName, snapshotName);
                 if (!semaphoreKeys.includes(key)) {
                     semaphoreKeys.push(key);
                 }

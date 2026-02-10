@@ -9,6 +9,7 @@ import {
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
 import {promises as dns} from "dns";
+import { generateSemaphoreKey } from './semaphoreUtils';
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG>;
@@ -413,13 +414,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     private generateSemaphoreConfig(sourceVersion: string, sourceName: string, snapshotName: string) {
-        const isLegacyVersion = /^(?:ES [1-7]|OS 1)(?:\.[0-9]+)*$/.test(sourceVersion);
-        const semaphoreKey = isLegacyVersion
-            ? `snapshot-legacy-${sourceName}`
-            : `snapshot-modern-${sourceName}-${snapshotName}`;
         return {
             semaphoreConfigMapName: 'concurrency-config',
-            semaphoreKey
+            semaphoreKey: generateSemaphoreKey(sourceVersion, sourceName, snapshotName)
         };
     }
 }

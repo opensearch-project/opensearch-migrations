@@ -166,13 +166,13 @@ class K8sRFSBackfill(RFSBackfill):
             return CommandResult(False, "Failed to get deployment status for RFS backfill")
         
         # Always perform deep check for K8s
+        logger.info("config=" + str(self.config))
+        session_name = self.config["reindex_from_snapshot"].get("backfill_session_name", "")
+        logger.info(f"Using backfill_session_name for deep check: '{session_name}'")
         try:
-            logger.info("config=" + str(self.config))
-            session_name = self.config["reindex_from_snapshot"].get("backfill_session_name", "")
-            logger.info(f"Using backfill_session_name for deep check: '{session_name}'")
             shard_status = get_detailed_status(target_cluster=self.target_cluster, session_name=session_name)
         except Exception:
-            logger.exception("Failed to get detailed status")
+            logger.exception(f"Failed to get detailed status for session '{session_name}'")
             shard_status = None
         
         status_parts = [

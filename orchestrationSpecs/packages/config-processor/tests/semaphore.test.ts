@@ -294,11 +294,10 @@ describe('semaphore configuration', () => {
         
         // Extract semaphore keys from transformed workflow
         const workflowSemaphoreKeys = new Set();
-        bundle.workflows.forEach(migration => {
-            migration.snapshotExtractAndLoadConfigArray?.forEach(snapConfig => {
-                workflowSemaphoreKeys.add(snapConfig.createSnapshotConfig.semaphoreKey);
-            });
-        });
+        bundle.workflows.snapshots.forEach(ss =>
+            ss.createSnapshotConfig.forEach(snapshotConfig =>
+                workflowSemaphoreKeys.add(snapshotConfig.semaphoreKey))
+        );
         
         // Extract semaphore keys from ConfigMap
         const configMapKeys = new Set(Object.keys(bundle.concurrencyConfigMaps.items[0].data));

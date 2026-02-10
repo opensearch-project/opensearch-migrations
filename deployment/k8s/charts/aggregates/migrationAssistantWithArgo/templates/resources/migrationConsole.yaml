@@ -36,15 +36,24 @@ roleRef:
   name: migration-console-access-role
   apiGroup: rbac.authorization.k8s.io
 ---
-{{- if .Values.cluster.isEKS }}
+{{- if .Values.cluster.dedicatedKarpenterNodePoolForMigrationConsole }}
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
   name: dedicated-small-instance-migration-console-pool
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
+  # Limits on the TOTAL aggregate size of the pool.
+  # The Migration Console is intended only to be a very small control-plane
   limits:
     cpu: 4000m
     memory: 4Gi
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 5m  # No reason to wait long if the console exits
   template:
     spec:
       nodeClassRef:
@@ -70,9 +79,6 @@ spec:
         - key: "migration-console" # Taint to ensure only migration console pods land here
           value: "dedicated"
           effect: NoSchedule
-    disruption:
-      consolidationPolicy: WhenEmpty
-      consolidateAfter: 5m  # No reason to wait long if the console exits
 ---
 {{- end }}
 {{ $sharedLogsVolumeEnabled := .Values.logs.sharedLogsVolume.enabled }}
@@ -93,7 +99,7 @@ spec:
         env: v1
     spec:
       serviceAccountName: migration-console-access-role
-      {{- if .Values.cluster.isEKS }}
+      {{- if .Values.cluster.dedicatedKarpenterNodePoolForMigrationConsole }}
       tolerations: # Set the metadata so that the dedicated nodepool will let this pod schedule to it
         - key: "migration-console"
           operator: "Equal"
