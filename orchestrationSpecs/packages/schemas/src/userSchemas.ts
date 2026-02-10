@@ -381,7 +381,7 @@ export const SNAPSHOT_INFO = z.object({
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     enabled: z.boolean().default(true).optional(),
-    snapshotInfo: SNAPSHOT_INFO
+    snapshotInfo: SNAPSHOT_INFO.optional()
 }).superRefine((data, ctx) => {
     // for (const migrationConfig of data.snapshotMigrationConfigs) {
     //     const sourceCluster = data.sourceClusters[migrationConfig.fromSource];
@@ -462,6 +462,7 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
             .describe("Top-level items are independent of each other but " +
                 "items in the inner-arrays require all snapshot activities across each of the items' " +
                 "sources to finish before any replays in this group can start.")
+            .optional()
     }).superRefine((data, ctx) => {
         // for (const migrationConfig of data.snapshotMigrationConfigs) {
         //     const sourceCluster = data.sourceClusters[migrationConfig.fromSource];

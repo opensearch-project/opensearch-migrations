@@ -540,10 +540,12 @@ export const FullMigration = WorkflowBuilder.create({
 
     .addTemplate("runSingleReplay", t => t
         .addRequiredInput("replayConfig", typeToken<z.infer<typeof DENORMALIZED_REPLAY_CONFIG>>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addDag(b => b
             .addTask("waitForSnapshotMigrationDeps", INTERNAL, "waitForSnapshotMigration", c => {
                     return c.register({
+                        ...selectInputsForRegister(b, c),
                         resourceName: expr.concat(
                             expr.asString(expr.get(c.item, "source")),
                             expr.literal("-"),
@@ -617,6 +619,7 @@ export const FullMigration = WorkflowBuilder.create({
             )
             .addTask("runTrafficReplays", INTERNAL, "runSingleReplay", c =>
                 c.register({
+                    ...selectInputsForRegister(b, c),
                     replayConfig: expr.serialize(c.item)
                 }), {
                     loopWith: makeParameterLoop(

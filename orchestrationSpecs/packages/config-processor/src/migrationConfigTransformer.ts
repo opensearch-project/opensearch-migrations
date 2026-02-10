@@ -209,7 +209,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const processedSourceClusters = {...input.sourceClusters};
 
         for (const [name, cluster] of Object.entries(input.sourceClusters)) {
-            if (cluster.snapshotInfo.repos !== undefined) {
+            if (cluster.snapshotInfo !== undefined && cluster.snapshotInfo.repos !== undefined) {
                 processedSourceClusters[name] = {
                     ...cluster,
                     snapshotInfo: {
@@ -251,7 +251,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const kafkaClusters = userConfig.kafkaClusterConfiguration ?? {};
         // Aggregate topics per kafka cluster from proxies
         const topicsByCluster = new Map<string, Set<string>>();
-        for (const [proxyName, proxy] of Object.entries(userConfig.traffic.proxies)) {
+        for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
             const clusterKey = proxy.kafka ?? "default";
             if (!topicsByCluster.has(clusterKey)) topicsByCluster.set(clusterKey, new Set());
             topicsByCluster.get(clusterKey)!.add(proxy.kafkaTopic || proxyName);
@@ -269,7 +269,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     /** Denormalize each proxy with source endpoint and kafka client config. */
     private buildProxies(userConfig: InputConfig) {
         const kafkaClusters = userConfig.kafkaClusterConfiguration ?? {};
-        return Object.entries(userConfig.traffic.proxies).map(([proxyName, proxy]) => {
+        return Object.entries(userConfig.traffic?.proxies || {}).map(([proxyName, proxy]) => {
             const sourceCluster = userConfig.sourceClusters[proxy.source];
             if (!sourceCluster) {
                 throw new Error(`Proxy '${proxyName}' references unknown source cluster '${proxy.source}'`);
@@ -288,7 +288,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     private buildSnapshots(userConfig: InputConfig) {
         // Build a map of source → proxy names for dependsUponProxySetups
         const proxyNamesBySource = new Map<string, string[]>();
-        for (const [proxyName, proxy] of Object.entries(userConfig.traffic.proxies)) {
+        for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
             const source = proxy.source;
             if (!proxyNamesBySource.has(source)) proxyNamesBySource.set(source, []);
             proxyNamesBySource.get(source)!.push(proxyName);
@@ -299,10 +299,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const snapshotInfo = sourceCluster.snapshotInfo;
             const createConfigs: any[] = [];
 
-            for (const [snapshotName, snapshotDef] of Object.entries(snapshotInfo.snapshots)) {
+            for (const [snapshotName, snapshotDef] of Object.entries(snapshotInfo?.snapshots || {})) {
                 if (!isGenerateSnapshot(snapshotDef.config)) continue;
 
-                const repoConfig = snapshotInfo.repos?.[snapshotDef.repoName];
+                const repoConfig = snapshotInfo?.repos?.[snapshotDef.repoName];
                 if (!repoConfig) {
                     throw new Error(`Snapshot '${snapshotName}' in source '${sourceName}' references repo '${snapshotDef.repoName}' which is not defined`);
                 }
@@ -352,13 +352,13 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const { snapshotInfo: _si, enabled: _e1, ...restOfSource } = sourceCluster;
 
             for (const [snapshotName, migrations] of Object.entries(perSnapshotConfig)) {
-                const snapshotDef = sourceCluster.snapshotInfo.snapshots[snapshotName];
+                const snapshotDef = sourceCluster.snapshotInfo?.snapshots[snapshotName];
                 if (!snapshotDef) {
                     throw new Error(`Migration references snapshot '${snapshotName}' not defined in source '${fromSource}'`);
                 }
 
                 const globalSnapshotName = `${fromSource}.${snapshotName}`;
-                const repoConfig = sourceCluster.snapshotInfo.repos?.[snapshotDef.repoName];
+                const repoConfig = sourceCluster.snapshotInfo?.repos?.[snapshotDef.repoName];
 
                 results.push({
                     label: globalSnapshotName,
@@ -387,10 +387,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     /** Build traffic replay configs by resolving proxy → kafka chain. */
     private buildTrafficReplays(userConfig: InputConfig) {
         const kafkaClusters = userConfig.kafkaClusterConfiguration ?? {};
-        const proxies = userConfig.traffic.proxies;
+        const proxies = userConfig.traffic?.proxies;
 
-        return Object.entries(userConfig.traffic.replayers).map(([_name, replayer]) => {
-            const proxy = proxies[replayer.fromProxy];
+        return Object.entries(userConfig.traffic?.replayers || {}).map(([_name, replayer]) => {
+            const proxy = proxies?.[replayer.fromProxy];
             if (!proxy) {
                 throw new Error(`Replayer references unknown proxy '${replayer.fromProxy}'`);
             }

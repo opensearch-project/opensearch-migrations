@@ -31,6 +31,7 @@ import {
     HasRequiredByDef,
     NormalizeInputs
 } from "./parameterConversions";
+import {TemplateBuilder} from "./templateBuilder";
 
 export type WhenCondition = (SimpleExpression<boolean> | {templateExp: TemplateExpression<boolean>});
 
@@ -256,7 +257,7 @@ type InlineBuilderResult = {
 };
 
 export type InlineTemplateFn<C extends WorkflowAndTemplatesScope> =
-    (builder: any) => InlineBuilderResult;
+    (builder: TemplateBuilder<C, {}, {}, {}>) => any;
 
 export type InlineInputsFrom<Fn> = 
     Fn extends (builder: any) => infer R

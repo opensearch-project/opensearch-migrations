@@ -1357,8 +1357,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           }
         },
         "required": [
-          "version",
-          "snapshotInfo"
+          "version"
         ]
       }
     },
@@ -2030,8 +2029,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
   "required": [
     "sourceClusters",
     "targetClusters",
-    "snapshotMigrationConfigs",
-    "traffic"
+    "snapshotMigrationConfigs"
   ]
 }"
 `;

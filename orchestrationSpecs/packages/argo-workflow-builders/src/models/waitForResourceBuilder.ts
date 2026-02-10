@@ -8,7 +8,7 @@ import {UniqueNameConstraintAtDeclaration} from "./scopeConstraints";
 import {TypeToken} from "./sharedTypes";
 import {StepsBuilder} from "./stepsBuilder";
 import {INLINE} from "./taskBuilder";
-import {AllowLiteralOrExpression} from "./expression";
+import {AllowLiteralOrExpression, expr} from "./expression";
 import {IMAGE_PULL_POLICY} from "./containerBuilder";
 
 export interface WaitForCreationOpts {
@@ -155,19 +155,20 @@ export class WaitForResourceBuilder<
 
         return new StepsBuilder(this.parentWorkflowScope, this.inputsScope, {}, [], {}, {}, undefined)
             .addStep("waitForCreate", INLINE, b=>b
-                .addContainer((cb: any) => cb
+                .addContainer(cb => cb
                     .addImageInfo(kubectlImage, kubectlImagePullPolicy)
                     .addCommand(["kubectl"])
                     .addArgs(["wait", "--for=create",
                         `${kind}/${name}`,
                         `--timeout=${maxKubeWaitDuration}s`,
                         ...(namespace ? ["-n", namespace] : [])])
+                    .addActiveDeadlineSeconds(_=>expr.literal(maxDuration))
+                    .addRetryParameters({
+                        limit: `${retryLimit}`, retryPolicy: `${retryPolicy}`,
+                        backoff: {duration: `${retryInitialBackoffDuration}`, factor: `${retryFactor}`, cap: `${maxDuration}`}
+                    })
+                    .addResources({})
                 )
-                .addActiveDeadlineSeconds(maxDuration)
-                .addRetryParameters({
-                    limit: retryLimit, retryPolicy: retryPolicy,
-                    backoff: {duration: retryInitialBackoffDuration, factor: retryFactor, cap: maxDuration}
-                })
             ).getBody();
     }
 }

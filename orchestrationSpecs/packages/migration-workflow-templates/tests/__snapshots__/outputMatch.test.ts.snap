@@ -1836,20 +1836,17 @@ metadata:
             {
               "name": "resourceName",
             },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
           ],
         },
         "name": "waitforsnapshotmigration",
         "outputs": {
           "parameters": [],
-        },
-        "resource": {
-          "action": "get",
-          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
-kind: SnapshotMigration
-metadata:
-  name: "{{inputs.parameters.resourceName}}"
-",
-          "successCondition": "status.phase == Ready",
         },
         "retryStrategy": {
           "backoff": {
@@ -1860,6 +1857,43 @@ metadata:
           "limit": "120",
           "retryPolicy": "Always",
         },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [],
+              },
+              "inline": {
+                "activeDeadlineSeconds": "172800",
+                "container": {
+                  "args": [
+                    "wait",
+                    "--for=create",
+                    "SnapshotMigration/[object Object]",
+                    "--timeout=172800s",
+                  ],
+                  "command": [
+                    "kubectl",
+                  ],
+                  "env": [],
+                  "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  "resources": {},
+                },
+                "retryStrategy": {
+                  "backoff": {
+                    "cap": 172800,
+                    "duration": 10,
+                    "factor": 2,
+                  },
+                  "limit": 5,
+                  "retryPolicy": "Always",
+                },
+              },
+              "name": "waitForCreate",
+            },
+          ],
+        ],
       },
       {
         "inputs": {
@@ -2797,6 +2831,14 @@ status:
               "arguments": {
                 "parameters": [
                   {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
                     "name": "resourceName",
                     "value": "{{=item['source']+'-'+item['snapshot']}}",
                   },
@@ -2823,6 +2865,12 @@ status:
           "parameters": [
             {
               "name": "replayConfig",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
             },
           ],
         },
@@ -2962,6 +3010,14 @@ status:
             {
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
                   {
                     "name": "replayConfig",
                     "value": "{{=toJSON(item)}}",
