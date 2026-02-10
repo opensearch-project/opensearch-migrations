@@ -330,8 +330,8 @@ def call(Map config = [:]) {
                     timeout(time: 10, unit: 'MINUTES') {
                         script {
                             sh """
-                                curl -fsSL https://desktop-release.q.us-east-1.amazonaws.com/latest/kiro-cli/linux/x64/kiro-cli.tar.gz | tar -xz -C /tmp
-                                sudo mv /tmp/kiro-cli /usr/local/bin/kiro-cli
+                                curl -fsSL https://cli.kiro.dev/install | bash
+                                export PATH="\$HOME/.local/bin:\$PATH"
                                 kiro-cli --version
                             """
                         }
@@ -400,6 +400,7 @@ CRITICAL: When migration is complete, output MIGRATION_COMPLETE. If failed, outp
                                     writeFile file: '/tmp/kiro-prompt.txt', text: prompt
 
                                     sh """
+                                        export PATH="\$HOME/.local/bin:\$PATH"
                                         cd ${WORKSPACE}
                                         cat /tmp/kiro-prompt.txt | kiro-cli chat --agent opensearch-migration --trust-all-tools 2>&1 | tee ${WORKSPACE}/kiro-cli-output.log || true
                                     """
