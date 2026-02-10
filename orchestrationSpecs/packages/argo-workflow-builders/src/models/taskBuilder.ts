@@ -183,6 +183,8 @@ export type NormalizeInputsOfWfTemplate<
         ? NormalizeInputs<X> extends InputParametersRecord ? NormalizeInputs<X> : {}
         : {};
 
+type ForbiddenParamsRegistration = { __no_params_allowed__: never };
+
 export type ParamsTuple<
     I extends InputParametersRecord,
     Name extends string,
@@ -192,7 +194,12 @@ export type ParamsTuple<
     OptsType extends TaskOpts<S, Label, LoopT>
 > =
     InputKind<I> extends "empty"
-        ? [opts?: OptsType]
+        ? [opts?: OptsType] | [
+            paramsFn: UniqueNameConstraintOutsideDeclaration<
+                Name, S, ParamsRegistrationFn<S, ForbiddenParamsRegistration, Label, LoopT>
+            >,
+            opts?: OptsType
+        ]
         : InputKind<I> extends "allOptional"
             ? [
                 paramsFn?: UniqueNameConstraintOutsideDeclaration<
@@ -241,14 +248,28 @@ export type IsInternal<Src> = Src extends typeof INTERNAL ? true : false;
 
 export type IsInline<Src> = Src extends typeof INLINE ? true : false;
 
+type InlineBuilderResult = {
+    getBody(): any;
+    retryParameters?: any;
+    inputsScope?: any;
+    outputsScope?: any;
+};
+
+export type InlineTemplateFn<C extends WorkflowAndTemplatesScope> =
+    (builder: any) => InlineBuilderResult;
+
 export type InlineInputsFrom<Fn> = 
-    Fn extends (builder: any) => { inputsScope: infer I }
-        ? I extends InputParametersRecord ? I : {}
+    Fn extends (builder: any) => infer R
+        ? R extends { inputsScope: infer I }
+            ? I extends InputParametersRecord ? I : {}
+            : {}
         : {};
 
 export type InlineOutputsFrom<Fn> = 
-    Fn extends (builder: any) => { outputsScope: infer O }
-        ? O extends OutputParametersRecord ? O : {}
+    Fn extends (builder: any) => infer R
+        ? R extends { outputsScope: infer O }
+            ? O extends OutputParametersRecord ? O : {}
+            : {}
         : {};
 
 export type KeyFor<C extends WorkflowAndTemplatesScope, Src> =
@@ -386,7 +407,7 @@ export abstract class TaskBuilder<
     >;
     public addTask<
         Name extends string,
-        InlineFnType extends (builder: any) => { inputsScope: any; outputsScope: any; getBody(): any; retryParameters?: any },
+        InlineFnType extends InlineTemplateFn<C>,
         LoopT extends NonSerializedPlainObject = never,
         OptsType extends TaskOpts<S, Label, LoopT> = TaskOpts<S, Label, LoopT>
     >(
@@ -401,7 +422,7 @@ export abstract class TaskBuilder<
     >;
     public addTask(name: any, sourceOrInline: any, keyOrFn?: any, ...restArgs: any[]): any {
         if (sourceOrInline === INLINE) {
-            const inlineFn = keyOrFn as (builder: any) => { getBody(): any; retryParameters?: any; inputsScope?: any; outputsScope?: any };
+            const inlineFn = keyOrFn as (builder: any) => InlineBuilderResult;
             const args = restArgs;
             const {paramsFn, opts} = unpackParams<any, S, Label, any>(args);
             const loopWith = reduceLoopWith(opts?.loopWith, this.getTaskOutputsByTaskName());

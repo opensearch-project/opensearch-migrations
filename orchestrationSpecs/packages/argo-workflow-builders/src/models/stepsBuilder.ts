@@ -27,8 +27,10 @@ import {
     LabelledAllTasksAsOutputReferenceable,
     getTaskOutputsByTaskName,
     INLINE,
+    INTERNAL,
     InlineInputsFrom,
     InlineOutputsFrom,
+    InlineTemplateFn,
     InputsFrom,
     KeyFor,
     OutputsFrom,
@@ -176,7 +178,7 @@ export class StepsBuilder<
     >;
     public addStep<
         Name extends string,
-        InlineFnType extends (builder: any) => { inputsScope: any; outputsScope: any; getBody(): any; retryParameters?: any },
+        InlineFnType extends InlineTemplateFn<ParentWorkflowScope>,
         LoopT extends NonSerializedPlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
@@ -190,7 +192,7 @@ export class StepsBuilder<
         OutputParamsScope
     >;
     public addStep(name: any, source: any, keyOrFn?: any, ...restArgs: any[]): any {
-        return this.addStepGroup(gb => gb.addTask(name, source, keyOrFn, ...restArgs)) as any;
+        return this.addStepGroup(gb => (gb as any).addTask(name, source, keyOrFn, ...restArgs)) as any;
     }
 
     protected getBody() {

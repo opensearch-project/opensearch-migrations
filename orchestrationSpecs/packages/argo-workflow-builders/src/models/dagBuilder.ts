@@ -22,8 +22,10 @@ import {Workflow} from "./workflowBuilder";
 import {
     LabelledAllTasksAsOutputReferenceable,
     INLINE,
+    INTERNAL,
     InlineInputsFrom,
     InlineOutputsFrom,
+    InlineTemplateFn,
     InputsFrom,
     KeyFor,
     OutputsFrom,
@@ -171,7 +173,7 @@ export class DagBuilder<
     >;
     public addTask<
         Name extends string,
-        InlineFnType extends (builder: any) => { inputsScope: any; outputsScope: any; getBody(): any; retryParameters?: any },
+        InlineFnType extends InlineTemplateFn<ParentWorkflowScope>,
         LoopT extends NonSerializedPlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, TaskScope>,
@@ -189,7 +191,7 @@ export class DagBuilder<
         >
     >;
     public addTask(name: any, source: any, keyOrFn?: any, ...restArgs: any[]): any {
-        return this.taskBuilder.addTask(name, source, keyOrFn, ...restArgs);
+        return (this.taskBuilder as any).addTask(name, source, keyOrFn, ...restArgs);
     }
 
     protected getBody() {

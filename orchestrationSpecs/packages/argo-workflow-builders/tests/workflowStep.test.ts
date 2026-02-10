@@ -95,7 +95,6 @@ describe("nested steps test", () => {
             baseWorkflow.addTemplate("testNoParamsValid", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", noParamsTemplate, "noParams",
-                        // @ts-expect-error — spurious property registration should be rejected
                         c => c.register({})
                     );
                     return step;
@@ -107,7 +106,7 @@ describe("nested steps test", () => {
             baseWorkflow.addTemplate("testNoParamsSpurious", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", noParamsTemplate, "noParams",
-                        // @ts-expect-error — spurious property registration should be rejected
+                        // @ts-expect-error — spurious parameter should be rejected
                         c => c.register({spuriousField: "should error"})
                     );
                     return step;
@@ -166,7 +165,7 @@ describe("nested steps test", () => {
                         c => c.register({
                             reqStr: "validString",
                             reqNum: 123,
-                            // @ts-expect-error — spurious property should be rejected
+                                // @ts-expect-error — invalid param for empty template
                             spuriousField: "should error"
                         }));
                     return step;
@@ -253,8 +252,8 @@ describe("nested steps test", () => {
                     const step = g.addStep("step1", optionalOnlyTemplate, "optionalOnly",
                         c => c.register({
                             optStr: "validString",
-                            // @ts-expect-error — spurious property should be rejected
-                            spuriousField: "should error"
+                                // @ts-expect-error — spurious parameter should be rejected
+                                spuriousField: "should error"
                         })
                     );
                     return step;
@@ -267,8 +266,8 @@ describe("nested steps test", () => {
                 .addSteps(g => {
                     const step = g.addStep("step1", optionalOnlyTemplate, "optionalOnly",
                         c => c.register({
-                            // @ts-expect-error — spurious property should be rejected
-                            spuriousField: "should error"
+                                // @ts-expect-error — spurious parameter should be rejected
+                                spuriousField: "should error"
                         })
                     );
                     return step;
@@ -366,8 +365,8 @@ describe("nested steps test", () => {
                         c => c.register({
                             reqStr: "validString",
                             reqBool: true,
-                            // @ts-expect-error — spurious property should be rejected
-                            spuriousField: "should error",
+                                // @ts-expect-error — spurious parameter should be rejected
+                                spuriousField: "should error",
                             anotherBadField: 999
                         }));
                     return step;
@@ -399,7 +398,6 @@ describe("nested steps test", () => {
             baseWorkflow.addTemplate("testInternalNoParamsValid", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalNoParams",
-                        // @ts-expect-error — spurious property should be rejected
                         c => c.register({}));
                     return step;
                 })
@@ -410,8 +408,8 @@ describe("nested steps test", () => {
             baseWorkflow.addTemplate("testInternalNoParamsSpurious", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalNoParams",
-                        // @ts-expect-error — spurious property should be rejected
                         c => c.register({
+                            // @ts-expect-error — spurious parameter should be rejected
                             spuriousField: "should error"
                         }));
                     return step;
@@ -471,8 +469,8 @@ describe("nested steps test", () => {
                         c => c.register({
                             reqStr: "validString",
                             reqNum: 456,
-                            // @ts-expect-error — spurious property should be rejected
-                            spuriousField: "should error"
+                                // @ts-expect-error — spurious parameter should be rejected
+                                spuriousField: "should error"
                         }));
                     return step;
                 })
@@ -543,8 +541,8 @@ describe("nested steps test", () => {
                     const step = g.addStep("step1", INTERNAL, "internalOptionalOnly",
                         c => c.register({
                             optStr: "validString",
-                            // @ts-expect-error — spurious property should be rejected
-                            spuriousField: "should error"
+                                // @ts-expect-error — spurious parameter should be rejected
+                                spuriousField: "should error"
                         }));
                     return step;
                 })
@@ -651,8 +649,8 @@ describe("nested steps test", () => {
                         c => c.register({
                             reqStr: "validString",
                             reqBool: false,
-                            // @ts-expect-error — spurious property should be rejected
-                            spuriousField: "should error",
+                                // @ts-expect-error — spurious parameter should be rejected
+                                spuriousField: "should error",
                             anotherInvalidField: true
                         })
                     );
