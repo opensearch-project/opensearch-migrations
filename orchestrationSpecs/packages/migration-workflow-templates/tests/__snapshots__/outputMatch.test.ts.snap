@@ -2805,7 +2805,7 @@ status:
               "name": "waitForSnapshotMigrationDeps",
               "template": "waitforsnapshotmigration",
               "when": "{{=!(0 == len(fromJSON(inputs.parameters.replayConfig)['dependsOnSnapshotMigrations']))}}",
-              "withParam": "{{=fromJSON(inputs.parameters.replayConfig)['dependsOnSnapshotMigrations']}}",
+              "withParam": "{{=sprig.dig('dependsOnSnapshotMigrations', [], fromJSON(inputs.parameters.replayConfig))}}",
             },
             {
               "arguments": {

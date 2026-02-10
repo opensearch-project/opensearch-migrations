@@ -264,18 +264,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
                             "default": ""
-                          },
-                          "semaphoreConfigMapName": {
-                            "type": "string"
-                          },
-                          "semaphoreKey": {
-                            "type": "string"
                           }
-                        },
-                        "required": [
-                          "semaphoreConfigMapName",
-                          "semaphoreKey"
-                        ]
+                        }
                       },
                       "repo": {
                         "type": "object",
@@ -313,6 +303,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "repoName"
                         ]
                       },
+                      "semaphoreConfigMapName": {
+                        "type": "string"
+                      },
+                      "semaphoreKey": {
+                        "type": "string"
+                      },
                       "dependsUponProxySetups": {
                         "type": "array",
                         "items": {
@@ -324,7 +320,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "required": [
                       "snapshotPrefix",
                       "config",
-                      "repo"
+                      "repo",
+                      "semaphoreConfigMapName",
+                      "semaphoreKey"
                     ]
                   },
                   "minItems": 1
@@ -437,6 +435,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               "type": "object",
               "properties": {
                 "label": {
+                  "type": "string"
+                },
+                "snapshotLabel": {
                   "type": "string"
                 },
                 "migrations": {
@@ -650,6 +651,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   },
                   "minItems": 1
                 },
+                "sourceVersion": {
+                  "type": "string"
+                },
+                "sourceLabel": {
+                  "type": "string"
+                },
                 "targetConfig": {
                   "type": "object",
                   "properties": {
@@ -801,7 +808,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               },
               "required": [
                 "label",
+                "snapshotLabel",
                 "migrations",
+                "sourceVersion",
+                "sourceLabel",
                 "targetConfig",
                 "snapshotConfig"
               ]
@@ -1280,6 +1290,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "createSnapshotConfig": {
                               "type": "object",
                               "properties": {
+                                "snapshotPrefix": {
+                                  "type": "string",
+                                  "default": ""
+                                },
                                 "indexAllowlist": {
                                   "type": "array",
                                   "items": {
@@ -1704,6 +1718,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "kafka": {
                 "type": "string",
                 "default": "default"
+              },
+              "kafkaTopic": {
+                "type": "string",
+                "default": "",
+                "description": "Kafka topic for captured traffic. Empty defaults to the proxy name."
               },
               "source": {
                 "type": "string"

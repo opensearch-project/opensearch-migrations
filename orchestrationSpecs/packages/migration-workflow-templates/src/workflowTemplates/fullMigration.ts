@@ -158,6 +158,8 @@ export const FullMigration = WorkflowBuilder.create({
 
     .addTemplate("waitForSnapshotMigration", t => t
         .addRequiredInput("resourceName", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+
         .addWaitForResource(b => b
             .setDefinition({
                 action: "get",
@@ -167,7 +169,13 @@ export const FullMigration = WorkflowBuilder.create({
                     kind: "SnapshotMigration",
                     metadata: { name: b.inputs.resourceName }
                 }
-            }))
+            })
+            .setWaitForCreation({
+                kubectlImage: b.inputs.imageMigrationConsoleLocation,
+                kubectlImagePullPolicy: b.inputs.imageMigrationConsolePullPolicy,
+                maxDuration: (2*24*60*60)
+            })
+        )
         .addRetryParameters({
             limit: "120", retryPolicy: "Always",
             backoff: { duration: "10", factor: "2", cap: "120" }

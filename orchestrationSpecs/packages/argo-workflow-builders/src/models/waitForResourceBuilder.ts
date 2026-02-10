@@ -7,12 +7,21 @@ import {PlainObject} from "./plainObject";
 import {UniqueNameConstraintAtDeclaration} from "./scopeConstraints";
 import {TypeToken} from "./sharedTypes";
 import {StepsBuilder} from "./stepsBuilder";
+import {INLINE} from "./taskBuilder";
+import {AllowLiteralOrExpression} from "./expression";
+import {IMAGE_PULL_POLICY} from "./containerBuilder";
 
 export interface WaitForCreationOpts {
-    kubectlImage?: string;
+    kubectlImage: AllowLiteralOrExpression<string>;
+    kubectlImagePullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>;
+    maxDuration?: number;
+    maxKubeWaitDuration?: number;
+
+    retryPolicy?: string;
+
     retryLimit?: number;
-    retryBackoffDuration?: string;
-    timeout?: string;
+    retryInitialBackoffDuration?: number;
+    retryFactor?: number;
 }
 
 export class WaitForResourceBuilder<
@@ -123,52 +132,42 @@ export class WaitForResourceBuilder<
             throw new Error("waitForCreation requires manifest to have kind and metadata.name");
         }
 
-        const {
-            kubectlImage = "bitnami/kubectl:latest",
-            retryLimit = 12,
-            retryBackoffDuration = "30s",
-            timeout = "60s"
+        const DEFAULT_WAIT_DURATION = 300;
+        let {
+            kubectlImage,
+            kubectlImagePullPolicy,
+            retryPolicy = "Always",
+            maxDuration = -1,
+            maxKubeWaitDuration = -1,
+            retryLimit = 5,
+            retryInitialBackoffDuration = 10,
+            retryFactor = 2
         } = this.waitForCreationOpts;
 
-        let stepsBuilder =
-            new StepsBuilder(this.parentWorkflowScope, this.inputsScope, {}, [], {}, {}, undefined);
+        if (maxDuration < 0) {
+            if (maxKubeWaitDuration < 0) {
+                maxKubeWaitDuration = DEFAULT_WAIT_DURATION;
+            }
+            maxDuration = maxKubeWaitDuration;
+        } else if (maxKubeWaitDuration < 0) {
+            maxKubeWaitDuration = maxDuration;
+        }
 
-        const withSteps = stepsBuilder
-            .addStepGroup(gb => gb)
-            .addStepGroup(gb => gb);
-
-        // Inject inline templates into the step groups
-        const stepGroups = withSteps['stepGroups'];
-        stepGroups[0].steps = [{
-            name: "wait-for-create",
-            inline: {
-                container: {
-                    name: "main",
-                    image: kubectlImage,
-                    command: ["kubectl"],
-                    args: [
-                        "wait", "--for=create",
+        return new StepsBuilder(this.parentWorkflowScope, this.inputsScope, {}, [], {}, {}, undefined)
+            .addStep("waitForCreate", INLINE, b=>b
+                .addContainer((cb: any) => cb
+                    .addImageInfo(kubectlImage, kubectlImagePullPolicy)
+                    .addCommand(["kubectl"])
+                    .addArgs(["wait", "--for=create",
                         `${kind}/${name}`,
-                        `--timeout=${timeout}`,
-                        ...(namespace ? ["-n", namespace] : [])
-                    ],
-                    resources: {}
-                },
-                retryStrategy: {
-                    limit: retryLimit,
-                    retryPolicy: "Always",
-                    backoff: {duration: retryBackoffDuration}
-                }
-            }
-        } as any];
-        
-        stepGroups[1].steps = [{
-            name: "check-resource",
-            inline: {
-                resource: resourceBody
-            }
-        } as any];
-
-        return withSteps['getBody']();
+                        `--timeout=${maxKubeWaitDuration}s`,
+                        ...(namespace ? ["-n", namespace] : [])])
+                )
+                .addActiveDeadlineSeconds(maxDuration)
+                .addRetryParameters({
+                    limit: retryLimit, retryPolicy: retryPolicy,
+                    backoff: {duration: retryInitialBackoffDuration, factor: retryFactor, cap: maxDuration}
+                })
+            ).getBody();
     }
 }

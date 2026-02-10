@@ -195,7 +195,10 @@ export class StepsBuilder<
         return this.addStepGroup(gb => (gb as any).addTask(name, source, keyOrFn, ...restArgs)) as any;
     }
 
-    protected getBody() {
+    /**
+     * Made public because waitForResourceBuilder uses this to make its own body.
+     */
+    public getBody() {
         return {steps: this.stepGroups};
     }
 }
