@@ -23,7 +23,10 @@ def evaluate(namespace: str = "ma") -> dict:
 
     # 1. Workflow Completion (40 pts)
     log.info("Evaluating workflow completion...")
-    wf = run_bash(f"kubectl exec migration-console-0 -n {namespace} -- bash -c 'source /.venv/bin/activate && workflow status --all' 2>&1")
+    wf = run_bash(
+        f"kubectl exec migration-console-0 -n {namespace} -- "
+        f"bash -c 'source /.venv/bin/activate && workflow status --all' 2>&1"
+    )
     if "Succeeded" in wf["output"]:
         scores["workflow_completion"] = 40
     elif "Running" in wf["output"]:
@@ -34,11 +37,27 @@ def evaluate(namespace: str = "ma") -> dict:
 
     # 2. Data Integrity (30 pts)
     log.info("Evaluating data integrity...")
-    src = run_bash(f"kubectl exec migration-console-0 -n {namespace} -- bash -c 'source /.venv/bin/activate && console clusters curl source_cluster /_cat/indices?format=json' 2>&1")
-    tgt = run_bash(f"kubectl exec migration-console-0 -n {namespace} -- bash -c 'source /.venv/bin/activate && console clusters curl target_cluster /_cat/indices?format=json' 2>&1")
+    src = run_bash(
+        f"kubectl exec migration-console-0 -n {namespace} -- "
+        f"bash -c 'source /.venv/bin/activate && "
+        f"console clusters curl source_cluster /_cat/indices?format=json' 2>&1"
+    )
+    tgt = run_bash(
+        f"kubectl exec migration-console-0 -n {namespace} -- "
+        f"bash -c 'source /.venv/bin/activate && "
+        f"console clusters curl target_cluster /_cat/indices?format=json' 2>&1"
+    )
     try:
-        src_indices = {i["index"]: int(i["docs.count"]) for i in json.loads(src["output"]) if not i["index"].startswith(".")}
-        tgt_indices = {i["index"]: int(i["docs.count"]) for i in json.loads(tgt["output"]) if not i["index"].startswith(".")}
+        src_indices = {
+            i["index"]: int(i["docs.count"])
+            for i in json.loads(src["output"])
+            if not i["index"].startswith(".")
+        }
+        tgt_indices = {
+            i["index"]: int(i["docs.count"])
+            for i in json.loads(tgt["output"])
+            if not i["index"].startswith(".")
+        }
         if src_indices:
             matched = sum(1 for idx, cnt in src_indices.items() if tgt_indices.get(idx) == cnt)
             scores["data_integrity"] = round(matched / len(src_indices) * 30)

@@ -14,7 +14,13 @@ DB_PATH = os.path.expanduser("~/.local/share/kiro-cli/data.sqlite3")
 def main():
     # Get credentials from secrets manager
     result = subprocess.run(
-        ["aws", "secretsmanager", "get-secret-value", "--secret-id", SECRET_ID, "--region", REGION, "--query", "SecretString", "--output", "text"],
+        [
+            "aws", "secretsmanager", "get-secret-value",
+            "--secret-id", SECRET_ID,
+            "--region", REGION,
+            "--query", "SecretString",
+            "--output", "text"
+        ],
         capture_output=True, text=True
     )
     if result.returncode != 0:
@@ -31,7 +37,10 @@ def main():
     c = conn.cursor()
     c.execute("CREATE TABLE IF NOT EXISTS auth_kv (key TEXT PRIMARY KEY, value TEXT)")
     for key, value in creds.items():
-        c.execute("INSERT OR REPLACE INTO auth_kv (key, value) VALUES (?, ?)", (key, json.dumps(value)))
+        c.execute(
+            "INSERT OR REPLACE INTO auth_kv (key, value) VALUES (?, ?)",
+            (key, json.dumps(value))
+        )
     conn.commit()
     conn.close()
 
