@@ -257,7 +257,7 @@ export class SolutionsInfrastructureStack extends Stack {
                 --query 'Parameter.Value' \
                 --output text
         */
-        amiMap['us-gov-west-1'] = 'ami-08f42c51760f3e3af';
+        amiMap['us-gov-west-1'] = 'ami-026b4e20cce457db1';
         /*
             aws ssm get-parameter \
                 --region us-gov-east-1 \
@@ -265,7 +265,7 @@ export class SolutionsInfrastructureStack extends Stack {
                 --query 'Parameter.Value' \
                 --output text
         */
-        amiMap['us-gov-east-1'] = 'ami-0c16bde0528963329';
+        amiMap['us-gov-east-1'] = 'ami-09508aa4f79530b83';
 
         const securityGroup = new SecurityGroup(this, 'BootstrapSecurityGroup', {
             vpc: vpc,
