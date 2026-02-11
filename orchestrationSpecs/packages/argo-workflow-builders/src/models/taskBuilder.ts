@@ -575,7 +575,7 @@ export abstract class TaskBuilder<
         LoopT extends NonSerializedPlainObject = never
     >(
         name: string,
-        bodyBuilder: { getBody(): any; retryParameters?: any },
+        bodyBuilder: { getBody(): any; inputsScope?: any, retryParameters?: any },
         params: ParamsWithLiteralsOrExpressionsIncludingSerialized<CallerParams<IN>>,
         loopWith?: LoopWithUnion<LoopT>
     ): NamedTask<IN, OUT, LoopT> {
@@ -583,6 +583,7 @@ export abstract class TaskBuilder<
         return {
             name,
             inline: {
+                ...(bodyBuilder.inputsScope ? {inputsScope: bodyBuilder.inputsScope} : {}),
                 ...body,
                 ...(bodyBuilder.retryParameters ? {retryStrategy: bodyBuilder.retryParameters} : {})
             },

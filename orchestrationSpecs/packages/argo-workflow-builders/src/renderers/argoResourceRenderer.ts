@@ -108,8 +108,9 @@ function formatArguments(passedParameters: { parameters?: Record<string, any> | 
 }
 
 function formatInlineTemplate(inline: Record<string, any>): Record<string, any> {
-    const {retryStrategy, ...bodyContent} = inline;
+    const {retryStrategy, inputsScope, ...bodyContent} = inline;
     return {
+        ...(inputsScope ? {inputs: formatParameters(inputsScope)} : {}),
         ...formatBody(bodyContent),
         ...(retryStrategy ? {retryStrategy} : {})
     };

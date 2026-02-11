@@ -1,6 +1,11 @@
 import {ExtendScope, GenericScope, WorkflowAndTemplatesScope} from "./workflowTypes";
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
-import {RetryableTemplateBodyBuilder, RetryableTemplateRebinder, RetryParameters} from "./templateBodyBuilder";
+import {
+    RetryableTemplateBodyBuilder,
+    RetryableTemplateRebinder,
+    RetryParameters,
+    TemplateBodyBuilder, TemplateRebinder
+} from "./templateBodyBuilder";
 import {SynchronizationConfig} from "./synchronization";
 import {K8sResourceBuilder, ResourceWorkflowDefinition} from "./k8sResourceBuilder";
 import {PlainObject} from "./plainObject";
@@ -10,6 +15,7 @@ import {StepsBuilder} from "./stepsBuilder";
 import {INLINE} from "./taskBuilder";
 import {AllowLiteralOrExpression, expr} from "./expression";
 import {IMAGE_PULL_POLICY} from "./containerBuilder";
+import {selectInputsForRegister} from "./parameterConversions";
 
 export interface WaitForCreationOpts {
     kubectlImage: AllowLiteralOrExpression<string>;
@@ -29,7 +35,7 @@ export class WaitForResourceBuilder<
     InputParamsScope extends InputParametersRecord,
     ResourceScope extends GenericScope,
     OutputParamsScope extends OutputParametersRecord
-> extends RetryableTemplateBodyBuilder<
+> extends TemplateBodyBuilder<
     ParentWorkflowScope,
     InputParamsScope,
     ResourceScope,
@@ -41,15 +47,14 @@ export class WaitForResourceBuilder<
         parentWorkflowScope: ParentWorkflowScope,
         inputsScope: InputParamsScope,
         private readonly k8sResourceBuilder: K8sResourceBuilder<ParentWorkflowScope, InputParamsScope, ResourceScope, OutputParamsScope>,
-        retryParameters: RetryParameters,
         synchronization: SynchronizationConfig | undefined,
         private readonly waitForCreationOpts?: WaitForCreationOpts
     ) {
-        const templateRebind: RetryableTemplateRebinder<ParentWorkflowScope, InputParamsScope, GenericScope> = (
-            ctx, inputs, body, outputs, retry, sync
+        const templateRebind: TemplateRebinder<ParentWorkflowScope, InputParamsScope, GenericScope> = (
+            ctx, inputs, body, outputs, sync
         ) => {
-            const newK8sBuilder = new K8sResourceBuilder(ctx, inputs, body, outputs, retry, sync);
-            return new WaitForResourceBuilder(ctx, inputs, newK8sBuilder, retry, sync, this.waitForCreationOpts) as any;
+            const newK8sBuilder = new K8sResourceBuilder(ctx, inputs, body, outputs, {}, sync);
+            return new WaitForResourceBuilder(ctx, inputs, newK8sBuilder, sync, this.waitForCreationOpts) as any;
         };
 
         super(
@@ -57,7 +62,6 @@ export class WaitForResourceBuilder<
             inputsScope,
             k8sResourceBuilder['bodyScope'],
             k8sResourceBuilder['outputsScope'],
-            retryParameters,
             synchronization,
             templateRebind
         );
@@ -76,7 +80,6 @@ export class WaitForResourceBuilder<
             this.parentWorkflowScope,
             this.inputsScope,
             newK8sBuilder,
-            this.retryParameters,
             this.synchronization,
             this.waitForCreationOpts
         );
@@ -89,7 +92,6 @@ export class WaitForResourceBuilder<
             this.parentWorkflowScope,
             this.inputsScope,
             this.k8sResourceBuilder,
-            this.retryParameters,
             this.synchronization,
             opts
         );
@@ -111,7 +113,6 @@ export class WaitForResourceBuilder<
             this.parentWorkflowScope,
             this.inputsScope,
             newK8sBuilder,
-            this.retryParameters,
             this.synchronization,
             this.waitForCreationOpts
         );
@@ -139,7 +140,7 @@ export class WaitForResourceBuilder<
             retryPolicy = "Always",
             maxDuration = -1,
             maxKubeWaitDuration = -1,
-            retryLimit = 5,
+            retryLimit = 1000*1000, // let the active deadline take care of this
             retryInitialBackoffDuration = 10,
             retryFactor = 2
         } = this.waitForCreationOpts;
@@ -153,22 +154,45 @@ export class WaitForResourceBuilder<
             maxKubeWaitDuration = maxDuration;
         }
 
+        const passThroughInputs = (ctx: {register: (params: Record<string, any>) => any}) => {
+            const selectedInputs = selectInputsForRegister(this.k8sResourceBuilder as any, ctx);
+            return ctx.register(selectedInputs as Record<string, any>);
+        };
+
         return new StepsBuilder(this.parentWorkflowScope, this.inputsScope, {}, [], {}, {}, undefined)
-            .addStep("waitForCreate", INLINE, b=>b
-                .addContainer(cb => cb
-                    .addImageInfo(kubectlImage, kubectlImagePullPolicy)
-                    .addCommand(["kubectl"])
-                    .addArgs(["wait", "--for=create",
-                        `${kind}/${name}`,
-                        `--timeout=${maxKubeWaitDuration}s`,
-                        ...(namespace ? ["-n", namespace] : [])])
-                    .addActiveDeadlineSeconds(_=>expr.literal(maxDuration))
-                    .addRetryParameters({
-                        limit: `${retryLimit}`, retryPolicy: `${retryPolicy}`,
-                        backoff: {duration: `${retryInitialBackoffDuration}`, factor: `${retryFactor}`, cap: `${maxDuration}`}
-                    })
-                    .addResources({})
-                )
-            ).getBody();
+            .addStep("waitForCreate", INLINE, (b: any)=>b
+                    .addInputsFromRecord(this.k8sResourceBuilder.inputsScope)
+                    .addContainer((cb: any) => cb
+                        .addImageInfo(kubectlImage, kubectlImagePullPolicy)
+                        .addCommand(["kubectl"])
+                        .addArgs(["wait", "--for=create",
+                            expr.concat(expr.literal(`${kind}/`), name),
+                            `--timeout=${maxKubeWaitDuration}s`,
+                            ...(namespace ? ["-n", namespace] : [])])
+                        .addActiveDeadlineSeconds((_: any)=>expr.literal(maxDuration))
+                        .addRetryParameters({
+                            limit: `${retryLimit}`, retryPolicy: `${retryPolicy}`,
+                            backoff: {duration: `${retryInitialBackoffDuration}`, factor: `${retryFactor}`, cap: `${maxDuration}`}
+                        })
+                        .addResources({
+                            limits: {
+                                cpu: "50m", // 1% of a CPU
+                                memory: "32Mi",
+                            },
+                            requests: {
+                                cpu: "50m",
+                                memory: "32Mi",
+                            }
+                        })
+                    ),
+                passThroughInputs as any, undefined)
+            .addStep("waitForCreatedResource", INLINE, b=>b
+                    .addInputsFromRecord(this.k8sResourceBuilder.inputsScope)
+                    .addResourceTask(
+                        (_: any) => this.k8sResourceBuilder as any,
+                        () => this.k8sResourceBuilder as any
+                    ),
+                passThroughInputs as any, undefined)
+            .getBody();
     }
 }
