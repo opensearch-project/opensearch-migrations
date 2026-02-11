@@ -55,13 +55,16 @@ source:
 
   imageTag: "latest"
   image: "migrations/elasticsearch_searchguard"
-  roles: [ master, data, ingest ]
+  roles: [ "master ", "data", "ingest" ]
   antiAffinity: "soft"
   esJavaOpts: "-Xms512m -Xmx512m"
   protocol: https
   # for simplest dev testing
   replicas: 1
   createCert: false
+  cluster.initial_master_nodes: ""
+  elasticsearch:
+    endpoints: []
   esConfig:
     elasticsearch.yml: |
       cluster.name: "docker-cluster"
@@ -97,9 +100,6 @@ source:
   minimumMasterNodes: 1
   persistence:
     enabled: false
-  extraEnvs:
-    - name: cluster.initial_master_nodes
-      value: null  # Set to null to disable
 
 target:
   image:
