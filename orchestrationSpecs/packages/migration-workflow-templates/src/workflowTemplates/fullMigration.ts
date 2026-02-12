@@ -26,14 +26,14 @@ import {
     configMapKey,
     defineParam,
     defineRequiredParam,
-    expr,
+    expr, GenericScope,
     IMAGE_PULL_POLICY,
-    InputParamDef,
+    InputParamDef, InputParametersRecord,
     INTERNAL,
-    makeParameterLoop,
+    makeParameterLoop, OutputParametersRecord,
     selectInputsFieldsAsExpressionRecord,
-    selectInputsForRegister,
-    typeToken,
+    selectInputsForRegister, TemplateBuilder,
+    typeToken, WorkflowAndTemplatesScope,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
 import {DocumentBulkLoad} from "./documentBulkLoad";
@@ -43,6 +43,9 @@ import {CreateOrGetSnapshot} from "./createOrGetSnapshot";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {SetupKafka} from "./setupKafka";
+
+const SECONDS_IN_DAYS = 24*3600;
+const LONGEST_POSSIBLE_MIGRATION = 365*SECONDS_IN_DAYS;
 
 const uniqueRunNonceParam = {
     uniqueRunNonce: defineRequiredParam<string>({description: "Workflow session nonce"})
@@ -99,87 +102,67 @@ export const FullMigration = WorkflowBuilder.create({
 
     // ── Wait templates (resource get with retry) ─────────────────────────
 
-    .addTemplate("waitForKafkaTopic", t => t
-        .addRequiredInput("topicName", typeToken<string>())
-        .addWaitForResource(b => b
+    .addTemplate("waitForKafkaTopic", b => b
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addWaitForNewResource(b=>b
             .setDefinition({
-                action: "get",
-                successCondition: "status.topicName",
-                manifest: {
-                    apiVersion: "kafka.strimzi.io/v1beta2",
-                    kind: "KafkaTopic",
-                    metadata: { name: b.inputs.topicName }
+                resourceKindAndName: expr.concat(expr.literal(""), b.inputs.resourceName),
+                waitForCreation: {
+                    kubectlImage: b.inputs.imageMigrationConsoleLocation,
+                    kubectlImagePullPolicy: b.inputs.imageMigrationConsolePullPolicy,
+                    maxDurationSeconds: LONGEST_POSSIBLE_MIGRATION
                 }
-            }))
-        .addRetryParameters({
-            limit: "60", retryPolicy: "Always",
-            backoff: { duration: "10", factor: "2", cap: "120" }
-        })
+            })
+        )
     )
 
 
     .addTemplate("waitForCapturedTraffic", t => t
         .addRequiredInput("resourceName", typeToken<string>())
-        .addWaitForResource(b => b
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addWaitForExistingResource(b=>b
             .setDefinition({
-                action: "get",
-                successCondition: "status.phase == Ready",
-                manifest: {
+                resource: {
                     apiVersion: CRD_API_VERSION,
                     kind: "CapturedTraffic",
-                    metadata: { name: b.inputs.resourceName }
-                }
-            }))
-        .addRetryParameters({
-            limit: "120", retryPolicy: "Always",
-            backoff: { duration: "10", factor: "2", cap: "120" }
-        })
+                    name: b.inputs.resourceName
+                },
+                conditions: {successCondition: "status.phase == Ready"}
+            })
+        )
     )
 
 
     .addTemplate("waitForDataSnapshot", t => t
         .addRequiredInput("resourceName", typeToken<string>())
-        .addWaitForResource(b => b
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addWaitForExistingResource(b=>b
             .setDefinition({
-                action: "get",
-                successCondition: "status.phase == Ready",
-                manifest: {
+                resource: {
                     apiVersion: CRD_API_VERSION,
-                    kind: "DataSnapshot",
-                    metadata: { name: b.inputs.resourceName }
-                }
-            }))
-        .addRetryParameters({
-            limit: "120", retryPolicy: "Always",
-            backoff: { duration: "10", factor: "2", cap: "120" }
-        })
+                    kind:"DataSnapshot",
+                    name: b.inputs.resourceName
+                },
+                conditions: {successCondition: "status.phase == Ready"}
+            })
+        )
     )
 
 
     .addTemplate("waitForSnapshotMigration", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-
-        .addWaitForResource(b => b
+        .addWaitForExistingResource(b=>b
             .setDefinition({
-                action: "get",
-                successCondition: "status.phase == Ready",
-                manifest: {
+                resource: {
                     apiVersion: CRD_API_VERSION,
                     kind: "SnapshotMigration",
-                    metadata: { name: b.inputs.resourceName }
-                }
-            })
-            .setWaitForCreation({
-                kubectlImage: b.inputs.imageMigrationConsoleLocation,
-                kubectlImagePullPolicy: b.inputs.imageMigrationConsolePullPolicy,
-                maxDuration: (2*24*60*60)
+                    name: b.inputs.resourceName
+                },
+                conditions: {successCondition: "status.phase == Ready"}
             })
         )
-        .addRetryParameters({
-            limit: "120", retryPolicy: "Always",
-            backoff: { duration: "10", factor: "2", cap: "120" }
-        })
     )
 
 
@@ -315,11 +298,13 @@ export const FullMigration = WorkflowBuilder.create({
 
     .addTemplate("setupSingleProxy", t => t
         .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addDag(b => b
             .addTask("waitForTopic", INTERNAL, "waitForKafkaTopic", c =>
                 c.register({
-                    topicName: expr.jsonPathStrict(b.inputs.proxyConfig, "kafkaConfig", "kafkaTopic")
+                    ...selectInputsForRegister(b, c),
+                    resourceName: expr.jsonPathStrict(b.inputs.proxyConfig, "kafkaConfig", "kafkaTopic")
                 })
             )
             .addTask("placeholderProxySetup", INTERNAL, "doNothing",
@@ -356,6 +341,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addDag(b => b
             .addTask("waitForProxyDeps", INTERNAL, "waitForCapturedTraffic", c =>
                     c.register({
+                        ...selectInputsForRegister(b, c),
                         resourceName: expr.asString(c.item)
                     }), {
                     loopWith: makeParameterLoop(
@@ -499,6 +485,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addDag(b => b
             .addTask("waitForSnapshot", INTERNAL, "waitForDataSnapshot", c =>
                 c.register({
+                    ...selectInputsForRegister(b, c),
                     resourceName: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "snapshotLabel")
                 })
             )
@@ -593,6 +580,7 @@ export const FullMigration = WorkflowBuilder.create({
             )
             .addTask("setupProxies", INTERNAL, "setupSingleProxy", c =>
                 c.register({
+                    ...selectInputsForRegister(b, c),
                     proxyConfig: expr.serialize(c.item)
                 }), {
                     loopWith: makeParameterLoop(

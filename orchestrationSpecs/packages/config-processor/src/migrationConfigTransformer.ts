@@ -307,7 +307,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     throw new Error(`Snapshot '${snapshotName}' in source '${sourceName}' references repo '${snapshotDef.repoName}' which is not defined`);
                 }
 
-                const globalSnapshotName = `${sourceName}.${snapshotName}`;
+                const globalSnapshotName = `${sourceName}-${snapshotName}`;
                 const proxyDeps = proxyNamesBySource.get(sourceName);
 
                 const { snapshotPrefix: _sp, ...createSnapshotOpts } = snapshotDef.config.createSnapshotConfig;
@@ -357,7 +357,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     throw new Error(`Migration references snapshot '${snapshotName}' not defined in source '${fromSource}'`);
                 }
 
-                const globalSnapshotName = `${fromSource}.${snapshotName}`;
+                const globalSnapshotName = `${fromSource}-${snapshotName}`;
                 const repoConfig = sourceCluster.snapshotInfo?.repos?.[snapshotDef.repoName];
 
                 results.push({

@@ -1738,10 +1738,41 @@ exports[`test workflow template renderings full-migration 1`] = `
         },
       },
       {
+        "activeDeadlineSeconds": "31536000",
+        "container": {
+          "args": [
+            "wait",
+            "--for=create",
+            "{{=''+inputs.parameters.resourceName}}",
+            "--timeout=undefineds",
+          ],
+          "command": [
+            "kubectl",
+          ],
+          "env": [],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "50m",
+              "memory": "32Mi",
+            },
+            "requests": {
+              "cpu": "50m",
+              "memory": "32Mi",
+            },
+          },
+        },
         "inputs": {
           "parameters": [
             {
-              "name": "topicName",
+              "name": "resourceName",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
             },
           ],
         },
@@ -1749,30 +1780,18 @@ exports[`test workflow template renderings full-migration 1`] = `
         "outputs": {
           "parameters": [],
         },
-        "resource": {
-          "action": "get",
-          "manifest": "apiVersion: kafka.strimzi.io/v1beta2
-kind: KafkaTopic
-metadata:
-  name: "{{inputs.parameters.topicName}}"
-",
-          "successCondition": "status.topicName",
-        },
-        "retryStrategy": {
-          "backoff": {
-            "cap": "120",
-            "duration": "10",
-            "factor": "2",
-          },
-          "limit": "60",
-          "retryPolicy": "Always",
-        },
       },
       {
         "inputs": {
           "parameters": [
             {
               "name": "resourceName",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
             },
           ],
         },
@@ -1789,21 +1808,18 @@ metadata:
 ",
           "successCondition": "status.phase == Ready",
         },
-        "retryStrategy": {
-          "backoff": {
-            "cap": "120",
-            "duration": "10",
-            "factor": "2",
-          },
-          "limit": "120",
-          "retryPolicy": "Always",
-        },
       },
       {
         "inputs": {
           "parameters": [
             {
               "name": "resourceName",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
             },
           ],
         },
@@ -1819,15 +1835,6 @@ metadata:
   name: "{{inputs.parameters.resourceName}}"
 ",
           "successCondition": "status.phase == Ready",
-        },
-        "retryStrategy": {
-          "backoff": {
-            "cap": "120",
-            "duration": "10",
-            "factor": "2",
-          },
-          "limit": "120",
-          "retryPolicy": "Always",
         },
       },
       {
@@ -1848,52 +1855,15 @@ metadata:
         "outputs": {
           "parameters": [],
         },
-        "retryStrategy": {
-          "backoff": {
-            "cap": "120",
-            "duration": "10",
-            "factor": "2",
-          },
-          "limit": "120",
-          "retryPolicy": "Always",
+        "resource": {
+          "action": "get",
+          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
+kind: SnapshotMigration
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+",
+          "successCondition": "status.phase == Ready",
         },
-        "steps": [
-          [
-            {
-              "arguments": {
-                "parameters": [],
-              },
-              "inline": {
-                "activeDeadlineSeconds": "172800",
-                "container": {
-                  "args": [
-                    "wait",
-                    "--for=create",
-                    "SnapshotMigration/[object Object]",
-                    "--timeout=172800s",
-                  ],
-                  "command": [
-                    "kubectl",
-                  ],
-                  "env": [],
-                  "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-                  "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  "resources": {},
-                },
-                "retryStrategy": {
-                  "backoff": {
-                    "cap": 172800,
-                    "duration": 10,
-                    "factor": 2,
-                  },
-                  "limit": 5,
-                  "retryPolicy": "Always",
-                },
-              },
-              "name": "waitForCreate",
-            },
-          ],
-        ],
       },
       {
         "inputs": {
@@ -2113,7 +2083,15 @@ status:
               "arguments": {
                 "parameters": [
                   {
-                    "name": "topicName",
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "resourceName",
                     "value": "{{=jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic')}}",
                   },
                 ],
@@ -2168,6 +2146,12 @@ status:
             {
               "name": "proxyConfig",
             },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
           ],
         },
         "name": "setupsingleproxy",
@@ -2181,6 +2165,14 @@ status:
             {
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
                   {
                     "name": "resourceName",
                     "value": "{{item}}",
@@ -2660,6 +2652,14 @@ status:
               "arguments": {
                 "parameters": [
                   {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
                     "name": "resourceName",
                     "value": "{{=jsonpath(inputs.parameters.snapshotMigrationConfig, '$.snapshotLabel')}}",
                   },
@@ -2899,6 +2899,14 @@ status:
             {
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
                   {
                     "name": "proxyConfig",
                     "value": "{{=toJSON(item)}}",

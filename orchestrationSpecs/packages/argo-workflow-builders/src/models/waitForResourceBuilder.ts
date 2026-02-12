@@ -1,4 +1,10 @@
-import {ExtendScope, GenericScope, WorkflowAndTemplatesScope} from "./workflowTypes";
+import {
+    ExtendScope,
+    GenericScope,
+    InputParamsToExpressions,
+    WorkflowAndTemplatesScope,
+    WorkflowInputsToExpressions
+} from "./workflowTypes";
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {
     RetryableTemplateBodyBuilder,
@@ -14,185 +20,201 @@ import {TypeToken} from "./sharedTypes";
 import {StepsBuilder} from "./stepsBuilder";
 import {INLINE} from "./taskBuilder";
 import {AllowLiteralOrExpression, expr} from "./expression";
-import {IMAGE_PULL_POLICY} from "./containerBuilder";
-import {selectInputsForRegister} from "./parameterConversions";
+import {ContainerBuilder, IMAGE_PULL_POLICY} from "./containerBuilder";
 
-export interface WaitForCreationOpts {
+type WaitForCreationOptions = {
     kubectlImage: AllowLiteralOrExpression<string>;
     kubectlImagePullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>;
-    maxDuration?: number;
+    maxDurationSeconds: AllowLiteralOrExpression<number | string>;
     maxKubeWaitDuration?: number;
-
     retryPolicy?: string;
-
     retryLimit?: number;
     retryInitialBackoffDuration?: number;
     retryFactor?: number;
+};
+
+export type WaitForNewResourceDefinition = {
+    namespace?: AllowLiteralOrExpression<string>;
+    resourceKindAndName: AllowLiteralOrExpression<string>;
+    waitForCreation: WaitForCreationOptions;
+};
+
+export type WaitForConditions = {
+    successCondition?: string;
+    failureCondition?: string;
+};
+
+type ExistingResourceSpecifier = {
+    kind: AllowLiteralOrExpression<string>;
+    name: AllowLiteralOrExpression<string>;
+    apiVersion: AllowLiteralOrExpression<string>;
 }
 
-export class WaitForResourceBuilder<
+export type WaitForExistingResourceDefinition = {
+    resource: ExistingResourceSpecifier;
+    conditions: WaitForConditions;
+};
+
+export class WaitForNewResourceBuilder<
     ParentWorkflowScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
-    ResourceScope extends GenericScope,
+    BodyScope extends GenericScope,
     OutputParamsScope extends OutputParametersRecord
 > extends TemplateBodyBuilder<
     ParentWorkflowScope,
     InputParamsScope,
-    ResourceScope,
+    BodyScope,
     OutputParamsScope,
-    WaitForResourceBuilder<ParentWorkflowScope, InputParamsScope, ResourceScope, any>,
+    WaitForNewResourceBuilder<ParentWorkflowScope, InputParamsScope, any, any>,
     GenericScope
 > {
     constructor(
         parentWorkflowScope: ParentWorkflowScope,
         inputsScope: InputParamsScope,
-        private readonly k8sResourceBuilder: K8sResourceBuilder<ParentWorkflowScope, InputParamsScope, ResourceScope, OutputParamsScope>,
-        synchronization: SynchronizationConfig | undefined,
-        private readonly waitForCreationOpts?: WaitForCreationOpts
+        bodyScope: BodyScope,
+        outputsScope: OutputParamsScope,
+        synchronization: SynchronizationConfig | undefined
     ) {
-        const templateRebind: TemplateRebinder<ParentWorkflowScope, InputParamsScope, GenericScope> = (
-            ctx, inputs, body, outputs, sync
-        ) => {
-            const newK8sBuilder = new K8sResourceBuilder(ctx, inputs, body, outputs, {}, sync);
-            return new WaitForResourceBuilder(ctx, inputs, newK8sBuilder, sync, this.waitForCreationOpts) as any;
-        };
+        const templateRebind: TemplateRebinder<
+            ParentWorkflowScope,
+            InputParamsScope,
+            GenericScope
+        > = (ctx, inputs, body, outputs, sync) =>
+            new WaitForNewResourceBuilder(ctx, inputs, body as any, outputs as any, sync) as any;
 
-        super(
-            parentWorkflowScope,
-            inputsScope,
-            k8sResourceBuilder['bodyScope'],
-            k8sResourceBuilder['outputsScope'],
-            synchronization,
-            templateRebind
-        );
+        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, synchronization, templateRebind);
     }
 
-    public setDefinition(
-        workflowDefinition: ResourceWorkflowDefinition
-    ): WaitForResourceBuilder<
-        ParentWorkflowScope,
-        InputParamsScope,
-        ResourceScope & ResourceWorkflowDefinition,
-        OutputParamsScope
+    setDefinition(
+        def: WaitForNewResourceDefinition
+    ):
+        WaitForNewResourceBuilder<
+            ParentWorkflowScope,
+            InputParamsScope,
+            WaitForNewResourceDefinition,
+            OutputParamsScope
     > {
-        const newK8sBuilder = this.k8sResourceBuilder.setDefinition(workflowDefinition);
-        return new WaitForResourceBuilder(
+        return new WaitForNewResourceBuilder(
             this.parentWorkflowScope,
             this.inputsScope,
-            newK8sBuilder,
-            this.synchronization,
-            this.waitForCreationOpts
-        );
-    }
-
-    public setWaitForCreation(
-        opts: WaitForCreationOpts
-    ): WaitForResourceBuilder<ParentWorkflowScope, InputParamsScope, ResourceScope, OutputParamsScope> {
-        return new WaitForResourceBuilder(
-            this.parentWorkflowScope,
-            this.inputsScope,
-            this.k8sResourceBuilder,
-            this.synchronization,
-            opts
-        );
-    }
-
-    public addJsonPathOutput<T extends PlainObject, Name extends string>(
-        name: UniqueNameConstraintAtDeclaration<Name, OutputParamsScope>,
-        pathValue: string,
-        _t: TypeToken<T>,
-        descriptionValue?: string
-    ): WaitForResourceBuilder<
-        ParentWorkflowScope,
-        InputParamsScope,
-        ResourceScope,
-        ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>
-    > {
-        const newK8sBuilder = this.k8sResourceBuilder.addJsonPathOutput(name, pathValue, _t, descriptionValue);
-        return new WaitForResourceBuilder(
-            this.parentWorkflowScope,
-            this.inputsScope,
-            newK8sBuilder,
-            this.synchronization,
-            this.waitForCreationOpts
+            def,
+            this.outputsScope,
+            this.synchronization
         );
     }
 
     protected getBody() {
-        if (!this.waitForCreationOpts) {
-            return this.k8sResourceBuilder['getBody']();
-        }
+        const def: WaitForNewResourceDefinition = this.bodyScope as any;
+        const waitOpts = def.waitForCreation;
 
-        const resourceBody = this.k8sResourceBuilder['getBody']().resource;
-        const manifest = resourceBody.manifest;
-        const kind = manifest?.kind;
-        const name = manifest?.metadata?.name;
-        const namespace = manifest?.metadata?.namespace;
+        const retryPolicy = waitOpts.retryPolicy ?? "Always";
+        const retryLimit = waitOpts.retryLimit ?? 1_000_000; // you used “let active deadline handle it”
+        const retryInitialBackoffDuration = waitOpts.retryInitialBackoffDuration ?? 10;
+        const retryFactor = waitOpts.retryFactor ?? 2;
 
-        if (!kind || !name) {
-            throw new Error("waitForCreation requires manifest to have kind and metadata.name");
-        }
-
+        // reconcile durations like your commented code did
         const DEFAULT_WAIT_DURATION = 300;
-        let {
-            kubectlImage,
-            kubectlImagePullPolicy,
-            retryPolicy = "Always",
-            maxDuration = -1,
-            maxKubeWaitDuration = -1,
-            retryLimit = 1000*1000, // let the active deadline take care of this
-            retryInitialBackoffDuration = 10,
-            retryFactor = 2
-        } = this.waitForCreationOpts;
+        const maxKformatBodubeWaitDuration =
+            waitOpts.maxKubeWaitDuration ??
+            (typeof waitOpts.maxDurationSeconds === "number" ? waitOpts.maxDurationSeconds : DEFAULT_WAIT_DURATION);
 
-        if (maxDuration < 0) {
-            if (maxKubeWaitDuration < 0) {
-                maxKubeWaitDuration = DEFAULT_WAIT_DURATION;
-            }
-            maxDuration = maxKubeWaitDuration;
-        } else if (maxKubeWaitDuration < 0) {
-            maxKubeWaitDuration = maxDuration;
-        }
+        const maxDurationSeconds = waitOpts.maxDurationSeconds ?? waitOpts.maxKubeWaitDuration;
 
-        const passThroughInputs = (ctx: {register: (params: Record<string, any>) => any}) => {
-            const selectedInputs = selectInputsForRegister(this.k8sResourceBuilder as any, ctx);
-            return ctx.register(selectedInputs as Record<string, any>);
-        };
+        const namespaceArgs =
+            def.namespace !== undefined ? ["-n", def.namespace] : [];
 
-        return new StepsBuilder(this.parentWorkflowScope, this.inputsScope, {}, [], {}, {}, undefined)
-            .addStep("waitForCreate", INLINE, (b: any)=>b
-                    .addInputsFromRecord(this.k8sResourceBuilder.inputsScope)
-                    .addContainer((cb: any) => cb
-                        .addImageInfo(kubectlImage, kubectlImagePullPolicy)
-                        .addCommand(["kubectl"])
-                        .addArgs(["wait", "--for=create",
-                            expr.concat(expr.literal(`${kind}/`), name),
-                            `--timeout=${maxKubeWaitDuration}s`,
-                            ...(namespace ? ["-n", namespace] : [])])
-                        .addActiveDeadlineSeconds((_: any)=>expr.literal(maxDuration))
-                        .addRetryParameters({
-                            limit: `${retryLimit}`, retryPolicy: `${retryPolicy}`,
-                            backoff: {duration: `${retryInitialBackoffDuration}`, factor: `${retryFactor}`, cap: `${maxDuration}`}
-                        })
-                        .addResources({
-                            limits: {
-                                cpu: "50m", // 1% of a CPU
-                                memory: "32Mi",
-                            },
-                            requests: {
-                                cpu: "50m",
-                                memory: "32Mi",
-                            }
-                        })
-                    ),
-                passThroughInputs as any, undefined)
-            .addStep("waitForCreatedResource", INLINE, b=>b
-                    .addInputsFromRecord(this.k8sResourceBuilder.inputsScope)
-                    .addResourceTask(
-                        (_: any) => this.k8sResourceBuilder as any,
-                        () => this.k8sResourceBuilder as any
-                    ),
-                passThroughInputs as any, undefined)
+        return new ContainerBuilder(this.parentWorkflowScope, this.inputsScope, {}, {}, {}, {}, {}, this.synchronization)
+            .addImageInfo(waitOpts.kubectlImage, waitOpts.kubectlImagePullPolicy)
+            .addCommand(["kubectl"])
+            .addArgs([
+                "wait",
+                "--for=create",
+                def.resourceKindAndName,
+                `--timeout=${waitOpts.maxKubeWaitDuration}s`,
+                ...namespaceArgs
+            ])
+            .addActiveDeadlineSeconds(() => expr.literal(maxDurationSeconds as any))
+            .addRetryParameters({
+                limit: `${retryLimit}`,
+                retryPolicy: `${retryPolicy}`,
+                backoff: {
+                    duration: `${retryInitialBackoffDuration}`,
+                    factor: `${retryFactor}`,
+                    cap: `${maxDurationSeconds as any}`
+                }
+            })
+            .addResources({
+                limits: { cpu: "50m", memory: "32Mi" },
+                requests: { cpu: "50m", memory: "32Mi" }
+            }).getBody();
+    }
+}
+
+
+export class WaitForExistingResourceBuilder<
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
+    InputParamsScope extends InputParametersRecord,
+    BodyScope extends GenericScope,
+    OutputParamsScope extends OutputParametersRecord
+> extends TemplateBodyBuilder<
+    ParentWorkflowScope,
+    InputParamsScope,
+    BodyScope,
+    OutputParamsScope,
+    WaitForExistingResourceBuilder<ParentWorkflowScope, InputParamsScope, any, any>,
+    GenericScope
+> {
+    constructor(
+        parentWorkflowScope: ParentWorkflowScope,
+        inputsScope: InputParamsScope,
+        bodyScope: BodyScope,
+        outputsScope: OutputParamsScope,
+        synchronization: SynchronizationConfig | undefined
+    ) {
+        const templateRebind: TemplateRebinder<
+            ParentWorkflowScope,
+            InputParamsScope,
+            GenericScope
+        > = (ctx, inputs, body, outputs, sync) =>
+            new WaitForExistingResourceBuilder(ctx, inputs, body as any, outputs as any, sync) as any;
+
+        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, synchronization, templateRebind);
+    }
+
+    setDefinition(
+        def: WaitForExistingResourceDefinition
+    ): WaitForExistingResourceBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        WaitForExistingResourceDefinition,
+        OutputParamsScope
+    > {
+        return new WaitForExistingResourceBuilder(
+            this.parentWorkflowScope,
+            this.inputsScope,
+            def,
+            this.outputsScope,
+            this.synchronization
+        );
+    }
+
+    protected getBody() {
+        const def: WaitForExistingResourceDefinition = this.bodyScope as any;
+        const m = def.resource;
+
+        return new K8sResourceBuilder(this.parentWorkflowScope, this.inputsScope, {}, {}, {})
+            .setDefinition({
+                action: "get",
+                manifest: {
+                    apiVersion: m.apiVersion,
+                    kind: m.kind,
+                    metadata: {
+                        name: m.name
+                    }
+                },
+                ...(def.conditions.successCondition ? { successCondition: def.conditions.successCondition!} : {}),
+                ...(def.conditions.failureCondition ? { failureCondition: def.conditions.failureCondition!} : {})
+            })
             .getBody();
     }
 }
