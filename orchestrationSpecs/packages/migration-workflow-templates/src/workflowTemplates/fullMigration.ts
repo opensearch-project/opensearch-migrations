@@ -361,8 +361,7 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     sourceConfig: b.inputs.sourceConfig,
-                    createSnapshotConfig: expr.serialize(
-                        expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "config")),
+                    createSnapshotConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotItemConfig, "config"),
                     snapshotPrefix: expr.get(
                         expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix"),
                     snapshotConfig: expr.serialize(expr.makeDict({
@@ -370,8 +369,7 @@ export const FullMigration = WorkflowBuilder.create({
                             createSnapshotConfig: expr.get(
                                 expr.deserializeRecord(b.inputs.snapshotItemConfig), "config")
                         }),
-                        repoConfig: expr.get(
-                            expr.deserializeRecord(b.inputs.snapshotItemConfig), "repo"),
+                        repoConfig: expr.deserializeRecord(expr.jsonPathStrictSerialized(b.inputs.snapshotItemConfig, "repo")),
                         // TODO: label should be the logical snapshot name (record key from user config),
                         // not snapshotPrefix. PER_SOURCE_CREATE_SNAPSHOTS_CONFIG needs a label field.
                         label: expr.get(
