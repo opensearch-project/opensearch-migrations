@@ -2205,7 +2205,7 @@ status:
                   },
                   {
                     "name": "createSnapshotConfig",
-                    "value": "{{=toJSON(fromJSON(inputs.parameters.snapshotItemConfig)['config'])}}",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotItemConfig, '$.config')}}",
                   },
                   {
                     "name": "snapshotPrefix",
@@ -2213,7 +2213,7 @@ status:
                   },
                   {
                     "name": "snapshotConfig",
-                    "value": "{{=toJSON(sprig.dict("config", sprig.dict("createSnapshotConfig", fromJSON(inputs.parameters.snapshotItemConfig)['config']), "repoConfig", fromJSON(inputs.parameters.snapshotItemConfig)['repo'], "label", fromJSON(inputs.parameters.snapshotItemConfig)['snapshotPrefix']))}}",
+                    "value": "{{=toJSON(sprig.dict("config", sprig.dict("createSnapshotConfig", fromJSON(inputs.parameters.snapshotItemConfig)['config']), "repoConfig", fromJSON(jsonpath(inputs.parameters.snapshotItemConfig, '$.repo')), "label", fromJSON(inputs.parameters.snapshotItemConfig)['snapshotPrefix']))}}",
                   },
                   {
                     "name": "targetLabel",
