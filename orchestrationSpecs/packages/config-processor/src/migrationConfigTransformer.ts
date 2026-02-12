@@ -232,10 +232,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
         const output = {
             ...(kafkaClusters.length > 0 ? { kafkaClusters } : {}),
-            proxies,
-            snapshots,
-            snapshotMigrations,
-            trafficReplays,
+            ...(proxies.length > 0 ? { proxies } : {}),
+            ...(snapshots.length > 0 ? { snapshots } : {}),
+            ...(snapshotMigrations.length > 0 ? { snapshotMigrations } : {}),
+            ...(trafficReplays.length > 0 ? { trafficReplays } : {})
         };
 
         try {

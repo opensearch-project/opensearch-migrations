@@ -20,7 +20,6 @@ import {
     SNAPSHOT_MIGRATION_FILTER,
     TARGET_CLUSTER_CONFIG,
 } from '@opensearch-migrations/schemas'
-import {ConfigManagementHelpers} from "./configManagementHelpers";
 import {
     AllowLiteralOrExpression,
     configMapKey,
@@ -459,13 +458,6 @@ export const FullMigration = WorkflowBuilder.create({
                     }),
                 { when: { templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)) }}
             )
-            .addStep("targetBackfillCompleteCheck", ConfigManagementHelpers, "decrementLatch", c =>
-                c.register({
-                    ...(selectInputsForRegister(b, c)),
-                    prefix: b.inputs.uniqueRunNonce,
-                    targetName: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
-                    processorId: c.steps.idGenerator.id
-                }))
             .addStep("signalReplayerForTarget", INTERNAL, "signalReplayerForTarget", c =>
                 c.register({
                     ...selectInputsForRegister(b, c)

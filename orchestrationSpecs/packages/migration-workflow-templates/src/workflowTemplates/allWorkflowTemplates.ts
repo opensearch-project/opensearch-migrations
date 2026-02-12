@@ -9,7 +9,6 @@ import {MigrationConsole} from "./migrationConsole";
 import {Replayer} from "./replayer";
 import {SetupKafka} from "./setupKafka";
 import {SetupCapture} from "./setupCapture";
-import {ConfigManagementHelpers} from "./configManagementHelpers";
 
 export const AllWorkflowTemplates = [
     CaptureProxy,
@@ -22,6 +21,5 @@ export const AllWorkflowTemplates = [
     Replayer,
     SetupCapture,
     SetupKafka,
-    ConfigManagementHelpers,
     TestMigrationWithWorkflowCli,
 ];

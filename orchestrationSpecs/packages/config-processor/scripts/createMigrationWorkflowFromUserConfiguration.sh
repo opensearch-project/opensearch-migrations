@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e  # Exit on any error
+set -e -x # Exit on any error
 
 # Check if config filename argument is provided
 if [ $# -eq 0 ]; then
@@ -29,9 +29,15 @@ UUID=$(printf '%x' $(date +%s))$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head 
 echo "Generated unique uniqueRunNonce: $UUID"
 
 echo "Running configuration conversion..."
-$INITIALIZE_CMD --user-config $CONFIG_FILENAME --unique-run-nonce $UUID --output-dir $TEMP_DIR $@
+$INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR $@
 
 echo "Applying Kubernetes resources..."
+
+# Apply CRD resources
+if [ -f "$TEMP_DIR/crdResources.yaml" ]; then
+    echo "Applying CRD resources..."
+    kubectl apply -f "$TEMP_DIR/crdResources.yaml"
+fi
 
 # Apply approval config maps
 if [ -f "$TEMP_DIR/approvalConfigMaps.yaml" ]; then
