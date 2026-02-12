@@ -161,6 +161,22 @@ type DeepStripUndefined<T> =
                     // primitives / strings / numbers / booleans
                     Exclude<T, undefined>;
 
+type DeepNormalizeJsonPath<T> =
+    T extends any
+        ? T extends readonly (infer U)[] ? DeepNormalizeJsonPath<U>[] :
+            T extends object ? { -readonly [K in keyof T]: DeepNormalizeJsonPath<T[K]> } :
+                T
+        : never;
+
+type JsonPathResult<T extends PlainObject> =
+    DeepStripUndefined<T> extends Serialized<infer U extends PlainObject>
+        ? Serialized<DeepNormalizeJsonPath<DeepStripUndefined<U>>>
+        : DeepNormalizeJsonPath<DeepStripUndefined<T>> extends infer U extends PlainObject
+            ? U extends AggregateType
+                ? Serialized<U>
+                : U
+            : never;
+
 export class RecordGetExpression<
     E extends BaseExpression<PlainRecord, any>,
     // infer T from E's result
@@ -761,42 +777,27 @@ class ExprBuilder {
     >(
         source: BaseExpression<Serialized<T>, any>,
         key: K
-    ): BaseExpression<SegmentsValueStrict<T, readonly [K]>, "complicatedExpression">;
+    ): BaseExpression<JsonPathResult<SegmentsValueStrict<T, readonly [K]>>, "complicatedExpression">;
     jsonPathStrict<
         T extends Record<string, any>,
         S extends KeySegments<T>
     >(
         source: BaseExpression<Serialized<T>, any>,
         ...segs: S
-    ): BaseExpression<SegmentsValueStrict<T, S>, "complicatedExpression">;
+    ): BaseExpression<JsonPathResult<SegmentsValueStrict<T, S>>, "complicatedExpression">;
     jsonPathStrict<
         T extends Serialized<Record<string, any>>,
         K extends Extract<KeysOfUnion<UnwrapSerialized<T>>, string>
     >(
         source: BaseExpression<T, any>,
         key: K
-    ): BaseExpression<SegmentsValueStrict<UnwrapSerialized<T>, readonly [K]>, "complicatedExpression">;
+    ): BaseExpression<JsonPathResult<SegmentsValueStrict<UnwrapSerialized<T>, readonly [K]>>, "complicatedExpression">;
     jsonPathStrict(
         source: BaseExpression<Serialized<any>, any>,
         ...segs: readonly unknown[]
     ): BaseExpression<any, "complicatedExpression"> {
         const path = _segmentsToPath(segs);
         return new RecordFieldSelectExpression(source, path) as any;
-    }
-
-    /**
-     * Like jsonPathStrict, but returns a Serialized result. Use this when extracting
-     * nested object fields from a serialized record, where the field value is itself
-     * a serialized string at runtime.
-     */
-    jsonPathStrictSerialized<
-        T extends Record<string, any>,
-        K extends Extract<keyof NonMissing<T>, string>
-    >(
-        source: BaseExpression<Serialized<T>, any>,
-        key: K
-    ): BaseExpression<Serialized<SegmentsValueStrict<T, readonly [K]>>, "complicatedExpression"> {
-        return this.jsonPathStrict(source, key) as any;
     }
 
     omit<
@@ -837,7 +838,7 @@ class ExprBuilder {
     }
 
 
-    serialize<R extends PlainObject, CIn extends ExpressionType>(data: BaseExpression<R,CIn>) {
+    serialize<R extends NonSerializedPlainObject, CIn extends ExpressionType>(data: BaseExpression<R,CIn>) {
         return fn<Serialized<R>,CIn,"complicatedExpression">("toJSON", data);
     }
 

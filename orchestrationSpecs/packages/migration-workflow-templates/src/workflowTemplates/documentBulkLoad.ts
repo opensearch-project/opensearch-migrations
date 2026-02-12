@@ -425,7 +425,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             b.inputs.documentBackfillConfig,
                             b.inputs.sessionName)
                     )),
-                    resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),
+                    resources: expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources"),
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),

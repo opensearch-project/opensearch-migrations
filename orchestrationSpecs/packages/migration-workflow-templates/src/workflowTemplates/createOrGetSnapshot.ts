@@ -77,7 +77,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                     ...selectInputsForKeys(b, getAcceptedRegisterKeys(c)),
                     snapshotConfig: expr.serialize(
                         expr.makeDict({
-                            repoConfig: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig"),
+                            repoConfig: expr.deserializeRecord(expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig")),
                             snapshotName: expr.toLowerCase(c.steps.getSnapshotName.outputs.snapshotName),
                             label: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
                         })

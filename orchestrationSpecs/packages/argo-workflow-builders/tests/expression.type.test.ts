@@ -1,5 +1,6 @@
 import {expectTypeOf} from "expect-type";
 import {BaseExpression, DeepWiden, expr} from "../src";
+import {Serialized} from "../src/models/plainObject";
 
 describe("expression type contracts", () => {
     it("expr.literal() produces the correct value/complexity types", () => {
@@ -58,13 +59,19 @@ describe("expression type contracts", () => {
         });
 
         const v1 = expr.jsonPathStrict(expr.recordToString(obj), "c");
-        const v2 = expr.index(v1, expr.literal(0));
+        const v2 = expr.index(expr.cast(expr.deserializeRecord(v1)).to<{ c2: { c3: string } }[]>(), expr.literal(0));
         const v3 = expr.jsonPathStrict(expr.recordToString(v2), "c2", "c3");
         expectTypeOf(v3).toExtend<BaseExpression<string>>();
         expectTypeOf(v3).not.toBeAny();
 
         const result = expr.jsonPathStrict(expr.recordToString(obj), "a");
-        expectTypeOf(result).toExtend<BaseExpression<{hello: string}>>();
+        expectTypeOf(result).toExtend<BaseExpression<Serialized<{hello: string}>>>();
+
+        const primitiveResult = expr.jsonPathStrict(expr.recordToString(obj), "a", "hello");
+        expectTypeOf(primitiveResult).toExtend<BaseExpression<string>>();
+
+        // @ts-expect-error jsonPathStrict already returns Serialized for aggregate values
+        expr.serialize(result);
     });
 
     it("dig infers precise value type and enforces default type", () => {

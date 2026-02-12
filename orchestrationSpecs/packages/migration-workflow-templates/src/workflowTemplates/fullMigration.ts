@@ -361,7 +361,7 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     sourceConfig: b.inputs.sourceConfig,
-                    createSnapshotConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotItemConfig, "config"),
+                    createSnapshotConfig: expr.jsonPathStrict(b.inputs.snapshotItemConfig, "config"),
                     snapshotPrefix: expr.get(
                         expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix"),
                     snapshotConfig: expr.serialize(expr.makeDict({
@@ -369,7 +369,7 @@ export const FullMigration = WorkflowBuilder.create({
                             createSnapshotConfig: expr.get(
                                 expr.deserializeRecord(b.inputs.snapshotItemConfig), "config")
                         }),
-                        repoConfig: expr.deserializeRecord(expr.jsonPathStrictSerialized(b.inputs.snapshotItemConfig, "repo")),
+                        repoConfig: expr.deserializeRecord(expr.jsonPathStrict(b.inputs.snapshotItemConfig, "repo")),
                         // TODO: label should be the logical snapshot name (record key from user config),
                         // not snapshotPrefix. PER_SOURCE_CREATE_SNAPSHOTS_CONFIG needs a label field.
                         label: expr.get(
@@ -413,7 +413,7 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     snapshotItemConfig: expr.serialize(c.item),
-                    sourceConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotsSourceConfig, "sourceConfig")
+                    sourceConfig: expr.jsonPathStrict(b.inputs.snapshotsSourceConfig, "sourceConfig")
                 }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.snapshotsSourceConfig),
@@ -494,8 +494,8 @@ export const FullMigration = WorkflowBuilder.create({
                             getZodKeys(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)),
                         sourceVersion: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "sourceVersion"),
                         sourceLabel: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "sourceLabel"),
-                        targetConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "targetConfig"),
-                        snapshotConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotConfig"),
+                        targetConfig: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "targetConfig"),
+                        snapshotConfig: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "snapshotConfig"),
                         migrationLabel: expr.get(c.item, "label"),
                         groupName: expr.get(c.item, "label")
                     });
