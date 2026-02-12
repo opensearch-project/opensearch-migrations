@@ -271,7 +271,7 @@ npm install 2>&1
         "IamInstanceProfile": {
           "Ref": "BootstrapEC2InstanceInstanceProfile987ED32E",
         },
-        "ImageId": "ami-0b967c22fe917319b",
+        "ImageId": "ami-0e2694e3cb74a4c35",
         "InstanceType": "t3.large",
         "LaunchTemplate": {
           "LaunchTemplateName": "BootstrapEC2InstanceLaunchTemplate",
@@ -842,7 +842,7 @@ npm install 2>&1
         "IamInstanceProfile": {
           "Ref": "BootstrapEC2InstanceInstanceProfile987ED32E",
         },
-        "ImageId": "ami-0b967c22fe917319b",
+        "ImageId": "ami-0e2694e3cb74a4c35",
         "InstanceType": "t3.large",
         "LaunchTemplate": {
           "LaunchTemplateName": "BootstrapEC2InstanceLaunchTemplate",
