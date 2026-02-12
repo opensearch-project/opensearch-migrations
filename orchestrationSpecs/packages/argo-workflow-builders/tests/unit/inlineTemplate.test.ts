@@ -1,4 +1,4 @@
-import {INLINE, renderWorkflowTemplate, typeToken, WorkflowBuilder} from "../src";
+import {INLINE, renderWorkflowTemplate, typeToken, WorkflowBuilder} from '../../src';
 
 describe("inline template tests", () => {
     it("should support inline container template in steps", () => {

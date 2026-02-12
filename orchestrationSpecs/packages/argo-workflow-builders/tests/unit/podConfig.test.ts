@@ -1,4 +1,4 @@
-import { WorkflowBuilder, renderWorkflowTemplate, typeToken, defineParam } from '../src';
+import { WorkflowBuilder, renderWorkflowTemplate, typeToken, defineParam } from '../../src';
 
 const EXAMPLE_RESOURCES = {
     requests: { cpu: "100m", memory: "128Mi" },

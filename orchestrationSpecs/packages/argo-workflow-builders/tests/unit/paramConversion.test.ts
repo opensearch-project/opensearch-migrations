@@ -1,4 +1,4 @@
-import {BaseExpression, selectInputsFieldsAsExpressionRecord, Serialized} from '../src'; // <-- update
+import {BaseExpression, selectInputsFieldsAsExpressionRecord, Serialized} from '../../src'; // <-- update
 
 const tuple = <T extends readonly string[]>(...xs: T) => xs;
 

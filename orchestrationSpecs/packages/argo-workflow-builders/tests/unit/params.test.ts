@@ -1,5 +1,5 @@
 import {expectTypeOf} from "expect-type";
-import {CallerParams, defineParam, expr, InputParamDef, TemplateBuilder, typeToken, WorkflowBuilder} from "../src";
+import {CallerParams, defineParam, expr, InputParamDef, TemplateBuilder, typeToken, WorkflowBuilder} from '../../src';
 
 export type SIMPLE_ENUM = "a" | "b" | "c";
 

@@ -1,4 +1,4 @@
-import { WorkflowBuilder, expr, renderWorkflowTemplate } from '../src';
+import { WorkflowBuilder, expr, renderWorkflowTemplate } from '../../src';
 
 const EXAMPLE_RESOURCES = {
     requests: {

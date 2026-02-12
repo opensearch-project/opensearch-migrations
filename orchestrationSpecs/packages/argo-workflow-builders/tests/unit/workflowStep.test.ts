@@ -1,4 +1,4 @@
-import {CallerParams, INTERNAL, renderWorkflowTemplate, typeToken, WorkflowBuilder} from "../src";
+import {CallerParams, INTERNAL, renderWorkflowTemplate, typeToken, WorkflowBuilder} from '../../src';
 import {json} from "node:stream/consumers";
 
 describe("nested steps test", () => {
