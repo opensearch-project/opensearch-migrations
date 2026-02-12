@@ -1593,7 +1593,7 @@ spec:
               "name": "targetConfig",
             },
             {
-              "name": "coordinatorConfig",
+              "name": "rfsCoordinatorConfig",
             },
             {
               "name": "documentBackfillConfig",
@@ -1640,7 +1640,7 @@ spec:
                   },
                   {
                     "name": "coordinatorBasicCredsSecretNameOrEmpty",
-                    "value": "{{=sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.coordinatorConfig))}}",
+                    "value": "{{=sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.rfsCoordinatorConfig))}}",
                   },
                   {
                     "name": "loggingConfigurationOverrideConfigMap",
@@ -1652,7 +1652,7 @@ spec:
                   },
                   {
                     "name": "rfsJsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.coordinatorConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.coordinatorConfig)['authConfig']) ? (sprig.dict("coordinatorAwsServiceSigningName", fromJSON(inputs.parameters.coordinatorConfig)['authConfig']['sigv4']['service'], "coordinatorAwsRegion", fromJSON(inputs.parameters.coordinatorConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.coordinatorConfig)['authConfig']) ? (sprig.dict("coordinatorCaCert", fromJSON(inputs.parameters.coordinatorConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.coordinatorConfig)) ? (sprig.dict("coordinatorHost", fromJSON(inputs.parameters.coordinatorConfig)['endpoint'])) : ({}))), sprig.dict("coordinatorInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.coordinatorConfig))))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp', "cleanLocalDirs", true), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict("s3RoleArn", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict("s3RepoUri", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], "s3Region", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], "s3LocalDir", '/tmp')))))}}",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict("coordinatorAwsServiceSigningName", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['service'], "coordinatorAwsRegion", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict("coordinatorCaCert", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? (sprig.dict("coordinatorHost", fromJSON(inputs.parameters.rfsCoordinatorConfig)['endpoint'])) : ({}))), sprig.dict("coordinatorInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.rfsCoordinatorConfig))))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources', 'useTargetClusterForWorkCoordination')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp', "cleanLocalDirs", true), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict("s3RoleArn", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict("s3RepoUri", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], "s3Region", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], "s3LocalDir", '/tmp')))))}}",
                   },
                   {
                     "name": "resources",
@@ -1695,7 +1695,7 @@ spec:
               "name": "targetConfig",
             },
             {
-              "name": "coordinatorConfig",
+              "name": "rfsCoordinatorConfig",
             },
             {
               "name": "snapshotConfig",
@@ -1757,8 +1757,8 @@ spec:
                     "value": "{{inputs.parameters.targetConfig}}",
                   },
                   {
-                    "name": "coordinatorConfig",
-                    "value": "{{inputs.parameters.coordinatorConfig}}",
+                    "name": "rfsCoordinatorConfig",
+                    "value": "{{inputs.parameters.rfsCoordinatorConfig}}",
                   },
                   {
                     "name": "documentBackfillConfig",
@@ -1792,7 +1792,7 @@ spec:
                   },
                   {
                     "name": "targetConfig",
-                    "value": "{{inputs.parameters.coordinatorConfig}}",
+                    "value": "{{inputs.parameters.rfsCoordinatorConfig}}",
                   },
                   {
                     "name": "backfillSession",
@@ -1927,10 +1927,19 @@ spec:
           [
             {
               "arguments": {
-                "parameters": [],
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}",
+                  },
+                ],
               },
-              "name": "configureCoordinator",
-              "template": "donothing",
+              "name": "createRfsCoordinator",
+              "templateRef": {
+                "name": "rfs-coordinator-cluster",
+                "template": "createrfscoordinator",
+              },
+              "when": "{{=!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])}}",
             },
           ],
           [
@@ -1986,13 +1995,31 @@ spec:
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
-                    "name": "coordinatorConfig",
-                    "value": "{{inputs.parameters.targetConfig}}",
+                    "name": "rfsCoordinatorConfig",
+                    "value": "{{=((!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])) ? (toJSON(sprig.dict("endpoint", 'https://'+inputs.parameters.sessionName+'-rfs-coordinator'+':9200', "label", inputs.parameters.sessionName+'-rfs-coordinator', "allowInsecure", true, "authConfig", sprig.dict("basic", sprig.dict("secretName", inputs.parameters.sessionName+'-rfs-coordinator'+'-creds'))))) : (inputs.parameters.targetConfig))}}",
                   },
                 ],
               },
               "name": "runBulkLoad",
               "template": "runbulkload",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}",
+                  },
+                ],
+              },
+              "name": "cleanupRfsCoordinator",
+              "templateRef": {
+                "name": "rfs-coordinator-cluster",
+                "template": "deleterfscoordinator",
+              },
+              "when": "{{=!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])}}",
             },
           ],
         ],
@@ -4126,6 +4153,399 @@ spec:
 }
 `;
 
+exports[`test workflow template renderings rfs-coordinator-cluster 1`] = `
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "rfs-coordinator-cluster",
+  },
+  "spec": {
+    "arguments": {
+      "parameters": [
+        {
+          "name": "etcdEndpoints",
+          "value": "http://etcd.ma.svc.cluster.local:2379",
+        },
+        {
+          "name": "etcdUser",
+          "value": "root",
+        },
+        {
+          "name": "etcdPassword",
+          "value": "password",
+        },
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config",
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config",
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config",
+        },
+      ],
+    },
+    "entrypoint": undefined,
+    "parallelism": 100,
+    "serviceAccountName": "argo-workflow-executor",
+    "templates": [
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+          ],
+        },
+        "name": "createrfscoordinatorsecret",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "apply",
+          "manifest": "apiVersion: v1
+kind: Secret
+metadata:
+  name: "{{=inputs.parameters.clusterName+'-creds'}}"
+  labels:
+    app: "{{inputs.parameters.clusterName}}"
+type: Opaque
+stringData:
+  username: admin
+  password: myStrongPassword123!
+",
+          "setOwnerReference": true,
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+          ],
+        },
+        "name": "createrfscoordinatorservice",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "apply",
+          "manifest": "apiVersion: v1
+kind: Service
+metadata:
+  name: "{{inputs.parameters.clusterName}}"
+  labels:
+    app: "{{inputs.parameters.clusterName}}"
+spec:
+  clusterIP: None
+  selector:
+    app: "{{inputs.parameters.clusterName}}"
+  ports:
+    - name: https
+      port: 9200
+      targetPort: https
+",
+          "setOwnerReference": true,
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+          ],
+        },
+        "name": "createrfscoordinatorstatefulset",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "apply",
+          "manifest": "apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: "{{inputs.parameters.clusterName}}"
+  labels:
+    app: "{{inputs.parameters.clusterName}}"
+    app.kubernetes.io/instance: "{{inputs.parameters.clusterName}}"
+spec:
+  serviceName: "{{inputs.parameters.clusterName}}"
+  replicas: 1
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Delete
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app: "{{inputs.parameters.clusterName}}"
+  template:
+    metadata:
+      labels:
+        app: "{{inputs.parameters.clusterName}}"
+        app.kubernetes.io/instance: "{{inputs.parameters.clusterName}}"
+    spec:
+      serviceAccountName: argo-workflow-executor
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: opensearch
+          image: opensearchproject/opensearch:3.1.0
+          ports:
+            - name: https
+              containerPort: 9200
+          env:
+            - name: cluster.name
+              value: "{{inputs.parameters.clusterName}}"
+            - name: discovery.type
+              value: single-node
+            - name: OPENSEARCH_INITIAL_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: "{{=inputs.parameters.clusterName+'-creds'}}"
+                  key: username
+                  optional: false
+            - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "{{=inputs.parameters.clusterName+'-creds'}}"
+                  key: password
+                  optional: false
+            - name: OPENSEARCH_JAVA_OPTS
+              value: -Xms1g -Xmx1g
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - curl -sk -u "\${OPENSEARCH_INITIAL_ADMIN_USERNAME}:\${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" "https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=10s"
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 15
+            failureThreshold: 20
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/opensearch/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+",
+          "setOwnerReference": true,
+          "successCondition": "status.readyReplicas > 0",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+            {
+              "name": "groupName",
+              "value": "Start RFS OpenSearch cluster for worker coordination",
+            },
+          ],
+        },
+        "name": "createrfscoordinator",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
+                  },
+                ],
+              },
+              "name": "createSecret",
+              "template": "createrfscoordinatorsecret",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
+                  },
+                ],
+              },
+              "name": "createService",
+              "template": "createrfscoordinatorservice",
+            },
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
+                  },
+                ],
+              },
+              "name": "createStatefulSet",
+              "template": "createrfscoordinatorstatefulset",
+            },
+          ],
+        ],
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+          ],
+        },
+        "name": "deleterfscoordinatorstatefulset",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found",
+          ],
+          "manifest": "apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: "{{inputs.parameters.clusterName}}"
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+          ],
+        },
+        "name": "deleterfscoordinatorservice",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found",
+          ],
+          "manifest": "apiVersion: v1
+kind: Service
+metadata:
+  name: "{{inputs.parameters.clusterName}}"
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+          ],
+        },
+        "name": "deleterfscoordinatorsecret",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found",
+          ],
+          "manifest": "apiVersion: v1
+kind: Secret
+metadata:
+  name: "{{=inputs.parameters.clusterName+'-creds'}}"
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+            {
+              "name": "groupName",
+              "value": "Stop RFS OpenSearch cluster for worker coordination",
+            },
+          ],
+        },
+        "name": "deleterfscoordinator",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
+                  },
+                ],
+              },
+              "name": "deleteStatefulSet",
+              "template": "deleterfscoordinatorstatefulset",
+            },
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
+                  },
+                ],
+              },
+              "name": "deleteService",
+              "template": "deleterfscoordinatorservice",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
+                  },
+                ],
+              },
+              "name": "deleteSecret",
+              "template": "deleterfscoordinatorsecret",
+            },
+          ],
+        ],
+      },
+    ],
+  },
+}
+`;
+
 exports[`test workflow template renderings setup-kafka 1`] = `
 {
   "apiVersion": "argoproj.io/v1alpha1",
@@ -4180,7 +4600,7 @@ exports[`test workflow template renderings setup-kafka 1`] = `
             {
               "name": "brokers",
               "valueFrom": {
-                "path": "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
+                "jsonPath": "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
               },
             },
           ],
@@ -4272,7 +4692,7 @@ spec:
             {
               "name": "brokers",
               "valueFrom": {
-                "path": "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
+                "jsonPath": "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
               },
             },
           ],
@@ -4420,7 +4840,7 @@ spec:
             {
               "name": "topicName",
               "valueFrom": {
-                "path": "{.status.topicName}",
+                "jsonPath": "{.status.topicName}",
               },
             },
           ],

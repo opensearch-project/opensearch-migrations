@@ -29,7 +29,6 @@ describe('semaphore configuration', () => {
                 target: {
                     endpoint: "https://target.example.com",
                     allowInsecure: true,
-                    version: "OS 2.0.0",
                     authConfig: {
                         basic: {
                             secretName: "target-creds"
@@ -115,7 +114,6 @@ describe('semaphore configuration', () => {
                 target: {
                     endpoint: "https://target.example.com",
                     allowInsecure: true,
-                    version: "OS 2.0.0",
                     authConfig: {
                         basic: {
                             secretName: "target-creds"
@@ -218,7 +216,6 @@ describe('semaphore configuration', () => {
                 target: {
                     endpoint: "https://target.example.com",
                     allowInsecure: true,
-                    version: "OS 2.0.0",
                     authConfig: {
                         basic: {
                             secretName: "target-creds"

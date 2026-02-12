@@ -8,6 +8,7 @@ import {TestMigrationWithWorkflowCli} from "./testMigrationWithWorkflowCli";
 import {MetadataMigration} from "./metadataMigration";
 import {MigrationConsole} from "./migrationConsole";
 import {Replayer} from "./replayer";
+import {RfsCoordinatorCluster} from "./rfsCoordinatorCluster";
 import {SetupKafka} from "./setupKafka";
 import {ConfigManagementHelpers} from "./configManagementHelpers";
 
@@ -21,6 +22,7 @@ export const AllWorkflowTemplates = [
     MetadataMigration,
     MigrationConsole,
     Replayer,
+    RfsCoordinatorCluster,
     SetupKafka,
     ConfigManagementHelpers,
     TestMigrationWithWorkflowCli,

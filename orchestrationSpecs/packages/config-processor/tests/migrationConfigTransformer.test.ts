@@ -30,10 +30,10 @@ describe('errorsArePrintedSuccinctly', () => {
             await processor.processFromObject(config);
         });
         expect(formatInputValidationError(error)).toBe(
-            `Invalid input: expected string, received undefined... at:\n` +
-            `  sourceClusters.source1.version\n` +
             `Invalid input... at:\n` +
             `  sourceClusters.source1.authConfig\n` +
+            `Invalid input: expected string, received undefined... at:\n` +
+            `  sourceClusters.source1.version\n` +
             `Invalid input: expected array, received undefined... at:\n` +
             `  migrationConfigs`);
     });
