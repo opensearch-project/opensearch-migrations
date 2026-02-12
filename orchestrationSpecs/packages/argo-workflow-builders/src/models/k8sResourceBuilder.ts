@@ -102,8 +102,8 @@ export class K8sResourceBuilder<
         const newOutputs = {
             ...this.outputsScope,
             [name as string]: {
-                fromWhere: "path" as const,
-                path: pathValue,
+                fromWhere: "jsonPath" as const,
+                jsonPath: pathValue,
                 description: descriptionValue
             }
         } as ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>;

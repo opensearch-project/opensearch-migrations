@@ -128,7 +128,7 @@ public class CreateSnapshot {
     }
 
     public static void main(String[] args) throws Exception {
-        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_SOURCE_ARGS)));
+        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
         Args arguments = EnvVarParameterPuller.injectFromEnv(new Args(), "CREATE_SNAPSHOT_");
         var argParser = JsonCommandLineParser.newBuilder().addObject(arguments).build();
         argParser.parse(args);
