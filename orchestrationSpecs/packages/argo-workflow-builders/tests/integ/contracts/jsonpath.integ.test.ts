@@ -90,14 +90,14 @@ describe("JSONPath Contract Tests", () => {
     expect(result.globalOutputs.result).toBe("b");
   });
 
-  test("missing path behavior", async () => {
+  test("missing path causes Error", async () => {
     const result = await submitProbe({
       inputs: { data: '{"key":"val"}' },
       expression: "jsonpath(inputs.parameters.data, '$.missing')",
     });
     
-    // Missing path returns empty string, workflow succeeds
-    expect(result.phase).toBe("Succeeded");
-    expect(result.globalOutputs.result).toBe("");
+    // Missing path causes Error phase with message about key not found
+    expect(result.phase).toBe("Error");
+    expect(result.message).toContain("not found");
   });
 });

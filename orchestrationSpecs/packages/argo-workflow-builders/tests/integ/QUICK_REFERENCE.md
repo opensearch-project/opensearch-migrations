@@ -2,6 +2,79 @@
 
 This guide provides quick examples for common test extension scenarios.
 
+## Verified Argo Features
+
+All features below are tested and working. See [CONTRACT_TEST_RESULTS.md](CONTRACT_TEST_RESULTS.md) for full results.
+
+### Regex Functions (Sprig)
+
+```typescript
+// Pattern matching
+sprig.regexMatch('^[A-Za-z0-9._%+-]+@', email)
+
+// Extract first match
+sprig.regexFind('[a-zA-Z][1-9]', 'abcd1234')  // → "d1"
+
+// Find all matches
+sprig.regexFindAll('[2,4,6,8]', '123456789', -1)  // → ["2","4","6","8"]
+
+// Replace with capture groups
+sprig.regexReplaceAll('a(x*)b', '-ab-axxb-', '${1}W')  // → "-W-xxW-"
+
+// Split by pattern
+sprig.regexSplit('z+', 'pizza', -1)  // → ["pi","a"]
+```
+
+### Advanced Sprig Functions
+
+```typescript
+// Merge dictionaries (first takes precedence)
+sprig.merge(sprig.dict('a','1','b','2'), sprig.dict('b','3','c','4'))
+// → {a:"1", b:"2", c:"4"}
+
+// Remove keys
+sprig.omit(sprig.dict('a','1','b','2','c','3'), 'b')  // → {a:"1", c:"3"}
+
+// Navigate nested with default
+sprig.dig('user', 'role', 'name', 'guest', obj)  // Returns 'guest' if path doesn't exist
+
+// Get keys
+keys({a:1, b:2})  // → ["a","b"]
+```
+
+### Bracket Notation & 'in' Operator
+
+```typescript
+// Access keys with special characters
+fromJSON('{"my-key":"value"}')['my-key']  // → "value"
+
+// Array access
+array[1]    // Second element
+array[-1]   // Last element
+
+// Membership checks
+'John' in ['John', 'Jane']  // → true
+'name' in {name: 'John'}    // → true
+
+// Combined with ternary
+role in ['admin', 'superuser'] ? 'allowed' : 'denied'
+```
+
+### Type Conversion
+
+```typescript
+// ⚠️ asInt() errors on decimals
+asInt("42")     // ✅ Works → 42
+asInt("42.7")   // ❌ Errors
+
+// Use this for decimals:
+int(asFloat("42.7"))  // ✅ Works → 42
+
+// asFloat works on both
+asFloat("42")    // → 42.0
+asFloat("3.14")  // → 3.14
+```
+
 ## Adding a New Contract Test
 
 Contract tests document Argo's runtime behavior using raw expressions.

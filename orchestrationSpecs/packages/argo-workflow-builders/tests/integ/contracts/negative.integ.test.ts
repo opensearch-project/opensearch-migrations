@@ -17,15 +17,27 @@ describe("Negative Contract Tests", () => {
       }
     });
 
-    test("invalid parameter reference fails", async () => {
+    test("invalid parameter reference returns <nil>", async () => {
+      const result = await submitProbe({
+        inputs: { data: "test" },
+        expression: "inputs.parameters.nonexistent",
+      });
+      
+      // Argo returns "<nil>" for nonexistent parameters, workflow succeeds
+      expect(result.phase).toBe("Succeeded");
+      expect(result.globalOutputs.result).toBe("<nil>");
+    });
+
+    test("invalid function name fails", async () => {
       try {
         const result = await submitProbe({
-          inputs: { data: "test" },
-          expression: "inputs.parameters.nonexistent",
+          inputs: { data: '{"key":"value"}' },
+          expression: "invalidFunction(inputs.parameters.data)",
         });
         
         expect(result.phase).not.toBe("Succeeded");
       } catch (err: any) {
+        // Expected - workflow should fail or timeout
         expect(err.message).toMatch(/timed out|Failed|Error/);
       }
     });
@@ -47,7 +59,7 @@ describe("Negative Contract Tests", () => {
       try {
         const result = await submitProbe({
           inputs: { data: "{invalid json}" },
-          expression: "fromJson(inputs.parameters.data)",
+          expression: "fromJSON(inputs.parameters.data)",
         });
         
         expect(result.phase).not.toBe("Succeeded");

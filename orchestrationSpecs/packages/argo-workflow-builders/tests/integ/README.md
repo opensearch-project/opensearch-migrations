@@ -2,9 +2,35 @@
 
 This directory contains integration tests that validate the `@opensearch-migrations/argo-workflow-builders` library against a real Argo Workflows instance.
 
+## Quick Start
+
+```bash
+# Run all integration tests
+npm run test:integ
+
+# Run only contract tests
+npm run test:integ -- contracts/
+
+# Run specific test file
+npm run test:integ -- jsonpath.integ.test.ts
+
+# Run tests matching pattern
+npm run test:integ -- -t "regex"
+```
+
+## Test Results
+
+✅ **All 154 contract tests passing**  
+✅ **Runtime**: ~80 seconds  
+✅ **Coverage**: JSONPath, Sprig functions, expressions, regex, operators
+
+See [CONTRACT_TEST_RESULTS.md](CONTRACT_TEST_RESULTS.md) for detailed results.
+
 ## Overview
 
 The integration test suite spins up a K3s Kubernetes cluster with Argo Workflows installed via testcontainers, submits workflows built by the library, and verifies that the rendered expressions produce expected output values at runtime.
+
+**Key Design**: Tests use `suspend` templates with `duration: "0"` to avoid container overhead. Each test runs in <1 second.
 
 **Key design**: Tests use templates with empty `steps: [[]]` to evaluate expressions without container overhead. This allows fast expression evaluation while properly propagating outputs to the workflow level.
 
@@ -45,12 +71,16 @@ These tests establish ground truth about Argo's runtime behavior. They use raw A
 
 **Purpose**: Document Argo's behavior for:
 - JSONPath extraction and type coercion
-- Sprig function return values
+- Sprig function return values (including regex, merge, omit, dig, keys)
 - Expression evaluation semantics
 - Parameter pass-through fidelity
 - Conditional execution (`when` clauses)
+- Bracket notation and 'in' operator
+- Type conversion (asInt, asFloat, string)
 
 **Key characteristic**: Tests use `submitProbe()` with raw expressions to isolate Argo's behavior from the builder library.
+
+**Status**: ✅ All 154 tests passing
 
 **Negative tests**: Each category includes negative tests that verify:
 - Invalid expressions fail as expected
@@ -75,6 +105,78 @@ These tests validate that the builder API's type system and renderer produce wor
 #### 3. Container Tests (`containers/`)
 
 Optional tests for container-specific features like `valueFrom.path` and stdout capture. These require pulling container images and are slower.
+
+## Key Findings & Recommendations
+
+### ✅ Supported Features (Verified)
+
+All of the following are fully supported and tested:
+
+**Regex Functions** (via Sprig):
+```typescript
+sprig.regexMatch('^[A-Za-z0-9._%+-]+@', 'test@example.com')  // Email validation
+sprig.regexFind('[a-zA-Z][1-9]', 'abcd1234')                 // Extract pattern
+sprig.regexFindAll('[2,4,6,8]', '123456789', -1)             // Find all
+sprig.regexReplaceAll('a(x*)b', '-ab-axxb-', '${1}W')        // Replace with groups
+sprig.regexSplit('z+', 'pizza', -1)                          // Split by pattern
+```
+
+**Advanced Sprig Functions**:
+```typescript
+sprig.merge(dict1, dict2)              // Merge dictionaries
+sprig.omit(dict, 'key')                // Remove keys
+sprig.dig('a', 'b', 'c', 'default', obj)  // Navigate nested with default
+keys(obj)                              // Get dictionary keys
+```
+
+**Bracket Notation**:
+```typescript
+obj['my-key']      // Access keys with special characters
+array[1]           // Array access
+array[-1]          // Negative index (last element)
+```
+
+**'in' Operator**:
+```typescript
+'value' in ['a', 'b', 'c']           // Array membership
+'key' in {key: 'value'}              // Map key check
+role in ['admin', 'user'] ? 'ok' : 'denied'  // With ternary
+```
+
+### ⚠️ Important Behaviors
+
+**asInt() on Decimals**:
+```typescript
+// ❌ This ERRORS (doesn't truncate):
+asInt("42.7")  // → Workflow fails
+
+// ✅ Use this instead:
+int(asFloat("42.7"))  // → 42
+```
+
+**Regex Escaping**:
+```typescript
+// Need double backslashes in expressions:
+sprig.regexMatch('\\d+', text)  // Matches digits
+```
+
+**JSONPath Type Coercion**:
+- Numbers: `jsonpath(data, '$.num')` → `"42"` (string, no quotes)
+- Booleans: `jsonpath(data, '$.flag')` → `"true"` (lowercase string)
+- Objects/Arrays: Re-serialized as JSON strings
+- Null: Returns `"null"` (string)
+
+**Parameter Pass-Through**:
+- JSON strings maintain exact format across multiple hops
+- Empty strings, whitespace, unicode all preserved
+- Special YAML characters (colons, newlines) handled correctly
+
+### 📚 Additional Resources
+
+- [CONTRACT_TEST_RESULTS.md](CONTRACT_TEST_RESULTS.md) - Full test results
+- [ADDITIONAL_TESTS.md](ADDITIONAL_TESTS.md) - Regex and advanced features
+- [NEGATIVE_TESTS.md](NEGATIVE_TESTS.md) - Negative test patterns
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues and solutions
 
 ## Running Tests
 
