@@ -25,9 +25,7 @@ describe("When Conditions Contract Tests", () => {
             inputs: {
               parameters: [{ name: "val" }],
             },
-            suspend: {
-              duration: "0",
-            },
+            steps: [[]],
           },
           {
             name: "main",

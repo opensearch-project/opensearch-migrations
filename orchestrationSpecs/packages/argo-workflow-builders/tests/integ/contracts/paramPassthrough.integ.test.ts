@@ -8,6 +8,9 @@ describe("Parameter Pass-through Contract Tests", () => {
       steps: [{ expression: "inputs.parameters.input" }],
     });
     
+    console.log("Node output keys:", Object.keys(result.nodeOutputs));
+    console.log("step0 output:", result.nodeOutputs["step0"]);
+    
     expect(result.phase).toBe("Succeeded");
     expect(result.globalOutputs.result).toBe(input);
   });

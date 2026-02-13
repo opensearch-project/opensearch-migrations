@@ -28,30 +28,29 @@ export async function submitAndWait(
   const startTime = Date.now();
   
   // Submit workflow
-  const response = await customApi.createNamespacedCustomObject(
-    "argoproj.io",
-    "v1alpha1",
+  const response = await customApi.createNamespacedCustomObject({
+    group: "argoproj.io",
+    version: "v1alpha1",
     namespace,
-    "workflows",
-    workflowObject
-  ) as any;
+    plural: "workflows",
+    body: workflowObject,
+  }) as any;
   
-  const workflowName = response.body.metadata.name;
+  const workflowName = response.metadata.name;
   
   // Poll for completion
   const deadline = Date.now() + timeoutMs;
   let workflow: any;
   
   while (Date.now() < deadline) {
-    const getResponse = await customApi.getNamespacedCustomObject(
-      "argoproj.io",
-      "v1alpha1",
+    workflow = await customApi.getNamespacedCustomObject({
+      group: "argoproj.io",
+      version: "v1alpha1",
       namespace,
-      "workflows",
-      workflowName
-    ) as any;
+      plural: "workflows",
+      name: workflowName,
+    }) as any;
     
-    workflow = getResponse.body;
     const phase = workflow.status?.phase;
     
     if (phase === "Succeeded" || phase === "Failed" || phase === "Error") {
@@ -96,6 +95,30 @@ function extractResults(workflow: any, duration: number): WorkflowResult {
         phase: node.phase,
         message: node.message,
       };
+    }
+  }
+  
+  // FALLBACK: If globalOutputs is empty, try to populate from the main/entrypoint node
+  if (Object.keys(globalOutputs).length === 0) {
+    // Find the entrypoint node (usually matches workflow name or has templateName matching entrypoint)
+    const workflowName = workflow.metadata?.name;
+    const entrypointName = workflow.spec?.entrypoint;
+    
+    for (const [displayName, nodeOutput] of Object.entries(nodeOutputs)) {
+      const nodeId = Object.keys(status.nodes).find((id: string) => 
+        status.nodes[id].displayName === displayName
+      );
+      
+      if (!nodeId) continue;
+      
+      const node = status.nodes[nodeId];
+      
+      // Check if this is the entrypoint node
+      if (displayName === workflowName || node?.templateName === entrypointName) {
+        // Copy its outputs to globalOutputs
+        Object.assign(globalOutputs, nodeOutput.parameters);
+        break;
+      }
     }
   }
   

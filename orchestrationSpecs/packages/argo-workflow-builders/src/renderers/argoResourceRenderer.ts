@@ -10,7 +10,7 @@ import {GenericScope, LoopWithUnion} from "../models/workflowTypes";
 import {WorkflowBuilder} from "../models/workflowBuilder";
 import {BaseExpression, makeDirectTypeProxy, UnquotedTypeWrapper} from "../models/expression";
 import {NamedTask} from "../models/sharedTypes";
-import { omit } from 'lodash';
+import * as _ from 'lodash';
 import {toSafeYamlOutput} from "../utils";
 import {SynchronizationConfig} from "../models/synchronization";
 
@@ -147,7 +147,7 @@ function formatContainerEnvs(envVars: Record<string, BaseExpression<any>>) {
     Object.entries(envVars).forEach(([key, value]) => {
         const transformedValue = transformExpressionsDeep(value);
         const v = ("configMapKeyRef" in value || "secretKeyRef" in value) ?
-            { valueFrom: omit(transformedValue, "type") } :
+            { valueFrom: _.omit(transformedValue, "type") } :
             { value: transformedValue };
         result.push({name: key, ...v});
     });

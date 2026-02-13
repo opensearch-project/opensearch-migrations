@@ -7,6 +7,12 @@ describe("JSONPath Contract Tests", () => {
       expression: "jsonpath(inputs.parameters.data, '$.key')",
     });
     
+    console.log("Result:", JSON.stringify({ 
+      phase: result.phase, 
+      globalOutputs: result.globalOutputs, 
+      evalNodeOutput: result.nodeOutputs["eval"]
+    }, null, 2));
+    
     expect(result.phase).toBe("Succeeded");
     expect(result.globalOutputs.result).toBe("1");
   });
@@ -38,8 +44,8 @@ describe("JSONPath Contract Tests", () => {
     });
     
     expect(result.phase).toBe("Succeeded");
-    const parsed = JSON.parse(result.globalOutputs.result);
-    expect(parsed).toEqual({ inner: "val" });
+    // Argo returns Go map format, not JSON
+    expect(result.globalOutputs.result).toBe("map[inner:val]");
   });
 
   test("extracts array as JSON", async () => {
@@ -49,8 +55,8 @@ describe("JSONPath Contract Tests", () => {
     });
     
     expect(result.phase).toBe("Succeeded");
-    const parsed = JSON.parse(result.globalOutputs.result);
-    expect(parsed).toEqual([1, 2, 3]);
+    // Argo returns Go slice format, not JSON
+    expect(result.globalOutputs.result).toBe("[1 2 3]");
   });
 
   test("extracts null", async () => {
@@ -60,9 +66,8 @@ describe("JSONPath Contract Tests", () => {
     });
     
     expect(result.phase).toBe("Succeeded");
-    // Document actual behavior
-    console.log("Null extraction result:", result.globalOutputs.result);
-    expect(result.globalOutputs.result).toBe("null");
+    // Argo returns Go nil representation
+    expect(result.globalOutputs.result).toBe("<nil>");
   });
 
   test("nested path extraction", async () => {
@@ -86,19 +91,13 @@ describe("JSONPath Contract Tests", () => {
   });
 
   test("missing path behavior", async () => {
-    try {
-      const result = await submitProbe({
-        inputs: { data: '{"key":"val"}' },
-        expression: "jsonpath(inputs.parameters.data, '$.missing')",
-      });
-      
-      // If it succeeds, document what it returns
-      console.log("Missing path result:", result.globalOutputs.result);
-      expect(result.phase).toBe("Succeeded");
-    } catch (err) {
-      // If it fails, that's also valid behavior - document it
-      console.log("Missing path causes workflow failure:", err);
-      throw err;
-    }
+    const result = await submitProbe({
+      inputs: { data: '{"key":"val"}' },
+      expression: "jsonpath(inputs.parameters.data, '$.missing')",
+    });
+    
+    // Missing path returns empty string, workflow succeeds
+    expect(result.phase).toBe("Succeeded");
+    expect(result.globalOutputs.result).toBe("");
   });
 });

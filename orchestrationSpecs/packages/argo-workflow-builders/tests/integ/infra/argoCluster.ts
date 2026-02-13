@@ -1,5 +1,5 @@
 import { K3sContainer, StartedK3sContainer } from "@testcontainers/k3s";
-import { KubeConfig, CoreV1Api, AppsV1Api } from "@kubernetes/client-node";
+import { KubeConfig, CoreV1Api, AppsV1Api, RbacAuthorizationV1Api } from "@kubernetes/client-node";
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "yaml";
@@ -36,24 +36,49 @@ export async function startCluster(): Promise<void> {
 
   // Create namespaces
   await coreApi.createNamespace({
-    metadata: { name: ARGO_NAMESPACE },
+    body: {
+      metadata: { name: ARGO_NAMESPACE },
+    },
   });
   
   await coreApi.createNamespace({
-    metadata: { name: TEST_NAMESPACE },
+    body: {
+      metadata: { name: TEST_NAMESPACE },
+    },
   });
 
   console.log("Installing Argo Workflows...");
   
-  // Read and apply Argo manifest using kubectl inside the container
+  // Read Argo manifest
   const manifestPath = path.join(__dirname, "../fixtures/quick-start-minimal.yaml");
   const manifestContent = fs.readFileSync(manifestPath, "utf-8");
   
-  // Write manifest to container
-  await container.exec(["sh", "-c", `cat > /tmp/argo-manifest.yaml << 'EOF'\n${manifestContent}\nEOF`]);
+  // Write to temp file and copy to container
+  const tempFile = "/tmp/argo-install-manifest.yaml";
+  fs.writeFileSync(tempFile, manifestContent);
   
-  // Apply manifest
-  await container.exec(["kubectl", "apply", "-f", "/tmp/argo-manifest.yaml", "-n", ARGO_NAMESPACE]);
+  await container.copyFilesToContainer([{
+    source: tempFile,
+    target: "/tmp/argo-manifest.yaml",
+  }]);
+  
+  console.log("Manifest copied to container");
+  
+  // Apply manifest with server-side apply (required for large CRDs in Argo 4.0.0)
+  const applyResult = await container.exec(["kubectl", "apply", "--server-side", "-f", "/tmp/argo-manifest.yaml"]);
+  console.log("Manifest applied");
+  if (applyResult.exitCode !== 0) {
+    console.error("kubectl apply failed:", applyResult.output);
+    throw new Error(`Failed to apply Argo manifest: ${applyResult.output}`);
+  }
+  
+  // Verify CRDs are installed
+  const crdCheck = await container.exec(["kubectl", "get", "crd", "workflows.argoproj.io"]);
+  if (crdCheck.exitCode !== 0) {
+    console.error("Workflow CRD not found:", crdCheck.output);
+    throw new Error("Workflow CRD was not installed");
+  }
+  console.log("Workflow CRD verified");
 
   console.log("Waiting for Argo controller to be ready...");
   
@@ -62,12 +87,12 @@ export async function startCluster(): Promise<void> {
   
   while (Date.now() < timeout) {
     try {
-      const deployment = await appsApi.readNamespacedDeployment(
-        "workflow-controller",
-        ARGO_NAMESPACE
-      );
+      const deployment = await appsApi.readNamespacedDeployment({
+        name: "workflow-controller",
+        namespace: ARGO_NAMESPACE,
+      });
       
-      if ((deployment.body.status?.readyReplicas ?? 0) >= 1) {
+      if ((deployment.status?.readyReplicas ?? 0) >= 1) {
         console.log("Argo controller is ready");
         break;
       }
@@ -79,23 +104,28 @@ export async function startCluster(): Promise<void> {
   }
 
   // Create ServiceAccount and ClusterRoleBinding for test workflows
-  await coreApi.createNamespacedServiceAccount(TEST_NAMESPACE, {
-    metadata: { name: "test-runner" },
+  await coreApi.createNamespacedServiceAccount({
+    namespace: TEST_NAMESPACE,
+    body: {
+      metadata: { name: "test-runner" },
+    },
   });
 
-  const rbacApi = kc.makeApiClient(require("@kubernetes/client-node").RbacAuthorizationV1Api);
+  const rbacApi = kc.makeApiClient(RbacAuthorizationV1Api);
   await rbacApi.createClusterRoleBinding({
-    metadata: { name: "test-runner-admin" },
-    roleRef: {
-      apiGroup: "rbac.authorization.k8s.io",
-      kind: "ClusterRole",
-      name: "cluster-admin",
+    body: {
+      metadata: { name: "test-runner-admin" },
+      roleRef: {
+        apiGroup: "rbac.authorization.k8s.io",
+        kind: "ClusterRole",
+        name: "cluster-admin",
+      },
+      subjects: [{
+        kind: "ServiceAccount",
+        name: "test-runner",
+        namespace: TEST_NAMESPACE,
+      }],
     },
-    subjects: [{
-      kind: "ServiceAccount",
-      name: "test-runner",
-      namespace: TEST_NAMESPACE,
-    }],
   });
 
   console.log("Cluster setup complete");

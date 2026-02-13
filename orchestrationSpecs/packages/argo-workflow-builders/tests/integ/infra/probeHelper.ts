@@ -37,43 +37,17 @@ export async function submitProbe(config: ProbeConfig): Promise<WorkflowResult> 
       },
       templates: [
         {
-          name: "eval",
+          name: "main",
           inputs: {
             parameters: inputParamDefs,
           },
-          suspend: {
-            duration: "0",
-          },
+          steps: [[]], // Empty steps - no containers, but provides execution context
           outputs: {
             parameters: [
               {
                 name: "result",
                 valueFrom: {
                   expression: config.expression,
-                },
-              },
-            ],
-          },
-        },
-        {
-          name: "main",
-          steps: [
-            [
-              {
-                name: "eval",
-                template: "eval",
-                arguments: {
-                  parameters: inputParamArgs,
-                },
-              },
-            ],
-          ],
-          outputs: {
-            parameters: [
-              {
-                name: "result",
-                valueFrom: {
-                  parameter: "{{steps.eval.outputs.parameters.result}}",
                 },
               },
             ],
@@ -105,9 +79,7 @@ export async function submitChainProbe(config: ChainProbeConfig): Promise<Workfl
       inputs: {
         parameters: [{ name: "input" }],
       },
-      suspend: {
-        duration: "0",
-      },
+      steps: [[]],
       outputs: {
         parameters: [
           {
