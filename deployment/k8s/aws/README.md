@@ -83,7 +83,7 @@ To update images see [buildImages](../../../buildImages/README.md).
 To update the K8s deployment (other than images, configmaps, workflow templates,
 resource settings, etc.) see the [k8s README](../README.md).
 
-When building images (`--build-images` or `--build-images-locally`), the script,
+When building images (`--build-images-locally`), the script,
 by default, automatically configures cross-platform builds for amd64 and arm64.
 
 1. A `general-work-pool` NodePool is pre-created from the Migration Assistant  
