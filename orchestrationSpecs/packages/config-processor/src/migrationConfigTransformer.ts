@@ -4,7 +4,7 @@ import {
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     ARGO_MIGRATION_CONFIG, KAFKA_CLUSTER_CONFIG, CAPTURE_CONFIG,
-    GENERATE_SNAPSHOT,
+    GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -307,13 +307,14 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     throw new Error(`Snapshot '${snapshotName}' in source '${sourceName}' references repo '${snapshotDef.repoName}' which is not defined`);
                 }
 
-                const globalSnapshotName = `${sourceName}-${snapshotName}`;
+                const globallyUniqueSnapshotName = `${sourceName}-${snapshotName}`;
                 const proxyDeps = proxyNamesBySource.get(sourceName);
 
                 const { snapshotPrefix: _sp, ...createSnapshotOpts } = snapshotDef.config.createSnapshotConfig;
                 const semaphore = this.generateSemaphoreConfig(sourceCluster.version, sourceName, snapshotName);
                 createConfigs.push({
-                    snapshotPrefix: snapshotDef.config.createSnapshotConfig.snapshotPrefix || globalSnapshotName,
+                    label: globallyUniqueSnapshotName,
+                    snapshotPrefix: snapshotDef.config.createSnapshotConfig.snapshotPrefix || globallyUniqueSnapshotName,
                     config: {
                         ...createSnapshotOpts,
                     },
@@ -357,19 +358,23 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     throw new Error(`Migration references snapshot '${snapshotName}' not defined in source '${fromSource}'`);
                 }
 
-                const globalSnapshotName = `${fromSource}-${snapshotName}`;
+                const globallyUniqueSnapshotName = `${fromSource}-${snapshotName}`;
                 const repoConfig = sourceCluster.snapshotInfo?.repos?.[snapshotDef.repoName];
 
+                const isExternal = 'externallyManagedSnapshotName' in snapshotDef.config;
+                const snapshotNameResolution = isExternal
+                    ? { externalSnapshotName: (snapshotDef.config as z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT>).externallyManagedSnapshotName }
+                    : { dataSnapshotResourceName: globallyUniqueSnapshotName };
+
                 results.push({
-                    label: globalSnapshotName,
-                    snapshotLabel: globalSnapshotName,
+                    label: globallyUniqueSnapshotName,
+                    snapshotNameResolution,
                     migrations: autoLabelMigrations(migrations),
                     sourceVersion: sourceCluster.version || "",
                     sourceLabel: fromSource,
                     targetConfig: { ...restOfTarget, label: toTarget },
                     snapshotConfig: {
-                        snapshotName: globalSnapshotName,
-                        label: globalSnapshotName,
+                        label: globallyUniqueSnapshotName,
                         ...(repoConfig ? {
                             repoConfig: {
                                 ...repoConfig,

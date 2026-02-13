@@ -130,14 +130,24 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
             data.documentBackfillConfig !== undefined,
         {message: "At least one of metadataMigrationConfig or documentBackfillConfig must be provided"});
 
+export const SNAPSHOT_NAME_RESOLUTION = z.union([
+    z.object({ externalSnapshotName: z.string() }),
+    z.object({ dataSnapshotResourceName: z.string() })
+]);
+
+export const SNAPSHOT_REPO_CONFIG = z.object({
+    label: z.string(),
+    repoConfig: DENORMALIZED_S3_REPO_CONFIG
+});
+
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     label: z.string(), // from the record of the user config
-    snapshotLabel: z.string(), // label from snapshotConfig, hoisted for easy access
+    snapshotNameResolution: SNAPSHOT_NAME_RESOLUTION,
     migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1),
     sourceVersion: z.string(),
     sourceLabel: z.string(),
     targetConfig: NAMED_TARGET_CLUSTER_CONFIG,
-    snapshotConfig: COMPLETE_SNAPSHOT_CONFIG
+    snapshotConfig: SNAPSHOT_REPO_CONFIG
 });
 
 export const NAMED_KAFKA_CLIENT_CONFIG =
@@ -153,6 +163,7 @@ export const DENORMALIZED_PROXY_CONFIG = z.object({
 })
 
 export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
+    label: z.string(),
     snapshotPrefix: z.string(),
     config: ARGO_CREATE_SNAPSHOT_OPTIONS,
     repo: DENORMALIZED_S3_REPO_CONFIG,
@@ -176,10 +187,10 @@ export const DENORMALIZED_REPLAY_CONFIG = z.object({
 
 export const ARGO_MIGRATION_CONFIG = z.object({
     kafkaClusters: z.array(NAMED_KAFKA_CLUSTER_CONFIG).min(1).optional(),
-    proxies: z.array(DENORMALIZED_PROXY_CONFIG),
-    snapshots: z.array(DENORMALIZED_CREATE_SNAPSHOTS_CONFIG),
-    snapshotMigrations: z.array(SNAPSHOT_MIGRATION_CONFIG),
-    trafficReplays: z.array(DENORMALIZED_REPLAY_CONFIG),
+    proxies: z.array(DENORMALIZED_PROXY_CONFIG).default([]),
+    snapshots: z.array(DENORMALIZED_CREATE_SNAPSHOTS_CONFIG).default([]),
+    snapshotMigrations: z.array(SNAPSHOT_MIGRATION_CONFIG).default([]),
+    trafficReplays: z.array(DENORMALIZED_REPLAY_CONFIG).default([]),
 
 })
 

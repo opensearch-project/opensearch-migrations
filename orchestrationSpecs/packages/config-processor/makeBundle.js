@@ -59,11 +59,6 @@ async function bundle() {
         platform: 'node',
         target: 'node22',
         outfile: outputFile,
-        external: [
-            '@grpc/grpc-js',
-            '@grpc/proto-loader',
-            'etcd3'
-        ],
         banner: {
             js: '#!/usr/bin/env node\nprocess.env.SUPPRESS_AUTO_LOAD = "true";'
         }
@@ -76,13 +71,7 @@ async function bundle() {
     const bundledNodeModules = path.join(outputDir, 'node_modules');
     fs.mkdirSync(bundledNodeModules, { recursive: true });
 
-    const topLevelExternals = ['etcd3', '@grpc/grpc-js', '@grpc/proto-loader'];
     const allDeps = new Set();
-
-    for (const dep of topLevelExternals) {
-        const deps = getDependencies(dep, workspaceNodeModules);
-        deps.forEach(d => allDeps.add(d));
-    }
 
     console.log(`Found ${allDeps.size} dependencies to copy (including transitive deps)`);
 

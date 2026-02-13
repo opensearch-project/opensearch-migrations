@@ -18,6 +18,8 @@ import {
     RFS_OPTIONS,
     SNAPSHOT_MIGRATION_CONFIG,
     SNAPSHOT_MIGRATION_FILTER,
+    SNAPSHOT_NAME_RESOLUTION,
+    SNAPSHOT_REPO_CONFIG,
     TARGET_CLUSTER_CONFIG,
 } from '@opensearch-migrations/schemas'
 import {
@@ -28,7 +30,7 @@ import {
     expr, GenericScope,
     IMAGE_PULL_POLICY,
     InputParamDef, InputParametersRecord,
-    INTERNAL,
+    INTERNAL, isExpression,
     makeParameterLoop, OutputParametersRecord,
     selectInputsFieldsAsExpressionRecord,
     selectInputsForRegister, TemplateBuilder,
@@ -47,7 +49,10 @@ const SECONDS_IN_DAYS = 24*3600;
 const LONGEST_POSSIBLE_MIGRATION = 365*SECONDS_IN_DAYS;
 
 const uniqueRunNonceParam = {
-    uniqueRunNonce: defineRequiredParam<string>({description: "Workflow session nonce"})
+    uniqueRunNonce: defineParam({
+        expression: expr.getWorkflowValue("uid"),
+        description: "Workflow session nonce"
+    })
 };
 
 function lowercaseFirst(str: string): string {
@@ -71,7 +76,7 @@ function defaultImagesMap(imageConfigMapName: AllowLiteralOrExpression<string>) 
         Record<`image${typeof LogicalOciImages[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY, false>>;
 }
 
-const CRD_API_VERSION = "migration.opensearch.org/v1alpha1";
+const CRD_API_VERSION = "migrations.opensearch.org/v1alpha1";
 
 export const FullMigration = WorkflowBuilder.create({
     k8sResourceName: "full-migration",
@@ -235,6 +240,7 @@ export const FullMigration = WorkflowBuilder.create({
 
     .addTemplate("patchDataSnapshotReady", t => t
         .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("snapshotName", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "patch",
@@ -243,7 +249,7 @@ export const FullMigration = WorkflowBuilder.create({
                     apiVersion: CRD_API_VERSION,
                     kind: "DataSnapshot",
                     metadata: { name: b.inputs.resourceName },
-                    status: { phase: "Ready" }
+                    status: { phase: "Ready", snapshotName: b.inputs.snapshotName }
                 }
             }))
     )
@@ -262,6 +268,21 @@ export const FullMigration = WorkflowBuilder.create({
                     status: { phase: "Ready" }
                 }
             }))
+    )
+
+
+    .addTemplate("readDataSnapshotName", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "get",
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "DataSnapshot",
+                    metadata: { name: b.inputs.resourceName }
+                }
+            })
+            .addJsonPathOutput("snapshotName", "{.status.snapshotName}", typeToken<string>()))
     )
 
 
@@ -369,13 +390,11 @@ export const FullMigration = WorkflowBuilder.create({
                                 expr.deserializeRecord(b.inputs.snapshotItemConfig), "config")
                         }),
                         repoConfig: expr.deserializeRecord(expr.jsonPathStrictSerialized(b.inputs.snapshotItemConfig, "repo")),
-                        // TODO: label should be the logical snapshot name (record key from user config),
-                        // not snapshotPrefix. PER_SOURCE_CREATE_SNAPSHOTS_CONFIG needs a label field.
                         label: expr.get(
-                            expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix")
+                            expr.deserializeRecord(b.inputs.snapshotItemConfig), "label")
                     })),
                     targetLabel: expr.get(
-                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix"),
+                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "label"),
                     semaphoreConfigMapName: expr.get(
                         expr.deserializeRecord(b.inputs.snapshotItemConfig), "semaphoreConfigMapName"),
                     semaphoreKey: expr.get(
@@ -386,14 +405,17 @@ export const FullMigration = WorkflowBuilder.create({
             .addTask("createDataSnapshot", INTERNAL, "createDataSnapshotResource", c =>
                 c.register({
                     resourceName: expr.get(
-                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix")
+                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "label")
                 }),
                 { dependencies: ["createOrGetSnapshot"] as const }
             )
             .addTask("patchDataSnapshot", INTERNAL, "patchDataSnapshotReady", c =>
                 c.register({
                     resourceName: expr.get(
-                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix")
+                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "label"),
+                    snapshotName: expr.get(
+                        expr.deserializeRecord(c.tasks.createOrGetSnapshot.outputs.snapshotConfig),
+                        "snapshotName")
                 }),
                 { dependencies: ["createDataSnapshot"] as const }
             )
@@ -476,10 +498,42 @@ export const FullMigration = WorkflowBuilder.create({
             .addTask("waitForSnapshot", INTERNAL, "waitForDataSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    resourceName: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "snapshotLabel")
-                })
+                    resourceName: expr.getLoose(
+                        expr.deserializeRecord(
+                            expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotNameResolution")),
+                        "dataSnapshotResourceName")
+                }), {
+                    when: { templateExp: expr.hasKey(
+                        expr.deserializeRecord(
+                            expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotNameResolution")),
+                        "dataSnapshotResourceName") }
+                }
+            )
+            .addTask("readSnapshotName", INTERNAL, "readDataSnapshotName", c =>
+                c.register({
+                    resourceName: expr.getLoose(
+                        expr.deserializeRecord(
+                            expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotNameResolution")),
+                        "dataSnapshotResourceName")
+                }), {
+                    when: { templateExp: expr.hasKey(
+                        expr.deserializeRecord(
+                            expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotNameResolution")),
+                        "dataSnapshotResourceName") },
+                    dependencies: ["waitForSnapshot"] as const
+                }
             )
             .addTask("migrateFromSnapshot", INTERNAL, "migrateFromSnapshot", c => {
+                    const snapshotNameResolution = expr.deserializeRecord(
+                        expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotNameResolution"));
+                    const resolvedSnapshotName = expr.ternary(
+                        expr.hasKey(snapshotNameResolution, "externalSnapshotName"),
+                        expr.getLoose(snapshotNameResolution, "externalSnapshotName"),
+                        c.tasks.readSnapshotName.outputs.snapshotName
+                    );
+                    const snapshotRepoConfig = expr.deserializeRecord(
+                        expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotConfig"));
+
                     return c.register({
                         ...selectInputsForRegister(b, c),
                         ...selectInputsFieldsAsExpressionRecord(c.item, c,
@@ -487,14 +541,18 @@ export const FullMigration = WorkflowBuilder.create({
                         sourceVersion: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "sourceVersion"),
                         sourceLabel: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "sourceLabel"),
                         targetConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "targetConfig"),
-                        snapshotConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotConfig"),
+                        snapshotConfig: expr.serialize(expr.makeDict({
+                            snapshotName: resolvedSnapshotName,
+                            label: expr.get(snapshotRepoConfig, "label"),
+                            repoConfig: expr.get(snapshotRepoConfig, "repoConfig")
+                        })),
                         migrationLabel: expr.get(c.item, "label"),
                         groupName: expr.get(c.item, "label")
                     });
                 }, {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "migrations")),
-                    dependencies: ["waitForSnapshot"] as const
+                    dependencies: ["readSnapshotName"] as const
                 }
             )
             .addTask("createSnapshotMigration", INTERNAL, "createSnapshotMigrationResource", c =>

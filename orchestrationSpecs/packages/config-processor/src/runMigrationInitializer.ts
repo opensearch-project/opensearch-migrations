@@ -13,7 +13,7 @@ global.console = new Console({
 const COMMAND_LINE_HELP_MESSAGE = `
 Usage: initialize-workflow [options] [input-file]
 
-Initialize migration workflow in etcd.  
+Initialize migration workflow and its requisite resources.  
 When the configuration is provided in the user-schema with the --user-config option, 
 that configuration will first be validated and transformed before doing the initialization.
 

@@ -260,7 +260,7 @@ describe('semaphore configuration', () => {
             ]
         };
 
-        const initializer = new MigrationInitializer({endpoints: ["localhost"]}, 'test-nonce');
+        const initializer = new MigrationInitializer();
         const concurrencyConfigMaps = (initializer as any).generateConcurrencyConfigMaps(config);
         
         const concurrencyConfigMap = concurrencyConfigMaps.items[0];
@@ -278,7 +278,7 @@ describe('semaphore configuration', () => {
         
         // Extract semaphore keys from transformed workflow
         const workflowSemaphoreKeys = new Set();
-        bundle.workflows.snapshots.forEach(ss =>
+        bundle.workflows.snapshots?.forEach(ss =>
             ss.createSnapshotConfig.forEach(snapshotConfig =>
                 workflowSemaphoreKeys.add(snapshotConfig.semaphoreKey))
         );

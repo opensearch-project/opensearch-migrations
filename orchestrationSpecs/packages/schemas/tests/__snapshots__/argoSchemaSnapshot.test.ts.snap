@@ -232,7 +232,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "sourceEndpoint",
                 "proxyConfig"
               ]
-            }
+            },
+            "default": []
           },
           "snapshots": {
             "type": "array",
@@ -244,6 +245,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "items": {
                     "type": "object",
                     "properties": {
+                      "label": {
+                        "type": "string"
+                      },
                       "snapshotPrefix": {
                         "type": "string"
                       },
@@ -318,6 +322,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       }
                     },
                     "required": [
+                      "label",
                       "snapshotPrefix",
                       "config",
                       "repo",
@@ -427,7 +432,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "createSnapshotConfig",
                 "sourceConfig"
               ]
-            }
+            },
+            "default": []
           },
           "snapshotMigrations": {
             "type": "array",
@@ -437,8 +443,31 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "label": {
                   "type": "string"
                 },
-                "snapshotLabel": {
-                  "type": "string"
+                "snapshotNameResolution": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "externalSnapshotName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "externalSnapshotName"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "dataSnapshotResourceName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "dataSnapshotResourceName"
+                      ]
+                    }
+                  ]
                 },
                 "migrations": {
                   "type": "array",
@@ -756,9 +785,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "snapshotConfig": {
                   "type": "object",
                   "properties": {
-                    "snapshotName": {
-                      "type": "string"
-                    },
                     "label": {
                       "type": "string"
                     },
@@ -800,7 +826,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     }
                   },
                   "required": [
-                    "snapshotName",
                     "label",
                     "repoConfig"
                   ]
@@ -808,14 +833,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               },
               "required": [
                 "label",
-                "snapshotLabel",
+                "snapshotNameResolution",
                 "migrations",
                 "sourceVersion",
                 "sourceLabel",
                 "targetConfig",
                 "snapshotConfig"
               ]
-            }
+            },
+            "default": []
           },
           "trafficReplays": {
             "type": "array",
@@ -1062,15 +1088,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "kafkaConfig",
                 "toTarget"
               ]
-            }
+            },
+            "default": []
           }
-        },
-        "required": [
-          "proxies",
-          "snapshots",
-          "snapshotMigrations",
-          "trafficReplays"
-        ]
+        }
       }
     }
   },

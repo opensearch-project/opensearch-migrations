@@ -133,7 +133,7 @@ export class MigrationInitializer {
         const items: any[] = [];
 
         // CapturedTraffic resources from proxies
-        for (const proxy of workflows.proxies) {
+        for (const proxy of workflows.proxies ?? []) {
             items.push({
                 apiVersion: CRD_API_VERSION,
                 kind: 'CapturedTraffic',
@@ -144,12 +144,12 @@ export class MigrationInitializer {
         }
 
         // DataSnapshot resources from snapshots
-        for (const snapshot of workflows.snapshots) {
+        for (const snapshot of workflows.snapshots ?? []) {
             for (const item of snapshot.createSnapshotConfig) {
                 items.push({
                     apiVersion: CRD_API_VERSION,
                     kind: 'DataSnapshot',
-                    metadata: { name: item.snapshotPrefix },
+                    metadata: { name: item.label },
                     spec: {},
                     status: { phase: 'Initialized' }
                 });
@@ -157,7 +157,7 @@ export class MigrationInitializer {
         }
 
         // SnapshotMigration resources from snapshotMigrations
-        for (const migration of workflows.snapshotMigrations) {
+        for (const migration of workflows.snapshotMigrations ?? []) {
             items.push({
                 apiVersion: CRD_API_VERSION,
                 kind: 'SnapshotMigration',
