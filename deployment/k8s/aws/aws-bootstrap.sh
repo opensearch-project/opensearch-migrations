@@ -33,6 +33,7 @@ skip_console_exec=false
 stage_filter=""
 extra_helm_values=""
 disable_general_purpose_pool=false
+region="${AWS_CFN_REGION:-}"
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -55,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --stage) stage_filter="$2"; shift 2 ;;
     --helm-values) extra_helm_values="$2"; shift 2 ;;
     --disable-general-purpose-pool) disable_general_purpose_pool=true; shift 1 ;;
+    --region) region="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo "Options:"
@@ -76,6 +78,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --stage <val>                             Filter CFN exports by stage name"
       echo "  --helm-values <path>                      Extra values file for helm install"
       echo "  --disable-general-purpose-pool            Disable EKS Auto Mode general-purpose pool (cost control)"
+      echo "  --region <val>                            AWS region for CloudFormation exports lookup"
       exit 0
       ;;
     *)
@@ -142,6 +145,7 @@ get_cfn_export() {
     names+=("$name")
     values+=("$value")
   done < <(aws cloudformation list-exports \
+    ${region:+--region "$region"} \
     --query "Exports[?starts_with(Name, \`${prefix}\`)].[Name,Value]" \
     --output text)
 
@@ -153,14 +157,13 @@ get_cfn_export() {
   else
     echo "Multiple Cloudformation stacks with migration exports found:" >&2
     for i in "${!names[@]}"; do
-      echo "[$i] ${names[$i]}" >&2
+      echo "  [$i] ${names[$i]}" >&2
     done
-    read -rp "Select the stack export name to use (0-$((${#names[@]} - 1))): " choice
-    if [[ ! "$choice" =~ ^[0-9]+$ || "$choice" -ge ${#names[@]} ]]; then
-      echo "Invalid choice." >&2
-      return 1
-    fi
-    echo "${values[$choice]}"
+    echo >&2
+    echo "Please re-run with the --stage flag to select the correct stack." >&2
+    echo "For example:" >&2
+    echo "  $0 --stage <stage-name>" >&2
+    return 1
   fi
 }
 
@@ -252,31 +255,11 @@ check_existing_ma_release() {
     echo "A Migration Assistant Helm release named '$release_name' already exists in namespace '$release_namespace'."
     echo "This usually means Migration Assistant is already installed on this cluster."
     echo
-
-    while true; do
-      read -rp "Would you like to uninstall the existing release so that we can reinstall it? (y/n): " answer
-      case "$answer" in
-        [Yy]*)
-          echo "Uninstalling existing Migration Assistant Helm release '$release_name' from namespace '$release_namespace'..."
-          if ! helm uninstall "$release_name" -n "$release_namespace"; then
-            echo "Failed to uninstall the existing Migration Assistant release."
-            echo "Please resolve manually with:"
-            echo "  helm uninstall $release_name -n $release_namespace"
-            exit 1
-          fi
-          echo "Existing Migration Assistant release removed. Continuing with fresh install..."
-          echo
-          break
-          ;;
-        [Nn]*)
-          echo "Existing installation detected. Bootstrap aborted."
-          exit 1
-          ;;
-        *)
-          echo "Please answer 'y' or 'n'."
-          ;;
-      esac
-    done
+    echo "To reinstall, first uninstall the existing release with:"
+    echo "  helm uninstall $release_name -n $release_namespace"
+    echo
+    echo "Then re-run this bootstrap script."
+    exit 1
   fi
 }
 
@@ -289,16 +272,10 @@ for cmd in git jq kubectl; do
   fi
 done
 
-# Prompt for installing helm
+# Install helm if missing
 if ! command -v helm &>/dev/null; then
-  echo "Helm is not installed."
-  read -rp "Would you like to install Helm now? (y/n): " answer
-  if [[ "$answer" == [Yy]* ]]; then
-    install_helm
-  else
-    echo "Helm is required. Exiting."
-    missing=1
-  fi
+  echo "Helm is not installed. Installing it now..."
+  install_helm
 fi
 
 # Exit if any tool was missing and not resolved
@@ -306,7 +283,8 @@ fi
 
 if ! output=$(get_cfn_export); then
   echo "Unable to find any CloudFormation stacks in the current region which have an output that starts with '$prefix'. \
-        Has the Migration Assistant CloudFormation template been deployed?" >&2
+Has the Migration Assistant CloudFormation template been deployed?" >&2
+  echo "If the stack is in a different region, re-run with --region <region>." >&2
   exit 1
 fi
 echo "Setting ENV variables: $output"
@@ -392,14 +370,14 @@ if [[ "$build_images" == "true" ]]; then
     echo "Builder removed. Buildkit pods will be terminated by kubernetes driver."
   else
     if helm status build-images -n "$namespace" >/dev/null 2>&1; then
-      read -rp "Helm release 'build-images' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
-      if [[ "$answer" == [Yy]* ]]; then
-        helm uninstall build-images -n "$namespace"
-        sleep 2
-      else
-        echo "The 'build-images' release must be uninstalled before proceeding. This can be uninstalled with 'helm uninstall build-images -n $namespace'"
-        exit 1
-      fi
+      echo "Helm release 'build-images' already exists in namespace '$namespace'."
+      echo "The 'build-images' release must be uninstalled before proceeding."
+      echo
+      echo "To uninstall, run:"
+      echo "  helm uninstall build-images -n $namespace"
+      echo
+      echo "Then re-run this bootstrap script."
+      exit 1
     fi
     helm install build-images "${build_images_chart_dir}" \
       --namespace "$namespace" \
