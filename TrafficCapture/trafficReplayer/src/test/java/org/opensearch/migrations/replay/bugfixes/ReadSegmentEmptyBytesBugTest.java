@@ -40,14 +40,13 @@ import org.junit.jupiter.api.Test;
  * Since the observation has a ReadSegment (not a Read), getRead() returns a default empty
  * ReadObservation, so an empty byte[] is added to packetBytes for every ReadSegment.
  *
- * This test asserts on the CURRENT BUGGY behavior (empty byte arrays in packetBytes).
- * When the bug is fixed, this test should FAIL.
+ * This test verifies the fix: only the correctly concatenated segment data appears in packetBytes.
  */
 @Slf4j
 public class ReadSegmentEmptyBytesBugTest extends InstrumentationTest {
 
     @Test
-    void readSegment_addsEmptyBytesToPacketBytes_becauseGetReadReturnsEmpty() {
+    void readSegment_correctlyAccumulatesData() {
         var baseTime = Instant.now();
         var ts = Timestamp.newBuilder()
             .setSeconds(baseTime.getEpochSecond())
@@ -115,23 +114,12 @@ public class ReadSegmentEmptyBytesBugTest extends InstrumentationTest {
         Assertions.assertEquals(1, results.size(), "Should have 1 transaction");
         var requestPackets = results.get(0).getRequestData().packetBytes;
 
-        // BUG ASSERTION: With the bug, packetBytes has 3 entries:
-        //   [0] = empty byte[] (from 1st ReadSegment's buggy getRead())
-        //   [1] = empty byte[] (from 2nd ReadSegment's buggy getRead())
-        //   [2] = full concatenated data (from finalizeRequestSegments)
-        // When fixed, there should be only 1 entry with the full data.
-        Assertions.assertEquals(3, requestPackets.size(),
-            "BUG: packetBytes should have 1 entry but has 3 because getRead() adds empty byte[] for each ReadSegment");
+        // FIXED: packetBytes should have exactly 1 entry with the full concatenated segment data
+        Assertions.assertEquals(1, requestPackets.size(),
+            "packetBytes should have 1 entry with the full concatenated segment data");
 
-        // The first two entries are empty (the bug)
-        Assertions.assertEquals(0, requestPackets.get(0).length,
-            "BUG: first entry is empty bytes from getRead() on a ReadSegment observation");
-        Assertions.assertEquals(0, requestPackets.get(1).length,
-            "BUG: second entry is empty bytes from getRead() on a ReadSegment observation");
-
-        // The third entry has the actual data (from finalizeRequestSegments)
         var expectedData = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
-        Assertions.assertEquals(expectedData, new String(requestPackets.get(2), StandardCharsets.UTF_8),
-            "Third entry should have the full concatenated segment data");
+        Assertions.assertEquals(expectedData, new String(requestPackets.get(0), StandardCharsets.UTF_8),
+            "Single entry should have the full concatenated segment data");
     }
 }
