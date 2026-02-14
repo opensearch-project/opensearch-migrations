@@ -9,7 +9,7 @@ describe("Expression Evaluation - ternary true branch", () => {
     name: "ternary true branch",
     inputs: { count: "5" },
     argoExpression: "asInt(inputs.parameters.count) > 3 ? 'high' : 'low'",
-    expectedResult: "high" as any,
+    expectedResult: "high",
   };
 
   describe("ArgoYaml", () => {
@@ -27,7 +27,7 @@ describe("Expression Evaluation - ternary true branch", () => {
   describe("Builder - ternary", () => {
     const builderVariant: BuilderVariant = {
       name: "ternary",
-      code: 'expr.ternary(expr.greaterThan(expr.cast(ctx.inputs.count).to<number>(), expr.literal(3)), "high" as any, "low" as any)',
+      code: 'expr.ternary(expr.greaterThan(expr.cast(ctx.inputs.count).to<number>(), expr.literal(3)), expr.literal("high"), expr.literal("low"))',
     };
 
     test("builder API produces same result", async () => {
@@ -37,8 +37,8 @@ describe("Expression Evaluation - ternary true branch", () => {
         .addExpressionOutput("result", (ctx) =>
           expr.ternary(
             expr.greaterThan(expr.cast(ctx.inputs.count).to<number>(), expr.literal(3)),
-            "high" as any,
-            "low" as any
+            expr.literal("high"),
+            expr.literal("low")
           )
         )
       );
@@ -58,7 +58,7 @@ describe("Expression Evaluation - ternary false branch", () => {
     name: "ternary false branch",
     inputs: { count: "1" },
     argoExpression: "asInt(inputs.parameters.count) > 3 ? 'high' : 'low'",
-    expectedResult: "low" as any,
+    expectedResult: "low",
   };
 
   describe("ArgoYaml", () => {
@@ -76,7 +76,7 @@ describe("Expression Evaluation - ternary false branch", () => {
   describe("Builder - ternary", () => {
     const builderVariant: BuilderVariant = {
       name: "ternary",
-      code: 'expr.ternary(expr.greaterThan(expr.cast(ctx.inputs.count).to<number>(), expr.literal(3)), "high" as any, "low" as any)',
+      code: 'expr.ternary(expr.greaterThan(expr.cast(ctx.inputs.count).to<number>(), expr.literal(3)), expr.literal("high"), expr.literal("low"))',
     };
 
     test("builder API produces same result", async () => {
@@ -86,8 +86,8 @@ describe("Expression Evaluation - ternary false branch", () => {
         .addExpressionOutput("result", (ctx) =>
           expr.ternary(
             expr.greaterThan(expr.cast(ctx.inputs.count).to<number>(), expr.literal(3)),
-            "high" as any,
-            "low" as any
+            expr.literal("high"),
+            expr.literal("low")
           )
         )
       );
@@ -107,7 +107,7 @@ describe("Expression Evaluation - string equality", () => {
     name: "string equality",
     inputs: { status: "ready" },
     argoExpression: "inputs.parameters.status == 'ready' ? 'go' : 'wait'",
-    expectedResult: "go" as any,
+    expectedResult: "go",
   };
 
   describe("ArgoYaml", () => {
@@ -125,7 +125,7 @@ describe("Expression Evaluation - string equality", () => {
   describe("Builder - ternary/equals", () => {
     const builderVariant: BuilderVariant = {
       name: "ternary/equals",
-      code: 'expr.ternary(expr.equals(ctx.inputs.status, "ready"), "go" as any, "wait" as any)',
+      code: 'expr.ternary(expr.equals(ctx.inputs.status, expr.literal("ready")), expr.literal("go"), expr.literal("wait"))',
     };
 
     test("builder API produces same result", async () => {
@@ -133,7 +133,11 @@ describe("Expression Evaluation - string equality", () => {
         .addOptionalInput("status", () => "ready")
         .addSteps(s => s.addStepGroup(c => c))
         .addExpressionOutput("result", (ctx) =>
-          expr.ternary(expr.equals(ctx.inputs.status, "ready"), "go" as any, "wait" as any)
+          expr.ternary(
+            expr.equals(ctx.inputs.status, expr.literal("ready")),
+            expr.literal("go"),
+            expr.literal("wait")
+          )
         )
       );
 
@@ -170,7 +174,7 @@ describe("Expression Evaluation - string concatenation", () => {
   describe("Builder - concat", () => {
     const builderVariant: BuilderVariant = {
       name: "concat",
-      code: 'expr.concat(ctx.inputs.a, " ", ctx.inputs.b)',
+      code: 'expr.concat(ctx.inputs.a, expr.literal(" "), ctx.inputs.b)',
     };
 
     test("builder API produces same result", async () => {
@@ -179,7 +183,7 @@ describe("Expression Evaluation - string concatenation", () => {
         .addOptionalInput("b", () => "world")
         .addSteps(s => s.addStepGroup(c => c))
         .addExpressionOutput("result", (ctx) =>
-          expr.concat(ctx.inputs.a, " ", ctx.inputs.b)
+          expr.concat(ctx.inputs.a, expr.literal(" "), ctx.inputs.b)
         )
       );
 
@@ -265,7 +269,7 @@ describe("Expression Evaluation - boolean expressions", () => {
     name: "boolean expressions",
     inputs: {},
     argoExpression: "true ? 'yes' : 'no'",
-    expectedResult: "yes" as any,
+    expectedResult: "yes",
   };
 
   describe("ArgoYaml", () => {
@@ -282,14 +286,14 @@ describe("Expression Evaluation - boolean expressions", () => {
   describe("Builder - ternary", () => {
     const builderVariant: BuilderVariant = {
       name: "ternary",
-      code: 'expr.ternary(true, expr.literal("yes" as any), expr.literal("no" as any))',
+      code: 'expr.ternary(expr.literal(true), expr.literal("yes"), expr.literal("no"))',
     };
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
         .addSteps(s => s.addStepGroup(c => c))
         .addExpressionOutput("result", () =>
-          expr.ternary(true, expr.literal("yes" as any), expr.literal("no" as any))
+          expr.ternary(expr.literal(true), expr.literal("yes"), expr.literal("no"))
         )
       );
 
@@ -308,7 +312,7 @@ describe("Expression Evaluation - nested ternary", () => {
     name: "nested ternary",
     inputs: { x: "5" },
     argoExpression: "asInt(inputs.parameters.x) > 10 ? 'big' : asInt(inputs.parameters.x) > 3 ? 'medium' : 'small'",
-    expectedResult: "medium" as any,
+    expectedResult: "medium",
   };
 
   describe("ArgoYaml", () => {
@@ -326,7 +330,7 @@ describe("Expression Evaluation - nested ternary", () => {
   describe("Builder - ternary", () => {
     const builderVariant: BuilderVariant = {
       name: "ternary",
-      code: 'expr.ternary(expr.greaterThan(expr.cast(ctx.inputs.x).to<number>(), expr.literal(10)), "big" as any, expr.ternary(expr.greaterThan(expr.cast(ctx.inputs.x).to<number>(), expr.literal(3)), "medium" as any, "small" as any))',
+      code: 'expr.ternary(expr.greaterThan(expr.cast(ctx.inputs.x).to<number>(), expr.literal(10)), expr.literal("big"), expr.ternary(expr.greaterThan(expr.cast(ctx.inputs.x).to<number>(), expr.literal(3)), expr.literal("medium"), expr.literal("small")))',
     };
 
     test("builder API produces same result", async () => {
@@ -336,11 +340,11 @@ describe("Expression Evaluation - nested ternary", () => {
         .addExpressionOutput("result", (ctx) =>
           expr.ternary(
             expr.greaterThan(expr.cast(ctx.inputs.x).to<number>(), expr.literal(10)),
-            "big" as any,
+            expr.literal("big"),
             expr.ternary(
               expr.greaterThan(expr.cast(ctx.inputs.x).to<number>(), expr.literal(3)),
-              "medium" as any,
-              "small" as any
+              expr.literal("medium"),
+              expr.literal("small")
             )
           )
         )

@@ -1,4 +1,4 @@
-import { WorkflowBuilder, TemplateBuilder } from "../../../src/index.js";
+import { TemplateBuilder, WorkflowBuilder } from "../../../src/index.js";
 
 /**
  * Creates a test workflow from a template builder function.
@@ -15,12 +15,14 @@ import { WorkflowBuilder, TemplateBuilder } from "../../../src/index.js";
  * );
  */
 export function makeTestWorkflow(
-  templateBuilder: (t: any) => any
-): any {
+  templateBuilder: (
+    t: TemplateBuilder<{ workflowParameters: {}; templates: {} }, {}, {}, {}>
+  ) => { getFullTemplateScope(): unknown }
+) {
   const uniqueName = `test-${Date.now()}-${Math.random().toString(36).substring(7)}`.toLowerCase();
   
   return WorkflowBuilder.create({ k8sResourceName: uniqueName as any })
-    .addTemplate("test" as any, (t: any) => templateBuilder(t))
+    .addTemplate("test" as any, (t) => templateBuilder(t))
     .setEntrypoint("test" as any)
     .getFullScope();
 }

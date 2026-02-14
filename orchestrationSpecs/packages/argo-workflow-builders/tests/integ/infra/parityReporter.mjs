@@ -7,6 +7,11 @@ const RESULTS_DIR = "/tmp/parity-results";
 const OUTPUT_PATH = path.join(__dirname, "../artifacts/parity-catalog.md");
 
 export default class ParityReporter {
+  constructor() {
+    this.builderSpecTitles = new Set();
+    this.builderFailureText = "";
+  }
+
   onRunStart() {
     if (fs.existsSync(RESULTS_DIR)) {
       fs.rmSync(RESULTS_DIR, { recursive: true });
@@ -15,6 +20,8 @@ export default class ParityReporter {
   }
 
   onRunComplete(_contexts, _results) {
+    this.builderSpecTitles = this.collectBuilderSpecTitles(_results);
+    this.builderFailureText = this.collectBuilderFailureText(_results);
     const entries = this.readAllResults();
     if (entries.length === 0) return;
 
@@ -90,8 +97,11 @@ export default class ParityReporter {
 
     let builderCol = "-";
     const variants = entry.parityVariants || [];
+    const hasBuilderAssertion = this.hasBuilderAssertionForSpec(spec);
     if (variants.length === 0) {
-      builderCol = "⚠️ No builder support";
+      builderCol = hasBuilderAssertion
+        ? "❌ Builder test exists but failed before result capture"
+        : "⚠️ No builder support";
     } else {
       const variantLines = variants.map(v => {
         const passed = spec.expectedPhase === "Error"
@@ -125,10 +135,35 @@ export default class ParityReporter {
         parityCol = "❌";
       }
     } else if (entry.contract && variants.length === 0) {
-      parityCol = "⚠️";
+      parityCol = hasBuilderAssertion ? "❌" : "⚠️";
     }
 
     return `| ${testCase} | ${argoExpr} | ${inputs} | ${expected} | ${argoCol} | ${builderCol} | ${parityCol} |`;
+  }
+
+  collectBuilderSpecTitles(results) {
+    const titles = new Set();
+    for (const suite of results?.testResults || []) {
+      for (const assertion of suite.assertionResults || []) {
+        const ancestors = assertion?.ancestorTitles || [];
+        if (ancestors.length >= 2 && String(ancestors[1]).startsWith("Builder - ")) {
+          titles.add(String(ancestors[0]));
+        }
+      }
+    }
+    return titles;
+  }
+
+  hasBuilderAssertionForSpec(spec) {
+    const title = `${spec.category} - ${spec.name}`;
+    if (this.builderSpecTitles.has(title)) return true;
+    return this.builderFailureText.includes(`${title} › Builder -`);
+  }
+
+  collectBuilderFailureText(results) {
+    return (results?.testResults || [])
+      .map(suite => suite?.failureMessage || "")
+      .join("\n");
   }
 
   groupByCategory(entries) {

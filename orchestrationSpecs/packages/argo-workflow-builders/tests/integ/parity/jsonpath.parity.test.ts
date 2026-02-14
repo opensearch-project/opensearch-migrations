@@ -1,6 +1,10 @@
-import { renderWorkflowTemplate, expr } from "../../../src/index.js";
+import { renderWorkflowTemplate, expr, typeToken } from "../../../src/index.js";
 import { submitProbe, submitRenderedWorkflow } from "../infra/probeHelper.js";
 import { ParitySpec, BuilderVariant, reportContractResult, reportParityResult } from "../infra/parityHelper.js";
+import { makeTestWorkflow } from "../infra/testWorkflowHelper.js";
+
+type NumberKeyRecord = { key: number };
+type StringKeyRecord = { key: string };
 
 describe("JSONPath - extract number as bare string", () => {
   const spec: ParitySpec = {
@@ -26,23 +30,21 @@ describe("JSONPath - extract number as bare string", () => {
   describe("Builder - jsonPathStrict", () => {
     const builderVariant: BuilderVariant = {
       name: "jsonPathStrict",
-      code: 'expr.jsonPathStrict(expr.cast(expr.literal("{{workflow.parameters.data}}")).to<any>(), "key")',
+      code: 'expr.jsonPathStrict(ctx.inputs.data, "key")',
     };
 
     test("builder API produces same result", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "jp-num" })
-        .addParams({ data: defineParam({ expression: spec.inputs!.data }) })
-        .addTemplate("main", t => t
+      const wf = makeTestWorkflow(t => t
+          .addRequiredInput("data", typeToken<NumberKeyRecord>())
           .addSteps(s => s.addStepGroup(c => c))
-          .addExpressionOutput("result", () =>
-            expr.jsonPathStrict(expr.cast(expr.literal("{{workflow.parameters.data}}")).to<any>(), "key")
+          .addExpressionOutput("result", (ctx) =>
+            expr.jsonPathStrict(ctx.inputs.data, "key")
           )
         )
-        
         ;
 
       const rendered = renderWorkflowTemplate(wf);
-      const result = await submitRenderedWorkflow(rendered);
+      const result = await submitRenderedWorkflow(rendered, { data: spec.inputs!.data });
       expect(result.phase).toBe("Succeeded");
       expect(result.globalOutputs.result).toBe(spec.expectedResult);
       reportParityResult(spec, builderVariant, result);
@@ -74,23 +76,21 @@ describe("JSONPath - extract string without extra quotes", () => {
   describe("Builder - jsonPathStrict", () => {
     const builderVariant: BuilderVariant = {
       name: "jsonPathStrict",
-      code: 'expr.jsonPathStrict(expr.cast(expr.literal("{{workflow.parameters.data}}")).to<any>(), "key")',
+      code: 'expr.jsonPathStrict(ctx.inputs.data, "key")',
     };
 
     test("builder API produces same result", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "jp-str" })
-        .addParams({ data: defineParam({ expression: spec.inputs!.data }) })
-        .addTemplate("main", t => t
+      const wf = makeTestWorkflow(t => t
+          .addRequiredInput("data", typeToken<StringKeyRecord>())
           .addSteps(s => s.addStepGroup(c => c))
-          .addExpressionOutput("result", () =>
-            expr.jsonPathStrict(expr.cast(expr.literal("{{workflow.parameters.data}}")).to<any>(), "key")
+          .addExpressionOutput("result", (ctx) =>
+            expr.jsonPathStrict(ctx.inputs.data, "key")
           )
         )
-        
         ;
 
       const rendered = renderWorkflowTemplate(wf);
-      const result = await submitRenderedWorkflow(rendered);
+      const result = await submitRenderedWorkflow(rendered, { data: spec.inputs!.data });
       expect(result.phase).toBe("Succeeded");
       expect(result.globalOutputs.result).toBe(spec.expectedResult);
       reportParityResult(spec, builderVariant, result);

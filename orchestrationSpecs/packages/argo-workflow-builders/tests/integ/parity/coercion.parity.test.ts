@@ -1,7 +1,11 @@
-import { renderWorkflowTemplate, expr } from "../../../src/index.js";
+import { renderWorkflowTemplate, expr, typeToken } from "../../../src/index.js";
 import { submitProbe, submitRenderedWorkflow } from "../infra/probeHelper.js";
 import { ParitySpec, BuilderVariant, reportContractResult, reportParityResult } from "../infra/parityHelper.js";
 import { makeTestWorkflow } from "../infra/testWorkflowHelper.js";
+
+type NestedPayload = { nested: { value: number } };
+type FlagPayload = { flag: boolean };
+type StructuredPayload = { a: number; b: string; c: boolean };
 
 describe("Type Coercion - toJSON on string parameter double-serializes", () => {
   const spec: ParitySpec = {
@@ -35,7 +39,7 @@ describe("Type Coercion - toJSON on string parameter double-serializes", () => {
         .addOptionalInput("data", () => '{"a":1}')
         .addSteps(s => s.addStepGroup(c => c))
         .addExpressionOutput("result", (ctx) =>
-          expr.serialize(ctx.ctx.inputs.data)
+          expr.serialize(ctx.inputs.data)
         )
       );
 
@@ -77,7 +81,7 @@ describe("Type Coercion - fromJSON then toJSON preserves structure", () => {
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-          .addOptionalInput("data", () => '{"a":1,"b":"two","c":true}')
+          .addRequiredInput("data", typeToken<StructuredPayload>())
           .addSteps(s => s.addStepGroup(c => c))
           .addExpressionOutput("result", (ctx) =>
             expr.serialize(expr.deserializeRecord(ctx.inputs.data))
@@ -87,7 +91,7 @@ describe("Type Coercion - fromJSON then toJSON preserves structure", () => {
         ;
 
       const rendered = renderWorkflowTemplate(wf);
-      const result = await submitRenderedWorkflow(rendered);
+      const result = await submitRenderedWorkflow(rendered, { data: spec.inputs!.data });
       expect(result.phase).toBe("Succeeded");
       expect(JSON.parse(result.globalOutputs.result)).toEqual(JSON.parse(spec.inputs!.data));
       reportParityResult(spec, builderVariant, result);
@@ -124,17 +128,19 @@ describe("Type Coercion - nested fromJSON extracts then re-serializes", () => {
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-          .addOptionalInput("data", () => '{"nested":{"value":42}}')
+          .addRequiredInput("data", typeToken<NestedPayload>())
           .addSteps(s => s.addStepGroup(c => c))
           .addExpressionOutput("result", (ctx) =>
-            expr.serialize(expr.get(expr.deserializeRecord(ctx.inputs.data), "nested"))
+            expr.serialize(
+              expr.get(expr.deserializeRecord(ctx.inputs.data), "nested")
+            )
           )
         )
         
         ;
 
       const rendered = renderWorkflowTemplate(wf);
-      const result = await submitRenderedWorkflow(rendered);
+      const result = await submitRenderedWorkflow(rendered, { data: spec.inputs!.data });
       expect(result.phase).toBe("Succeeded");
       expect(JSON.parse(result.globalOutputs.result)).toEqual({ value: 42 });
       reportParityResult(spec, builderVariant, result);
@@ -188,18 +194,18 @@ describe("Type Coercion - fromJSON boolean can be used in conditionals", () => {
   describe("Builder - ternary", () => {
     const builderVariant: BuilderVariant = {
       name: "ternary",
-      code: 'expr.ternary(expr.get(expr.deserializeRecord(ctx.inputs.data), "flag"), "yes", "no")',
+      code: 'expr.ternary(expr.get(expr.deserializeRecord(ctx.inputs.data), "flag"), expr.literal("yes"), expr.literal("no"))',
     };
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-          .addOptionalInput("data", () => '{"flag":true}')
+          .addRequiredInput("data", typeToken<FlagPayload>())
           .addSteps(s => s.addStepGroup(c => c))
           .addExpressionOutput("result", (ctx) =>
             expr.ternary(
               expr.get(expr.deserializeRecord(ctx.inputs.data), "flag"),
-              "yes",
-              "no"
+              expr.literal("yes"),
+              expr.literal("no")
             )
           )
         )
@@ -207,7 +213,7 @@ describe("Type Coercion - fromJSON boolean can be used in conditionals", () => {
         ;
 
       const rendered = renderWorkflowTemplate(wf);
-      const result = await submitRenderedWorkflow(rendered);
+      const result = await submitRenderedWorkflow(rendered, { data: spec.inputs!.data });
       expect(result.phase).toBe("Succeeded");
       expect(result.globalOutputs.result).toBe(spec.expectedResult);
       reportParityResult(spec, builderVariant, result);

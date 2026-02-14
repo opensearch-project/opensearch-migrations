@@ -8,7 +8,13 @@ import {StepGroup} from "../models/stepsBuilder";
 import {MISSING_FIELD, PlainObject} from "../models/plainObject";
 import {GenericScope, LoopWithUnion} from "../models/workflowTypes";
 import {WorkflowBuilder} from "../models/workflowBuilder";
-import {BaseExpression, makeDirectTypeProxy, UnquotedTypeWrapper} from "../models/expression";
+import {
+    BaseExpression,
+    makeDirectTypeProxy,
+    SimpleExpression,
+    TemplateExpression,
+    UnquotedTypeWrapper
+} from "../models/expression";
 import {NamedTask} from "../models/sharedTypes";
 import * as _ from 'lodash';
 import {toSafeYamlOutput} from "../utils";
@@ -36,7 +42,7 @@ export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder<any
             ...(wf.workflowParameters != null && {arguments: formatParameters(wf.workflowParameters)}),
             ...(wf.metadata.synchronization && {synchronization: formatSynchronization(wf.metadata.synchronization)}),
             templates: (() => {
-                const list = [];
+                const list: ReturnType<typeof formatTemplate>[] = [];
                 for (const k in wf.templates) {
                     list.push(formatTemplate(wf.templates, k));
                 }
@@ -133,13 +139,19 @@ function formatStepOrTask<T extends NamedTask & { withLoop?: unknown }>(step: T)
         ...(undefined === withLoop   ? {} : renderWithLoop(withLoop as LoopWithUnion<any>)),
         ...(undefined === when       ? {} : {
             when:
-                (when && typeof when === "object" && "templateExp" in when) ?
+                isTemplateWhenWrapper(when) ?
                 `${toArgoExpressionString(when.templateExp, "Outer")}` :
                     `${toArgoExpressionString(when, "IdentifierOnly").replace(/^'|'$/g, '')}`
         }),
         ...{"arguments": {parameters: (formatArguments(args) as object)}},
         ...rest
     };
+}
+
+function isTemplateWhenWrapper(
+    when: SimpleExpression<boolean> | { templateExp: TemplateExpression<boolean> }
+): when is { templateExp: TemplateExpression<boolean> } {
+    return typeof when === "object" && when !== null && "templateExp" in when;
 }
 
 function formatContainerEnvs(envVars: Record<string, BaseExpression<any>>) {

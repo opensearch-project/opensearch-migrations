@@ -177,14 +177,21 @@ export async function submitRenderedWorkflow(
     },
   };
   
-  // Apply input overrides
-  if (inputOverrides && workflow.spec.arguments?.parameters) {
-    workflow.spec.arguments.parameters = workflow.spec.arguments.parameters.map((param: any) => {
-      if (inputOverrides.hasOwnProperty(param.name)) {
-        return { ...param, value: inputOverrides[param.name] };
+  // Apply input overrides. If arguments are absent, create them from overrides.
+  if (inputOverrides) {
+    if (!workflow.spec.arguments?.parameters) {
+      workflow.spec.arguments = {
+        ...(workflow.spec.arguments || {}),
+        parameters: Object.entries(inputOverrides).map(([name, value]) => ({ name, value })),
+      };
+    } else {
+      const existing = workflow.spec.arguments.parameters as Array<{ name: string; value?: string }>;
+      const byName = new Map(existing.map(p => [p.name, p]));
+      for (const [name, value] of Object.entries(inputOverrides)) {
+        byName.set(name, { ...(byName.get(name) || { name }), value });
       }
-      return param;
-    });
+      workflow.spec.arguments.parameters = Array.from(byName.values());
+    }
   }
   
   return submitAndWait(workflow);

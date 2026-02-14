@@ -1,4 +1,4 @@
-import { renderWorkflowTemplate, expr } from "../../../src/index.js";
+import { renderWorkflowTemplate, expr, typeToken } from "../../../src/index.js";
 import { makeTestWorkflow } from "../infra/testWorkflowHelper.js";import { submitProbe, submitRenderedWorkflow } from "../infra/probeHelper.js";
 import { ParitySpec, BuilderVariant, reportContractResult, reportParityResult } from "../infra/parityHelper.js";
 
@@ -26,15 +26,15 @@ describe("Array Operations - array indexing with literal index", () => {
   describe("Builder - index", () => {
     const builderVariant: BuilderVariant = {
       name: "index",
-      code: 'expr.index(expr.cast(expr.deserializeRecord(ctx.inputs.arr)).to<any[]>(), expr.literal(1))',
+      code: 'expr.index(expr.deserializeRecord(ctx.inputs.arr), expr.literal(1))',
     };
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-          .addOptionalInput("arr", () => '["a","b","c"]')
+          .addOptionalInput("arr", () => expr.stringToRecord(typeToken<string[]>(), '["a","b","c"]'))
           .addSteps(s => s.addStepGroup(c => c))
           .addExpressionOutput("result", (ctx) =>
-            expr.index(expr.cast(expr.deserializeRecord(ctx.inputs.arr)).to<any[]>(), expr.literal(1))
+            expr.index(expr.deserializeRecord(ctx.inputs.arr), expr.literal(1))
           )
         )
         
@@ -73,15 +73,15 @@ describe("Array Operations - array length", () => {
   describe("Builder - length", () => {
     const builderVariant: BuilderVariant = {
       name: "length",
-      code: 'expr.toString(expr.length(expr.cast(expr.deserializeRecord(ctx.inputs.arr)).to<any[]>()))',
+      code: 'expr.toString(expr.length(expr.deserializeRecord(ctx.inputs.arr)))',
     };
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-          .addOptionalInput("arr", () => '["a","b","c"]')
+          .addOptionalInput("arr", () => expr.stringToRecord(typeToken<string[]>(), '["a","b","c"]'))
           .addSteps(s => s.addStepGroup(c => c))
           .addExpressionOutput("result", (ctx) =>
-            expr.toString(expr.length(expr.cast(expr.deserializeRecord(ctx.inputs.arr)).to<any[]>()))
+            expr.toString(expr.length(expr.deserializeRecord(ctx.inputs.arr)))
           )
         )
         
@@ -120,15 +120,15 @@ describe("Array Operations - last element of array", () => {
   describe("Builder - last", () => {
     const builderVariant: BuilderVariant = {
       name: "last",
-      code: 'expr.last(expr.cast(expr.deserializeRecord(ctx.inputs.arr)).to<any[]>())',
+      code: 'expr.last(expr.deserializeRecord(ctx.inputs.arr))',
     };
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-          .addOptionalInput("arr", () => '["first","middle","last"]')
+          .addOptionalInput("arr", () => expr.stringToRecord(typeToken<string[]>(), '["first","middle","last"]'))
           .addSteps(s => s.addStepGroup(c => c))
           .addExpressionOutput("result", (ctx) =>
-            expr.last(expr.cast(expr.deserializeRecord(ctx.inputs.arr)).to<any[]>())
+            expr.last(expr.deserializeRecord(ctx.inputs.arr))
           )
         )
         
@@ -173,7 +173,7 @@ describe("Array Operations - array with mixed types", () => {
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-          .addOptionalInput("arr", () => '[1,"two",true]')
+          .addRequiredInput("arr", typeToken<(number | string | boolean)[]>())
           .addSteps(s => s.addStepGroup(c => c))
           .addExpressionOutput("result", (ctx) =>
             expr.serialize(expr.deserializeRecord(ctx.inputs.arr))
@@ -183,7 +183,7 @@ describe("Array Operations - array with mixed types", () => {
         ;
 
       const rendered = renderWorkflowTemplate(wf);
-      const result = await submitRenderedWorkflow(rendered);
+      const result = await submitRenderedWorkflow(rendered, { arr: spec.inputs!.arr });
       expect(result.phase).toBe("Succeeded");
       const parsed = JSON.parse(result.globalOutputs.result);
       expect(parsed).toEqual([1, "two", true]);
@@ -216,15 +216,15 @@ describe("Array Operations - empty array length", () => {
   describe("Builder - length", () => {
     const builderVariant: BuilderVariant = {
       name: "length",
-      code: 'expr.toString(expr.length(expr.cast(expr.deserializeRecord(ctx.inputs.arr)).to<any[]>()))',
+      code: 'expr.toString(expr.length(expr.deserializeRecord(ctx.inputs.arr)))',
     };
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-          .addOptionalInput("arr", () => '[]')
+          .addOptionalInput("arr", () => expr.stringToRecord(typeToken<string[]>(), '[]'))
           .addSteps(s => s.addStepGroup(c => c))
           .addExpressionOutput("result", (ctx) =>
-            expr.toString(expr.length(expr.cast(expr.deserializeRecord(ctx.inputs.arr)).to<any[]>()))
+            expr.toString(expr.length(expr.deserializeRecord(ctx.inputs.arr)))
           )
         )
         
