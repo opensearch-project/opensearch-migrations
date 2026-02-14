@@ -374,7 +374,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 rrPair.requestData = new HttpMessageAndTimestamp.Request(timestamp);
                 requestCounter.incrementAndGet();
             }
-            rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
             rrPair.requestData.addSegment(observation.getReadSegment().getData().toByteArray());
             log.atTrace().setMessage("Added request segment for accum[{}]={}")
                 .addArgument(connectionId)
