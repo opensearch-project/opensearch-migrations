@@ -238,10 +238,12 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
 
         @SneakyThrows
         private void commitTrafficStreams(boolean shouldCommit, List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
-            if (shouldCommit && trafficStreamKeysBeingHeld != null) {
+            if (trafficStreamKeysBeingHeld != null) {
                 for (var tsk : trafficStreamKeysBeingHeld) {
                     tsk.getTrafficStreamsContext().close();
-                    trafficCaptureSource.commitTrafficStream(tsk);
+                    if (shouldCommit) {
+                        trafficCaptureSource.commitTrafficStream(tsk);
+                    }
                 }
             }
         }

@@ -37,8 +37,8 @@ import org.junit.jupiter.api.Test;
  * When shouldCommit is false (CLOSED_PREMATURELY), the method does nothing — contexts
  * are never closed. The fix should always close contexts, only skipping the commit.
  *
- * This test asserts on the CURRENT BUGGY behavior (context not closed on premature close).
- * When the bug is fixed, this test should FAIL.
+ * This test verifies the fix: traffic stream contexts are always closed, even when
+ * the status is CLOSED_PREMATURELY (only the commit is skipped).
  */
 @Slf4j
 public class ClosedPrematurelyContextLeakBugTest extends InstrumentationTest {
@@ -49,7 +49,7 @@ public class ClosedPrematurelyContextLeakBugTest extends InstrumentationTest {
     }
 
     @Test
-    void closedPrematurelyStatus_doesNotCloseTrafficStreamContext() {
+    void closedPrematurelyStatus_closesTrafficStreamContext() {
         var baseTime = Instant.now();
         var ts = Timestamp.newBuilder()
             .setSeconds(baseTime.getEpochSecond())
@@ -90,16 +90,13 @@ public class ClosedPrematurelyContextLeakBugTest extends InstrumentationTest {
                 ) {
                     capturedStatus.set(status);
                     capturedKeys.addAll(trafficStreamKeysBeingHeld);
-                    // This is where TrafficReplayerCore.commitTrafficStreams would be called.
-                    // With CLOSED_PREMATURELY, shouldCommit = false, so contexts are never closed.
-                    // Replicate the buggy behavior:
-                    boolean shouldCommit = status != RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY;
-                    if (shouldCommit && trafficStreamKeysBeingHeld != null) {
+                    // Replicate the FIXED commitTrafficStreams behavior:
+                    // always close contexts, only skip commit when CLOSED_PREMATURELY
+                    if (trafficStreamKeysBeingHeld != null) {
                         for (var tsk : trafficStreamKeysBeingHeld) {
                             tsk.getTrafficStreamsContext().close();
                         }
                     }
-                    // BUG: when shouldCommit is false, contexts are NEVER closed
                 }
 
                 @Override
@@ -131,11 +128,8 @@ public class ClosedPrematurelyContextLeakBugTest extends InstrumentationTest {
         long lifecycleCount = InMemoryInstrumentationBundle.getMetricValueOrZero(
             metrics, "trafficStreamLifetimeCount");
 
-        // BUG ASSERTION: The traffic stream context was never closed because
-        // commitTrafficStreams(false, keys) does nothing when shouldCommit is false.
-        // When the bug is fixed (contexts always closed), this metric should be > 0.
-        Assertions.assertEquals(0, lifecycleCount,
-            "BUG: trafficStreamLifetimeCount should be > 0 (context closed) but is 0 "
-            + "because CLOSED_PREMATURELY path never closes contexts");
+        // FIXED: The traffic stream context is now closed even for CLOSED_PREMATURELY
+        Assertions.assertTrue(lifecycleCount > 0,
+            "trafficStreamLifetimeCount should be > 0 because contexts are always closed");
     }
 }
