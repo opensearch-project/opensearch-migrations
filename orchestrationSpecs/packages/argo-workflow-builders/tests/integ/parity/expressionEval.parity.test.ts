@@ -1,4 +1,4 @@
-import { renderWorkflowTemplate, expr } from "../../../src/index.js";
+import { renderWorkflowTemplate, expr, typeToken } from "../../../src/index.js";
 import { submitProbe, submitRenderedWorkflow } from "../infra/probeHelper.js";
 import { ParitySpec, BuilderVariant, reportContractResult, reportParityResult } from "../infra/parityHelper.js";
 import { makeTestWorkflow } from "../infra/testWorkflowHelper.js";
@@ -27,16 +27,16 @@ describe("Expression Evaluation - ternary true branch", () => {
   describe("Builder - ternary", () => {
     const builderVariant: BuilderVariant = {
       name: "ternary",
-      code: 'expr.ternary(expr.greaterThan(expr.cast(ctx.inputs.count).to<number>(), expr.literal(3)), expr.literal("high"), expr.literal("low"))',
+      code: 'expr.ternary(expr.greaterThan(expr.deserializeRecord(ctx.inputs.count), expr.literal(3)), expr.literal("high"), expr.literal("low"))',
     };
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-        .addOptionalInput("count", () => "5")
+        .addRequiredInput("count", typeToken<number>())
         .addSteps(s => s.addStepGroup(c => c))
         .addExpressionOutput("result", (ctx) =>
           expr.ternary(
-            expr.greaterThan(expr.cast(ctx.inputs.count).to<number>(), expr.literal(3)),
+            expr.greaterThan(expr.deserializeRecord(ctx.inputs.count), expr.literal(3)),
             expr.literal("high"),
             expr.literal("low")
           )
@@ -44,7 +44,7 @@ describe("Expression Evaluation - ternary true branch", () => {
       );
 
       const rendered = renderWorkflowTemplate(wf);
-      const result = await submitRenderedWorkflow(rendered);
+      const result = await submitRenderedWorkflow(rendered, { count: spec.inputs!.count });
       expect(result.phase).toBe("Succeeded");
       expect(result.globalOutputs.result).toBe(spec.expectedResult);
       reportParityResult(spec, builderVariant, result);
@@ -76,16 +76,16 @@ describe("Expression Evaluation - ternary false branch", () => {
   describe("Builder - ternary", () => {
     const builderVariant: BuilderVariant = {
       name: "ternary",
-      code: 'expr.ternary(expr.greaterThan(expr.cast(ctx.inputs.count).to<number>(), expr.literal(3)), expr.literal("high"), expr.literal("low"))',
+      code: 'expr.ternary(expr.greaterThan(expr.deserializeRecord(ctx.inputs.count), expr.literal(3)), expr.literal("high"), expr.literal("low"))',
     };
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-        .addOptionalInput("count", () => "1")
+        .addRequiredInput("count", typeToken<number>())
         .addSteps(s => s.addStepGroup(c => c))
         .addExpressionOutput("result", (ctx) =>
           expr.ternary(
-            expr.greaterThan(expr.cast(ctx.inputs.count).to<number>(), expr.literal(3)),
+            expr.greaterThan(expr.deserializeRecord(ctx.inputs.count), expr.literal(3)),
             expr.literal("high"),
             expr.literal("low")
           )
@@ -93,7 +93,7 @@ describe("Expression Evaluation - ternary false branch", () => {
       );
 
       const rendered = renderWorkflowTemplate(wf);
-      const result = await submitRenderedWorkflow(rendered);
+      const result = await submitRenderedWorkflow(rendered, { count: spec.inputs!.count });
       expect(result.phase).toBe("Succeeded");
       expect(result.globalOutputs.result).toBe(spec.expectedResult);
       reportParityResult(spec, builderVariant, result);
@@ -330,19 +330,19 @@ describe("Expression Evaluation - nested ternary", () => {
   describe("Builder - ternary", () => {
     const builderVariant: BuilderVariant = {
       name: "ternary",
-      code: 'expr.ternary(expr.greaterThan(expr.cast(ctx.inputs.x).to<number>(), expr.literal(10)), expr.literal("big"), expr.ternary(expr.greaterThan(expr.cast(ctx.inputs.x).to<number>(), expr.literal(3)), expr.literal("medium"), expr.literal("small")))',
+      code: 'expr.ternary(expr.greaterThan(expr.deserializeRecord(ctx.inputs.x), expr.literal(10)), expr.literal("big"), expr.ternary(expr.greaterThan(expr.deserializeRecord(ctx.inputs.x), expr.literal(3)), expr.literal("medium"), expr.literal("small")))',
     };
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-        .addOptionalInput("x", () => "5")
+        .addRequiredInput("x", typeToken<number>())
         .addSteps(s => s.addStepGroup(c => c))
         .addExpressionOutput("result", (ctx) =>
           expr.ternary(
-            expr.greaterThan(expr.cast(ctx.inputs.x).to<number>(), expr.literal(10)),
+            expr.greaterThan(expr.deserializeRecord(ctx.inputs.x), expr.literal(10)),
             expr.literal("big"),
             expr.ternary(
-              expr.greaterThan(expr.cast(ctx.inputs.x).to<number>(), expr.literal(3)),
+              expr.greaterThan(expr.deserializeRecord(ctx.inputs.x), expr.literal(3)),
               expr.literal("medium"),
               expr.literal("small")
             )
@@ -351,7 +351,7 @@ describe("Expression Evaluation - nested ternary", () => {
       );
 
       const rendered = renderWorkflowTemplate(wf);
-      const result = await submitRenderedWorkflow(rendered);
+      const result = await submitRenderedWorkflow(rendered, { x: spec.inputs!.x });
       expect(result.phase).toBe("Succeeded");
       expect(result.globalOutputs.result).toBe(spec.expectedResult);
       reportParityResult(spec, builderVariant, result);

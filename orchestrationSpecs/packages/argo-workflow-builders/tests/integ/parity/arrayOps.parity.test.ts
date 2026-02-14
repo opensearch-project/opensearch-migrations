@@ -31,7 +31,7 @@ describe("Array Operations - array indexing with literal index", () => {
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-          .addOptionalInput("arr", () => expr.stringToRecord(typeToken<string[]>(), '["a","b","c"]'))
+          .addRequiredInput("arr", typeToken<string[]>())
           .addSteps(s => s.addStepGroup(c => c))
           .addExpressionOutput("result", (ctx) =>
             expr.index(expr.deserializeRecord(ctx.inputs.arr), expr.literal(1))
@@ -41,7 +41,7 @@ describe("Array Operations - array indexing with literal index", () => {
         ;
 
       const rendered = renderWorkflowTemplate(wf);
-      const result = await submitRenderedWorkflow(rendered);
+      const result = await submitRenderedWorkflow(rendered, { arr: spec.inputs!.arr });
       expect(result.phase).toBe("Succeeded");
       expect(result.globalOutputs.result).toBe(spec.expectedResult);
       reportParityResult(spec, builderVariant, result);
@@ -78,7 +78,7 @@ describe("Array Operations - array length", () => {
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-          .addOptionalInput("arr", () => expr.stringToRecord(typeToken<string[]>(), '["a","b","c"]'))
+          .addRequiredInput("arr", typeToken<string[]>())
           .addSteps(s => s.addStepGroup(c => c))
           .addExpressionOutput("result", (ctx) =>
             expr.toString(expr.length(expr.deserializeRecord(ctx.inputs.arr)))
@@ -88,7 +88,7 @@ describe("Array Operations - array length", () => {
         ;
 
       const rendered = renderWorkflowTemplate(wf);
-      const result = await submitRenderedWorkflow(rendered);
+      const result = await submitRenderedWorkflow(rendered, { arr: spec.inputs!.arr });
       expect(result.phase).toBe("Succeeded");
       expect(result.globalOutputs.result).toBe(spec.expectedResult);
       reportParityResult(spec, builderVariant, result);
@@ -125,7 +125,7 @@ describe("Array Operations - last element of array", () => {
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-          .addOptionalInput("arr", () => expr.stringToRecord(typeToken<string[]>(), '["first","middle","last"]'))
+          .addRequiredInput("arr", typeToken<string[]>())
           .addSteps(s => s.addStepGroup(c => c))
           .addExpressionOutput("result", (ctx) =>
             expr.last(expr.deserializeRecord(ctx.inputs.arr))
@@ -135,7 +135,7 @@ describe("Array Operations - last element of array", () => {
         ;
 
       const rendered = renderWorkflowTemplate(wf);
-      const result = await submitRenderedWorkflow(rendered);
+      const result = await submitRenderedWorkflow(rendered, { arr: spec.inputs!.arr });
       expect(result.phase).toBe("Succeeded");
       expect(result.globalOutputs.result).toBe(spec.expectedResult);
       reportParityResult(spec, builderVariant, result);
@@ -221,7 +221,7 @@ describe("Array Operations - empty array length", () => {
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
-          .addOptionalInput("arr", () => expr.stringToRecord(typeToken<string[]>(), '[]'))
+          .addRequiredInput("arr", typeToken<string[]>())
           .addSteps(s => s.addStepGroup(c => c))
           .addExpressionOutput("result", (ctx) =>
             expr.toString(expr.length(expr.deserializeRecord(ctx.inputs.arr)))
@@ -231,7 +231,7 @@ describe("Array Operations - empty array length", () => {
         ;
 
       const rendered = renderWorkflowTemplate(wf);
-      const result = await submitRenderedWorkflow(rendered);
+      const result = await submitRenderedWorkflow(rendered, { arr: spec.inputs!.arr });
       expect(result.phase).toBe("Succeeded");
       expect(result.globalOutputs.result).toBe(spec.expectedResult);
       reportParityResult(spec, builderVariant, result);

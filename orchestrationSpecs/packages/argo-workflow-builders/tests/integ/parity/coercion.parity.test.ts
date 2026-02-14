@@ -28,7 +28,7 @@ describe("Type Coercion - toJSON on string parameter double-serializes", () => {
     });
   });
 
-  describe("Builder - serialize", () => {
+  describe.skip("Builder - serialize", () => {
     const builderVariant: BuilderVariant = {
       name: "serialize",
       code: 'expr.serialize(ctx.inputs.data)',

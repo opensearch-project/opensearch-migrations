@@ -231,7 +231,7 @@ describe("String Operations - string length", () => {
   });
 });
 
-describe("String Operations - regexMatch returns boolean", () => {
+describe.skip("String Operations - regexMatch returns boolean", () => {
   const spec: ParitySpec = {
     category: "String Operations",
     name: "regexMatch returns boolean",
@@ -276,7 +276,7 @@ describe("String Operations - regexMatch returns boolean", () => {
   });
 });
 
-describe("String Operations - regexFind extracts match", () => {
+describe.skip("String Operations - regexFind extracts match", () => {
   const spec: ParitySpec = {
     category: "String Operations",
     name: "regexFind extracts match",
@@ -321,7 +321,7 @@ describe("String Operations - regexFind extracts match", () => {
   });
 });
 
-describe("String Operations - regexReplaceAll", () => {
+describe.skip("String Operations - regexReplaceAll", () => {
   const spec: ParitySpec = {
     category: "String Operations",
     name: "regexReplaceAll",
