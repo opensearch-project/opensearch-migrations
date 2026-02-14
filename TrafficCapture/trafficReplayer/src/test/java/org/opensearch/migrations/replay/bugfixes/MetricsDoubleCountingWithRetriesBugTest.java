@@ -25,8 +25,8 @@ import static org.mockito.Mockito.mock;
  * A request that fails twice then succeeds will increment exceptionRequestCount by 2 AND
  * successfulRequestCount by 1. The counters should only reflect the final outcome per request.
  *
- * This test asserts on the CURRENT BUGGY behavior (double-counting).
- * When the bug is fixed, this test should FAIL.
+ * This test verifies the fix: perResponseConsumer no longer increments counters (counting
+ * moved to handleCompletedTransaction which is called once per request).
  */
 @Slf4j
 public class MetricsDoubleCountingWithRetriesBugTest {
@@ -65,12 +65,12 @@ public class MetricsDoubleCountingWithRetriesBugTest {
     }
 
     @Test
-    void perResponseConsumer_countsEveryRetryResponse_notJustFinalOutcome() {
+    void perResponseConsumer_doesNotCountRetries() {
         var core = new TestableReplayerCore();
         var ctx = mock(IReplayContexts.IReplayerHttpTransactionContext.class);
         var okStatus = HttpRequestTransformationStatus.completed();
 
-        // Simulate what happens during retries: perResponseConsumer is called for EACH response
+        // Simulate retries: perResponseConsumer is called for EACH response
         var errorResponse = new AggregatedRawResponse(null, 0, null, null, new RuntimeException("503"));
         var successResponse = new AggregatedRawResponse(null, 0, null, null, null);
 
@@ -81,17 +81,11 @@ public class MetricsDoubleCountingWithRetriesBugTest {
         // Final attempt: success
         core.callPerResponseConsumer(successResponse, okStatus, ctx);
 
-        // BUG ASSERTION: For a single request with 2 retries then success,
-        // both counters are incremented. A correct implementation would only
-        // count the final outcome (1 success, 0 exceptions).
-        Assertions.assertEquals(2, core.getExceptionCount().get(),
-            "BUG: exceptionRequestCount is 2 because each retry error is counted separately");
-        Assertions.assertEquals(1, core.getSuccessCount().get(),
-            "BUG: successfulRequestCount is also 1, so total counted = 3 for 1 request");
-
-        // The total counted responses (3) exceeds the actual number of unique requests (1)
-        int totalCounted = core.getExceptionCount().get() + core.getSuccessCount().get();
-        Assertions.assertEquals(3, totalCounted,
-            "BUG: 3 responses counted for 1 request due to per-retry counting");
+        // FIXED: perResponseConsumer no longer increments counters — counting is done
+        // once per request in handleCompletedTransaction
+        Assertions.assertEquals(0, core.getExceptionCount().get(),
+            "perResponseConsumer should not count retries");
+        Assertions.assertEquals(0, core.getSuccessCount().get(),
+            "perResponseConsumer should not count retries");
     }
 }
