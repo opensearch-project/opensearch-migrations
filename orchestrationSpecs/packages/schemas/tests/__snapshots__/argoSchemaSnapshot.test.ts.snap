@@ -313,7 +313,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "semaphoreKey": {
                         "type": "string"
                       },
-                      "dependsUponProxySetups": {
+                      "dependsOnProxySetups": {
                         "type": "array",
                         "items": {
                           "type": "string"

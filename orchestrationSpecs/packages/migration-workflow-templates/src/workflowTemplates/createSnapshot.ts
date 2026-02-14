@@ -9,6 +9,7 @@ import {
     NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
+import {ResourceManagement} from "./resourceManagement";
 import {
     BaseExpression,
     expr,
@@ -216,6 +217,12 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     sourceK8sLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
                     targetK8sLabel: b.inputs.targetLabel,
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
+                }))
+
+            .addStep("patchDataSnapshot", ResourceManagement, "patchDataSnapshotReady", c =>
+                c.register({
+                    resourceName: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
+                    snapshotName: expr.jsonPathStrict(b.inputs.snapshotConfig, "snapshotName")
                 }))
         )
         .addSynchronization(c => ({

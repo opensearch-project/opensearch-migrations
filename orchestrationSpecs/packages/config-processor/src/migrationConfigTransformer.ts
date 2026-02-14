@@ -286,7 +286,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
     /** Build snapshot creation configs grouped by source cluster. */
     private buildSnapshots(userConfig: InputConfig) {
-        // Build a map of source → proxy names for dependsUponProxySetups
+        // Build a map of source → proxy names for dependsOnProxySetups
         const proxyNamesBySource = new Map<string, string[]>();
         for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
             const source = proxy.source;
@@ -320,7 +320,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     },
                     repo: { ...repoConfig, useLocalStack: /^localstacks?:\/\//i.test(repoConfig.endpoint ?? ""), repoName: snapshotDef.repoName },
                     ...semaphore,
-                    ...(proxyDeps && proxyDeps.length > 0 ? { dependsUponProxySetups: proxyDeps } : {})
+                    ...(proxyDeps && proxyDeps.length > 0 ? { dependsOnProxySetups: proxyDeps } : {})
                 });
             }
 

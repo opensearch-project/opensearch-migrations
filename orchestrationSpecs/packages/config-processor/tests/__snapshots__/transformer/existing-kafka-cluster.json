@@ -58,7 +58,7 @@
             "useLocalStack": false,
             "repoName": "default"
           },
-          "dependsUponProxySetups": [
+          "dependsOnProxySetups": [
             "proxy1"
           ]
         }

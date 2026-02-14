@@ -11,18 +11,6 @@ exports[`test workflow template renderings capture-proxy 1`] = `
     "arguments": {
       "parameters": [
         {
-          "name": "etcdEndpoints",
-          "value": "http://etcd.ma.svc.cluster.local:2379",
-        },
-        {
-          "name": "etcdUser",
-          "value": "root",
-        },
-        {
-          "name": "etcdPassword",
-          "value": "password",
-        },
-        {
           "name": "s3SnapshotConfigMap",
           "value": "s3-snapshot-config",
         },
@@ -99,18 +87,6 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
   "spec": {
     "arguments": {
       "parameters": [
-        {
-          "name": "etcdEndpoints",
-          "value": "http://etcd.ma.svc.cluster.local:2379",
-        },
-        {
-          "name": "etcdUser",
-          "value": "root",
-        },
-        {
-          "name": "etcdPassword",
-          "value": "password",
-        },
         {
           "name": "s3SnapshotConfigMap",
           "value": "s3-snapshot-config",
@@ -303,18 +279,6 @@ exports[`test workflow template renderings create-snapshot 1`] = `
   "spec": {
     "arguments": {
       "parameters": [
-        {
-          "name": "etcdEndpoints",
-          "value": "http://etcd.ma.svc.cluster.local:2379",
-        },
-        {
-          "name": "etcdUser",
-          "value": "root",
-        },
-        {
-          "name": "etcdPassword",
-          "value": "password",
-        },
         {
           "name": "s3SnapshotConfigMap",
           "value": "s3-snapshot-config",
@@ -757,6 +721,27 @@ exports[`test workflow template renderings create-snapshot 1`] = `
               "template": "checksnapshotstatus",
             },
           ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "snapshotName",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.snapshotName')}}",
+                  },
+                ],
+              },
+              "name": "patchDataSnapshot",
+              "templateRef": {
+                "name": "resource-management",
+                "template": "patchdatasnapshotready",
+              },
+            },
+          ],
         ],
         "synchronization": {
           "semaphores": [
@@ -784,18 +769,6 @@ exports[`test workflow template renderings document-bulk-load 1`] = `
   "spec": {
     "arguments": {
       "parameters": [
-        {
-          "name": "etcdEndpoints",
-          "value": "http://etcd.ma.svc.cluster.local:2379",
-        },
-        {
-          "name": "etcdUser",
-          "value": "root",
-        },
-        {
-          "name": "etcdPassword",
-          "value": "password",
-        },
         {
           "name": "s3SnapshotConfigMap",
           "value": "s3-snapshot-config",
@@ -1655,18 +1628,6 @@ exports[`test workflow template renderings full-migration 1`] = `
     "arguments": {
       "parameters": [
         {
-          "name": "etcdEndpoints",
-          "value": "http://etcd.ma.svc.cluster.local:2379",
-        },
-        {
-          "name": "etcdUser",
-          "value": "root",
-        },
-        {
-          "name": "etcdPassword",
-          "value": "password",
-        },
-        {
           "name": "s3SnapshotConfigMap",
           "value": "s3-snapshot-config",
         },
@@ -1735,284 +1696,6 @@ exports[`test workflow template renderings full-migration 1`] = `
         "name": "signalreplayerfortarget",
         "outputs": {
           "parameters": [],
-        },
-      },
-      {
-        "activeDeadlineSeconds": "31536000",
-        "container": {
-          "args": [
-            "wait",
-            "--for=create",
-            "{{=''+inputs.parameters.resourceName}}",
-            "--timeout=undefineds",
-          ],
-          "command": [
-            "kubectl",
-          ],
-          "env": [],
-          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-          "resources": {
-            "limits": {
-              "cpu": "50m",
-              "memory": "32Mi",
-            },
-            "requests": {
-              "cpu": "50m",
-              "memory": "32Mi",
-            },
-          },
-        },
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "waitforkafkatopic",
-        "outputs": {
-          "parameters": [],
-        },
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "waitforcapturedtraffic",
-        "outputs": {
-          "parameters": [],
-        },
-        "resource": {
-          "action": "get",
-          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
-kind: CapturedTraffic
-metadata:
-  name: "{{inputs.parameters.resourceName}}"
-",
-          "successCondition": "status.phase == Ready",
-        },
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "waitfordatasnapshot",
-        "outputs": {
-          "parameters": [],
-        },
-        "resource": {
-          "action": "get",
-          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
-kind: DataSnapshot
-metadata:
-  name: "{{inputs.parameters.resourceName}}"
-",
-          "successCondition": "status.phase == Ready",
-        },
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "waitforsnapshotmigration",
-        "outputs": {
-          "parameters": [],
-        },
-        "resource": {
-          "action": "get",
-          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
-kind: SnapshotMigration
-metadata:
-  name: "{{inputs.parameters.resourceName}}"
-",
-          "successCondition": "status.phase == Ready",
-        },
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName",
-            },
-          ],
-        },
-        "name": "createcapturedtrafficresource",
-        "outputs": {
-          "parameters": [],
-        },
-        "resource": {
-          "action": "create",
-          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
-kind: CapturedTraffic
-metadata:
-  name: "{{inputs.parameters.resourceName}}"
-spec: {}
-",
-          "setOwnerReference": false,
-        },
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName",
-            },
-          ],
-        },
-        "name": "createdatasnapshotresource",
-        "outputs": {
-          "parameters": [],
-        },
-        "resource": {
-          "action": "create",
-          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
-kind: DataSnapshot
-metadata:
-  name: "{{inputs.parameters.resourceName}}"
-spec: {}
-",
-          "setOwnerReference": false,
-        },
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName",
-            },
-          ],
-        },
-        "name": "createsnapshotmigrationresource",
-        "outputs": {
-          "parameters": [],
-        },
-        "resource": {
-          "action": "create",
-          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
-kind: SnapshotMigration
-metadata:
-  name: "{{inputs.parameters.resourceName}}"
-spec: {}
-",
-          "setOwnerReference": false,
-        },
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName",
-            },
-          ],
-        },
-        "name": "patchcapturedtrafficready",
-        "outputs": {
-          "parameters": [],
-        },
-        "resource": {
-          "action": "patch",
-          "flags": [
-            "--type",
-            "merge",
-          ],
-          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
-kind: CapturedTraffic
-metadata:
-  name: "{{inputs.parameters.resourceName}}"
-status:
-  phase: Ready
-",
-        },
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName",
-            },
-          ],
-        },
-        "name": "patchdatasnapshotready",
-        "outputs": {
-          "parameters": [],
-        },
-        "resource": {
-          "action": "patch",
-          "flags": [
-            "--type",
-            "merge",
-          ],
-          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
-kind: DataSnapshot
-metadata:
-  name: "{{inputs.parameters.resourceName}}"
-status:
-  phase: Ready
-",
-        },
-      },
-      {
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName",
-            },
-          ],
-        },
-        "name": "patchsnapshotmigrationready",
-        "outputs": {
-          "parameters": [],
-        },
-        "resource": {
-          "action": "patch",
-          "flags": [
-            "--type",
-            "merge",
-          ],
-          "manifest": "apiVersion: migration.opensearch.org/v1alpha1
-kind: SnapshotMigration
-metadata:
-  name: "{{inputs.parameters.resourceName}}"
-status:
-  phase: Ready
-",
         },
       },
       {
@@ -2097,7 +1780,10 @@ status:
                 ],
               },
               "name": "waitForTopic",
-              "template": "waitforkafkatopic",
+              "templateRef": {
+                "name": "resource-management",
+                "template": "waitforkafkatopic",
+              },
             },
             {
               "arguments": {
@@ -2121,23 +1807,11 @@ status:
               "dependencies": [
                 "placeholderProxySetup",
               ],
-              "name": "createCapturedTraffic",
-              "template": "createcapturedtrafficresource",
-            },
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['name']}}",
-                  },
-                ],
-              },
-              "dependencies": [
-                "createCapturedTraffic",
-              ],
               "name": "patchCapturedTraffic",
-              "template": "patchcapturedtrafficready",
+              "templateRef": {
+                "name": "resource-management",
+                "template": "patchcapturedtrafficready",
+              },
             },
           ],
         },
@@ -2180,9 +1854,11 @@ status:
                 ],
               },
               "name": "waitForProxyDeps",
-              "template": "waitforcapturedtraffic",
-              "when": "{{=!(0 == len(fromJSON(inputs.parameters.snapshotItemConfig)['dependsUponProxySetups']))}}",
-              "withParam": "{{=(('dependsUponProxySetups' in fromJSON(inputs.parameters.snapshotItemConfig)) ? (fromJSON(inputs.parameters.snapshotItemConfig)['dependsUponProxySetups']) : ([]))}}",
+              "templateRef": {
+                "name": "resource-management",
+                "template": "waitforcapturedtraffic",
+              },
+              "when": "{{=!(0 == len(fromJSON(inputs.parameters.snapshotItemConfig)['dependsOnProxySetups']))}}",
             },
             {
               "arguments": {
@@ -2213,11 +1889,11 @@ status:
                   },
                   {
                     "name": "snapshotConfig",
-                    "value": "{{=toJSON(sprig.dict("config", sprig.dict("createSnapshotConfig", fromJSON(inputs.parameters.snapshotItemConfig)['config']), "repoConfig", fromJSON(jsonpath(inputs.parameters.snapshotItemConfig, '$.repo')), "label", fromJSON(inputs.parameters.snapshotItemConfig)['snapshotPrefix']))}}",
+                    "value": "{{=toJSON(sprig.dict("config", sprig.dict("createSnapshotConfig", fromJSON(inputs.parameters.snapshotItemConfig)['config']), "repoConfig", fromJSON(jsonpath(inputs.parameters.snapshotItemConfig, '$.repo')), "label", fromJSON(inputs.parameters.snapshotItemConfig)['label']))}}",
                   },
                   {
                     "name": "targetLabel",
-                    "value": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['snapshotPrefix']}}",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['label']}}",
                   },
                   {
                     "name": "semaphoreConfigMapName",
@@ -2238,36 +1914,6 @@ status:
                 "template": "createorgetsnapshot",
               },
             },
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['snapshotPrefix']}}",
-                  },
-                ],
-              },
-              "dependencies": [
-                "createOrGetSnapshot",
-              ],
-              "name": "createDataSnapshot",
-              "template": "createdatasnapshotresource",
-            },
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['snapshotPrefix']}}",
-                  },
-                ],
-              },
-              "dependencies": [
-                "createDataSnapshot",
-              ],
-              "name": "patchDataSnapshot",
-              "template": "patchdatasnapshotready",
-            },
           ],
         },
         "inputs": {
@@ -2281,6 +1927,7 @@ status:
             {
               "description": "Workflow session nonce",
               "name": "uniqueRunNonce",
+              "value": "{{workflow.uid}}",
             },
             {
               "name": "imageCaptureProxyLocation",
@@ -2322,6 +1969,7 @@ status:
             {
               "description": "Workflow session nonce",
               "name": "uniqueRunNonce",
+              "value": "{{workflow.uid}}",
             },
             {
               "name": "imageCaptureProxyLocation",
@@ -2443,6 +2091,7 @@ status:
             {
               "description": "Workflow session nonce",
               "name": "uniqueRunNonce",
+              "value": "{{workflow.uid}}",
             },
             {
               "name": "imageCaptureProxyLocation",
@@ -2628,12 +2277,35 @@ status:
                   },
                   {
                     "name": "resourceName",
-                    "value": "{{=jsonpath(inputs.parameters.snapshotMigrationConfig, '$.snapshotLabel')}}",
+                    "value": "{{=fromJSON(jsonpath(inputs.parameters.snapshotMigrationConfig, '$.snapshotNameResolution'))['dataSnapshotResourceName']}}",
                   },
                 ],
               },
               "name": "waitForSnapshot",
-              "template": "waitfordatasnapshot",
+              "templateRef": {
+                "name": "resource-management",
+                "template": "waitfordatasnapshot",
+              },
+              "when": "{{='dataSnapshotResourceName' in fromJSON(jsonpath(inputs.parameters.snapshotMigrationConfig, '$.snapshotNameResolution'))}}",
+            },
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=fromJSON(jsonpath(inputs.parameters.snapshotMigrationConfig, '$.snapshotNameResolution'))['dataSnapshotResourceName']}}",
+                  },
+                ],
+              },
+              "dependencies": [
+                "waitForSnapshot",
+              ],
+              "name": "readSnapshotName",
+              "templateRef": {
+                "name": "resource-management",
+                "template": "readdatasnapshotname",
+              },
+              "when": "{{='dataSnapshotResourceName' in fromJSON(jsonpath(inputs.parameters.snapshotMigrationConfig, '$.snapshotNameResolution'))}}",
             },
             {
               "arguments": {
@@ -2700,7 +2372,7 @@ status:
                   },
                   {
                     "name": "snapshotConfig",
-                    "value": "{{=jsonpath(inputs.parameters.snapshotMigrationConfig, '$.snapshotConfig')}}",
+                    "value": "{{=toJSON(sprig.dict("snapshotName", (('externalSnapshotName' in fromJSON(jsonpath(inputs.parameters.snapshotMigrationConfig, '$.snapshotNameResolution'))) ? (fromJSON(jsonpath(inputs.parameters.snapshotMigrationConfig, '$.snapshotNameResolution'))['externalSnapshotName']) : (tasks.readSnapshotName.outputs.parameters.snapshotName)), "label", fromJSON(jsonpath(inputs.parameters.snapshotMigrationConfig, '$.snapshotConfig'))['label'], "repoConfig", fromJSON(jsonpath(inputs.parameters.snapshotMigrationConfig, '$.snapshotConfig'))['repoConfig']))}}",
                   },
                   {
                     "name": "migrationLabel",
@@ -2713,7 +2385,7 @@ status:
                 ],
               },
               "dependencies": [
-                "waitForSnapshot",
+                "readSnapshotName",
               ],
               "name": "migrateFromSnapshot",
               "template": "migratefromsnapshot",
@@ -2731,23 +2403,11 @@ status:
               "dependencies": [
                 "migrateFromSnapshot",
               ],
-              "name": "createSnapshotMigration",
-              "template": "createsnapshotmigrationresource",
-            },
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{=jsonpath(inputs.parameters.snapshotMigrationConfig, '$.label')}}",
-                  },
-                ],
-              },
-              "dependencies": [
-                "createSnapshotMigration",
-              ],
               "name": "patchSnapshotMigration",
-              "template": "patchsnapshotmigrationready",
+              "templateRef": {
+                "name": "resource-management",
+                "template": "patchsnapshotmigrationready",
+              },
             },
           ],
         },
@@ -2759,6 +2419,7 @@ status:
             {
               "description": "Workflow session nonce",
               "name": "uniqueRunNonce",
+              "value": "{{workflow.uid}}",
             },
             {
               "name": "imageCaptureProxyLocation",
@@ -2812,9 +2473,11 @@ status:
                 ],
               },
               "name": "waitForSnapshotMigrationDeps",
-              "template": "waitforsnapshotmigration",
+              "templateRef": {
+                "name": "resource-management",
+                "template": "waitforsnapshotmigration",
+              },
               "when": "{{=!(0 == len(fromJSON(inputs.parameters.replayConfig)['dependsOnSnapshotMigrations']))}}",
-              "withParam": "{{=sprig.dig('dependsOnSnapshotMigrations', [], fromJSON(inputs.parameters.replayConfig))}}",
             },
             {
               "arguments": {
@@ -3116,18 +2779,6 @@ exports[`test workflow template renderings full-migration-with-workflow-cli 1`] 
   "spec": {
     "arguments": {
       "parameters": [
-        {
-          "name": "etcdEndpoints",
-          "value": "http://etcd.ma.svc.cluster.local:2379",
-        },
-        {
-          "name": "etcdUser",
-          "value": "root",
-        },
-        {
-          "name": "etcdPassword",
-          "value": "password",
-        },
         {
           "name": "s3SnapshotConfigMap",
           "value": "s3-snapshot-config",
@@ -3515,18 +3166,6 @@ exports[`test workflow template renderings metadata-migration 1`] = `
     "arguments": {
       "parameters": [
         {
-          "name": "etcdEndpoints",
-          "value": "http://etcd.ma.svc.cluster.local:2379",
-        },
-        {
-          "name": "etcdUser",
-          "value": "root",
-        },
-        {
-          "name": "etcdPassword",
-          "value": "password",
-        },
-        {
           "name": "s3SnapshotConfigMap",
           "value": "s3-snapshot-config",
         },
@@ -3906,18 +3545,6 @@ exports[`test workflow template renderings migration-console 1`] = `
     "arguments": {
       "parameters": [
         {
-          "name": "etcdEndpoints",
-          "value": "http://etcd.ma.svc.cluster.local:2379",
-        },
-        {
-          "name": "etcdUser",
-          "value": "root",
-        },
-        {
-          "name": "etcdPassword",
-          "value": "password",
-        },
-        {
           "name": "s3SnapshotConfigMap",
           "value": "s3-snapshot-config",
         },
@@ -4250,18 +3877,6 @@ exports[`test workflow template renderings replayer 1`] = `
     "arguments": {
       "parameters": [
         {
-          "name": "etcdEndpoints",
-          "value": "http://etcd.ma.svc.cluster.local:2379",
-        },
-        {
-          "name": "etcdUser",
-          "value": "root",
-        },
-        {
-          "name": "etcdPassword",
-          "value": "password",
-        },
-        {
           "name": "s3SnapshotConfigMap",
           "value": "s3-snapshot-config",
         },
@@ -4465,6 +4080,280 @@ spec:
 }
 `;
 
+exports[`test workflow template renderings resource-management 1`] = `
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "resource-management",
+  },
+  "spec": {
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config",
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config",
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config",
+        },
+      ],
+    },
+    "entrypoint": undefined,
+    "parallelism": 100,
+    "serviceAccountName": "argo-workflow-executor",
+    "templates": [
+      {
+        "activeDeadlineSeconds": "31536000",
+        "container": {
+          "args": [
+            "wait",
+            "--for=create",
+            "{{=''+inputs.parameters.resourceName}}",
+            "--timeout=undefineds",
+          ],
+          "command": [
+            "kubectl",
+          ],
+          "env": [],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "50m",
+              "memory": "32Mi",
+            },
+            "requests": {
+              "cpu": "50m",
+              "memory": "32Mi",
+            },
+          },
+        },
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "waitforkafkatopic",
+        "outputs": {
+          "parameters": [],
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "waitforcapturedtraffic",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "get",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1
+kind: CapturedTraffic
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+",
+          "successCondition": "status.phase == Ready",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "waitfordatasnapshot",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "get",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1
+kind: DataSnapshot
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+",
+          "successCondition": "status.phase == Ready",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "waitforsnapshotmigration",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "get",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1
+kind: SnapshotMigration
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+",
+          "successCondition": "status.phase == Ready",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+          ],
+        },
+        "name": "patchcapturedtrafficready",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+          ],
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1
+kind: CapturedTraffic
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+status:
+  phase: Ready
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+            {
+              "name": "snapshotName",
+            },
+          ],
+        },
+        "name": "patchdatasnapshotready",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+          ],
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1
+kind: DataSnapshot
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+status:
+  phase: Ready
+  snapshotName: "{{inputs.parameters.snapshotName}}"
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+          ],
+        },
+        "name": "patchsnapshotmigrationready",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+          ],
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1
+kind: SnapshotMigration
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+status:
+  phase: Ready
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName",
+            },
+          ],
+        },
+        "name": "readdatasnapshotname",
+        "outputs": {
+          "parameters": [
+            {
+              "name": "snapshotName",
+              "valueFrom": {
+                "jsonPath": "{.status.snapshotName}",
+              },
+            },
+          ],
+        },
+        "resource": {
+          "action": "get",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1
+kind: DataSnapshot
+metadata:
+  name: "{{inputs.parameters.resourceName}}"
+",
+        },
+      },
+    ],
+  },
+}
+`;
+
 exports[`test workflow template renderings setup-capture 1`] = `
 {
   "apiVersion": "argoproj.io/v1alpha1",
@@ -4475,18 +4364,6 @@ exports[`test workflow template renderings setup-capture 1`] = `
   "spec": {
     "arguments": {
       "parameters": [
-        {
-          "name": "etcdEndpoints",
-          "value": "http://etcd.ma.svc.cluster.local:2379",
-        },
-        {
-          "name": "etcdUser",
-          "value": "root",
-        },
-        {
-          "name": "etcdPassword",
-          "value": "password",
-        },
         {
           "name": "s3SnapshotConfigMap",
           "value": "s3-snapshot-config",
@@ -4570,18 +4447,6 @@ exports[`test workflow template renderings setup-kafka 1`] = `
   "spec": {
     "arguments": {
       "parameters": [
-        {
-          "name": "etcdEndpoints",
-          "value": "http://etcd.ma.svc.cluster.local:2379",
-        },
-        {
-          "name": "etcdUser",
-          "value": "root",
-        },
-        {
-          "name": "etcdPassword",
-          "value": "password",
-        },
         {
           "name": "s3SnapshotConfigMap",
           "value": "s3-snapshot-config",
