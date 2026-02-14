@@ -11,14 +11,14 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * Bug 8: HttpMessageAndTimestamp.Response.toString() was passing HttpMessageType.REQUEST
- * instead of HttpMessageType.RESPONSE to the formatter (copy-paste error).
+ * Verifies that HttpMessageAndTimestamp.Response.toString() passes HttpMessageType.RESPONSE
+ * to the formatter, not HttpMessageType.REQUEST.
  *
- * This test verifies the fix: Response uses RESPONSE type, producing different output
+ * This test verifies that Response uses RESPONSE type, producing different output
  * than Request for the same bytes when parsed as HTTP.
  */
 @Slf4j
-public class ResponseToStringUsesRequestTypeBugTest {
+public class ResponseToStringUsesRequestTypeTest {
 
     @Test
     void responseToString_usesCorrectResponseType() throws Exception {
@@ -40,7 +40,7 @@ public class ResponseToStringUsesRequestTypeBugTest {
                 var responseMessage = extractMessagePortion(responseStr);
                 var requestMessage = extractMessagePortion(requestStr);
 
-                // FIXED: Response uses RESPONSE type, Request uses REQUEST type,
+                // Response uses RESPONSE type, Request uses REQUEST type,
                 // so they produce different parsed output for the same bytes
                 Assertions.assertNotEquals(requestMessage, responseMessage,
                     "Response.toString() should produce different output than Request.toString() "

@@ -20,16 +20,16 @@ import org.junit.jupiter.api.Test;
 import static org.mockito.Mockito.mock;
 
 /**
- * Bug 3: TrafficReplayerCore.perResponseConsumer() is called for every response including retries.
+ * Verifies that request metrics are counted once per request, not once per retry attempt.
  *
  * A request that fails twice then succeeds will increment exceptionRequestCount by 2 AND
  * successfulRequestCount by 1. The counters should only reflect the final outcome per request.
  *
- * This test verifies the fix: perResponseConsumer no longer increments counters (counting
+ * This test verifies that perResponseConsumer does not increment counters (counting
  * moved to handleCompletedTransaction which is called once per request).
  */
 @Slf4j
-public class MetricsDoubleCountingWithRetriesBugTest {
+public class MetricsDoubleCountingWithRetriesTest {
 
     /**
      * Minimal concrete subclass that exposes protected members for testing.
@@ -81,7 +81,7 @@ public class MetricsDoubleCountingWithRetriesBugTest {
         // Final attempt: success
         core.callPerResponseConsumer(successResponse, okStatus, ctx);
 
-        // FIXED: perResponseConsumer no longer increments counters — counting is done
+        // perResponseConsumer does not increment counters — counting is done
         // once per request in handleCompletedTransaction
         Assertions.assertEquals(0, core.getExceptionCount().get(),
             "perResponseConsumer should not count retries");

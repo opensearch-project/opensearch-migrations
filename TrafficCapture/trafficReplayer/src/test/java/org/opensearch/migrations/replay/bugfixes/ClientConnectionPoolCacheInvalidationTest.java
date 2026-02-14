@@ -13,15 +13,15 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * Bug 1: ClientConnectionPool.closeConnection() uses the wrong key type for cache invalidation.
+ * Verifies that ClientConnectionPool.closeConnection() uses the correct composite Key for cache invalidation.
  *
- * The cache is keyed by Key(connectionId, sessionNumber), but invalidate() is called with the
- * raw String connectionId. Since String.equals(Key) is always false, the entry is never evicted.
+ * The cache is keyed by Key(connectionId, sessionNumber). If invalidate() were called with the
+ * raw String connectionId, String.equals(Key) would always be false and the entry would never be evicted.
  *
- * This test verifies the fix: cache entry is properly evicted after closeConnection().
+ * This test verifies that the cache entry is properly evicted after closeConnection().
  */
 @Slf4j
-public class ClientConnectionPoolCacheInvalidationBugTest extends InstrumentationTest {
+public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTest {
 
     @SneakyThrows
     private LoadingCache<?, ?> getCache(ClientConnectionPool pool) {
@@ -48,10 +48,10 @@ public class ClientConnectionPoolCacheInvalidationBugTest extends Instrumentatio
             pool.getCachedSession(channelKeyCtx, 0);
             Assertions.assertEquals(1, getCache(pool).size(), "cache should have 1 entry after getCachedSession");
 
-            // Close the connection — this SHOULD evict the cache entry but doesn't due to the bug
+            // Close the connection — this should evict the cache entry
             pool.closeConnection(channelKeyCtx, 0);
 
-            // FIXED: cache entry is properly evicted because invalidate() now uses the correct Key type
+            // Cache entry is properly evicted because invalidate() uses the correct Key type
             Assertions.assertEquals(0, getCache(pool).size(),
                 "cache entry should be evicted after closeConnection()");
         } finally {

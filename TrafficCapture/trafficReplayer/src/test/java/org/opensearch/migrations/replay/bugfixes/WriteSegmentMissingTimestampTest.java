@@ -31,17 +31,17 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * Bug 7: WriteSegment handling in CapturedTrafficToHttpTransactionAccumulator doesn't call
+ * Verifies that WriteSegment handling in CapturedTrafficToHttpTransactionAccumulator calls
  * setLastPacketTimestamp(). Unlike the Write path (which calls addResponseData, setting
  * lastPacketTimestamp), WriteSegment only calls addSegment().
  *
  * If there's no SegmentEnd (e.g., premature close), lastPacketTimestamp remains null,
  * which can cause NPEs in duration calculations.
  *
- * This test verifies the fix: lastPacketTimestamp is set for WriteSegment observations.
+ * This test verifies that lastPacketTimestamp is set for WriteSegment observations.
  */
 @Slf4j
-public class WriteSegmentMissingTimestampBugTest extends InstrumentationTest {
+public class WriteSegmentMissingTimestampTest extends InstrumentationTest {
 
     @Test
     void writeSegment_setsLastPacketTimestamp() {
@@ -112,7 +112,7 @@ public class WriteSegmentMissingTimestampBugTest extends InstrumentationTest {
         var responseData = results.get(0).getResponseData();
         Assertions.assertNotNull(responseData, "Response data should exist");
 
-        // FIXED: lastPacketTimestamp is now set by WriteSegment handling
+        // lastPacketTimestamp is set by WriteSegment handling
         Assertions.assertNotNull(responseData.getLastPacketTimestamp(),
             "lastPacketTimestamp should be set for WriteSegment observations");
     }

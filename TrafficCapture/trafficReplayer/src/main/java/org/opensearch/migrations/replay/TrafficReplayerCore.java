@@ -216,6 +216,21 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             }
         }
 
+        private void countFinalOutcome(TransformedTargetRequestAndResponseList summary, Throwable t) {
+            if (t != null) {
+                exceptionRequestCount.incrementAndGet();
+            } else if (summary == null || summary.getResponseList().isEmpty()) {
+                // no response to count
+            } else {
+                var lastResponse = summary.getResponseList().get(summary.getResponseList().size() - 1);
+                if (lastResponse.getError() != null || summary.getTransformationStatus().isError()) {
+                    exceptionRequestCount.incrementAndGet();
+                } else {
+                    successfulRequestCount.incrementAndGet();
+                }
+            }
+        }
+
         @Override
         public void onTrafficStreamsExpired(
             RequestResponsePacketPair.ReconstructionStatus status,
@@ -311,21 +326,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             request.getFirstPacketTimestamp(),
             request.getLastPacketTimestamp(),
             request.packetBytes::stream);
-    }
-
-    private void countFinalOutcome(TransformedTargetRequestAndResponseList summary, Throwable t) {
-        if (t != null) {
-            exceptionRequestCount.incrementAndGet();
-        } else if (summary == null || summary.getResponseList().isEmpty()) {
-            // no response to count
-        } else {
-            var lastResponse = summary.getResponseList().get(summary.getResponseList().size() - 1);
-            if (lastResponse.getError() != null || summary.getTransformationStatus().isError()) {
-                exceptionRequestCount.incrementAndGet();
-            } else {
-                successfulRequestCount.incrementAndGet();
-            }
-        }
     }
 
     @Override

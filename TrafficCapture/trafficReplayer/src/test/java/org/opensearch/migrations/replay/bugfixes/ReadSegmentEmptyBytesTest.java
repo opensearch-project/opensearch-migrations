@@ -32,16 +32,16 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * Bug 2: CapturedTrafficToHttpTransactionAccumulator ReadSegment handling calls
- * observation.getRead().getData() instead of observation.getReadSegment().getData().
+ * Verifies that CapturedTrafficToHttpTransactionAccumulator ReadSegment handling uses
+ * observation.getReadSegment().getData() rather than observation.getRead().getData().
  *
  * Since the observation has a ReadSegment (not a Read), getRead() returns a default empty
  * ReadObservation, so an empty byte[] is added to packetBytes for every ReadSegment.
  *
- * This test verifies the fix: only the correctly concatenated segment data appears in packetBytes.
+ * This test verifies that only the correctly concatenated segment data appears in packetBytes.
  */
 @Slf4j
-public class ReadSegmentEmptyBytesBugTest extends InstrumentationTest {
+public class ReadSegmentEmptyBytesTest extends InstrumentationTest {
 
     @Test
     void readSegment_correctlyAccumulatesData() {
@@ -112,7 +112,7 @@ public class ReadSegmentEmptyBytesBugTest extends InstrumentationTest {
         Assertions.assertEquals(1, results.size(), "Should have 1 transaction");
         var requestPackets = results.get(0).getRequestData().packetBytes;
 
-        // FIXED: packetBytes should have exactly 1 entry with the full concatenated segment data
+        // packetBytes should have exactly 1 entry with the full concatenated segment data
         Assertions.assertEquals(1, requestPackets.size(),
             "packetBytes should have 1 entry with the full concatenated segment data");
 

@@ -22,16 +22,16 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * Bug 5: NettyPacketToHttpConsumer.finalizeRequest() double-closes context spans.
+ * Verifies that NettyPacketToHttpConsumer.finalizeRequest() closes context spans exactly once.
  *
  * deactivateChannel() closes getCurrentRequestSpan() and getParentContext() in its finally block.
  * Then the outer finally block in finalizeRequest() closes them again.
  * This causes sendMeterEventsForEnd() to be called twice, doubling the metric counts.
  *
- * This test verifies the fix: spans are closed exactly once, so metric count = 1 for 1 request.
+ * This test verifies that spans are closed exactly once, so metric count = 1 for 1 request.
  */
 @Slf4j
-public class DoubleCloseContextSpansBugTest extends InstrumentationTest {
+public class DoubleCloseContextSpansTest extends InstrumentationTest {
 
     private static final String REQUEST = "GET / HTTP/1.1\r\n"
         + "Host: localhost\r\n"
@@ -71,7 +71,7 @@ public class DoubleCloseContextSpansBugTest extends InstrumentationTest {
             long targetTxnCount = InMemoryInstrumentationBundle.getMetricValueOrZero(
                 metrics, "targetTransactionCount");
 
-            // FIXED: targetTransaction metric count is 1 — spans closed exactly once
+            // targetTransaction metric count is 1 — spans closed exactly once
             Assertions.assertEquals(1, targetTxnCount,
                 "targetTransactionCount should be 1 for 1 request (no double-close)");
 

@@ -24,17 +24,17 @@ import org.junit.jupiter.api.Test;
 import static org.mockito.Mockito.mock;
 
 /**
- * Bug 4: TrackingKafkaConsumer.kafkaRecordsReadyToCommit is never set to true when
+ * Verifies that TrackingKafkaConsumer.kafkaRecordsReadyToCommit is set to true when
  * commitKafkaKey() adds entries to nextSetOfCommitsMap.
  *
  * It's only set in onPartitionsRevoked(). This means getNextRequiredTouch() always returns
  * lastTouchTime + keepAliveInterval instead of Instant.now(), delaying commits by up to 30s.
  *
- * This test verifies the fix: kafkaRecordsReadyToCommit is set to true when commitKafkaKey()
+ * This test verifies that kafkaRecordsReadyToCommit is set to true when commitKafkaKey()
  * adds entries to nextSetOfCommitsMap.
  */
 @Slf4j
-public class KafkaRecordsReadyToCommitBugTest extends InstrumentationTest {
+public class KafkaRecordsReadyToCommitTest extends InstrumentationTest {
 
     private static final String TOPIC = "test-topic";
 
@@ -93,7 +93,7 @@ public class KafkaRecordsReadyToCommitBugTest extends InstrumentationTest {
         var result = callCommitKafkaKey(consumer, mock(ITrafficStreamKey.class), offsetData);
         log.info("commitKafkaKey result: {}", result);
 
-        // FIXED: kafkaRecordsReadyToCommit is now true because commitKafkaKey sets it
+        // kafkaRecordsReadyToCommit is true because commitKafkaKey sets it
         // when adding to nextSetOfCommitsMap
         var readyFlag = getReadyToCommitFlag(consumer);
         Assertions.assertTrue(readyFlag.get(),

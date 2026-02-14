@@ -31,17 +31,15 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * Bug 6: TrafficReplayerCore.commitTrafficStreams() with CLOSED_PREMATURELY status
- * never closes the traffic stream contexts, causing a resource leak.
+ * Verifies that TrafficReplayerCore.commitTrafficStreams() with CLOSED_PREMATURELY status
+ * properly closes traffic stream contexts (only skipping the commit).
  *
- * When shouldCommit is false (CLOSED_PREMATURELY), the method does nothing — contexts
- * are never closed. The fix should always close contexts, only skipping the commit.
  *
- * This test verifies the fix: traffic stream contexts are always closed, even when
+ * This test verifies that traffic stream contexts are always closed, even when
  * the status is CLOSED_PREMATURELY (only the commit is skipped).
  */
 @Slf4j
-public class ClosedPrematurelyContextLeakBugTest extends InstrumentationTest {
+public class ClosedPrematurelyContextLeakTest extends InstrumentationTest {
 
     @Override
     protected TestContext makeInstrumentationContext() {
@@ -90,7 +88,7 @@ public class ClosedPrematurelyContextLeakBugTest extends InstrumentationTest {
                 ) {
                     capturedStatus.set(status);
                     capturedKeys.addAll(trafficStreamKeysBeingHeld);
-                    // Replicate the FIXED commitTrafficStreams behavior:
+                    // Replicate the commitTrafficStreams behavior:
                     // always close contexts, only skip commit when CLOSED_PREMATURELY
                     if (trafficStreamKeysBeingHeld != null) {
                         for (var tsk : trafficStreamKeysBeingHeld) {
@@ -123,12 +121,12 @@ public class ClosedPrematurelyContextLeakBugTest extends InstrumentationTest {
         Assertions.assertFalse(capturedKeys.isEmpty(), "Should have captured traffic stream keys");
 
         // Check the metric for trafficStreamLifetime — if the context was closed,
-        // the counter would be incremented. With the bug, it's NOT closed.
+        // the counter is incremented when the context is properly closed.
         var metrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         long lifecycleCount = InMemoryInstrumentationBundle.getMetricValueOrZero(
             metrics, "trafficStreamLifetimeCount");
 
-        // FIXED: The traffic stream context is now closed even for CLOSED_PREMATURELY
+        // The traffic stream context is closed even for CLOSED_PREMATURELY
         Assertions.assertTrue(lifecycleCount > 0,
             "trafficStreamLifetimeCount should be > 0 because contexts are always closed");
     }
