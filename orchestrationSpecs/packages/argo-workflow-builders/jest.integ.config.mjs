@@ -3,7 +3,7 @@ export default {
   testEnvironment: "node",
   extensionsToTreatAsEsm: [".ts"],
   roots: ["<rootDir>/tests/integ"],
-  testMatch: ["**/*.integ.test.ts"],
+  testMatch: ["**/*.integ.test.ts", "**/*.parity.test.ts"],
   testTimeout: 120_000,
   maxWorkers: 1,
   globalSetup: "<rootDir>/tests/integ/infra/setup.ts",
@@ -18,7 +18,12 @@ export default {
       tsconfig: {
         module: "ES2022",
         moduleResolution: "bundler",
+        noImplicitAny: false,
       },
     }],
   },
+  reporters: [
+    "default",
+    "<rootDir>/tests/integ/infra/parityReporter.mjs",
+  ],
 };

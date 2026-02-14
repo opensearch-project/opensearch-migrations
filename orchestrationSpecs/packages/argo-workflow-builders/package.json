@@ -12,7 +12,8 @@
     "rebuildK8sSchemas": "./scripts/fetchK8sSchemas.sh && ts-node scripts/generateK8sTypes.ts",
     "type-check": "tsc --noEmit",
     "test": "jest",
-    "test:integ": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.integ.config.mjs"
+    "test:integ": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.integ.config.mjs",
+    "test:parity": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.integ.config.mjs -- parity/"
   },
   "dependencies": {
     "zod": "^4"
