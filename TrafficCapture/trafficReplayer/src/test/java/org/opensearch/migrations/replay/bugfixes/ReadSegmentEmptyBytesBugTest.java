@@ -5,10 +5,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
-import org.opensearch.migrations.replay.Accumulation;
 import org.opensearch.migrations.replay.AccumulationCallbacks;
 import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;

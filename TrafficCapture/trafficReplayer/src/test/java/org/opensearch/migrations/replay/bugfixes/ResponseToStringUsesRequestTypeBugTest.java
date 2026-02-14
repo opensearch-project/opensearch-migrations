@@ -11,61 +11,45 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * Bug 8: HttpMessageAndTimestamp.Response.toString() passes HttpMessageType.REQUEST
- * instead of HttpMessageType.RESPONSE to the formatter.
+ * Bug 8: HttpMessageAndTimestamp.Response.toString() was passing HttpMessageType.REQUEST
+ * instead of HttpMessageType.RESPONSE to the formatter (copy-paste error).
  *
- * This is a copy-paste error from the Request class. Response data is parsed/displayed
- * as if it were a request, producing garbled log output.
- *
- * This test asserts on the CURRENT BUGGY behavior (Response uses REQUEST type).
- * When the bug is fixed, this test should FAIL.
+ * This test verifies the fix: Response uses RESPONSE type, producing different output
+ * than Request for the same bytes when parsed as HTTP.
  */
 @Slf4j
 public class ResponseToStringUsesRequestTypeBugTest {
 
     @Test
-    void responseToString_usesRequestType_insteadOfResponseType() {
+    void responseToString_usesCorrectResponseType() throws Exception {
         var response = new HttpMessageAndTimestamp.Response(Instant.now());
         response.add("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".getBytes(StandardCharsets.UTF_8));
 
-        var toString = response.toString();
-        log.info("Response.toString() = {}", toString);
-
-        // The format() method is called with HttpMessageType.REQUEST (the bug).
-        // When parsing HTTP response bytes as a REQUEST, the formatter tries to parse
-        // "HTTP/1.1 200 OK" as a request line (method URI version), which produces
-        // different output than parsing it as a response status line.
-        //
-        // With REQUEST type, httpPacketBytesToString tries to decode as HttpRequest.
-        // With RESPONSE type, it would decode as HttpResponse.
-        //
-        // We can verify the bug by checking that the toString output does NOT contain
-        // a properly parsed response status line. When parsed as REQUEST, the formatter
-        // will either fail to parse or produce garbled output.
-
-        // BUG ASSERTION: The Response class formats itself using REQUEST type.
-        // We verify this by creating a Request with the same bytes and checking
-        // that both produce identical toString output (they shouldn't if types were correct).
         var request = new HttpMessageAndTimestamp.Request(Instant.now());
         request.add("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".getBytes(StandardCharsets.UTF_8));
 
-        var requestToString = request.toString();
-        log.info("Request.toString() = {}", requestToString);
+        // Use PARSED_HTTP mode so the formatter actually uses the message type
+        HttpByteBufFormatter.setPrintStyleForCallable(
+            HttpByteBufFormatter.PacketPrintFormat.PARSED_HTTP,
+            () -> {
+                var responseStr = response.toString();
+                var requestStr = request.toString();
+                log.info("Response.toString() = {}", responseStr);
+                log.info("Request.toString() = {}", requestStr);
 
-        // Both use HttpMessageType.REQUEST in format(), so the formatted message portion
-        // should be identical (both parse the same bytes with the same type).
-        // When the bug is fixed, Response will use RESPONSE type and produce different output.
-        var responseMessage = extractMessagePortion(toString);
-        var requestMessage = extractMessagePortion(requestToString);
+                var responseMessage = extractMessagePortion(responseStr);
+                var requestMessage = extractMessagePortion(requestStr);
 
-        Assertions.assertEquals(requestMessage, responseMessage,
-            "BUG: Response.toString() produces the same formatted output as Request.toString() "
-            + "because both use HttpMessageType.REQUEST. When fixed, they should differ.");
+                // FIXED: Response uses RESPONSE type, Request uses REQUEST type,
+                // so they produce different parsed output for the same bytes
+                Assertions.assertNotEquals(requestMessage, responseMessage,
+                    "Response.toString() should produce different output than Request.toString() "
+                    + "because they use different HttpMessageType");
+                return null;
+            }
+        );
     }
 
-    /**
-     * Extract the message=[...] portion from the toString output.
-     */
     private String extractMessagePortion(String fullString) {
         int start = fullString.indexOf("message=[");
         int end = fullString.lastIndexOf("]}");
