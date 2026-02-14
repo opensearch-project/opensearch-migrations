@@ -28,8 +28,7 @@ import org.junit.jupiter.api.Test;
  * Then the outer finally block in finalizeRequest() closes them again.
  * This causes sendMeterEventsForEnd() to be called twice, doubling the metric counts.
  *
- * This test asserts on the CURRENT BUGGY behavior (metric count = 2 for 1 request).
- * When the bug is fixed, this test should FAIL.
+ * This test verifies the fix: spans are closed exactly once, so metric count = 1 for 1 request.
  */
 @Slf4j
 public class DoubleCloseContextSpansBugTest extends InstrumentationTest {
@@ -45,7 +44,7 @@ public class DoubleCloseContextSpansBugTest extends InstrumentationTest {
     }
 
     @Test
-    void finalizeRequest_closesSpansTwice_whenChannelIsPresent() throws Exception {
+    void finalizeRequest_closesSpansExactlyOnce() throws Exception {
         try (var testServer = SimpleNettyHttpServer.makeServer(false, r -> {
             var headers = new TreeMap<>(Map.of(
                 "Content-Type", "text/plain",
@@ -72,10 +71,9 @@ public class DoubleCloseContextSpansBugTest extends InstrumentationTest {
             long targetTxnCount = InMemoryInstrumentationBundle.getMetricValueOrZero(
                 metrics, "targetTransactionCount");
 
-            // BUG ASSERTION: targetTransaction metric count is 2 instead of 1
-            // because deactivateChannel() and the outer finally both call close()
-            Assertions.assertEquals(2, targetTxnCount,
-                "BUG: targetTransactionCount should be 1 but is 2 due to double-close in finalizeRequest()");
+            // FIXED: targetTransaction metric count is 1 — spans closed exactly once
+            Assertions.assertEquals(1, targetTxnCount,
+                "targetTransactionCount should be 1 for 1 request (no double-close)");
 
             eventLoop.shutdownGracefully().sync();
         }
