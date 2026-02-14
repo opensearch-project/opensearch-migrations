@@ -31,8 +31,8 @@ import static org.mockito.Mockito.mock;
  * It's only set in onPartitionsRevoked(). This means getNextRequiredTouch() always returns
  * lastTouchTime + keepAliveInterval instead of Instant.now(), delaying commits by up to 30s.
  *
- * This test asserts on the CURRENT BUGGY behavior (flag stays false after commits are ready).
- * When the bug is fixed, this test should FAIL.
+ * This test verifies the fix: kafkaRecordsReadyToCommit is set to true when commitKafkaKey()
+ * adds entries to nextSetOfCommitsMap.
  */
 @Slf4j
 public class KafkaRecordsReadyToCommitBugTest extends InstrumentationTest {
@@ -72,7 +72,7 @@ public class KafkaRecordsReadyToCommitBugTest extends InstrumentationTest {
     }
 
     @Test
-    void kafkaRecordsReadyToCommit_staysFalse_afterCommitKafkaKeyAddsToMap() {
+    void kafkaRecordsReadyToCommit_setToTrue_afterCommitKafkaKeyAddsToMap() {
         var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var tp = new TopicPartition(TOPIC, 0);
         mockConsumer.updateBeginningOffsets(new HashMap<>() {{ put(tp, 0L); }});
@@ -94,12 +94,10 @@ public class KafkaRecordsReadyToCommitBugTest extends InstrumentationTest {
         var result = callCommitKafkaKey(consumer, mock(ITrafficStreamKey.class), offsetData);
         log.info("commitKafkaKey result: {}", result);
 
-        // BUG ASSERTION: kafkaRecordsReadyToCommit is still false even though
-        // nextSetOfCommitsMap now has an entry ready to be committed.
-        // When the bug is fixed (commitKafkaKey sets the flag to true), this assertion should FAIL.
+        // FIXED: kafkaRecordsReadyToCommit is now true because commitKafkaKey sets it
+        // when adding to nextSetOfCommitsMap
         var readyFlag = getReadyToCommitFlag(consumer);
-        Assertions.assertFalse(readyFlag.get(),
-            "BUG: kafkaRecordsReadyToCommit should be true (commits are ready) but is false "
-            + "because commitKafkaKey() never sets it");
+        Assertions.assertTrue(readyFlag.get(),
+            "kafkaRecordsReadyToCommit should be true after commitKafkaKey adds to nextSetOfCommitsMap");
     }
 }
