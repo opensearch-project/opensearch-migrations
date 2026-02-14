@@ -38,14 +38,13 @@ import org.junit.jupiter.api.Test;
  * If there's no SegmentEnd (e.g., premature close), lastPacketTimestamp remains null,
  * which can cause NPEs in duration calculations.
  *
- * This test asserts on the CURRENT BUGGY behavior (lastPacketTimestamp is null).
- * When the bug is fixed, this test should FAIL.
+ * This test verifies the fix: lastPacketTimestamp is set for WriteSegment observations.
  */
 @Slf4j
 public class WriteSegmentMissingTimestampBugTest extends InstrumentationTest {
 
     @Test
-    void writeSegment_doesNotSetLastPacketTimestamp_whenNoSegmentEnd() {
+    void writeSegment_setsLastPacketTimestamp() {
         var baseTime = Instant.now();
         var ts = Timestamp.newBuilder()
             .setSeconds(baseTime.getEpochSecond())
@@ -113,11 +112,8 @@ public class WriteSegmentMissingTimestampBugTest extends InstrumentationTest {
         var responseData = results.get(0).getResponseData();
         Assertions.assertNotNull(responseData, "Response data should exist");
 
-        // BUG ASSERTION: lastPacketTimestamp is null because WriteSegment handling
-        // never calls setLastPacketTimestamp(). The Write path does via addResponseData().
-        // When the bug is fixed, lastPacketTimestamp should be non-null.
-        Assertions.assertNull(responseData.getLastPacketTimestamp(),
-            "BUG: lastPacketTimestamp should be set but is null because WriteSegment "
-            + "doesn't call setLastPacketTimestamp()");
+        // FIXED: lastPacketTimestamp is now set by WriteSegment handling
+        Assertions.assertNotNull(responseData.getLastPacketTimestamp(),
+            "lastPacketTimestamp should be set for WriteSegment observations");
     }
 }
