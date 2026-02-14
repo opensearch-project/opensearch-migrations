@@ -18,8 +18,7 @@ import org.junit.jupiter.api.Test;
  * The cache is keyed by Key(connectionId, sessionNumber), but invalidate() is called with the
  * raw String connectionId. Since String.equals(Key) is always false, the entry is never evicted.
  *
- * This test asserts on the CURRENT BUGGY behavior (cache entry remains after close).
- * When the bug is fixed, this test should FAIL — update the assertion to expect size == 0.
+ * This test verifies the fix: cache entry is properly evicted after closeConnection().
  */
 @Slf4j
 public class ClientConnectionPoolCacheInvalidationBugTest extends InstrumentationTest {
@@ -33,7 +32,7 @@ public class ClientConnectionPoolCacheInvalidationBugTest extends Instrumentatio
 
     @Test
     @SneakyThrows
-    void closeConnection_doesNotEvictCacheEntry_becauseInvalidateUsesWrongKeyType() {
+    void closeConnection_evictsCacheEntry() {
         // Dummy channel creator — never actually called since we don't send requests
         var pool = new ClientConnectionPool(
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "dummy"),
@@ -52,10 +51,9 @@ public class ClientConnectionPoolCacheInvalidationBugTest extends Instrumentatio
             // Close the connection — this SHOULD evict the cache entry but doesn't due to the bug
             pool.closeConnection(channelKeyCtx, 0);
 
-            // BUG ASSERTION: cache entry is NOT evicted because invalidate(String) != invalidate(Key)
-            // When the bug is fixed, this should be 0
-            Assertions.assertEquals(1, getCache(pool).size(),
-                "BUG: cache entry should have been evicted but wasn't because invalidate() uses String instead of Key");
+            // FIXED: cache entry is properly evicted because invalidate() now uses the correct Key type
+            Assertions.assertEquals(0, getCache(pool).size(),
+                "cache entry should be evicted after closeConnection()");
         } finally {
             pool.shutdownNow().get();
         }
