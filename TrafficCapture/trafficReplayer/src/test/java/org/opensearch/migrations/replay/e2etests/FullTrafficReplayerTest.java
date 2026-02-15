@@ -5,7 +5,9 @@ import javax.net.ssl.SSLException;
 import java.io.EOFException;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
@@ -39,14 +41,19 @@ import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
+import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
+import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
+import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.opensearch.migrations.transform.TransformationLoader;
 
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Timestamp;
 import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -395,5 +402,99 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             );
             log.info("done");
         }
+    }
+
+    @Test
+    @ResourceLock("TrafficReplayerRunner")
+    @Tag("longTest")
+    public void testReusedConnectionAndSessionFailsWithStaleSessionState() {
+        var random = new Random(1);
+        try (
+            var httpServer = SimpleNettyHttpServer.makeServer(
+                false,
+                Duration.ofMillis(5),
+                response -> TestHttpServerContext.makeResponse(random, response)
+            )
+        ) {
+            var firstRequest = "GET /first HTTP/1.1\r\nConnection: Keep-Alive\r\nHost: localhost\r\n\r\n";
+            var secondRequest = "GET /second HTTP/1.1\r\nConnection: Keep-Alive\r\nHost: localhost\r\n\r\n";
+            var firstStream = makeSingleRequestStream(TEST_NODE_ID, TEST_CONNECTION_ID, firstRequest);
+            var secondStream = makeSingleRequestStream(TEST_NODE_ID, TEST_CONNECTION_ID, secondRequest);
+            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(List.of(firstStream, secondStream));
+
+            var thrown = Assertions.assertThrows(Throwable.class, () ->
+                TrafficReplayerRunner.runReplayer(
+                    2,
+                    httpServer.localhostEndpoint(),
+                    () -> t -> { },
+                    () -> TestContext.noOtelTracking(),
+                    trafficSourceSupplier,
+                    new TimeShifter(10 * 1000)
+                ));
+
+            var rootCause = getDeepestCause(thrown);
+            Assertions.assertInstanceOf(IllegalStateException.class, rootCause);
+            Assertions.assertTrue(rootCause.getMessage().contains("dependencyDiagnosticFutureRef was already set"));
+        } catch (Throwable t) {
+            throw Lombok.sneakyThrow(t);
+        }
+    }
+
+    private static TrafficStream makeSingleRequestStream(String nodeId, String connectionId, String rawRequest) {
+        var now = Instant.now();
+        var fixedTimestamp = Timestamp.newBuilder()
+            .setSeconds(now.getEpochSecond())
+            .setNanos(now.getNano())
+            .build();
+        return TrafficStream.newBuilder()
+            .setNodeId(nodeId)
+            .setConnectionId(connectionId)
+            .setPriorRequestsReceived(0)
+            .addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setRead(
+                        ReadObservation.newBuilder()
+                            .setData(ByteString.copyFrom(rawRequest.getBytes(StandardCharsets.UTF_8)))
+                            .build()
+                    )
+                    .build()
+            )
+            .addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setEndOfMessageIndicator(
+                        EndOfMessageIndication.newBuilder()
+                            .setFirstLineByteLength(18)
+                            .setHeadersByteLength(58)
+                            .build()
+                    )
+                    .build()
+            )
+            .addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setWrite(
+                        WriteObservation.newBuilder()
+                            .setData(ByteString.copyFrom("HTTP/1.1 OK 200\r\n".getBytes(StandardCharsets.UTF_8)))
+                            .build()
+                    )
+                    .build()
+            )
+            .addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setClose(CloseObservation.getDefaultInstance())
+                    .build()
+            )
+            .build();
+    }
+
+    private static Throwable getDeepestCause(Throwable throwable) {
+        var current = throwable;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current;
     }
 }
