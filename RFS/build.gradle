@@ -147,6 +147,7 @@ dependencies {
     testImplementation libs.docker.java.transport.httpclient5
 
     testImplementation testFixtures(project(path: ':RFS'))
+    testImplementation project(':SnapshotReader')
     testImplementation libs.lucene.v9.backward.codecs
     testImplementation libs.reactor.test
     testImplementation libs.log4j.core
