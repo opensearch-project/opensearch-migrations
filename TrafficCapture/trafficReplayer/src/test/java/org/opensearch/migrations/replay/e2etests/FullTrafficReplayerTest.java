@@ -5,7 +5,9 @@ import javax.net.ssl.SSLException;
 import java.io.EOFException;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
@@ -39,14 +41,20 @@ import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
+import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
+import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
+import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
+import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.opensearch.migrations.transform.TransformationLoader;
 
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Timestamp;
 import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -396,4 +404,187 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             log.info("done");
         }
     }
+
+    @Test
+    @ResourceLock("TrafficReplayerRunner")
+    @Tag("longTest")
+    public void testReusedConnectionAndSessionCompletesWithMonotonicRequestOffsets() {
+        var random = new Random(1);
+        try (
+            var httpServer = SimpleNettyHttpServer.makeServer(
+                false,
+                Duration.ofMillis(5),
+                response -> TestHttpServerContext.makeResponse(random, response)
+            )
+        ) {
+            var firstRequest = "GET /first HTTP/1.1\r\nConnection: Keep-Alive\r\nHost: localhost\r\n\r\n";
+            var secondRequest = "GET /second HTTP/1.1\r\nConnection: Keep-Alive\r\nHost: localhost\r\n\r\n";
+            var firstStream = makeSingleRequestStream(TEST_NODE_ID, TEST_CONNECTION_ID, 0, firstRequest);
+            var secondStream = makeSingleRequestStream(TEST_NODE_ID, TEST_CONNECTION_ID, 1, secondRequest);
+            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(List.of(firstStream, secondStream));
+
+            var tuplesSeen = new AtomicInteger();
+            TrafficReplayerRunner.runReplayer(
+                2,
+                httpServer.localhostEndpoint(),
+                () -> t -> tuplesSeen.incrementAndGet(),
+                () -> TestContext.noOtelTracking(),
+                trafficSourceSupplier,
+                new TimeShifter(10 * 1000)
+            );
+            Assertions.assertEquals(2, tuplesSeen.get());
+        } catch (Throwable t) {
+            throw Lombok.sneakyThrow(t);
+        }
+    }
+
+    @Test
+    @ResourceLock("TrafficReplayerRunner")
+    @Tag("longTest")
+    public void testReadSegmentRequestAvoidsUnexpectedEmptyPacket() throws Throwable {
+        var random = new Random(1);
+        try (
+            var httpServer = SimpleNettyHttpServer.makeServer(
+                false,
+                Duration.ofMillis(5),
+                response -> TestHttpServerContext.makeResponse(random, response)
+            )
+        ) {
+            var now = Instant.now();
+            var fixedTimestamp = Timestamp.newBuilder()
+                .setSeconds(now.getEpochSecond())
+                .setNanos(now.getNano())
+                .build();
+            var part1 = "GET /segmented HTTP/1.1\r\n";
+            var part2 = "Connection: Keep-Alive\r\nHost: localhost\r\n\r\n";
+            var stream = TrafficStream.newBuilder()
+                .setNodeId(TEST_NODE_ID)
+                .setConnectionId(TEST_CONNECTION_ID)
+                .setPriorRequestsReceived(0)
+                .addSubStream(
+                    TrafficObservation.newBuilder()
+                        .setTs(fixedTimestamp)
+                        .setReadSegment(
+                            org.opensearch.migrations.trafficcapture.protos.ReadSegmentObservation.newBuilder()
+                                .setData(ByteString.copyFrom(part1.getBytes(StandardCharsets.UTF_8)))
+                                .build()
+                        )
+                        .build()
+                )
+                .addSubStream(
+                    TrafficObservation.newBuilder()
+                        .setTs(fixedTimestamp)
+                        .setReadSegment(
+                            org.opensearch.migrations.trafficcapture.protos.ReadSegmentObservation.newBuilder()
+                                .setData(ByteString.copyFrom(part2.getBytes(StandardCharsets.UTF_8)))
+                                .build()
+                        )
+                        .build()
+                )
+                .addSubStream(
+                    TrafficObservation.newBuilder()
+                        .setTs(fixedTimestamp)
+                        .setSegmentEnd(EndOfSegmentsIndication.getDefaultInstance())
+                        .build()
+                )
+                .addSubStream(
+                    TrafficObservation.newBuilder()
+                        .setTs(fixedTimestamp)
+                        .setEndOfMessageIndicator(
+                            EndOfMessageIndication.newBuilder()
+                                .setFirstLineByteLength(24)
+                                .setHeadersByteLength(58)
+                                .build()
+                        )
+                        .build()
+                )
+                .addSubStream(
+                    TrafficObservation.newBuilder()
+                        .setTs(fixedTimestamp)
+                        .setWrite(
+                            WriteObservation.newBuilder()
+                                .setData(ByteString.copyFrom("HTTP/1.1 OK 200\r\n".getBytes(StandardCharsets.UTF_8)))
+                                .build()
+                        )
+                        .build()
+                )
+                .addSubStream(
+                    TrafficObservation.newBuilder()
+                        .setTs(fixedTimestamp)
+                        .setClose(CloseObservation.getDefaultInstance())
+                        .build()
+                )
+                .build();
+
+            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(List.of(stream));
+            var requestPacketSizes = new AtomicInteger(-1);
+
+            TrafficReplayerRunner.runReplayer(
+                1,
+                httpServer.localhostEndpoint(),
+                () -> tuple -> requestPacketSizes.set(tuple.sourcePair.getRequestData().packetBytes.size()),
+                () -> TestContext.noOtelTracking(),
+                trafficSourceSupplier,
+                new TimeShifter(10 * 1000)
+            );
+
+            Assertions.assertEquals(1, requestPacketSizes.get());
+        }
+    }
+
+    private static TrafficStream makeSingleRequestStream(
+        String nodeId,
+        String connectionId,
+        int priorRequestsReceived,
+        String rawRequest
+    ) {
+        var now = Instant.now();
+        var fixedTimestamp = Timestamp.newBuilder()
+            .setSeconds(now.getEpochSecond())
+            .setNanos(now.getNano())
+            .build();
+        return TrafficStream.newBuilder()
+            .setNodeId(nodeId)
+            .setConnectionId(connectionId)
+            .setPriorRequestsReceived(priorRequestsReceived)
+            .addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setRead(
+                        ReadObservation.newBuilder()
+                            .setData(ByteString.copyFrom(rawRequest.getBytes(StandardCharsets.UTF_8)))
+                            .build()
+                    )
+                    .build()
+            )
+            .addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setEndOfMessageIndicator(
+                        EndOfMessageIndication.newBuilder()
+                            .setFirstLineByteLength(18)
+                            .setHeadersByteLength(58)
+                            .build()
+                    )
+                    .build()
+            )
+            .addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setWrite(
+                        WriteObservation.newBuilder()
+                            .setData(ByteString.copyFrom("HTTP/1.1 OK 200\r\n".getBytes(StandardCharsets.UTF_8)))
+                            .build()
+                    )
+                    .build()
+            )
+            .addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setClose(CloseObservation.getDefaultInstance())
+                    .build()
+            )
+            .build();
+    }
+
 }
