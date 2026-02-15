@@ -1,0 +1,85 @@
+# ============================================================
+# Dockerfile.legacy — ES 1.x–2.x, 5.1–5.2 (tarball-based install)
+# Multi-stage: download in alpine, run on JDK 8 slim
+# ============================================================
+ARG ES_VERSION
+ARG TARBALL_URL
+
+# --- Stage 1: Download and extract tarball ---
+FROM alpine:3.18 AS downloader
+ARG ES_VERSION
+ARG TARBALL_URL
+
+RUN apk add --no-cache curl && \
+    mkdir -p /opt/elasticsearch && \
+    curl -fsSL "$TARBALL_URL" | tar -xz --strip-components=1 -C /opt/elasticsearch
+
+# --- Stage 2: Build cgroups fix for ES 5.1-5.2 ---
+FROM eclipse-temurin:8-jre-jammy AS cgroup-fixer
+ARG ES_VERSION
+
+RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
+    MINOR=$(echo "${ES_VERSION}" | cut -d. -f2) && \
+    mkdir -p /opt/fix && \
+    if [ "$MAJOR" -eq 5 ] && [ "$MINOR" -le 2 ]; then \
+      apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && \
+      printf '#define _GNU_SOURCE\n#include <stdio.h>\n#include <string.h>\n#include <dlfcn.h>\n#include <fcntl.h>\n#include <stdarg.h>\nstatic const char *rp="/proc/self/cgroup";\nstatic const char *fp="/tmp/cgroup_filtered";\ntypedef int (*open_t)(const char*,int,...);\nint open(const char *p,int f,...){open_t r=(open_t)dlsym(RTLD_NEXT,"open");mode_t m=0;if(f&O_CREAT){va_list a;va_start(a,f);m=va_arg(a,mode_t);va_end(a);}if(p&&strcmp(p,rp)==0)return r(fp,f,m);return r(p,f,m);}\nint open64(const char *p,int f,...){open_t r=(open_t)dlsym(RTLD_NEXT,"open64");mode_t m=0;if(f&O_CREAT){va_list a;va_start(a,f);m=va_arg(a,mode_t);va_end(a);}if(p&&strcmp(p,rp)==0)return r(fp,f,m);return r(p,f,m);}\ntypedef FILE*(*fopen_t)(const char*,const char*);\nFILE*fopen(const char*p,const char*m){fopen_t r=(fopen_t)dlsym(RTLD_NEXT,"fopen");if(p&&strcmp(p,rp)==0)return r(fp,m);return r(p,m);}\nFILE*fopen64(const char*p,const char*m){fopen_t r=(fopen_t)dlsym(RTLD_NEXT,"fopen64");if(p&&strcmp(p,rp)==0)return r(fp,m);return r(p,m);}\n' > /tmp/fix.c && \
+      gcc -shared -fPIC -o /opt/fix/libcgroup_fix.so /tmp/fix.c -ldl && \
+      rm -rf /var/lib/apt/lists/*; \
+    else \
+      touch /opt/fix/.skip; \
+    fi
+
+# --- Stage 3: Prepare config ---
+FROM alpine:3.18 AS config-builder
+ARG ES_VERSION
+
+RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
+    mkdir -p /tmp/config /tmp/scripts && \
+    printf 'cluster.name: docker-cluster\nnode.name: es-node\npath.repo: /tmp/es-snapshots\n' > /tmp/config/elasticsearch.yml && \
+    if [ "$MAJOR" -eq 5 ]; then \
+      printf 'http.host: 0.0.0.0\ntransport.host: _local_\ndiscovery.zen.minimum_master_nodes: 1\n' >> /tmp/config/elasticsearch.yml; \
+    else \
+      printf 'network.host: 0.0.0.0\ndiscovery.zen.minimum_master_nodes: 1\n' >> /tmp/config/elasticsearch.yml; \
+    fi && \
+    # Entrypoint: for 5.1-5.2, set up cgroup fix before starting ES
+    MINOR=$(echo "${ES_VERSION}" | cut -d. -f2) && \
+    if [ "$MAJOR" -eq 5 ] && [ "$MINOR" -le 2 ]; then \
+      printf '#!/bin/bash\ngrep -v "^0::" /proc/self/cgroup > /tmp/cgroup_filtered\nexport LD_PRELOAD=/usr/local/lib/libcgroup_fix.so\nexec /usr/share/elasticsearch/bin/elasticsearch "$@"\n' > /tmp/scripts/entrypoint.sh; \
+    else \
+      printf '#!/bin/bash\nexec /usr/share/elasticsearch/bin/elasticsearch "$@"\n' > /tmp/scripts/entrypoint.sh; \
+    fi && \
+    chmod +x /tmp/scripts/entrypoint.sh
+
+# --- Stage 4: Runtime ---
+FROM eclipse-temurin:8-jre-jammy
+
+ARG ES_VERSION
+LABEL org.opencontainers.image.title="custom-elasticsearch" \
+      org.opencontainers.image.version="${ES_VERSION}" \
+      org.opencontainers.image.description="Custom Elasticsearch ${ES_VERSION} image for migration testing"
+
+ENV ES_HOME=/usr/share/elasticsearch \
+    ES_VERSION=${ES_VERSION} \
+    JAVA_HOME=/opt/java/openjdk
+
+RUN groupadd -g 1000 elasticsearch && \
+    useradd -u 1000 -g 1000 -d ${ES_HOME} elasticsearch
+
+COPY --from=downloader --chown=1000:1000 /opt/elasticsearch ${ES_HOME}
+COPY --from=cgroup-fixer /opt/fix/libcgroup_fix.so* /usr/local/lib/
+COPY --from=config-builder /tmp/scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --from=config-builder /tmp/config/elasticsearch.yml ${ES_HOME}/config/elasticsearch.yml
+
+RUN mkdir -p ${ES_HOME}/data ${ES_HOME}/logs && \
+    chown -R 1000:1000 ${ES_HOME}
+
+WORKDIR ${ES_HOME}
+USER 1000
+
+EXPOSE 9200 9300
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=12 \
+  CMD curl -sf http://localhost:9200/_cluster/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

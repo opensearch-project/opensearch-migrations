@@ -1,0 +1,43 @@
+# ============================================================
+# Dockerfile.official — ES 5.x–8.x (official image base)
+# Multi-stage: config prep in alpine, final on official image
+# ============================================================
+ARG ES_VERSION
+
+# --- Stage 1: Prepare custom configuration ---
+FROM alpine:3.18 AS config-builder
+ARG ES_VERSION
+
+RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
+    MINOR=$(echo "${ES_VERSION}" | cut -d. -f2) && \
+    mkdir -p /tmp/config && \
+    printf 'cluster.name: docker-cluster\nnode.name: es-node\npath.repo: /tmp/es-snapshots\n' > /tmp/config/elasticsearch.yml && \
+    # ES 5.0-5.3: no single-node discovery, use http.host + transport.host to stay in dev mode
+    if [ "$MAJOR" -eq 5 ] && [ "$MINOR" -lt 4 ]; then \
+      printf 'http.host: 0.0.0.0\ntransport.host: _local_\ndiscovery.zen.minimum_master_nodes: 1\n' >> /tmp/config/elasticsearch.yml; \
+    else \
+      printf 'network.host: 0.0.0.0\ndiscovery.type: single-node\n' >> /tmp/config/elasticsearch.yml; \
+    fi && \
+    # Disable security
+    if [ "$MAJOR" -ge 8 ]; then \
+      printf 'xpack.security.enabled: false\nxpack.security.enrollment.enabled: false\nxpack.security.http.ssl.enabled: false\nxpack.security.transport.ssl.enabled: false\n' >> /tmp/config/elasticsearch.yml; \
+    elif [ "$MAJOR" -ge 5 ]; then \
+      printf 'xpack.security.enabled: false\n' >> /tmp/config/elasticsearch.yml; \
+    fi
+
+# --- Stage 2: Final image ---
+FROM docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
+
+ARG ES_VERSION
+LABEL org.opencontainers.image.title="custom-elasticsearch" \
+      org.opencontainers.image.version="${ES_VERSION}" \
+      org.opencontainers.image.description="Custom Elasticsearch ${ES_VERSION} image for migration testing"
+
+ENV ES_VERSION=${ES_VERSION}
+
+COPY --from=config-builder /tmp/config/elasticsearch.yml /usr/share/elasticsearch/config/elasticsearch.yml
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=12 \
+  CMD curl -sf http://localhost:9200/_cluster/health || exit 1
+
+EXPOSE 9200 9300
