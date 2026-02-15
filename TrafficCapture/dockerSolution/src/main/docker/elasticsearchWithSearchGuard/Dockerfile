@@ -1,4 +1,4 @@
-FROM custom-elasticsearch:7.10.2
+FROM docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
 
 RUN echo y | /usr/share/elasticsearch/bin/elasticsearch-plugin install https://maven.search-guard.com/search-guard-suite-release/com/floragunn/search-guard-suite-plugin/7.10.2-53.5.0/search-guard-suite-plugin-7.10.2-53.5.0.zip
 # add search-guard, which provides TLS, as well as other features that we don't need to consider
