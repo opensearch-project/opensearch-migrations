@@ -307,18 +307,17 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     throw new Error(`Snapshot '${snapshotName}' in source '${sourceName}' references repo '${snapshotDef.repoName}' which is not defined`);
                 }
 
-                const globallyUniqueSnapshotName = `${sourceName}-${snapshotName}`;
                 const proxyDeps = proxyNamesBySource.get(sourceName);
 
                 const { snapshotPrefix: _sp, ...createSnapshotOpts } = snapshotDef.config.createSnapshotConfig;
                 const semaphore = this.generateSemaphoreConfig(sourceCluster.version, sourceName, snapshotName);
                 createConfigs.push({
-                    label: globallyUniqueSnapshotName,
-                    snapshotPrefix: snapshotDef.config.createSnapshotConfig.snapshotPrefix || globallyUniqueSnapshotName,
+                    label: snapshotName,
+                    snapshotPrefix: snapshotDef.config.createSnapshotConfig.snapshotPrefix || snapshotName,
                     config: {
                         ...createSnapshotOpts,
                     },
-                    repo: { ...repoConfig, useLocalStack: /^localstacks?:\/\//i.test(repoConfig.endpoint ?? ""), repoName: snapshotDef.repoName },
+                    repo: repoConfig,
                     ...semaphore,
                     ...(proxyDeps && proxyDeps.length > 0 ? { dependsOnProxySetups: proxyDeps } : {})
                 });
@@ -367,18 +366,17 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     : { dataSnapshotResourceName: globallyUniqueSnapshotName };
 
                 results.push({
-                    label: globallyUniqueSnapshotName,
+                    label: snapshotName,
                     snapshotNameResolution,
                     migrations: autoLabelMigrations(migrations),
                     sourceVersion: sourceCluster.version || "",
                     sourceLabel: fromSource,
                     targetConfig: { ...restOfTarget, label: toTarget },
                     snapshotConfig: {
-                        label: globallyUniqueSnapshotName,
+                        label: snapshotName,
                         ...(repoConfig ? {
                             repoConfig: {
                                 ...repoConfig,
-                                useLocalStack: /^localstacks?:\/\//i.test(repoConfig.endpoint ?? ""),
                                 repoName: snapshotDef.repoName
                             }
                         } : {})

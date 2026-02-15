@@ -1187,6 +1187,7 @@ spec:
             optional: {{=!(fromJSON(inputs.parameters.useLocalStack))}}
 ",
           "setOwnerReference": true,
+          "successCondition": "status.readyReplicas > 0",
         },
       },
       {
@@ -1658,47 +1659,6 @@ exports[`test workflow template renderings full-migration 1`] = `
         ],
       },
       {
-        "container": {
-          "args": [
-            "echo signal replayer here",
-          ],
-          "command": [
-            "sh",
-            "-c",
-          ],
-          "env": [],
-          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-          "resources": {
-            "limits": {
-              "cpu": "500m",
-              "memory": "2000Mi",
-            },
-            "requests": {
-              "cpu": "500m",
-              "memory": "2000Mi",
-            },
-          },
-        },
-        "inputs": {
-          "parameters": [
-            {
-              "name": "targetConfig",
-            },
-            {
-              "name": "imageMigrationConsoleLocation",
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy",
-            },
-          ],
-        },
-        "name": "signalreplayerfortarget",
-        "outputs": {
-          "parameters": [],
-        },
-      },
-      {
         "inputs": {
           "parameters": [
             {
@@ -1858,7 +1818,7 @@ exports[`test workflow template renderings full-migration 1`] = `
                 "name": "resource-management",
                 "template": "waitforcapturedtraffic",
               },
-              "when": "{{=!(0 == len(fromJSON(inputs.parameters.snapshotItemConfig)['dependsOnProxySetups']))}}",
+              "when": "{{=!(0 == len(sprig.dig('dependsOnProxySetups', [], fromJSON(inputs.parameters.snapshotItemConfig))))}}",
             },
             {
               "arguments": {
@@ -2235,28 +2195,6 @@ exports[`test workflow template renderings full-migration 1`] = `
                 "template": "setupandrunbulkload",
               },
               "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig))}}",
-            },
-          ],
-          [
-            {
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "targetConfig",
-                    "value": "{{inputs.parameters.targetConfig}}",
-                  },
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                ],
-              },
-              "name": "signalReplayerForTarget",
-              "template": "signalreplayerfortarget",
             },
           ],
         ],
@@ -4253,6 +4191,7 @@ metadata:
           "flags": [
             "--type",
             "merge",
+            "--subresource=status",
           ],
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1
 kind: CapturedTraffic
@@ -4283,6 +4222,7 @@ status:
           "flags": [
             "--type",
             "merge",
+            "--subresource=status",
           ],
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1
 kind: DataSnapshot
@@ -4311,6 +4251,7 @@ status:
           "flags": [
             "--type",
             "merge",
+            "--subresource=status",
           ],
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1
 kind: SnapshotMigration

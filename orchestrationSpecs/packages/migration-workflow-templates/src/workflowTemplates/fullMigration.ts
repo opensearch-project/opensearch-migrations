@@ -94,17 +94,6 @@ export const FullMigration = WorkflowBuilder.create({
         .addSteps(b => b.addStepGroup(c => c)))
 
 
-    .addTemplate("signalReplayerForTarget", t => t
-        .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-
-        .addContainer(cb => cb
-            .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
-            .addCommand(["sh", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
-            .addArgs(["echo signal replayer here"])))
-
-
     // ── Section 1: Kafka Clusters ────────────────────────────────────────
 
     .addTemplate("setupSingleKafkaCluster", t => t
@@ -274,10 +263,6 @@ export const FullMigration = WorkflowBuilder.create({
                     }),
                 { when: { templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)) }}
             )
-            .addStep("signalReplayerForTarget", INTERNAL, "signalReplayerForTarget", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c)
-                }))
         )
     )
 

@@ -1,4 +1,5 @@
 # Basic snapshot migration: single source/target, metadata + document backfill, no traffic
+skipApprovals : true
 sourceClusters:
   source:
     endpoint: "https://elasticsearch-master-headless:9200"
@@ -11,7 +12,7 @@ sourceClusters:
       repos:
         default:
           awsRegion: "us-east-2"
-          endpoint: "http://10.99.62.203:4566"
+          endpoint: "localstack://10.105.23.133:4566"
           s3RepoPathUri: "s3://migrations-default-123456789012-dev-us-east-2"
       snapshots:
         snap1:
@@ -40,7 +41,11 @@ snapshotMigrationConfigs:
           documentBackfillConfig:
             maxConnections: 4
             documentsPerBulkRequest: 1000
-
+            maxShardSizeBytes: 1000000000
+            "resources": {
+              requests: { cpu: "25m",   memory: "1Gi", ephemeral-storage: "5Gi" },
+              limits: { cpu: "1000m", memory: "2Gi", ephemeral-storage: "5Gi" },
+            }
 traffic:
   proxies: {}
   replayers: {}
