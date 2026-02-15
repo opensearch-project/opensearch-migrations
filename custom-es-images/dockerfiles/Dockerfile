@@ -98,7 +98,7 @@ ENV ES_HOME=/usr/share/elasticsearch \
     ES_VERSION=${ES_VERSION}
 
 # Install minimal runtime deps — bash for ES scripts, curl for healthcheck
-RUN apk add --no-cache bash curl coreutils && \
+RUN apk add --no-cache bash coreutils curl && \
     addgroup -g 1000 elasticsearch && \
     adduser -u 1000 -G elasticsearch -h ${ES_HOME} -D elasticsearch && \
     mkdir -p /tmp/es-snapshots && chown 1000:1000 /tmp/es-snapshots
