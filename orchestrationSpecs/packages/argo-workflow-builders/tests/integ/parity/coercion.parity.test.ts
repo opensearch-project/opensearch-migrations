@@ -1,7 +1,8 @@
 import { renderWorkflowTemplate, expr, typeToken } from "../../../src/index.js";
 import { submitProbe, submitRenderedWorkflow } from "../infra/probeHelper.js";
-import { ParitySpec, BuilderVariant, reportContractResult, reportParityResult } from "../infra/parityHelper.js";
+import { ParitySpec, BuilderVariant, reportContractResult, reportKnownBroken, reportParityResult } from "../infra/parityHelper.js";
 import { makeTestWorkflow } from "../infra/testWorkflowHelper.js";
+import { describeBroken } from "../infra/brokenTestControl.js";
 
 type NestedPayload = { nested: { value: number } };
 type FlagPayload = { flag: boolean };
@@ -28,11 +29,12 @@ describe("Type Coercion - toJSON on string parameter double-serializes", () => {
     });
   });
 
-  describe.skip("Builder - serialize", () => {
+  describeBroken("Builder - serialize", () => {
     const builderVariant: BuilderVariant = {
       name: "serialize",
       code: 'expr.serialize(ctx.inputs.data)',
     };
+    reportKnownBroken(spec, builderVariant, "Known mismatch: serialize on plain string does not match Argo double-serialization behavior.");
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
@@ -258,6 +260,137 @@ describe("Type Coercion - string() on number", () => {
 
       const rendered = renderWorkflowTemplate(wf);
       const result = await submitRenderedWorkflow(rendered);
+      expect(result.phase).toBe("Succeeded");
+      expect(result.globalOutputs.result).toBe(spec.expectedResult);
+      reportParityResult(spec, builderVariant, result);
+    });
+  });
+});
+
+describe("Type Coercion - toBase64 encodes string", () => {
+  const spec: ParitySpec = {
+    category: "Type Coercion",
+    name: "toBase64 encodes string",
+    inputs: { text: "hello" },
+    argoExpression: "toBase64(inputs.parameters.text)",
+    expectedResult: "aGVsbG8=",
+  };
+
+  describe("ArgoYaml", () => {
+    test("raw expression produces expected result", async () => {
+      const result = await submitProbe({
+        inputs: spec.inputs,
+        expression: spec.argoExpression,
+      });
+      expect(result.phase).toBe("Succeeded");
+      expect(result.globalOutputs.result).toBe(spec.expectedResult);
+      reportContractResult(spec, result);
+    });
+  });
+
+  describe("Builder - toBase64", () => {
+    const builderVariant: BuilderVariant = {
+      name: "toBase64",
+      code: "expr.toBase64(ctx.inputs.text)",
+    };
+
+    test("builder API produces same result", async () => {
+      const wf = makeTestWorkflow(t => t
+        .addRequiredInput("text", typeToken<string>())
+        .addSteps(s => s.addStepGroup(c => c))
+        .addExpressionOutput("result", (ctx) => expr.toBase64(ctx.inputs.text))
+      );
+
+      const rendered = renderWorkflowTemplate(wf);
+      const result = await submitRenderedWorkflow(rendered, spec.inputs);
+      expect(result.phase).toBe("Succeeded");
+      expect(result.globalOutputs.result).toBe(spec.expectedResult);
+      reportParityResult(spec, builderVariant, result);
+    });
+  });
+});
+
+describe("Type Coercion - fromBase64 decodes string", () => {
+  const spec: ParitySpec = {
+    category: "Type Coercion",
+    name: "fromBase64 decodes string",
+    inputs: { encoded: "aGVsbG8=" },
+    argoExpression: "fromBase64(inputs.parameters.encoded)",
+    expectedResult: "hello",
+  };
+
+  describe("ArgoYaml", () => {
+    test("raw expression produces expected result", async () => {
+      const result = await submitProbe({
+        inputs: spec.inputs,
+        expression: spec.argoExpression,
+      });
+      expect(result.phase).toBe("Succeeded");
+      expect(result.globalOutputs.result).toBe(spec.expectedResult);
+      reportContractResult(spec, result);
+    });
+  });
+
+  describe("Builder - fromBase64", () => {
+    const builderVariant: BuilderVariant = {
+      name: "fromBase64",
+      code: "expr.fromBase64(ctx.inputs.encoded)",
+    };
+
+    test("builder API produces same result", async () => {
+      const wf = makeTestWorkflow(t => t
+        .addRequiredInput("encoded", typeToken<string>())
+        .addSteps(s => s.addStepGroup(c => c))
+        .addExpressionOutput("result", (ctx) => expr.fromBase64(ctx.inputs.encoded))
+      );
+
+      const rendered = renderWorkflowTemplate(wf);
+      const result = await submitRenderedWorkflow(rendered, spec.inputs);
+      expect(result.phase).toBe("Succeeded");
+      expect(result.globalOutputs.result).toBe(spec.expectedResult);
+      reportParityResult(spec, builderVariant, result);
+    });
+  });
+});
+
+describe("Type Coercion - base64 round-trip preserves data", () => {
+  const spec: ParitySpec = {
+    category: "Type Coercion",
+    name: "base64 round-trip preserves data",
+    inputs: { text: "test data 123" },
+    argoExpression: "fromBase64(toBase64(inputs.parameters.text))",
+    expectedResult: "test data 123",
+  };
+
+  describe("ArgoYaml", () => {
+    test("raw expression produces expected result", async () => {
+      const result = await submitProbe({
+        inputs: spec.inputs,
+        expression: spec.argoExpression,
+      });
+      expect(result.phase).toBe("Succeeded");
+      expect(result.globalOutputs.result).toBe(spec.expectedResult);
+      reportContractResult(spec, result);
+    });
+  });
+
+  describe("Builder - fromBase64/toBase64", () => {
+    const builderVariant: BuilderVariant = {
+      name: "fromBase64/toBase64",
+      code: "expr.fromBase64(expr.toBase64(ctx.inputs.text))",
+    };
+
+    test("builder API produces same result", async () => {
+      const wf = makeTestWorkflow(t => t
+        .addRequiredInput("text", typeToken<string>())
+        .addSteps(s => s.addStepGroup(c => c))
+        .addExpressionOutput("result", (ctx) =>
+          expr.fromBase64(expr.toBase64(ctx.inputs.text))
+        )
+      );
+
+      const rendered = renderWorkflowTemplate(wf);
+      const result = await submitRenderedWorkflow(rendered, spec.inputs);
       expect(result.phase).toBe("Succeeded");
       expect(result.globalOutputs.result).toBe(spec.expectedResult);
       reportParityResult(spec, builderVariant, result);

@@ -1,5 +1,9 @@
+import { expr, renderWorkflowTemplate, typeToken } from "../../../src/index.js";
 import { submitProbe } from "../infra/probeHelper.js";
-import { ParitySpec, reportContractResult } from "../infra/parityHelper.js";
+import { submitRenderedWorkflow } from "../infra/probeHelper.js";
+import { BuilderVariant, ParitySpec, reportContractResult, reportKnownBroken, reportParityResult } from "../infra/parityHelper.js";
+import { makeTestWorkflow } from "../infra/testWorkflowHelper.js";
+import { describeBroken } from "../infra/brokenTestControl.js";
 
 function spec(
   name: string,
@@ -26,6 +30,35 @@ describe("Regex And Advanced - regexMatch valid email", () => {
       reportContractResult(s, r);
     });
   });
+
+  describeBroken("Builder - regexMatch", () => {
+    const builderVariant: BuilderVariant = {
+      name: "regexMatch",
+      code: "expr.toString(expr.regexMatch(expr.literal('^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\\\.[A-Za-z]{2,}$'), ctx.inputs.email))",
+    };
+    reportKnownBroken(s, builderVariant, "Runtime Error: builder regex helpers are not yet mapped compatibly to Argo Sprig regex evaluation.");
+
+    test("builder API produces same result", async () => {
+      const wf = makeTestWorkflow(t => t
+        .addRequiredInput("email", typeToken<string>())
+        .addSteps(s => s.addStepGroup(c => c))
+        .addExpressionOutput("result", ctx =>
+          expr.toString(
+            expr.regexMatch(
+              expr.literal("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"),
+              ctx.inputs.email
+            )
+          )
+        )
+      );
+
+      const rendered = renderWorkflowTemplate(wf);
+      const r = await submitRenderedWorkflow(rendered, s.inputs);
+      expect(r.phase).toBe("Succeeded");
+      expect(r.globalOutputs.result).toBe(s.expectedResult);
+      reportParityResult(s, builderVariant, r);
+    });
+  });
 });
 
 describe("Regex And Advanced - regexMatch invalid email", () => {
@@ -43,6 +76,35 @@ describe("Regex And Advanced - regexMatch invalid email", () => {
       reportContractResult(s, r);
     });
   });
+
+  describeBroken("Builder - regexMatch", () => {
+    const builderVariant: BuilderVariant = {
+      name: "regexMatch",
+      code: "expr.toString(expr.regexMatch(expr.literal('^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\\\.[A-Za-z]{2,}$'), ctx.inputs.email))",
+    };
+    reportKnownBroken(s, builderVariant, "Runtime Error: builder regex helpers are not yet mapped compatibly to Argo Sprig regex evaluation.");
+
+    test("builder API produces same result", async () => {
+      const wf = makeTestWorkflow(t => t
+        .addRequiredInput("email", typeToken<string>())
+        .addSteps(s => s.addStepGroup(c => c))
+        .addExpressionOutput("result", ctx =>
+          expr.toString(
+            expr.regexMatch(
+              expr.literal("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"),
+              ctx.inputs.email
+            )
+          )
+        )
+      );
+
+      const rendered = renderWorkflowTemplate(wf);
+      const r = await submitRenderedWorkflow(rendered, s.inputs);
+      expect(r.phase).toBe("Succeeded");
+      expect(r.globalOutputs.result).toBe(s.expectedResult);
+      reportParityResult(s, builderVariant, r);
+    });
+  });
 });
 
 describe("Regex And Advanced - regexFind extract pattern", () => {
@@ -53,6 +115,30 @@ describe("Regex And Advanced - regexFind extract pattern", () => {
       expect(r.phase).toBe("Succeeded");
       expect(r.globalOutputs.result).toBe(s.expectedResult);
       reportContractResult(s, r);
+    });
+  });
+
+  describeBroken("Builder - regexFind", () => {
+    const builderVariant: BuilderVariant = {
+      name: "regexFind",
+      code: "expr.regexFind(expr.literal('[a-zA-Z][1-9]'), ctx.inputs.text)",
+    };
+    reportKnownBroken(s, builderVariant, "Runtime Error: builder regex helpers are not yet mapped compatibly to Argo Sprig regex evaluation.");
+
+    test("builder API produces same result", async () => {
+      const wf = makeTestWorkflow(t => t
+        .addRequiredInput("text", typeToken<string>())
+        .addSteps(s => s.addStepGroup(c => c))
+        .addExpressionOutput("result", ctx =>
+          expr.regexFind(expr.literal("[a-zA-Z][1-9]"), ctx.inputs.text)
+        )
+      );
+
+      const rendered = renderWorkflowTemplate(wf);
+      const r = await submitRenderedWorkflow(rendered, s.inputs);
+      expect(r.phase).toBe("Succeeded");
+      expect(r.globalOutputs.result).toBe(s.expectedResult);
+      reportParityResult(s, builderVariant, r);
     });
   });
 });
@@ -87,6 +173,34 @@ describe("Regex And Advanced - regexReplaceAll capture groups", () => {
       expect(r.phase).toBe("Succeeded");
       expect(r.globalOutputs.result).toBe(s.expectedResult);
       reportContractResult(s, r);
+    });
+  });
+
+  describeBroken("Builder - regexReplaceAll", () => {
+    const builderVariant: BuilderVariant = {
+      name: "regexReplaceAll",
+      code: "expr.regexReplaceAll(expr.literal('a(x*)b'), expr.literal('${1}W'), ctx.inputs.text)",
+    };
+    reportKnownBroken(s, builderVariant, "Runtime Error: builder regex helpers are not yet mapped compatibly to Argo Sprig regex evaluation.");
+
+    test("builder API produces same result", async () => {
+      const wf = makeTestWorkflow(t => t
+        .addRequiredInput("text", typeToken<string>())
+        .addSteps(s => s.addStepGroup(c => c))
+        .addExpressionOutput("result", ctx =>
+          expr.regexReplaceAll(
+            expr.literal("a(x*)b"),
+            expr.literal("${1}W"),
+            ctx.inputs.text
+          )
+        )
+      );
+
+      const rendered = renderWorkflowTemplate(wf);
+      const r = await submitRenderedWorkflow(rendered, s.inputs);
+      expect(r.phase).toBe("Succeeded");
+      expect(r.globalOutputs.result).toBe(s.expectedResult);
+      reportParityResult(s, builderVariant, r);
     });
   });
 });
@@ -199,6 +313,29 @@ describe("Regex And Advanced - in operator map key true", () => {
       reportContractResult(s, r);
     });
   });
+
+  describe("Builder - hasKey", () => {
+    const builderVariant: BuilderVariant = {
+      name: "hasKey",
+      code: 'expr.toString(expr.hasKey(expr.deserializeRecord(ctx.inputs.data), "name"))',
+    };
+
+    test("builder API produces same result", async () => {
+      const wf = makeTestWorkflow(t => t
+        .addRequiredInput("data", typeToken<{ name: string; age: number }>())
+        .addSteps(s2 => s2.addStepGroup(c => c))
+        .addExpressionOutput("result", ctx =>
+          expr.toString(expr.hasKey(expr.deserializeRecord(ctx.inputs.data), "name"))
+        )
+      );
+
+      const rendered = renderWorkflowTemplate(wf);
+      const r = await submitRenderedWorkflow(rendered, s.inputs);
+      expect(r.phase).toBe("Succeeded");
+      expect(r.globalOutputs.result).toBe(s.expectedResult);
+      reportParityResult(s, builderVariant, r);
+    });
+  });
 });
 
 describe("Regex And Advanced - in operator map key false", () => {
@@ -214,6 +351,29 @@ describe("Regex And Advanced - in operator map key false", () => {
       expect(r.phase).toBe("Succeeded");
       expect(r.globalOutputs.result).toBe(s.expectedResult);
       reportContractResult(s, r);
+    });
+  });
+
+  describe("Builder - hasKey", () => {
+    const builderVariant: BuilderVariant = {
+      name: "hasKey",
+      code: 'expr.toString(expr.hasKey(expr.deserializeRecord(ctx.inputs.data), "email"))',
+    };
+
+    test("builder API produces same result", async () => {
+      const wf = makeTestWorkflow(t => t
+        .addRequiredInput("data", typeToken<{ name: string; age: number; email?: string }>())
+        .addSteps(s2 => s2.addStepGroup(c => c))
+        .addExpressionOutput("result", ctx =>
+          expr.toString(expr.hasKey(expr.deserializeRecord(ctx.inputs.data), "email"))
+        )
+      );
+
+      const rendered = renderWorkflowTemplate(wf);
+      const r = await submitRenderedWorkflow(rendered, s.inputs);
+      expect(r.phase).toBe("Succeeded");
+      expect(r.globalOutputs.result).toBe(s.expectedResult);
+      reportParityResult(s, builderVariant, r);
     });
   });
 });

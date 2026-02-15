@@ -50,6 +50,30 @@ describe("JSONPath - extract number as bare string", () => {
       reportParityResult(spec, builderVariant, result);
     });
   });
+
+  describe("Builder - jsonPathStrictSerialized", () => {
+    const builderVariant: BuilderVariant = {
+      name: "jsonPathStrictSerialized",
+      code: 'expr.jsonPathStrictSerialized(ctx.inputs.data, "key")',
+    };
+
+    test("builder API produces same result when serialized output is desired", async () => {
+      const wf = makeTestWorkflow(t => t
+          .addRequiredInput("data", typeToken<StringKeyRecord>())
+          .addSteps(s => s.addStepGroup(c => c))
+          .addExpressionOutput("result", (ctx) =>
+            expr.jsonPathStrictSerialized(ctx.inputs.data, "key")
+          )
+        )
+        ;
+
+      const rendered = renderWorkflowTemplate(wf);
+      const result = await submitRenderedWorkflow(rendered, { data: spec.inputs!.data });
+      expect(result.phase).toBe("Succeeded");
+      expect(result.globalOutputs.result).toBe(spec.expectedResult);
+      reportParityResult(spec, builderVariant, result);
+    });
+  });
 });
 
 describe("JSONPath - extract string without extra quotes", () => {

@@ -16,6 +16,41 @@ export interface WorkflowResult {
   raw: any;
 }
 
+function truncate(value: string, max: number = 300): string {
+  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+}
+
+function formatFailureDiagnostics(workflow: any): string {
+  const metadata = workflow?.metadata ?? {};
+  const status = workflow?.status ?? {};
+  const nodes = status.nodes ?? {};
+  const lines: string[] = [];
+
+  lines.push(`Workflow: ${metadata.name ?? "<unknown>"}`);
+  lines.push(`Phase: ${status.phase ?? "<unknown>"}`);
+  if (status.message) {
+    lines.push(`Status message: ${truncate(String(status.message), 600)}`);
+  }
+
+  const problematicNodes = Object.values<any>(nodes)
+    .filter((n) => n?.phase === "Failed" || n?.phase === "Error")
+    .slice(0, 8);
+
+  if (problematicNodes.length > 0) {
+    lines.push("Problem nodes:");
+    for (const node of problematicNodes) {
+      const display = node.displayName || node.name || "<unnamed>";
+      const template = node.templateName ? ` template=${node.templateName}` : "";
+      const msg = node.message ? ` message=${truncate(String(node.message), 400)}` : "";
+      lines.push(`- ${display} phase=${node.phase}${template}${msg}`);
+    }
+  }
+
+  const statusJson = JSON.stringify(status, null, 2);
+  lines.push(`Status snapshot: ${truncate(statusJson, 4000)}`);
+  return lines.join("\n");
+}
+
 export async function submitAndWait(
   workflowObject: any,
   timeoutMs: number = 60000
@@ -55,6 +90,9 @@ export async function submitAndWait(
     
     if (phase === "Succeeded" || phase === "Failed" || phase === "Error") {
       const duration = Date.now() - startTime;
+      if (phase === "Failed" || phase === "Error") {
+        console.error(`[workflow-failure]\n${formatFailureDiagnostics(workflow)}`);
+      }
       return extractResults(workflow, duration);
     }
     
@@ -124,7 +162,9 @@ function extractResults(workflow: any, duration: number): WorkflowResult {
   
   return {
     phase: status.phase,
-    message: status.message,
+    message: status.message ?? (status.phase === "Failed" || status.phase === "Error"
+      ? formatFailureDiagnostics(workflow)
+      : undefined),
     globalOutputs,
     nodeOutputs,
     duration,

@@ -1,6 +1,17 @@
+import {
+  INTERNAL,
+  WorkflowBuilder,
+  expr,
+  makeItemsLoop,
+  makeParameterLoop,
+  renderWorkflowTemplate,
+  Serialized,
+  typeToken,
+} from "../../../src/index.js";
 import { getTestNamespace } from "../infra/argoCluster.js";
+import { submitRenderedWorkflow } from "../infra/probeHelper.js";
 import { submitAndWait } from "../infra/workflowRunner.js";
-import { ParitySpec, reportContractResult } from "../infra/parityHelper.js";
+import { BuilderVariant, ParitySpec, reportContractResult, reportParityResult } from "../infra/parityHelper.js";
 
 function countLoopNodes(result: any, prefix = "loop-step(") {
   return Object.values(result.raw.status.nodes).filter(
@@ -48,6 +59,41 @@ describe("Loop Item - withItems iterates over array strings", () => {
       reportContractResult(spec, result);
     });
   });
+
+  describe("Builder - loopWith items", () => {
+    const builderVariant: BuilderVariant = {
+      name: "loopWith items",
+      code: "addStep(..., c => c.register({ value: expr.asString(c.item) }), { loopWith: makeItemsLoop(['a','b','c']) })",
+    };
+
+    test("builder workflow loops 3 times and passes item", async () => {
+      const wf = WorkflowBuilder.create({ k8sResourceName: "loop-strings-builder" })
+        .addTemplate("process-item", t => t
+          .addRequiredInput("value", typeToken<string>())
+          .addSuspend(0)
+        )
+        .addTemplate("main", t => t
+          .addSteps(s => s.addStep(
+            "loop-step",
+            INTERNAL,
+            "process-item",
+            c => c.register({ value: expr.asString(c.item) }),
+            { loopWith: makeItemsLoop(["a", "b", "c"]) }
+          ))
+        )
+        .setEntrypoint("main")
+        .getFullScope();
+
+      const rendered = renderWorkflowTemplate(wf);
+      const result = await submitRenderedWorkflow(rendered);
+      expect(result.phase).toBe("Succeeded");
+      const loopNodes = countLoopNodes(result);
+      expect(loopNodes.length).toBe(3);
+      const items = loopNodes.map((n: any) => n.inputs?.parameters?.find((p: any) => p.name === "value")?.value).sort();
+      expect(items).toEqual(["a", "b", "c"]);
+      reportParityResult(spec, builderVariant, result);
+    });
+  });
 });
 
 describe("Loop Item - withItems iterates over numbers", () => {
@@ -87,6 +133,40 @@ describe("Loop Item - withItems iterates over numbers", () => {
       const items = loopNodes.map((n: any) => n.inputs?.parameters?.find((p: any) => p.name === "value")?.value).sort();
       expect(items).toEqual(["1", "2", "3"]);
       reportContractResult(spec, result);
+    });
+  });
+
+  describe("Builder - loopWith items", () => {
+    const builderVariant: BuilderVariant = {
+      name: "loopWith items",
+      code: "addStep(..., c => c.register({ value: expr.asString(c.item) }), { loopWith: makeItemsLoop([1,2,3]) })",
+    };
+
+    test("builder workflow loops and coerces numbers to strings", async () => {
+      const wf = WorkflowBuilder.create({ k8sResourceName: "loop-numbers-builder" })
+        .addTemplate("process-item", t => t
+          .addRequiredInput("value", typeToken<string>())
+          .addSuspend(0)
+        )
+        .addTemplate("main", t => t
+          .addSteps(s => s.addStep(
+            "loop-step",
+            INTERNAL,
+            "process-item",
+            c => c.register({ value: expr.asString(c.item) }),
+            { loopWith: makeItemsLoop([1, 2, 3]) }
+          ))
+        )
+        .setEntrypoint("main")
+        .getFullScope();
+
+      const rendered = renderWorkflowTemplate(wf);
+      const result = await submitRenderedWorkflow(rendered);
+      expect(result.phase).toBe("Succeeded");
+      const loopNodes = countLoopNodes(result);
+      const items = loopNodes.map((n: any) => n.inputs?.parameters?.find((p: any) => p.name === "value")?.value).sort();
+      expect(items).toEqual(["1", "2", "3"]);
+      reportParityResult(spec, builderVariant, result);
     });
   });
 });
@@ -132,6 +212,42 @@ describe("Loop Item - withItems JSON objects are serialized", () => {
       reportContractResult(spec, result);
     });
   });
+
+  describe("Builder - loopWith items objects", () => {
+    const builderVariant: BuilderVariant = {
+      name: "loopWith items objects",
+      code: "addStep(..., c => c.register({ obj: expr.serialize(c.item) }), { loopWith: makeItemsLoop([{name:'alice',age:30},{name:'bob',age:25}]) })",
+    };
+
+    test("builder workflow loops objects as serialized values", async () => {
+      const wf = WorkflowBuilder.create({ k8sResourceName: "loop-objects-builder" })
+        .addTemplate("process-item", t => t
+          .addRequiredInput("obj", typeToken<Serialized<{ name: string; age: number }>>())
+          .addSuspend(0)
+        )
+        .addTemplate("main", t => t
+          .addSteps(s => s.addStep(
+            "loop-step",
+            INTERNAL,
+            "process-item",
+            c => c.register({ obj: expr.serialize(c.item) }),
+            { loopWith: makeItemsLoop([{ name: "alice", age: 30 }, { name: "bob", age: 25 }]) }
+          ))
+        )
+        .setEntrypoint("main")
+        .getFullScope();
+
+      const rendered = renderWorkflowTemplate(wf);
+      const result = await submitRenderedWorkflow(rendered);
+      expect(result.phase).toBe("Succeeded");
+      const loopNodes = countLoopNodes(result);
+      const items = loopNodes
+        .map((n: any) => JSON.parse(n.inputs?.parameters?.find((p: any) => p.name === "obj")?.value).name)
+        .sort();
+      expect(items).toEqual(["alice", "bob"]);
+      reportParityResult(spec, builderVariant, result);
+    });
+  });
 });
 
 describe("Loop Item - item used in expression directly", () => {
@@ -171,6 +287,42 @@ describe("Loop Item - item used in expression directly", () => {
       const items = loopNodes.map((n: any) => n.inputs?.parameters?.find((p: any) => p.name === "computed")?.value).sort();
       expect(items).toEqual(["x-processed", "y-processed"]);
       reportContractResult(spec, result);
+    });
+  });
+
+  describe("Builder - loop item expression", () => {
+    const builderVariant: BuilderVariant = {
+      name: "item expression",
+      code: "addStep(..., c => c.register({ computed: expr.concat(expr.asString(c.item), expr.literal('-processed')) }), { loopWith: makeItemsLoop(['x','y']) })",
+    };
+
+    test("builder workflow computes per-item expression values", async () => {
+      const wf = WorkflowBuilder.create({ k8sResourceName: "loop-expr-builder" })
+        .addTemplate("process-item", t => t
+          .addRequiredInput("computed", typeToken<string>())
+          .addSuspend(0)
+        )
+        .addTemplate("main", t => t
+          .addSteps(s => s.addStep(
+            "loop-step",
+            INTERNAL,
+            "process-item",
+            c => c.register({
+              computed: expr.concat(expr.asString(c.item), expr.literal("-processed")),
+            }),
+            { loopWith: makeItemsLoop(["x", "y"]) }
+          ))
+        )
+        .setEntrypoint("main")
+        .getFullScope();
+
+      const rendered = renderWorkflowTemplate(wf);
+      const result = await submitRenderedWorkflow(rendered);
+      expect(result.phase).toBe("Succeeded");
+      const loopNodes = countLoopNodes(result);
+      const items = loopNodes.map((n: any) => n.inputs?.parameters?.find((p: any) => p.name === "computed")?.value).sort();
+      expect(items).toEqual(["x-processed", "y-processed"]);
+      reportParityResult(spec, builderVariant, result);
     });
   });
 });
@@ -216,6 +368,41 @@ describe("Loop Item - withParam from JSON array", () => {
       reportContractResult(spec, result);
     });
   });
+
+  describe("Builder - loopWith param", () => {
+    const builderVariant: BuilderVariant = {
+      name: "loopWith param",
+      code: "addStep(..., c => c.register({ value: expr.asString(c.item) }), { loopWith: makeParameterLoop(ctx.inputs.items) })",
+    };
+
+    test("builder workflow loops over parameter array", async () => {
+      const wf = WorkflowBuilder.create({ k8sResourceName: "loop-param-builder" })
+        .addTemplate("process-item", t => t
+          .addRequiredInput("value", typeToken<string>())
+          .addSuspend(0)
+        )
+        .addTemplate("main", t => t
+          .addRequiredInput("items", typeToken<string[]>())
+          .addSteps(s => s.addStep(
+            "loop-step",
+            INTERNAL,
+            "process-item",
+            c => c.register({ value: expr.asString(c.item) }),
+            { loopWith: makeParameterLoop(expr.deserializeRecord(s.inputs.items)) }
+          ))
+        )
+        .setEntrypoint("main")
+        .getFullScope();
+
+      const rendered = renderWorkflowTemplate(wf);
+      const result = await submitRenderedWorkflow(rendered, { items: spec.inputs!.items });
+      expect(result.phase).toBe("Succeeded");
+      const loopNodes = countLoopNodes(result);
+      const items = loopNodes.map((n: any) => n.inputs?.parameters?.find((p: any) => p.name === "value")?.value).sort();
+      expect(items).toEqual(["one", "three", "two"]);
+      reportParityResult(spec, builderVariant, result);
+    });
+  });
 });
 
 describe("Loop Item - item number coerced with string()", () => {
@@ -255,6 +442,42 @@ describe("Loop Item - item number coerced with string()", () => {
       const items = loopNodes.map((n: any) => n.inputs?.parameters?.find((p: any) => p.name === "computed")?.value).sort();
       expect(items).toEqual(["value-10", "value-20", "value-30"]);
       reportContractResult(spec, result);
+    });
+  });
+
+  describe("Builder - item number coercion", () => {
+    const builderVariant: BuilderVariant = {
+      name: "item number coercion",
+      code: "addStep(..., c => c.register({ computed: expr.concat(expr.literal('value-'), expr.asString(c.item)) }), { loopWith: makeItemsLoop([10,20,30]) })",
+    };
+
+    test("builder workflow computes value-prefixed numeric items", async () => {
+      const wf = WorkflowBuilder.create({ k8sResourceName: "loop-coerce-builder" })
+        .addTemplate("process-item", t => t
+          .addRequiredInput("computed", typeToken<string>())
+          .addSuspend(0)
+        )
+        .addTemplate("main", t => t
+          .addSteps(s => s.addStep(
+            "loop-step",
+            INTERNAL,
+            "process-item",
+            c => c.register({
+              computed: expr.concat(expr.literal("value-"), expr.asString(c.item)),
+            }),
+            { loopWith: makeItemsLoop([10, 20, 30]) }
+          ))
+        )
+        .setEntrypoint("main")
+        .getFullScope();
+
+      const rendered = renderWorkflowTemplate(wf);
+      const result = await submitRenderedWorkflow(rendered);
+      expect(result.phase).toBe("Succeeded");
+      const loopNodes = countLoopNodes(result);
+      const items = loopNodes.map((n: any) => n.inputs?.parameters?.find((p: any) => p.name === "computed")?.value).sort();
+      expect(items).toEqual(["value-10", "value-20", "value-30"]);
+      reportParityResult(spec, builderVariant, result);
     });
   });
 });

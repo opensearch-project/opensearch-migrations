@@ -75,3 +75,19 @@ export function reportParityResult(
   });
   writeResult(spec, data);
 }
+
+export function reportKnownBroken(
+  spec: ParitySpec,
+  variant: BuilderVariant,
+  reason: string
+) {
+  const data = readOrCreate(spec);
+  if (!data.knownBrokenVariants) {
+    data.knownBrokenVariants = [];
+  }
+  const exists = data.knownBrokenVariants.some((v: any) => v.variant?.name === variant.name);
+  if (!exists) {
+    data.knownBrokenVariants.push({ variant, reason });
+  }
+  writeResult(spec, data);
+}

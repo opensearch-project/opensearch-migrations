@@ -13,7 +13,8 @@
     "type-check": "tsc --noEmit",
     "test": "jest",
     "test:integ": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.integ.config.mjs",
-    "test:parity": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.integ.config.mjs -- parity/"
+    "test:parity": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.integ.config.mjs -- parity/",
+    "test:parity:broken": "PARITY_INCLUDE_BROKEN=1 NODE_OPTIONS=--experimental-vm-modules jest --config jest.integ.config.mjs -- parity/"
   },
   "dependencies": {
     "zod": "^4"

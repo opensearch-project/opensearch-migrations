@@ -1,7 +1,8 @@
 import { renderWorkflowTemplate, expr } from "../../../src/index.js";
 import { submitProbe, submitRenderedWorkflow } from "../infra/probeHelper.js";
-import { ParitySpec, BuilderVariant, reportContractResult, reportParityResult } from "../infra/parityHelper.js";
+import { ParitySpec, BuilderVariant, reportContractResult, reportKnownBroken, reportParityResult } from "../infra/parityHelper.js";
 import { makeTestWorkflow } from "../infra/testWorkflowHelper.js";
+import { describeBroken } from "../infra/brokenTestControl.js";
 
 describe("String Operations - concatenation with + operator", () => {
   const spec: ParitySpec = {
@@ -231,7 +232,7 @@ describe("String Operations - string length", () => {
   });
 });
 
-describe.skip("String Operations - regexMatch returns boolean", () => {
+describeBroken("String Operations - regexMatch returns boolean", () => {
   const spec: ParitySpec = {
     category: "String Operations",
     name: "regexMatch returns boolean",
@@ -257,6 +258,7 @@ describe.skip("String Operations - regexMatch returns boolean", () => {
       name: "regexMatch",
       code: 'expr.toString(expr.regexMatch("[0-9]+", ctx.inputs.text))',
     };
+    reportKnownBroken(spec, builderVariant, "Runtime Error: regex helper mapping mismatch between builder expressions and Argo runtime.");
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
@@ -276,7 +278,7 @@ describe.skip("String Operations - regexMatch returns boolean", () => {
   });
 });
 
-describe.skip("String Operations - regexFind extracts match", () => {
+describeBroken("String Operations - regexFind extracts match", () => {
   const spec: ParitySpec = {
     category: "String Operations",
     name: "regexFind extracts match",
@@ -302,6 +304,7 @@ describe.skip("String Operations - regexFind extracts match", () => {
       name: "regexFind",
       code: 'expr.regexFind("[0-9]+", ctx.inputs.text)',
     };
+    reportKnownBroken(spec, builderVariant, "Runtime Error: regex helper mapping mismatch between builder expressions and Argo runtime.");
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
@@ -321,7 +324,7 @@ describe.skip("String Operations - regexFind extracts match", () => {
   });
 });
 
-describe.skip("String Operations - regexReplaceAll", () => {
+describeBroken("String Operations - regexReplaceAll", () => {
   const spec: ParitySpec = {
     category: "String Operations",
     name: "regexReplaceAll",
@@ -347,6 +350,7 @@ describe.skip("String Operations - regexReplaceAll", () => {
       name: "regexReplaceAll",
       code: 'expr.regexReplaceAll("[0-9]+", "X", ctx.inputs.text)',
     };
+    reportKnownBroken(spec, builderVariant, "Runtime Error: regex helper mapping mismatch between builder expressions and Argo runtime.");
 
     test("builder API produces same result", async () => {
       const wf = makeTestWorkflow(t => t
