@@ -385,6 +385,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 addKeyContextForEventualCommit(streamKey, kafkaTsk, k);
                 nextSetOfCommitsMap.put(k, v);
             }
+            kafkaRecordsReadyToCommit.set(true);
             return ITrafficCaptureSource.CommitResult.AFTER_NEXT_READ;
         }).orElseGet(() -> {
             synchronized (commitDataLock) {

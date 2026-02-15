@@ -187,6 +187,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                             (Exception) t
                         );
                     }
+                    // Count the final outcome once per request (not per retry)
+                    countFinalOutcome(summary, t);
                     commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
                     return null;
                 } else {
@@ -214,6 +216,21 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             }
         }
 
+        private void countFinalOutcome(TransformedTargetRequestAndResponseList summary, Throwable t) {
+            if (t != null) {
+                exceptionRequestCount.incrementAndGet();
+            } else if (summary == null || summary.getResponseList().isEmpty()) {
+                // no response to count
+            } else {
+                var lastResponse = summary.getResponseList().get(summary.getResponseList().size() - 1);
+                if (lastResponse.getError() != null || summary.getTransformationStatus().isError()) {
+                    exceptionRequestCount.incrementAndGet();
+                } else {
+                    successfulRequestCount.incrementAndGet();
+                }
+            }
+        }
+
         @Override
         public void onTrafficStreamsExpired(
             RequestResponsePacketPair.ReconstructionStatus status,
@@ -236,10 +253,12 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
 
         @SneakyThrows
         private void commitTrafficStreams(boolean shouldCommit, List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
-            if (shouldCommit && trafficStreamKeysBeingHeld != null) {
+            if (trafficStreamKeysBeingHeld != null) {
                 for (var tsk : trafficStreamKeysBeingHeld) {
                     tsk.getTrafficStreamsContext().close();
-                    trafficCaptureSource.commitTrafficStream(tsk);
+                    if (shouldCommit) {
+                        trafficCaptureSource.commitTrafficStream(tsk);
+                    }
                 }
             }
         }
@@ -313,23 +332,20 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     protected void perResponseConsumer(AggregatedRawResponse summary,
                                        HttpRequestTransformationStatus transformationStatus,
                                        IReplayContexts.IReplayerHttpTransactionContext context) {
+        // Logging only — counting moved to handleCompletedTransaction to avoid double-counting on retries
         if (summary != null && summary.getError() != null) {
             log.atInfo().setCause(summary.getError())
                 .setMessage("Exception for {}: ").addArgument(context).log();
-            exceptionRequestCount.incrementAndGet();
         } else if (transformationStatus.isError()) {
             log.atInfo()
                 .setCause(Optional.ofNullable(summary).map(AggregatedRawResponse::getError).orElse(null))
                 .setMessage("Unknown error transforming {}: ")
                 .addArgument(context)
                 .log();
-            exceptionRequestCount.incrementAndGet();
         } else if (summary == null) {
-            log.atInfo().setMessage("Not counting this response.  No result at all for {}: ")
+            log.atInfo().setMessage("No result at all for {}: ")
                 .addArgument(context)
                 .log();
-        } else {
-            successfulRequestCount.incrementAndGet();
         }
     }
 
