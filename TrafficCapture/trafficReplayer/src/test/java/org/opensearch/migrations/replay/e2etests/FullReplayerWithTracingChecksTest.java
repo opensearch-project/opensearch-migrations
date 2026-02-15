@@ -155,7 +155,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
     @ValueSource(booleans = { true, false })
     @ResourceLock("TrafficReplayerRunner")
     @Tag("longTest")
-    public void testSameConnectionIdAcrossNodesCollidesInSharedPool(boolean useSharedConnectionId) throws Throwable {
+    public void testSameConnectionIdAcrossNodesNoLongerCollidesInSharedPool(boolean useSharedConnectionId) throws Throwable {
         var random = new Random(1);
         try (
             var httpServer = SimpleNettyHttpServer.makeServer(
@@ -195,28 +195,14 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                 );
                 var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))
             ) {
-                if (useSharedConnectionId) {
-                    var thrown = Assertions.assertThrows(Throwable.class, () ->
-                        tr.setupRunAndWaitForReplayToFinish(
-                            Duration.ofSeconds(70),
-                            Duration.ofSeconds(30),
-                            blockingTrafficSource,
-                            new TimeShifter(10 * 1000),
-                            t -> tuplesReceived.incrementAndGet()
-                        ));
-                    var rootCause = getDeepestCause(thrown);
-                    Assertions.assertInstanceOf(IllegalStateException.class, rootCause);
-                    Assertions.assertTrue(rootCause.getMessage().contains("dependencyDiagnosticFutureRef was already set"));
-                } else {
-                    tr.setupRunAndWaitForReplayToFinish(
-                        Duration.ofSeconds(70),
-                        Duration.ofSeconds(30),
-                        blockingTrafficSource,
-                        new TimeShifter(10 * 1000),
-                        t -> tuplesReceived.incrementAndGet()
-                    );
-                    Assertions.assertEquals(2, tuplesReceived.get());
-                }
+                tr.setupRunAndWaitForReplayToFinish(
+                    Duration.ofSeconds(70),
+                    Duration.ofSeconds(30),
+                    blockingTrafficSource,
+                    new TimeShifter(10 * 1000),
+                    t -> tuplesReceived.incrementAndGet()
+                );
+                Assertions.assertEquals(2, tuplesReceived.get());
                 tr.shutdown(null).get();
             }
         }
@@ -269,14 +255,6 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                     .build()
             )
             .build();
-    }
-
-    private static Throwable getDeepestCause(Throwable throwable) {
-        var current = throwable;
-        while (current.getCause() != null && current.getCause() != current) {
-            current = current.getCause();
-        }
-        return current;
     }
 
     private static class TraceProcessor {

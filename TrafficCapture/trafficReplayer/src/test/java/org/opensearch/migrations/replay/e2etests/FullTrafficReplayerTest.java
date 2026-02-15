@@ -408,7 +408,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
     @Test
     @ResourceLock("TrafficReplayerRunner")
     @Tag("longTest")
-    public void testReusedConnectionAndSessionFailsWithStaleSessionState() {
+    public void testReusedConnectionAndSessionCompletesWithMonotonicRequestOffsets() {
         var random = new Random(1);
         try (
             var httpServer = SimpleNettyHttpServer.makeServer(
@@ -419,23 +419,20 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
         ) {
             var firstRequest = "GET /first HTTP/1.1\r\nConnection: Keep-Alive\r\nHost: localhost\r\n\r\n";
             var secondRequest = "GET /second HTTP/1.1\r\nConnection: Keep-Alive\r\nHost: localhost\r\n\r\n";
-            var firstStream = makeSingleRequestStream(TEST_NODE_ID, TEST_CONNECTION_ID, firstRequest);
-            var secondStream = makeSingleRequestStream(TEST_NODE_ID, TEST_CONNECTION_ID, secondRequest);
+            var firstStream = makeSingleRequestStream(TEST_NODE_ID, TEST_CONNECTION_ID, 0, firstRequest);
+            var secondStream = makeSingleRequestStream(TEST_NODE_ID, TEST_CONNECTION_ID, 1, secondRequest);
             var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(List.of(firstStream, secondStream));
 
-            var thrown = Assertions.assertThrows(Throwable.class, () ->
-                TrafficReplayerRunner.runReplayer(
-                    2,
-                    httpServer.localhostEndpoint(),
-                    () -> t -> { },
-                    () -> TestContext.noOtelTracking(),
-                    trafficSourceSupplier,
-                    new TimeShifter(10 * 1000)
-                ));
-
-            var rootCause = getDeepestCause(thrown);
-            Assertions.assertInstanceOf(IllegalStateException.class, rootCause);
-            Assertions.assertTrue(rootCause.getMessage().contains("dependencyDiagnosticFutureRef was already set"));
+            var tuplesSeen = new AtomicInteger();
+            TrafficReplayerRunner.runReplayer(
+                2,
+                httpServer.localhostEndpoint(),
+                () -> t -> tuplesSeen.incrementAndGet(),
+                () -> TestContext.noOtelTracking(),
+                trafficSourceSupplier,
+                new TimeShifter(10 * 1000)
+            );
+            Assertions.assertEquals(2, tuplesSeen.get());
         } catch (Throwable t) {
             throw Lombok.sneakyThrow(t);
         }
@@ -444,7 +441,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
     @Test
     @ResourceLock("TrafficReplayerRunner")
     @Tag("longTest")
-    public void testReadSegmentRequestContainsUnexpectedEmptyPacket() throws Throwable {
+    public void testReadSegmentRequestAvoidsUnexpectedEmptyPacket() throws Throwable {
         var random = new Random(1);
         try (
             var httpServer = SimpleNettyHttpServer.makeServer(
@@ -531,11 +528,16 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                 new TimeShifter(10 * 1000)
             );
 
-            Assertions.assertEquals(3, requestPacketSizes.get());
+            Assertions.assertEquals(1, requestPacketSizes.get());
         }
     }
 
-    private static TrafficStream makeSingleRequestStream(String nodeId, String connectionId, String rawRequest) {
+    private static TrafficStream makeSingleRequestStream(
+        String nodeId,
+        String connectionId,
+        int priorRequestsReceived,
+        String rawRequest
+    ) {
         var now = Instant.now();
         var fixedTimestamp = Timestamp.newBuilder()
             .setSeconds(now.getEpochSecond())
@@ -544,7 +546,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
         return TrafficStream.newBuilder()
             .setNodeId(nodeId)
             .setConnectionId(connectionId)
-            .setPriorRequestsReceived(0)
+            .setPriorRequestsReceived(priorRequestsReceived)
             .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
@@ -585,11 +587,4 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             .build();
     }
 
-    private static Throwable getDeepestCause(Throwable throwable) {
-        var current = throwable;
-        while (current.getCause() != null && current.getCause() != current) {
-            current = current.getCause();
-        }
-        return current;
-    }
 }
