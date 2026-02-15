@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build.sh — Build custom ES Docker images from versions.json
+# build.sh — Build custom ES Docker images on Amazon Corretto
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -9,7 +9,7 @@ IMAGE_PREFIX="${IMAGE_PREFIX:-custom-elasticsearch}"
 usage() {
   echo "Usage: $0 [OPTIONS] [MINOR_VERSION...]"
   echo ""
-  echo "Build custom Elasticsearch Docker images."
+  echo "Build custom Elasticsearch Docker images (Amazon Corretto base)."
   echo ""
   echo "Options:"
   echo "  -l, --list        List all available versions"
@@ -27,6 +27,20 @@ usage() {
 
 PARALLEL=0
 
+# Determine Amazon Corretto version based on ES version
+get_corretto_version() {
+  local major=$1 minor=$2
+  if [ "$major" -le 5 ] || { [ "$major" -eq 6 ] && [ "$minor" -le 4 ]; }; then
+    echo 8
+  elif [ "$major" -eq 6 ] || { [ "$major" -eq 7 ] && [ "$minor" -le 10 ]; }; then
+    echo 11
+  elif [ "$major" -eq 7 ]; then
+    echo 17
+  else
+    echo 21
+  fi
+}
+
 list_versions() {
   python3 -c "
 import json
@@ -34,7 +48,7 @@ with open('${VERSIONS_FILE}') as f:
     data = json.load(f)
 for minor in sorted(data.keys(), key=lambda x: [int(p) for p in x.split('.')]):
     info = data[minor]
-    print(f\"  {minor:>5} -> {info['version']:>10}  ({info['method']})\")" 
+    print(f\"  {minor:>5} -> {info['version']:>10}\")"
 }
 
 build_version() {
@@ -47,28 +61,27 @@ with open('${VERSIONS_FILE}') as f:
 if '${minor}' not in data:
     print('NOT_FOUND', file=sys.stderr); sys.exit(1)
 v = data['${minor}']
-print(f\"{v['version']}|{v['method']}|{v.get('url', '')}\")")
+print(f\"{v['version']}|{v['url']}\")")
 
-  local version method url
-  IFS='|' read -r version method url <<< "$info"
+  local version url
+  IFS='|' read -r version url <<< "$info"
   local tag="${IMAGE_PREFIX}:${version}"
 
-  echo "=== Building ${tag} (${method}) ==="
+  local es_major es_minor
+  es_major=$(echo "$minor" | cut -d. -f1)
+  es_minor=$(echo "$minor" | cut -d. -f2)
+  local corretto
+  corretto=$(get_corretto_version "$es_major" "$es_minor")
 
-  if [ "$method" = "tarball" ]; then
-    docker build \
-      --build-arg ES_VERSION="${version}" \
-      --build-arg TARBALL_URL="${url}" \
-      -f "${SCRIPT_DIR}/dockerfiles/Dockerfile.legacy" \
-      -t "${tag}" \
-      "${SCRIPT_DIR}"
-  else
-    docker build \
-      --build-arg ES_VERSION="${version}" \
-      -f "${SCRIPT_DIR}/dockerfiles/Dockerfile.official" \
-      -t "${tag}" \
-      "${SCRIPT_DIR}"
-  fi
+  echo "=== Building ${tag} (Corretto ${corretto}) ==="
+
+  docker build \
+    --build-arg CORRETTO_VERSION="${corretto}" \
+    --build-arg ES_VERSION="${version}" \
+    --build-arg TARBALL_URL="${url}" \
+    -f "${SCRIPT_DIR}/dockerfiles/Dockerfile" \
+    -t "${tag}" \
+    "${SCRIPT_DIR}"
 
   echo "=== Built ${tag} ==="
 }
