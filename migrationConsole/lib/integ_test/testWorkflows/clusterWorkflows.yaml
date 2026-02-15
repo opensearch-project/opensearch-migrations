@@ -82,7 +82,7 @@ spec:
                     fsGroup: 1000
                   initContainers:
                     - name: install-s3-plugin
-                      image: elasticsearch:1.5.2
+                      image: custom-elasticsearch:1.5.2
                       command: ["sh","-c"]
                       args:
                         - |
@@ -113,7 +113,7 @@ spec:
                         runAsNonRoot: true
                   containers:
                     - name: elasticsearch
-                      image: elasticsearch:1.5.2
+                      image: custom-elasticsearch:1.5.2
                       imagePullPolicy: IfNotPresent
                       env:
                         - name: ES_HEAP_SIZE
@@ -298,7 +298,7 @@ spec:
                     fsGroup: 1000
                   initContainers:
                     - name: install-s3-plugin
-                      image: elasticsearch:2.4.6
+                      image: custom-elasticsearch:2.4.6
                       command: ["sh","-c"]
                       args:
                         - /usr/share/elasticsearch/bin/plugin install cloud-aws
@@ -311,7 +311,7 @@ spec:
                         runAsNonRoot: true
                   containers:
                     - name: elasticsearch
-                      image: elasticsearch:2.4.6
+                      image: custom-elasticsearch:2.4.6
                       imagePullPolicy: IfNotPresent
                       env:
                         - name: ES_HEAP_SIZE
@@ -445,7 +445,7 @@ spec:
             # Create Helm values file for ES 5.6.16
             cat > /tmp/es-values.yaml << 'EOF'
             fullnameOverride: {{inputs.parameters.cluster-name}}
-            image: "docker.elastic.co/elasticsearch/elasticsearch"
+            image: "custom-elasticsearch"
             imageTag: "5.6.16"
             antiAffinity: "soft"
             esJavaOpts: "-Xms2g -Xmx2g"
@@ -473,7 +473,7 @@ spec:
             
             extraInitContainers:
               - name: install-s3-plugin
-                image: docker.elastic.co/elasticsearch/elasticsearch:5.6.16
+                image: custom-elasticsearch:5.6.16
                 command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
                 volumeMounts:
                   - name: plugins
@@ -544,7 +544,7 @@ spec:
             # Create Helm values file for ES 6.8.23 with OSS image and disabled readiness probe
             cat > /tmp/es-values.yaml << 'EOF'
             fullnameOverride: {{inputs.parameters.cluster-name}}
-            image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
+            image: "custom-elasticsearch"
             imageTag: "6.8.23"
             antiAffinity: "soft"
             esJavaOpts: "-Xms2g -Xmx2g -XX:UseAVX=0 -Dcom.amazonaws.sdk.disableMBeans=true"
@@ -586,13 +586,13 @@ spec:
             
             extraInitContainers:
               - name: install-s3-plugin
-                image: docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23
+                image: custom-elasticsearch:6.8.23
                 command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
                 volumeMounts:
                   - name: plugins
                     mountPath: /usr/share/elasticsearch/plugins
               - name: inject-aws-creds
-                image: docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23
+                image: custom-elasticsearch:6.8.23
                 command:
                   - sh
                   - -c
@@ -677,7 +677,7 @@ spec:
             
             cat > /tmp/es-values.yaml << 'EOF'
             fullnameOverride: {{inputs.parameters.cluster-name}}
-            image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
+            image: "custom-elasticsearch"
             imageTag: "7.10.2"
             antiAffinity: "soft"
             esJavaOpts: "-Xms2g -Xmx2g"
@@ -709,13 +709,13 @@ spec:
             
             extraInitContainers:
               - name: install-s3-plugin
-                image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
+                image: custom-elasticsearch:7.10.2
                 command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
                 volumeMounts:
                   - name: plugins
                     mountPath: /usr/share/elasticsearch/plugins
               - name: inject-aws-creds
-                image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
+                image: custom-elasticsearch:7.10.2
                 command:
                   - sh
                   - -c
