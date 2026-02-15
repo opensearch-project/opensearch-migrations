@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
@@ -148,6 +149,134 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                 tr.shutdown(null).get();
             }
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = { true, false })
+    @ResourceLock("TrafficReplayerRunner")
+    @Tag("longTest")
+    public void testSameConnectionIdAcrossNodesCollidesInSharedPool(boolean useSharedConnectionId) throws Throwable {
+        var random = new Random(1);
+        try (
+            var httpServer = SimpleNettyHttpServer.makeServer(
+                false,
+                Duration.ofMinutes(10),
+                response -> TestHttpServerContext.makeResponse(random, response)
+            )
+        ) {
+            var connectionIdA = useSharedConnectionId ? "sharedConnection" : "nodeAConnection";
+            var connectionIdB = useSharedConnectionId ? "sharedConnection" : "nodeBConnection";
+            var streamFromNodeA = makeSingleRequestStream(
+                "NodeA",
+                connectionIdA,
+                "GET /a HTTP/1.1\r\nConnection: Keep-Alive\r\nHost: localhost\r\n\r\n"
+            );
+            var streamFromNodeB = makeSingleRequestStream(
+                "NodeB",
+                connectionIdB,
+                "GET /b HTTP/1.1\r\nConnection: Keep-Alive\r\nHost: localhost\r\n\r\n"
+            );
+
+            var trafficSource = new ArrayCursorTrafficCaptureSource(
+                rootContext,
+                new ArrayCursorTrafficSourceContext(List.of(streamFromNodeA, streamFromNodeB))
+            );
+            var serverUri = httpServer.localhostEndpoint();
+            var tuplesReceived = new AtomicInteger();
+
+            try (
+                var tr = new RootReplayerConstructorExtensions(
+                    rootContext,
+                    serverUri,
+                    new StaticAuthTransformerFactory("TEST"),
+                    new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(serverUri.getHost()),
+                    RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
+                    10 * 1024
+                );
+                var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))
+            ) {
+                if (useSharedConnectionId) {
+                    var thrown = Assertions.assertThrows(Throwable.class, () ->
+                        tr.setupRunAndWaitForReplayToFinish(
+                            Duration.ofSeconds(70),
+                            Duration.ofSeconds(30),
+                            blockingTrafficSource,
+                            new TimeShifter(10 * 1000),
+                            t -> tuplesReceived.incrementAndGet()
+                        ));
+                    var rootCause = getDeepestCause(thrown);
+                    Assertions.assertInstanceOf(IllegalStateException.class, rootCause);
+                    Assertions.assertTrue(rootCause.getMessage().contains("dependencyDiagnosticFutureRef was already set"));
+                } else {
+                    tr.setupRunAndWaitForReplayToFinish(
+                        Duration.ofSeconds(70),
+                        Duration.ofSeconds(30),
+                        blockingTrafficSource,
+                        new TimeShifter(10 * 1000),
+                        t -> tuplesReceived.incrementAndGet()
+                    );
+                    Assertions.assertEquals(2, tuplesReceived.get());
+                }
+                tr.shutdown(null).get();
+            }
+        }
+    }
+
+    private static TrafficStream makeSingleRequestStream(String nodeId, String connectionId, String rawRequest) {
+        var baseTime = Instant.now();
+        var fixedTimestamp = Timestamp.newBuilder()
+            .setSeconds(baseTime.getEpochSecond())
+            .setNanos(baseTime.getNano())
+            .build();
+        return TrafficStream.newBuilder()
+            .setNodeId(nodeId)
+            .setConnectionId(connectionId)
+            .addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setRead(
+                        ReadObservation.newBuilder()
+                            .setData(ByteString.copyFrom(rawRequest.getBytes(StandardCharsets.UTF_8)))
+                            .build()
+                    )
+                    .build()
+            )
+            .addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setEndOfMessageIndicator(
+                        EndOfMessageIndication.newBuilder()
+                            .setFirstLineByteLength(14)
+                            .setHeadersByteLength(58)
+                            .build()
+                    )
+                    .build()
+            )
+            .addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setWrite(
+                        WriteObservation.newBuilder()
+                            .setData(ByteString.copyFrom("HTTP/1.1 OK 200\r\n".getBytes(StandardCharsets.UTF_8)))
+                            .build()
+                    )
+                    .build()
+            )
+            .addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setClose(CloseObservation.getDefaultInstance())
+                    .build()
+            )
+            .build();
+    }
+
+    private static Throwable getDeepestCause(Throwable throwable) {
+        var current = throwable;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     private static class TraceProcessor {
