@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 ARG BASE_IMAGE=migrations/elasticsearch_client_test_console:latest
 
 # Stage 1: Download and install tools (kafka, kubectl, helm, etcd)
@@ -77,7 +78,8 @@ WORKDIR /root
 
 # Install Node.js for config processor and workflow template creation
 # NPM is to setup the schema checking that coc uses
-RUN dnf install -y  \
+RUN --mount=type=cache,target=/var/cache/dnf \
+    dnf install -y  \
       --setopt=install_weak_deps=False \
       --setopt=tsflags=nodocs \
       --setopt=keepcache=False \
@@ -87,8 +89,7 @@ RUN dnf install -y  \
         nodejs22-npm \
         bash-completion \
         && \
-        dnf clean all && \
-        rm -rf /var/cache/dnf
+        dnf clean all
 
 COPY setupVimSchemaChecker.sh /tmp/setupVimSchemaChecker.sh
 RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
@@ -113,14 +114,17 @@ WORKDIR /root
 COPY lib /root/lib
 
 WORKDIR /root/lib/console_link
-RUN pipenv install --deploy
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pipenv install --deploy
 WORKDIR /root/lib/integ_test
-RUN pipenv install --deploy
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pipenv install --deploy
 
 COPY cluster_tools /root/cluster_tools
 RUN rm -rf /root/cluster_tools/.venv
 WORKDIR /root/cluster_tools
-RUN pipenv install
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pipenv install
 WORKDIR /root
 
 COPY nodeStaging/configProcessor /root/configProcessor

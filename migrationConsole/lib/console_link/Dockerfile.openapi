@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM python:3.11-slim
 
 # Set working directory
@@ -8,14 +9,16 @@ COPY Pipfile Pipfile.lock ./
 COPY setup.py ./
 
 # Install pipenv and dependencies
-RUN pip install pipenv && \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install pipenv && \
     pipenv install --system --deploy
 
 # Copy source code
 COPY console_link/ ./console_link/
 
 # Install the package in development mode
-RUN pip install -e .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -e .
 
 # Set the entrypoint to generate OpenAPI spec
 ENTRYPOINT ["python", "-m", "console_link.scripts.generate_openapi"]
