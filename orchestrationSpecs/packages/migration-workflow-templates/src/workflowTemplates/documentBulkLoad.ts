@@ -21,10 +21,11 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {Deployment} from "@opensearch-migrations/argo-workflow-builders";
-import {makeRepoParamDict} from "./metadataMigration";
+import {makeRepoParamDict, makeMountpointRepoParamDict, S3_MOUNT_PATH} from "./metadataMigration";
 import {
     setupLog4jConfigForContainer,
-    setupTestCredsForContainer
+    setupTestCredsForContainer,
+    setupS3MountpointVolumeForContainer
 } from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
@@ -67,9 +68,8 @@ function makeParamsDict(
                 luceneDir: "/tmp",
                 cleanLocalDirs: true
             }),
-            makeRepoParamDict(
-                expr.omit(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), "s3RoleArn"),
-                true)
+            makeMountpointRepoParamDict(
+                expr.omit(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), "s3RoleArn"))
         )
     );
 }
@@ -190,10 +190,13 @@ function getRfsDeploymentManifest
 
     const finalContainerDefinition= setupTestCredsForContainer(
         args.useLocalstackAwsCreds,
-        setupLog4jConfigForContainer(
-            useCustomLogging,
-            args.loggingConfigMap,
-            { container: baseContainerDefinition, volumes: []}
+        setupS3MountpointVolumeForContainer(
+            S3_MOUNT_PATH,
+            setupLog4jConfigForContainer(
+                useCustomLogging,
+                args.loggingConfigMap,
+                { container: baseContainerDefinition, volumes: []}
+            )
         )
     );
     const deploymentName = getRfsDeploymentName(args.sessionName);

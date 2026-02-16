@@ -12,6 +12,38 @@ export type ContainerVolumePair = {
     readonly volumes: Volume[]
 };
 
+const S3_SNAPSHOT_VOLUME_NAME = "snapshot-s3";
+const S3_SNAPSHOT_PVC_NAME = "snapshot-s3-pvc";
+
+export function setupS3MountpointVolumeForContainer(
+    mountPath: string,
+    def: ContainerVolumePair): ContainerVolumePair {
+    const {volumeMounts, ...restOfContainer} = def.container;
+    return {
+        volumes: [
+            ...def.volumes,
+            {
+                name: S3_SNAPSHOT_VOLUME_NAME,
+                persistentVolumeClaim: {
+                    claimName: S3_SNAPSHOT_PVC_NAME,
+                    readOnly: true
+                }
+            }
+        ],
+        container: {
+            ...restOfContainer,
+            volumeMounts: [
+                ...(volumeMounts === undefined ? [] : volumeMounts),
+                {
+                    name: S3_SNAPSHOT_VOLUME_NAME,
+                    mountPath: mountPath,
+                    readOnly: true
+                }
+            ]
+        }
+    } as const;
+}
+
 export function setupTestCredsForContainer(
     useLocalStack: BaseExpression<boolean>,
     def: ContainerVolumePair): ContainerVolumePair {

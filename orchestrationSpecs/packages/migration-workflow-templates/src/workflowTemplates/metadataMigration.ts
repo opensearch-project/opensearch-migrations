@@ -10,7 +10,7 @@ import {
 import {
     BaseExpression, configMapKey,
     defineRequiredParam,
-    expr, FunctionExpression, InputParameterSource, InputParametersRecord, InputParamsToExpressions,
+    expr, ExpressionType, FunctionExpression, InputParameterSource, InputParametersRecord, InputParamsToExpressions,
     INTERNAL, PlainObject,
     selectInputsForRegister,
     Serialized,
@@ -57,6 +57,28 @@ export function makeRepoParamDict(
             ...(includes3LocalDir ? { "s3LocalDir": expr.literal("/tmp") } : {})
         })
     );
+}
+
+export const S3_MOUNT_PATH = "/mnt/s3";
+
+/**
+ * Build param dict for RFS/MetadataMigration when using Mountpoint S3 instead of direct S3 access.
+ * Emits snapshotLocalDir (for RFS) pointing to the mounted S3 path.
+ * The S3 bucket is mounted at S3_MOUNT_PATH via the Mountpoint S3 CSI driver PVC,
+ * and the repo path is extracted from the s3RepoPathUri (s3://bucket/path → /mnt/s3/path).
+ */
+export function makeMountpointRepoParamDict(
+    repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>) {
+    // Use FunctionExpression directly with "sprig.regexReplaceAll" because
+    // expr.regexReplaceAll renders without the sprig. prefix, which Argo doesn't evaluate.
+    // sprig.regexReplaceAll signature: (regex, input, replacement)
+    const localDir = new FunctionExpression<string, string, ExpressionType, "complicatedExpression">(
+        "sprig.regexReplaceAll",
+        [expr.literal("^s3://[^/]+/"), expr.get(repoConfig, "s3RepoPathUri"),
+         expr.literal(S3_MOUNT_PATH + "/")] as any);
+    return expr.makeDict({
+        "snapshotLocalDir": localDir
+    });
 }
 
 function makeParamsDict(
