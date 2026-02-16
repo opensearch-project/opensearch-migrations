@@ -4,8 +4,7 @@ FROM amazonlinux:2023
 ENV PIP_ROOT_USER_ACTION ignore
 ENV LANG C.UTF-8
 
-RUN --mount=type=cache,target=/var/cache/dnf \
-    dnf install -y \
+RUN dnf install -y \
         jq \
         less \
         python3.11 \

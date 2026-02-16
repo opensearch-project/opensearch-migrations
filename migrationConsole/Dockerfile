@@ -78,8 +78,7 @@ WORKDIR /root
 
 # Install Node.js for config processor and workflow template creation
 # NPM is to setup the schema checking that coc uses
-RUN --mount=type=cache,target=/var/cache/dnf \
-    dnf install -y  \
+RUN dnf install -y  \
       --setopt=install_weak_deps=False \
       --setopt=tsflags=nodocs \
       --setopt=keepcache=False \

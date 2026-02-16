@@ -3,8 +3,7 @@
 FROM amazonlinux:2023 AS builder
 
 # Build deps (toolchain + headers)
-RUN --mount=type=cache,target=/var/cache/dnf \
-    dnf install -y \
+RUN dnf install -y \
       --setopt=install_weak_deps=False \
       --setopt=tsflags=nodocs \
       --setopt=keepcache=False \
@@ -46,8 +45,7 @@ ENV PIP_ROOT_USER_ACTION ignore
 ENV LANG C.UTF-8
 
 # Minimal runtime deps (no compilers, no *-devel)
-RUN --mount=type=cache,target=/var/cache/dnf \
-    dnf install -y \
+RUN dnf install -y \
       --setopt=install_weak_deps=False \
       --setopt=tsflags=nodocs \
       --setopt=keepcache=False \
