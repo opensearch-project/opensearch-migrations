@@ -28,10 +28,10 @@ RUN  bin/elasticsearch-keystore create --silent && \
 # without this line, elasticsearch will complain that there aren't enough nodes
 RUN echo "discovery.type: single-node" >> $ELASTIC_SEARCH_CONFIG_FILE
 
-# Root needed for COPY to /root/ and chmod
+# Copy TLS config scripts to accessible location
 USER root
-COPY disableTlsConfig.sh enableTlsConfig.sh /root/
-RUN chmod ugo+x /root/disableTlsConfig.sh /root/enableTlsConfig.sh
+COPY disableTlsConfig.sh enableTlsConfig.sh /usr/local/bin/
+RUN chmod ugo+x /usr/local/bin/disableTlsConfig.sh /usr/local/bin/enableTlsConfig.sh
 USER 1000
 
 ENV PATH=${PATH}:/usr/share/elasticsearch/jdk/bin/
@@ -40,7 +40,7 @@ RUN sed 's/searchguard/plugins.security/g' $ELASTIC_SEARCH_CONFIG_FILE |  \
 
 # The following two commands are more convenient for development purposes,
 # but maybe not for a demo to show individual steps
-RUN /root/enableTlsConfig.sh $ELASTIC_SEARCH_CONFIG_FILE
+RUN /usr/local/bin/enableTlsConfig.sh $ELASTIC_SEARCH_CONFIG_FILE
 # Alter this config line to either enable(searchguard.disabled: false) or disable(searchguard.disabled: true) HTTP auth
 RUN echo -n "searchguard.disabled: false" >> $ELASTIC_SEARCH_CONFIG_FILE  && \
     echo -n "plugins.security.ssl.http.enabled_protocols: ['TLSv1.2', 'TLSv1.3']" >> $PROXY_TLS_CONFIG_FILE
