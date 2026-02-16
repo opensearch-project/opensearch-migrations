@@ -323,7 +323,7 @@ public class RequestSenderOrchestrator {
         Instant atTime,
         ChannelTask<T> task
     ) {
-        log.atInfo().setMessage("{} scheduling {} at {}")
+        log.atDebug().setMessage("{} scheduling {} at {}")
             .addArgument(channelInteraction)
             .addArgument(task.kind)
             .addArgument(atTime)
@@ -400,7 +400,7 @@ public class RequestSenderOrchestrator {
                 }
                 if (dtr.directive == RetryDirective.RETRY) {
                     var newStartTime = referenceStartTime.plus(nextRetryDelay);
-                    log.atInfo().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
+                    log.atDebug().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
                     var schedulingDelay = Duration.between(now(), newStartTime);
                     return NettyFutureBinders.bindNettyScheduleToCompletableFuture(
                         eventLoop, schedulingDelay)

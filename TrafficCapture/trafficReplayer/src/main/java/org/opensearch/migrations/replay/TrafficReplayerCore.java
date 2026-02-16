@@ -276,7 +276,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             log.trace("done sending and finalizing data to the packet handler");
 
             if (t != null) {
-                log.error("Got exception in CompletableFuture callback: ", t);
+                log.atDebug().setMessage("Got exception in CompletableFuture callback for {}")
+                    .addArgument(tupleHandlingContext)
+                    .setCause(t)
+                    .log();
             }
             try (var requestResponseTuple = new SourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
                 log.atDebug()
@@ -329,6 +332,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 .addArgument(context)
                 .log();
         } else {
+            log.atInfo().setMessage("Request completed successfully for {} with status {}")
+                .addArgument(context)
+                .addArgument(() -> summary.getRawResponse().status().code())
+                .log();
             successfulRequestCount.incrementAndGet();
         }
     }
@@ -368,6 +375,9 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     .filter(s -> !s.isEmpty())
                     .ifPresent(s -> log.atDebug().setMessage("TrafficStream Summary: {{}}").addArgument(s).log());
             }
+            log.atInfo().setMessage("Read {} traffic stream(s) from source")
+                .addArgument(trafficStreams::size)
+                .log();
             trafficStreams.forEach(trafficToHttpTransactionAccumulator::accept);
         }
     }
