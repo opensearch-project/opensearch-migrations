@@ -8,6 +8,8 @@ data:
   buildkitd.toml: |
     [registry."docker-registry:5000"]
     http = true
+    [worker.oci]
+    max-parallelism = {{ .Values.buildkitd.maxParallelism }}
 {{- if .Values.multiArchNative }}
 {{- range $arch := list "amd64" "arm64" }}
 ---
@@ -59,13 +61,13 @@ spec:
           readOnly: true
       resources:
         requests:
-          cpu: "4000m"
-          memory: "8Gi"
-          ephemeral-storage: "30Gi"
+          cpu: {{ $.Values.buildkitd.resources.requests.cpu | quote }}
+          memory: {{ $.Values.buildkitd.resources.requests.memory | quote }}
+          ephemeral-storage: {{ $.Values.buildkitd.resources.requests.ephemeralStorage | quote }}
         limits:
-          cpu: "8000m"
-          memory: "12Gi"
-          ephemeral-storage: "80Gi"
+          cpu: {{ $.Values.buildkitd.resources.limits.cpu | quote }}
+          memory: {{ $.Values.buildkitd.resources.limits.memory | quote }}
+          ephemeral-storage: {{ $.Values.buildkitd.resources.limits.ephemeralStorage | quote }}
   volumes:
     - name: buildkitd-config
       configMap:
@@ -115,13 +117,13 @@ spec:
           readOnly: true
       resources:
         requests:
-          cpu: "4000m"
-          memory: "8Gi"
-          ephemeral-storage: "30Gi"
+          cpu: {{ .Values.buildkitd.resources.requests.cpu | quote }}
+          memory: {{ .Values.buildkitd.resources.requests.memory | quote }}
+          ephemeral-storage: {{ .Values.buildkitd.resources.requests.ephemeralStorage | quote }}
         limits:
-          cpu: "8000m"
-          memory: "12Gi"
-          ephemeral-storage: "80Gi"
+          cpu: {{ .Values.buildkitd.resources.limits.cpu | quote }}
+          memory: {{ .Values.buildkitd.resources.limits.memory | quote }}
+          ephemeral-storage: {{ .Values.buildkitd.resources.limits.ephemeralStorage | quote }}
   volumes:
     - name: buildkitd-config
       configMap:
