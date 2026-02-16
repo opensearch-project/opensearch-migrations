@@ -28,6 +28,7 @@ export function setupS3MountpointVolumeForContainer(
     // Shell script parses S3_REPO_PATH_URI env var to extract bucket/prefix,
     // then runs mount-s3 with the appropriate args.
     const mountScript =
+        `export PATH="/mountpoint-s3/bin:$PATH"; ` +
         `BUCKET=$(echo "$S3_REPO_PATH_URI" | sed 's|^s3://||' | cut -d/ -f1); ` +
         `PREFIX=$(echo "$S3_REPO_PATH_URI" | sed "s|^s3://$BUCKET/\\\\?||"); ` +
         `ARGS="$BUCKET ${mountPath} --read-only --foreground"; ` +

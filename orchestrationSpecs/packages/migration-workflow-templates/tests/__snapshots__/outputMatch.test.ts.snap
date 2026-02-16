@@ -1587,7 +1587,7 @@ spec:
             - /bin/sh
             - -c
           args:
-            - BUCKET=$(echo "$S3_REPO_PATH_URI" | sed 's|^s3://||' | cut -d/ -f1); PREFIX=$(echo "$S3_REPO_PATH_URI" | sed "s|^s3://$BUCKET/\\\\?||"); ARGS="$BUCKET /mnt/s3 --read-only --foreground"; [ -n "$PREFIX" ] && ARGS="$ARGS --prefix $PREFIX/"; [ -n "$S3_REGION" ] && ARGS="$ARGS --region $S3_REGION"; [ -n "$S3_ENDPOINT" ] && ARGS="$ARGS --endpoint-url $S3_ENDPOINT"; exec mount-s3 $ARGS
+            - export PATH="/mountpoint-s3/bin:$PATH"; BUCKET=$(echo "$S3_REPO_PATH_URI" | sed 's|^s3://||' | cut -d/ -f1); PREFIX=$(echo "$S3_REPO_PATH_URI" | sed "s|^s3://$BUCKET/\\\\?||"); ARGS="$BUCKET /mnt/s3 --read-only --foreground"; [ -n "$PREFIX" ] && ARGS="$ARGS --prefix $PREFIX/"; [ -n "$S3_REGION" ] && ARGS="$ARGS --region $S3_REGION"; [ -n "$S3_ENDPOINT" ] && ARGS="$ARGS --endpoint-url $S3_ENDPOINT"; exec mount-s3 $ARGS
           env:
             - name: S3_REPO_PATH_URI
               value: "{{inputs.parameters.s3RepoPathUri}}"
