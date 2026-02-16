@@ -623,7 +623,7 @@ charts:
   kyverno:
     version: "3.5.2"
     repository: "https://kyverno.github.io/kyverno/"
-    namespace: ma
+    namespace: kyverno-ma
     values:
       admissionController:
         replicas: 1
@@ -651,4 +651,4 @@ charts:
           requests: null
           limits: null
       config:
-        excludeKyvernoNamespace: false
+        excludeKyvernoNamespace: true

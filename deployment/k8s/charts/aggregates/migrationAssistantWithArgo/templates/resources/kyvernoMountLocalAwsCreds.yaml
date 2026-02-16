@@ -93,7 +93,7 @@ spec:
               echo "Waiting for Kyverno CRD to be established..."
               kubectl wait --for=condition=Established crd/clusterpolicies.kyverno.io --timeout=300s
               echo "Waiting for Kyverno admission controller to be ready..."
-              kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=admission-controller -n {{ .Release.Namespace }} --timeout=120s
+              kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=admission-controller -n {{ .Values.charts.kyverno.namespace }} --timeout=120s
               kubectl apply -f /policy/policy.yaml
           volumeMounts:
             - name: policy
