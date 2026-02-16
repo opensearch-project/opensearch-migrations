@@ -128,22 +128,19 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
-        .addDag(b => b
-            .addTask("waitForTopic", ResourceManagement, "waitForKafkaTopic", c =>
+        .addSteps(b => b
+            .addStep("waitForTopic", ResourceManagement, "waitForKafkaTopic", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: expr.jsonPathStrict(b.inputs.proxyConfig, "kafkaConfig", "kafkaTopic")
                 })
             )
-            .addTask("placeholderProxySetup", INTERNAL, "doNothing",
-                { dependencies: ["waitForTopic"] as const }
-            )
-            .addTask("patchCapturedTraffic", ResourceManagement, "patchCapturedTrafficReady", c =>
+            .addStep("placeholderProxySetup", INTERNAL, "doNothing")
+            .addStep("patchCapturedTraffic", ResourceManagement, "patchCapturedTrafficReady", c =>
                 c.register({
                     resourceName: expr.get(
                         expr.deserializeRecord(b.inputs.proxyConfig), "name")
-                }),
-                { dependencies: ["placeholderProxySetup"] as const }
+                })
             )
         )
     )
@@ -159,8 +156,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
-        .addDag(b => b
-            .addTask("waitForProxyDeps", ResourceManagement, "waitForCapturedTraffic", c =>
+        .addSteps(b => b
+            .addStep("waitForProxyDeps", ResourceManagement, "waitForCapturedTraffic", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
                         resourceName: expr.asString(c.item)
@@ -177,7 +174,7 @@ export const FullMigration = WorkflowBuilder.create({
                     }
                 }
             )
-            .addTask("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot", c =>
+            .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     sourceConfig: b.inputs.sourceConfig,
@@ -199,8 +196,7 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.deserializeRecord(b.inputs.snapshotItemConfig), "semaphoreConfigMapName"),
                     semaphoreKey: expr.get(
                         expr.deserializeRecord(b.inputs.snapshotItemConfig), "semaphoreKey")
-                }),
-                { dependencies: ["waitForProxyDeps"] as const }
+                })
             )
         )
     )
@@ -345,8 +341,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("replayConfig", typeToken<z.infer<typeof DENORMALIZED_REPLAY_CONFIG>>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
-        .addDag(b => b
-            .addTask("waitForSnapshotMigrationDeps", ResourceManagement, "waitForSnapshotMigration", c => {
+        .addSteps(b => b
+            .addStep("waitForSnapshotMigrationDeps", ResourceManagement, "waitForSnapshotMigration", c => {
                     return c.register({
                         ...selectInputsForRegister(b, c),
                         resourceName: expr.concat(
@@ -364,9 +360,7 @@ export const FullMigration = WorkflowBuilder.create({
                     }
                 }
             )
-            .addTask("placeholderReplay", INTERNAL, "doNothing",
-                { dependencies: ["waitForSnapshotMigrationDeps"] as const }
-            )
+            .addStep("placeholderReplay", INTERNAL, "doNothing")
         )
     )
 
@@ -380,8 +374,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
 
-        .addDag(b => b
-            .addTask("setupKafkaClusters", INTERNAL, "setupSingleKafkaCluster", c =>
+        .addSteps(b => b.addStepGroup(g => g
+            .addStep("setupKafkaClusters", INTERNAL, "setupSingleKafkaCluster", c =>
                 c.register({
                     kafkaClusterConfig: expr.serialize(c.item)
                 }), {
@@ -394,7 +388,7 @@ export const FullMigration = WorkflowBuilder.create({
                     when: { templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.config), "kafkaClusters") }
                 }
             )
-            .addTask("setupProxies", INTERNAL, "setupSingleProxy", c =>
+            .addStep("setupProxies", INTERNAL, "setupSingleProxy", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     proxyConfig: expr.serialize(c.item)
@@ -403,7 +397,7 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.get(expr.deserializeRecord(b.inputs.config), "proxies"))
                 }
             )
-            .addTask("createSnapshots", INTERNAL, "createSnapshotsForSource", c =>
+            .addStep("createSnapshots", INTERNAL, "createSnapshotsForSource", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     snapshotsSourceConfig: expr.serialize(c.item)
@@ -412,13 +406,15 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.get(expr.deserializeRecord(b.inputs.config), "snapshots"))
                 }
             )
-            .addTask("runSnapshotMigrations", INTERNAL, "runSingleSnapshotMigration", c =>
+            .addStep("runSnapshotMigrations", INTERNAL, "runSingleSnapshotMigration", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: expr.concat(
                         expr.get(c.item, "sourceLabel"),
                         expr.literal("-"),
-                        expr.jsonPathStrict(expr.get(c.item, "targetConfig"), "label"),
+                        // TODO/BUG - need to fix this in the type system.
+                        // The following line is required, but won't type check w/out the any cast!
+                        expr.jsonPathStrict(expr.get(c.item, "targetConfig") as any, "label"),
                         // expr.get(expr.get(c.item, "targetConfig"), "label"),
                         expr.literal("-"),
                         expr.get(c.item, "label")
@@ -429,7 +425,7 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.get(expr.deserializeRecord(b.inputs.config), "snapshotMigrations"))
                 }
             )
-            .addTask("runTrafficReplays", INTERNAL, "runSingleReplay", c =>
+            .addStep("runTrafficReplays", INTERNAL, "runSingleReplay", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     replayConfig: expr.serialize(c.item)
@@ -438,7 +434,7 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.get(expr.deserializeRecord(b.inputs.config), "trafficReplays"))
                 }
             )
-        )
+        ))
     )
 
 
