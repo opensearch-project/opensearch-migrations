@@ -218,6 +218,7 @@ export const USER_RFS_OPTIONS = z.object({
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
 
     skipApproval: z.boolean().default(false).optional(),  // TODO - fullmigration
+    useTargetClusterForWorkCoordination: z.boolean().default(true),
     resources: z.preprocess((v) =>
             deepmerge(DEFAULT_RESOURCES.RFS, (v ?? {})),
         RESOURCE_REQUIREMENTS
@@ -305,7 +306,6 @@ export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123]
 export const CLUSTER_CONFIG = z.object({
     endpoint:  z.string().regex(/^(?:https?:\/\/[^:\/\s]+(:\d+)?(\/)?)?$/).default("").optional(),
     allowInsecure: z.boolean().default(false).optional(),
-    version: CLUSTER_VERSION_STRING,
     authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
 });
 
@@ -380,6 +380,7 @@ export const SNAPSHOT_INFO = z.object({
 })
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
+    version: CLUSTER_VERSION_STRING,
     enabled: z.boolean().default(true).optional(),
     snapshotInfo: SNAPSHOT_INFO.optional()
 }).superRefine((data, ctx) => {

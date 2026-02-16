@@ -50,8 +50,8 @@ export function makeTargetParamDict(targetConfig: BaseExpression<Serialized<z.in
     return makeClusterParamDict("target", targetConfig);
 }
 
-export function makeCoordinatorParamDict(coordinatorConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
-    return makeClusterParamDict("coordinator", coordinatorConfig);
+export function makeRfsCoordinatorParamDict(rfsCoordinatorConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
+    return makeClusterParamDict("coordinator", rfsCoordinatorConfig);
 }
 
 // The functions below are still used by the replaer, but they should probably be replaced with the ones above
