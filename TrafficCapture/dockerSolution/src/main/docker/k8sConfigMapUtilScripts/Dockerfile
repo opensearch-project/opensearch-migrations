@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 FROM amazonlinux:2023
 
 ENV PIP_ROOT_USER_ACTION ignore
@@ -24,16 +23,14 @@ ENV PIPENV_CUSTOM_VENV_NAME=.venv
 ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
 ENV PIPENV_MAX_DEPTH=1
 
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python3.11 -m pip install pipenv
+RUN python3.11 -m pip install pipenv
 WORKDIR /
 RUN python3.11 -m venv .venv
 
 WORKDIR /root
 COPY Pipfile .
 COPY Pipfile.lock .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pipenv install --deploy
+RUN pipenv install --deploy
 
 COPY configmap2yaml /root/configmap2yaml/
 RUN chmod ug+x /root/configmap2yaml/*.py

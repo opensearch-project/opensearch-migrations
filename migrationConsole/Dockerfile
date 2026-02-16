@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 ARG BASE_IMAGE=migrations/elasticsearch_client_test_console:latest
 
 # Stage 1: Download and install tools (kafka, kubectl, helm, etcd)
@@ -113,17 +112,14 @@ WORKDIR /root
 COPY lib /root/lib
 
 WORKDIR /root/lib/console_link
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pipenv install --deploy
+RUN pipenv install --deploy
 WORKDIR /root/lib/integ_test
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pipenv install --deploy
+RUN pipenv install --deploy
 
 COPY cluster_tools /root/cluster_tools
 RUN rm -rf /root/cluster_tools/.venv
 WORKDIR /root/cluster_tools
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pipenv install
+RUN pipenv install
 WORKDIR /root
 
 COPY nodeStaging/configProcessor /root/configProcessor

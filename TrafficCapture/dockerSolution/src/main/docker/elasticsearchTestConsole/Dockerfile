@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # ---------- 1) Builder ----------
 FROM amazonlinux:2023 AS builder
 
@@ -30,13 +29,11 @@ ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
 ENV PIPENV_MAX_DEPTH=1
 
 # Pipenv & project install into a project-local venv we can copy out
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python3.11 -m pip install pipenv
+RUN python3.11 -m pip install pipenv
 WORKDIR /
 RUN python3.11 -m venv .venv
 COPY Pipfile Pipfile.lock ./
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pipenv install --deploy
+RUN pipenv install --deploy
 
 # ---------- 2) Runtime ----------
 FROM amazonlinux:2023
@@ -80,8 +77,7 @@ ENV PIPENV_CUSTOM_VENV_NAME=.venv
 ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
 ENV PIPENV_MAX_DEPTH=1
 
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python3.11 -m pip install pipenv
+RUN python3.11 -m pip install pipenv
 WORKDIR /
 COPY --from=builder /.venv /.venv
 
