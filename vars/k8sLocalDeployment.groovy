@@ -92,7 +92,7 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
-                            sh "USE_LOCAL_REGISTRY=true BUILDKIT_HELM_ARGS='--set buildkitd.maxParallelism=16' ./buildImages/setUpK8sImageBuildServices.sh"
+                            sh "USE_LOCAL_REGISTRY=true BUILDKIT_HELM_ARGS='--set buildkitd.maxParallelism=16 --set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0' ./buildImages/setUpK8sImageBuildServices.sh"
                             sh "./gradlew :buildImages:buildImagesToRegistry_amd64 -x test --info --stacktrace"
                             sh "docker buildx rm local-remote-builder 2>/dev/null || true"
                             sh "helm uninstall buildkit -n buildkit 2>/dev/null || true"
