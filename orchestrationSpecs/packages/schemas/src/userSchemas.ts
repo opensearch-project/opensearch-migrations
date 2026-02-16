@@ -149,6 +149,7 @@ export const REPLAYER_OPTIONS = z.object({
     speedupFactor: z.number().default(1.1).optional(),
     podReplicas: z.number().default(1).optional(),
     authHeaderOverride: z.string().default("").optional(),
+    jvmArgs: z.string().default("").optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
     resources: RESOURCE_REQUIREMENTS
         .describe("Resource limits and requests for replayer container.")
@@ -162,6 +163,7 @@ export const REPLAYER_OPTIONS = z.object({
 export const CREATE_SNAPSHOT_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional(),
     maxSnapshotRateMbPerNode: z.number().default(0).optional(),
+    jvmArgs: z.string().default("").optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
 });
 
@@ -172,6 +174,7 @@ export const USER_METADATA_OPTIONS = z.object({
 
     allowLooseVersionMatching: z.boolean().default(true).optional(),
     clusterAwarenessAttributes: z.number().default(1).optional(),
+    jvmArgs: z.string().default("").optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
     multiTypeBehavior: z.union(["NONE", "UNION", "SPLIT"].map(s=>z.literal(s))).default("NONE").optional(),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
@@ -186,6 +189,7 @@ export const USER_RFS_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional(),
     podReplicas: z.number().default(1).optional(),
 
+    jvmArgs: z.string().default("").optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
     allowLooseVersionMatching: z.boolean().default(true).describe("").optional(),
     docTransformerConfigBase64: z.string().default("").optional(),
