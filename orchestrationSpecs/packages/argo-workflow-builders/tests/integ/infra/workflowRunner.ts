@@ -20,6 +20,15 @@ function truncate(value: string, max: number = 300): string {
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 }
 
+function formatRenderedWorkflow(workflowObject: any): string {
+  try {
+    const rendered = JSON.stringify(workflowObject, null, 2);
+    return `Rendered workflow:\n${truncate(rendered, 12000)}`;
+  } catch (err) {
+    return `Rendered workflow: <unserializable: ${String(err)}>`;
+  }
+}
+
 function formatFailureDiagnostics(workflow: any): string {
   const metadata = workflow?.metadata ?? {};
   const status = workflow?.status ?? {};
@@ -91,7 +100,9 @@ export async function submitAndWait(
     if (phase === "Succeeded" || phase === "Failed" || phase === "Error") {
       const duration = Date.now() - startTime;
       if (phase === "Failed" || phase === "Error") {
-        console.error(`[workflow-failure]\n${formatFailureDiagnostics(workflow)}`);
+        console.error(
+          `[workflow-failure]\n${formatFailureDiagnostics(workflow)}\n${formatRenderedWorkflow(workflowObject)}`
+        );
       }
       return extractResults(workflow, duration);
     }
@@ -100,7 +111,7 @@ export async function submitAndWait(
   }
   
   throw new Error(
-    `Workflow ${workflowName} timed out after ${timeoutMs}ms. Last status: ${JSON.stringify(workflow?.status, null, 2)}`
+    `Workflow ${workflowName} timed out after ${timeoutMs}ms. Last status: ${JSON.stringify(workflow?.status, null, 2)}\n${formatRenderedWorkflow(workflowObject)}`
   );
 }
 
