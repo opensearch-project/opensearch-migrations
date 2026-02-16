@@ -3,10 +3,8 @@
 # Bootstrap EKS Environment for OpenSearch Migration Assistant
 #
 # This script prepares an existing EKS cluster to use the Migration Assistant tooling.
-# As a default public images will be used from https://gallery.ecr.aws/opensearchproject.
-# However, images can also be built from source with the --build-images=true flag
-# which kicks-off a buildImages chart which will build required images for the
-# Migration Assistant inside of an EKS pod and push these images to a private ECR for use.
+# By default, public images will be used from https://gallery.ecr.aws/opensearchproject.
+# Images can also be built from source locally with the --build-images-locally flag.
 #
 # Usage:
 #   Run directly: curl -s https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh | bash
@@ -24,15 +22,13 @@ skip_git_pull=false
 
 base_dir="./opensearch-migrations"
 namespace="ma"
-build_images=false
 build_images_locally=false
-keep_build_images_job_alive=false
-use_existing_built_images=false
 use_public_images=true
 skip_console_exec=false
 stage_filter=""
 extra_helm_values=""
 disable_general_purpose_pool=false
+region="${AWS_CFN_REGION:-}"
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -43,18 +39,14 @@ while [[ $# -gt 0 ]]; do
     --tag) tag="$2"; shift 2 ;;
     --skip-git-pull) skip_git_pull=true; shift 1 ;;
     --base-dir) base_dir="$2"; shift 2 ;;
-    --build-images-chart-dir) build_images_chart_dir="$2"; shift 2 ;;
     --ma-chart-dir) ma_chart_dir="$2"; shift 2 ;;
     --namespace) namespace="$2"; shift 2 ;;
-    --build-images) build_images="$2"; shift 2 ;;
     --build-images-locally) build_images_locally=true; shift 1 ;;
-    --use-existing-built-images) use_existing_built_images=true; shift ;;
-    --use-public-images) use_public_images="$2"; shift 2 ;;
-    --keep-build-images-job-alive) keep_build_images_job_alive=true; shift 1 ;;
     --skip-console-exec) skip_console_exec=true; shift 1 ;;
     --stage) stage_filter="$2"; shift 2 ;;
     --helm-values) extra_helm_values="$2"; shift 2 ;;
     --disable-general-purpose-pool) disable_general_purpose_pool=true; shift 1 ;;
+    --region) region="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo "Options:"
@@ -64,18 +56,14 @@ while [[ $# -gt 0 ]]; do
       echo "  --tag <val>                               (default: $tag)"
       echo "  --skip-git-pull                           (default: $skip_git_pull)"
       echo "  --base-dir <path>                         (default: $base_dir)"
-      echo "  --build-images-chart-dir <path>           (default: $build_images_chart_dir)"
       echo "  --ma-chart-dir <path>                     (default: $ma_chart_dir)"
       echo "  --namespace <val>                         (default: $namespace)"
-      echo "  --build-images <true|false>               (default: $build_images)"
-      echo "  --build-images-locally                    (default: $build_images_locally)"
-      echo "  --use-existing-built-images               (default: $use_existing_built_images)"
-      echo "  --use-public-images <true|false>          (default: $use_public_images)"
-      echo "  --keep-build-images-job-alive             (default: $keep_build_images_job_alive)"
+      echo "  --build-images-locally                    Build images from source locally (default: $build_images_locally)"
       echo "  --skip-console-exec                       (default: $skip_console_exec)"
       echo "  --stage <val>                             Filter CFN exports by stage name"
       echo "  --helm-values <path>                      Extra values file for helm install"
       echo "  --disable-general-purpose-pool            Disable EKS Auto Mode general-purpose pool (cost control)"
+      echo "  --region <val>                            AWS region for CloudFormation exports lookup"
       exit 0
       ;;
     *)
@@ -86,17 +74,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$build_images_locally" == "true" ]]; then
-  build_images="true"
-fi
-
-if [[ "$use_existing_built_images" == "true" && "$build_images" == "true" ]]; then
-  echo "Error: --use-existing-built-images and --build-images/--build-images-locally are mutually exclusive."
-  exit 1
-fi
-
-# --- validation ---
-if [[ "$build_images" == "true" && "$use_public_images" == "true" ]]; then
-  echo "Note: --build-images is enabled, so public images will NOT be used."
   use_public_images=false
 fi
 
@@ -109,7 +86,6 @@ esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 HELM_VERSION="3.14.0"
 
-build_images_chart_dir="${base_dir}/deployment/k8s/charts/components/buildImages"
 ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
 
 install_helm() {
@@ -142,6 +118,7 @@ get_cfn_export() {
     names+=("$name")
     values+=("$value")
   done < <(aws cloudformation list-exports \
+    ${region:+--region "$region"} \
     --query "Exports[?starts_with(Name, \`${prefix}\`)].[Name,Value]" \
     --output text)
 
@@ -153,14 +130,13 @@ get_cfn_export() {
   else
     echo "Multiple Cloudformation stacks with migration exports found:" >&2
     for i in "${!names[@]}"; do
-      echo "[$i] ${names[$i]}" >&2
+      echo "  [$i] ${names[$i]}" >&2
     done
-    read -rp "Select the stack export name to use (0-$((${#names[@]} - 1))): " choice
-    if [[ ! "$choice" =~ ^[0-9]+$ || "$choice" -ge ${#names[@]} ]]; then
-      echo "Invalid choice." >&2
-      return 1
-    fi
-    echo "${values[$choice]}"
+    echo >&2
+    echo "Please re-run with the --stage flag to select the correct stack." >&2
+    echo "For example:" >&2
+    echo "  $0 --stage <stage-name>" >&2
+    return 1
   fi
 }
 
@@ -252,31 +228,11 @@ check_existing_ma_release() {
     echo "A Migration Assistant Helm release named '$release_name' already exists in namespace '$release_namespace'."
     echo "This usually means Migration Assistant is already installed on this cluster."
     echo
-
-    while true; do
-      read -rp "Would you like to uninstall the existing release so that we can reinstall it? (y/n): " answer
-      case "$answer" in
-        [Yy]*)
-          echo "Uninstalling existing Migration Assistant Helm release '$release_name' from namespace '$release_namespace'..."
-          if ! helm uninstall "$release_name" -n "$release_namespace"; then
-            echo "Failed to uninstall the existing Migration Assistant release."
-            echo "Please resolve manually with:"
-            echo "  helm uninstall $release_name -n $release_namespace"
-            exit 1
-          fi
-          echo "Existing Migration Assistant release removed. Continuing with fresh install..."
-          echo
-          break
-          ;;
-        [Nn]*)
-          echo "Existing installation detected. Bootstrap aborted."
-          exit 1
-          ;;
-        *)
-          echo "Please answer 'y' or 'n'."
-          ;;
-      esac
-    done
+    echo "To reinstall, first uninstall the existing release with:"
+    echo "  helm uninstall $release_name -n $release_namespace"
+    echo
+    echo "Then re-run this bootstrap script."
+    exit 1
   fi
 }
 
@@ -289,16 +245,10 @@ for cmd in git jq kubectl; do
   fi
 done
 
-# Prompt for installing helm
+# Install helm if missing
 if ! command -v helm &>/dev/null; then
-  echo "Helm is not installed."
-  read -rp "Would you like to install Helm now? (y/n): " answer
-  if [[ "$answer" == [Yy]* ]]; then
-    install_helm
-  else
-    echo "Helm is required. Exiting."
-    missing=1
-  fi
+  echo "Helm is not installed. Installing it now..."
+  install_helm
 fi
 
 # Exit if any tool was missing and not resolved
@@ -306,7 +256,8 @@ fi
 
 if ! output=$(get_cfn_export); then
   echo "Unable to find any CloudFormation stacks in the current region which have an output that starts with '$prefix'. \
-        Has the Migration Assistant CloudFormation template been deployed?" >&2
+Has the Migration Assistant CloudFormation template been deployed?" >&2
+  echo "If the stack is in a different region, re-run with --region <region>." >&2
   exit 1
 fi
 echo "Setting ENV variables: $output"
@@ -368,72 +319,27 @@ if [[ "$skip_git_pull" == "false" ]]; then
 fi
 
 
-if [[ "$build_images" == "true" ]]; then
-  # Always build for both architectures on EKS - buildImages chart creates its own nodepool
+if [[ "$build_images_locally" == "true" ]]; then
+  # Always build for both architectures on EKS
   MULTI_ARCH_NATIVE=true
   BUILD_TARGET="buildImagesToRegistry"
   export MULTI_ARCH_NATIVE
 
-  if [[ "$build_images_locally" == "true" ]]; then
-    if docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
-      echo "Buildkit already configured and healthy, skipping setup"
-    else
-      echo "Setting up buildkit for local builds..."
-      "${base_dir}/buildImages/setUpK8sImageBuildServices.sh"
-    fi
-
-    echo "Building images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"
-    pushd "$base_dir" || exit
-    ./gradlew :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
-    popd > /dev/null || exit
-
-    echo "Cleaning up docker buildx builder to free buildkit pods..."
-    docker buildx rm local-remote-builder 2>/dev/null || true
-    echo "Builder removed. Buildkit pods will be terminated by kubernetes driver."
+  if docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
+    echo "Buildkit already configured and healthy, skipping setup"
   else
-    if helm status build-images -n "$namespace" >/dev/null 2>&1; then
-      read -rp "Helm release 'build-images' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
-      if [[ "$answer" == [Yy]* ]]; then
-        helm uninstall build-images -n "$namespace"
-        sleep 2
-      else
-        echo "The 'build-images' release must be uninstalled before proceeding. This can be uninstalled with 'helm uninstall build-images -n $namespace'"
-        exit 1
-      fi
-    fi
-    helm install build-images "${build_images_chart_dir}" \
-      --namespace "$namespace" \
-      --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
-      --set awsEKSEnabled=true \
-      --set multiArchNative="${MULTI_ARCH_NATIVE}" \
-      --set keepJobAlive="${keep_build_images_job_alive}" \
-      --set repositoryUrl="https://github.com/${org_name}/${repo_name}.git" \
-      --set repositoryBranch="${branch}" \
-      || { echo "Installing buildImages chart failed..."; exit 1; }
-
-    if [[ "$keep_build_images_job_alive" == "true" ]]; then
-      echo "The keep_build_images_job_alive setting was enabled, will not proceed with installing the Migration Assistant chart"
-      exit 0
-    fi
-    pod_name=$(kubectl get pod -n "$namespace" -o name | grep '^pod/build-images' | cut -d/ -f2)
-    echo "Waiting for pod ${pod_name} to be ready..."
-    kubectl -n "$namespace" wait --for=condition=ready pod/"$pod_name" --timeout=300s
-    sleep 5
-    echo "Tailing logs for ${pod_name}..."
-    echo "-------------------------------"
-    kubectl -n "$namespace" logs -f "$pod_name"
-    echo "-------------------------------"
-    sleep 5
-    final_status=$(kubectl get pod "$pod_name" -n "$namespace" -o jsonpath='{.status.phase}')
-    echo "Pod ${pod_name} ended with status: ${final_status}"
-    if [[ "$final_status" != "Succeeded" ]]; then
-      echo "The $pod_name pod did not end with 'Succeeded'. Exiting..."
-      exit 1
-    else
-      echo "Uninstalling buildImages chart after successful setup"
-      helm uninstall build-images -n "$namespace"
-    fi
+    echo "Setting up buildkit for local builds..."
+    "${base_dir}/buildImages/setUpK8sImageBuildServices.sh"
   fi
+
+  echo "Building images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"
+  pushd "$base_dir" || exit
+  ./gradlew :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
+  popd > /dev/null || exit
+
+  echo "Cleaning up docker buildx builder to free buildkit pods..."
+  docker buildx rm local-remote-builder 2>/dev/null || true
+  echo "Builder removed. Buildkit pods will be terminated by kubernetes driver."
 fi
 
 if [[ "$use_public_images" == "false" ]]; then
