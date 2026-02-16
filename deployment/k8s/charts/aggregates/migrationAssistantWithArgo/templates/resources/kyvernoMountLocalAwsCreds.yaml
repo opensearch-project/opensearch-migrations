@@ -76,7 +76,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   ttlSecondsAfterFinished: 300
-  backoffLimit: 5
+  backoffLimit: 10
   template:
     spec:
       serviceAccountName: {{ .Values.installer.serviceAccount.name }}
@@ -89,6 +89,11 @@ spec:
             - /bin/sh
             - -c
             - |
+              set -e
+              echo "Waiting for Kyverno CRD to be established..."
+              kubectl wait --for=condition=Established crd/clusterpolicies.kyverno.io --timeout=300s
+              echo "Waiting for Kyverno admission controller to be ready..."
+              kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=admission-controller -n {{ .Release.Namespace }} --timeout=120s
               kubectl apply -f /policy/policy.yaml
           volumeMounts:
             - name: policy

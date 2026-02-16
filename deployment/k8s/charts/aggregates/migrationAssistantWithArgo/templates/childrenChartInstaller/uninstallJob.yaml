@@ -74,4 +74,5 @@ spec:
               set -e
 
               {{ include "migration.helmUninstallFunctions" . | nindent 14 }}
-              uninstall_charts
+              # Kyverno already uninstalled in pre-delete hook
+              uninstall_charts kyverno

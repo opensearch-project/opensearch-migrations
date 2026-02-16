@@ -2,8 +2,20 @@
 uninstall_charts() {
   # Accepts space-separated list of releases to skip
   local RELEASES_TO_SKIP=("$@")
-  # Always skip kyverno in parallel uninstall - handled synchronously at end
-  RELEASES_TO_SKIP+=("kyverno")
+
+  # Check if kyverno was explicitly skipped by caller
+  local UNINSTALL_KYVERNO=true
+  for CANDIDATE in "${RELEASES_TO_SKIP[@]}"; do
+    if [ "$CANDIDATE" = "kyverno" ]; then
+      UNINSTALL_KYVERNO=false
+      break
+    fi
+  done
+
+  # Always skip kyverno in parallel uninstall - handled synchronously at end if needed
+  if [ "$UNINSTALL_KYVERNO" = "true" ]; then
+    RELEASES_TO_SKIP+=("kyverno")
+  fi
 
   echo "Starting Helm uninstallation sequence..."
   UMBRELLA_CHART_ID="{{ .Release.Name }}"
@@ -44,10 +56,8 @@ uninstall_charts() {
           if [ "$OWNERSHIP" = "$UMBRELLA_CHART_ID" ]; then
             echo "Chart $RELEASE_NAME is managed by this umbrella chart. Uninstalling..."
 
-            # Uninstall chart
-            helm uninstall $RELEASE_NAME -n $NAMESPACE --debug &
-
-            echo "Successfully uninstalled chart: $RELEASE_NAME"
+            # Uninstall chart in background, log success/failure after completion
+            (helm uninstall $RELEASE_NAME -n $NAMESPACE --debug && echo "Successfully uninstalled chart: $RELEASE_NAME" || echo "Failed to uninstall chart: $RELEASE_NAME") &
           else
             echo "Chart $RELEASE_NAME exists but is not managed by this umbrella chart ($UMBRELLA_CHART_ID). Skipping."
           fi
@@ -62,13 +72,22 @@ uninstall_charts() {
   echo "Uninstallation sequence completed!"
 
   # Uninstall kyverno last (synchronously) to avoid webhook issues
-  for NAMESPACE in $NAMESPACES; do
-    OWNERSHIP=$(helm get values kyverno -n $NAMESPACE -o json 2>/dev/null | jq -r '.global.managedBy // empty')
-    if [ "$OWNERSHIP" = "$UMBRELLA_CHART_ID" ]; then
-      echo "Uninstalling kyverno last..."
-      helm uninstall kyverno -n $NAMESPACE --debug
-      break
-    fi
-  done
+  if [ "$UNINSTALL_KYVERNO" = "true" ]; then
+    for NAMESPACE in $NAMESPACES; do
+      OWNERSHIP=$(helm get values kyverno -n $NAMESPACE -o json 2>/dev/null | jq -r '.global.managedBy // empty')
+      if [ "$OWNERSHIP" = "$UMBRELLA_CHART_ID" ]; then
+        echo "Deleting kyverno webhook configurations to prevent chicken-and-egg issues..."
+        kubectl delete mutatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found
+        kubectl delete validatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found
+
+        echo "Uninstalling kyverno last..."
+        helm uninstall kyverno -n $NAMESPACE --debug
+
+        echo "Cleaning up kyverno CRDs..."
+        kubectl delete crd -l app.kubernetes.io/instance=kyverno --ignore-not-found
+        break
+      fi
+    done
+  fi
 }
 {{- end }}
