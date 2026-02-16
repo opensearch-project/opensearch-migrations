@@ -32,7 +32,7 @@ class ES8SemanticTextMappingsTransformationTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
         var source = SearchClusterContainer.ES_V8_17;
-        var target = SearchClusterContainer.OS_LATEST;
+        var target = SearchClusterContainer.OS_V3_5_0;
         return Stream.of(Arguments.of(source, target));
     }
 
