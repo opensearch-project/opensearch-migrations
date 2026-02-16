@@ -1,0 +1,35 @@
+{
+  "name" : "test_updates_deletes",
+  "id" : "-KQKQKwfQ8-nhYQ8JfijxQ",
+  "numberOfShards" : 1,
+  "numberOfReplicas" : 0,
+  "settings" : {
+    "index" : {
+      "creation_date" : "1724427845717",
+      "number_of_replicas" : "0",
+      "number_of_shards" : "1",
+      "provided_name" : "test_updates_deletes",
+      "uuid" : "o6EB80-3TeKFKdLzRP-UgQ",
+      "version" : {
+        "created" : "5061699"
+      }
+    }
+  },
+  "mappings" : {
+    "properties" : {
+      "content" : {
+        "type" : "text",
+        "fields" : {
+          "keyword" : {
+            "type" : "keyword",
+            "ignore_above" : 256
+          }
+        }
+      },
+      "contents" : {
+        "type" : "text"
+      }
+    }
+  },
+  "aliases" : { }
+}

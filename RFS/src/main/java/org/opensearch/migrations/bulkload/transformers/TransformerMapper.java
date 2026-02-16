@@ -1,9 +1,16 @@
 package org.opensearch.migrations.bulkload.transformers;
 
-import org.opensearch.migrations.UnboundVersionMatchers;
+import java.util.List;
+
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.VersionStrictness;
+import org.opensearch.migrations.UnboundVersionMatchers;
+import org.opensearch.migrations.transformation.TransformationRule;
+import org.opensearch.migrations.transformation.entity.Index;
+import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
+import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemovalWithMergedSupport;
+import org.opensearch.migrations.transformation.rules.TemplateMatchClausePattern;
 
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,57 +48,86 @@ public class TransformerMapper {
 
     private Transformer strictTransformerMapping(int awarenessAttributes, MetadataTransformerParams metadataTransformerParams) {
         if (VersionMatchers.anyOS.test(targetVersion)) {
-            return mapStrictSourceVersion(awarenessAttributes, metadataTransformerParams);
+            return mapSourceVersion(awarenessAttributes, metadataTransformerParams);
         }
         throw new IllegalArgumentException("Unsupported transformation requested for " + sourceVersion + " to " + targetVersion + "." + VersionStrictness.REMEDIATION_MESSAGE);
     }
 
-    private Transformer mapStrictSourceVersion(int awarenessAttributes, MetadataTransformerParams metadataTransformerParams) {
+    private Transformer mapSourceVersion(int awarenessAttributes, MetadataTransformerParams metadataTransformerParams) {
+        var rules = getRulesForSourceVersion(metadataTransformerParams);
+        return new CanonicalTransformer(awarenessAttributes, rules, rules);
+    }
+
+    private List<TransformationRule<Index>> getRulesForSourceVersion(MetadataTransformerParams params) {
+        // ES 1.x, 2.x — multi-type with merged support + template match clause
         if (VersionMatchers.isES_2_X.or(VersionMatchers.isES_1_X).test(sourceVersion)) {
-            return new Transformer_ES_2_4_to_OS_2_19(awarenessAttributes, metadataTransformerParams);
+            return List.of(
+                new IndexMappingTypeRemovalWithMergedSupport(params.getMultiTypeResolutionBehavior()),
+                new TemplateMatchClausePattern()
+            );
         }
+        // ES 5.0-5.4 — multi-type with merged support + template match clause
         if (VersionMatchers.equalOrBetween_ES_5_0_and_5_4.test(sourceVersion)) {
-            return new Transformer_ES_5_4_to_OS_2_19(awarenessAttributes, metadataTransformerParams);
+            return List.of(
+                new IndexMappingTypeRemovalWithMergedSupport(params.getMultiTypeResolutionBehavior()),
+                new TemplateMatchClausePattern()
+            );
         }
+        // ES 5.5+ — single-type removal + template match clause
         if (VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion)) {
-            return new Transformer_ES_5_6_to_OS_2_11(awarenessAttributes, metadataTransformerParams);
+            return List.of(
+                new IndexMappingTypeRemoval(params.getMultiTypeResolutionBehavior()),
+                new TemplateMatchClausePattern()
+            );
         }
+        // ES 6.x — single-type removal
         if (VersionMatchers.isES_6_X.test(sourceVersion)) {
-            return new Transformer_ES_6_8_to_OS_2_11(awarenessAttributes, metadataTransformerParams);
+            return List.of(new IndexMappingTypeRemoval(params.getMultiTypeResolutionBehavior()));
         }
+        // ES 7.0-7.8 — single-type removal (still has type wrappers in some cases)
         if (VersionMatchers.equalOrBetween_ES_7_0_and_7_8.test(sourceVersion)) {
-            return new Transformer_ES_6_8_to_OS_2_11(awarenessAttributes, metadataTransformerParams);
+            return List.of(new IndexMappingTypeRemoval(params.getMultiTypeResolutionBehavior()));
         }
-        if (VersionMatchers.equalOrGreaterThanES_7_9.test(sourceVersion)) {
-            return new Transformer_ES_7_10_OS_2_11(awarenessAttributes);
+        // ES 7.9+, ES 8.x, OS — no type removal needed
+        if (VersionMatchers.equalOrGreaterThanES_7_9.test(sourceVersion)
+            || VersionMatchers.isES_8_X.test(sourceVersion)
+            || VersionMatchers.anyOS.test(sourceVersion)) {
+            return List.of();
         }
-        if (VersionMatchers.isES_8_X.test(sourceVersion)) {
-            return new Transformer_ES_7_10_OS_2_11(awarenessAttributes);
-        }
-        if (VersionMatchers.anyOS.test(sourceVersion)) {
-            return new Transformer_ES_7_10_OS_2_11(awarenessAttributes);
-        }
-        throw new IllegalArgumentException("Unsupported transformation requested for " + sourceVersion + " to " + targetVersion + "." + VersionStrictness.REMEDIATION_MESSAGE);
+        throw new IllegalArgumentException("Unsupported source version: " + sourceVersion + "." + VersionStrictness.REMEDIATION_MESSAGE);
     }
 
     private Transformer looseTransformerMapping(int awarenessAttributes, MetadataTransformerParams metadataTransformerParams) {
         if (UnboundVersionMatchers.anyOS.or(UnboundVersionMatchers.isGreaterOrEqualES_6_X).test(targetVersion)) {
-            if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion)) {
-                return new Transformer_ES_2_4_to_OS_2_19(awarenessAttributes, metadataTransformerParams);
-            }
-            if (VersionMatchers.equalOrBetween_ES_5_0_and_5_4.test(sourceVersion)) {
-                return new Transformer_ES_5_4_to_OS_2_19(awarenessAttributes, metadataTransformerParams);
-            }
-            if (VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion)) {
-                return new Transformer_ES_5_6_to_OS_2_11(awarenessAttributes, metadataTransformerParams);
-            }
-            if (VersionMatchers.isES_6_X.test(sourceVersion)) {
-                return new Transformer_ES_6_8_to_OS_2_11(awarenessAttributes, metadataTransformerParams);
-            }
-            if (UnboundVersionMatchers.anyES.or(UnboundVersionMatchers.anyOS).test(sourceVersion)) {
-                return new Transformer_ES_7_10_OS_2_11(awarenessAttributes);
-            }
+            return mapSourceVersionLoose(awarenessAttributes, metadataTransformerParams);
         }
         throw new IllegalArgumentException("Unsupported transformation requested for " + sourceVersion + " to " + targetVersion + ".");
+    }
+
+    private Transformer mapSourceVersionLoose(int awarenessAttributes, MetadataTransformerParams metadataTransformerParams) {
+        List<TransformationRule<Index>> rules;
+        if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion)) {
+            rules = List.of(
+                new IndexMappingTypeRemovalWithMergedSupport(metadataTransformerParams.getMultiTypeResolutionBehavior()),
+                new TemplateMatchClausePattern()
+            );
+        } else if (VersionMatchers.equalOrBetween_ES_5_0_and_5_4.test(sourceVersion)) {
+            rules = List.of(
+                new IndexMappingTypeRemovalWithMergedSupport(metadataTransformerParams.getMultiTypeResolutionBehavior()),
+                new TemplateMatchClausePattern()
+            );
+        } else if (VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion)) {
+            rules = List.of(
+                new IndexMappingTypeRemoval(metadataTransformerParams.getMultiTypeResolutionBehavior()),
+                new TemplateMatchClausePattern()
+            );
+        } else if (VersionMatchers.isES_6_X.test(sourceVersion)) {
+            rules = List.of(new IndexMappingTypeRemoval(metadataTransformerParams.getMultiTypeResolutionBehavior()));
+        } else if (UnboundVersionMatchers.anyES.or(UnboundVersionMatchers.anyOS).test(sourceVersion)) {
+            rules = List.of();
+        } else {
+            throw new IllegalArgumentException("Unsupported transformation requested for " + sourceVersion + " to " + targetVersion + ".");
+        }
+        return new CanonicalTransformer(awarenessAttributes, rules, rules);
     }
 }

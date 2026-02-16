@@ -10,6 +10,9 @@ import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
+import org.opensearch.migrations.cluster.SnapshotCapabilities;
+import org.opensearch.migrations.cluster.SnapshotCapabilities.LuceneVersion;
+import org.opensearch.migrations.cluster.SnapshotCapabilities.SoftDeleteSupport;
 
 import lombok.Getter;
 
@@ -57,13 +60,23 @@ public class SnapshotReader_ES_6_8 implements ClusterSnapshotReader {
     }
 
     @Override
-    public boolean getSoftDeletesPossible() {
-        return ElasticsearchConstants_ES_6_8.SOFT_DELETES_POSSIBLE;
-    }
-
-    @Override
-    public String getSoftDeletesFieldData() {
-        return ElasticsearchConstants_ES_6_8.SOFT_DELETES_FIELD;
+    public SnapshotCapabilities getCapabilities() {
+        // ES 5.x uses Lucene 6, no soft deletes
+        if (VersionMatchers.isES_5_X.test(version)) {
+            return new SnapshotCapabilities(LuceneVersion.LUCENE_6, new SoftDeleteSupport.None());
+        }
+        // ES 6.x uses Lucene 7, soft deletes added in 6.5
+        if (VersionMatchers.isES_6_X.test(version)) {
+            return new SnapshotCapabilities(
+                LuceneVersion.LUCENE_7,
+                new SoftDeleteSupport.Supported(ElasticsearchConstants_ES_6_8.SOFT_DELETES_FIELD)
+            );
+        }
+        // ES 7.0-7.8 uses Lucene 9 format, soft deletes enabled
+        return new SnapshotCapabilities(
+            LuceneVersion.LUCENE_9,
+            new SoftDeleteSupport.Supported(ElasticsearchConstants_ES_6_8.SOFT_DELETES_FIELD)
+        );
     }
 
     @Override

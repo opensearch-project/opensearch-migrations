@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.tracing;
 
-import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 public interface IRfsContexts {
@@ -36,7 +35,7 @@ public interface IRfsContexts {
     }
 
     interface ICreateSnapshotContext extends IScopedInstrumentationAttributes {
-        String ACTIVITY_NAME = IMetadataMigrationContexts.ActivityNames.CREATE_SNAPSHOT;
+        String ACTIVITY_NAME = "createSnapshot";
 
         IRequestContext createRegisterRequest();
 

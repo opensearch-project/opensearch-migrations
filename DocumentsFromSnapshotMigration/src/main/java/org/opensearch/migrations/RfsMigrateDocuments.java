@@ -808,7 +808,7 @@ public class RfsMigrateDocuments {
         };
 
         var shardMetadataSupplier = shardMetadataSupplierFactory.apply(snapshotName);
-        var strategy = (previousSnapshotName == null)
+        var engine = (previousSnapshotName == null)
             ? new RegularDocumentReaderEngine(shardMetadataSupplier)
             : new DeltaDocumentReaderEngine(
                 shardMetadataSupplierFactory.apply(previousSnapshotName), shardMetadataSupplier, deltaMode);
@@ -821,7 +821,7 @@ public class RfsMigrateDocuments {
             progressCursor::set,
             cancellationRunnable::set,
             timeProvider,
-            strategy);
+            (indexName, shardNumber) -> engine);
         return runner.migrateNextShard(rootDocumentContext::createReindexContext);
     }
 

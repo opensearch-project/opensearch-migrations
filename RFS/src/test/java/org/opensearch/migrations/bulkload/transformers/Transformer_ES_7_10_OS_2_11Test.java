@@ -26,13 +26,13 @@ public class Transformer_ES_7_10_OS_2_11Test {
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
         var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
 
-        Transformer_ES_7_10_OS_2_11 transformer = new Transformer_ES_7_10_OS_2_11(2);
+        CanonicalTransformer transformer = new CanonicalTransformer(2);
 
         GlobalMetadata globalMetadata = sourceResourceProvider.getGlobalMetadata().fromRepo(snapshot.name);
         GlobalMetadata transformedGlobalMetadata = transformer.transformGlobalMetadata(globalMetadata);
         GlobalMetadataData_OS_2_11 finalMetadata = new GlobalMetadataData_OS_2_11(transformedGlobalMetadata.toObjectNode());
 
-        String expectedBwcTemplates = "{\"bwc_template\":{\"order\":0,\"index_patterns\":[\"bwc_index*\"],\"settings\":{\"number_of_shards\":\"1\",\"number_of_replicas\":\"0\"},\"mappings\":{\"properties\":{\"title\":{\"type\":\"text\"},\"content\":{\"type\":\"text\"}}},\"aliases\":{\"bwc_alias\":{}}}}";
+        String expectedBwcTemplates = "{\"bwc_template\":{\"order\":0,\"index_patterns\":[\"bwc_index*\"],\"settings\":{\"number_of_shards\":\"1\",\"number_of_replicas\":1},\"mappings\":{\"properties\":{\"title\":{\"type\":\"text\"},\"content\":{\"type\":\"text\"}}},\"aliases\":{\"bwc_alias\":{}}}}";
         String expectedIndexTemplates = "{\"fwc_template\":{\"index_patterns\":[\"fwc_index*\"],\"template\":{\"aliases\":{\"fwc_alias\":{}}},\"composed_of\":[\"fwc_mappings\",\"fwc_settings\"]}}";
         String expectedComponentTemplates = "{\"fwc_settings\":{\"template\":{\"settings\":{\"index\":{\"number_of_shards\":\"1\",\"number_of_replicas\":\"0\"}}}},\"fwc_mappings\":{\"template\":{\"mappings\":{\"properties\":{\"title\":{\"type\":\"text\"},\"content\":{\"type\":\"text\"}}}}}}";
 
@@ -50,7 +50,7 @@ public class Transformer_ES_7_10_OS_2_11Test {
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
         var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
 
-        Transformer_ES_7_10_OS_2_11 transformer = new Transformer_ES_7_10_OS_2_11(2);
+        CanonicalTransformer transformer = new CanonicalTransformer(2);
 
         IndexMetadata indexMetadataBwc = sourceResourceProvider.getIndexMetadata().fromRepo(snapshot.name, "bwc_index_1");
         IndexMetadata transformedIndexBwc = transformer.transformIndexMetadata(indexMetadataBwc).get(0);

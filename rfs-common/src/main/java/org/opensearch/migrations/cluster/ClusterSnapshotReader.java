@@ -17,11 +17,8 @@ public interface ClusterSnapshotReader extends ClusterReader {
     /** Reads information about index shards */
     ShardMetadata.Factory getShardMetadata();
 
-    /** if soft deletes can be in the snapshot */
-    boolean getSoftDeletesPossible();
-
-    /** gets the soft deletes can field data */
-    String getSoftDeletesFieldData();
+    /** Queryable capabilities for this snapshot (lucene version, soft deletes, etc.) */
+    SnapshotCapabilities getCapabilities();
 
     /** Get the source repo for the snapshot */
     SourceRepo getSourceRepo();

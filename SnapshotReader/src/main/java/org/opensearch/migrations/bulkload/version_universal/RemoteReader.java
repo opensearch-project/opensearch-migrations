@@ -3,7 +3,7 @@ package org.opensearch.migrations.bulkload.version_universal;
 import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
-import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
+import org.opensearch.migrations.bulkload.common.ClusterVersionDetector;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata.Factory;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
@@ -52,9 +52,7 @@ public class RemoteReader implements RemoteCluster, ClusterReader {
     @Override
     public Version getVersion() {
         if (version == null) {
-            // Use a throw away client that will work on any version of the service
-            var clientFactory = new OpenSearchClientFactory(connection);
-            version = clientFactory.getClusterVersion();
+            version = ClusterVersionDetector.detect(connection);
         }
         return version;
     }

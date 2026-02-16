@@ -4,7 +4,8 @@ plugins {
 }
 
 dependencies {
-    implementation project(':RFS')
+    implementation project(':rfs-common')
+    implementation project(':SearchSnapshotExtractor')
     implementation project(':coreUtilities')
     implementation project(':transformation')
 
@@ -18,8 +19,8 @@ dependencies {
     implementation libs.aws.s3
     implementation libs.aws.crt
 
-    // Shadow lucene jars from RFS (needed by ShardMetadataData classes for BytesRef)
-    implementation project(':RFS').tasks.named('shadowLucene9').map { it.outputs.files }
+    // Shadow lucene jars from SearchSnapshotExtractor (needed by ShardMetadataData classes for BytesRef)
+    implementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene9').map { it.outputs.files }
 
     testImplementation testFixtures(project(':RFS'))
     testImplementation testFixtures(project(':coreUtilities'))

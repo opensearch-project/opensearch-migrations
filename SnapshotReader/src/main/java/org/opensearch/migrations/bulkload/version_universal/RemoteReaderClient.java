@@ -4,32 +4,38 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.util.retry.Retry;
+
+import java.time.Duration;
 
 @Slf4j
-public class RemoteReaderClient extends OpenSearchClient {
+public class RemoteReaderClient {
+    protected static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
+    private static final int DEFAULT_MAX_RETRY_ATTEMPTS = 3;
+    private static final Duration DEFAULT_BACKOFF = Duration.ofSeconds(1);
+    private static final Duration DEFAULT_MAX_BACKOFF = Duration.ofSeconds(10);
+    protected static final Retry CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY =
+        Retry.backoff(DEFAULT_MAX_RETRY_ATTEMPTS, DEFAULT_BACKOFF)
+            .maxBackoff(DEFAULT_MAX_BACKOFF);
+
+    @Getter
+    protected final RestClient client;
 
     public RemoteReaderClient(ConnectionContext connection) {
-        super(connection, null, CompressionMode.UNCOMPRESSED);
-    }
-
-    @Override
-    protected String getCreateIndexPath(String indexName) {
-        return indexName;
-    }
-
-    @Override
-    protected String getBulkRequestPath(String indexName) {
-        return indexName + "/_bulk";
+        this.client = new RestClient(connection);
     }
 
     protected Map<String, String> getTemplateEndpoints() {
@@ -47,7 +53,7 @@ public class RemoteReaderClient extends OpenSearchClient {
                 .flatMap(this::getJsonForTemplateApis)
                 .map(json -> Map.entry(entry.getKey(), json))
                 .doOnError(e -> log.error("Error fetching template {}: {}", entry.getKey(), e.getMessage()))
-                .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
+                .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
             )
             .collectMap(Entry::getKey, Entry::getValue)
             .block();
@@ -83,7 +89,7 @@ public class RemoteReaderClient extends OpenSearchClient {
                 .getAsync(endpoint, null)
                 .flatMap(this::getJsonForIndexApis)
                 .doOnError(e -> log.error(e.getMessage()))
-                .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
+                .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
             )
             .collectList()
             .block();
@@ -168,5 +174,14 @@ public class RemoteReaderClient extends OpenSearchClient {
         String errorPrefix = "Unable to get json response: ";
         log.atError().setCause(e).setMessage(errorPrefix).log();
         return Mono.error(new OperationFailed(errorPrefix + e.getMessage(), resp));
+    }
+
+    public static class OperationFailed extends RuntimeException {
+        public final HttpResponse response;
+
+        public OperationFailed(String message, HttpResponse response) {
+            super(message + "\nBody:\n" + response);
+            this.response = response;
+        }
     }
 }

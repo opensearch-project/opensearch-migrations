@@ -7,9 +7,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-import org.opensearch.migrations.bulkload.common.DocumentReaderEngine;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.RfsException;
+import org.opensearch.migrations.bulkload.common.ShardReadStrategy;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
@@ -35,7 +35,7 @@ public class DocumentsRunner {
     private final Consumer<WorkItemCursor> cursorConsumer;
     private final Consumer<Runnable> cancellationTriggerConsumer;
     private final WorkItemTimeProvider timeProvider;
-    private final DocumentReaderEngine documentReaderEngine;
+    private final ShardReadStrategy shardReadStrategy;
 
     /**
      * @return true if it did work, false if there was no available work at this time.
@@ -138,7 +138,8 @@ public class DocumentsRunner {
     ) throws IOException {
         log.atInfo().setMessage("Migrating docs for {}").addArgument(workItem).log();
 
-        var unpacker = documentReaderEngine.createUnpacker(
+        var engine = shardReadStrategy.getEngine(workItem.getIndexName(), workItem.getShardNumber());
+        var unpacker = engine.createUnpacker(
             unpackerFactory,
             workItem.getIndexName(),
             workItem.getShardNumber()
@@ -151,7 +152,7 @@ public class DocumentsRunner {
 
         // Get the root context from the DocumentReindexContext
         var rootContext = ((DocumentMigrationContexts.BaseDocumentMigrationContext) context).getRootInstrumentationScope();
-        var documents = documentReaderEngine.prepareChangeset(
+        var documents = engine.prepareChangeset(
             reader,
             workItem.getIndexName(),
             workItem.getShardNumber(),
