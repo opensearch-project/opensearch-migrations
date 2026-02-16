@@ -8,6 +8,10 @@ updates:
       migration-assistant-npm:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "eslint"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "npm"
     directory: "/deployment/cdk/opensearch-service-migration"
@@ -17,6 +21,10 @@ updates:
       opensearch-cdk-npm:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "eslint"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "gradle"
     directory: "/"
@@ -55,5 +63,77 @@ updates:
       interval: "weekly"
     groups:
       github-actions-all:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/migrationConsole/lib/console_link"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-console-link:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/migrationConsole/cluster_tools"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-cluster-tools:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/migrationConsole/lib/integ_test"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-integ-test:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/libraries/testAutomation"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-test-automation:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/test/cleanupDeployment"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-cleanup-deployment:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-es-test-console:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/TrafficCapture/dockerSolution/src/main/docker/k8sConfigMapUtilScripts"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-k8s-configmap-utils:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/TrafficCapture/dockerSolution/otelConfigs"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-otel-configs:
         patterns:
           - "*"
