@@ -57,6 +57,17 @@ public class MetadataTransformationRegistry {
                 .build())
             .build(),
         TransformerConfigs.builder()
+            .filename("js/es-semantic-text-metadata.js")
+            .isRelevantForVersions(andSourceTargetVersionPredicate(
+                    UnboundVersionMatchers.isGreaterOrEqualES_8_X,
+                    UnboundVersionMatchers.anyOS
+            ))
+            .transformerInfo(Transformers.TransformerInfo.builder()
+                .name("semantic_text to text")
+                .descriptionLine("Convert field data type semantic_text to OpenSearch text")
+                .build())
+            .build(),
+        TransformerConfigs.builder()
             .filename("js/knn-to-serverless-metadata.js")
             .isRelevantForVersions(andSourceTargetVersionPredicate(
                     v -> true,
