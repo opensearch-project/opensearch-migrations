@@ -88,13 +88,14 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Build Docker Images (Minikube)') {
+            stage('Build Docker Images (BuildKit)') {
                 steps {
                     timeout(time: 30, unit: 'MINUTES') {
-                        dir('deployment/k8s') {
-                            script {
-                                sh "./buildDockerImagesMini.sh"
-                            }
+                        script {
+                            sh "USE_LOCAL_REGISTRY=true ./buildImages/setUpK8sImageBuildServices.sh"
+                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 -x test --info --stacktrace"
+                            sh "docker buildx rm local-remote-builder 2>/dev/null || true"
+                            sh "helm uninstall buildkit -n buildkit 2>/dev/null || true"
                         }
                     }
                 }
