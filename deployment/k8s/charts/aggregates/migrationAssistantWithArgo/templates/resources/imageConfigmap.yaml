@@ -15,5 +15,3 @@ data:
   reindexFromSnapshotPullPolicy: "{{ .Values.images.reindexFromSnapshot.pullPolicy }}"
   migrationConsoleImage: "{{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}"
   migrationConsolePullPolicy: "{{ .Values.images.migrationConsole.pullPolicy }}"
-  mountpointS3Image: "{{ .Values.images.mountpointS3.repository }}:{{ .Values.images.mountpointS3.tag }}"
-  mountpointS3PullPolicy: "{{ .Values.images.mountpointS3.pullPolicy }}"

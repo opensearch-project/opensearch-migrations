@@ -2,7 +2,6 @@ import {
     BaseExpression,
     Container,
     expr,
-    IMAGE_PULL_POLICY,
     makeDirectTypeProxy,
     makeStringTypeProxy,
     Volume
@@ -16,47 +15,16 @@ export type ContainerVolumePair = {
 
 const S3_SNAPSHOT_VOLUME_NAME = "snapshot-s3";
 
-export function setupS3MountpointVolumeForContainer(
+/**
+ * Add a PVC-backed S3 volume mount to a container definition.
+ * Requires the Mountpoint S3 CSI Driver v2 to be installed on the cluster,
+ * and a PV/PVC to be pre-created for the target S3 bucket.
+ * The CSI driver manages the FUSE mount lifecycle — no sidecar or privileged container needed.
+ */
+export function setupS3CsiVolumeForContainer(
     mountPath: string,
-    s3RepoPathUri: BaseExpression<string>,
-    s3Region: BaseExpression<string>,
-    s3Endpoint: BaseExpression<string>,
-    mountpointS3Image: BaseExpression<string>,
-    mountpointS3ImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
+    pvcClaimName: BaseExpression<string>,
     def: ContainerVolumePair): ContainerVolumePair {
-
-    // Shell script parses S3_REPO_PATH_URI env var to extract bucket/prefix,
-    // then runs mount-s3 with the appropriate args.
-    const mountScript =
-        `export PATH="/mountpoint-s3/bin:$PATH"; ` +
-        `BUCKET=$(echo "$S3_REPO_PATH_URI" | sed 's|^s3://||' | cut -d/ -f1); ` +
-        `PREFIX=$(echo "$S3_REPO_PATH_URI" | sed "s|^s3://$BUCKET/\\\\?||"); ` +
-        `ARGS="$BUCKET ${mountPath} --read-only --foreground"; ` +
-        `[ -n "$PREFIX" ] && ARGS="$ARGS --prefix $PREFIX/"; ` +
-        `[ -n "$S3_REGION" ] && ARGS="$ARGS --region $S3_REGION"; ` +
-        `[ -n "$S3_ENDPOINT" ] && ARGS="$ARGS --endpoint-url $S3_ENDPOINT"; ` +
-        `exec mount-s3 $ARGS`;
-
-    const sidecar: Container = {
-        name: "mountpoint-s3",
-        image: makeStringTypeProxy(mountpointS3Image),
-        imagePullPolicy: makeStringTypeProxy(mountpointS3ImagePullPolicy),
-        command: ["/bin/sh", "-c"],
-        args: [mountScript],
-        env: [
-            { name: "S3_REPO_PATH_URI", value: makeStringTypeProxy(s3RepoPathUri) },
-            { name: "S3_REGION", value: makeStringTypeProxy(s3Region) },
-            { name: "S3_ENDPOINT", value: makeStringTypeProxy(s3Endpoint) }
-        ],
-        securityContext: {
-            privileged: true
-        },
-        volumeMounts: [{
-            name: S3_SNAPSHOT_VOLUME_NAME,
-            mountPath: mountPath,
-            mountPropagation: "Bidirectional"
-        }]
-    };
 
     const {volumeMounts, ...restOfContainer} = def.container;
     return {
@@ -64,7 +32,10 @@ export function setupS3MountpointVolumeForContainer(
             ...def.volumes,
             {
                 name: S3_SNAPSHOT_VOLUME_NAME,
-                emptyDir: {}
+                persistentVolumeClaim: {
+                    claimName: makeStringTypeProxy(pvcClaimName),
+                    readOnly: true
+                }
             }
         ],
         container: {
@@ -74,12 +45,11 @@ export function setupS3MountpointVolumeForContainer(
                 {
                     name: S3_SNAPSHOT_VOLUME_NAME,
                     mountPath: mountPath,
-                    mountPropagation: "HostToContainer",
                     readOnly: true
                 }
             ]
         },
-        sidecars: [...def.sidecars, sidecar]
+        sidecars: def.sidecars
     } as const;
 }
 

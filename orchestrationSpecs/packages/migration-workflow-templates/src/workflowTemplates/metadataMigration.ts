@@ -62,9 +62,9 @@ export function makeRepoParamDict(
 export const S3_MOUNT_PATH = "/mnt/s3";
 
 /**
- * Build param dict for RFS/MetadataMigration when using Mountpoint S3 instead of direct S3 access.
+ * Build param dict for RFS when using S3 CSI driver PV/PVC mount.
  * Emits snapshotLocalDir (for RFS) pointing to the mounted S3 path.
- * The S3 bucket is mounted at S3_MOUNT_PATH via a per-pod mountpoint-s3 sidecar container,
+ * The S3 bucket is mounted at S3_MOUNT_PATH via a PersistentVolume backed by the S3 CSI driver,
  * and the repo path is extracted from the s3RepoPathUri (s3://bucket/path → /mnt/s3/path).
  */
 export function makeMountpointRepoParamDict(
