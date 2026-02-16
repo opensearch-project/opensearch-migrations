@@ -45,6 +45,8 @@ class ES8SemanticTextMappingsTransformationTest extends BaseMigrationTest {
                 final var sourceCluster = new SearchClusterContainer(sourceVersion);
                 final var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
+            // ES 8 containers disable ML by default; enable it for inference endpoint support
+            sourceCluster.withEnv("xpack.ml.enabled", "true");
             this.sourceCluster = sourceCluster;
             this.targetCluster = targetCluster;
             performSemanticTextTransformationTest();
@@ -54,6 +56,9 @@ class ES8SemanticTextMappingsTransformationTest extends BaseMigrationTest {
     @SneakyThrows
     private void performSemanticTextTransformationTest() {
         startClusters();
+
+        // Start trial license on ES for ML features (inference API)
+        sourceOperations.post("/_license/start_trial?acknowledge=true", "");
 
         // Create inference endpoint required for semantic_text field
         var inferenceBody = "{\n" +
@@ -91,6 +96,8 @@ class ES8SemanticTextMappingsTransformationTest extends BaseMigrationTest {
         createSnapshot(sourceCluster, snapshotName, testSnapshotContext);
         sourceCluster.copySnapshotData(localDirectory.toString());
         var arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
+        // Provide source host so inference endpoints are migrated (registers models in OS)
+        arguments.sourceArgs.host = sourceCluster.getUrl();
 
         // Execute migration
         MigrationItemResult result = executeMigration(arguments, MetadataCommands.MIGRATE);
