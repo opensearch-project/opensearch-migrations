@@ -141,6 +141,12 @@ function getS3CsiPvManifest(args: {
                     expr.isEmpty(args.s3Endpoint),
                     expr.literal("--read-only"),
                     expr.concat(expr.literal("--endpoint-url "), args.s3Endpoint)
+                )),
+                // Non-AWS endpoints (e.g. LocalStack) need path-style addressing
+                makeStringTypeProxy(expr.ternary(
+                    expr.isEmpty(args.s3Endpoint),
+                    expr.literal("--read-only"),
+                    expr.literal("--force-path-style")
                 ))
             ],
             csi: {
