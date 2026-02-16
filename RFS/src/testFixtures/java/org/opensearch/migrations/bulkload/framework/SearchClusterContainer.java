@@ -416,7 +416,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_OSS, "elasticsearch");
         }
         public static ElasticsearchOssVersion fromTag(String tag) {
-            String imageName = "docker.elastic.co/elasticsearch/elasticsearch-oss:" + tag;
+            String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new ElasticsearchOssVersion(imageName, version);
         }
@@ -427,7 +427,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH, "elasticsearch");
         }
         public static ElasticsearchVersion fromTag(String tag) {
-            String imageName = "docker.elastic.co/elasticsearch/elasticsearch:" + tag;
+            String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new ElasticsearchVersion(imageName, version);
         }
@@ -438,7 +438,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_8, "elasticsearch");
         }
         public static Elasticsearch8Version fromTag(String tag) {
-            String imageName = "docker.elastic.co/elasticsearch/elasticsearch:" + tag;
+            String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new Elasticsearch8Version(imageName, version);
         }
@@ -449,7 +449,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_7, "elasticsearch");
         }
         public static Elasticsearch7Version fromTag(String tag) {
-            String imageName = "docker.elastic.co/elasticsearch/elasticsearch:" + tag;
+            String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new Elasticsearch7Version(imageName, version);
         }
@@ -460,8 +460,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_6, "elasticsearch");
         }
         public static Elasticsearch6Version fromTag(String tag, boolean oss) {
-            String prefix = oss ? "elasticsearch-oss" : "elasticsearch";
-            String imageName = "docker.elastic.co/elasticsearch/" + prefix + ":" + tag;
+            String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new Elasticsearch6Version(imageName, version);
         }
@@ -482,7 +481,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             return INITIALIZATION_FLAVOR.ELASTICSEARCH_5;
         }
         public static Elasticsearch5Version fromTag(String tag, String configContent) {
-            String imageName = "elasticsearch:" + tag;
+            String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new Elasticsearch5Version(imageName, version, OLDER_ES_CONFIG_PATH, configContent);
         }
@@ -527,7 +526,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             this.filePath = filePath;
         }
         public static OlderElasticsearchVersion fromTag(String tag) {
-            String imageName = "elasticsearch:" + tag;
+            String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new OlderElasticsearchVersion(imageName, version, OLDER_ES_CONFIG_PATH, OLDER_ES_CONFIG);
         }

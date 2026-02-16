@@ -63,6 +63,7 @@ include 'TrafficCapture:trafficCaptureProxyServer'
 include 'TrafficCapture:trafficReplayer'
 include 'frontend'
 include 'buildImages'
+include 'custom-es-images'
 include 'kiro-cli'
 include ':console_link'
 

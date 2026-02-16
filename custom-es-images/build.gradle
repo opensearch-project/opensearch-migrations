@@ -1,0 +1,132 @@
+import groovy.json.JsonSlurper
+import org.opensearch.migrations.image.RegistryImageBuildUtils.Registry
+import org.opensearch.migrations.image.ImageRegistryFormatterFactory
+
+def versionsFile = file('versions.json')
+def versions = new JsonSlurper().parse(versionsFile) as Map<String, Map>
+def imagePrefix = findProperty('esImagePrefix') ?: 'custom-elasticsearch'
+def tarballDir = layout.buildDirectory.dir('tarballs')
+
+// Opt-in push: -PpushVersions=7.10,7.17
+def pushVersionsList = (findProperty('pushVersions') ?: '').toString()
+        .split(',').collect { it.trim() }.findAll { it }
+
+def correttoVersion = { String minor ->
+    def parts = minor.split('\\.')
+    int maj = parts[0] as int, min = parts[1] as int
+    if (maj <= 5 || (maj == 6 && min <= 4)) return '8'
+    if (maj == 6 || (maj == 7 && min <= 10)) return '11'
+    if (maj == 7) return '17'
+    return '21'
+}
+
+versions.each { minor, info ->
+    def safeName = minor.replace('.', '_')
+    def version = info.version
+    def url = info.url
+    def filename = url.split('/').last()
+
+    // Download task — Gradle caches based on URL input
+    tasks.register("downloadTarball_${safeName}") {
+        group = 'download'
+        description = "Download ES ${version} tarball"
+        inputs.property('url', url)
+        def outputFile = tarballDir.map { it.file(filename) }
+        outputs.file(outputFile)
+        doLast {
+            def dest = outputFile.get().asFile
+            dest.parentFile.mkdirs()
+            if (!dest.exists()) {
+                ant.get(src: url, dest: dest)
+            }
+        }
+    }
+
+    // Local docker build
+    tasks.register("buildImage_${safeName}", Exec) {
+        group = 'docker'
+        description = "Build ${imagePrefix}:${version}"
+        dependsOn "downloadTarball_${safeName}"
+        inputs.file(tarballDir.map { it.file(filename) })
+        inputs.file('dockerfiles/Dockerfile')
+        inputs.property('version', version)
+        commandLine 'docker', 'build',
+                '--build-arg', "CORRETTO_VERSION=${correttoVersion(minor)}",
+                '--build-arg', "ES_VERSION=${version}",
+                '--build-arg', "TARBALL_FILE=${filename}",
+                '-f', 'dockerfiles/Dockerfile',
+                '-t', "${imagePrefix}:${version}",
+                '.'
+    }
+}
+
+// Aggregate tasks
+tasks.register('downloadAll') {
+    group = 'download'
+    description = 'Download all ES tarballs'
+    dependsOn tasks.matching { it.name.startsWith('downloadTarball_') }
+}
+
+tasks.register('buildAll') {
+    group = 'docker'
+    description = 'Build all ES images locally'
+    dependsOn tasks.matching { it.name.startsWith('buildImage_') }
+}
+
+// Per-major aggregate tasks
+[1, 2, 5, 6, 7, 8].each { major ->
+    def majorVersions = versions.keySet().findAll { it.startsWith("${major}.") }
+    if (!majorVersions.isEmpty()) {
+        tasks.register("buildMajor_${major}") {
+            group = 'docker'
+            description = "Build all ES ${major}.x images"
+            dependsOn majorVersions.collect { "buildImage_${it.replace('.', '_')}" }
+        }
+    }
+}
+
+// Registry push tasks — opt-in via -PpushVersions=7.10,7.17
+if (!pushVersionsList.isEmpty()) {
+    def publishedUrl = rootProject.findProperty('registryEndpoint') ?: 'localhost:5001'
+    def registry = new Registry(publishedUrl.toString())
+    def formatter = ImageRegistryFormatterFactory.getFormatter(registry.containerUrl)
+    def builder = rootProject.findProperty('builder') ?: 'default'
+
+    pushVersionsList.each { minor ->
+        def info = versions[minor]
+        if (!info) {
+            throw new GradleException("Unknown ES version in pushVersions: ${minor}")
+        }
+        def safeName = minor.replace('.', '_')
+        def version = info.version
+        def filename = info.url.split('/').last()
+        def (dest, cacheDest) = formatter.getFullTargetImageIdentifier(
+                registry.containerUrl, "custom_elasticsearch", version, null)
+
+        tasks.register("pushImage_${safeName}", Exec) {
+            group = 'docker'
+            description = "Build and push ${imagePrefix}:${version} to ${registry.containerUrl}"
+            dependsOn "downloadTarball_${safeName}"
+            commandLine 'sh', '-c', [
+                    "docker buildx build",
+                    "--platform linux/amd64",
+                    "--builder ${builder}",
+                    "-f dockerfiles/Dockerfile",
+                    "--build-arg CORRETTO_VERSION=${correttoVersion(minor)}",
+                    "--build-arg ES_VERSION=${version}",
+                    "--build-arg TARBALL_FILE=${filename}",
+                    "-t ${dest}",
+                    "--push",
+                    "--cache-to=type=registry,ref=${cacheDest},mode=max",
+                    "--cache-from=type=registry,ref=${cacheDest}",
+                    "."
+            ].join(" ")
+        }
+    }
+
+    tasks.register('pushAll') {
+        group = 'docker'
+        description = 'Push all opt-in ES images to registry'
+        dependsOn tasks.matching { it.name.startsWith('pushImage_') }
+    }
+}

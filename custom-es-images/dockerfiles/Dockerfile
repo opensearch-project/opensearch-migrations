@@ -4,16 +4,19 @@
 # ============================================================
 ARG CORRETTO_VERSION=8
 ARG ES_VERSION
-ARG TARBALL_URL
+ARG TARBALL_FILE
 
-# --- Stage 1: Download, extract, and strip tarball (AL2023) ---
+# --- Stage 1: Extract pre-downloaded tarball (AL2023) ---
 FROM amazonlinux:2023 AS downloader
 ARG ES_VERSION
-ARG TARBALL_URL
+ARG TARBALL_FILE
+
+COPY build/tarballs/${TARBALL_FILE} /tmp/es.tar.gz
 
 RUN dnf install -y tar gzip findutils && \
     mkdir -p /opt/elasticsearch && \
-    curl -fsSL "$TARBALL_URL" | tar -xz --strip-components=1 -C /opt/elasticsearch && \
+    tar -xzf /tmp/es.tar.gz --strip-components=1 -C /opt/elasticsearch && \
+    rm /tmp/es.tar.gz && \
     cd /opt/elasticsearch && \
     # Remove bundled JDK (we use Corretto)
     rm -rf jdk && \

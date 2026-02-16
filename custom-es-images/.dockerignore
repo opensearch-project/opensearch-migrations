@@ -2,3 +2,8 @@
 **/.git
 **/*.md
 !README.md
+test-results/
+*.sh
+Makefile
+.gitignore
+.gradle/
