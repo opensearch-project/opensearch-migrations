@@ -1,8 +1,10 @@
 FROM custom-elasticsearch:7.10.2
 
-# Alpine needs bash for Search Guard's install_demo_configuration.sh
+# Custom image runs as user 1000 on Alpine — need root for package install and file ops
 USER root
 RUN apk add --no-cache bash
+
+# Switch to elasticsearch user for plugin installs
 USER 1000
 
 RUN echo y | /usr/share/elasticsearch/bin/elasticsearch-plugin install https://maven.search-guard.com/search-guard-suite-release/com/floragunn/search-guard-suite-plugin/7.10.2-53.5.0/search-guard-suite-plugin-7.10.2-53.5.0.zip
@@ -12,6 +14,7 @@ RUN chmod ugo+x /usr/share/elasticsearch/plugins/search-guard-7/tools/install_de
 # Search Guard demo config duplicates keys already in the custom image's elasticsearch.yml
 RUN awk -F: '/^[a-zA-Z]/ && NF>1 {if(seen[$1]++) next} 1' /usr/share/elasticsearch/config/elasticsearch.yml > /tmp/es.yml && \
     mv /tmp/es.yml /usr/share/elasticsearch/config/elasticsearch.yml
+
 ENV ELASTIC_SEARCH_CONFIG_FILE=/usr/share/elasticsearch/config/elasticsearch.yml
 ENV PROXY_TLS_CONFIG_FILE=/usr/share/elasticsearch/config/proxy_tls.yml
 ENV ELASTIC_SEARCH_JVM_CONFIG_FILE=/usr/share/elasticsearch/config/jvm.options
@@ -22,11 +25,15 @@ RUN  bin/elasticsearch-keystore create --silent && \
      echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key && \
      echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.session_token
 
-
 # without this line, elasticsearch will complain that there aren't enough nodes
 RUN echo "discovery.type: single-node" >> $ELASTIC_SEARCH_CONFIG_FILE
+
+# Root needed for COPY to /root/ and chmod
+USER root
 COPY disableTlsConfig.sh enableTlsConfig.sh /root/
 RUN chmod ugo+x /root/disableTlsConfig.sh /root/enableTlsConfig.sh
+USER 1000
+
 ENV PATH=${PATH}:/usr/share/elasticsearch/jdk/bin/
 RUN sed 's/searchguard/plugins.security/g' $ELASTIC_SEARCH_CONFIG_FILE |  \
     grep ssl.http > $PROXY_TLS_CONFIG_FILE
@@ -43,6 +50,4 @@ RUN sed -i '/^-Xms/i # Increase default heap to 80% RAM, Requires JDK >= 10' $EL
     sed -i 's/^-Xmx/#&/' $ELASTIC_SEARCH_JVM_CONFIG_FILE && \
     sed -i '/^#-Xmx/s/$/\n-XX:MaxRAMPercentage=80.0/' $ELASTIC_SEARCH_JVM_CONFIG_FILE
 
-
-#CMD tail -f /dev/null
 CMD []
