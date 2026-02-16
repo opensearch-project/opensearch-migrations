@@ -67,7 +67,7 @@ function getReplayerDeploymentManifest
     };
     const finalContainerDefinition =
         setupLog4jConfigForContainer(args.useCustomLogging, args.loggingConfigMap,
-            {container: baseContainerDefinition, volumes: []});
+            {container: baseContainerDefinition, volumes: [], sidecars: []});
     return {
         apiVersion: "apps/v1",
         kind: "Deployment",
