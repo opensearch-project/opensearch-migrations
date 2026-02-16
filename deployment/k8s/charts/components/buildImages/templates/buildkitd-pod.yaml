@@ -61,13 +61,25 @@ spec:
           readOnly: true
       resources:
         requests:
+{{- if and $.Values.buildkitd.resources.requests.cpu (ne (toString $.Values.buildkitd.resources.requests.cpu) "0") }}
           cpu: {{ $.Values.buildkitd.resources.requests.cpu | quote }}
+{{- end }}
+{{- if and $.Values.buildkitd.resources.requests.memory (ne (toString $.Values.buildkitd.resources.requests.memory) "0") }}
           memory: {{ $.Values.buildkitd.resources.requests.memory | quote }}
+{{- end }}
+{{- if and $.Values.buildkitd.resources.requests.ephemeralStorage (ne (toString $.Values.buildkitd.resources.requests.ephemeralStorage) "0") }}
           ephemeral-storage: {{ $.Values.buildkitd.resources.requests.ephemeralStorage | quote }}
+{{- end }}
         limits:
+{{- if and $.Values.buildkitd.resources.limits.cpu (ne (toString $.Values.buildkitd.resources.limits.cpu) "0") }}
           cpu: {{ $.Values.buildkitd.resources.limits.cpu | quote }}
+{{- end }}
+{{- if and $.Values.buildkitd.resources.limits.memory (ne (toString $.Values.buildkitd.resources.limits.memory) "0") }}
           memory: {{ $.Values.buildkitd.resources.limits.memory | quote }}
+{{- end }}
+{{- if and $.Values.buildkitd.resources.limits.ephemeralStorage (ne (toString $.Values.buildkitd.resources.limits.ephemeralStorage) "0") }}
           ephemeral-storage: {{ $.Values.buildkitd.resources.limits.ephemeralStorage | quote }}
+{{- end }}
   volumes:
     - name: buildkitd-config
       configMap:
@@ -117,13 +129,25 @@ spec:
           readOnly: true
       resources:
         requests:
+{{- if and .Values.buildkitd.resources.requests.cpu (ne (toString .Values.buildkitd.resources.requests.cpu) "0") }}
           cpu: {{ .Values.buildkitd.resources.requests.cpu | quote }}
+{{- end }}
+{{- if and .Values.buildkitd.resources.requests.memory (ne (toString .Values.buildkitd.resources.requests.memory) "0") }}
           memory: {{ .Values.buildkitd.resources.requests.memory | quote }}
+{{- end }}
+{{- if and .Values.buildkitd.resources.requests.ephemeralStorage (ne (toString .Values.buildkitd.resources.requests.ephemeralStorage) "0") }}
           ephemeral-storage: {{ .Values.buildkitd.resources.requests.ephemeralStorage | quote }}
+{{- end }}
         limits:
+{{- if and .Values.buildkitd.resources.limits.cpu (ne (toString .Values.buildkitd.resources.limits.cpu) "0") }}
           cpu: {{ .Values.buildkitd.resources.limits.cpu | quote }}
+{{- end }}
+{{- if and .Values.buildkitd.resources.limits.memory (ne (toString .Values.buildkitd.resources.limits.memory) "0") }}
           memory: {{ .Values.buildkitd.resources.limits.memory | quote }}
+{{- end }}
+{{- if and .Values.buildkitd.resources.limits.ephemeralStorage (ne (toString .Values.buildkitd.resources.limits.ephemeralStorage) "0") }}
           ephemeral-storage: {{ .Values.buildkitd.resources.limits.ephemeralStorage | quote }}
+{{- end }}
   volumes:
     - name: buildkitd-config
       configMap:
