@@ -1200,6 +1200,130 @@ metadata:
         "inputs": {
           "parameters": [
             {
+              "name": "claimName",
+            },
+          ],
+        },
+        "name": "deletes3csipvc",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found",
+          ],
+          "manifest": "apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: "{{=inputs.parameters.claimName+'-s3-snapshot'}}"
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "volumeName",
+            },
+          ],
+        },
+        "name": "deletes3csipv",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found",
+          ],
+          "manifest": "apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: "{{=inputs.parameters.volumeName+'-s3-snapshot'}}"
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sessionName",
+            },
+            {
+              "name": "s3RepoPathUri",
+            },
+            {
+              "name": "s3Region",
+            },
+            {
+              "name": "s3Endpoint",
+            },
+          ],
+        },
+        "name": "creates3csipv",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "create",
+          "manifest": "apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: "{{=inputs.parameters.sessionName+'-s3-snapshot'}}"
+spec:
+  capacity:
+    storage: 1200Gi
+  accessModes:
+    - ReadOnlyMany
+  mountOptions:
+    - --read-only
+    - "{{='--region '+inputs.parameters.s3Region}}"
+    - "{{=((0 == len(sprig.regexReplaceAll('^s3://[^/]+/?', inputs.parameters.s3RepoPathUri, ''))) ? ('--read-only') : ('--prefix '+sprig.regexReplaceAll('^s3://[^/]+/?', inputs.parameters.s3RepoPathUri, '')+'/'))}}"
+    - "{{=((0 == len(inputs.parameters.s3Endpoint)) ? ('--read-only') : ('--endpoint-url '+inputs.parameters.s3Endpoint))}}"
+    - "{{=((0 == len(inputs.parameters.s3Endpoint)) ? ('--read-only') : ('--force-path-style'))}}"
+  csi:
+    driver: s3.csi.aws.com
+    volumeHandle: "{{=inputs.parameters.sessionName+'-s3-snapshot'}}"
+    volumeAttributes:
+      bucketName: "{{=sprig.regexReplaceAll('^s3://([^/]+).*$', inputs.parameters.s3RepoPathUri, '\${1}')}}"
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sessionName",
+            },
+          ],
+        },
+        "name": "creates3csipvc",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "create",
+          "manifest": "apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: "{{=inputs.parameters.sessionName+'-s3-snapshot'}}"
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 1200Gi
+  volumeName: "{{=inputs.parameters.sessionName+'-s3-snapshot'}}"
+",
+          "setOwnerReference": true,
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
               "name": "configContents",
             },
             {
@@ -1446,15 +1570,6 @@ END {
               "name": "resources",
             },
             {
-              "name": "s3RepoPathUri",
-            },
-            {
-              "name": "s3Region",
-            },
-            {
-              "name": "s3Endpoint",
-            },
-            {
               "name": "sourceK8sLabel",
             },
             {
@@ -1475,12 +1590,6 @@ END {
             },
             {
               "name": "imageReindexFromSnapshotPullPolicy",
-            },
-            {
-              "name": "imageMountpointS3Location",
-            },
-            {
-              "name": "imageMountpointS3PullPolicy",
             },
           ],
         },
@@ -1575,39 +1684,19 @@ spec:
               readOnly: true
             - name: snapshot-s3
               mountPath: /mnt/s3
-              mountPropagation: HostToContainer
               readOnly: true
             - name: localstack-test-creds
               mountPath: /config/credentials
               readOnly: true
-        - name: mountpoint-s3
-          image: "{{inputs.parameters.imageMountpointS3Location}}"
-          imagePullPolicy: "{{inputs.parameters.imageMountpointS3PullPolicy}}"
-          command:
-            - /bin/sh
-            - -c
-          args:
-            - export PATH="/mountpoint-s3/bin:$PATH"; BUCKET=$(echo "$S3_REPO_PATH_URI" | sed 's|^s3://||' | cut -d/ -f1); PREFIX=$(echo "$S3_REPO_PATH_URI" | sed "s|^s3://$BUCKET/\\\\?||"); ARGS="$BUCKET /mnt/s3 --read-only --foreground"; [ -n "$PREFIX" ] && ARGS="$ARGS --prefix $PREFIX/"; [ -n "$S3_REGION" ] && ARGS="$ARGS --region $S3_REGION"; [ -n "$S3_ENDPOINT" ] && ARGS="$ARGS --endpoint-url $S3_ENDPOINT"; exec mount-s3 $ARGS
-          env:
-            - name: S3_REPO_PATH_URI
-              value: "{{inputs.parameters.s3RepoPathUri}}"
-            - name: S3_REGION
-              value: "{{inputs.parameters.s3Region}}"
-            - name: S3_ENDPOINT
-              value: "{{inputs.parameters.s3Endpoint}}"
-          securityContext:
-            privileged: true
-          volumeMounts:
-            - name: snapshot-s3
-              mountPath: /mnt/s3
-              mountPropagation: Bidirectional
       volumes:
         - name: log4j-configuration
           configMap:
             name: "{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}"
             optional: {{=!(!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)))}}
         - name: snapshot-s3
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: "{{=inputs.parameters.sessionName+'-s3-snapshot'}}"
+            readOnly: true
         - name: localstack-test-creds
           configMap:
             name: localstack-test-creds
@@ -1649,12 +1738,6 @@ spec:
             {
               "name": "imageReindexFromSnapshotPullPolicy",
             },
-            {
-              "name": "imageMountpointS3Location",
-            },
-            {
-              "name": "imageMountpointS3PullPolicy",
-            },
           ],
         },
         "name": "starthistoricalbackfillfromconfig",
@@ -1671,20 +1754,52 @@ spec:
                     "value": "{{inputs.parameters.sessionName}}",
                   },
                   {
+                    "name": "s3RepoPathUri",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri']}}",
+                  },
+                  {
+                    "name": "s3Region",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion']}}",
+                  },
+                  {
+                    "name": "s3Endpoint",
+                    "value": "{{=sprig.dig('repoConfig', 'endpoint', '', fromJSON(inputs.parameters.snapshotConfig))}}",
+                  },
+                ],
+              },
+              "name": "createS3CsiPv",
+              "template": "creates3csipv",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}",
+                  },
+                ],
+              },
+              "name": "createS3CsiPvc",
+              "template": "creates3csipvc",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}",
+                  },
+                  {
                     "name": "imageReindexFromSnapshotLocation",
                     "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}",
                   },
                   {
                     "name": "imageReindexFromSnapshotPullPolicy",
                     "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
-                  },
-                  {
-                    "name": "imageMountpointS3Location",
-                    "value": "{{inputs.parameters.imageMountpointS3Location}}",
-                  },
-                  {
-                    "name": "imageMountpointS3PullPolicy",
-                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}",
                   },
                   {
                     "name": "podReplicas",
@@ -1713,18 +1828,6 @@ spec:
                   {
                     "name": "resources",
                     "value": "{{=toJSON(jsonpath(inputs.parameters.documentBackfillConfig, '$.resources'))}}",
-                  },
-                  {
-                    "name": "s3RepoPathUri",
-                    "value": "{{=fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri']}}",
-                  },
-                  {
-                    "name": "s3Region",
-                    "value": "{{=fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion']}}",
-                  },
-                  {
-                    "name": "s3Endpoint",
-                    "value": "{{=sprig.dig('repoConfig', 'endpoint', '', fromJSON(inputs.parameters.snapshotConfig))}}",
                   },
                   {
                     "name": "sourceK8sLabel",
@@ -1788,12 +1891,6 @@ spec:
               "name": "imageReindexFromSnapshotPullPolicy",
             },
             {
-              "name": "imageMountpointS3Location",
-            },
-            {
-              "name": "imageMountpointS3PullPolicy",
-            },
-            {
               "name": "imageMigrationConsoleLocation",
             },
             {
@@ -1849,14 +1946,6 @@ spec:
                   {
                     "name": "imageReindexFromSnapshotPullPolicy",
                     "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
-                  },
-                  {
-                    "name": "imageMountpointS3Location",
-                    "value": "{{inputs.parameters.imageMountpointS3Location}}",
-                  },
-                  {
-                    "name": "imageMountpointS3PullPolicy",
-                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}",
                   },
                 ],
               },
@@ -1945,6 +2034,34 @@ spec:
               "template": "stophistoricalbackfill",
             },
           ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "claimName",
+                    "value": "{{inputs.parameters.sessionName}}",
+                  },
+                ],
+              },
+              "name": "deleteS3CsiPvc",
+              "template": "deletes3csipvc",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "volumeName",
+                    "value": "{{inputs.parameters.sessionName}}",
+                  },
+                ],
+              },
+              "name": "deleteS3CsiPv",
+              "template": "deletes3csipv",
+            },
+          ],
         ],
       },
       {
@@ -1992,12 +2109,6 @@ spec:
             },
             {
               "name": "imageReindexFromSnapshotPullPolicy",
-            },
-            {
-              "name": "imageMountpointS3Location",
-            },
-            {
-              "name": "imageMountpointS3PullPolicy",
             },
             {
               "name": "imageMigrationConsoleLocation",
@@ -2073,14 +2184,6 @@ spec:
                   {
                     "name": "imageReindexFromSnapshotPullPolicy",
                     "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
-                  },
-                  {
-                    "name": "imageMountpointS3Location",
-                    "value": "{{inputs.parameters.imageMountpointS3Location}}",
-                  },
-                  {
-                    "name": "imageMountpointS3PullPolicy",
-                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}",
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -2272,12 +2375,6 @@ exports[`test workflow template renderings full-migration 1`] = `
             {
               "name": "imageMigrationConsolePullPolicy",
             },
-            {
-              "name": "imageMountpointS3Location",
-            },
-            {
-              "name": "imageMountpointS3PullPolicy",
-            },
           ],
         },
         "name": "migratefromsnapshot",
@@ -2365,14 +2462,6 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
                   },
                   {
-                    "name": "imageMountpointS3Location",
-                    "value": "{{inputs.parameters.imageMountpointS3Location}}",
-                  },
-                  {
-                    "name": "imageMountpointS3PullPolicy",
-                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}",
-                  },
-                  {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
                   },
@@ -2452,12 +2541,6 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
             {
               "name": "imageMigrationConsolePullPolicy",
-            },
-            {
-              "name": "imageMountpointS3Location",
-            },
-            {
-              "name": "imageMountpointS3PullPolicy",
             },
           ],
         },
@@ -2556,14 +2639,6 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
-                    "name": "imageMountpointS3Location",
-                    "value": "{{inputs.parameters.imageMountpointS3Location}}",
-                  },
-                  {
-                    "name": "imageMountpointS3PullPolicy",
-                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}",
-                  },
-                  {
                     "name": "label",
                     "value": "{{=jsonpath(toJSON(item), '$.label')}}",
                   },
@@ -2644,12 +2719,6 @@ exports[`test workflow template renderings full-migration 1`] = `
             {
               "name": "imageMigrationConsolePullPolicy",
             },
-            {
-              "name": "imageMountpointS3Location",
-            },
-            {
-              "name": "imageMountpointS3PullPolicy",
-            },
           ],
         },
         "name": "migration",
@@ -2704,14 +2773,6 @@ exports[`test workflow template renderings full-migration 1`] = `
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "imageMountpointS3Location",
-                    "value": "{{inputs.parameters.imageMountpointS3Location}}",
-                  },
-                  {
-                    "name": "imageMountpointS3PullPolicy",
-                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}",
                   },
                   {
                     "name": "createSnapshotConfig",
@@ -2833,26 +2894,6 @@ exports[`test workflow template renderings full-migration 1`] = `
                 },
               },
             },
-            {
-              "name": "imageMountpointS3Location",
-              "valueFrom": {
-                "configMapKeyRef": {
-                  "key": "mountpointS3Image",
-                  "name": "{{workflow.parameters.imageConfigMapName}}",
-                  "optional": undefined,
-                },
-              },
-            },
-            {
-              "name": "imageMountpointS3PullPolicy",
-              "valueFrom": {
-                "configMapKeyRef": {
-                  "key": "mountpointS3PullPolicy",
-                  "name": "{{workflow.parameters.imageConfigMapName}}",
-                  "optional": undefined,
-                },
-              },
-            },
           ],
         },
         "name": "main",
@@ -2899,14 +2940,6 @@ exports[`test workflow template renderings full-migration 1`] = `
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "imageMountpointS3Location",
-                    "value": "{{inputs.parameters.imageMountpointS3Location}}",
-                  },
-                  {
-                    "name": "imageMountpointS3PullPolicy",
-                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}",
                   },
                   {
                     "name": "sourceConfig",
