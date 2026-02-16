@@ -31,6 +31,9 @@ images:
 charts:
   kyverno:
     values:
+      features:
+        forceFailurePolicyIgnore:
+          enabled: true
       cleanupJobs:
         admissionReports:
           image:

@@ -81,7 +81,10 @@ uninstall_charts() {
         kubectl delete validatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found
 
         echo "Uninstalling kyverno last..."
-        helm uninstall kyverno -n $NAMESPACE --debug
+        timeout 300 helm uninstall kyverno -n $NAMESPACE --debug || {
+          echo "Kyverno uninstall timed out, force-cleaning remaining resources..."
+          kubectl delete all -l app.kubernetes.io/instance=kyverno -n $NAMESPACE --force --grace-period=0 || true
+        }
 
         echo "Cleaning up kyverno CRDs..."
         kubectl delete crd -l app.kubernetes.io/instance=kyverno --ignore-not-found
