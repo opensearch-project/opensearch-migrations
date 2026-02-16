@@ -1,7 +1,9 @@
 package org.opensearch.migrations.commands;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -53,7 +55,12 @@ public abstract class MigratorEvaluatorBase {
     }
 
     protected Transformers getCustomTransformer(Version sourceVersion, Version targetVersion) {
-        var versionSpecificCustomTransforms = MetadataTransformationRegistry.getCustomTransformationByClusterVersions(sourceVersion, targetVersion);
+        return getCustomTransformer(sourceVersion, targetVersion, Collections.emptyMap());
+    }
+
+    protected Transformers getCustomTransformer(Version sourceVersion, Version targetVersion, Map<String, String> modelMappings) {
+        var versionSpecificCustomTransforms = MetadataTransformationRegistry.getCustomTransformationByClusterVersions(
+            sourceVersion, targetVersion, modelMappings);
         var transformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.metadataCustomTransformationParams);
         if (transformerConfig != null) {
             MetadataTransformationRegistry.logTransformerConfig("User supplied custom transform", transformerConfig);
@@ -76,13 +83,17 @@ public abstract class MigratorEvaluatorBase {
     }
 
     protected Transformers selectTransformer(Clusters clusters, int awarenessAttributes, boolean allowLooseVersionMatches) {
+        return selectTransformer(clusters, awarenessAttributes, allowLooseVersionMatches, Collections.emptyMap());
+    }
+
+    protected Transformers selectTransformer(Clusters clusters, int awarenessAttributes, boolean allowLooseVersionMatches, Map<String, String> modelMappings) {
         var mapper = new TransformerMapper(clusters.getSource().getVersion(), clusters.getTarget().getVersion());
         var versionTransformer = mapper.getTransformer(
                 awarenessAttributes,
                 arguments.metadataTransformationParams,
                 allowLooseVersionMatches
         );
-        var customTransformer = getCustomTransformer(clusters.getSource().getVersion(), clusters.getTarget().getVersion());
+        var customTransformer = getCustomTransformer(clusters.getSource().getVersion(), clusters.getTarget().getVersion(), modelMappings);
         log.atInfo().setMessage("Selected transformer composite: custom = {}, version = {}")
                 .addArgument(customTransformer.getClass().getSimpleName())
                 .addArgument(versionTransformer.getClass().getSimpleName())
@@ -99,6 +110,10 @@ public abstract class MigratorEvaluatorBase {
 
     protected Transformers selectTransformer(Clusters clusters) {
         return selectTransformer(clusters, arguments.clusterAwarenessAttributes, arguments.versionStrictness.allowLooseVersionMatches);
+    }
+
+    protected Transformers selectTransformer(Clusters clusters, Map<String, String> modelMappings) {
+        return selectTransformer(clusters, arguments.clusterAwarenessAttributes, arguments.versionStrictness.allowLooseVersionMatches, modelMappings);
     }
 
     protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {

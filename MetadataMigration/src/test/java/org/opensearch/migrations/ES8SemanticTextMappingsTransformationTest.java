@@ -103,14 +103,16 @@ class ES8SemanticTextMappingsTransformationTest extends BaseMigrationTest {
             .filter(t -> t.getName().contains("semantic_text"))
             .findAny();
         Assertions.assertTrue(semanticTransformation.isPresent());
-        Assertions.assertEquals("semantic_text to text", semanticTransformation.get().getName());
+        Assertions.assertEquals("semantic_text to semantic", semanticTransformation.get().getName());
 
         // Verify that the transformed index exists on the target cluster
         var res = targetOperations.get("/" + indexName);
         assertThat(res.getKey(), equalTo(200));
         assertThat(res.getValue(), containsString(indexName));
-        // Verify semantic_text was converted to text
+        // Verify semantic_text was converted to semantic with renamed properties
         assertThat(res.getValue(), not(containsString("semantic_text")));
         assertThat(res.getValue(), not(containsString("inference_id")));
+        assertThat(res.getValue(), not(containsString("search_inference_id")));
+        assertThat(res.getValue(), not(containsString("model_settings")));
     }
 }

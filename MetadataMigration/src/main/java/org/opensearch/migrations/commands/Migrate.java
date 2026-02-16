@@ -1,5 +1,9 @@
 package org.opensearch.migrations.commands;
 
+import java.util.Collections;
+import java.util.Map;
+
+import org.opensearch.migrations.InferenceEndpointMigrator;
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
@@ -24,7 +28,10 @@ public class Migrate extends MigratorEvaluatorBase {
             var clusters = createClusters();
             migrateResult.clusters(clusters);
 
-            var transformer = selectTransformer(clusters);
+            // Migrate inference endpoints if source host is available
+            Map<String, String> modelMappings = migrateInferenceEndpoints();
+
+            var transformer = selectTransformer(clusters, modelMappings);
             migrateResult.transformations(transformer);
 
             var items = migrateAllItems(migrationMode, clusters, transformer.getTransformer(), context);
@@ -43,5 +50,17 @@ public class Migrate extends MigratorEvaluatorBase {
         }
 
         return migrateResult.build();
+    }
+
+    private Map<String, String> migrateInferenceEndpoints() {
+        var sourceHost = arguments.sourceArgs.host;
+        var targetHost = arguments.targetArgs.host;
+        if (sourceHost == null || sourceHost.isEmpty()) {
+            log.info("No source host provided, skipping inference endpoint migration");
+            return Collections.emptyMap();
+        }
+        log.info("Migrating inference endpoints from {} to {}", sourceHost, targetHost);
+        var migrator = new InferenceEndpointMigrator(sourceHost, targetHost);
+        return migrator.migrateInferenceEndpoints();
     }
 }
