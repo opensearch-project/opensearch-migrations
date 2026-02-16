@@ -3,19 +3,25 @@ uninstall_charts() {
   # Accepts space-separated list of releases to skip
   local RELEASES_TO_SKIP=("$@")
 
-  # Check if kyverno was explicitly skipped by caller
-  local UNINSTALL_KYVERNO=true
-  for CANDIDATE in "${RELEASES_TO_SKIP[@]}"; do
-    if [ "$CANDIDATE" = "kyverno" ]; then
-      UNINSTALL_KYVERNO=false
-      break
+  # Track which uninstallLast charts should be deferred to synchronous uninstall at end
+  local UNINSTALL_LAST=()
+{{- range $name, $chart := .Values.charts }}
+  {{- if $chart.uninstallLast }}
+  {
+    local ALREADY_SKIPPED=false
+    for CANDIDATE in "${RELEASES_TO_SKIP[@]}"; do
+      if [ "$CANDIDATE" = "{{ $name }}" ]; then
+        ALREADY_SKIPPED=true
+        break
+      fi
+    done
+    if [ "$ALREADY_SKIPPED" = "false" ]; then
+      UNINSTALL_LAST+=("{{ $name }}")
+      RELEASES_TO_SKIP+=("{{ $name }}")
     fi
-  done
-
-  # Always skip kyverno in parallel uninstall - handled synchronously at end if needed
-  if [ "$UNINSTALL_KYVERNO" = "true" ]; then
-    RELEASES_TO_SKIP+=("kyverno")
-  fi
+  }
+  {{- end }}
+{{- end }}
 
   echo "Starting Helm uninstallation sequence..."
   UMBRELLA_CHART_ID="{{ .Release.Name }}"
@@ -71,26 +77,37 @@ uninstall_charts() {
   wait
   echo "Uninstallation sequence completed!"
 
-  # Uninstall kyverno last (synchronously) to avoid webhook issues
-  if [ "$UNINSTALL_KYVERNO" = "true" ]; then
-    for NAMESPACE in $NAMESPACES; do
-      OWNERSHIP=$(helm get values kyverno -n $NAMESPACE -o json 2>/dev/null | jq -r '.global.managedBy // empty')
-      if [ "$OWNERSHIP" = "$UMBRELLA_CHART_ID" ]; then
-        echo "Deleting kyverno webhook configurations to prevent chicken-and-egg issues..."
-        kubectl delete mutatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found
-        kubectl delete validatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found
+  # Uninstall deferred charts synchronously (uninstallLast)
+{{- range $name, $chart := .Values.charts }}
+  {{- if $chart.uninstallLast }}
+  for CANDIDATE in "${UNINSTALL_LAST[@]}"; do
+    if [ "$CANDIDATE" = "{{ $name }}" ]; then
+      for NAMESPACE in $NAMESPACES; do
+        OWNERSHIP=$(helm get values {{ $name }} -n $NAMESPACE -o json 2>/dev/null | jq -r '.global.managedBy // empty')
+        if [ "$OWNERSHIP" = "$UMBRELLA_CHART_ID" ]; then
+    {{- if and $chart.preUninstallCleanup $chart.preUninstallCleanup.webhooks }}
+          echo "Deleting {{ $name }} webhook configurations..."
+          kubectl delete mutatingwebhookconfigurations -l app.kubernetes.io/instance={{ $name }} --ignore-not-found
+          kubectl delete validatingwebhookconfigurations -l app.kubernetes.io/instance={{ $name }} --ignore-not-found
+    {{- end }}
 
-        echo "Uninstalling kyverno last..."
-        timeout 60 helm uninstall kyverno -n $NAMESPACE --debug || {
-          echo "Kyverno uninstall timed out, force-cleaning remaining resources..."
-          kubectl delete all -l app.kubernetes.io/instance=kyverno -n $NAMESPACE --force --grace-period=0 || true
-        }
+          echo "Uninstalling {{ $name }} last..."
+          timeout {{ default 60 $chart.uninstallTimeout }} helm uninstall {{ $name }} -n $NAMESPACE --debug || {
+            echo "{{ $name }} uninstall timed out, force-cleaning remaining resources..."
+            kubectl delete all -l app.kubernetes.io/instance={{ $name }} -n $NAMESPACE --force --grace-period=0 || true
+          }
 
-        echo "Cleaning up kyverno CRDs..."
-        kubectl delete crd -l app.kubernetes.io/instance=kyverno --ignore-not-found
-        break
-      fi
-    done
-  fi
+    {{- if and $chart.postUninstallCleanup $chart.postUninstallCleanup.crds }}
+          echo "Cleaning up {{ $name }} CRDs..."
+          kubectl delete crd -l app.kubernetes.io/instance={{ $name }} --ignore-not-found
+    {{- end }}
+          break
+        fi
+      done
+      break
+    fi
+  done
+  {{- end }}
+{{- end }}
 }
 {{- end }}

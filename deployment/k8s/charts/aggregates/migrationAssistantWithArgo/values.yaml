@@ -358,6 +358,7 @@ charts:
           name: argo-workflow-executor
 
   fluent-bit:
+    uninstallPhase: post-delete  # Defer uninstall to post-delete hook (keep logging active during pre-delete)
     version: "0.49.0"
     repository: "https://fluent.github.io/helm-charts"
     values:
@@ -621,6 +622,14 @@ charts:
         enabled: false
 
   kyverno:
+    installFirst: true           # Install before all other charts (webhooks must be ready)
+    uninstallLast: true          # Uninstall after all other charts, synchronously
+    namespaceOwnership: true     # Set ownerReference on namespace to release namespace
+    uninstallTimeout: 60         # Timeout for helm uninstall (seconds), with force-cleanup fallback
+    preUninstallCleanup:
+      webhooks: true             # Delete mutating/validating webhook configs before uninstall
+    postUninstallCleanup:
+      crds: true                 # Delete CRDs after uninstall
     version: "3.5.2"
     repository: "https://kyverno.github.io/kyverno/"
     namespace: kyverno-ma

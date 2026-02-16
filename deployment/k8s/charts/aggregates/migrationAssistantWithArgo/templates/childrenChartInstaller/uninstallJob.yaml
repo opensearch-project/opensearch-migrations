@@ -34,8 +34,8 @@ spec:
               set -e
 
               {{ include "migration.helmUninstallFunctions" . | nindent 14 }}
-              # Skip fluent-bit (logging); kyverno handled at end of uninstall_charts
-              uninstall_charts fluent-bit
+              # Skip charts deferred to post-delete phase
+              uninstall_charts {{ range $name, $chart := .Values.charts }}{{ if eq (toString ($chart.uninstallPhase | default "pre-delete")) "post-delete" }}{{ $name }} {{ end }}{{ end }}
 
 ---
 apiVersion: batch/v1
@@ -74,5 +74,5 @@ spec:
               set -e
 
               {{ include "migration.helmUninstallFunctions" . | nindent 14 }}
-              # Kyverno already uninstalled in pre-delete hook
-              uninstall_charts kyverno
+              # Only uninstall charts deferred from pre-delete; skip everything else
+              uninstall_charts {{ range $name, $chart := .Values.charts }}{{ if ne (toString ($chart.uninstallPhase | default "pre-delete")) "post-delete" }}{{ $name }} {{ end }}{{ end }}

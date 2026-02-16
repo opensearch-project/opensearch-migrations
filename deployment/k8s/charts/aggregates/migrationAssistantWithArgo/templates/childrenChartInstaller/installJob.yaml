@@ -77,30 +77,27 @@ spec:
                 return 1
               }
 
-              # Install Kyverno first and wait for it to be fully ready before other charts
-              # This prevents race conditions where Kyverno's webhook intercepts other chart
-              # installations before Kyverno's admission controller is ready
-      {{- if (index $.Values.conditionalPackageInstalls "kyverno") }}
-        {{- $kyvernoChart := index .Values.charts "kyverno" }}
-        {{- if $kyvernoChart }}
-              echo "Installing Kyverno first (must be ready before other charts)..."
-              {{- include "migration.installChart" (dict "name" "kyverno" "chart" $kyvernoChart "root" $ "forceWait" true) | nindent 14 }}
-              echo "Kyverno installed and ready"
+              # Install charts marked installFirst synchronously before all others
+      {{- range $name, $chart := .Values.charts }}
+        {{- if and (index $.Values.conditionalPackageInstalls $name) $chart.installFirst }}
+              echo "Installing {{ $name }} first (must be ready before other charts)..."
+              {{- include "migration.installChart" (dict "name" $name "chart" $chart "root" $ "forceWait" true) | nindent 14 }}
+              echo "{{ $name }} installed and ready"
 
-              # Set ownerReference on kyverno namespace so it gets cascade-deleted with the release namespace
-              {{- if ne ($kyvernoChart.namespace | default $.Release.Namespace) $.Release.Namespace }}
-              echo "Setting {{ $kyvernoChart.namespace }} namespace ownership to {{ $.Release.Namespace }}..."
-              MA_NS_UID=$(kubectl get namespace {{ $.Release.Namespace }} -o jsonpath='{.metadata.uid}')
-              kubectl patch namespace {{ $kyvernoChart.namespace }} --type=merge -p \
-                "{\"metadata\":{\"ownerReferences\":[{\"apiVersion\":\"v1\",\"kind\":\"Namespace\",\"name\":\"{{ $.Release.Namespace }}\",\"uid\":\"$MA_NS_UID\"}]}}"
+              # Set ownerReference on namespace so it gets cascade-deleted with the release namespace
+              {{- if and $chart.namespaceOwnership (ne ($chart.namespace | default $.Release.Namespace) $.Release.Namespace) }}
+              echo "Setting {{ $chart.namespace }} namespace ownership to {{ $.Release.Namespace }}..."
+              PARENT_NS_UID=$(kubectl get namespace {{ $.Release.Namespace }} -o jsonpath='{.metadata.uid}')
+              kubectl patch namespace {{ $chart.namespace }} --type=merge -p \
+                "{\"metadata\":{\"ownerReferences\":[{\"apiVersion\":\"v1\",\"kind\":\"Namespace\",\"name\":\"{{ $.Release.Namespace }}\",\"uid\":\"$PARENT_NS_UID\"}]}}"
               {{- end }}
         {{- end }}
       {{- end }}
 
-              # Install charts
+              # Install remaining charts in parallel
       {{- range $name, $chart := .Values.charts }}
-        {{- if eq $name "kyverno" }}
-              echo "Skipping kyverno in main loop (already installed)"
+        {{- if $chart.installFirst }}
+              echo "Skipping {{ $name }} in main loop (already installed)"
         {{- else if (not (index $.Values.conditionalPackageInstalls $name)) }}
               echo "Skipping install for: {{ $name }} because conditionalPackageInstalls.{{ $name }} disabled it."
         {{- else }}
