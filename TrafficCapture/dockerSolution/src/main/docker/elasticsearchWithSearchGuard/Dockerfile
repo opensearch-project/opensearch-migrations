@@ -18,8 +18,10 @@ ENV ELASTIC_SEARCH_JVM_CONFIG_FILE=/usr/share/elasticsearch/config/jvm.options
 
 # Deduplicate YAML keys: Search Guard demo config duplicates settings from the custom image
 # (cluster.name, network.host, discovery.type, etc). Keep first occurrence of each key.
+# Also remove cluster.initial_master_nodes — conflicts with discovery.type=single-node
 RUN awk -F: '/^[a-zA-Z]/ && NF>1 {if(seen[$1]++) next} 1' $ELASTIC_SEARCH_CONFIG_FILE > /tmp/es.yml && \
-    mv /tmp/es.yml $ELASTIC_SEARCH_CONFIG_FILE
+    mv /tmp/es.yml $ELASTIC_SEARCH_CONFIG_FILE && \
+    sed -i '/^cluster\.initial_master_nodes/d' $ELASTIC_SEARCH_CONFIG_FILE
 
 RUN bin/elasticsearch-plugin install --batch repository-s3
 RUN  bin/elasticsearch-keystore create --silent && \

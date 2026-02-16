@@ -37,7 +37,7 @@ versions.each { minor, info ->
             def dest = outputFile.get().asFile
             dest.parentFile.mkdirs()
             if (!dest.exists()) {
-                ant.get(src: url, dest: dest)
+                ant.get(src: url, dest: dest, retries: 3)
             }
         }
     }

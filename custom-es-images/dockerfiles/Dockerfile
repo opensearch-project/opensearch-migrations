@@ -60,7 +60,7 @@ RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
     MINOR=$(echo "${ES_VERSION}" | cut -d. -f2) && \
     mkdir -p /tmp/config /tmp/scripts && \
     # Base config
-    printf 'cluster.name: docker-cluster\nnode.name: es-node\npath.repo: /tmp/es-snapshots\n' > /tmp/config/elasticsearch.yml && \
+    printf 'cluster.name: docker-cluster\nnode.name: es-node\npath.repo: /tmp/snapshots\n' > /tmp/config/elasticsearch.yml && \
     # Network and discovery
     if [ "$MAJOR" -le 2 ]; then \
       printf 'network.host: 0.0.0.0\ndiscovery.zen.minimum_master_nodes: 1\n' >> /tmp/config/elasticsearch.yml; \
@@ -104,7 +104,7 @@ ENV ES_HOME=/usr/share/elasticsearch \
 RUN apk add --no-cache bash coreutils curl && \
     addgroup -g 1000 elasticsearch && \
     adduser -u 1000 -G elasticsearch -h ${ES_HOME} -D elasticsearch && \
-    mkdir -p /tmp/es-snapshots && chown 1000:1000 /tmp/es-snapshots
+    mkdir -p /tmp/snapshots && chown 1000:1000 /tmp/snapshots
 
 COPY --from=downloader --chown=1000:1000 /opt/elasticsearch ${ES_HOME}
 COPY --from=cgroup-fixer /opt/fix/libcgroup_fix.so* /usr/local/lib/
