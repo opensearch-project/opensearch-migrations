@@ -68,6 +68,11 @@ dockerFilesForExternalServices.each { dockerImageName, projectName ->
     }
 }
 
+// elasticsearch_searchguard Dockerfile uses FROM custom-elasticsearch:7.10.2
+tasks.named('buildDockerImage_elasticsearch_searchguard') {
+    dependsOn ':custom-es-images:buildImage_7_10'
+}
+
 static TaskProvider<Sync> getMigrationConsoleSyncTask(Project project, String dockerImageName, String projectName, List<Project> libraries, List<Project> applications, Map sourceDirectoryOverrides, boolean dependOnBaseImage) {
     def destDir = "build/docker/${dockerImageName}_${projectName}"
     def taskName = "syncArtifact_${dockerImageName}_${projectName}"

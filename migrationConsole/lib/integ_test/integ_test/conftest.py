@@ -43,6 +43,8 @@ def pytest_addoption(parser):
                      help="Specify the Migration ALB endpoint for the source capture proxy")
     parser.addoption("--target_proxy_alb_endpoint", action="store", default=None,
                      help="Specify the Migration ALB endpoint for the target proxy")
+    parser.addoption("--image_registry_prefix", action="store", default="",
+                     help="Registry prefix for custom ES cluster images (e.g. 'localhost:5000/')")
 
 
 def pytest_configure(config):
@@ -68,8 +70,10 @@ def pytest_generate_tests(metafunc):
         metafunc.config.test_summary["source_version"] = source_version
         metafunc.config.test_summary["target_version"] = target_version
         test_ids_list = metafunc.config.getoption("test_ids")
+        image_registry_prefix = metafunc.config.getoption("image_registry_prefix")
         user_args = MATestUserArguments(source_version=source_version, target_version=target_version,
-                                        unique_id=unique_id, reuse_clusters=reuse_clusters)
+                                        unique_id=unique_id, reuse_clusters=reuse_clusters,
+                                        image_registry_prefix=image_registry_prefix)
         test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list)
         metafunc.parametrize("test_case", test_cases_param)
 

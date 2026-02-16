@@ -473,6 +473,7 @@ gradle.projectsEvaluated {
     }
 
     tasks.register("allTests") {
+        dependsOn ':custom-es-images:buildCoreTestImages'
         dependsOn sharedProcessTestsTasks
         dependsOn isolatedTestsTasks
     }

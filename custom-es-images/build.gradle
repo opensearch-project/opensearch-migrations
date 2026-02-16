@@ -85,6 +85,15 @@ tasks.register('buildAll') {
     }
 }
 
+// Core test images — versions used in SupportedClusters.sources() + K8s workflows
+tasks.register('buildCoreTestImages') {
+    group = 'docker'
+    description = 'Build ES images needed for core integration tests'
+    dependsOn 'buildImage_8_19', 'buildImage_7_17', 'buildImage_7_10',
+              'buildImage_6_8', 'buildImage_5_6', 'buildImage_2_4',
+              'buildImage_1_7', 'buildImage_1_5'
+}
+
 // Registry push tasks — opt-in via -PpushVersions=7.10,7.17
 if (!pushVersionsList.isEmpty()) {
     def publishedUrl = rootProject.findProperty('registryEndpoint') ?: 'localhost:5001'

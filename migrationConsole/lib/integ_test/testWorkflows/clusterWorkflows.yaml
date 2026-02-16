@@ -11,6 +11,8 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
         image: dtzar/helm-kubectl:3.18.6
         command: [ sh, -c ]
@@ -82,7 +84,7 @@ spec:
                     fsGroup: 1000
                   initContainers:
                     - name: install-s3-plugin
-                      image: custom-elasticsearch:1.5.2
+                      image: {{inputs.parameters.image-registry-prefix}}custom-elasticsearch:1.5.2
                       command: ["sh","-c"]
                       args:
                         - |
@@ -113,7 +115,7 @@ spec:
                         runAsNonRoot: true
                   containers:
                     - name: elasticsearch
-                      image: custom-elasticsearch:1.5.2
+                      image: {{inputs.parameters.image-registry-prefix}}custom-elasticsearch:1.5.2
                       imagePullPolicy: IfNotPresent
                       env:
                         - name: ES_HEAP_SIZE
@@ -228,6 +230,8 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
         image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
@@ -298,7 +302,7 @@ spec:
                     fsGroup: 1000
                   initContainers:
                     - name: install-s3-plugin
-                      image: custom-elasticsearch:2.4.6
+                      image: {{inputs.parameters.image-registry-prefix}}custom-elasticsearch:2.4.6
                       command: ["sh","-c"]
                       args:
                         - /usr/share/elasticsearch/bin/plugin install cloud-aws
@@ -311,7 +315,7 @@ spec:
                         runAsNonRoot: true
                   containers:
                     - name: elasticsearch
-                      image: custom-elasticsearch:2.4.6
+                      image: {{inputs.parameters.image-registry-prefix}}custom-elasticsearch:2.4.6
                       imagePullPolicy: IfNotPresent
                       env:
                         - name: ES_HEAP_SIZE
@@ -423,6 +427,8 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
         image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
@@ -445,7 +451,7 @@ spec:
             # Create Helm values file for ES 5.6.16
             cat > /tmp/es-values.yaml << 'EOF'
             fullnameOverride: {{inputs.parameters.cluster-name}}
-            image: "custom-elasticsearch"
+            image: "{{inputs.parameters.image-registry-prefix}}custom-elasticsearch"
             imageTag: "5.6.16"
             antiAffinity: "soft"
             esJavaOpts: "-Xms2g -Xmx2g"
@@ -473,7 +479,7 @@ spec:
             
             extraInitContainers:
               - name: install-s3-plugin
-                image: custom-elasticsearch:5.6.16
+                image: {{inputs.parameters.image-registry-prefix}}custom-elasticsearch:5.6.16
                 command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
                 volumeMounts:
                   - name: plugins
@@ -523,6 +529,8 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
         image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
@@ -544,7 +552,7 @@ spec:
             # Create Helm values file for ES 6.8.23 with OSS image and disabled readiness probe
             cat > /tmp/es-values.yaml << 'EOF'
             fullnameOverride: {{inputs.parameters.cluster-name}}
-            image: "custom-elasticsearch"
+            image: "{{inputs.parameters.image-registry-prefix}}custom-elasticsearch"
             imageTag: "6.8.23"
             antiAffinity: "soft"
             esJavaOpts: "-Xms2g -Xmx2g -XX:UseAVX=0 -Dcom.amazonaws.sdk.disableMBeans=true"
@@ -586,13 +594,13 @@ spec:
             
             extraInitContainers:
               - name: install-s3-plugin
-                image: custom-elasticsearch:6.8.23
+                image: {{inputs.parameters.image-registry-prefix}}custom-elasticsearch:6.8.23
                 command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
                 volumeMounts:
                   - name: plugins
                     mountPath: /usr/share/elasticsearch/plugins
               - name: inject-aws-creds
-                image: custom-elasticsearch:6.8.23
+                image: {{inputs.parameters.image-registry-prefix}}custom-elasticsearch:6.8.23
                 command:
                   - sh
                   - -c
@@ -661,6 +669,8 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
         image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
@@ -677,7 +687,7 @@ spec:
             
             cat > /tmp/es-values.yaml << 'EOF'
             fullnameOverride: {{inputs.parameters.cluster-name}}
-            image: "custom-elasticsearch"
+            image: "{{inputs.parameters.image-registry-prefix}}custom-elasticsearch"
             imageTag: "7.10.2"
             antiAffinity: "soft"
             esJavaOpts: "-Xms2g -Xmx2g"
@@ -709,13 +719,13 @@ spec:
             
             extraInitContainers:
               - name: install-s3-plugin
-                image: custom-elasticsearch:7.10.2
+                image: {{inputs.parameters.image-registry-prefix}}custom-elasticsearch:7.10.2
                 command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
                 volumeMounts:
                   - name: plugins
                     mountPath: /usr/share/elasticsearch/plugins
               - name: inject-aws-creds
-                image: custom-elasticsearch:7.10.2
+                image: {{inputs.parameters.image-registry-prefix}}custom-elasticsearch:7.10.2
                 command:
                   - sh
                   - -c

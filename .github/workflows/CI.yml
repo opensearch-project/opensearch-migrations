@@ -219,6 +219,8 @@ jobs:
           key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
           # Only save cache on push events
           read-only: ${{ github.event_name != 'push' }}
+      - name: Build custom ES images
+        run: ./gradlew :custom-es-images:buildCoreTestImages --info
       - name: Start Docker Solution
         run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
         env:

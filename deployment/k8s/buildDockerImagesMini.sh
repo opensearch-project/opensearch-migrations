@@ -132,6 +132,7 @@ eval $(minikube docker-env)
 
 if [ "$SKIP_BUILD" = "false" ]; then
   ./gradlew :buildDockerImages -x test --info --stacktrace
+  ./gradlew :custom-es-images:buildCoreTestImages --info --stacktrace
 fi
 
 # Push images to minikube registry addon
@@ -142,6 +143,14 @@ for image in $(docker images --format "{{.Repository}}:{{.Tag}}" | grep "^migrat
   docker tag "$image" "localhost:5000/$image_name:latest"
   docker push "localhost:5000/$image_name:latest"
   echo "✅  Pushed $image_name"
+done
+
+# Push custom ES images to minikube registry
+echo "📦  Pushing custom ES images to minikube registry"
+for image in $(docker images --format "{{.Repository}}:{{.Tag}}" | grep "^custom-elasticsearch:"); do
+  docker tag "$image" "localhost:5000/$image"
+  docker push "localhost:5000/$image"
+  echo "✅  Pushed $image"
 done
 
 if [ "$SYNC_ECR" = "true" ]; then
