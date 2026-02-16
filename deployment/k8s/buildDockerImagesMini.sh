@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Build Docker images using BuildKit and push directly to an in-cluster registry.
+# This mirrors the aws-bootstrap.sh --build-images-locally code path.
+
 set -e
 
 sync_ecr_repo() {
@@ -113,49 +116,28 @@ cd "$script_dir_abs_path" || exit
 
 cd ../.. || exit
 
-# Check if registry addon is enabled, enable it if not
-if ! minikube addons list | grep -q "registry.*enabled"; then
-  echo "⚠️  Minikube registry addon not enabled. Enabling it now..."
-  minikube addons enable registry
-  echo "✅  Registry addon enabled"
-  
-  # Wait for registry pod to be ready
-  # Note: The 'actual-registry=true' label is set by Minikube's registry addon to distinguish
-  # the actual registry pod from the registry proxy/daemonset pods
-  echo "⏳  Waiting for registry pod to be ready..."
-  kubectl wait --for=condition=ready pod -l actual-registry=true -n kube-system --timeout=120s || \
-    kubectl wait --for=condition=ready pod -l kubernetes.io/minikube-addons=registry -n kube-system --timeout=120s || \
-    echo "⚠️  Could not verify registry pod readiness, proceeding anyway..."
-fi
-
-eval $(minikube docker-env)
-
 if [ "$SKIP_BUILD" = "false" ]; then
-  ./gradlew :buildDockerImages -x test --info --stacktrace
-fi
+  # Set up BuildKit builder and local registry in k8s
+  # Same code path as aws-bootstrap.sh --build-images-locally and localTesting.sh
+  export USE_LOCAL_REGISTRY=true
+  ./buildImages/setUpK8sImageBuildServices.sh
 
-# Push images to minikube registry addon in parallel
-# Inside minikube's docker context, registry is at localhost:5000
-echo "📦  Pushing images to minikube registry"
-pids=()
-for image in $(docker images --format "{{.Repository}}:{{.Tag}}" | grep "^migrations.*:latest$"); do
-  image_name=$(echo "$image" | sed 's/:latest$//')
-  docker tag "$image" "localhost:5000/$image_name:latest"
-  docker push "localhost:5000/$image_name:latest" &
-  pids+=($!)
-done
+  ARCH=$(uname -m)
+  case "$ARCH" in
+    x86_64) PLATFORM="amd64" ;;
+    arm64|aarch64) PLATFORM="arm64" ;;
+    *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+  esac
 
-failed=0
-for pid in "${pids[@]}"; do
-  if ! wait "$pid"; then
-    failed=1
-  fi
-done
-if [ "$failed" -ne 0 ]; then
-  echo "❌  Some image pushes failed"
-  exit 1
+  # Build images directly to registry via BuildKit (no separate push step needed)
+  ./gradlew :buildImages:buildImagesToRegistry_$PLATFORM -x test --info --stacktrace
+
+  # Clean up BuildKit to free resources for test workloads
+  echo "🧹  Cleaning up BuildKit resources..."
+  docker buildx rm local-remote-builder 2>/dev/null || true
+  helm uninstall buildkit -n buildkit 2>/dev/null || true
+  echo "✅  BuildKit cleaned up, docker-registry preserved for tests"
 fi
-echo "✅  All images pushed"
 
 if [ "$SYNC_ECR" = "true" ]; then
   sync_ecr_repo
