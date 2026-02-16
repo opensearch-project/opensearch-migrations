@@ -221,7 +221,11 @@ export const CreateSnapshot = WorkflowBuilder.create({
 
             .addStep("patchDataSnapshot", ResourceManagement, "patchDataSnapshotReady", c =>
                 c.register({
-                    resourceName: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
+                    resourceName: expr.concat(
+                        expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
+                        expr.literal("-"),
+                        expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
+                    ),
                     snapshotName: expr.jsonPathStrict(b.inputs.snapshotConfig, "snapshotName")
                 }))
         )

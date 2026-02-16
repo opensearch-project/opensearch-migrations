@@ -128,6 +128,10 @@ export class MigrationInitializer {
         };
     }
 
+    private makeCrdName(...labels: string[]): string {
+        return labels.join('-');
+    }
+
     private generateCRDResources(workflows: ARGO_WORKFLOW_SCHEMA) {
         const CRD_API_VERSION = 'migrations.opensearch.org/v1alpha1';
         const items: any[] = [];
@@ -149,7 +153,7 @@ export class MigrationInitializer {
                 items.push({
                     apiVersion: CRD_API_VERSION,
                     kind: 'DataSnapshot',
-                    metadata: { name: item.label },
+                    metadata: { name: this.makeCrdName(snapshot.sourceConfig.label, item.label) },
                     spec: {},
                     status: { phase: 'Initialized' }
                 });
@@ -161,7 +165,7 @@ export class MigrationInitializer {
             items.push({
                 apiVersion: CRD_API_VERSION,
                 kind: 'SnapshotMigration',
-                metadata: { name: migration.label },
+                metadata: { name: this.makeCrdName(migration.sourceLabel, migration.targetConfig.label, migration.label) },
                 spec: {},
                 status: { phase: 'Initialized' }
             });

@@ -36,7 +36,7 @@ echo "Applying Kubernetes resources..."
 # Apply CRD resources
 if [ -f "$TEMP_DIR/crdResources.yaml" ]; then
     echo "Applying CRD resources..."
-    kubectl delete -f "$TEMP_DIR/crdResources.yaml"
+    kubectl delete -f "$TEMP_DIR/crdResources.yaml" --ignore-not-found
     kubectl apply -f "$TEMP_DIR/crdResources.yaml"
 fi
 

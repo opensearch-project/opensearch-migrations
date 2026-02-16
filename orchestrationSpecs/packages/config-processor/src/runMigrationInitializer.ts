@@ -62,6 +62,10 @@ export async function main() {
             workflowConfigFile = args[++i];
         } else if (arg === '--output-dir' && i + 1 < args.length) {
             outputDir = args[++i];
+        } else {
+            console.error('Error: unknown arg: `' + arg + '`.');
+            process.stderr.write(COMMAND_LINE_HELP_MESSAGE);
+            process.exit(5);
         }
     }
 

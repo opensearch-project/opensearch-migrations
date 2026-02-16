@@ -268,8 +268,8 @@ export const FullMigration = WorkflowBuilder.create({
 
 
     .addTemplate("runSingleSnapshotMigration", t => t
-        .addRequiredInput("snapshotMigrationConfig",
-            typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
+        .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
+        .addRequiredInput("resourceName", typeToken<string>())
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
@@ -335,9 +335,7 @@ export const FullMigration = WorkflowBuilder.create({
                 }
             )
             .addTask("patchSnapshotMigration", ResourceManagement, "patchSnapshotMigrationReady", c =>
-                c.register({
-                    resourceName: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "label")
-                }),
+                c.register({...selectInputsForRegister(b, c)}),
                 { dependencies: ["migrateFromSnapshot"] as const }
             )
         )
@@ -420,6 +418,14 @@ export const FullMigration = WorkflowBuilder.create({
             .addTask("runSnapshotMigrations", INTERNAL, "runSingleSnapshotMigration", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
+                    resourceName: expr.concat(
+                        expr.get(c.item, "sourceLabel"),
+                        expr.literal("-"),
+                        expr.jsonPathStrict(expr.get(c.item, "targetConfig"), "label"),
+                        // expr.get(expr.get(c.item, "targetConfig"), "label"),
+                        expr.literal("-"),
+                        expr.get(c.item, "label")
+                    ),
                     snapshotMigrationConfig: expr.serialize(c.item)
                 }), {
                     loopWith: makeParameterLoop(
