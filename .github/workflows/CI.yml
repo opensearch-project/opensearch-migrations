@@ -82,6 +82,12 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
 
+      # Build custom ES images needed by console_link tests
+      - name: Build custom ES images
+        if: matrix.py-project == 'migrationConsole/lib/console_link'
+        working-directory: .
+        run: ./gradlew :custom-es-images:buildImage_5_6 :custom-es-images:buildImage_6_8 :custom-es-images:buildImage_7_10 --info
+
       # Set up Kind cluster for workflow integration tests (only for console_link project)
       - name: Set up Kind cluster
         if: matrix.py-project == 'migrationConsole/lib/console_link'
@@ -220,7 +226,7 @@ jobs:
           # Only save cache on push events
           read-only: ${{ github.event_name != 'push' }}
       - name: Build custom ES images
-        run: ./gradlew :custom-es-images:buildCoreTestImages --info
+        run: ./gradlew :custom-es-images:buildImage_7_10 --info
       - name: Start Docker Solution
         run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
         env:

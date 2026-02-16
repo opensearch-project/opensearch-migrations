@@ -132,7 +132,7 @@ eval $(minikube docker-env)
 
 if [ "$SKIP_BUILD" = "false" ]; then
   ./gradlew :buildDockerImages -x test --info --stacktrace
-  ./gradlew :custom-es-images:buildCoreTestImages --info --stacktrace
+  ./gradlew :custom-es-images:buildAll --info --stacktrace
 fi
 
 # Push images to minikube registry addon

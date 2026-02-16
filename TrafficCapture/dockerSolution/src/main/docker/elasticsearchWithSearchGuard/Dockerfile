@@ -1,8 +1,13 @@
 FROM custom-elasticsearch:7.10.2
 
+# Alpine needs bash for Search Guard's install_demo_configuration.sh
+USER root
+RUN apk add --no-cache bash
+USER 1000
+
 RUN echo y | /usr/share/elasticsearch/bin/elasticsearch-plugin install https://maven.search-guard.com/search-guard-suite-release/com/floragunn/search-guard-suite-plugin/7.10.2-53.5.0/search-guard-suite-plugin-7.10.2-53.5.0.zip
 # add search-guard, which provides TLS, as well as other features that we don't need to consider
-RUN pushd /usr/share/elasticsearch/plugins/search-guard-7/tools ; chmod ugo+x ./install_demo_configuration.sh ; yes | ./install_demo_configuration.sh ; popd
+RUN cd /usr/share/elasticsearch/plugins/search-guard-7/tools && chmod ugo+x ./install_demo_configuration.sh && yes | ./install_demo_configuration.sh
 ENV ELASTIC_SEARCH_CONFIG_FILE=/usr/share/elasticsearch/config/elasticsearch.yml
 ENV PROXY_TLS_CONFIG_FILE=/usr/share/elasticsearch/config/proxy_tls.yml
 ENV ELASTIC_SEARCH_JVM_CONFIG_FILE=/usr/share/elasticsearch/config/jvm.options
