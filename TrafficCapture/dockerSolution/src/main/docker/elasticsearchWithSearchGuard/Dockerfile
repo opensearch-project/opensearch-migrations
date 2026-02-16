@@ -11,22 +11,21 @@ RUN echo y | /usr/share/elasticsearch/bin/elasticsearch-plugin install https://m
 # add search-guard, which provides TLS, as well as other features that we don't need to consider
 RUN chmod ugo+x /usr/share/elasticsearch/plugins/search-guard-7/tools/install_demo_configuration.sh && \
     yes | /usr/share/elasticsearch/plugins/search-guard-7/tools/install_demo_configuration.sh
-# Search Guard demo config duplicates keys already in the custom image's elasticsearch.yml
-RUN awk -F: '/^[a-zA-Z]/ && NF>1 {if(seen[$1]++) next} 1' /usr/share/elasticsearch/config/elasticsearch.yml > /tmp/es.yml && \
-    mv /tmp/es.yml /usr/share/elasticsearch/config/elasticsearch.yml
 
 ENV ELASTIC_SEARCH_CONFIG_FILE=/usr/share/elasticsearch/config/elasticsearch.yml
 ENV PROXY_TLS_CONFIG_FILE=/usr/share/elasticsearch/config/proxy_tls.yml
 ENV ELASTIC_SEARCH_JVM_CONFIG_FILE=/usr/share/elasticsearch/config/jvm.options
+
+# Deduplicate YAML keys: Search Guard demo config duplicates settings from the custom image
+# (cluster.name, network.host, discovery.type, etc). Keep first occurrence of each key.
+RUN awk -F: '/^[a-zA-Z]/ && NF>1 {if(seen[$1]++) next} 1' $ELASTIC_SEARCH_CONFIG_FILE > /tmp/es.yml && \
+    mv /tmp/es.yml $ELASTIC_SEARCH_CONFIG_FILE
 
 RUN bin/elasticsearch-plugin install --batch repository-s3
 RUN  bin/elasticsearch-keystore create --silent && \
      echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key && \
      echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key && \
      echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.session_token
-
-# without this line, elasticsearch will complain that there aren't enough nodes
-RUN echo "discovery.type: single-node" >> $ELASTIC_SEARCH_CONFIG_FILE
 
 # Copy TLS config scripts to accessible location
 USER root
