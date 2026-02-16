@@ -273,8 +273,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
-        .addDag(b => b
-            .addTask("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c =>
+        .addSteps(b => b
+            .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: expr.getLoose(
@@ -288,7 +288,7 @@ export const FullMigration = WorkflowBuilder.create({
                         "dataSnapshotResourceName") }
                 }
             )
-            .addTask("readSnapshotName", ResourceManagement, "readDataSnapshotName", c =>
+            .addStep("readSnapshotName", ResourceManagement, "readDataSnapshotName", c =>
                 c.register({
                     resourceName: expr.getLoose(
                         expr.deserializeRecord(
@@ -298,17 +298,16 @@ export const FullMigration = WorkflowBuilder.create({
                     when: { templateExp: expr.hasKey(
                         expr.deserializeRecord(
                             expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotNameResolution")),
-                        "dataSnapshotResourceName") },
-                    dependencies: ["waitForSnapshot"] as const
+                        "dataSnapshotResourceName") }
                 }
             )
-            .addTask("migrateFromSnapshot", INTERNAL, "migrateFromSnapshot", c => {
+            .addStep("migrateFromSnapshot", INTERNAL, "migrateFromSnapshot", c => {
                     const snapshotNameResolution = expr.deserializeRecord(
                         expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotNameResolution"));
                     const resolvedSnapshotName = expr.ternary(
                         expr.hasKey(snapshotNameResolution, "externalSnapshotName"),
                         expr.getLoose(snapshotNameResolution, "externalSnapshotName"),
-                        c.tasks.readSnapshotName.outputs.snapshotName
+                        c.steps.readSnapshotName.outputs.snapshotName
                     );
                     const snapshotRepoConfig = expr.deserializeRecord(
                         expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotConfig"));
@@ -330,13 +329,11 @@ export const FullMigration = WorkflowBuilder.create({
                     });
                 }, {
                     loopWith: makeParameterLoop(
-                        expr.get(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "migrations")),
-                    dependencies: ["readSnapshotName"] as const
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "migrations"))
                 }
             )
-            .addTask("patchSnapshotMigration", ResourceManagement, "patchSnapshotMigrationReady", c =>
-                c.register({...selectInputsForRegister(b, c)}),
-                { dependencies: ["migrateFromSnapshot"] as const }
+            .addStep("patchSnapshotMigration", ResourceManagement, "patchSnapshotMigrationReady", c =>
+                c.register({...selectInputsForRegister(b, c)})
             )
         )
     )
