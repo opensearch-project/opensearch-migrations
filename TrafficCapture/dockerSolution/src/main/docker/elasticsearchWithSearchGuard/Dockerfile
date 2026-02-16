@@ -51,4 +51,8 @@ RUN sed -i '/^-Xms/i # Increase default heap to 80% RAM, Requires JDK >= 10' $EL
     sed -i 's/^-Xmx/#&/' $ELASTIC_SEARCH_JVM_CONFIG_FILE && \
     sed -i '/^#-Xmx/s/$/\n-XX:MaxRAMPercentage=80.0/' $ELASTIC_SEARCH_JVM_CONFIG_FILE
 
+# Override healthcheck for HTTPS (SearchGuard enables TLS)
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=12 \
+  CMD curl -sf --insecure https://localhost:9200/_cluster/health || exit 1
+
 CMD []
