@@ -9,8 +9,8 @@ RUN echo y | /usr/share/elasticsearch/bin/elasticsearch-plugin install https://m
 # add search-guard, which provides TLS, as well as other features that we don't need to consider
 RUN chmod ugo+x /usr/share/elasticsearch/plugins/search-guard-7/tools/install_demo_configuration.sh && \
     yes | /usr/share/elasticsearch/plugins/search-guard-7/tools/install_demo_configuration.sh
-# Search Guard demo config appends cluster.name, duplicating the custom image's setting
-RUN awk '/^cluster\.name:/ && c++ > 0 {next} 1' /usr/share/elasticsearch/config/elasticsearch.yml > /tmp/es.yml && \
+# Search Guard demo config duplicates keys already in the custom image's elasticsearch.yml
+RUN awk -F: '/^[a-zA-Z]/ && NF>1 {if(seen[$1]++) next} 1' /usr/share/elasticsearch/config/elasticsearch.yml > /tmp/es.yml && \
     mv /tmp/es.yml /usr/share/elasticsearch/config/elasticsearch.yml
 ENV ELASTIC_SEARCH_CONFIG_FILE=/usr/share/elasticsearch/config/elasticsearch.yml
 ENV PROXY_TLS_CONFIG_FILE=/usr/share/elasticsearch/config/proxy_tls.yml
