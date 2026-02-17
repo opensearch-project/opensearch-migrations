@@ -99,17 +99,17 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     void allDocsMigratedButCoordinatorUnavailableAtCompletion() {
         var result = runCoordinatorOutageScenario(false, 0);
 
-        // (1/3) ASSERT that TARGET cluster has ALL docs from SOURCE cluster
+        // (1/4) ASSERT : Coordinator outage executed and disabled connectivity as scheduled
+        Assertions.assertTrue(result.outageInjected(), "Coordinator outage was not injected at scheduled time");
+
+        // (2/4) ASSERT that TARGET cluster has ALL docs from SOURCE cluster
         Assertions.assertEquals(result.expectedDocs(), result.finalDocs(), "All docs should be on target");
 
-        // ASSERT from COORDINATOR that at least one work item should remain incomplete
+        // (3/4) ASSERT from COORDINATOR that at least one work item should remain incomplete
         Assertions.assertTrue(result.coordinatorHasIncompleteWorkItems(),
             "Expected coordinator working state to contain incomplete work items after outage");
 
-        // (2/3) ASSERT : Coordinator outage thread executed and disabled connectivity as scheduled
-        Assertions.assertTrue(result.outageInjected(), "Coordinator outage was not injected at scheduled time");
-
-        // (3/3) ASSERT : RFS threw an exception because coordinator became unavailable during finalize path
+        // (4/4) ASSERT : RFS threw an exception because coordinator became unavailable during finalize path
         Assertions.assertNotNull(result.thrownException(),
             "Expected exception when coordinator becomes unavailable");
     }
@@ -193,12 +193,18 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
             var totalDeadlineNanos = testStartNanos + TimeUnit.SECONDS.toNanos(scenarioTimeoutSeconds);
             var outageInjected = new AtomicBoolean(false);
             var coordinatorReEnabled = new AtomicBoolean(false);
+            var outageThreadException = new AtomicReference<Throwable>();
 
-            var outageThread = new Thread(() ->
-                manageCoordinatorOutageWindow(
-                    coordinatorProxy, testStartNanos, totalDeadlineNanos, outageInjected,
-                    coordinatorReEnabled, reEnableCoordinator, reEnableAfterSeconds),
-                "rfs-coordinator-outage-scheduler");
+            var outageThread = new Thread(() -> {
+                try {
+                    manageCoordinatorOutageWindow(
+                        coordinatorProxy, testStartNanos, totalDeadlineNanos, outageInjected,
+                        coordinatorReEnabled, reEnableCoordinator, reEnableAfterSeconds);
+                } catch (Throwable t) {
+                    outageThreadException.set(t);
+                    log.atError().setCause(t).setMessage("Outage scheduler thread failed").log();
+                }
+            }, "rfs-coordinator-outage-scheduler");
             outageThread.start();
 
             // === ACTION : Run RFS in-process with separate coordinator and target connections
@@ -216,6 +222,11 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
 
             // === ACTION : Wait for outage scheduler thread to finish after RFS exits
             outageThread.join(TimeUnit.SECONDS.toMillis(reEnableCoordinator ? reEnableAfterSeconds + 10 : 5));
+            Assertions.assertFalse(outageThread.isAlive(),
+                "Outage scheduler thread did not finish. Outage may not have been injected");
+            if (outageThreadException.get() != null) {
+                Assertions.fail("Outage scheduler thread failed", outageThreadException.get());
+            }
 
             var finalDocs = getDocCountFromCluster(osTargetContainer.getUrl(), INDEX_NAME, false);
             var coordinatorHasIncompleteWorkItems = waitForCoordinatorIncompleteWorkItems(
@@ -437,7 +448,9 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
             }
             TimeUnit.MILLISECONDS.sleep(COORDINATOR_STATE_POLL_MILLIS);
         }
-        return !expectedIncomplete;
+        Assertions.fail("Timed out waiting for coordinator working state to reach expected incomplete="
+            + expectedIncomplete + " within " + COORDINATOR_STATE_OBSERVATION_TIMEOUT_SECONDS + "s");
+        return false; // unreachable
     }
 
     private static boolean hasIncompleteWorkItems(String searchBody) {
