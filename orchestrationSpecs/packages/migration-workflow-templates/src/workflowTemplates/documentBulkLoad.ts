@@ -95,24 +95,15 @@ function extractBucketName(s3RepoPathUri: BaseExpression<string>) {
 }
 
 /**
- * Extract the prefix (path after bucket) from an s3:// URI.
- * e.g. s3://my-bucket/path/to/snapshot → path/to/snapshot
- */
-function extractS3Prefix(s3RepoPathUri: BaseExpression<string>) {
-    return new FunctionExpression<string, string, ExpressionType, "complicatedExpression">(
-        "sprig.regexReplaceAll",
-        [expr.literal("^s3://[^/]+/?"), s3RepoPathUri, expr.literal("")] as any);
-}
-
-/**
  * Generate a PersistentVolume manifest for the S3 CSI driver v2.
- * Uses mountOptions to pass flags to mount-s3. Conditional options (prefix, endpoint)
+ * Uses mountOptions to pass flags to mount-s3. Conditional options (endpoint)
  * fall back to the harmless duplicate --read-only when empty.
+ * Note: We do NOT use --prefix here because snapshotLocalDir already includes the
+ * path component (e.g. /mnt/s3/suffix). Using --prefix would cause a double-prefix bug.
  */
 function getS3CsiPvManifest(args: {
     volumeName: BaseExpression<string>,
     bucketName: BaseExpression<string>,
-    s3Prefix: BaseExpression<string>,
     s3Region: BaseExpression<string>,
     s3Endpoint: BaseExpression<string>
 }) {
@@ -130,12 +121,6 @@ function getS3CsiPvManifest(args: {
             mountOptions: [
                 "--read-only",
                 makeStringTypeProxy(expr.concat(expr.literal("--region "), args.s3Region)),
-                // When prefix is empty, duplicate --read-only (harmless no-op)
-                makeStringTypeProxy(expr.ternary(
-                    expr.isEmpty(args.s3Prefix),
-                    expr.literal("--read-only"),
-                    expr.concat(expr.literal("--prefix "), args.s3Prefix, expr.literal("/"))
-                )),
                 // When endpoint is empty, duplicate --read-only (harmless no-op)
                 makeStringTypeProxy(expr.ternary(
                     expr.isEmpty(args.s3Endpoint),
@@ -475,7 +460,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 manifest: getS3CsiPvManifest({
                     volumeName: getS3VolumeName(b.inputs.sessionName),
                     bucketName: extractBucketName(b.inputs.s3RepoPathUri),
-                    s3Prefix: extractS3Prefix(b.inputs.s3RepoPathUri),
                     s3Region: b.inputs.s3Region,
                     s3Endpoint: b.inputs.s3Endpoint
                 })

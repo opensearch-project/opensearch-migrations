@@ -1,0 +1,17 @@
+{
+  "summary": {
+    "passed": 0,
+    "failed": 1,
+    "source_version": "ES_7.10",
+    "target_version": "OS_2.19"
+  },
+  "tests": [
+    {
+      "name": "Test0001SingleDocumentBackfill",
+      "description": "Performs backfill migration for a single document.",
+      "result": "failed",
+      "duration": 54.610061743005645,
+      "error": "integ_test.common_utils.ClusterAPIRequestError: Failed to receive desired status code of 200 and instead received 404 for request: GET /test_0001_vj78-20260216023644/_doc/test_0001_doc"
+    }
+  ]
+}

@@ -1279,7 +1279,6 @@ spec:
   mountOptions:
     - --read-only
     - "{{='--region '+inputs.parameters.s3Region}}"
-    - "{{=((0 == len(sprig.regexReplaceAll('^s3://[^/]+/?', inputs.parameters.s3RepoPathUri, ''))) ? ('--read-only') : ('--prefix '+sprig.regexReplaceAll('^s3://[^/]+/?', inputs.parameters.s3RepoPathUri, '')+'/'))}}"
     - "{{=((0 == len(inputs.parameters.s3Endpoint)) ? ('--read-only') : ('--endpoint-url '+inputs.parameters.s3Endpoint))}}"
     - "{{=((0 == len(inputs.parameters.s3Endpoint)) ? ('--read-only') : ('--force-path-style'))}}"
   csi:
