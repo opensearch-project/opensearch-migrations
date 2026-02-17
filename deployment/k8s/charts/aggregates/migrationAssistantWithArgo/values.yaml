@@ -57,10 +57,6 @@ images:
     repository: migrations/migration_console
     tag: latest
     pullPolicy: IfNotPresent
-  mountpointS3:
-    repository: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
-    tag: v2.3.0
-    pullPolicy: IfNotPresent
   installer:
     repository: migrations/migration_console
     tag: latest

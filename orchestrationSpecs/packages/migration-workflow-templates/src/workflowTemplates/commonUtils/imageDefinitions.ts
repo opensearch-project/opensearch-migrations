@@ -4,8 +4,7 @@ export const LogicalOciImages = [
     "CaptureProxy",
     "TrafficReplayer",
     "ReindexFromSnapshot",
-    "MigrationConsole",
-    "MountpointS3"
+    "MigrationConsole"
 ] as const;
 export type LogicalOciImagesKeys = typeof LogicalOciImages[number];
 

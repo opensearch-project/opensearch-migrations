@@ -21,11 +21,11 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {Deployment} from "@opensearch-migrations/argo-workflow-builders";
-import {makeRepoParamDict, makeMountpointRepoParamDict, S3_MOUNT_PATH} from "./metadataMigration";
+import {makeMountpointRepoParamDict, S3_MOUNT_PATH} from "./metadataMigration";
 import {
     setupLog4jConfigForContainer,
     setupTestCredsForContainer,
-    setupS3MountpointVolumeForContainer
+    setupS3CsiVolumeForContainer
 } from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
@@ -78,6 +78,9 @@ function getRfsDeploymentName(sessionName: BaseExpression<string>) {
     return expr.concat(sessionName, expr.literal("-rfs"));
 }
 
+/** Static PVC name — matches the Helm-managed PVC in s3CsiPvc.yaml */
+const S3_SNAPSHOT_PVC_NAME = "s3-snapshot";
+
 function getRfsDeploymentManifest
 (args: {
     workflowName: BaseExpression<string>,
@@ -94,12 +97,6 @@ function getRfsDeploymentManifest
     rfsImageName: BaseExpression<string>,
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
     resources: BaseExpression<ResourceRequirementsType>,
-
-    s3RepoPathUri: BaseExpression<string>,
-    s3Region: BaseExpression<string>,
-    s3Endpoint: BaseExpression<string>,
-    mountpointS3ImageName: BaseExpression<string>,
-    mountpointS3ImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
 
     sourceK8sLabel: BaseExpression<string>,
     targetK8sLabel: BaseExpression<string>,
@@ -197,13 +194,9 @@ function getRfsDeploymentManifest
 
     const finalContainerDefinition= setupTestCredsForContainer(
         args.useLocalstackAwsCreds,
-        setupS3MountpointVolumeForContainer(
+        setupS3CsiVolumeForContainer(
             S3_MOUNT_PATH,
-            args.s3RepoPathUri,
-            args.s3Region,
-            args.s3Endpoint,
-            args.mountpointS3ImageName,
-            args.mountpointS3ImagePullPolicy,
+            expr.literal(S3_SNAPSHOT_PVC_NAME),
             setupLog4jConfigForContainer(
                 useCustomLogging,
                 args.loggingConfigMap,
@@ -392,15 +385,12 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
-        .addRequiredInput("s3RepoPathUri", typeToken<string>())
-        .addRequiredInput("s3Region", typeToken<string>())
-        .addRequiredInput("s3Endpoint", typeToken<string>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("targetK8sLabel", typeToken<string>())
         .addRequiredInput("snapshotK8sLabel", typeToken<string>())
         .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
         .addOptionalInput("taskK8sLabel", c => "reindexFromSnapshot")
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MountpointS3"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addResourceTask(b => b
             .setDefinition({
@@ -419,11 +409,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     workflowName: expr.getWorkflowValue("name"),
                     jsonConfig: expr.toBase64(b.inputs.rfsJsonConfig),
                     resources: expr.deserializeRecord(b.inputs.resources),
-                    s3RepoPathUri: b.inputs.s3RepoPathUri,
-                    s3Region: b.inputs.s3Region,
-                    s3Endpoint: b.inputs.s3Endpoint,
-                    mountpointS3ImageName: b.inputs.imageMountpointS3Location,
-                    mountpointS3ImagePullPolicy: b.inputs.imageMountpointS3PullPolicy,
                     sourceK8sLabel: b.inputs.sourceK8sLabel,
                     targetK8sLabel: b.inputs.targetK8sLabel,
                     snapshotK8sLabel: b.inputs.snapshotK8sLabel,
@@ -443,7 +428,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("rfsCoordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MountpointS3"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addSteps(b => b
             .addStep("startHistoricalBackfill", INTERNAL, "startHistoricalBackfill", c =>
@@ -464,9 +449,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             b.inputs.sessionName)
                     )),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),
-                    s3RepoPathUri: expr.get(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "s3RepoPathUri"),
-                    s3Region: expr.get(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "awsRegion"),
-                    s3Endpoint: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "endpoint"], ""),
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
@@ -487,7 +469,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addOptionalInput("indices", c => [] as readonly string[])
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MountpointS3", "MigrationConsole"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
 
         .addSteps(b => b
             .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
@@ -531,7 +513,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addOptionalInput("indices", c => [] as readonly string[])
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MountpointS3", "MigrationConsole"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
 
         .addSteps(b => {
             const createRfsCluster = shouldCreateRfsWorkCoordinationCluster(b.inputs.documentBackfillConfig);
