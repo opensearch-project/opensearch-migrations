@@ -110,9 +110,10 @@ ENV ES_HOME=/usr/share/elasticsearch \
     ES_VERSION=${ES_VERSION}
 
 # Install minimal runtime deps — bash for ES scripts, curl for healthcheck
+# gcompat + libstdc++: ES 8.x ships glibc-compiled native libs (libzstd.so, libvec.so)
 # Detect package manager to support both Alpine (apk) and AL2023 (dnf)
 RUN if command -v apk >/dev/null 2>&1; then \
-      apk add --no-cache bash coreutils curl && \
+      apk add --no-cache bash coreutils curl gcompat libstdc++ && \
       addgroup -g 1000 elasticsearch && \
       adduser -u 1000 -G elasticsearch -h ${ES_HOME} -D elasticsearch; \
     else \
