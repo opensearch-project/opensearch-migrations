@@ -332,9 +332,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 .addArgument(context)
                 .log();
         } else {
+            var rawResponse = summary.getRawResponse();
             log.atInfo().setMessage("Request completed successfully for {} with status {}")
                 .addArgument(context)
-                .addArgument(() -> summary.getRawResponse().status().code())
+                .addArgument(() -> rawResponse != null ? rawResponse.status().code() : "N/A")
                 .log();
             successfulRequestCount.incrementAndGet();
         }
