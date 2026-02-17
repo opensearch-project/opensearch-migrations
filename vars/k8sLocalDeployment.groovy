@@ -107,8 +107,14 @@ def call(Map config = [:]) {
                             sh """
                                 helm repo add aws-mountpoint-s3-csi-driver https://awslabs.github.io/mountpoint-s3-csi-driver 2>/dev/null || true
                                 helm repo update aws-mountpoint-s3-csi-driver
+                                kubectl create secret generic aws-secret \
+                                    --namespace kube-system \
+                                    --from-literal=key_id=test \
+                                    --from-literal=access_key=test \
+                                    --dry-run=client -o yaml | kubectl apply -f -
                                 helm upgrade --install aws-mountpoint-s3-csi-driver aws-mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver \
-                                    --namespace kube-system
+                                    --namespace kube-system \
+                                    --set node.tolerateAllTaints=true
                             """
                         }
                     }
