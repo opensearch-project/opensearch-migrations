@@ -1,0 +1,17 @@
+{
+  "userPromptSubmit": [
+    {
+      "command": "{ echo \"=== $(date -Iseconds) USER ===\"; cat; echo; } >> .kiro/audit.log"
+    }
+  ],
+  "preToolUse": [
+    {
+      "command": "{ echo \"=== $(date -Iseconds) TOOL ===\"; cat; echo; } >> .kiro/audit.log"
+    }
+  ],
+  "postToolUse": [
+    {
+      "command": "{ echo \"=== $(date -Iseconds) RESULT ===\"; cat; echo; } >> .kiro/audit.log"
+    }
+  ]
+}
