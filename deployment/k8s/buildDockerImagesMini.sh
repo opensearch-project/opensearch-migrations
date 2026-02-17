@@ -132,7 +132,8 @@ eval $(minikube docker-env)
 
 if [ "$SKIP_BUILD" = "false" ]; then
   ./gradlew :buildDockerImages -x test --info --stacktrace
-  ./gradlew :custom-es-images:buildAll --info --stacktrace
+  # Only build the ES versions used in K8s tests (not all 67)
+  ./gradlew :custom-es-images:buildImage_1_5 :custom-es-images:buildImage_2_4 :custom-es-images:buildImage_5_6 :custom-es-images:buildImage_6_8 :custom-es-images:buildImage_7_10 --info --stacktrace
 fi
 
 # Push images to minikube registry addon
