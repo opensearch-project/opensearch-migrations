@@ -106,6 +106,13 @@ def call(Map config = [:]) {
                         script {
                             sh "kubectl config use-context minikube"
                             sh """
+                                # Delete kyverno webhooks first — they can block namespace deletion
+                                kubectl delete mutatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found || true
+                                kubectl delete validatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found || true
+
+                                # Delete kyverno's separate namespace (if it exists from a previous run)
+                                kubectl delete namespace kyverno-ma --ignore-not-found --grace-period=0 || true
+
                                 timeout 60 kubectl delete namespace ma --ignore-not-found || {
                                     echo "Namespace delete timed out, forcing cleanup..."
                                     kubectl get all -A

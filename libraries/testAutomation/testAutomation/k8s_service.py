@@ -239,9 +239,15 @@ class K8sService:
 
     def delete_namespace(self) -> None:
         logger.info(f"Deleting namespace '{self.namespace}'")
-        # Delete webhooks first to prevent them blocking namespace deletion
+        # Delete kyverno webhooks first — they can block API calls during cleanup
+        self.delete_kyverno_webhooks()
+        # Delete webhooks referencing our namespace
         self.delete_webhooks_referencing_namespace()
-        # Delete namespace
+        # Delete kyverno's separate namespace if it exists (ownerReference cascade
+        # may not complete in time when the parent namespace is force-deleted)
+        self.run_command(["kubectl", "delete", "namespace", "kyverno-ma",
+                         "--ignore-not-found", "--grace-period=0"], ignore_errors=True)
+        # Delete main namespace
         self.run_command(["kubectl", "delete", "namespace", self.namespace,
                          "--ignore-not-found", "--grace-period=0", "--force"])
         # Wait for pods to fully terminate before deleting webhooks again
@@ -249,6 +255,14 @@ class K8sService:
         self.wait_for_pods_terminated()
         # Delete webhooks again in case they were recreated during pod termination
         self.delete_webhooks_referencing_namespace()
+
+    def delete_kyverno_webhooks(self) -> None:
+        """Delete all kyverno-labeled webhook configurations."""
+        for webhook_type in ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]:
+            self.run_command(
+                ["kubectl", "delete", webhook_type, "-l", "app.kubernetes.io/instance=kyverno", "--ignore-not-found"],
+                ignore_errors=True
+            )
 
     def check_helm_release_exists(self, release_name: str) -> bool:
         logger.info(f"Checking if {release_name} is already deployed in '{self.namespace}' namespace")
