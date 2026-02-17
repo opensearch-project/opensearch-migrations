@@ -68,11 +68,8 @@ RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
     mkdir -p /tmp/config /tmp/scripts && \
     # Base config
     printf 'cluster.name: docker-cluster\nnode.name: es-node\npath.repo: /tmp/snapshots\n' > /tmp/config/elasticsearch.yml && \
-    # Disk watermark settings — disable disk-based allocation decisions for CI/test
-    printf 'cluster.routing.allocation.disk.watermark.low: 100%%\ncluster.routing.allocation.disk.watermark.high: 100%%\n' >> /tmp/config/elasticsearch.yml && \
-    if [ "$MAJOR" -ge 6 ]; then \
-      printf 'cluster.routing.allocation.disk.watermark.flood_stage: 100%%\n' >> /tmp/config/elasticsearch.yml; \
-    fi && \
+    # Disable disk-based allocation decisions entirely for CI/test
+    printf 'cluster.routing.allocation.disk.threshold_enabled: false\n' >> /tmp/config/elasticsearch.yml && \
     # Network and discovery
     if [ "$MAJOR" -le 2 ]; then \
       printf 'network.host: 0.0.0.0\ndiscovery.zen.minimum_master_nodes: 1\n' >> /tmp/config/elasticsearch.yml; \
