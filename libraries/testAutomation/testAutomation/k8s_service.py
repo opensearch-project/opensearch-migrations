@@ -250,6 +250,19 @@ class K8sService:
         # Delete webhooks again in case they were recreated during pod termination
         self.delete_webhooks_referencing_namespace()
 
+    def get_kyverno_webhooks(self) -> list:
+        """Return names of any remaining kyverno-labeled webhook configurations."""
+        webhooks = []
+        for webhook_type in ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]:
+            result = self.run_command(
+                ["kubectl", "get", webhook_type, "-l", "app.kubernetes.io/instance=kyverno",
+                 "-o", "jsonpath={.items[*].metadata.name}"],
+                ignore_errors=True
+            )
+            if result and result.stdout.strip():
+                webhooks.extend(result.stdout.strip().split())
+        return webhooks
+
     def check_helm_release_exists(self, release_name: str) -> bool:
         logger.info(f"Checking if {release_name} is already deployed in '{self.namespace}' namespace")
         check_command = ["helm", "status", release_name, "-n", self.namespace]

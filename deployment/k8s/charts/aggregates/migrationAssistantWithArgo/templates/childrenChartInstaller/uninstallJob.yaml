@@ -34,10 +34,14 @@ spec:
               set -e
 
               {{ include "migration.helmUninstallFunctions" . | nindent 14 }}
-              # Skip fluent-bit (logging); kyverno handled at end of uninstall_charts
+              # Phase 1: Uninstall all charts except fluent-bit (kept for logging) and kyverno (uninstalled last).
+              # See _uninstallHelper.tpl for the full uninstall strategy documentation.
               uninstall_charts fluent-bit
 
 ---
+# Phase 2: Post-delete job to clean up charts that were intentionally kept alive during Phase 1.
+# Runs after Helm deletes the umbrella chart's own resources. The service account and RBAC
+# survive because they are hook resources (delete-policy: before-hook-creation), not chart resources.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -74,4 +78,6 @@ spec:
               set -e
 
               {{ include "migration.helmUninstallFunctions" . | nindent 14 }}
+              # Phase 2: Uninstall remaining charts (fluent-bit etc.) that were kept active during Phase 1.
+              # Charts already removed in Phase 1 are safely skipped (discovery-based, ownership-checked).
               uninstall_charts
