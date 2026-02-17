@@ -14,7 +14,7 @@ FROM amazonlinux:2023 AS downloader
 ARG ES_VERSION
 ARG TARBALL_FILE
 
-COPY build/tarballs/${TARBALL_FILE} /tmp/es.tar.gz
+COPY ${TARBALL_FILE} /tmp/es.tar.gz
 
 RUN dnf install -y tar gzip findutils && \
     mkdir -p /opt/elasticsearch && \

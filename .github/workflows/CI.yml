@@ -152,6 +152,11 @@ jobs:
         with:
           gradle-cache-enabled: true
           gradle-cache-read-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift
+          sudo docker system prune -af
+          df -h
       - name: Restore Docker Cache
         uses: AndreKurait/docker-cache@0.6.0
         with:

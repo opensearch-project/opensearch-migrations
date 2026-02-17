@@ -54,7 +54,8 @@ versions.each { minor, info ->
         }
     }
 
-    // Local docker build
+    // Local docker build — uses tarball dir as context (not project root)
+    // to avoid sending all tarballs (~10GB) as context for each build
     tasks.register("buildImage_${safeName}", Exec) {
         group = 'docker'
         description = "Build ${imagePrefix}:${version}"
@@ -64,18 +65,21 @@ versions.each { minor, info ->
         inputs.property('version', version)
         def corretto = correttoVersion(minor)
         def useGlibc = needsGlibc(minor)
-        def args = ['docker', 'build',
-                '--build-arg', "CORRETTO_VERSION=${corretto}",
-                '--build-arg', "ES_VERSION=${version}",
-                '--build-arg', "TARBALL_FILE=${filename}"]
-        if (useGlibc) {
-            args += ['--build-arg', "BASE_IMAGE=amazoncorretto:${corretto}-al2023",
-                     '--build-arg', 'CGROUP_FIXER_BASE=amazonlinux:2023']
+        def dockerfilePath = file('dockerfiles/Dockerfile').absolutePath
+        doFirst {
+            def args = ['docker', 'build',
+                    '--build-arg', "CORRETTO_VERSION=${corretto}",
+                    '--build-arg', "ES_VERSION=${version}",
+                    '--build-arg', "TARBALL_FILE=${filename}",
+                    '-f', dockerfilePath]
+            if (useGlibc) {
+                args += ['--build-arg', "BASE_IMAGE=amazoncorretto:${corretto}-al2023",
+                         '--build-arg', 'CGROUP_FIXER_BASE=amazonlinux:2023']
+            }
+            args += ['-t', "${imagePrefix}:${version}",
+                     tarballDir.get().asFile.absolutePath]
+            commandLine args
         }
-        args += ['-f', 'dockerfiles/Dockerfile',
-                 '-t', "${imagePrefix}:${version}",
-                 '.']
-        commandLine args
     }
 }
 
@@ -137,29 +141,32 @@ if (!pushVersionsList.isEmpty()) {
             dependsOn "downloadTarball_${safeName}"
             def corretto = correttoVersion(minor)
             def useGlibc = needsGlibc(minor)
-            def buildArgs = [
-                    "docker buildx build",
-                    "--platform linux/amd64",
-                    "--builder ${builder}",
-                    "-f dockerfiles/Dockerfile",
-                    "--build-arg CORRETTO_VERSION=${corretto}",
-                    "--build-arg ES_VERSION=${version}",
-                    "--build-arg TARBALL_FILE=${filename}",
-            ]
-            if (useGlibc) {
-                buildArgs += [
-                    "--build-arg BASE_IMAGE=amazoncorretto:${corretto}-al2023",
-                    "--build-arg CGROUP_FIXER_BASE=amazonlinux:2023",
+            def dockerfilePath = file('dockerfiles/Dockerfile').absolutePath
+            doFirst {
+                def buildArgs = [
+                        "docker buildx build",
+                        "--platform linux/amd64",
+                        "--builder ${builder}",
+                        "-f ${dockerfilePath}",
+                        "--build-arg CORRETTO_VERSION=${corretto}",
+                        "--build-arg ES_VERSION=${version}",
+                        "--build-arg TARBALL_FILE=${filename}",
                 ]
+                if (useGlibc) {
+                    buildArgs += [
+                        "--build-arg BASE_IMAGE=amazoncorretto:${corretto}-al2023",
+                        "--build-arg CGROUP_FIXER_BASE=amazonlinux:2023",
+                    ]
+                }
+                buildArgs += [
+                        "-t ${dest}",
+                        "--push",
+                        "--cache-to=type=registry,ref=${cacheDest},mode=max",
+                        "--cache-from=type=registry,ref=${cacheDest}",
+                        tarballDir.get().asFile.absolutePath
+                ]
+                commandLine 'sh', '-c', buildArgs.join(" ")
             }
-            buildArgs += [
-                    "-t ${dest}",
-                    "--push",
-                    "--cache-to=type=registry,ref=${cacheDest},mode=max",
-                    "--cache-from=type=registry,ref=${cacheDest}",
-                    "."
-            ]
-            commandLine 'sh', '-c', buildArgs.join(" ")
         }
     }
 
