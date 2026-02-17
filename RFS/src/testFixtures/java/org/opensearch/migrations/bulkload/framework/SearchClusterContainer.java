@@ -382,7 +382,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     public void start() {
         log.info("Starting container version:" + containerVersion.version);
-        if (!isImageAvailable(containerVersion)) {
+        // Only check availability for custom-built images (not Docker Hub images like OpenSearch/ODFE)
+        if (containerVersion.imageName.startsWith("custom-elasticsearch:") && !isImageAvailable(containerVersion)) {
             org.junit.jupiter.api.Assumptions.assumeTrue(false,
                 "Skipping: Docker image not available locally: " + containerVersion.imageName);
         }
