@@ -73,4 +73,4 @@ info "Agent config ready at ${WORK_DIR}/${KIRO_DIR}"
 
 # --- 5. Start kiro-cli agent ---
 info "Starting kiro-cli with opensearch-migration agent..."
-exec kiro-cli chat --agent opensearch-migration
+exec kiro-cli chat --agent opensearch-migration --trust-all-tools "@start"
