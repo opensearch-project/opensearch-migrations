@@ -13,8 +13,6 @@ import {
     AllowLiteralOrExpression,
     BaseExpression,
     expr,
-    ExpressionType,
-    FunctionExpression,
     IMAGE_PULL_POLICY,
     INTERNAL, makeDirectTypeProxy, makeStringTypeProxy,
     selectInputsForRegister,
@@ -27,7 +25,7 @@ import {makeRepoParamDict, makeMountpointRepoParamDict, S3_MOUNT_PATH} from "./m
 import {
     setupLog4jConfigForContainer,
     setupTestCredsForContainer,
-    setupS3CsiVolumeForContainer
+    setupS3MountpointVolumeForContainer
 } from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
@@ -80,98 +78,6 @@ function getRfsDeploymentName(sessionName: BaseExpression<string>) {
     return expr.concat(sessionName, expr.literal("-rfs"));
 }
 
-function getS3VolumeName(sessionName: BaseExpression<string>) {
-    return expr.concat(sessionName, expr.literal("-s3-snapshot"));
-}
-
-/**
- * Extract the S3 bucket name from an s3:// URI.
- * e.g. s3://my-bucket/path/to/snapshot → my-bucket
- */
-function extractBucketName(s3RepoPathUri: BaseExpression<string>) {
-    return new FunctionExpression<string, string, ExpressionType, "complicatedExpression">(
-        "sprig.regexReplaceAll",
-        [expr.literal("^s3://([^/]+).*$"), s3RepoPathUri, expr.literal("${1}")] as any);
-}
-
-/**
- * Generate a PersistentVolume manifest for the S3 CSI driver v2.
- * Uses mountOptions to pass flags to mount-s3. Conditional options (endpoint)
- * fall back to the harmless duplicate --read-only when empty.
- * Note: We do NOT use --prefix here because snapshotLocalDir already includes the
- * path component (e.g. /mnt/s3/suffix). Using --prefix would cause a double-prefix bug.
- */
-function getS3CsiPvManifest(args: {
-    volumeName: BaseExpression<string>,
-    bucketName: BaseExpression<string>,
-    s3Region: BaseExpression<string>,
-    s3Endpoint: BaseExpression<string>
-}) {
-    return {
-        apiVersion: "v1",
-        kind: "PersistentVolume",
-        metadata: {
-            name: makeStringTypeProxy(args.volumeName)
-        },
-        spec: {
-            capacity: {
-                storage: "1200Gi"
-            },
-            accessModes: ["ReadOnlyMany"],
-            mountOptions: [
-                "--read-only",
-                makeStringTypeProxy(expr.concat(expr.literal("--region "), args.s3Region)),
-                // When endpoint is empty, duplicate --read-only (harmless no-op)
-                makeStringTypeProxy(expr.ternary(
-                    expr.isEmpty(args.s3Endpoint),
-                    expr.literal("--read-only"),
-                    expr.concat(expr.literal("--endpoint-url "), args.s3Endpoint)
-                )),
-                // Non-AWS endpoints (e.g. LocalStack) need path-style addressing
-                makeStringTypeProxy(expr.ternary(
-                    expr.isEmpty(args.s3Endpoint),
-                    expr.literal("--read-only"),
-                    expr.literal("--force-path-style")
-                ))
-            ],
-            csi: {
-                driver: "s3.csi.aws.com",
-                volumeHandle: makeStringTypeProxy(args.volumeName),
-                volumeAttributes: {
-                    bucketName: makeStringTypeProxy(args.bucketName)
-                }
-            }
-        }
-    };
-}
-
-/**
- * Generate a PersistentVolumeClaim manifest bound to a specific PV.
- * Uses storageClassName: "" to prevent dynamic provisioning.
- */
-function getS3CsiPvcManifest(args: {
-    claimName: BaseExpression<string>,
-    volumeName: BaseExpression<string>
-}) {
-    return {
-        apiVersion: "v1",
-        kind: "PersistentVolumeClaim",
-        metadata: {
-            name: makeStringTypeProxy(args.claimName)
-        },
-        spec: {
-            accessModes: ["ReadOnlyMany"],
-            storageClassName: "",
-            resources: {
-                requests: {
-                    storage: "1200Gi"
-                }
-            },
-            volumeName: makeStringTypeProxy(args.volumeName)
-        }
-    };
-}
-
 function getRfsDeploymentManifest
 (args: {
     workflowName: BaseExpression<string>,
@@ -189,7 +95,11 @@ function getRfsDeploymentManifest
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
     resources: BaseExpression<ResourceRequirementsType>,
 
-    s3PvcClaimName: BaseExpression<string>,
+    s3RepoPathUri: BaseExpression<string>,
+    s3Region: BaseExpression<string>,
+    s3Endpoint: BaseExpression<string>,
+    mountpointS3ImageName: BaseExpression<string>,
+    mountpointS3ImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
 
     sourceK8sLabel: BaseExpression<string>,
     targetK8sLabel: BaseExpression<string>,
@@ -287,9 +197,13 @@ function getRfsDeploymentManifest
 
     const finalContainerDefinition= setupTestCredsForContainer(
         args.useLocalstackAwsCreds,
-        setupS3CsiVolumeForContainer(
+        setupS3MountpointVolumeForContainer(
             S3_MOUNT_PATH,
-            args.s3PvcClaimName,
+            args.s3RepoPathUri,
+            args.s3Region,
+            args.s3Endpoint,
+            args.mountpointS3ImageName,
+            args.mountpointS3ImagePullPolicy,
             setupLog4jConfigForContainer(
                 useCustomLogging,
                 args.loggingConfigMap,
@@ -421,67 +335,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             })
         ))
 
-    .addTemplate("deleteS3CsiPvc", t => t
-        .addRequiredInput("claimName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "delete", flags: ["--ignore-not-found"],
-                manifest: {
-                    "apiVersion": "v1",
-                    "kind": "PersistentVolumeClaim",
-                    "metadata": {
-                        "name": makeStringTypeProxy(getS3VolumeName(b.inputs.claimName))
-                    }
-                }
-            })
-        ))
-
-    .addTemplate("deleteS3CsiPv", t => t
-        .addRequiredInput("volumeName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "delete", flags: ["--ignore-not-found"],
-                manifest: {
-                    "apiVersion": "v1",
-                    "kind": "PersistentVolume",
-                    "metadata": {
-                        "name": makeStringTypeProxy(getS3VolumeName(b.inputs.volumeName))
-                    }
-                }
-            })
-        ))
-
-    .addTemplate("createS3CsiPv", t => t
-        .addRequiredInput("sessionName", typeToken<string>())
-        .addRequiredInput("s3RepoPathUri", typeToken<string>())
-        .addRequiredInput("s3Region", typeToken<string>())
-        .addRequiredInput("s3Endpoint", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "create",
-                manifest: getS3CsiPvManifest({
-                    volumeName: getS3VolumeName(b.inputs.sessionName),
-                    bucketName: extractBucketName(b.inputs.s3RepoPathUri),
-                    s3Region: b.inputs.s3Region,
-                    s3Endpoint: b.inputs.s3Endpoint
-                })
-            })
-        ))
-
-    .addTemplate("createS3CsiPvc", t => t
-        .addRequiredInput("sessionName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "create",
-                setOwnerReference: true,
-                manifest: getS3CsiPvcManifest({
-                    claimName: getS3VolumeName(b.inputs.sessionName),
-                    volumeName: getS3VolumeName(b.inputs.sessionName)
-                })
-            })
-        ))
-
-
     .addTemplate("waitForCompletionInternal", t => t
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
         .addRequiredInput("sessionName", typeToken<string>())
@@ -539,12 +392,15 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
+        .addRequiredInput("s3RepoPathUri", typeToken<string>())
+        .addRequiredInput("s3Region", typeToken<string>())
+        .addRequiredInput("s3Endpoint", typeToken<string>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("targetK8sLabel", typeToken<string>())
         .addRequiredInput("snapshotK8sLabel", typeToken<string>())
         .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
         .addOptionalInput("taskK8sLabel", c => "reindexFromSnapshot")
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MountpointS3"]))
 
         .addResourceTask(b => b
             .setDefinition({
@@ -563,7 +419,11 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     workflowName: expr.getWorkflowValue("name"),
                     jsonConfig: expr.toBase64(b.inputs.rfsJsonConfig),
                     resources: expr.deserializeRecord(b.inputs.resources),
-                    s3PvcClaimName: getS3VolumeName(b.inputs.sessionName),
+                    s3RepoPathUri: b.inputs.s3RepoPathUri,
+                    s3Region: b.inputs.s3Region,
+                    s3Endpoint: b.inputs.s3Endpoint,
+                    mountpointS3ImageName: b.inputs.imageMountpointS3Location,
+                    mountpointS3ImagePullPolicy: b.inputs.imageMountpointS3PullPolicy,
                     sourceK8sLabel: b.inputs.sourceK8sLabel,
                     targetK8sLabel: b.inputs.targetK8sLabel,
                     snapshotK8sLabel: b.inputs.snapshotK8sLabel,
@@ -583,22 +443,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("rfsCoordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MountpointS3"]))
 
         .addSteps(b => b
-            .addStep("createS3CsiPv", INTERNAL, "createS3CsiPv", c =>
-                c.register({
-                    sessionName: b.inputs.sessionName,
-                    s3RepoPathUri: expr.get(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "s3RepoPathUri"),
-                    s3Region: expr.get(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "awsRegion"),
-                    s3Endpoint: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "endpoint"], "")
-                })
-            )
-            .addStep("createS3CsiPvc", INTERNAL, "createS3CsiPvc", c =>
-                c.register({
-                    sessionName: b.inputs.sessionName
-                })
-            )
             .addStep("startHistoricalBackfill", INTERNAL, "startHistoricalBackfill", c =>
                 c.register({
                     ...selectInputsForRegister(b,c),
@@ -617,6 +464,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             b.inputs.sessionName)
                     )),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),
+                    s3RepoPathUri: expr.get(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "s3RepoPathUri"),
+                    s3Region: expr.get(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "awsRegion"),
+                    s3Endpoint: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "endpoint"], ""),
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
@@ -637,7 +487,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addOptionalInput("indices", c => [] as readonly string[])
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MountpointS3", "MigrationConsole"]))
 
         .addSteps(b => b
             .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
@@ -664,10 +514,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 }))
             .addStep("stopHistoricalBackfill", INTERNAL, "stopHistoricalBackfill", c =>
                 c.register({sessionName: b.inputs.sessionName}))
-            .addStep("deleteS3CsiPvc", INTERNAL, "deleteS3CsiPvc", c =>
-                c.register({claimName: b.inputs.sessionName}))
-            .addStep("deleteS3CsiPv", INTERNAL, "deleteS3CsiPv", c =>
-                c.register({volumeName: b.inputs.sessionName}))
         )
     )
 
@@ -685,7 +531,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addOptionalInput("indices", c => [] as readonly string[])
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MountpointS3", "MigrationConsole"]))
 
         .addSteps(b => {
             const createRfsCluster = shouldCreateRfsWorkCoordinationCluster(b.inputs.documentBackfillConfig);
