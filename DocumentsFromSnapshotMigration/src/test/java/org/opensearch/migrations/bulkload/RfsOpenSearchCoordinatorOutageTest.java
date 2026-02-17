@@ -1,22 +1,40 @@
 package org.opensearch.migrations.bulkload;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.CreateSnapshot;
+import org.opensearch.migrations.RfsMigrateDocuments;
+import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
+import org.opensearch.migrations.bulkload.common.DocumentReindexer;
+import org.opensearch.migrations.bulkload.common.FileSystemRepo;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
+import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
+import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
+import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
+import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
+import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
+import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
+import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
+import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.utils.FileSystemUtils;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -34,19 +52,12 @@ import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNA
 
 /**
  * Covers two coordinator-outage scenarios after data migration starts:
- * - Coordinator becomes unavailable and stays down (current expected behavior: worker exits non-zero, docs preserved)
- * - Coordinator goes down, then comes back later (currently disabled, expects worker to exit with 0)
+ * - Coordinator becomes unavailable and stays down (current behavior: exception thrown, docs preserved)
+ * - Coordinator goes down, then comes back later (currently disabled, expects clean completion)
  *
- * Test timing:
- * - Start one worker at t=0s
- * - Disable coordinator at t=30s, after lease/work is already in progress
- * - Worker continues sending docs to target, but coordinator completion updates fail
- * - Worker expected to migrate 60 docs in 60 secs
- *
- * Choosing t < 60s (t=30s) : 
- * - We want to hit finalization/checkpoint calls, not startup/lease acquisition.
- * - With 60 docs, 1 doc/bulk, 1 connection, and 1000ms target upstream latency: 
- * TARGET is expected to see the last doc being indexed at the 60sec mark
+ * Runs RFS via {@link RfsMigrateDocuments#run} with a dedicated coordinator cluster
+ * separate from the target cluster. ToxiProxy injects outages on the coordinator connection at
+ * scheduled times while the target data path remains unaffected.
  */
 @Tag("isolatedTest")
 @Slf4j
@@ -56,25 +67,27 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
 
     private static final int SHARDS = 1;
     private static final int TOTAL_DOCS = 60;
-    private static final int DOCUMENTS_PER_BULK_REQUEST = 1;
-    private static final int MAX_CONNECTIONS = 1;
+    private static final String INDEX_NAME = "geonames";
     private static final String SESSION_NAME = "rfs-coordinator-outage";
 
+    private static final Version SOURCE_VERSION = SearchClusterContainer.ES_V7_10_2.getVersion();
+    private static final Version COORDINATOR_VERSION = SearchClusterContainer.OS_V3_0_0.getVersion();
+
+    // With 1 doc/bulk, 1 connection, and 1000ms upstream latency on the target proxy,
+    // each bulk request takes ~1s round-trip, so 60 docs take ~60s to migrate.
     private static final int TARGET_PROXY_UPSTREAM_LATENCY_MILLIS = 1_000;
 
-    // Timeline controls for this single-run test:
-    // - Inject outage at +30s to hit "before worker completion" window
-    // - RUN_TIMEOUT_SECONDS bounds one RFS process execution
-    // - Additional +60s protects against CI scheduling variance
-    // Total deadline = disableAt + runTimeout + buffer = 30 + 240 + 60 = 330s
-    private static final int RUN_TIMEOUT_SECONDS = 240;
-    private static final int READER_THREAD_JOIN_MILLIS = 5_000;
-    private static final int DESTROY_GRACE_SECONDS = 10;
-
+    // Timeline:
+    //   t=0s   : RFS starts (lease acquisition, shard setup, doc migration begins)
+    //   t=30s  : Coordinator disabled — mid-migration, ~30 docs already sent
+    //   t=60s  : All 60 docs reach target, RFS tries to finalize on coordinator (fails)
+    //   t=150s : (test 2 only) Coordinator re-enabled after 120s restart window
+    //   t=330s : Hard deadline for the outage scheduler thread
     private static final int COORDINATOR_DISABLE_AFTER_SECONDS = 30;
     private static final int COORDINATOR_REENABLE_AFTER_SECONDS = 120;
-    private static final int TOTAL_TIMEOUT_SECONDS =
-        COORDINATOR_DISABLE_AFTER_SECONDS + RUN_TIMEOUT_SECONDS + 60;
+    private static final int TOTAL_TIMEOUT_SECONDS = 330;
+
+    // Polling config for checking coordinator working state after RFS completes
     private static final int COORDINATOR_STATE_OBSERVATION_TIMEOUT_SECONDS = 5;
     private static final int COORDINATOR_STATE_POLL_MILLIS = 200;
 
@@ -96,15 +109,9 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
         // (2/3) ASSERT : Coordinator outage thread executed and disabled connectivity as scheduled
         Assertions.assertTrue(result.outageInjected(), "Coordinator outage was not injected at scheduled time");
 
-        // (3/3) ASSERT : RFS process failed because coordinator became unavailable during finalize path
-        Assertions.assertNotEquals(0, result.exitCode(),
-            "Expected non-zero exit when coordinator becomes unavailable");
-
-        // ASSERT : RFS output contains retry exhaustion path
-        // Note : Currently, there is no specific status code for RFS failures due to Coordinator unavailability
-        Assertions.assertTrue(result.output().contains("RetriesExceededException")
-                || result.output().contains("Unexpected error running RfsWorker"),
-            "Expected failure signature from coordinator unavailability");
+        // (3/3) ASSERT : RFS threw an exception because coordinator became unavailable during finalize path
+        Assertions.assertNotNull(result.thrownException(),
+            "Expected exception when coordinator becomes unavailable");
     }
 
     @Test
@@ -115,18 +122,18 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
 
         // (1/5) ASSERT : Coordinator outage thread executed and disabled connectivity as scheduled
         Assertions.assertTrue(result.outageInjected(), "Coordinator outage was not injected at scheduled time");
-        
+
         // (2/5) ASSERT that COORDINATOR was RE-ENABLED as scheduled
         Assertions.assertTrue(result.coordinatorReEnabled(),
             "Coordinator was not re-enabled after long restart window");
-        
+
         // (3/5) ASSERT that TARGET cluster has ALL docs from SOURCE cluster
         Assertions.assertEquals(result.expectedDocs(), result.finalDocs(), "All docs should be on target");
 
-        // (4/5) ASSERT that RFS retries M times and waits for COORDINATOR
-        Assertions.assertEquals(0, result.exitCode(),
-            "Expected RFS to recover and exit cleanly after coordinator returns");
-        
+        // (4/5) ASSERT that RFS completed without exception
+        Assertions.assertNull(result.thrownException(),
+            "Expected RFS to recover and complete cleanly after coordinator returns");
+
         // (5/5) ASSERT that every entry in COORDINATOR State has a `completedAt` field
         Assertions.assertFalse(result.coordinatorHasIncompleteWorkItems(),
             "Expected coordinator working state to have no incomplete work items after recovery");
@@ -135,7 +142,9 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     @SneakyThrows
     private ScenarioResult runCoordinatorOutageScenario(boolean reEnableCoordinator, int reEnableAfterSeconds) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        final var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
         var tempDirSnapshot = Files.createDirectory(tempRootDir.resolve("rfsCoordinatorOutage_snapshot"));
+        var tempDirLucene = Files.createDirectory(tempRootDir.resolve("rfsCoordinatorOutage_lucene"));
 
         try (
             var network = Network.newNetwork();
@@ -154,7 +163,7 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                 CompletableFuture.runAsync(osCoordinatorContainer::start)
             ).join();
 
-            // === ACTION: Place a toxi proxy infront of the TARGET cluster  ===
+            // === ACTION : Place a toxi proxy in front of the TARGET cluster
             targetProxy.start("target", 9200);
             targetProxy.getProxy().toxics().latency("target-upstream", ToxicDirection.UPSTREAM,
                 TARGET_PROXY_UPSTREAM_LATENCY_MILLIS);
@@ -162,32 +171,23 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
             // ASSERT that TARGET cluster is healthy and reachable
             assertClusterReachability(targetProxy.getProxyUriAsString(), "target", true);
 
-            // === ACTION : Place a toxi proxy infront of the COORDINATOR cluster ===
+            // === ACTION : Place a toxi proxy in front of the COORDINATOR cluster
             coordinatorProxy.start("coordinator", 9200);
 
             // ASSERT that COORDINATOR cluster is healthy and reachable
             assertClusterReachability(coordinatorProxy.getProxyUriAsString(), "coordinator", true);
 
-            // === ACTION : Ingest data on SOURCE cluster and take a snapshot ===
+            // === ACTION : Ingest data on SOURCE cluster and take a snapshot
             var sourceClusterOperations = new ClusterOperations(esSourceContainer);
             setupAndSnapshotSourceCluster(
-                sourceClusterOperations, esSourceContainer, SHARDS, "geonames", TOTAL_DOCS, tempDirSnapshot, testSnapshotContext);
-            
+                sourceClusterOperations, esSourceContainer, SHARDS, INDEX_NAME, TOTAL_DOCS,
+                tempDirSnapshot, testSnapshotContext);
+
             // ASSERT source snapshot has expected number of docs
-            var expectedDocs = getDocCountFromCluster(esSourceContainer.getUrl(), "geonames", true);
+            var expectedDocs = getDocCountFromCluster(esSourceContainer.getUrl(), INDEX_NAME, true);
             Assertions.assertEquals(TOTAL_DOCS, expectedDocs, "Expected source doc count to match configured TOTAL_DOCS");
 
-            // Build RFS CLI args for single-worker, single-doc bulk processing ===
-            String[] workerArgs = {
-                "--source-version", "ES_7_10",
-                "--session-name", SESSION_NAME,
-                "--coordinator-host", coordinatorProxy.getProxyUriAsString(),
-                "--max-connections", String.valueOf(MAX_CONNECTIONS),
-                "--documents-per-bulk-request", String.valueOf(DOCUMENTS_PER_BULK_REQUEST),
-                "--initial-lease-duration", "PT99M"
-            };
-
-            // === ACTION : Start outage scheduler for coordinator disable at fixed elapsed time ===
+            // === ACTION : Start outage scheduler
             var testStartNanos = System.nanoTime();
             var scenarioTimeoutSeconds = TOTAL_TIMEOUT_SECONDS + (reEnableCoordinator ? reEnableAfterSeconds : 0);
             var totalDeadlineNanos = testStartNanos + TimeUnit.SECONDS.toNanos(scenarioTimeoutSeconds);
@@ -201,42 +201,102 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                 "rfs-coordinator-outage-scheduler");
             outageThread.start();
 
-            // === ACTION : Run one RFS process while outage scheduler is active ===
-            var runResult = runRfsOnce(tempDirSnapshot, targetProxy.getProxyUriAsString(), workerArgs, 1, totalDeadlineNanos);
+            // === ACTION : Run RFS in-process with separate coordinator and target connections
+            final var thrownException = new AtomicReference<Exception>();
+            try {
+                runRfsInProcess(
+                    tempDirSnapshot, tempDirLucene,
+                    targetProxy.getProxyUriAsString(),
+                    coordinatorProxy.getProxyUriAsString(),
+                    testContext);
+            } catch (Exception e) {
+                thrownException.set(e);
+                log.atInfo().setCause(e).setMessage("RFS threw exception (expected in outage scenario)").log();
+            }
 
-            // === ACTION : Wait for outage scheduler thread to finish after RFS exits ===
+            // === ACTION : Wait for outage scheduler thread to finish after RFS exits
             outageThread.join(TimeUnit.SECONDS.toMillis(reEnableCoordinator ? reEnableAfterSeconds + 10 : 5));
 
-            var finalDocs = getDocCountFromCluster(osTargetContainer.getUrl(), "geonames", false);
+            var finalDocs = getDocCountFromCluster(osTargetContainer.getUrl(), INDEX_NAME, false);
             var coordinatorHasIncompleteWorkItems = waitForCoordinatorIncompleteWorkItems(
                 osCoordinatorContainer.getUrl(), true);
 
-            // === ACTION : Log one-line run summary for outage timing, exit behavior, and doc totals ===
-            log.atInfo().setMessage("Test summary: exitCode={}, outageInjected={}, coordinatorReEnabled={}, docs={}/{}")
-                .addArgument(runResult.exitCode())
+            log.atInfo().setMessage("Test summary: exception={}, outageInjected={}, coordinatorReEnabled={}, docs={}/{}")
+                .addArgument(() -> thrownException.get() != null ? thrownException.get().getClass().getSimpleName() : "none")
                 .addArgument(outageInjected.get())
                 .addArgument(coordinatorReEnabled.get())
                 .addArgument(finalDocs)
                 .addArgument(expectedDocs)
                 .log();
+
             return new ScenarioResult(
-                runResult.exitCode(),
+                thrownException.get(),
                 outageInjected.get(),
                 coordinatorReEnabled.get(),
                 expectedDocs,
                 finalDocs,
-                runResult.output(),
                 coordinatorHasIncompleteWorkItems);
         } finally {
-            // Cleanup temp directories created during this test run
-            try (var stream = Files.list(tempRootDir)) {
-                var dirsToDelete = stream.filter(Files::isDirectory)
-                    .map(Path::toString)
-                    .toList();
-                if (!dirsToDelete.isEmpty()) {
-                    FileSystemUtils.deleteDirectories(dirsToDelete.toArray(String[]::new));
-                }
-            }
+            FileSystemUtils.deleteDirectories(tempDirSnapshot.toString(), tempDirLucene.toString());
+        }
+    }
+
+    @SneakyThrows
+    private void runRfsInProcess(Path snapshotDir, Path luceneDir,
+                                 String targetAddress, String coordinatorAddress,
+                                 DocumentMigrationTestContext testContext)
+        throws RfsMigrateDocuments.NoWorkLeftException
+    {
+        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(SOURCE_VERSION, true);
+        var sourceRepo = new FileSystemRepo(snapshotDir, fileFinder);
+        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(SOURCE_VERSION, sourceRepo, false);
+        var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
+        var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, luceneDir);
+        var readerFactory = new LuceneIndexReader.Factory(sourceResourceProvider);
+
+        var docTransformer = new TransformationLoader().getTransformerFactoryLoader(
+            RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
+
+        // Target connection
+        var targetConnectionContext = ConnectionContextTestParams.builder()
+            .host(targetAddress).build().toConnectionContext();
+        var clientFactory = new OpenSearchClientFactory(targetConnectionContext);
+        var reindexer = new DocumentReindexer(
+            clientFactory.determineVersionAndCreate(), 1, Long.MAX_VALUE, 1,
+            () -> docTransformer, false);
+
+        // Coordinator connection (separate from target)
+        var coordinatorConnectionContext = ConnectionContextTestParams.builder()
+            .host(coordinatorAddress).build().toConnectionContext();
+        var coordinatorFactory = new WorkCoordinatorFactory(COORDINATOR_VERSION, SESSION_NAME);
+        var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+
+        try (var workCoordinator = coordinatorFactory.get(
+            new CoordinateWorkHttpClient(coordinatorConnectionContext),
+            TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+            UUID.randomUUID().toString(),
+            Clock.systemUTC(),
+            workItemRef::set
+        )) {
+            var progressCursor = new AtomicReference<WorkItemCursor>();
+            RfsMigrateDocuments.run(
+                readerFactory,
+                reindexer,
+                progressCursor,
+                workCoordinator,
+                Duration.ofMinutes(99),
+                new org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger(workItemId -> {}),
+                sourceResourceProvider.getIndexMetadata(),
+                SNAPSHOT_NAME,
+                null,
+                null,
+                List.of(INDEX_NAME),
+                sourceResourceProvider.getShardMetadata(),
+                unpackerFactory,
+                MAX_SHARD_SIZE_BYTES,
+                testContext,
+                new AtomicReference<>(),
+                new WorkItemTimeProvider());
         }
     }
 
@@ -262,66 +322,6 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
         snapshotArgs.sourceArgs.host = sourceCluster.getUrl();
         new CreateSnapshot(snapshotArgs, testSnapshotContext.createSnapshotCreateContext()).run();
         sourceCluster.copySnapshotData(snapshotDir.toString());
-    }
-
-    @SneakyThrows
-    private RunResult runRfsOnce(Path snapshotDir, String targetProxyHost, String[] workerArgs, int runIndex,
-                                 long totalDeadlineNanos) {
-        // Create per-run Lucene temp directory for unpacked shard files
-        var luceneDir = Files.createTempDirectory(tempRootDir, "rfsCoordinatorOutage_lucene_run" + runIndex);
-        var output = new StringBuilder();
-        try {
-            // Starting with one RFS subprocess for this run
-            var pb = setupProcess(snapshotDir, luceneDir, targetProxyHost, workerArgs);
-            pb.redirectErrorStream(true);
-            pb.redirectOutput(ProcessBuilder.Redirect.PIPE);
-            var process = pb.start();
-
-            // Stream subprocess output concurrently for logs and assertions
-            var readerThread = new Thread(() -> {
-                try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        log.atInfo().setMessage("from run-{} worker [{}]: {}")
-                            .addArgument(runIndex)
-                            .addArgument(() -> process.toHandle().pid())
-                            .addArgument(line)
-                            .log();
-                        output.append(line).append('\n');
-                    }
-                } catch (Exception e) {
-                    log.atWarn().setCause(e).setMessage("Failed to read run output").log();
-                }
-            }, "rfs-coordinator-run-" + runIndex + "-reader");
-            readerThread.start();
-
-            // Ensure this run still has time left within total test deadline
-            var nanosLeft = totalDeadlineNanos - System.nanoTime();
-            if (nanosLeft <= 0) {
-                Assertions.fail("Exceeded total timeout before run " + runIndex + " could complete");
-            }
-
-            // Wait for process completion with bounded per-run timeout
-            var runWaitSeconds = Math.max(1, Math.min(RUN_TIMEOUT_SECONDS, TimeUnit.NANOSECONDS.toSeconds(nanosLeft)));
-            if (!process.waitFor(runWaitSeconds, TimeUnit.SECONDS)) {
-                // Graceful stop first, then force kill if still alive
-                process.destroy();
-                if (!process.waitFor(DESTROY_GRACE_SECONDS, TimeUnit.SECONDS)) {
-                    process.destroyForcibly();
-                    process.waitFor();
-                }
-                log.atWarn().setMessage("Run {} output before timeout ({} chars):\n{}")
-                    .addArgument(runIndex).addArgument(output.length()).addArgument(output).log();
-                Assertions.fail("RFS run " + runIndex + " timed out after " + runWaitSeconds + " seconds");
-            }
-
-            // Allow output reader thread to drain remaining subprocess lines
-            readerThread.join(READER_THREAD_JOIN_MILLIS);
-            return new RunResult(process.exitValue(), output.toString());
-        } finally {
-            // Cleanup per-run Lucene temp directory
-            FileSystemUtils.deleteDirectories(luceneDir.toString());
-        }
     }
 
     @SneakyThrows
@@ -372,7 +372,6 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
 
     @SneakyThrows
     private void assertClusterReachability(String host, String clusterLabel, boolean expectedReachable) {
-        // Equivalent to "curl <host>/_cluster/health"
         var client = new RestClient(ConnectionContextTestParams.builder().host(host).build().toConnectionContext());
         try {
             var response = client.get("_cluster/health", null);
@@ -438,7 +437,6 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
             }
             TimeUnit.MILLISECONDS.sleep(COORDINATOR_STATE_POLL_MILLIS);
         }
-
         return !expectedIncomplete;
     }
 
@@ -460,8 +458,7 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
         }
     }
 
-    private record ScenarioResult(int exitCode, boolean outageInjected, boolean coordinatorReEnabled,
-                                  long expectedDocs, long finalDocs, String output,
+    private record ScenarioResult(Exception thrownException, boolean outageInjected, boolean coordinatorReEnabled,
+                                  long expectedDocs, long finalDocs,
                                   boolean coordinatorHasIncompleteWorkItems) {}
-    private record RunResult(int exitCode, String output) {}
 }
