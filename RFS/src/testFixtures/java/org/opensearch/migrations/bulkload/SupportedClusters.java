@@ -117,7 +117,7 @@ public class SupportedClusters {
         );
     }
 
-    private static List<ContainerVersion> targets() {
+    public static List<ContainerVersion> targets() {
         return List.of(
             SearchClusterContainer.OS_V1_3_20,
             SearchClusterContainer.OS_V2_19_4,
@@ -156,6 +156,29 @@ public class SupportedClusters {
         }
 
         return matrix;
+    }
+
+    /**
+     * Small representative set of source→target pairs for smoke testing the full E2E pipeline.
+     * Source-only coverage is in SnapshotReaderEndToEndTest (O(M)).
+     * Target-only coverage is in TargetWriteEndToEndTest (O(N)).
+     * These smoke pairs validate the wiring between reading and writing for key migration paths.
+     */
+    public static List<MigrationPair> smokePairs() {
+        return List.of(
+            // Oldest supported → latest target
+            new MigrationPair(SearchClusterContainer.ES_V1_7_6, SearchClusterContainer.OS_V2_19_4),
+            // Most common migration path
+            new MigrationPair(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_4),
+            // OS upgrade path
+            new MigrationPair(SearchClusterContainer.OS_V1_3_20, SearchClusterContainer.OS_V2_19_4),
+            // Latest ES → latest OS
+            new MigrationPair(SearchClusterContainer.ES_V8_19, SearchClusterContainer.OS_V2_19_4),
+            // Target version coverage: OS 1.3
+            new MigrationPair(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V1_3_20),
+            // Target version coverage: OS 3.0
+            new MigrationPair(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V3_0_0)
+        );
     }
 
     public static List<SearchClusterContainer.ContainerVersion> supportedSources(boolean includeRFSOnly) {

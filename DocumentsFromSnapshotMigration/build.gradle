@@ -42,6 +42,7 @@ dependencies {
     testImplementation testFixtures(project(":RFS"))
     testImplementation testFixtures(project(":coreUtilities"))
     testImplementation testFixtures(project(":testHelperFixtures"))
+    testImplementation project(":SearchSnapshotExtractor")
     testImplementation project(":DataGenerator")
     testImplementation project(":CreateSnapshot")
     testImplementation project(":MetadataMigration")

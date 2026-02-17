@@ -44,7 +44,7 @@ public class EndToEndTest extends SourceTestBase {
     private static final String ES5_SINGLE_TYPE_INDEX = "es5_single_type";
 
     private static Stream<Arguments> scenarios() {
-        return SupportedClusters.supportedPairs(true).stream()
+        return SupportedClusters.smokePairs().stream()
                 .map(migrationPair -> Arguments.of(migrationPair.source(), migrationPair.target()));
     }
 
