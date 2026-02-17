@@ -12,6 +12,15 @@ updates:
       - dependency-name: "eslint"
         update-types:
           - "version-update:semver-major"
+      - dependency-name: "@eslint/*"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@types/eslint__js"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "typescript-eslint"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "npm"
     directory: "/deployment/cdk/opensearch-service-migration"
@@ -23,6 +32,12 @@ updates:
           - "*"
     ignore:
       - dependency-name: "eslint"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@eslint/*"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "typescript-eslint"
         update-types:
           - "version-update:semver-major"
 
