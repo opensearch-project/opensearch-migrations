@@ -29,7 +29,7 @@ function makeParamsDict(
     return expr.mergeDicts(
         expr.mergeDicts(
             makeTargetParamDict(targetConfig),
-            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas", "resources")
+            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas", "resources", "jvmArgs")
         ),
         expr.mergeDicts(
             expr.makeDict({}),
@@ -47,6 +47,7 @@ function getReplayerDeploymentManifest
 
     useCustomLogging: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
+    jvmArgs: BaseExpression<string>,
 
     podReplicas: BaseExpression<number>,
     replayerImageName: BaseExpression<string>,
@@ -67,7 +68,8 @@ function getReplayerDeploymentManifest
     };
     const finalContainerDefinition =
         setupLog4jConfigForContainer(args.useCustomLogging, args.loggingConfigMap,
-            {container: baseContainerDefinition, volumes: [], sidecars: []});
+            {container: baseContainerDefinition, volumes: [], sidecars: []},
+            args.jvmArgs);
     return {
         apiVersion: "apps/v1",
         kind: "Deployment",
@@ -115,6 +117,7 @@ export const Replayer = WorkflowBuilder.create({
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("jsonConfig", typeToken<string>())
         .addRequiredInput("podReplicas", typeToken<number>())
+        .addRequiredInput("jvmArgs", typeToken<string>())
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
@@ -127,6 +130,7 @@ export const Replayer = WorkflowBuilder.create({
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
                     useCustomLogging: expr.equals(expr.literal(""), b.inputs.loggingConfigurationOverrideConfigMap),
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
+                    jvmArgs: b.inputs.jvmArgs,
                     sessionName: b.inputs.sessionName,
                     replayerImageName: b.inputs.imageTrafficReplayerLocation,
                     replayerImagePullPolicy: b.inputs.imageTrafficReplayerPullPolicy,
