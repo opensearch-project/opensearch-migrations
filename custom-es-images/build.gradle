@@ -44,7 +44,10 @@ versions.each { minor, info ->
             def dest = outputFile.get().asFile
             dest.parentFile.mkdirs()
             if (!dest.exists()) {
-                ant.get(src: url, dest: dest, retries: 3)
+                exec {
+                    commandLine 'curl', '-fSL', '--retry', '5', '--retry-delay', '5',
+                            '--retry-max-time', '300', '-o', dest.absolutePath, url
+                }
             }
         }
     }
