@@ -37,6 +37,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.bulkload.framework.SnapshotFixtureCache;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
@@ -74,6 +75,8 @@ public class SourceTestBase {
     public static final long MAX_SHARD_SIZE_BYTES = 1024 * 1024 * 1024L; // 1 GB
     public static final String SOURCE_SERVER_ALIAS = "source";
     public static final long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
+
+    protected static final SnapshotFixtureCache fixtureCache = new SnapshotFixtureCache();
 
     @NotNull
     protected static Process runAndMonitorProcess(ProcessBuilder processBuilder) throws IOException {

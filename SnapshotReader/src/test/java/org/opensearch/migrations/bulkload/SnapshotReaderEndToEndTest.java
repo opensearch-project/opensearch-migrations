@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
@@ -17,6 +18,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
+import org.opensearch.migrations.bulkload.framework.SnapshotFixtureCache;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
@@ -59,6 +61,8 @@ public class SnapshotReaderEndToEndTest {
     @TempDir
     private File localDirectory;
 
+    private static final SnapshotFixtureCache fixtureCache = new SnapshotFixtureCache();
+
     static Stream<Arguments> supportedSources() {
         return SupportedClusters.supportedSources(false).stream()
             .map(Arguments::of);
@@ -79,6 +83,39 @@ public class SnapshotReaderEndToEndTest {
         FileSystemRepo sourceRepo,
         Version version
     ) {}
+
+    /**
+     * Returns a cached snapshot if available, otherwise starts a container,
+     * runs the data setup, creates a snapshot, caches it, and returns the reader.
+     */
+    private SnapshotOnDisk getOrCreateSnapshot(
+        ContainerVersion sourceVersion,
+        String scenario,
+        Consumer<ClusterOperations> dataSetup
+    ) throws Exception {
+        String cacheKey = sourceVersion.getVersion() + "-" + scenario;
+        Path snapshotDir = localDirectory.toPath();
+
+        if (fixtureCache.restoreIfCached(cacheKey, snapshotDir)) {
+            return createReaderFromDir(snapshotDir, sourceVersion);
+        }
+
+        try (var sourceCluster = new SearchClusterContainer(sourceVersion)) {
+            sourceCluster.start();
+            dataSetup.accept(new ClusterOperations(sourceCluster));
+            var snapshot = createAndReadSnapshot(sourceCluster);
+            fixtureCache.store(cacheKey, snapshotDir);
+            return snapshot;
+        }
+    }
+
+    private SnapshotOnDisk createReaderFromDir(Path dir, ContainerVersion sourceVersion) {
+        Version version = sourceVersion.getVersion();
+        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
+        var sourceRepo = new FileSystemRepo(dir, fileFinder);
+        var reader = ClusterProviderRegistry.getSnapshotReader(version, sourceRepo, true);
+        return new SnapshotOnDisk(reader, sourceRepo, version);
+    }
 
     /**
      * Creates a snapshot from the running cluster and returns the reader.
@@ -155,56 +192,48 @@ public class SnapshotReaderEndToEndTest {
     @ParameterizedTest(name = "Document IR from {0}")
     @MethodSource("allSources")
     void snapshotProducesCorrectDocumentIR(ContainerVersion sourceVersion) throws Exception {
-        try (var sourceCluster = new SearchClusterContainer(sourceVersion)) {
-            sourceCluster.start();
-            var ops = new ClusterOperations(sourceCluster);
-
-            // Create index with 1 shard for deterministic doc counts
+        var snapshot = getOrCreateSnapshot(sourceVersion, "docIR", ops -> {
             ops.createIndex(INDEX_NAME, "{"
                 + "\"settings\": {"
                 + "  \"number_of_shards\": 1,"
                 + "  \"number_of_replicas\": 0"
                 + "}"
                 + "}");
-
-            // Index known documents
             ops.createDocument(INDEX_NAME, "doc1", "{\"title\": \"First\", \"value\": 1}");
             ops.createDocument(INDEX_NAME, "doc2", "{\"title\": \"Second\", \"value\": 2}");
             ops.createDocument(INDEX_NAME, "doc3", "{\"title\": \"Third\", \"value\": 3}");
             ops.post("/" + INDEX_NAME + "/_refresh", null);
+        });
 
-            var snapshot = createAndReadSnapshot(sourceCluster);
-            Path luceneDir = Files.createTempDirectory("snapshot_reader_test_docs");
-            try {
-                Flux<LuceneDocumentChange> docFlux = readDocumentsFromShard(
-                    snapshot.reader(), snapshot.sourceRepo(), luceneDir, INDEX_NAME, 0
-                );
+        Path luceneDir = Files.createTempDirectory("snapshot_reader_test_docs");
+        try {
+            Flux<LuceneDocumentChange> docFlux = readDocumentsFromShard(
+                snapshot.reader(), snapshot.sourceRepo(), luceneDir, INDEX_NAME, 0
+            );
 
-                // Validate with StepVerifier
-                List<LuceneDocumentChange> docs = new ArrayList<>();
-                StepVerifier.create(docFlux)
-                    .thenConsumeWhile(doc -> {
-                        docs.add(doc);
-                        return true;
-                    })
-                    .verifyComplete();
+            List<LuceneDocumentChange> docs = new ArrayList<>();
+            StepVerifier.create(docFlux)
+                .thenConsumeWhile(doc -> {
+                    docs.add(doc);
+                    return true;
+                })
+                .verifyComplete();
 
-                assertThat("Expected 3 documents from snapshot", docs, hasSize(3));
+            assertThat("Expected 3 documents from snapshot", docs, hasSize(3));
 
-                var docIds = docs.stream().map(LuceneDocumentChange::getId).sorted().toList();
-                assertThat(docIds, equalTo(List.of("doc1", "doc2", "doc3")));
+            var docIds = docs.stream().map(LuceneDocumentChange::getId).sorted().toList();
+            assertThat(docIds, equalTo(List.of("doc1", "doc2", "doc3")));
 
-                for (var doc : docs) {
-                    assertThat("Document " + doc.getId() + " should have source",
-                        doc.getSource(), notNullValue());
-                    assertThat("Document " + doc.getId() + " should have non-empty source",
-                        doc.getSource().length(), greaterThan(0));
-                }
-
-                log.info("Successfully read {} documents from {} snapshot", docs.size(), sourceVersion);
-            } finally {
-                deleteDir(luceneDir);
+            for (var doc : docs) {
+                assertThat("Document " + doc.getId() + " should have source",
+                    doc.getSource(), notNullValue());
+                assertThat("Document " + doc.getId() + " should have non-empty source",
+                    doc.getSource().length(), greaterThan(0));
             }
+
+            log.info("Successfully read {} documents from {} snapshot", docs.size(), sourceVersion);
+        } finally {
+            deleteDir(luceneDir);
         }
     }
 
@@ -214,10 +243,7 @@ public class SnapshotReaderEndToEndTest {
     @ParameterizedTest(name = "Metadata IR from {0}")
     @MethodSource("supportedSources")
     void snapshotProducesCorrectMetadataIR(ContainerVersion sourceVersion) throws Exception {
-        try (var sourceCluster = new SearchClusterContainer(sourceVersion)) {
-            sourceCluster.start();
-            var ops = new ClusterOperations(sourceCluster);
-
+        var snapshot = getOrCreateSnapshot(sourceVersion, "metadataIR", ops -> {
             ops.createIndex(INDEX_NAME, "{"
                 + "\"settings\": {"
                 + "  \"number_of_shards\": 2,"
@@ -226,33 +252,31 @@ public class SnapshotReaderEndToEndTest {
                 + "}");
             ops.createDocument(INDEX_NAME, "1", "{\"field\": \"value\"}");
             ops.post("/" + INDEX_NAME + "/_refresh", null);
+        });
 
-            var snapshot = createAndReadSnapshot(sourceCluster);
+        // Validate GlobalMetadata
+        GlobalMetadata globalMetadata = snapshot.reader().getGlobalMetadata().fromRepo(SNAPSHOT_NAME);
+        assertNotNull(globalMetadata, "GlobalMetadata should not be null");
+        assertNotNull(globalMetadata.toObjectNode(), "GlobalMetadata JSON should not be null");
 
-            // Validate GlobalMetadata
-            GlobalMetadata globalMetadata = snapshot.reader().getGlobalMetadata().fromRepo(SNAPSHOT_NAME);
-            assertNotNull(globalMetadata, "GlobalMetadata should not be null");
-            assertNotNull(globalMetadata.toObjectNode(), "GlobalMetadata JSON should not be null");
+        // Validate IndexMetadata
+        IndexMetadata indexMetadata = snapshot.reader().getIndexMetadata().fromRepo(SNAPSHOT_NAME, INDEX_NAME);
+        assertNotNull(indexMetadata, "IndexMetadata should not be null");
+        assertThat("Index should have 2 shards", indexMetadata.getNumberOfShards(), equalTo(2));
+        assertNotNull(indexMetadata.getSettings(), "Settings should not be null");
 
-            // Validate IndexMetadata
-            IndexMetadata indexMetadata = snapshot.reader().getIndexMetadata().fromRepo(SNAPSHOT_NAME, INDEX_NAME);
-            assertNotNull(indexMetadata, "IndexMetadata should not be null");
-            assertThat("Index should have 2 shards", indexMetadata.getNumberOfShards(), equalTo(2));
-            assertNotNull(indexMetadata.getSettings(), "Settings should not be null");
-
-            // Validate ShardMetadata for each shard
-            for (int shard = 0; shard < indexMetadata.getNumberOfShards(); shard++) {
-                ShardMetadata shardMeta = snapshot.reader().getShardMetadata()
-                    .fromRepo(SNAPSHOT_NAME, INDEX_NAME, shard);
-                assertNotNull(shardMeta, "ShardMetadata for shard " + shard + " should not be null");
-                assertThat("Shard should have files",
-                    shardMeta.getFiles().size(), greaterThanOrEqualTo(1));
-                assertNotNull(shardMeta.getSegmentFileName(),
-                    "Segment file name should not be null");
-            }
-
-            log.info("Successfully validated metadata IR from {} snapshot", sourceVersion);
+        // Validate ShardMetadata for each shard
+        for (int shard = 0; shard < indexMetadata.getNumberOfShards(); shard++) {
+            ShardMetadata shardMeta = snapshot.reader().getShardMetadata()
+                .fromRepo(SNAPSHOT_NAME, INDEX_NAME, shard);
+            assertNotNull(shardMeta, "ShardMetadata for shard " + shard + " should not be null");
+            assertThat("Shard should have files",
+                shardMeta.getFiles().size(), greaterThanOrEqualTo(1));
+            assertNotNull(shardMeta.getSegmentFileName(),
+                "Segment file name should not be null");
         }
+
+        log.info("Successfully validated metadata IR from {} snapshot", sourceVersion);
     }
 
     /**
@@ -262,10 +286,7 @@ public class SnapshotReaderEndToEndTest {
     @ParameterizedTest(name = "Deleted docs filtered from {0}")
     @MethodSource("supportedSources")
     void snapshotFiltersDeletedDocuments(ContainerVersion sourceVersion) throws Exception {
-        try (var sourceCluster = new SearchClusterContainer(sourceVersion)) {
-            sourceCluster.start();
-            var ops = new ClusterOperations(sourceCluster);
-
+        var snapshot = getOrCreateSnapshot(sourceVersion, "deletedDocs", ops -> {
             ops.createIndex(INDEX_NAME, "{"
                 + "\"settings\": {"
                 + "  \"number_of_shards\": 1,"
@@ -273,7 +294,6 @@ public class SnapshotReaderEndToEndTest {
                 + "}"
                 + "}");
 
-            // Create 3 docs, refresh, then create 2 more (one to delete), refresh, delete, refresh
             ops.createDocument(INDEX_NAME, "keep1", "{\"status\": \"active\"}");
             ops.createDocument(INDEX_NAME, "keep2", "{\"status\": \"active\"}");
             ops.createDocument(INDEX_NAME, "keep3", "{\"status\": \"active\"}");
@@ -284,33 +304,32 @@ public class SnapshotReaderEndToEndTest {
             ops.post("/" + INDEX_NAME + "/_refresh", null);
             ops.deleteDocument(INDEX_NAME, "toDelete", null, null);
             ops.post("/" + INDEX_NAME + "/_refresh", null);
+        });
 
-            var snapshot = createAndReadSnapshot(sourceCluster);
-            Path luceneDir = Files.createTempDirectory("snapshot_reader_test_deleted");
-            try {
-                Flux<LuceneDocumentChange> docFlux = readDocumentsFromShard(
-                    snapshot.reader(), snapshot.sourceRepo(), luceneDir, INDEX_NAME, 0
-                );
+        Path luceneDir = Files.createTempDirectory("snapshot_reader_test_deleted");
+        try {
+            Flux<LuceneDocumentChange> docFlux = readDocumentsFromShard(
+                snapshot.reader(), snapshot.sourceRepo(), luceneDir, INDEX_NAME, 0
+            );
 
-                List<String> docIds = new ArrayList<>();
-                StepVerifier.create(docFlux)
-                    .thenConsumeWhile(doc -> {
-                        docIds.add(doc.getId());
-                        return true;
-                    })
-                    .verifyComplete();
+            List<String> docIds = new ArrayList<>();
+            StepVerifier.create(docFlux)
+                .thenConsumeWhile(doc -> {
+                    docIds.add(doc.getId());
+                    return true;
+                })
+                .verifyComplete();
 
-                assertThat("Should have 4 live documents", docIds, hasSize(4));
-                assertThat("Deleted doc should not be present",
-                    docIds.stream().noneMatch(id -> id.equals("toDelete")), equalTo(true));
-                assertThat("All keep docs should be present",
-                    docIds.stream().filter(id -> id.startsWith("keep")).count(), equalTo(4L));
+            assertThat("Should have 4 live documents", docIds, hasSize(4));
+            assertThat("Deleted doc should not be present",
+                docIds.stream().noneMatch(id -> id.equals("toDelete")), equalTo(true));
+            assertThat("All keep docs should be present",
+                docIds.stream().filter(id -> id.startsWith("keep")).count(), equalTo(4L));
 
-                log.info("Successfully verified deleted doc filtering from {} ({} live docs)",
-                    sourceVersion, docIds.size());
-            } finally {
-                deleteDir(luceneDir);
-            }
+            log.info("Successfully verified deleted doc filtering from {} ({} live docs)",
+                sourceVersion, docIds.size());
+        } finally {
+            deleteDir(luceneDir);
         }
     }
 }

@@ -196,6 +196,16 @@ subprojects {
                 systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
                 systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
 
+                // Snapshot fixture caching - avoids re-creating Docker containers on subsequent runs
+                // Override: -Psnapshot.fixture.cache.dir=/path or SNAPSHOT_FIXTURE_CACHE_DIR env var
+                // Disable: -Psnapshot.fixture.cache.disable=true
+                if (project.hasProperty('snapshot.fixture.cache.dir')) {
+                    systemProperty 'snapshot.fixture.cache.dir', project.property('snapshot.fixture.cache.dir')
+                }
+                if (project.hasProperty('snapshot.fixture.cache.disable')) {
+                    systemProperty 'snapshot.fixture.cache.disable', project.property('snapshot.fixture.cache.disable')
+                }
+
                 // Register BucketTestExtension for all tests to enable test striping
                 // Test striping allows distributing test execution across multiple runs
                 // Usage: ./gradlew test -Dtest.striping.total=N -Dtest.striping.index=I
