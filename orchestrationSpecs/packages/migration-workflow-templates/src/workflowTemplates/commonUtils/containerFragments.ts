@@ -16,14 +16,13 @@ export type ContainerVolumePair = {
 const S3_SNAPSHOT_VOLUME_NAME = "snapshot-s3";
 
 /**
- * Add a PVC-backed S3 volume mount to a container definition.
- * Requires the Mountpoint S3 CSI Driver v2 to be installed on the cluster,
- * and a PV/PVC to be pre-created for the target S3 bucket.
- * The CSI driver manages the FUSE mount lifecycle — no sidecar or privileged container needed.
+ * Add a CSI ephemeral inline volume for S3 to a container definition.
+ * Requires the Mountpoint S3 CSI Driver v2 to be installed on the cluster.
+ * The volume is ephemeral — it dies with the pod, no PV/PVC needed.
  */
 export function setupS3CsiVolumeForContainer(
     mountPath: string,
-    pvcClaimName: BaseExpression<string>,
+    bucketName: BaseExpression<string>,
     def: ContainerVolumePair): ContainerVolumePair {
 
     const {volumeMounts, ...restOfContainer} = def.container;
@@ -32,9 +31,12 @@ export function setupS3CsiVolumeForContainer(
             ...def.volumes,
             {
                 name: S3_SNAPSHOT_VOLUME_NAME,
-                persistentVolumeClaim: {
-                    claimName: makeStringTypeProxy(pvcClaimName),
-                    readOnly: true
+                csi: {
+                    driver: "s3.csi.aws.com",
+                    readOnly: true,
+                    volumeAttributes: {
+                        bucketName: makeStringTypeProxy(bucketName)
+                    }
                 }
             }
         ],
