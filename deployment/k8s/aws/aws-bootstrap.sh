@@ -386,17 +386,22 @@ if aws eks describe-addon --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" --addo
   echo "S3 CSI Driver addon already installed, skipping"
 else
   echo "Installing Mountpoint S3 CSI Driver v2 addon..."
+  migrations_role_arn="arn:aws:iam::${AWS_ACCOUNT}:role/${MIGRATIONS_EKS_CLUSTER_NAME}-migrations-role"
   aws eks create-addon \
     --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
     --addon-name aws-mountpoint-s3-csi-driver \
     --region "${AWS_CFN_REGION}" \
-    --resolve-conflicts OVERWRITE
+    --resolve-conflicts OVERWRITE \
+    --pod-identity-associations "serviceAccount=s3-csi-driver-sa,roleArn=${migrations_role_arn}"
   echo "Waiting for S3 CSI Driver addon to become active..."
-  aws eks wait addon-active \
+  if aws eks wait addon-active \
     --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
     --addon-name aws-mountpoint-s3-csi-driver \
-    --region "${AWS_CFN_REGION}"
-  echo "✅  S3 CSI Driver v2 addon installed"
+    --region "${AWS_CFN_REGION}"; then
+    echo "✅  S3 CSI Driver v2 addon installed"
+  else
+    echo "⚠️  S3 CSI Driver addon did not become active — S3-backed volumes may not work"
+  fi
 fi
 
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
