@@ -282,6 +282,19 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     @Getter
     private final ContainerVersion containerVersion;
 
+    /**
+     * Check if a Docker image exists locally (without pulling).
+     */
+    public static boolean isImageAvailable(ContainerVersion version) {
+        try {
+            Process p = new ProcessBuilder("docker", "image", "inspect", version.imageName)
+                .redirectErrorStream(true).start();
+            return p.waitFor() == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     @SuppressWarnings("resource")
     public SearchClusterContainer(final ContainerVersion version) {
         super(DockerImageName.parse(version.imageName));

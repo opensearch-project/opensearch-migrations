@@ -68,6 +68,9 @@ public class EndToEndTest extends SourceTestBase {
    @MethodSource(value = "extendedScenarios")
     public void extendedMigrationDocuments(
             final SearchClusterContainer.ContainerVersion sourceVersion) {
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+            SearchClusterContainer.isImageAvailable(sourceVersion),
+            "Skipping: image not available for " + sourceVersion);
         try (
                 final var sourceCluster = new SearchClusterContainer(sourceVersion);
                 final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)

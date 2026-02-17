@@ -473,14 +473,14 @@ gradle.projectsEvaluated {
     }
 
     tasks.register("allTests") {
-        dependsOn ':custom-es-images:buildAll'
+        dependsOn ':custom-es-images:buildCoreTestImages'
         dependsOn sharedProcessTestsTasks
         dependsOn isolatedTestsTasks
     }
 
     // Ensure isolated test tasks (integration tests using Docker) wait for custom ES images
     isolatedTestsTasks.each { task ->
-        task.dependsOn ':custom-es-images:buildAll'
+        task.dependsOn ':custom-es-images:buildCoreTestImages'
     }
 }
 
