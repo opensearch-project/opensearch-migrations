@@ -1,7 +1,6 @@
 package org.opensearch.migrations.cluster;
 
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.bulkload.version_os_2_11.RemoteWriter_OS_2_11;

@@ -13,7 +13,6 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
-import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 
 import com.fasterxml.jackson.databind.ObjectMapper;

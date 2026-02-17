@@ -2,10 +2,10 @@ package org.opensearch.migrations.bulkload.transformers;
 
 import java.util.List;
 
+import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.VersionStrictness;
-import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.transformation.TransformationRule;
 import org.opensearch.migrations.transformation.entity.Index;
 import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
