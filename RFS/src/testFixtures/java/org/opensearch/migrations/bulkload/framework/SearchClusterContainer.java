@@ -298,6 +298,11 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     @SuppressWarnings("resource")
     public SearchClusterContainer(final ContainerVersion version) {
         super(DockerImageName.parse(version.imageName));
+        // Skip test if custom-built image not available locally (don't check Docker Hub images)
+        if (version.imageName.startsWith("custom-elasticsearch:") && !isImageAvailable(version)) {
+            org.junit.jupiter.api.Assumptions.assumeTrue(false,
+                "Skipping: Docker image not available locally: " + version.imageName);
+        }
         var builder = this.withExposedPorts(9200, 9300);
 
         if (version instanceof OverrideFile) {
@@ -382,11 +387,6 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     public void start() {
         log.info("Starting container version:" + containerVersion.version);
-        // Only check availability for custom-built images (not Docker Hub images like OpenSearch/ODFE)
-        if (containerVersion.imageName.startsWith("custom-elasticsearch:") && !isImageAvailable(containerVersion)) {
-            org.junit.jupiter.api.Assumptions.assumeTrue(false,
-                "Skipping: Docker image not available locally: " + containerVersion.imageName);
-        }
         super.start();
     }
 
