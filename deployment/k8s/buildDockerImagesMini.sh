@@ -130,6 +130,11 @@ fi
 
 eval $(minikube docker-env)
 
+# Minikube's Docker daemon may require a newer API version than the host's Docker CLI.
+# The DockerBuildImage plugin auto-negotiates, but our Exec-based docker build does not.
+# Set DOCKER_API_VERSION to the daemon's minimum to avoid "client version X is too old" errors.
+export DOCKER_API_VERSION=$(docker version -f '{{.Server.MinAPIVersion}}' 2>/dev/null || true)
+
 if [ "$SKIP_BUILD" = "false" ]; then
   ./gradlew :buildDockerImages -x test --info --stacktrace
   # Only build the ES versions used in K8s tests (not all 67)
