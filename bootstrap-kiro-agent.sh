@@ -7,9 +7,8 @@
 # This script:
 #   1. Installs helm (if missing)
 #   2. Installs kiro-cli (if missing)
-#   3. Deploys Migration Assistant on EKS via aws-bootstrap.sh
-#   4. Sets up .kiro agent configuration
-#   5. Starts kiro-cli with the opensearch-migration agent
+#   3. Sets up .kiro agent configuration
+#   4. Starts kiro-cli with the opensearch-migration agent (which handles AWS bootstrap via @start prompt)
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
@@ -47,11 +46,7 @@ if ! command -v kiro-cli &>/dev/null; then
 fi
 info "kiro-cli: $(kiro-cli --version 2>&1 || echo 'installed')"
 
-# --- 3. Deploy Migration Assistant ---
-info "Running aws-bootstrap.sh to deploy Migration Assistant on EKS..."
-curl -fsSL "${RAW_BASE}/deployment/k8s/aws/aws-bootstrap.sh" | bash -s -- --skip-console-exec "$@"
-
-# --- 4. Set up .kiro agent config ---
+# --- 3. Set up .kiro agent config ---
 info "Setting up .kiro agent configuration..."
 mkdir -p "${WORK_DIR}"
 cd "${WORK_DIR}"
@@ -71,6 +66,6 @@ curl -fsSL "${RAW_BASE}/agent-sops/opensearch-migration-assistant-eks.sop.md" \
 
 info "Agent config ready at ${WORK_DIR}/${KIRO_DIR}"
 
-# --- 5. Start kiro-cli agent ---
+# --- 4. Start kiro-cli agent ---
 info "Starting kiro-cli with opensearch-migration agent..."
 exec kiro-cli chat --agent opensearch-migration --trust-all-tools "@start"
