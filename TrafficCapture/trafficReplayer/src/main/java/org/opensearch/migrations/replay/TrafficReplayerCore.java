@@ -276,6 +276,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             log.trace("done sending and finalizing data to the packet handler");
 
             if (t != null) {
+                log.error("Got exception in CompletableFuture callback: ", t);
                 log.atDebug().setMessage("Got exception in CompletableFuture callback for {}")
                     .addArgument(tupleHandlingContext)
                     .setCause(t)
