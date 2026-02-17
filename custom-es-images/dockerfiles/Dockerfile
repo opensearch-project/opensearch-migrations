@@ -90,7 +90,7 @@ RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
     fi && \
     # Entrypoint script
     if [ "$MAJOR" -eq 5 ] && [ "$MINOR" -le 2 ]; then \
-      printf '#!/bin/bash\ngrep -v "^0::" /proc/self/cgroup > /tmp/cgroup_filtered\nexport LD_PRELOAD=/usr/local/lib/libcgroup_fix.so\nexec /usr/share/elasticsearch/bin/elasticsearch "$@"\n' > /tmp/scripts/entrypoint.sh; \
+      printf '#!/bin/bash\ngrep -v "^0::" /proc/self/cgroup > /tmp/cgroup_filtered\nexport LD_PRELOAD=/usr/local/lib/libcgroup_fix.so\nexport ES_JAVA_OPTS="${ES_JAVA_OPTS} -XX:-UseContainerSupport"\nexec /usr/share/elasticsearch/bin/elasticsearch "$@"\n' > /tmp/scripts/entrypoint.sh; \
     else \
       printf '#!/bin/bash\nexec /usr/share/elasticsearch/bin/elasticsearch "$@"\n' > /tmp/scripts/entrypoint.sh; \
     fi && \
