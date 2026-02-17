@@ -24,7 +24,7 @@ rules:
 
   # Add permissions for pods and pod logs (needed for Argo workflow execution)
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "services", "secrets", "configmaps", "serviceaccounts"]
+    resources: ["pods", "pods/log", "services", "secrets", "configmaps", "serviceaccounts", "persistentvolumeclaims"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # For services
@@ -55,5 +55,27 @@ subjects:
 roleRef:
   kind: Role
   name: workflow-deployer-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-workflow-pv-role
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["create", "get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-workflow-pv-rolebinding
+subjects:
+  - kind: ServiceAccount
+    name: argo-workflow-executor
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-workflow-pv-role
   apiGroup: rbac.authorization.k8s.io
 {{ end }}
