@@ -382,6 +382,10 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     public void start() {
         log.info("Starting container version:" + containerVersion.version);
+        if (!isImageAvailable(containerVersion)) {
+            throw new org.opentest4j.TestAbortedException(
+                "Skipping: Docker image not available locally: " + containerVersion.imageName);
+        }
         super.start();
     }
 

@@ -73,7 +73,7 @@ public abstract class SnapshotCreator {
             log.atInfo().setMessage("Snapshot {} creation initiated").addArgument(snapshotName).log();
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Snapshot {} creation failed").addArgument(snapshotName).log();
-            throw new SnapshotCreationFailed(snapshotName);
+            throw new SnapshotCreationFailed(snapshotName, e);
         }
     }
 
@@ -117,6 +117,9 @@ public abstract class SnapshotCreator {
     public static class SnapshotCreationFailed extends RfsException {
         public SnapshotCreationFailed(String snapshotName) {
             super("Failed to create snapshot " + snapshotName);
+        }
+        public SnapshotCreationFailed(String snapshotName, Throwable cause) {
+            super("Failed to create snapshot " + snapshotName, cause);
         }
     }
 

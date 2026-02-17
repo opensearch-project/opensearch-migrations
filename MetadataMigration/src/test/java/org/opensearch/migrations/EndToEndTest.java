@@ -98,9 +98,6 @@ class EndToEndTest extends BaseMigrationTest {
     @ParameterizedTest(name = "From version {0} to version OS 2.19")
     @MethodSource(value = "extendedScenarios")
     void extendedMetadata(SearchClusterContainer.ContainerVersion sourceVersion) {
-        org.junit.jupiter.api.Assumptions.assumeTrue(
-            SearchClusterContainer.isImageAvailable(sourceVersion),
-            "Skipping: image not available for " + sourceVersion);
         try (
                 final var sourceCluster = new SearchClusterContainer(sourceVersion);
                 final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4);
@@ -121,9 +118,6 @@ class EndToEndTest extends BaseMigrationTest {
     @ParameterizedTest(name = "Legacy template no mappings from {0} to OS 2.19")
     @MethodSource(value = "es6xScenarios")
     void legacyTemplateNoMappings(SearchClusterContainer.ContainerVersion sourceVersion) {
-        org.junit.jupiter.api.Assumptions.assumeTrue(
-            SearchClusterContainer.isImageAvailable(sourceVersion),
-            "Skipping: image not available for " + sourceVersion);
         try (
             final var sourceCluster = new SearchClusterContainer(sourceVersion);
             final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
