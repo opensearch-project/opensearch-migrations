@@ -143,7 +143,7 @@ def call(Map config = [:]) {
                                           --stage "${maStageName}" \
                                           --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
                                           --build-images \
-                                          --skip-git-pull \
+                                          --build-chart-and-dashboards \
                                           --base-dir "\$(pwd)" \
                                           --skip-console-exec \
                                           --region us-east-1

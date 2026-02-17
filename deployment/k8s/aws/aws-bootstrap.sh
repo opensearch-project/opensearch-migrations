@@ -1,25 +1,42 @@
 #!/bin/bash
-# -----------------------------------------------------------------------------
+# =============================================================================
 # Bootstrap EKS Environment for OpenSearch Migration Assistant
 #
-# This script provisions an EKS cluster with Cfn to use the Migration Assistant tooling.
-# By default, public images will be used from https://gallery.ecr.aws/opensearchproject.
-# Images can also be built from source locally with the --build-images flag.
+# This script handles the full lifecycle of deploying the Migration Assistant
+# onto AWS EKS:
+#   1. (Optional) Deploy the CloudFormation stack that creates the EKS cluster,
+#      ECR registry, IAM roles, and networking (VPC or imported VPC).
+#   2. Read CloudFormation exports to discover cluster details.
+#   3. Configure kubectl and (optionally) grant EKS access to an IAM principal.
+#   4. Install the Migration Assistant Helm chart with CloudWatch dashboards.
 #
-# Usage:
-#   Run directly: curl -s https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh | bash
-#   Save & run:   curl -s -o aws-bootstrap.sh https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh && chmod +x aws-bootstrap.sh && ./aws-bootstrap.sh
-# -----------------------------------------------------------------------------
+# By default, all artifacts are downloaded from the latest GitHub release:
+#   - CFN templates from the Solutions S3 bucket
+#   - Helm chart from GitHub releases
+#   - Dashboard JSON files from GitHub releases
+#   - Container images for pods will use images from public.ecr.aws/opensearchproject
+#
+# Developers can override any of these with --build-* flags to use locally
+# built artifacts from a repo checkout. When mixing built and downloaded
+# artifacts, --version is required to prevent accidental version mismatches.
+#
+# ARCHITECTURE NOTES FOR FUTURE CHANGES:
+#   - Version is resolved ONCE at startup and threaded through all downloads.
+#     To add a new downloaded artifact, use $RELEASE_VERSION for its URL.
+#   - The --build-* flags (--build-cfn, --build-images, --build-chart-and-dashboards)
+#     each gate a section of the script. To add a new buildable component,
+#     add a flag, add it to the build_count validation, and add a conditional
+#     block that switches between download and local build.
+#   - CFN parameters are in the "CFN deployment" section. The parameters come
+#     from the CDK stack in deployment/migration-assistant-solution/lib/solutions-stack-eks.ts.
+#   - Helm values: when using the packaged chart, valuesEks.yaml is extracted
+#     from the tgz. When using the local chart, it's referenced directly.
+#     To add new values files, update both the extract and the direct path.
+# =============================================================================
 
 set -euo pipefail
 
 # --- defaults ---
-org_name="opensearch-project"
-repo_name="opensearch-migrations"
-branch="main"
-tag=""
-skip_git_pull=false
-
 base_dir=""
 namespace="ma"
 build_images=false
@@ -37,15 +54,12 @@ vpc_id=""
 subnet_ids=""
 eks_access_principal_arn=""
 skip_cfn_deploy=false
+build_chart_and_dashboards=false
+version=""
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --org-name) org_name="$2"; shift 2 ;;
-    --repo-name) repo_name="$2"; shift 2 ;;
-    --branch) branch="$2"; shift 2 ;;
-    --tag) tag="$2"; shift 2 ;;
-    --skip-git-pull) skip_git_pull=true; shift 1 ;;
     --base-dir) base_dir="$2"; shift 2 ;;
     --ma-chart-dir) ma_chart_dir="$2"; shift 2 ;;
     --namespace) namespace="$2"; shift 2 ;;
@@ -63,22 +77,13 @@ while [[ $# -gt 0 ]]; do
     --subnet-ids) subnet_ids="$2"; shift 2 ;;
     --eks-access-principal-arn) eks_access_principal_arn="$2"; shift 2 ;;
     --skip-cfn-deploy) skip_cfn_deploy=true; shift 1 ;;
+    --build-chart-and-dashboards) build_chart_and_dashboards=true; shift 1 ;;
+    --version) version="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo ""
       echo "Bootstrap an EKS cluster for the OpenSearch Migration Assistant."
       echo "Optionally deploy the Migration Assistant CloudFormation stack first."
-      echo ""
-      echo "Git options:"
-      echo "  --org-name <val>                          GitHub org for git checkout (default: $org_name)"
-      echo "  --repo-name <val>                         GitHub repo for git checkout (default: $repo_name)"
-      echo "  --branch <val>                            Git branch for git checkout (default: $branch)"
-      echo "  --tag <val>                               Git tag for git checkout (default: none)"
-      echo "  --skip-git-pull                           Use existing local repo (default: $skip_git_pull)"
-      echo ""
-      echo "General options:"
-      echo "  --base-dir <path>                         Repo directory (default: git repo root, or ./opensearch-migrations if cloning)"
-      echo "  --build-images                            Build images from source (default: $build_images)"
       echo ""
       echo "CloudFormation deployment options (exactly one required):"
       echo "  --deploy-create-vpc-cfn                   Deploy the Create-VPC EKS CloudFormation template."
@@ -88,9 +93,6 @@ while [[ $# -gt 0 ]]; do
       echo "  --skip-cfn-deploy                         Skip CloudFormation deployment. Use when the Migration"
       echo "                                            Assistant stack is already deployed and you only want to"
       echo "                                            bootstrap the EKS cluster (install helm chart, images, etc)."
-      echo "  --build-cfn                               Build CFN templates from source (gradle cdkSynthMinified)"
-      echo "                                            instead of using the published S3 templates."
-      echo "                                            Requires one of the --deploy-*-cfn flags."
       echo "  --stack-name <name>                       CloudFormation stack name (required with --deploy-*-cfn)."
       echo "  --vpc-id <id>                             VPC ID (required with --deploy-import-vpc-cfn)."
       echo "  --subnet-ids <id1,id2>                    Comma-separated subnet IDs, each in a different AZ"
@@ -105,10 +107,29 @@ while [[ $# -gt 0 ]]; do
       echo "Deployment options:"
       echo "  --namespace <val>                         K8s namespace (default: $namespace)"
       echo "  --helm-values <path>                      Extra values file for helm install"
-      echo "  --disable-general-purpose-pool            Disable EKS Auto Mode general-purpose pool (cost control)"
+      echo "  --disable-general-purpose-pool            Disable EKS Auto Mode general-purpose pool, which will"
+      echo "                                            require another nodepool to be configured (such as with"
+      echo "                                            'cluster.useCustomKarpenterNodePool: true' in the file"
+      echo "                                            passed to --helm-values)"
       echo "  --stage <val>                             Stage name for CFN exports filter and CFN Stage parameter (default: dev)"
       echo "  --region <val>                            AWS region"
       echo "  --skip-console-exec                       Don't exec into console pod (default: $skip_console_exec)"
+      echo ""
+      echo "Build options:"
+      echo "  --base-dir <path>                         opensearch-migrations directory"
+      echo "                                            (default: ../../.. from the script location)"
+      echo "  --build-cfn                               Build CFN templates from source (gradle cdkSynthMinified)"
+      echo "                                            instead of using the published S3 templates."
+      echo "                                            Requires one of the --deploy-*-cfn flags."
+      echo "  --build-images                            Build images from source (default: $build_images)"
+      echo "  --build-chart-and-dashboards              Build Helm chart and dashboards from the local repo"
+      echo "                                            instead of downloading from the GitHub release."
+      echo "  --version <tag>                           Release version for artifacts to deploy (CFN templates, images,"
+      echo "                                            chart, dashboards). Defaults to latest GitHub"
+      echo "                                            release. Use 'latest' explicitly to track the newest"
+      echo "                                            release artifacts. Required when mixing --build-* flags (e.g."
+      echo "                                            --build-cfn without --build-images) to avoid accidental"
+      echo "                                            version mismatches between built and downloaded components."
       echo ""
       echo "Examples:"
       echo "  # Deploy new infrastructure with a new VPC and bootstrap:"
@@ -145,12 +166,8 @@ fi
 
 # --- resolve base_dir ---
 if [[ -z "$base_dir" ]]; then
-  if [[ "$skip_git_pull" == "true" ]]; then
-    # Script lives at deployment/k8s/aws/aws-bootstrap.sh — repo root is three levels up
-    base_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-  else
-    base_dir="./opensearch-migrations"
-  fi
+  # Script lives at deployment/k8s/aws/aws-bootstrap.sh — repo root is three levels up
+  base_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 fi
 
 # --- validation (reads globals, exits on error, mutates nothing) ---
@@ -213,8 +230,39 @@ validate_args() {
       exit 1
     fi
   fi
+  # Validate repo checkout exists when any --build-* flag requires it
+  if [[ "$build_cfn" == "true" || "$build_images" == "true" || "$build_chart_and_dashboards" == "true" ]]; then
+    if [[ ! -f "$base_dir/gradlew" ]]; then
+      echo "Error: --build-cfn, --build-images, and --build-chart-and-dashboards require a repo checkout." >&2
+      echo "  Expected repo root at: $base_dir" >&2
+      echo "  Use --base-dir to specify the repo location, or run this script from within the repo." >&2
+      exit 1
+    fi
+  fi
+  # When mixing build and download, require --version to avoid accidental mismatches
+  local build_count=0
+  [[ "$build_cfn" == "true" ]] && ((build_count++)) || true
+  [[ "$build_images" == "true" ]] && ((build_count++)) || true
+  [[ "$build_chart_and_dashboards" == "true" ]] && ((build_count++)) || true
+  if [[ $build_count -gt 0 && $build_count -lt 3 && -z "$version" ]]; then
+    echo "Error: --version is required when using some but not all --build-* flags." >&2
+    echo "  This prevents version mismatches between built and downloaded components." >&2
+    echo "  Use --version latest to track the newest release, or specify a tag like --version 2.6.4" >&2
+    exit 1
+  fi
 }
 validate_args
+
+# --- resolve version once ---
+if [[ -z "$version" || "$version" == "latest" ]]; then
+  RELEASE_VERSION=$(curl -s https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+  RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
+  [[ -n "$RELEASE_VERSION" ]] || { echo "Error: Could not determine latest release version from GitHub."; exit 1; }
+  echo "Resolved latest release version: $RELEASE_VERSION"
+else
+  RELEASE_VERSION="$version"
+  echo "Using specified version: $RELEASE_VERSION"
+fi
 
 TOOLS_ARCH=$(uname -m)
 case "$TOOLS_ARCH" in
@@ -377,7 +425,7 @@ check_existing_ma_release() {
 
 # Check required tools
 missing=0
-for cmd in git jq kubectl; do
+for cmd in jq kubectl; do
   if ! command -v $cmd &>/dev/null; then
     echo "Missing required tool: $cmd"
     missing=1
@@ -393,63 +441,43 @@ fi
 # Exit if any tool was missing and not resolved
 [ "$missing" -ne 0 ] && exit 1
 
-# --- git pull (before CFN deploy, which may need the repo for --build-cfn) ---
-if [[ "$skip_git_pull" == "false" ]]; then
-  echo "Preparing opensearch-migrations repo..."
-  mkdir -p $base_dir
-  pushd "$base_dir" > /dev/null || exit
-  git init > /dev/null
-  git remote | grep -q "^origin$" || git remote add -f origin "https://github.com/${org_name}/${repo_name}.git"
-  git fetch > /dev/null
-  if [ -n "$branch" ]; then
-    git checkout $branch
-  elif [ -n "$tag" ]; then
-    git checkout tags/"$tag"
-  else
-    latest_release_tag=$(curl -s https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | jq -r ".tag_name")
-    git checkout tags/"$latest_release_tag"
-  fi
-  echo "Using opensearch-migrations repo at commit point:"
-  echo "-------------------------------"
-  git show -s --format="%H%n%an <%ae>%n%ad%n%s" HEAD
-  echo "-------------------------------"
-  popd > /dev/null || exit
-fi
-
 # --- CFN deployment (optional) ---
 if [[ "$deploy_cfn" == "true" ]]; then
   # Determine template source
-  cfn_template_arg=""
+  cfn_template_flag=""
+  cfn_template_value=""
   if [[ "$build_cfn" == "true" ]]; then
     echo "Building CloudFormation templates from source..."
     "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified
+    cfn_template_flag="--template-body"
     if [[ "$deploy_create_vpc" == "true" ]]; then
-      cfn_template_arg="--template-file $base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
+      cfn_template_value="file://$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
     else
-      cfn_template_arg="--template-file $base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Import-VPC-eks.template.json"
+      cfn_template_value="file://$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Import-VPC-eks.template.json"
     fi
   else
+    cfn_template_flag="--template-url"
     if [[ "$deploy_create_vpc" == "true" ]]; then
-      s3_url="https://solutions-reference.s3.amazonaws.com/migration-assistant-for-amazon-opensearch-service/latest/migration-assistant-for-amazon-opensearch-service-create-vpc-eks.template"
+      cfn_template_value="https://solutions-reference.s3.amazonaws.com/migration-assistant-for-amazon-opensearch-service/${RELEASE_VERSION}/migration-assistant-for-amazon-opensearch-service-create-vpc-eks.template"
     else
-      s3_url="https://solutions-reference.s3.amazonaws.com/migration-assistant-for-amazon-opensearch-service/latest/migration-assistant-for-amazon-opensearch-service-import-vpc-eks.template"
+      cfn_template_value="https://solutions-reference.s3.amazonaws.com/migration-assistant-for-amazon-opensearch-service/${RELEASE_VERSION}/migration-assistant-for-amazon-opensearch-service-import-vpc-eks.template"
     fi
-    cfn_template_arg="--template-url $s3_url"
   fi
 
-  # Build parameter overrides
-  cfn_params="ParameterKey=Stage,ParameterValue=${stage_filter}"
+  # Build parameter overrides (use separate array to handle comma-separated subnet IDs)
+  cfn_params=("ParameterKey=Stage,ParameterValue=${stage_filter}")
   if [[ "$deploy_import_vpc" == "true" ]]; then
-    cfn_params="$cfn_params ParameterKey=VPCId,ParameterValue=${vpc_id} ParameterKey=VPCSubnetIds,ParameterValue=${subnet_ids}"
+    cfn_params+=("ParameterKey=VPCId,ParameterValue=${vpc_id}")
+    cfn_params+=("ParameterKey=VPCSubnetIds,ParameterValue=\"${subnet_ids}\"")
   fi
 
   echo "Deploying CloudFormation stack: $cfn_stack_name"
   # create-stack/update-stack to support both --template-file and --template-url
   if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
     aws cloudformation update-stack \
-      $cfn_template_arg \
+      "$cfn_template_flag" "$cfn_template_value" \
       --stack-name "$cfn_stack_name" \
-      --parameters $cfn_params \
+      --parameters "${cfn_params[@]}" \
       --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
       ${region:+--region "$region"} 2>&1 \
       | grep -v "No updates are to be performed" \
@@ -459,9 +487,9 @@ if [[ "$deploy_cfn" == "true" ]]; then
       --stack-name "$cfn_stack_name" ${region:+--region "$region"} 2>/dev/null || true
   else
     aws cloudformation create-stack \
-      $cfn_template_arg \
+      "$cfn_template_flag" "$cfn_template_value" \
       --stack-name "$cfn_stack_name" \
-      --parameters $cfn_params \
+      --parameters "${cfn_params[@]}" \
       --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
       ${region:+--region "$region"} \
       || { echo "CloudFormation deployment failed for stack: $cfn_stack_name"; exit 1; }
@@ -509,6 +537,7 @@ fi
 # Show resolved configuration and sources
 echo ""
 echo "Resolved configuration:"
+echo "  Version                = ${RELEASE_VERSION}"
 echo "  AWS_ACCOUNT              = ${AWS_ACCOUNT}"
 echo "  AWS_CFN_REGION           = ${AWS_CFN_REGION}"
 echo "  STAGE                    = ${STAGE}"
@@ -600,6 +629,11 @@ if [[ "$build_images" == "true" ]]; then
   echo "Builder removed. Buildkit pods will be terminated by kubernetes driver."
 fi
 
+# --- image source selection ---
+# When --build-images is set, images are built from source and pushed to the
+# private ECR registry. Otherwise, public images are pulled from
+# public.ecr.aws/opensearchproject, tagged with $RELEASE_VERSION.
+# To add a new image, add entries to both branches below.
 if [[ "$use_public_images" == "false" ]]; then
   IMAGE_FLAGS="\
     --set images.captureProxy.repository=${MIGRATIONS_ECR_REGISTRY} \
@@ -614,16 +648,7 @@ if [[ "$use_public_images" == "false" ]]; then
     --set images.installer.tag=migrations_migration_console_latest"
 # Use latest public images
 else
-  # Get latest release version from GitHub releases API
-  RELEASE_VERSION=$(curl -s https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
-  if [[ -z "$RELEASE_VERSION" ]]; then
-    echo "Warning: Could not fetch latest release from GitHub, falling back to VERSION file"
-    RELEASE_VERSION=$(<"$base_dir/VERSION")
-  fi
-  RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
-  echo "Using RELEASE_VERSION=$RELEASE_VERSION"
-
-  echo "Using release version tag '$RELEASE_VERSION' for all Migration Assistant images"
+  echo "Using public images tagged '$RELEASE_VERSION'"
   IMAGE_FLAGS="\
     --set images.captureProxy.repository=public.ecr.aws/opensearchproject/opensearch-migrations-traffic-capture-proxy \
     --set images.captureProxy.tag=$RELEASE_VERSION \
@@ -637,13 +662,43 @@ else
     --set images.installer.tag=$RELEASE_VERSION"
 fi
 
+# --- chart and dashboard source selection ---
+# By default, the Helm chart and dashboard JSON files are downloaded from the
+# GitHub release matching $RELEASE_VERSION. With --build-chart-and-dashboards,
+# they come from the local repo checkout instead.
+# To add new release artifacts, add curl downloads here and update
+# .github/workflows/release-drafter.yml to publish them.
+dashboard_dir="${base_dir}/deployment/k8s/dashboards"
+if [[ "$build_chart_and_dashboards" != "true" ]]; then
+  RELEASE_BASE_URL="https://github.com/opensearch-project/opensearch-migrations/releases/download/${RELEASE_VERSION}"
+  echo "Downloading release artifacts (${RELEASE_VERSION}) from GitHub..."
+  curl -fLO "${RELEASE_BASE_URL}/migration-assistant-${RELEASE_VERSION}.tgz" \
+    || { echo "Failed to download Helm chart for version ${RELEASE_VERSION}"; exit 1; }
+  curl -fLO "${RELEASE_BASE_URL}/capture-replay-dashboard.json" \
+    || { echo "Failed to download capture-replay-dashboard.json"; exit 1; }
+  curl -fLO "${RELEASE_BASE_URL}/reindex-from-snapshot-dashboard.json" \
+    || { echo "Failed to download reindex-from-snapshot-dashboard.json"; exit 1; }
+  ma_chart_dir="./migration-assistant-${RELEASE_VERSION}.tgz"
+  dashboard_dir="."
+fi
+
+# --- helm install ---
+# When using packaged chart, valuesEks.yaml is extracted from the tgz since
+# helm can't reference files inside an archive. When using the local chart,
+# values files are referenced directly. To add new values files, update both paths.
+if [[ "$build_chart_and_dashboards" != "true" ]]; then
+  tar xzf "${ma_chart_dir}" migration-assistant/valuesEks.yaml migration-assistant/values.yaml
+  HELM_VALUES_FLAGS="-f migration-assistant/values.yaml -f migration-assistant/valuesEks.yaml"
+else
+  HELM_VALUES_FLAGS="-f ${ma_chart_dir}/values.yaml -f ${ma_chart_dir}/valuesEks.yaml"
+fi
+
 check_existing_ma_release "$namespace" "$namespace"
 
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
 helm install "$namespace" "${ma_chart_dir}" \
   --namespace $namespace \
-  -f "${ma_chart_dir}/values.yaml" \
-  -f "${ma_chart_dir}/valuesEks.yaml" \
+  $HELM_VALUES_FLAGS \
   ${extra_helm_values:+-f "$extra_helm_values"} \
   --set stageName="${STAGE}" \
   --set aws.region="${AWS_CFN_REGION}" \
@@ -653,8 +708,8 @@ helm install "$namespace" "${ma_chart_dir}" \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 
 echo "Deploying CloudWatch dashboards..."
-deploy_dashboard "CaptureReplay" "${base_dir}/deployment/k8s/dashboards/capture-replay-dashboard.json"
-deploy_dashboard "ReindexFromSnapshot" "${base_dir}/deployment/k8s/dashboards/reindex-from-snapshot-dashboard.json"
+deploy_dashboard "CaptureReplay" "${dashboard_dir}/capture-replay-dashboard.json"
+deploy_dashboard "ReindexFromSnapshot" "${dashboard_dir}/reindex-from-snapshot-dashboard.json"
 echo "All dashboards deployed to CloudWatch"
 
 if [[ "$disable_general_purpose_pool" == "true" ]]; then
