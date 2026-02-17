@@ -213,7 +213,8 @@ Configure the MA workflow and execute it while capturing evidence.
 **Constraints:**
 - You MUST retrieve the current workflow config and schema at runtime (e.g., `workflow configure view`, `/root/.workflowUser.schema.json`) before editing.
 - You MUST set the workflow configuration via supported mechanisms (interactive editor or `--stdin`) and record what you changed.
-- You MUST run the workflow using `workflow submit` (optionally `--wait`) and record workflow name/IDs.
+- You MUST run the workflow using `workflow submit` and record workflow name/IDs.
+- You MUST NOT use `--wait` or any other blocking wait for long-running operations. After submitting, immediately proceed to the monitoring pattern in Step 8.
 - If the workflow includes manual approval gates:
   - In `guided`, you MUST stop and request confirmation before approving any gate.
   - In `semi_auto`, you MUST stop and request confirmation at each gate.
@@ -224,6 +225,19 @@ Configure the MA workflow and execute it while capturing evidence.
 Monitor progress and adjust backfill worker scale carefully.
 
 **Constraints:**
+- You MUST NOT use blocking waits (`--wait`, `sleep` without status checks, or any command that blocks until completion) for long-running operations because the user cannot see progress and will have to interrupt you.
+- You MUST use the following polling pattern immediately after any workflow submission:
+
+```bash
+while true; do
+  workflow status
+  sleep 30
+done
+```
+
+- You MUST show the status output to the user on each polling iteration.
+- You MUST report phase changes as they occur (e.g., snapshot → metadata → backfill).
+- You MUST immediately diagnose on completion or failure — do not wait for the user to ask.
 - You MUST use MA-provided status/log mechanisms where possible (workflow status/output and component logs).
 - You SHOULD use a token-efficient monitoring strategy (tail only progress indicators for long-running backfill).
 - In `guided`, you MUST ask before changing scale.
@@ -296,3 +310,29 @@ If the console cannot reach source/target:
 If resolving connectivity would require AWS-side changes (access policies, security groups, IAM, domain config):
 - You MUST NOT run `aws opensearch update-domain-config`, `aws ec2 authorize-security-group-*`, or IAM policy/role changes automatically because these can impact production access and security posture.
 - You SHOULD provide the exact commands and ask the user to run them or explicitly approve them.
+
+### Workflow Retry Procedure
+
+When a workflow fails and needs to be retried, follow this standard procedure:
+
+1. Run `workflow status` and capture the failure details.
+2. Get logs from the failed pod (`kubectl logs -n {namespace} <pod-name>`).
+3. Diagnose the root cause from the logs and status output.
+4. Clean up before resubmitting:
+   a. Delete the failed workflow.
+   b. Delete the target index if metadata or transformer config needs to change.
+   c. Verify the transformer config is correct before resubmitting.
+5. Resubmit the workflow.
+6. Immediately start the monitoring polling loop (see Step 8).
+
+- You MUST follow this procedure in order — do not skip cleanup steps because leftover state causes subsequent failures.
+- You MUST NOT retry more than 3 times with the same approach. If the same error recurs, stop and report to the user with a summary of what was tried and propose alternative approaches.
+
+### kubectl Command Patterns
+
+Use these validated patterns to avoid common kubectl errors:
+
+- **Pod status:** `kubectl get pods -n {namespace} -l <selector>`
+- **Pod logs:** `kubectl logs -n {namespace} <pod-name>` — always verify the pod exists and get the exact pod name first.
+- You MUST NOT use `--timeout` with `kubectl get` because it is not a valid flag for that subcommand.
+- You MUST NOT pass empty or unresolved variables as pod names to `kubectl logs`.
