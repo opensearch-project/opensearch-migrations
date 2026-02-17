@@ -33,12 +33,12 @@ function deleteProp(obj, key) {
 
 function resolveModelId(modelMappings, inferenceId) {
     if (!modelMappings || !inferenceId) return inferenceId;
-    var mapped = getProp(modelMappings, inferenceId);
+    const mapped = getProp(modelMappings, inferenceId);
     return mapped !== undefined ? mapped : inferenceId;
 }
 
 // ES properties that get renamed to OS equivalents
-var RENAME_MAP = {
+const RENAME_MAP = {
     'inference_id': 'model_id',
     'search_inference_id': 'search_model_id'
 };
@@ -46,20 +46,19 @@ var RENAME_MAP = {
 function recurse(node, modelMappings) {
     if (!node || typeof node !== 'object') return false;
 
-    var entries = node instanceof Map ? node.entries() : Object.entries(node);
-    var changed = false;
+    const entries = node instanceof Map ? node.entries() : Object.entries(node);
+    let changed = false;
 
-    for (var pair of entries) {
-        var key = pair[0];
-        var val = pair[1];
+    for (const pair of entries) {
+        const val = pair[1];
         if (val && typeof val === 'object') {
             if (getProp(val, 'type') === 'semantic_text') {
                 setProp(val, 'type', 'semantic');
                 // Rename inference_id -> model_id, search_inference_id -> search_model_id
-                for (var esProp in RENAME_MAP) {
-                    var value = getProp(val, esProp);
+                for (const esProp in RENAME_MAP) {
+                    const value = getProp(val, esProp);
                     if (value !== undefined) {
-                        var resolved = resolveModelId(modelMappings, value);
+                        const resolved = resolveModelId(modelMappings, value);
                         setProp(val, RENAME_MAP[esProp], resolved);
                         deleteProp(val, esProp);
                     }
@@ -77,17 +76,17 @@ function recurse(node, modelMappings) {
 }
 
 function applyTransformation(raw, modelMappings) {
-    var body = getProp(raw, 'body');
-    var mappings = getProp(body, 'mappings');
+    const body = getProp(raw, 'body');
+    const mappings = getProp(body, 'mappings');
 
     if (mappings && recurse(mappings, modelMappings)) {
         // semantic field type requires index.knn=true
-        var settings = getProp(body, 'settings');
+        let settings = getProp(body, 'settings');
         if (!settings) {
             settings = {};
             setProp(body, 'settings', settings);
         }
-        var indexSettings = getProp(settings, 'index');
+        let indexSettings = getProp(settings, 'index');
         if (!indexSettings) {
             indexSettings = {};
             setProp(settings, 'index', indexSettings);
@@ -99,7 +98,7 @@ function applyTransformation(raw, modelMappings) {
 }
 
 function main(context) {
-    var modelMappings = null;
+    let modelMappings = null;
     if (context) {
         modelMappings = getProp(context, 'model_mappings');
     }
