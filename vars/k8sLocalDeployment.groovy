@@ -100,6 +100,21 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Install S3 CSI Driver') {
+                steps {
+                    timeout(time: 3, unit: 'MINUTES') {
+                        script {
+                            sh """
+                                helm repo add aws-mountpoint-s3-csi-driver https://awslabs.github.io/mountpoint-s3-csi-driver 2>/dev/null || true
+                                helm repo update aws-mountpoint-s3-csi-driver
+                                helm upgrade --install aws-mountpoint-s3-csi-driver aws-mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver \
+                                    --namespace kube-system
+                            """
+                        }
+                    }
+                }
+            }
+
             stage('Cleanup Previous MA Deployment') {
                 steps {
                     timeout(time: 3, unit: 'MINUTES') {
