@@ -316,7 +316,7 @@ def call(Map config = [:]) {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir /home/ec2-user/workspace/eks-integ-test --use-public-images false --skip-console-exec --stage ${maStageName}"
+                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir /home/ec2-user/workspace/eks-integ-test --build-images-locally --skip-console-exec --stage ${maStageName}"
                                     }
                                 }
                             }
