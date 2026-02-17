@@ -448,7 +448,13 @@ if [[ "$deploy_cfn" == "true" ]]; then
   cfn_template_value=""
   if [[ "$build_cfn" == "true" ]]; then
     echo "Building CloudFormation templates from source..."
-    "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified
+    # Clear STACK_NAME_SUFFIX so CDK produces predictable template filenames.
+    # The stack name is controlled by --stack-name, not by CDK stack IDs.
+    # Other CDK env vars (CODE_BUCKET, SOLUTION_NAME, CODE_VERSION) are left
+    # intact — they affect template content (AppRegistry names, S3 paths) and
+    # the CDK has safe defaults when they're unset.
+    STACK_NAME_SUFFIX="" \
+      "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified
     cfn_template_flag="--template-body"
     if [[ "$deploy_create_vpc" == "true" ]]; then
       cfn_template_value="file://$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
@@ -698,6 +704,7 @@ check_existing_ma_release "$namespace" "$namespace"
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
 helm install "$namespace" "${ma_chart_dir}" \
   --namespace $namespace \
+  --timeout 10m \
   $HELM_VALUES_FLAGS \
   ${extra_helm_values:+-f "$extra_helm_values"} \
   --set stageName="${STAGE}" \

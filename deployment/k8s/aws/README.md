@@ -105,6 +105,7 @@ for additional deployment guidance.
 In addition to the general prerequisites above, if building any of the
 artifacts directly, you'll also need to install:
 - Java Development Kit (JDK) 11-17
+- Docker: for image builds, including builder support for buildkit remote builds
 - The opensearch-migrations repo
 
 ### Build everything from source
