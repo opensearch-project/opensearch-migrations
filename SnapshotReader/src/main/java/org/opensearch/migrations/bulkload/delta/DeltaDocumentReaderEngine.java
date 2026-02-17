@@ -5,6 +5,7 @@ import java.util.Comparator;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.BiFunction;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -16,7 +17,7 @@ import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
-import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +29,7 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
     private final BiFunction<String, Integer, ShardMetadata> previousShardMetadataFactory;
     private final BiFunction<String, Integer, ShardMetadata> shardMetadataFactory;
     private final DeltaMode deltaMode;
+    private final Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory;
 
     @Override
     public SnapshotShardUnpacker createUnpacker(
@@ -59,8 +61,7 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
         LuceneIndexReader reader,
         String indexName,
         int shardNumber,
-        int startingDocId,
-        BaseRootRfsContext rootContext
+        int startingDocId
     ) throws IOException {
         ShardMetadata previousShardMetadata = previousShardMetadataFactory.apply(indexName, shardNumber);
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexName, shardNumber);
@@ -70,8 +71,11 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
             previousReader = reader.getReader(previousShardMetadata.getSegmentFileName());
             currentReader  = reader.getReader(shardMetadata.getSegmentFileName());
 
-            var deltaResult = DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(
-                previousReader, currentReader, startingDocId, rootContext);
+            DeltaLuceneReader.DeltaResult deltaResult;
+            try (var deltaContext = deltaContextFactory.get()) {
+                deltaResult = DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(
+                    previousReader, currentReader, startingDocId, deltaContext);
+            }
 
             var deletions = switch (deltaMode) {
                 case UPDATES_ONLY -> Flux.<LuceneDocumentChange>empty();

@@ -8,14 +8,12 @@ import java.util.TreeSet;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
-import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneReader;
 import org.opensearch.migrations.bulkload.lucene.ReaderAndBase;
-import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
-import org.opensearch.migrations.bulkload.tracing.RfsContexts;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
@@ -25,7 +23,7 @@ import reactor.core.scheduler.Schedulers;
  * DeltaLuceneReader
  * <p>
  * Provides a delta-style backfill between a previous and current Lucene snapshot.
- * Emits both new documents and delete operations as {@link LuceneDocumentChange} or {@link BulkOperationSpec} via Reactor streams.
+ * Emits both new documents and delete operations as {@link LuceneDocumentChange} via Reactor streams.
  *
  * <h3>Functionality</h3>
  * - Builds segment → reader maps from both snapshots.
@@ -98,96 +96,93 @@ public class DeltaLuceneReader {
         LuceneDirectoryReader previousReader, 
         LuceneDirectoryReader currentReader, 
         int startDocId,
-        BaseRootRfsContext rootContext
+        IRfsContexts.IDeltaStreamContext deltaContext
     ) {
-        // Create delta stream context for telemetry
-        try (var deltaContext = new RfsContexts.DeltaStreamContext(rootContext, null)) {
-            log.atInfo()
-                .setMessage("Starting delta backfill from position {}")
-                .addArgument(startDocId)
-                .log();
+        log.atInfo()
+            .setMessage("Starting delta backfill from position {}")
+            .addArgument(startDocId)
+            .log();
 
-            var previousSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
-            previousReader.leaves().forEach(
-                leaf ->
-                    previousSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
-            );
+        var previousSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
+        previousReader.leaves().forEach(
+            leaf ->
+                previousSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
+        );
 
-            var currentSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
-            currentReader.leaves().forEach(
-                leaf ->
-                    currentSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
-            );
+        var currentSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
+        currentReader.leaves().forEach(
+            leaf ->
+                currentSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
+        );
 
-            log.atInfo()
-                .setMessage("Found {} segments in previous and {} segments in current")
-                .addArgument(previousSegmentToLeafReader.size())
-                .addArgument(currentSegmentToLeafReader.size())
-                .log();
+        log.atInfo()
+            .setMessage("Found {} segments in previous and {} segments in current")
+            .addArgument(previousSegmentToLeafReader.size())
+            .addArgument(currentSegmentToLeafReader.size())
+            .log();
 
-            // Record total segments seen
-            long totalSegmentsSeen = (long) previousSegmentToLeafReader.size() + currentSegmentToLeafReader.size();
-            deltaContext.recordSegmentsSeen(totalSegmentsSeen);
+        // Record total segments seen
+        long totalSegmentsSeen = (long) previousSegmentToLeafReader.size() + currentSegmentToLeafReader.size();
+        deltaContext.recordSegmentsSeen(totalSegmentsSeen);
 
-            log.atInfo()
-                .setMessage("Calculating remove and add docs in snapshot")
-                .log();
+        log.atInfo()
+            .setMessage("Calculating remove and add docs in snapshot")
+            .log();
 
-            // Docs to remove are additions between new and old
-            // TODO: Consider updating offset to a int to start at 0 instead of Integer.MIN_VALUE
-            var removes = getAdditionsBetweenSnapshot(currentSegmentToLeafReader, previousSegmentToLeafReader, Integer.MIN_VALUE);
-            var additions = getAdditionsBetweenSnapshot(previousSegmentToLeafReader, currentSegmentToLeafReader, 0);
+        // Docs to remove are additions between new and old
+        // TODO: Consider updating offset to a int to start at 0 instead of Integer.MIN_VALUE
+        var removes = getAdditionsBetweenSnapshot(currentSegmentToLeafReader, previousSegmentToLeafReader, Integer.MIN_VALUE);
+        var additions = getAdditionsBetweenSnapshot(previousSegmentToLeafReader, currentSegmentToLeafReader, 0);
 
-            // Calculate and record metrics
-            var totalDocsToRemove = removes.stream()
-                .mapToInt(s -> s.getLiveDocs() == null ? s.getReader().maxDoc() :
-                        s.getLiveDocs().cardinality()
-                    )
-                .sum();
-            
-            var totalDocsToAdd = additions.stream()
-                .mapToInt(s -> s.getLiveDocs() == null ? s.getReader().maxDoc() :
-                        s.getLiveDocs().cardinality()
-                    )
-                .sum();
-            
-            // Record metrics
-            deltaContext.recordDeltaDeletions(totalDocsToRemove);
-            deltaContext.recordDeltaAdditions(totalDocsToAdd);
+        // Calculate and record metrics
+        var totalDocsToRemove = removes.stream()
+            .mapToInt(s -> s.getLiveDocs() == null ? s.getReader().maxDoc() :
+                    s.getLiveDocs().cardinality()
+                )
+            .sum();
+        
+        var totalDocsToAdd = additions.stream()
+            .mapToInt(s -> s.getLiveDocs() == null ? s.getReader().maxDoc() :
+                    s.getLiveDocs().cardinality()
+                )
+            .sum();
+        
+        // Record metrics
+        deltaContext.recordDeltaDeletions(totalDocsToRemove);
+        deltaContext.recordDeltaAdditions(totalDocsToAdd);
 
-            log.atInfo()
-                .setMessage("Delta Snapshot will process {} deleted docs and {} added docs")
-                .addArgument(totalDocsToRemove)
-                .addArgument(totalDocsToAdd)
-                .log();
+        log.atInfo()
+            .setMessage("Delta Snapshot will process {} deleted docs and {} added docs")
+            .addArgument(totalDocsToRemove)
+            .addArgument(totalDocsToAdd)
+            .log();
 
-            var maxDocumentsToReadAtOnce = 100; // Arbitrary value
-            var sharedSegmentReaderScheduler = Schedulers.boundedElastic();
+        var maxDocumentsToReadAtOnce = 100; // Arbitrary value
+        var sharedSegmentReaderScheduler = Schedulers.boundedElastic();
 
-            // Create additions stream
-            var additionsStream = Flux.fromIterable(additions)
-                .flatMapSequential( c ->
-                    LuceneReader.readDocsFromSegment(c,
-                        startDocId,
-                        sharedSegmentReaderScheduler,
-                        maxDocumentsToReadAtOnce,
-                        Path.of(c.getReader().getSegmentName()),
-                        DocumentChangeType.INDEX)
-                ).subscribeOn(sharedSegmentReaderScheduler); // Scheduler to read documents on
+        // Create additions stream
+        var additionsStream = Flux.fromIterable(additions)
+            .flatMapSequential( c ->
+                LuceneReader.readDocsFromSegment(c,
+                    startDocId,
+                    sharedSegmentReaderScheduler,
+                    maxDocumentsToReadAtOnce,
+                    Path.of(c.getReader().getSegmentName()),
+                    DocumentChangeType.INDEX)
+            ).subscribeOn(sharedSegmentReaderScheduler); // Scheduler to read documents on
 
-            // Create deletions stream - these are documents that were removed between snapshots
-            var deletionsStream = Flux.fromIterable(removes)
-                .flatMapSequential( c ->
-                    LuceneReader.readDocsFromSegment(c,
-                        startDocId,
-                        sharedSegmentReaderScheduler,
-                        maxDocumentsToReadAtOnce,
-                        Path.of(c.getReader().getSegmentName()),
-                        DocumentChangeType.DELETE)
-                ).subscribeOn(sharedSegmentReaderScheduler);
+        // Create deletions stream - these are documents that were removed between snapshots
+        var deletionsStream = Flux.fromIterable(removes)
+            .flatMapSequential( c ->
+                LuceneReader.readDocsFromSegment(c,
+                    startDocId,
+                    sharedSegmentReaderScheduler,
+                    maxDocumentsToReadAtOnce,
+                    Path.of(c.getReader().getSegmentName()),
+                    DocumentChangeType.DELETE)
+            ).subscribeOn(sharedSegmentReaderScheduler);
 
-            return new DeltaResult(additionsStream, deletionsStream);
-        }
+        return new DeltaResult(additionsStream, deletionsStream);
     }
 
     private static List<ReaderAndBase> getAdditionsBetweenSnapshot(TreeMap<String, LuceneLeafReader>

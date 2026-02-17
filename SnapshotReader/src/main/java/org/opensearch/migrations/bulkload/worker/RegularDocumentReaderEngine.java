@@ -13,7 +13,6 @@ import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneReader;
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
-import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 
 import lombok.AllArgsConstructor;
 import reactor.core.publisher.Flux;
@@ -47,8 +46,7 @@ public class RegularDocumentReaderEngine implements DocumentReaderEngine {
         LuceneIndexReader reader,
         String indexName,
         int shardNumber,
-        int startingDocId,
-        BaseRootRfsContext ignored
+        int startingDocId
     ) throws IOException {
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexName, shardNumber);
         var directoryReader = reader.getReader(shardMetadata.getSegmentFileName());

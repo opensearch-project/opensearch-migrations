@@ -37,6 +37,7 @@ import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
+import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
@@ -811,7 +812,8 @@ public class RfsMigrateDocuments {
         var engine = (previousSnapshotName == null)
             ? new RegularDocumentReaderEngine(shardMetadataSupplier)
             : new DeltaDocumentReaderEngine(
-                shardMetadataSupplierFactory.apply(previousSnapshotName), shardMetadataSupplier, deltaMode);
+                shardMetadataSupplierFactory.apply(previousSnapshotName), shardMetadataSupplier, deltaMode,
+                () -> new RfsContexts.DeltaStreamContext(rootDocumentContext, null));
 
         DocumentsRunner runner = new DocumentsRunner(scopedWorkCoordinator,
             maxInitialLeaseDuration,
