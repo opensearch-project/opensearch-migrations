@@ -22,6 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class CanonicalTransformer implements Transformer {
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String SETTINGS_KEY = "settings";
 
     private final int awarenessAttributes;
     private final List<TransformationRule<Index>> indexTransformations;
@@ -112,8 +113,8 @@ public class CanonicalTransformer implements Transformer {
         TransformFunctions.removeIntermediateMappingsLevels(root);
 
         // Normalize settings — flat→tree, remove intermediate index level
-        if (root.has("settings")) {
-            root.set("settings", TransformFunctions.convertFlatSettingsToTree((ObjectNode) root.get("settings")));
+        if (root.has(SETTINGS_KEY)) {
+            root.set(SETTINGS_KEY, TransformFunctions.convertFlatSettingsToTree((ObjectNode) root.get(SETTINGS_KEY)));
         }
         TransformFunctions.removeIntermediateIndexSettingsLevel(root);
 

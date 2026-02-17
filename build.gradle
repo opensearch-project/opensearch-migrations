@@ -371,6 +371,21 @@ subprojects {
         jacocoTestReport {
             dependsOn = testsWithJacoco
             executionData.from testsWithJacoco*.jacoco.destinationFile
+
+            // Include source and class dirs from project dependencies so coverage
+            // for code in rfs-common/SearchSnapshotExtractor is reported by downstream modules
+            afterEvaluate {
+                def depProjects = configurations.findAll { it.canBeResolved }.collectMany { config ->
+                    config.dependencies.withType(ProjectDependency).collect { it.dependencyProject }
+                }.unique()
+                depProjects.each { depProject ->
+                    if (depProject.plugins.hasPlugin('java')) {
+                        additionalSourceDirs.from depProject.sourceSets.main.allSource.srcDirs
+                        additionalClassDirs.from depProject.sourceSets.main.output.classesDirs
+                    }
+                }
+            }
+
             reports {
                 xml.required = true
             }
