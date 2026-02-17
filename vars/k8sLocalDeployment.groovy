@@ -105,6 +105,7 @@ def call(Map config = [:]) {
                     timeout(time: 3, unit: 'MINUTES') {
                         script {
                             sh """
+                                kubectl config use-context minikube
                                 helm repo add aws-mountpoint-s3-csi-driver https://awslabs.github.io/mountpoint-s3-csi-driver 2>/dev/null || true
                                 helm repo update aws-mountpoint-s3-csi-driver
                                 kubectl create secret generic aws-secret \
