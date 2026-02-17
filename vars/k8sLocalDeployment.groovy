@@ -116,6 +116,9 @@ def call(Map config = [:]) {
                                 helm upgrade --install aws-mountpoint-s3-csi-driver aws-mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver \
                                     --namespace kube-system \
                                     --set node.tolerateAllTaints=true
+                                # Restart the CSI driver DaemonSet to ensure it picks up the aws-secret
+                                kubectl rollout restart daemonset -n kube-system s3-csi-node
+                                kubectl rollout status daemonset -n kube-system s3-csi-node --timeout=60s
                             """
                         }
                     }
