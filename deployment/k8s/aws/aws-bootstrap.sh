@@ -2,9 +2,9 @@
 # -----------------------------------------------------------------------------
 # Bootstrap EKS Environment for OpenSearch Migration Assistant
 #
-# This script prepares an existing EKS cluster to use the Migration Assistant tooling.
+# This script provisions an EKS cluster with Cfn to use the Migration Assistant tooling.
 # By default, public images will be used from https://gallery.ecr.aws/opensearchproject.
-# Images can also be built from source locally with the --build-images-locally flag.
+# Images can also be built from source locally with the --build-images flag.
 #
 # Usage:
 #   Run directly: curl -s https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh | bash
@@ -20,15 +20,23 @@ branch="main"
 tag=""
 skip_git_pull=false
 
-base_dir="./opensearch-migrations"
+base_dir=""
 namespace="ma"
-build_images_locally=false
+build_images=false
 use_public_images=true
 skip_console_exec=false
 stage_filter=""
 extra_helm_values=""
 disable_general_purpose_pool=false
 region="${AWS_CFN_REGION:-}"
+deploy_create_vpc=false
+deploy_import_vpc=false
+build_cfn=false
+cfn_stack_name=""
+vpc_id=""
+subnet_ids=""
+eks_access_principal_arn=""
+skip_cfn_deploy=false
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -41,29 +49,77 @@ while [[ $# -gt 0 ]]; do
     --base-dir) base_dir="$2"; shift 2 ;;
     --ma-chart-dir) ma_chart_dir="$2"; shift 2 ;;
     --namespace) namespace="$2"; shift 2 ;;
-    --build-images-locally) build_images_locally=true; shift 1 ;;
+    --build-images) build_images=true; shift 1 ;;
     --skip-console-exec) skip_console_exec=true; shift 1 ;;
     --stage) stage_filter="$2"; shift 2 ;;
     --helm-values) extra_helm_values="$2"; shift 2 ;;
     --disable-general-purpose-pool) disable_general_purpose_pool=true; shift 1 ;;
     --region) region="$2"; shift 2 ;;
+    --deploy-create-vpc-cfn) deploy_create_vpc=true; shift 1 ;;
+    --deploy-import-vpc-cfn) deploy_import_vpc=true; shift 1 ;;
+    --build-cfn) build_cfn=true; shift 1 ;;
+    --stack-name) cfn_stack_name="$2"; shift 2 ;;
+    --vpc-id) vpc_id="$2"; shift 2 ;;
+    --subnet-ids) subnet_ids="$2"; shift 2 ;;
+    --eks-access-principal-arn) eks_access_principal_arn="$2"; shift 2 ;;
+    --skip-cfn-deploy) skip_cfn_deploy=true; shift 1 ;;
     -h|--help)
       echo "Usage: $0 [options]"
-      echo "Options:"
-      echo "  --org-name <val>                          (default: $org_name)"
-      echo "  --repo-name <val>                         (default: $repo_name)"
-      echo "  --branch <val>                            (default: $branch)"
-      echo "  --tag <val>                               (default: $tag)"
-      echo "  --skip-git-pull                           (default: $skip_git_pull)"
-      echo "  --base-dir <path>                         (default: $base_dir)"
-      echo "  --ma-chart-dir <path>                     (default: $ma_chart_dir)"
-      echo "  --namespace <val>                         (default: $namespace)"
-      echo "  --build-images-locally                    Build images from source locally (default: $build_images_locally)"
-      echo "  --skip-console-exec                       (default: $skip_console_exec)"
-      echo "  --stage <val>                             Filter CFN exports by stage name"
+      echo ""
+      echo "Bootstrap an EKS cluster for the OpenSearch Migration Assistant."
+      echo "Optionally deploy the Migration Assistant CloudFormation stack first."
+      echo ""
+      echo "Git options:"
+      echo "  --org-name <val>                          GitHub org for git checkout (default: $org_name)"
+      echo "  --repo-name <val>                         GitHub repo for git checkout (default: $repo_name)"
+      echo "  --branch <val>                            Git branch for git checkout (default: $branch)"
+      echo "  --tag <val>                               Git tag for git checkout (default: none)"
+      echo "  --skip-git-pull                           Use existing local repo (default: $skip_git_pull)"
+      echo ""
+      echo "General options:"
+      echo "  --base-dir <path>                         Repo directory (default: git repo root, or ./opensearch-migrations if cloning)"
+      echo "  --build-images                            Build images from source (default: $build_images)"
+      echo ""
+      echo "CloudFormation deployment options (exactly one required):"
+      echo "  --deploy-create-vpc-cfn                   Deploy the Create-VPC EKS CloudFormation template."
+      echo "                                            Creates a new VPC with all required networking."
+      echo "  --deploy-import-vpc-cfn                   Deploy the Import-VPC EKS CloudFormation template."
+      echo "                                            Uses an existing VPC — requires --vpc-id and --subnet-ids."
+      echo "  --skip-cfn-deploy                         Skip CloudFormation deployment. Use when the Migration"
+      echo "                                            Assistant stack is already deployed and you only want to"
+      echo "                                            bootstrap the EKS cluster (install helm chart, images, etc)."
+      echo "  --build-cfn                               Build CFN templates from source (gradle cdkSynthMinified)"
+      echo "                                            instead of using the published S3 templates."
+      echo "                                            Requires one of the --deploy-*-cfn flags."
+      echo "  --stack-name <name>                       CloudFormation stack name (required with --deploy-*-cfn)."
+      echo "  --vpc-id <id>                             VPC ID (required with --deploy-import-vpc-cfn)."
+      echo "  --subnet-ids <id1,id2>                    Comma-separated subnet IDs, each in a different AZ"
+      echo "                                            (required with --deploy-import-vpc-cfn)."
+      echo ""
+      echo "EKS access options:"
+      echo "  --eks-access-principal-arn <arn>          Grant an IAM principal (role/user) cluster-admin access"
+      echo "                                            to the EKS cluster. Useful after a fresh CFN deploy when"
+      echo "                                            the deploying principal needs kubectl access, or to grant"
+      echo "                                            access to a CI role or teammate."
+      echo ""
+      echo "Deployment options:"
+      echo "  --namespace <val>                         K8s namespace (default: $namespace)"
       echo "  --helm-values <path>                      Extra values file for helm install"
       echo "  --disable-general-purpose-pool            Disable EKS Auto Mode general-purpose pool (cost control)"
-      echo "  --region <val>                            AWS region for CloudFormation exports lookup"
+      echo "  --stage <val>                             Stage name for CFN exports filter and CFN Stage parameter (default: dev)"
+      echo "  --region <val>                            AWS region"
+      echo "  --skip-console-exec                       Don't exec into console pod (default: $skip_console_exec)"
+      echo ""
+      echo "Examples:"
+      echo "  # Deploy new infrastructure with a new VPC and bootstrap:"
+      echo "  $0 --deploy-create-vpc-cfn --stack-name MA-Dev --stage dev --region us-east-1"
+      echo ""
+      echo "  # Deploy into an existing VPC and bootstrap:"
+      echo "  $0 --deploy-import-vpc-cfn --stack-name MA-Dev --stage dev \\"
+      echo "     --vpc-id vpc-0abc123 --subnet-ids subnet-111,subnet-222 --region us-east-1"
+      echo ""
+      echo "  # Bootstrap Migration Assistant only (CloudFormation stack already deployed):"
+      echo "  $0 --skip-cfn-deploy --stage dev --region us-east-1"
       exit 0
       ;;
     *)
@@ -73,9 +129,92 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$build_images_locally" == "true" ]]; then
+if [[ "$build_images" == "true" ]]; then
   use_public_images=false
 fi
+
+# --- derive state from parsed arguments ---
+deploy_cfn=false
+if [[ "$deploy_create_vpc" == "true" || "$deploy_import_vpc" == "true" ]]; then
+  deploy_cfn=true
+fi
+if [[ "$deploy_cfn" == "true" && -z "$stage_filter" ]]; then
+  stage_filter="dev"
+  echo "No --stage specified, defaulting to 'dev' for CFN Stage parameter."
+fi
+
+# --- resolve base_dir ---
+if [[ -z "$base_dir" ]]; then
+  if [[ "$skip_git_pull" == "true" ]]; then
+    # Script lives at deployment/k8s/aws/aws-bootstrap.sh — repo root is three levels up
+    base_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+  else
+    base_dir="./opensearch-migrations"
+  fi
+fi
+
+# --- validation (reads globals, exits on error, mutates nothing) ---
+validate_args() {
+  if [[ "$deploy_create_vpc" == "true" && "$deploy_import_vpc" == "true" ]]; then
+    echo "Error: --deploy-create-vpc-cfn and --deploy-import-vpc-cfn are mutually exclusive." >&2
+    exit 1
+  fi
+  if [[ "$deploy_cfn" == "false" && "$skip_cfn_deploy" == "false" ]]; then
+    echo "Error: One of --deploy-create-vpc-cfn, --deploy-import-vpc-cfn, or --skip-cfn-deploy is required." >&2
+    echo "  Use --deploy-create-vpc-cfn to create a new VPC and EKS cluster." >&2
+    echo "  Use --deploy-import-vpc-cfn to deploy into an existing VPC." >&2
+    echo "  Use --skip-cfn-deploy if the stack is already deployed." >&2
+    exit 1
+  fi
+  if [[ "$deploy_cfn" == "true" && "$skip_cfn_deploy" == "true" ]]; then
+    echo "Error: --skip-cfn-deploy cannot be combined with --deploy-create-vpc-cfn or --deploy-import-vpc-cfn." >&2
+    exit 1
+  fi
+  if [[ "$build_cfn" == "true" && "$deploy_cfn" == "false" ]]; then
+    echo "Error: --build-cfn requires --deploy-create-vpc-cfn or --deploy-import-vpc-cfn." >&2
+    exit 1
+  fi
+  if [[ "$deploy_cfn" == "true" && -z "$cfn_stack_name" ]]; then
+    echo "Error: --stack-name is required with --deploy-create-vpc-cfn or --deploy-import-vpc-cfn." >&2
+    exit 1
+  fi
+  if [[ "$deploy_import_vpc" == "true" ]]; then
+    if [[ -z "$vpc_id" ]]; then
+      echo "Error: --vpc-id is required with --deploy-import-vpc-cfn." >&2
+      echo "" >&2
+      echo "Available VPCs${region:+ in $region}:" >&2
+      aws ec2 describe-vpcs ${region:+--region "$region"} \
+        --query 'Vpcs[].{ID:VpcId,Name:Tags[?Key==`Name`].Value|[0],CIDR:CidrBlock,State:State}' \
+        --output table >&2 || true
+      echo "" >&2
+      echo "Re-run with: --vpc-id <vpc-id> --subnet-ids <subnet1,subnet2>" >&2
+      exit 1
+    fi
+    if [[ -z "$subnet_ids" ]]; then
+      echo "Error: --subnet-ids is required with --deploy-import-vpc-cfn." >&2
+      echo "" >&2
+      echo "Available subnets in VPC $vpc_id${region:+ ($region)}:" >&2
+      aws ec2 describe-subnets ${region:+--region "$region"} \
+        --filters "Name=vpc-id,Values=$vpc_id" \
+        --query 'Subnets[].{ID:SubnetId,AZ:AvailabilityZone,CIDR:CidrBlock,Public:MapPublicIpOnLaunch}' \
+        --output table >&2 || true
+      echo "" >&2
+      echo "Re-run with: --subnet-ids <subnet1,subnet2>" >&2
+      exit 1
+    fi
+  fi
+  if [[ "$deploy_import_vpc" == "false" ]]; then
+    if [[ -n "$vpc_id" ]]; then
+      echo "Error: --vpc-id is only valid with --deploy-import-vpc-cfn." >&2
+      exit 1
+    fi
+    if [[ -n "$subnet_ids" ]]; then
+      echo "Error: --subnet-ids is only valid with --deploy-import-vpc-cfn." >&2
+      exit 1
+    fi
+  fi
+}
+validate_args
 
 TOOLS_ARCH=$(uname -m)
 case "$TOOLS_ARCH" in
@@ -254,48 +393,7 @@ fi
 # Exit if any tool was missing and not resolved
 [ "$missing" -ne 0 ] && exit 1
 
-if ! output=$(get_cfn_export); then
-  echo "Unable to find any CloudFormation stacks in the current region which have an output that starts with '$prefix'. \
-Has the Migration Assistant CloudFormation template been deployed?" >&2
-  echo "If the stack is in a different region, re-run with --region <region>." >&2
-  exit 1
-fi
-echo "Setting ENV variables: $output"
-eval "$output"
-
-AWS_ACCOUNT="${AWS_ACCOUNT:-$(aws sts get-caller-identity --query Account --output text)}"
-AWS_CFN_REGION="${AWS_CFN_REGION:-$(aws configure get region)}"
-STAGE="${STAGE:-${MA_STAGE:-dev}}"
-MA_QUALIFIER="${MA_QUALIFIER:-${MIGRATIONS_QUALIFIER:-default}}"
-
-aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
-
-# Check if general-purpose pool is disabled and re-enable if needed for installation
-# Skip this if building images locally, since we'll pre-create general-work-pool
-CURRENT_NODEPOOLS=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
-  --query 'cluster.computeConfig.nodePools' --output text 2>/dev/null)
-if [[ "$CURRENT_NODEPOOLS" != *"general-purpose"* ]] && [[ "$build_images_locally" != "true" ]]; then
-  echo "general-purpose nodepool is currently disabled."
-  echo "Re-enabling it temporarily to allow pod scheduling during installation..."
-  NODE_ROLE_ARN=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
-    --query 'cluster.computeConfig.nodeRoleArn' --output text)
-  aws eks update-cluster-config \
-    --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
-    --region "${AWS_CFN_REGION}" \
-    --compute-config "{\"enabled\": true, \"nodePools\": [\"system\", \"general-purpose\"], \"nodeRoleArn\": \"${NODE_ROLE_ARN}\"}" \
-    --kubernetes-network-config '{"elasticLoadBalancing":{"enabled": true}}' \
-    --storage-config '{"blockStorage":{"enabled": true}}'
-  echo "Waiting for cluster update to complete..."
-  aws eks wait cluster-active --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}"
-  echo "general-purpose nodepool re-enabled"
-  if [[ "$disable_general_purpose_pool" == "true" ]]; then
-    echo "Note: --disable-general-purpose-pool was specified, will disable it again after installation completes"
-  fi
-fi
-
-kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace "$namespace"
-kubectl config set-context --current --namespace="$namespace" >/dev/null 2>&1
-
+# --- git pull (before CFN deploy, which may need the repo for --build-cfn) ---
 if [[ "$skip_git_pull" == "false" ]]; then
   echo "Preparing opensearch-migrations repo..."
   mkdir -p $base_dir
@@ -318,8 +416,170 @@ if [[ "$skip_git_pull" == "false" ]]; then
   popd > /dev/null || exit
 fi
 
+# --- CFN deployment (optional) ---
+if [[ "$deploy_cfn" == "true" ]]; then
+  # Determine template source
+  cfn_template_arg=""
+  if [[ "$build_cfn" == "true" ]]; then
+    echo "Building CloudFormation templates from source..."
+    "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified
+    if [[ "$deploy_create_vpc" == "true" ]]; then
+      cfn_template_arg="--template-file $base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
+    else
+      cfn_template_arg="--template-file $base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Import-VPC-eks.template.json"
+    fi
+  else
+    if [[ "$deploy_create_vpc" == "true" ]]; then
+      s3_url="https://solutions-reference.s3.amazonaws.com/migration-assistant-for-amazon-opensearch-service/latest/migration-assistant-for-amazon-opensearch-service-create-vpc-eks.template"
+    else
+      s3_url="https://solutions-reference.s3.amazonaws.com/migration-assistant-for-amazon-opensearch-service/latest/migration-assistant-for-amazon-opensearch-service-import-vpc-eks.template"
+    fi
+    cfn_template_arg="--template-url $s3_url"
+  fi
 
-if [[ "$build_images_locally" == "true" ]]; then
+  # Build parameter overrides
+  cfn_params="ParameterKey=Stage,ParameterValue=${stage_filter}"
+  if [[ "$deploy_import_vpc" == "true" ]]; then
+    cfn_params="$cfn_params ParameterKey=VPCId,ParameterValue=${vpc_id} ParameterKey=VPCSubnetIds,ParameterValue=${subnet_ids}"
+  fi
+
+  echo "Deploying CloudFormation stack: $cfn_stack_name"
+  # create-stack/update-stack to support both --template-file and --template-url
+  if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
+    aws cloudformation update-stack \
+      $cfn_template_arg \
+      --stack-name "$cfn_stack_name" \
+      --parameters $cfn_params \
+      --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+      ${region:+--region "$region"} 2>&1 \
+      | grep -v "No updates are to be performed" \
+      || true
+    echo "Waiting for stack update to complete..."
+    aws cloudformation wait stack-update-complete \
+      --stack-name "$cfn_stack_name" ${region:+--region "$region"} 2>/dev/null || true
+  else
+    aws cloudformation create-stack \
+      $cfn_template_arg \
+      --stack-name "$cfn_stack_name" \
+      --parameters $cfn_params \
+      --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+      ${region:+--region "$region"} \
+      || { echo "CloudFormation deployment failed for stack: $cfn_stack_name"; exit 1; }
+    echo "Waiting for stack creation to complete..."
+    aws cloudformation wait stack-create-complete \
+      --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+      || { echo "CloudFormation stack creation failed for: $cfn_stack_name"; exit 1; }
+  fi
+
+  echo "CloudFormation stack deployed successfully: $cfn_stack_name"
+fi
+
+if ! output=$(get_cfn_export); then
+  echo "Unable to find any CloudFormation stacks with a 'MigrationsExportString' export${region:+ in region '$region'}${stage_filter:+ matching stage '$stage_filter'}." >&2
+  echo "Has the Migration Assistant CloudFormation template been deployed?" >&2
+  if [[ -z "$region" ]]; then
+    echo "No --region specified; used default region from AWS CLI config." >&2
+  fi
+  echo "If the stack is in a different region, re-run with --region <region>." >&2
+  echo "To deploy the stack now, re-run with --deploy-create-vpc-cfn or --deploy-import-vpc-cfn." >&2
+  exit 1
+fi
+echo "Setting ENV variables: $output"
+eval "$output"
+
+AWS_ACCOUNT="${AWS_ACCOUNT:-$(aws sts get-caller-identity --query Account --output text)}"
+AWS_CFN_REGION="${AWS_CFN_REGION:-$(aws configure get region)}"
+STAGE="${STAGE:-${MA_STAGE:-dev}}"
+MA_QUALIFIER="${MA_QUALIFIER:-${MIGRATIONS_QUALIFIER:-default}}"
+
+# Validate required variables from CFN exports
+missing_vars=()
+for var in MIGRATIONS_EKS_CLUSTER_NAME MIGRATIONS_ECR_REGISTRY SNAPSHOT_ROLE; do
+  if [[ -z "${!var:-}" ]]; then
+    missing_vars+=("$var")
+  fi
+done
+if [[ ${#missing_vars[@]} -gt 0 ]]; then
+  echo "Error: The following required variables were not set by CloudFormation exports:" >&2
+  printf '  %s\n' "${missing_vars[@]}" >&2
+  echo "This may indicate the stack was deployed with an older template version." >&2
+  exit 1
+fi
+
+# Show resolved configuration and sources
+echo ""
+echo "Resolved configuration:"
+echo "  AWS_ACCOUNT              = ${AWS_ACCOUNT}"
+echo "  AWS_CFN_REGION           = ${AWS_CFN_REGION}"
+echo "  STAGE                    = ${STAGE}"
+echo "  EKS Cluster              = ${MIGRATIONS_EKS_CLUSTER_NAME}"
+echo "  ECR Registry             = ${MIGRATIONS_ECR_REGISTRY}"
+echo "  Snapshot Role            = ${SNAPSHOT_ROLE}"
+echo ""
+if [[ -n "$region" ]]; then
+  echo "  Region source: --region flag ('$region')"
+else
+  echo "  Region source: CFN exports / AWS_CFN_REGION env / aws configure default"
+fi
+if [[ -n "$stage_filter" ]]; then
+  echo "  Stage source:  --stage flag ('$stage_filter')"
+else
+  echo "  Stage source:  CFN exports / MA_STAGE env / default 'dev'"
+fi
+echo ""
+
+aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
+
+# --- EKS access entry (optional) ---
+if [[ -n "$eks_access_principal_arn" ]]; then
+  echo "Configuring EKS access for principal: $eks_access_principal_arn"
+  if aws eks describe-access-entry --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+       --principal-arn "$eks_access_principal_arn" ${region:+--region "$region"} >/dev/null 2>&1; then
+    echo "Access entry already exists, skipping create."
+  else
+    aws eks create-access-entry \
+      --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+      --principal-arn "$eks_access_principal_arn" \
+      --type STANDARD \
+      ${region:+--region "$region"}
+  fi
+  aws eks associate-access-policy \
+    --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --principal-arn "$eks_access_principal_arn" \
+    --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
+    --access-scope type=cluster \
+    ${region:+--region "$region"}
+  echo "EKS access configured for $eks_access_principal_arn"
+fi
+
+# Check if general-purpose pool is disabled and re-enable if needed for installation
+# Skip this if building images locally, since we'll pre-create general-work-pool
+CURRENT_NODEPOOLS=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
+  --query 'cluster.computeConfig.nodePools' --output text 2>/dev/null)
+if [[ "$CURRENT_NODEPOOLS" != *"general-purpose"* ]] && [[ "$build_images" != "true" ]]; then
+  echo "general-purpose nodepool is currently disabled."
+  echo "Re-enabling it temporarily to allow pod scheduling during installation..."
+  NODE_ROLE_ARN=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
+    --query 'cluster.computeConfig.nodeRoleArn' --output text)
+  aws eks update-cluster-config \
+    --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --region "${AWS_CFN_REGION}" \
+    --compute-config "{\"enabled\": true, \"nodePools\": [\"system\", \"general-purpose\"], \"nodeRoleArn\": \"${NODE_ROLE_ARN}\"}" \
+    --kubernetes-network-config '{"elasticLoadBalancing":{"enabled": true}}' \
+    --storage-config '{"blockStorage":{"enabled": true}}'
+  echo "Waiting for cluster update to complete..."
+  aws eks wait cluster-active --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}"
+  echo "general-purpose nodepool re-enabled"
+  if [[ "$disable_general_purpose_pool" == "true" ]]; then
+    echo "Note: --disable-general-purpose-pool was specified, will disable it again after installation completes"
+  fi
+fi
+
+kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace "$namespace"
+kubectl config set-context --current --namespace="$namespace" >/dev/null 2>&1
+
+
+if [[ "$build_images" == "true" ]]; then
   # Always build for both architectures on EKS
   MULTI_ARCH_NATIVE=true
   BUILD_TARGET="buildImagesToRegistry"
@@ -333,9 +593,7 @@ if [[ "$build_images_locally" == "true" ]]; then
   fi
 
   echo "Building images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"
-  pushd "$base_dir" || exit
-  ./gradlew :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
-  popd > /dev/null || exit
+  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."
   docker buildx rm local-remote-builder 2>/dev/null || true
