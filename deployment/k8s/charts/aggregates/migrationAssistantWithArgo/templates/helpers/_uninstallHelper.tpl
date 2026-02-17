@@ -123,6 +123,12 @@ uninstall_charts() {
       echo "Cleaning up kyverno CRDs..."
       kubectl delete crd -l app.kubernetes.io/instance=kyverno --ignore-not-found
 {{- end }}
+
+      # Step 4: Delete kyverno namespace (if separate from release namespace)
+      if [ "$NAMESPACE" != "{{ .Release.Namespace }}" ]; then
+        echo "Deleting kyverno namespace: $NAMESPACE"
+        kubectl delete namespace "$NAMESPACE" --ignore-not-found --grace-period=0 || true
+      fi
       break
     fi
   done
