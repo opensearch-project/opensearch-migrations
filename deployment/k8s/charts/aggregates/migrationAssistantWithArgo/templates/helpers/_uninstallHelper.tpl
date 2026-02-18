@@ -2,21 +2,21 @@
   Uninstall Helper — Helm Release Cleanup Functions
   ==================================================
 
-  This template defines `uninstall_charts`, the core function used by both the
-  pre-delete and post-delete uninstall jobs.
+  This template defines `uninstall_all_charts_except`, the core function used by
+  both the pre-delete and post-delete uninstall jobs.
 
   ## Uninstall Strategy (Two-Phase)
 
   Phase 1 — Pre-delete hook (uninstallJob.yaml, hook-weight: -10):
     Runs BEFORE Helm deletes the umbrella chart's own resources.
-    Calls: uninstall_charts fluent-bit
+    Calls: uninstall_all_charts_except fluent-bit
     Effect: Uninstalls all managed child charts IN PARALLEL, except:
       - fluent-bit: kept alive so logs are captured during teardown
       - kyverno: always uninstalled LAST and SYNCHRONOUSLY (see below)
 
   Phase 2 — Post-delete hook (uninstallJob.yaml, hook-weight: 10):
     Runs AFTER Helm deletes the umbrella chart's own resources.
-    Calls: uninstall_charts
+    Calls: uninstall_all_charts_except
     Effect: Uninstalls any remaining charts (primarily fluent-bit).
     The function re-discovers releases dynamically, so charts already removed
     in Phase 1 are simply not found — no double-uninstall occurs.
@@ -44,7 +44,7 @@
 */}}
 {{- define "migration.helmUninstallFunctions" -}}
 {{- $kyvernoChart := index .Values.charts "kyverno" -}}
-uninstall_charts() {
+uninstall_all_charts_except() {
   # Args: space-separated release names to skip in the parallel uninstall phase
   local RELEASES_TO_SKIP=("$@")
   # Kyverno is always handled separately at the end (see header comment)

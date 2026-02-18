@@ -201,6 +201,9 @@ class TestRunner:
             helm_uninstall_error = e
         self.cleanup_clusters()
         self.k8s_service.delete_namespace()
+        # Assert both namespaces are actually gone
+        self.k8s_service.wait_for_namespace_deleted("kyverno-ma", timeout_seconds=60)
+        self.k8s_service.wait_for_namespace_deleted(self.k8s_service.namespace, timeout_seconds=120)
         if helm_uninstall_error:
             raise HelmCommandFailed(
                 f"Helm uninstall of '{MA_RELEASE_NAME}' release failed cleanly. "

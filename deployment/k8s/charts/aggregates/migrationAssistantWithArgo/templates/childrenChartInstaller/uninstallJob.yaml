@@ -36,7 +36,7 @@ spec:
               {{ include "migration.helmUninstallFunctions" . | nindent 14 }}
               # Phase 1: Uninstall all charts except fluent-bit (kept for logging) and kyverno (uninstalled last).
               # See _uninstallHelper.tpl for the full uninstall strategy documentation.
-              uninstall_charts fluent-bit
+              uninstall_all_charts_except fluent-bit
 
 ---
 # Phase 2: Post-delete job to clean up charts that were intentionally kept alive during Phase 1.
@@ -80,7 +80,7 @@ spec:
               {{ include "migration.helmUninstallFunctions" . | nindent 14 }}
               # Phase 2: Uninstall remaining charts (fluent-bit etc.) that were kept active during Phase 1.
               # Charts already removed in Phase 1 are safely skipped (discovery-based, ownership-checked).
-              uninstall_charts
+              uninstall_all_charts_except
 
               # Final cleanup: delete the release namespace itself.
               # --wait=false returns immediately (marks for deletion); the namespace

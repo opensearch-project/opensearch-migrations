@@ -237,6 +237,20 @@ class K8sService:
             time.sleep(2)
         logger.warning(f"Timeout waiting for pods to terminate in {self.namespace}")
 
+    def wait_for_namespace_deleted(self, namespace: str, timeout_seconds: int = 120) -> None:
+        """Poll until namespace is fully deleted, raise TimeoutError if not."""
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            result = self.run_command(
+                ["kubectl", "get", "namespace", namespace, "-o", "name"],
+                ignore_errors=True
+            )
+            if not result or not result.stdout.strip():
+                logger.info(f"Namespace '{namespace}' deleted successfully")
+                return
+            time.sleep(3)
+        raise TimeoutError(f"Namespace '{namespace}' still exists after {timeout_seconds}s")
+
     def delete_namespace(self) -> None:
         logger.info(f"Deleting namespace '{self.namespace}'")
         # Delete kyverno webhooks first — they can block API calls during cleanup
