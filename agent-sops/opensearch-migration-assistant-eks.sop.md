@@ -409,7 +409,7 @@ aws opensearch create-domain \
 
 - If using NVME instance types, omit `--ebs-options` or set `EBSEnabled=false`.
 
-- You MUST NOT wait for the domain to become active here. Domain provisioning takes 15–20 minutes. After submitting the `create-domain` call, you MUST immediately proceed to Step 5 (MA deployment) while the domain provisions in the background.
+- You MUST NOT wait for the domain to become active here. Domain provisioning takes 15–20 minutes. After submitting the `create-domain` call, if MA is not already deployed (check via `kubectl get namespace {namespace} 2>/dev/null`), you MUST immediately kick off the MA CFN stack deployment (Step 5) IN PARALLEL — do not wait for the domain to finish before starting MA deployment. Both should be provisioning simultaneously.
 - You MUST record the domain name and expected configuration in `{artifacts_dir}/discovery.md` (endpoint and ARN will be captured after the domain becomes active).
 
 **4g. Wait for domain activation (after MA deployment):**
@@ -444,20 +444,41 @@ kubectl get namespace {namespace} 2>/dev/null
 kubectl -n {namespace} get pods 2>/dev/null
 ```
 
-- If MA is not deployed (or `ma_deployment=deploy_new`), deploy via Helm:
+- If MA is NOT deployed (or `ma_deployment=deploy_new`), you MUST deploy via the CloudFormation template. This MUST be kicked off in parallel with the target cluster deployment (Step 4) — do not wait for the domain to become active first.
 
 ```bash
-# Add the MA Helm repo (or use local chart)
-helm repo add opensearch-migrations https://opensearch-project.github.io/opensearch-migrations/charts || true
-helm repo update
+aws cloudformation create-stack \
+  --stack-name migration-assistant \
+  --template-url "https://solutions-reference.s3.amazonaws.com/migration-assistant-for-amazon-opensearch-service/latest/migration-assistant-for-amazon-opensearch-service-import-vpc-eks.template" \
+  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+  --parameters \
+    ParameterKey=VpcId,ParameterValue="<vpc-id>" \
+    ParameterKey=PrivateSubnetIds,ParameterValue="<subnet-ids>" \
+    ParameterKey=ExistingEKSClusterName,ParameterValue="<eks-cluster-name>" \
+    ParameterKey=SourceClusterEndpoint,ParameterValue="<source-endpoint>" \
+    ParameterKey=TargetClusterEndpoint,ParameterValue="<target-endpoint>" \
+  --region "${aws_region}"
+```
 
-# Install MA
-helm install migration-assistant opensearch-migrations/opensearch-migrations \
-  -n {namespace} --create-namespace \
-  --set source.endpoint="<source-endpoint>" \
-  --set target.endpoint="<target-endpoint>" \
-  --set target.auth.type="sigv4" \
-  --set target.auth.region="${aws_region}"
+- You MUST poll the stack until it reaches `CREATE_COMPLETE`:
+
+```bash
+while true; do
+  STATUS=$(aws cloudformation describe-stacks --stack-name migration-assistant \
+    --region "${aws_region}" --query 'Stacks[0].StackStatus' --output text)
+  echo "CFN stack status: $STATUS"
+  case "$STATUS" in
+    CREATE_COMPLETE) break ;;
+    CREATE_FAILED|ROLLBACK_*) echo "Stack failed: $STATUS"; exit 1 ;;
+  esac
+  sleep 30
+done
+```
+
+- After the CFN stack completes, update kubeconfig if needed and verify MA pods are running:
+
+```bash
+kubectl -n {namespace} get pods
 ```
 
 - You MUST wait for critical pods to be ready before proceeding:
