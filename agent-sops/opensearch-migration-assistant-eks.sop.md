@@ -475,7 +475,13 @@ while true; do
 done
 ```
 
-- After the CFN stack completes, update kubeconfig if needed and verify MA pods are running:
+- After the CFN stack completes, you MUST run `aws-bootstrap.sh` via raw curl to install MA on the EKS cluster. This script reads the CFN exports, installs Helm if needed, clones the repo, and runs `helm install` with the correct configuration:
+
+```bash
+curl -sL https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh | bash
+```
+
+- Verify MA pods are running:
 
 ```bash
 kubectl -n {namespace} get pods
@@ -509,7 +515,21 @@ Validate connectivity and configuration from within the Migration Console before
 - You MUST run ALL cluster API commands through the Migration Console pod using `console clusters curl`. You MUST NOT use `kubectl port-forward`, `kubectl exec` into source pods, or direct `curl` to any cluster endpoint. See "Cluster Access Constraints" above.
 - You MUST record all commands and outputs in `{artifacts_dir}/run-log.md`.
 
-**6a. Validate connectivity to source and target:**
+**6a. Run connection-check to validate source and target connectivity:**
+
+After MA is deployed and source/target are configured, you MUST run `console clusters connection-check` to verify end-to-end connectivity before proceeding:
+
+```bash
+CONSOLE_POD=$(kubectl -n {namespace} get pod -l app=migration-console -o jsonpath='{.items[0].metadata.name}')
+
+kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
+  "source /.venv/bin/activate && console clusters connection-check"
+```
+
+- If the connection-check fails, you MUST stop and diagnose the issue (network, auth, TLS, endpoint) before proceeding. Do NOT skip this step.
+- If the connection-check passes, proceed to detailed cluster inspection.
+
+**6b. Validate connectivity details to source and target:**
 
 ```bash
 CONSOLE_POD=$(kubectl -n {namespace} get pod -l app=migration-console -o jsonpath='{.items[0].metadata.name}')
@@ -529,7 +549,7 @@ kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
   "source /.venv/bin/activate && console clusters curl --path '/_cluster/health?pretty' --cluster target"
 ```
 
-**6b. Source cluster data inspection (via migration console):**
+**6c. Source cluster data inspection (via migration console):**
 
 This is where you capture the data-level details that were NOT gathered in Step 2 (which only used kubectl for resource sizing):
 
@@ -549,7 +569,7 @@ kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
 
 - Record total data size, shard count, index list, and doc counts in `{artifacts_dir}/discovery.md`.
 
-**6c. Field type compatibility inspection (via migration console):**
+**6d. Field type compatibility inspection (via migration console):**
 
 ```bash
 # Check mappings for compatibility issues
@@ -560,19 +580,19 @@ kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
 - Flag known incompatible types: `sparse_vector`, `dense_vector` (may need `knn_vector`), ELSER-specific types, any ML-specific field types.
 - Record compatibility issues in `{artifacts_dir}/discovery.md`.
 
-**6d. Target state check:**
+**6e. Target state check:**
 - Check whether target has indices that would conflict with migration.
 - You MUST classify the following as destructive: deleting/clearing indices, deleting templates, deleting snapshots.
 - In `guided` and `semi_auto`, you MUST ask for explicit confirmation before any destructive action.
 - In `auto`, you MUST NOT perform destructive actions unless `allow_destructive=true`.
 
-**6e. Snapshot configuration:**
+**6f. Snapshot configuration:**
 - Locate runtime config sources (ConfigMaps, mounted files, workflow schema).
 - Determine snapshot repo details (S3 bucket, region, IAM role).
 - Verify snapshot prerequisites are in place.
 
-**6f. Migration estimate:**
-- You MUST calculate and present a migration estimate (snapshot + metadata + backfill) using the data sizes discovered in 6b.
+**6g. Migration estimate:**
+- You MUST calculate and present a migration estimate (snapshot + metadata + backfill) using the data sizes discovered in 6c.
 
 ### 7. Configure and Run the Migration Workflow
 
