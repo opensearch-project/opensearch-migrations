@@ -392,7 +392,7 @@ else
     --addon-name aws-mountpoint-s3-csi-driver \
     --region "${AWS_CFN_REGION}" \
     --resolve-conflicts OVERWRITE \
-    --pod-identity-associations "serviceAccount=s3-csi-driver-sa,roleArn=${migrations_role_arn}"
+    --pod-identity-associations "serviceAccount=s3-csi-node-sa,roleArn=${migrations_role_arn}"
   echo "Waiting for S3 CSI Driver addon to become active..."
   if aws eks wait addon-active \
     --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
