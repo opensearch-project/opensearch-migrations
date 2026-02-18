@@ -323,6 +323,11 @@ done
   2. Find the latest generation OpenSearch instance type that matches or exceeds those specs.
   3. Prefer the latest generation available (e.g., `r7g` over `r6g` over `r5`, `m7g` over `m6g` over `m5`).
   4. Use `aws opensearch list-instance-type-details --engine-version OpenSearch_<version> --region "${aws_region}"` to verify the chosen type is available.
+- Instance family selection:
+  - **r-family** (e.g., `r7g`): Memory-optimized — default choice when source nodes have high memory-to-vCPU ratio.
+  - **r8gd**: NVMe-backed memory-optimized — use when you want local NVMe storage with a memory-optimized profile. Avoids needing separate EBS volumes.
+  - **m-family** (e.g., `m7g`): General purpose — use when the source workload doesn't need the high memory-to-vCPU ratio of r-family instances.
+  - **c-family** (e.g., `c7g`): Compute-optimized — use for data nodes when the workload is CPU-bound and needs less RAM (e.g., heavy aggregations, low per-node data volume).
 - Common mappings (use as guidance, always verify availability):
   | Source profile | Recommended OS instance type |
   |---|---|
@@ -333,6 +338,10 @@ done
   | ~32 vCPU, ~256 GB | `r7g.8xlarge.search` |
   | ~4 vCPU, ~16 GB (balanced) | `m7g.xlarge.search` |
   | ~8 vCPU, ~32 GB (balanced) | `m7g.2xlarge.search` |
+  | ~4 vCPU, ~8 GB (compute) | `c7g.xlarge.search` |
+  | ~8 vCPU, ~16 GB (compute) | `c7g.2xlarge.search` |
+  | ~4 vCPU, ~32 GB + NVMe | `r8gd.xlarge.search` |
+  | ~8 vCPU, ~64 GB + NVMe | `r8gd.2xlarge.search` |
 
 **4c. Dedicated master nodes — Always add for best practice:**
 - You MUST add dedicated master nodes even if the source cluster does not have them.
@@ -353,6 +362,7 @@ done
 - NVME-backed instance families to consider:
   | Family | Profile | Local storage |
   |---|---|---|
+  | `r8gd` | Memory-optimized Graviton + NVMe | NVMe SSD (good default for NVMe-backed data nodes) |
   | `i3` | Storage-optimized | NVMe SSD (large) |
   | `im4gn` | Storage-optimized Graviton | NVMe SSD |
   | `or1` | OpenSearch-optimized | NVMe SSD + managed cache |
