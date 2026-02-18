@@ -374,7 +374,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 rrPair.requestData = new HttpMessageAndTimestamp.Request(timestamp);
                 requestCounter.incrementAndGet();
             }
-            rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
             rrPair.requestData.addSegment(observation.getReadSegment().getData().toByteArray());
             log.atTrace().setMessage("Added request segment for accum[{}]={}")
                 .addArgument(connectionId)
@@ -425,6 +424,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 rrPair.responseData = new HttpMessageAndTimestamp.Response(timestamp);
             }
             rrPair.responseData.addSegment(observation.getWriteSegment().getData().toByteArray());
+            rrPair.responseData.setLastPacketTimestamp(timestamp);
             log.atTrace().setMessage("Added response segment for accum[{}]={}")
                 .addArgument(connectionId)
                 .addArgument(accum)
