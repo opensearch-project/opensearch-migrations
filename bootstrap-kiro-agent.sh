@@ -2,7 +2,9 @@
 # -----------------------------------------------------------------------------
 # Bootstrap Kiro Migration Agent
 #
-# One-liner: curl -sL https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/kiro-agent/bootstrap-kiro-agent.sh | bash
+# One-liner:
+#   curl -sL -H "Accept: application/vnd.github.raw" \
+#     "https://api.github.com/repos/opensearch-project/opensearch-migrations/contents/bootstrap-kiro-agent.sh?ref=kiro-agent" | bash
 #
 # This script:
 #   1. Installs helm silently (if missing)
@@ -16,11 +18,14 @@ set -euo pipefail
 BRANCH="kiro-agent"
 ORG="opensearch-project"
 REPO="opensearch-migrations"
-RAW_BASE="https://raw.githubusercontent.com/${ORG}/${REPO}/${BRANCH}"
+API_BASE="https://api.github.com/repos/${ORG}/${REPO}/contents"
 WORK_DIR="${WORK_DIR:-./kiro-migration-agent}"
 
 info()  { printf '\033[1;34m[kiro]\033[0m %s\n' "$*"; }
 error() { printf '\033[1;31m[kiro]\033[0m %s\n' "$*" >&2; }
+
+# Download a file from GitHub via the API (no CDN caching)
+gh_raw() { curl -fsSL -H "Accept: application/vnd.github.raw" "${API_BASE}/${1}?ref=${BRANCH}"; }
 
 # --- 1. Install helm silently ---
 if ! command -v helm &>/dev/null; then
@@ -52,11 +57,11 @@ mkdir -p "${KIRO_DIR}/agents" "${KIRO_DIR}/prompts" "${KIRO_DIR}/settings" "${KI
 
 for f in agents/opensearch-migration.json prompts/start.md settings/hooks.json \
          steering/product.md steering/deployment.md steering/migration-prompt.md steering/workflow.md; do
-  curl -fsSL "${RAW_BASE}/kiro-cli/kiro-cli-config/${f}" -o "${KIRO_DIR}/${f}"
+  gh_raw "kiro-cli/kiro-cli-config/${f}" > "${KIRO_DIR}/${f}"
 done
 
-curl -fsSL "${RAW_BASE}/agent-sops/opensearch-migration-assistant-eks.sop.md" \
-  -o "${KIRO_DIR}/steering/opensearch-migration-assistant-eks.sop.md"
+gh_raw "agent-sops/opensearch-migration-assistant-eks.sop.md" \
+  > "${KIRO_DIR}/steering/opensearch-migration-assistant-eks.sop.md"
 
 # --- 4. Start kiro-cli ---
 # Redirect stdin from /dev/tty so kiro-cli gets the real terminal,
