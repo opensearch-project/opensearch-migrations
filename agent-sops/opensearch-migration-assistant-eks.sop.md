@@ -317,7 +317,12 @@ aws opensearch create-domain \
 
 - If using NVME instance types, omit `--ebs-options` or set `EBSEnabled=false`.
 
-- You MUST poll domain status until it reaches `Active` (typically 15–20 minutes):
+- You MUST NOT wait for the domain to become active here. Domain provisioning takes 15–20 minutes. After submitting the `create-domain` call, you MUST immediately proceed to Step 5 (MA deployment) while the domain provisions in the background.
+- You MUST record the domain name and expected configuration in `{artifacts_dir}/discovery.md` (endpoint and ARN will be captured after the domain becomes active).
+
+**4g. Wait for domain activation (after MA deployment):**
+
+After completing Step 5 (MA deployment), return here to poll domain status until it reaches `Active`:
 
 ```bash
 while true; do
@@ -329,8 +334,7 @@ while true; do
 done
 ```
 
-- While waiting for the domain, you SHOULD proceed to Step 5 (MA deployment) in parallel if possible.
-- You MUST record the domain endpoint, ARN, and VPC configuration in `{artifacts_dir}/discovery.md`.
+- You MUST record the domain endpoint, ARN, and VPC configuration in `{artifacts_dir}/discovery.md` once the domain is active.
 
 **Constraints for `target_provisioning=use_existing`:**
 - You MUST discover or accept the target endpoint and validate connectivity.
@@ -417,6 +421,18 @@ Configure the MA workflow and execute it.
 **Constraints:**
 - You MUST retrieve the current workflow config and schema at runtime before editing.
 - You MUST set the workflow configuration via supported mechanisms and record what you changed.
+- You MUST calculate the RFS (Reindex From Snapshot) worker count using this formula:
+
+  ```
+  rfs_workers = min(target_data_node_total_vcpu / 6, number_of_source_shards)
+  ```
+
+  Where:
+  - `target_data_node_total_vcpu` = (number of target data nodes) × (vCPU per target data node)
+  - `number_of_source_shards` = total primary shard count across all indices being migrated
+
+  This ensures workers don't overwhelm the target cluster and don't exceed the parallelism available from source shards.
+
 - You MUST run the workflow using `workflow submit` and record workflow name/IDs.
 - You MUST NOT use `--wait` or any other blocking wait. After submitting, immediately proceed to Step 8.
 - If the workflow includes manual approval gates:
