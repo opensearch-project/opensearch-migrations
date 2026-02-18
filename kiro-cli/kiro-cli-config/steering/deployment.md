@@ -78,7 +78,7 @@ kubectl get pods -n ma
 ```bash
 # Download bootstrap script
 cd /tmp && rm -f aws-bootstrap.sh && rm -rf opensearch-migrations
-curl -s -o aws-bootstrap.sh https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh
+curl -s -o aws-bootstrap.sh https://raw.githubusercontent.com/gregschohn/opensearch-migrations/9d59a7cb0003a9a2f493b834c6444caf191694c3/deployment/k8s/aws/aws-bootstrap.sh
 chmod +x aws-bootstrap.sh
 
 # Run with --skip-console-exec to avoid interactive session
