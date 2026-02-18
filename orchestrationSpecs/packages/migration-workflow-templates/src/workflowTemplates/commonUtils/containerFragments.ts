@@ -16,14 +16,14 @@ export type ContainerVolumePair = {
 const S3_SNAPSHOT_VOLUME_NAME = "snapshot-s3";
 
 /**
- * Add a PVC-backed S3 volume mount to a container definition.
- * Requires the Mountpoint S3 CSI Driver v2 to be installed on the cluster,
- * and a PV/PVC to be pre-created (via Helm templates) for the target S3 bucket.
- * The CSI driver manages the FUSE mount lifecycle — no sidecar or privileged container needed.
+ * Add a per-pod S3 volume mount using a Generic Ephemeral Volume.
+ * Requires the Mountpoint S3 CSI Driver v2 and a StorageClass (via Helm template).
+ * Kubernetes auto-creates a PVC per pod (named <pod>-<volume>), and the CSI driver
+ * dynamically provisions a PV. When the pod dies, the PVC is garbage collected.
  */
 export function setupS3CsiVolumeForContainer(
     mountPath: string,
-    pvcClaimName: BaseExpression<string>,
+    storageClassName: BaseExpression<string>,
     def: ContainerVolumePair): ContainerVolumePair {
 
     const {volumeMounts, ...restOfContainer} = def.container;
@@ -32,9 +32,16 @@ export function setupS3CsiVolumeForContainer(
             ...def.volumes,
             {
                 name: S3_SNAPSHOT_VOLUME_NAME,
-                persistentVolumeClaim: {
-                    claimName: makeStringTypeProxy(pvcClaimName),
-                    readOnly: true
+                ephemeral: {
+                    volumeClaimTemplate: {
+                        spec: {
+                            accessModes: ["ReadOnlyMany"],
+                            storageClassName: makeStringTypeProxy(storageClassName),
+                            resources: {
+                                requests: { storage: "1200Gi" }
+                            }
+                        }
+                    }
                 }
             }
         ],

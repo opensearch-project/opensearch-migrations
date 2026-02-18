@@ -1,0 +1,15 @@
+{{- $bucketName := printf "migrations-default-%s-%s-%s" (toString .Values.aws.account) .Values.stageName .Values.aws.region -}}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Release.Namespace }}-s3-csi
+provisioner: s3.csi.aws.com
+parameters:
+  bucketName: {{ $bucketName }}
+mountOptions:
+  - --read-only
+  - --region {{ .Values.aws.region }}
+  {{- if .Values.defaultBucketConfiguration.useLocalStack }}
+  - --endpoint-url http://{{ .Values.defaultBucketConfiguration.endpoint }}.{{ .Release.Namespace }}.svc.cluster.local:4566
+  - --force-path-style
+  {{- end }}

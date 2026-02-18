@@ -1577,9 +1577,15 @@ spec:
             name: "{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}"
             optional: {{=!(!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)))}}
         - name: snapshot-s3
-          persistentVolumeClaim:
-            claimName: s3-snapshot
-            readOnly: true
+          ephemeral:
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadOnlyMany
+                storageClassName: "{{=workflow.namespace+'-s3-csi'}}"
+                resources:
+                  requests:
+                    storage: 1200Gi
         - name: localstack-test-creds
           configMap:
             name: localstack-test-creds
