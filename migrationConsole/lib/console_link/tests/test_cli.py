@@ -366,6 +366,21 @@ def test_cli_cluster_run_curl_head_method(runner, mocker):
     assert result.exit_code == 0
 
 
+def test_cli_cluster_curl_timeout_shows_friendly_error(runner, mocker):
+    import requests.exceptions
+    mocker.patch.object(Cluster, 'call_api', autospec=True,
+                        side_effect=requests.exceptions.ReadTimeout(
+                            "HTTPSConnectionPool(host='example.com', port=443): Read timed out. (read timeout=15)"))
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
+                                 'target_cluster', '/_cluster/health'],
+                           catch_exceptions=True)
+    assert result.exit_code == 0
+    assert "timed out" in result.output
+    assert "--timeout" in result.output
+    assert "HTTPSConnectionPool" not in result.output
+    assert "Traceback" not in result.output
+
+
 def test_cli_cluster_clear_indices(runner, mocker):
     mock = mocker.patch('console_link.middleware.clusters.clear_indices')
     result = runner.invoke(cli,
