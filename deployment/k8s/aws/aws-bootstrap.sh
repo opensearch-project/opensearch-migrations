@@ -211,11 +211,25 @@ validate_args() {
       echo "Error: --subnet-ids is required with --deploy-import-vpc-cfn." >&2
       echo "" >&2
       echo "Available subnets in VPC $vpc_id${region:+ ($region)}:" >&2
+      echo "  (checking route tables for internet access...)" >&2
       aws ec2 describe-subnets ${region:+--region "$region"} \
         --filters "Name=vpc-id,Values=$vpc_id" \
-        --query 'Subnets[].{ID:SubnetId,AZ:AvailabilityZone,CIDR:CidrBlock,Public:MapPublicIpOnLaunch}' \
-        --output table >&2 || true
+        --query 'Subnets[].SubnetId' --output text | tr '\t' '\n' | while read -r sid; do
+        has_nat=$(aws ec2 describe-route-tables ${region:+--region "$region"} \
+          --filters "Name=association.subnet-id,Values=$sid" \
+          --query 'RouteTables[0].Routes[?NatGatewayId!=null] | length(@)' --output text 2>/dev/null)
+        has_igw=$(aws ec2 describe-route-tables ${region:+--region "$region"} \
+          --filters "Name=association.subnet-id,Values=$sid" \
+          --query 'RouteTables[0].Routes[?GatewayId!=null && starts_with(GatewayId, `igw-`)] | length(@)' --output text 2>/dev/null)
+        info=$(aws ec2 describe-subnets ${region:+--region "$region"} --subnet-ids "$sid" \
+          --query 'Subnets[0].[SubnetId,AvailabilityZone,CidrBlock]' --output text 2>/dev/null)
+        route="no-internet"
+        [[ "${has_nat:-0}" -gt 0 ]] && route="NAT"
+        [[ "${has_igw:-0}" -gt 0 ]] && route="IGW (public)"
+        echo "  $info  $route"
+      done >&2
       echo "" >&2
+      echo "Select subnets with NAT or IGW routes (pods need internet access to pull images)." >&2
       echo "Re-run with: --subnet-ids <subnet1,subnet2>" >&2
       exit 1
     fi
