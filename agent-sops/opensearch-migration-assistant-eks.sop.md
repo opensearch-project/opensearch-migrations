@@ -324,25 +324,27 @@ done
   2. Find the latest generation OpenSearch instance type that matches or exceeds those specs.
   3. Prefer the latest generation available (e.g., `r7g` over `r6g` over `r5`, `m7g` over `m6g` over `m5`).
   4. Use `aws opensearch list-instance-type-details --engine-version OpenSearch_<version> --region "${aws_region}"` to verify the chosen type is available.
-- Instance family selection:
-  - **r-family** (e.g., `r7g`): Memory-optimized — default choice when source nodes have high memory-to-vCPU ratio.
-  - **r8gd**: NVMe-backed memory-optimized — use when you want local NVMe storage with a memory-optimized profile. Avoids needing separate EBS volumes.
-  - **m-family** (e.g., `m7g`): General purpose — use when the source workload doesn't need the high memory-to-vCPU ratio of r-family instances.
-  - **c-family** (e.g., `c7g`): Compute-optimized — use for data nodes when the workload is CPU-bound and needs less RAM (e.g., heavy aggregations, low per-node data volume).
-- Common mappings (use as guidance, always verify availability):
-  | Source profile | Recommended OS instance type |
-  |---|---|
-  | ~2 vCPU, ~16 GB | `r7g.large.search` |
-  | ~4 vCPU, ~32 GB | `r7g.xlarge.search` |
-  | ~8 vCPU, ~64 GB | `r7g.2xlarge.search` |
-  | ~16 vCPU, ~128 GB | `r7g.4xlarge.search` |
-  | ~32 vCPU, ~256 GB | `r7g.8xlarge.search` |
-  | ~4 vCPU, ~16 GB (balanced) | `m7g.xlarge.search` |
-  | ~8 vCPU, ~32 GB (balanced) | `m7g.2xlarge.search` |
-  | ~4 vCPU, ~8 GB (compute) | `c7g.xlarge.search` |
-  | ~8 vCPU, ~16 GB (compute) | `c7g.2xlarge.search` |
-  | ~4 vCPU, ~32 GB + NVMe | `r8gd.xlarge.search` |
-  | ~8 vCPU, ~64 GB + NVMe | `r8gd.2xlarge.search` |
+- Instance family selection — **r8gd (NVMe) is the default first choice**:
+  - **r8gd** (STRONGLY PREFERRED): NVMe-backed memory-optimized Graviton instances. This SHOULD be the default for data nodes. NVMe local storage eliminates EBS costs entirely, which significantly reduces the total cost of the cluster. It is acceptable to choose r8gd even if it means slightly less vCPU than the source — the cost savings from eliminating EBS more than compensate. Only skip r8gd if the total data (primary + replicas + 30% headroom) does NOT fit on the available NVMe storage per node.
+  - **r-family** (e.g., `r7g`): Memory-optimized with EBS — fallback when data does not fit on r8gd NVMe storage, or when r8gd is not available in the target region/version.
+  - **m-family** (e.g., `m7g`): General purpose with EBS — use when the source workload doesn't need the high memory-to-vCPU ratio of r-family instances AND data doesn't fit on NVMe.
+  - **c-family** (e.g., `c7g`): Compute-optimized with EBS — last resort for CPU-bound workloads that need less RAM and where data doesn't fit on NVMe.
+- Instance selection decision tree (follow in order):
+  1. Calculate total storage needed: `(primary_data_size × (1 + replica_count) × 1.3)` headroom per node = `total / data_node_count`.
+  2. Check if an r8gd instance size exists where the NVMe capacity per node ≥ storage needed per node. If YES → use r8gd. Accept up to 25% less vCPU compared to source if needed to fit an r8gd size — the EBS cost savings justify it.
+  3. If data does NOT fit on any r8gd size → fall back to r7g + EBS (or m7g/c7g if memory/compute profile warrants it).
+- Common mappings (r8gd preferred — use as guidance, always verify availability):
+  | Source profile | Recommended OS instance type | Notes |
+  |---|---|---|
+  | ~2 vCPU, ~16 GB | `r8gd.large.search` | NVMe preferred; fall back to `r7g.large.search` if data doesn't fit |
+  | ~4 vCPU, ~32 GB | `r8gd.xlarge.search` | NVMe preferred; fall back to `r7g.xlarge.search` if data doesn't fit |
+  | ~8 vCPU, ~64 GB | `r8gd.2xlarge.search` | NVMe preferred; fall back to `r7g.2xlarge.search` if data doesn't fit |
+  | ~16 vCPU, ~128 GB | `r8gd.4xlarge.search` | NVMe preferred; fall back to `r7g.4xlarge.search` if data doesn't fit |
+  | ~32 vCPU, ~256 GB | `r8gd.8xlarge.search` | NVMe preferred; fall back to `r7g.8xlarge.search` if data doesn't fit |
+  | ~4 vCPU, ~16 GB (balanced) | `r8gd.xlarge.search` | Prefer r8gd even with more RAM than needed — cost is still better without EBS; fall back to `m7g.xlarge.search` |
+  | ~8 vCPU, ~32 GB (balanced) | `r8gd.2xlarge.search` | Same rationale; fall back to `m7g.2xlarge.search` |
+  | ~4 vCPU, ~8 GB (compute) | `r8gd.xlarge.search` | Prefer r8gd even with more RAM — no EBS cost wins; fall back to `c7g.xlarge.search` only if data doesn't fit |
+  | ~8 vCPU, ~16 GB (compute) | `r8gd.2xlarge.search` | Same rationale; fall back to `c7g.2xlarge.search` only if data doesn't fit |
 
 **4c. Dedicated master nodes — Always add for best practice:**
 - You MUST add dedicated master nodes even if the source cluster does not have them.
@@ -355,21 +357,20 @@ done
   | 76+ | `c7g.4xlarge.search` | 3 |
 - In `guided` mode, inform the user: *"I'm adding 3 dedicated master nodes ({master_type}) as best practice for cluster stability, even though your source doesn't have them. This is recommended for production workloads."*
 
-**4d. Storage — Prefer NVME over EBS when available:**
-- You MUST prefer instance types with local NVME storage (instance store) over EBS when:
-  1. An NVME-backed instance type exists with similar vCPU/memory profile to the chosen EBS type.
-  2. The local storage capacity is sufficient for the data (primary + replica + headroom).
-  3. The cost is similar or lower than the EBS equivalent.
-- NVME-backed instance families to consider:
+**4d. Storage — NVMe is the default; EBS is the fallback:**
+- You MUST use NVMe-backed instance types (r8gd) unless the data does not fit on local storage. This is not a preference — it is the default. EBS is only for cases where NVMe capacity is insufficient.
+- Decision: if you chose r8gd in Step 4b (which you should have), storage is already handled — NVMe is included with the instance. Set `EBSEnabled=false`.
+- Only if you had to fall back to a non-NVMe instance type (r7g, m7g, c7g) because data didn't fit:
+  - Use `gp3` EBS volumes sized at 1.5x–2x primary data size per node.
+- NVMe-backed instance families (r8gd is the default — others are for specialized needs):
   | Family | Profile | Local storage |
   |---|---|---|
-  | `r8gd` | Memory-optimized Graviton + NVMe | NVMe SSD (good default for NVMe-backed data nodes) |
-  | `i3` | Storage-optimized | NVMe SSD (large) |
-  | `im4gn` | Storage-optimized Graviton | NVMe SSD |
-  | `or1` | OpenSearch-optimized | NVMe SSD + managed cache |
+  | `r8gd` | Memory-optimized Graviton + NVMe | NVMe SSD — **default choice for data nodes** |
+  | `i3` | Storage-optimized | NVMe SSD (large) — use when data is too large for r8gd but you still want NVMe |
+  | `im4gn` | Storage-optimized Graviton | NVMe SSD — Graviton alternative to i3 |
+  | `or1` | OpenSearch-optimized | NVMe SSD + managed cache — for very large datasets |
 - If NVME is chosen, set `EBSEnabled=false` in the create-domain call.
-- If NVME local storage is insufficient or no suitable instance type exists, fall back to EBS with `gp3` volumes sized at 1.5x–2x primary data size per node.
-- In `guided` mode, present both options with cost estimates and let the user choose.
+- In `guided` mode, present the r8gd option first and explain the cost advantage: *"r8gd includes NVMe storage at no extra cost — this eliminates EBS charges entirely, which is typically 20-40% of the cluster cost. Your data fits on the local NVMe, so I'm recommending r8gd."*
 
 **4e. Present the provisioning plan:**
 - You MUST present the full plan before creating the domain (even in `auto` mode) because provisioning creates billable AWS resources:
