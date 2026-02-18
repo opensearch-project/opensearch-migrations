@@ -1,5 +1,7 @@
+import * as cdk from 'aws-cdk-lib';
 import {
     Aws,
+    CfnCondition,
     CfnMapping, CfnOutput,
     CfnParameter,
     Fn,
@@ -143,6 +145,95 @@ export class SolutionsInfrastructureEKSStack extends Stack {
 
             importedVPCParameters.push(vpcIdParameter.logicalId, subnetIdsParameter.logicalId)
             vpc = importVPC(this, vpcIdParameter);
+
+            // Optional VPC endpoint creation for imported VPCs with private subnets
+            const vpcEndpointParameters: string[] = [];
+
+            const createS3EndpointParam = new CfnParameter(this, 'CreateS3Endpoint', {
+                type: 'String',
+                allowedValues: ['true', 'false'],
+                default: 'false',
+                description: 'Create an S3 gateway VPC endpoint (required for ECR image layer pulls in private subnets).'
+            });
+            addParameterLabel(parameterLabels, createS3EndpointParam, "Create S3 VPC Endpoint")
+            vpcEndpointParameters.push(createS3EndpointParam.logicalId)
+
+            const createECREndpointParam = new CfnParameter(this, 'CreateECREndpoint', {
+                type: 'String',
+                allowedValues: ['true', 'false'],
+                default: 'false',
+                description: 'Create an ECR API interface VPC endpoint (required for private ECR image pulls).'
+            });
+            addParameterLabel(parameterLabels, createECREndpointParam, "Create ECR API VPC Endpoint")
+            vpcEndpointParameters.push(createECREndpointParam.logicalId)
+
+            const createECRDockerEndpointParam = new CfnParameter(this, 'CreateECRDockerEndpoint', {
+                type: 'String',
+                allowedValues: ['true', 'false'],
+                default: 'false',
+                description: 'Create an ECR Docker interface VPC endpoint (required for private ECR image pulls).'
+            });
+            addParameterLabel(parameterLabels, createECRDockerEndpointParam, "Create ECR Docker VPC Endpoint")
+            vpcEndpointParameters.push(createECRDockerEndpointParam.logicalId)
+
+            const createCWLogsEndpointParam = new CfnParameter(this, 'CreateCloudWatchLogsEndpoint', {
+                type: 'String',
+                allowedValues: ['true', 'false'],
+                default: 'false',
+                description: 'Create a CloudWatch Logs interface VPC endpoint.'
+            });
+            addParameterLabel(parameterLabels, createCWLogsEndpointParam, "Create CloudWatch Logs VPC Endpoint")
+            vpcEndpointParameters.push(createCWLogsEndpointParam.logicalId)
+
+            const createEFSEndpointParam = new CfnParameter(this, 'CreateEFSEndpoint', {
+                type: 'String',
+                allowedValues: ['true', 'false'],
+                default: 'false',
+                description: 'Create an EFS interface VPC endpoint.'
+            });
+            addParameterLabel(parameterLabels, createEFSEndpointParam, "Create EFS VPC Endpoint")
+            vpcEndpointParameters.push(createEFSEndpointParam.logicalId)
+
+            // Conditionally create endpoints
+            const s3Condition = new CfnCondition(this, 'CreateS3EndpointCondition', {
+                expression: Fn.conditionEquals(createS3EndpointParam, 'true')
+            });
+            // S3 gateway endpoint uses L1 construct since imported VPCs lack route table info
+            const s3Endpoint = new cdk.CfnResource(this, 'S3VpcEndpoint', {
+                type: 'AWS::EC2::VPCEndpoint',
+                properties: {
+                    ServiceName: `com.amazonaws.${this.region}.s3`,
+                    VpcId: vpc.vpcId,
+                    VpcEndpointType: 'Gateway',
+                }
+            });
+            s3Endpoint.cfnOptions.condition = s3Condition;
+
+            const endpointConfigs: Array<{param: CfnParameter, serviceSuffix: string, name: string}> = [
+                { param: createECREndpointParam, serviceSuffix: 'ecr.api', name: 'ECR' },
+                { param: createECRDockerEndpointParam, serviceSuffix: 'ecr.dkr', name: 'ECRDocker' },
+                { param: createCWLogsEndpointParam, serviceSuffix: 'logs', name: 'CloudWatchLogs' },
+                { param: createEFSEndpointParam, serviceSuffix: 'elasticfilesystem', name: 'EFS' },
+            ];
+
+            for (const config of endpointConfigs) {
+                const condition = new CfnCondition(this, `Create${config.name}EndpointCondition`, {
+                    expression: Fn.conditionEquals(config.param, 'true')
+                });
+                const endpoint = new cdk.CfnResource(this, `${config.name}VpcEndpoint`, {
+                    type: 'AWS::EC2::VPCEndpoint',
+                    properties: {
+                        ServiceName: `com.amazonaws.${this.region}.${config.serviceSuffix}`,
+                        VpcId: vpc.vpcId,
+                        VpcEndpointType: 'Interface',
+                        PrivateDnsEnabled: true,
+                        SubnetIds: vpcSubnetIds,
+                    }
+                });
+                endpoint.cfnOptions.condition = condition;
+            }
+
+            importedVPCParameters.push(...vpcEndpointParameters)
         }
 
         const eksClusterName = `migration-eks-cluster-${stackMarker}`

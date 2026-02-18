@@ -56,6 +56,8 @@ eks_access_principal_arn=""
 skip_cfn_deploy=false
 build_chart_and_dashboards=false
 version=""
+create_vpc_endpoints=""
+ignore_checks=false
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -79,6 +81,16 @@ while [[ $# -gt 0 ]]; do
     --skip-cfn-deploy) skip_cfn_deploy=true; shift 1 ;;
     --build-chart-and-dashboards) build_chart_and_dashboards=true; shift 1 ;;
     --version) version="$2"; shift 2 ;;
+    --create-vpc-endpoints)
+      if [[ "${2:-}" == "" || "${2:-}" == --* ]]; then
+        create_vpc_endpoints="all"
+        shift 1
+      else
+        create_vpc_endpoints="$2"
+        shift 2
+      fi
+      ;;
+    --ignore-checks) ignore_checks=true; shift 1 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo ""
@@ -97,6 +109,11 @@ while [[ $# -gt 0 ]]; do
       echo "  --vpc-id <id>                             VPC ID (required with --deploy-import-vpc-cfn)."
       echo "  --subnet-ids <id1,id2>                    Comma-separated subnet IDs, each in a different AZ"
       echo "                                            (required with --deploy-import-vpc-cfn)."
+      echo "  --create-vpc-endpoints [list]             Create VPC endpoints for private subnet connectivity."
+      echo "                                            Only valid with --deploy-import-vpc-cfn."
+      echo "                                            No argument or 'all' creates: s3,ecr,ecrDocker,cloudwatchLogs,efs."
+      echo "                                            Or specify a comma-separated subset, e.g. 's3,ecr,ecrDocker'."
+      echo "  --ignore-checks                           Skip subnet connectivity and VPC endpoint pre-flight checks."
       echo ""
       echo "EKS access options:"
       echo "  --eks-access-principal-arn <arn>          Grant an IAM principal (role/user) cluster-admin access"
@@ -217,10 +234,19 @@ validate_args() {
         --query 'Subnets[].SubnetId' --output text | tr '\t' '\n' | while read -r sid; do
         has_nat=$(aws ec2 describe-route-tables ${region:+--region "$region"} \
           --filters "Name=association.subnet-id,Values=$sid" \
-          --query 'RouteTables[0].Routes[?NatGatewayId!=null] | length(@)' --output text 2>/dev/null)
+          --query 'RouteTables[0].Routes[?NatGatewayId!=null] | length(@)' --output text 2>/dev/null || echo 0)
         has_igw=$(aws ec2 describe-route-tables ${region:+--region "$region"} \
           --filters "Name=association.subnet-id,Values=$sid" \
-          --query 'RouteTables[0].Routes[?GatewayId!=null && starts_with(GatewayId, `igw-`)] | length(@)' --output text 2>/dev/null)
+          --query 'RouteTables[0].Routes[?GatewayId!=null && starts_with(GatewayId, `igw-`)] | length(@)' --output text 2>/dev/null || echo 0)
+        # Fall back to main route table if no explicit association
+        if [[ "${has_nat:-0}" -eq 0 && "${has_igw:-0}" -eq 0 ]]; then
+          has_nat=$(aws ec2 describe-route-tables ${region:+--region "$region"} \
+            --filters "Name=vpc-id,Values=$vpc_id" "Name=association.main,Values=true" \
+            --query 'RouteTables[0].Routes[?NatGatewayId!=null] | length(@)' --output text 2>/dev/null || echo 0)
+          has_igw=$(aws ec2 describe-route-tables ${region:+--region "$region"} \
+            --filters "Name=vpc-id,Values=$vpc_id" "Name=association.main,Values=true" \
+            --query 'RouteTables[0].Routes[?GatewayId!=null && starts_with(GatewayId, `igw-`)] | length(@)' --output text 2>/dev/null || echo 0)
+        fi
         info=$(aws ec2 describe-subnets ${region:+--region "$region"} --subnet-ids "$sid" \
           --query 'Subnets[0].[SubnetId,AvailabilityZone,CidrBlock]' --output text 2>/dev/null)
         route="no-internet"
@@ -264,8 +290,49 @@ validate_args() {
     echo "  Use --version latest to track the newest release, or specify a tag like --version 2.6.4" >&2
     exit 1
   fi
+  if [[ -n "$create_vpc_endpoints" && "$deploy_import_vpc" != "true" ]]; then
+    echo "Error: --create-vpc-endpoints is only valid with --deploy-import-vpc-cfn." >&2
+    exit 1
+  fi
 }
 validate_args
+
+# --- early subnet isolation check (before any slow operations) ---
+if [[ "$deploy_import_vpc" == "true" && -n "$subnet_ids" && "$ignore_checks" != "true" ]]; then
+  echo "Checking subnet connectivity..."
+  has_internet=false
+  IFS=',' read -ra _early_subnets <<< "$subnet_ids"
+  for sid in "${_early_subnets[@]}"; do
+    for rt_filter in "Name=association.subnet-id,Values=$sid" "Name=vpc-id,Values=$vpc_id Name=association.main,Values=true"; do
+      n=$(aws ec2 describe-route-tables ${region:+--region "$region"} \
+        --filters $rt_filter \
+        --query 'RouteTables[0].Routes[?NatGatewayId!=null || (GatewayId!=null && starts_with(GatewayId, `igw-`))]' \
+        --output json 2>/dev/null | grep -c '"NatGatewayId"\|"GatewayId"' || true)
+      [[ "${n:-0}" -gt 0 ]] && { has_internet=true; break; }
+    done
+    [[ "$has_internet" == "true" ]] && break
+  done
+  if [[ "$has_internet" == "false" ]]; then
+    echo "  Subnets are isolated (no NAT/IGW routes)."
+    if [[ "$build_images" != "true" ]]; then
+      echo "" >&2
+      echo "Error: --build-images is required when using isolated subnets (no NAT/IGW)." >&2
+      echo "  public.ecr.aws has no VPC endpoint — public images cannot be pulled." >&2
+      echo "  Use --build-images to build and push to the private ECR registry," >&2
+      echo "  which is reachable via ECR VPC endpoints." >&2
+      echo "  Or use --ignore-checks to skip this check." >&2
+      exit 1
+    fi
+    echo "  Subnets are isolated — --build-images is set, will use private ECR. ✅"
+  else
+    echo "  Subnets have internet access. ✅"
+  fi
+fi
+
+# --- expand --create-vpc-endpoints value ---
+if [[ "$create_vpc_endpoints" == "all" ]]; then
+  create_vpc_endpoints="s3,ecr,ecrDocker,cloudwatchLogs,efs"
+fi
 
 # --- resolve version once ---
 if [[ -z "$version" || "$version" == "latest" ]]; then
@@ -489,6 +556,20 @@ if [[ "$deploy_cfn" == "true" ]]; then
   if [[ "$deploy_import_vpc" == "true" ]]; then
     cfn_params+=("ParameterKey=VPCId,ParameterValue=${vpc_id}")
     cfn_params+=("ParameterKey=VPCSubnetIds,ParameterValue=\"${subnet_ids}\"")
+    # Add VPC endpoint creation parameters
+    if [[ -n "$create_vpc_endpoints" ]]; then
+      IFS=',' read -ra ep_arr <<< "$create_vpc_endpoints"
+      for ep in "${ep_arr[@]}"; do
+        case "$ep" in
+          s3)              cfn_params+=("ParameterKey=CreateS3Endpoint,ParameterValue=true") ;;
+          ecr)             cfn_params+=("ParameterKey=CreateECREndpoint,ParameterValue=true") ;;
+          ecrDocker)       cfn_params+=("ParameterKey=CreateECRDockerEndpoint,ParameterValue=true") ;;
+          cloudwatchLogs)  cfn_params+=("ParameterKey=CreateCloudWatchLogsEndpoint,ParameterValue=true") ;;
+          efs)             cfn_params+=("ParameterKey=CreateEFSEndpoint,ParameterValue=true") ;;
+          *) echo "Warning: Unknown VPC endpoint type: $ep (valid: s3,ecr,ecrDocker,cloudwatchLogs,efs)" >&2 ;;
+        esac
+      done
+    fi
   fi
 
   echo "Deploying CloudFormation stack: $cfn_stack_name"
@@ -621,6 +702,108 @@ if [[ "$CURRENT_NODEPOOLS" != *"general-purpose"* ]] && [[ "$build_images" != "t
   echo "general-purpose nodepool re-enabled"
   if [[ "$disable_general_purpose_pool" == "true" ]]; then
     echo "Note: --disable-general-purpose-pool was specified, will disable it again after installation completes"
+  fi
+fi
+
+# --- subnet connectivity pre-flight check ---
+# Check if the selected subnets can reach the internet (needed for public image pulls).
+# If subnets are isolated, check for required VPC endpoints.
+if [[ "$ignore_checks" != "true" && -n "${VPC_ID:-}" ]]; then
+  echo "Checking subnet connectivity..."
+  # Get the subnet IDs from the CFN exports or the command line
+  check_subnets="${subnet_ids:-}"
+  if [[ -z "$check_subnets" ]]; then
+    # For create-vpc, subnets are managed by CFN — skip check
+    echo "  Skipping (create-VPC manages its own networking)"
+  else
+    isolated_subnets=()
+    IFS=',' read -ra subnet_arr <<< "$check_subnets"
+    for sid in "${subnet_arr[@]}"; do
+      # Check explicit route table association first, then fall back to main route table
+      rt_filter="Name=association.subnet-id,Values=$sid"
+      has_nat=$(aws ec2 describe-route-tables ${region:+--region "$region"} \
+        --filters "$rt_filter" \
+        --query 'RouteTables[0].Routes[?NatGatewayId!=null] | length(@)' --output text 2>/dev/null || echo 0)
+      has_igw=$(aws ec2 describe-route-tables ${region:+--region "$region"} \
+        --filters "$rt_filter" \
+        --query 'RouteTables[0].Routes[?GatewayId!=null && starts_with(GatewayId, `igw-`)] | length(@)' --output text 2>/dev/null || echo 0)
+      # If no explicit association, check the VPC's main route table
+      if [[ "${has_nat:-0}" -eq 0 && "${has_igw:-0}" -eq 0 ]]; then
+        has_nat=$(aws ec2 describe-route-tables ${region:+--region "$region"} \
+          --filters "Name=vpc-id,Values=${VPC_ID}" "Name=association.main,Values=true" \
+          --query 'RouteTables[0].Routes[?NatGatewayId!=null] | length(@)' --output text 2>/dev/null || echo 0)
+        has_igw=$(aws ec2 describe-route-tables ${region:+--region "$region"} \
+          --filters "Name=vpc-id,Values=${VPC_ID}" "Name=association.main,Values=true" \
+          --query 'RouteTables[0].Routes[?GatewayId!=null && starts_with(GatewayId, `igw-`)] | length(@)' --output text 2>/dev/null || echo 0)
+      fi
+      if [[ "${has_nat:-0}" -eq 0 && "${has_igw:-0}" -eq 0 ]]; then
+        isolated_subnets+=("$sid")
+      fi
+    done
+
+    if [[ ${#isolated_subnets[@]} -gt 0 ]]; then
+      echo "  WARNING: The following subnets have no internet access (no NAT/IGW route):"
+      printf '    %s\n' "${isolated_subnets[@]}"
+      echo "  Pods on these subnets cannot pull public images."
+
+      # Isolated subnets REQUIRE --build-images because public.ecr.aws has no VPC endpoint.
+      # Images must be pushed to the private ECR registry and pulled via VPC endpoints.
+      if [[ "$build_images" != "true" ]]; then
+        echo "" >&2
+        echo "Error: --build-images is required when using isolated subnets (no NAT/IGW)." >&2
+        echo "  public.ecr.aws has no VPC endpoint — public images cannot be pulled." >&2
+        echo "  Use --build-images to build and push to the private ECR registry," >&2
+        echo "  which is reachable via ECR VPC endpoints." >&2
+        echo "  Or use --ignore-checks to skip this check." >&2
+        exit 1
+      fi
+
+      echo "  Checking for VPC endpoints that enable private connectivity..."
+
+      missing_endpoints=()
+      required_services=("s3" "ecr.api" "ecr.dkr")
+      service_labels=("S3 (gateway)" "ECR API" "ECR Docker")
+      for i in "${!required_services[@]}"; do
+        svc="${required_services[$i]}"
+        existing=$(aws ec2 describe-vpc-endpoints ${region:+--region "$region"} \
+          --filters "Name=vpc-id,Values=${VPC_ID}" "Name=service-name,Values=com.amazonaws.${AWS_CFN_REGION}.${svc}" \
+          --query 'VpcEndpoints[?State==`available`] | length(@)' --output text 2>/dev/null || echo 0)
+        if [[ "${existing:-0}" -eq 0 ]]; then
+          missing_endpoints+=("${service_labels[$i]} (com.amazonaws.${AWS_CFN_REGION}.${svc})")
+        else
+          echo "  ✅ ${service_labels[$i]} endpoint exists"
+        fi
+      done
+
+      # Also check optional but recommended endpoints
+      optional_services=("logs" "elasticfilesystem")
+      optional_labels=("CloudWatch Logs" "EFS")
+      for i in "${!optional_services[@]}"; do
+        svc="${optional_services[$i]}"
+        existing=$(aws ec2 describe-vpc-endpoints ${region:+--region "$region"} \
+          --filters "Name=vpc-id,Values=${VPC_ID}" "Name=service-name,Values=com.amazonaws.${AWS_CFN_REGION}.${svc}" \
+          --query 'VpcEndpoints[?State==`available`] | length(@)' --output text 2>/dev/null || echo 0)
+        if [[ "${existing:-0}" -eq 0 ]]; then
+          echo "  ⚠️  ${optional_labels[$i]} endpoint not found (optional but recommended)"
+        else
+          echo "  ✅ ${optional_labels[$i]} endpoint exists"
+        fi
+      done
+
+      if [[ ${#missing_endpoints[@]} -gt 0 ]]; then
+        echo "" >&2
+        echo "Error: Required VPC endpoints missing for isolated subnets:" >&2
+        printf '  ❌ %s\n' "${missing_endpoints[@]}" >&2
+        echo "" >&2
+        echo "Options:" >&2
+        echo "  1. Use --create-vpc-endpoints to have the CFN template create them." >&2
+        echo "  2. Use subnets with NAT/IGW routes instead." >&2
+        echo "  3. Use --ignore-checks to skip this check." >&2
+        exit 1
+      fi
+    else
+      echo "  All subnets have internet access (NAT or IGW routes)."
+    fi
   fi
 fi
 
