@@ -568,9 +568,9 @@ Configure the MA workflow and execute it.
     total_vcpu = target_data_nodes × vcpu_per_target_data_node
     S          = number_of_source_primary_shards
 
-  Range (1 worker per 2–4 vCPU):
-    upper = total_vcpu / 2
-    lower = total_vcpu / 4
+  Range (1 worker per 3–6 vCPU):
+    upper = total_vcpu / 3
+    lower = total_vcpu / 6
 
   Algorithm:
     if S <= lower:
@@ -585,7 +585,7 @@ Configure the MA workflow and execute it.
 
   The worker count should be a clean fraction of the shard count (`S/1`, `S/2`, `S/3`, …) so that every batch of workers processes the same number of shards. This avoids a final partial batch where some workers sit idle.
 
-  **Example:** 100 primary shards, target has 120 total vCPU → range [30, 60]. `100/1=100` (>60, skip), `100/2=50` (in range ✓) → **use 50 workers**. Two full rounds of 50 shards each — all workers busy both rounds, faster than 60 workers doing 60+40.
+  **Example:** 100 primary shards, target has 120 total vCPU → range [20, 40]. `100/1=100` (>40, skip), `100/2=50` (>40, skip), `100/3=33` (in range ✓) → **use 33 workers**. Three rounds of ~33 shards each — all workers busy every round, no wasted capacity.
 
   Where:
   - `total_vcpu` = (number of target data nodes) × (vCPU per target data node)
