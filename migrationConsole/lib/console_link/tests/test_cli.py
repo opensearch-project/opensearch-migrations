@@ -284,7 +284,7 @@ def test_cli_cluster_run_curl_source_cluster(runner, mocker):
     assert model_mock.call_args.kwargs == {'path': '/new_index/_doc', 'method': HttpMethod.POST,
                                            'data': '{"id": 3, "number": 5}',
                                            'headers': {'Content-Type': 'application/json'},
-                                           'timeout': None, 'session': None, 'raise_error': False}
+                                           'timeout': 15, 'session': None, 'raise_error': False}
     assert result.exit_code == 0
 
 
@@ -297,7 +297,7 @@ def test_cli_cluster_run_curl_target_cluster(runner, mocker):
     middleware_mock.assert_called_once()
     model_mock.assert_called_once()
     assert model_mock.call_args.kwargs == {'path': '/_cat/indices', 'method': HttpMethod.GET,
-                                           'data': None, 'headers': {'user-agent': 'TestAgent'}, 'timeout': None,
+                                           'data': None, 'headers': {'user-agent': 'TestAgent'}, 'timeout': 15,
                                            'session': None, 'raise_error': False}
     assert result.exit_code == 0
 
@@ -347,7 +347,7 @@ def test_cli_cluster_run_curl_multiple_headers(runner, mocker):
     middleware_mock.assert_called_once()
     model_mock.assert_called_once()
     assert model_mock.call_args.kwargs == {'path': '/', 'method': HttpMethod.GET,
-                                           'data': None, 'headers': {k: v for k, v in headers}, 'timeout': None,
+                                           'data': None, 'headers': {k: v for k, v in headers}, 'timeout': 15,
                                            'session': None, 'raise_error': False}
     assert result.exit_code == 0
 
@@ -361,7 +361,7 @@ def test_cli_cluster_run_curl_head_method(runner, mocker):
     middleware_mock.assert_called_once()
     model_mock.assert_called_once()
     assert model_mock.call_args.kwargs == {'path': '/', 'method': HttpMethod.HEAD,
-                                           'data': None, 'headers': {}, 'timeout': None,
+                                           'data': None, 'headers': {}, 'timeout': 15,
                                            'session': None, 'raise_error': False}
     assert result.exit_code == 0
 
