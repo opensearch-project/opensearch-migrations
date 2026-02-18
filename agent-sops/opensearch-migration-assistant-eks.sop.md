@@ -33,7 +33,7 @@ This SOP guides an agent through a complete migration from Elasticsearch or Open
 - **app_deployment** (optional, default: ask user if `migration_scope=full_stack`): Whether to deploy a parallel application stack.
   - `parallel`: Deploy a parallel copy of the application pointing at the new target.
   - `skip`: Do not deploy any application stack.
-  - If omitted and `migration_scope=full_stack`, the agent MUST ask: *"I can deploy a parallel copy of your application pointing at the new OpenSearch cluster. Want me to do that? If so, point me to your application manifests or describe your deployment."*
+  - If omitted and `migration_scope=full_stack`, the agent MUST ask: *"I can deploy a parallel copy of your application pointing at the new OpenSearch cluster. Want me to do that? If so, share your application source code, repo URL, manifests, or describe your deployment so I can understand how to build and deploy it."*
 - **app_source** (optional): How to find the application to clone.
   - `discover`: Inspect K8s deployments in the source cluster's namespace for pods connecting to the source cluster.
   - `manifests`: User provides a path to K8s manifests, Helm chart, or deployment config.
@@ -254,6 +254,8 @@ Discover the application stack connected to the source cluster so it can be clon
 **Skip condition:** Skip this step if `migration_scope=data_only` or `app_deployment=skip`.
 
 **Constraints:**
+- You MUST ask the user for their application source code, repository URL, or detailed deployment information before attempting any discovery or deployment. Do NOT blindly inspect the cluster — the user knows their application best:
+  *"Before I can deploy a parallel copy of your application, I need to understand it. Can you share: (1) your application source code or repo URL, (2) your K8s manifests or Helm charts, or (3) a description of your application architecture and how it connects to the cluster? The more context I have, the better I can set up the parallel deployment."*
 - You MUST ask the user how to find their application if `app_source` is not set:
   *"I need to understand your application to deploy a parallel copy later. I can: (1) inspect your K8s cluster for deployments connecting to the source, (2) read your manifests/Helm charts if you point me to them, or (3) you can describe your setup and I'll build the config. Which works best?"*
 - You MUST NOT assume any specific application architecture. The application could be:
@@ -638,6 +640,7 @@ Deploy a parallel copy of the application stack pointing at the new OpenSearch c
 **Skip condition:** Skip this step if `migration_scope=data_only` or `app_deployment=skip`.
 
 **Constraints:**
+- You MUST have application source code, manifests, or detailed deployment information from Step 3 before proceeding. If Step 3 did not capture sufficient information, you MUST ask the user again: *"I don't have enough information about your application to deploy a parallel copy. Can you share your source code, repo URL, or deployment manifests?"*
 - You MUST use the application information captured in Step 3 to create modified deployments.
 - You MUST create modified copies of the original manifests with:
   - New deployment/service names (e.g., append `-migrated` or a user-chosen suffix)
