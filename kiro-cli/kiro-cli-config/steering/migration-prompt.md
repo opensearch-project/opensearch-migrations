@@ -1,52 +1,27 @@
-# Migration Assistant Prompt (Default)
+# Migration Assistant Prompt
 
 The default workflow for this agent is the SOP shipped with the assistant package:
 
 - `.kiro/steering/opensearch-migration-assistant-eks.sop.md`
 
-This file is intentionally short and only provides quick-start prompts. Use the SOP as the source of truth.
+## Handling User Input
 
-## First Question (Required)
+The user will describe their migration in natural language. Infer all parameters from what they say. Only ask about things that are genuinely ambiguous or missing.
 
-Ask for `hands_on_level` up front:
+Examples of natural language → parameter inference:
 
-```text
-hands_on_level: guided | semi_auto | auto
-```
+- "full stack autonomous migration from my es 8 cluster in EKS to a new OS 3.3 cluster with sigv4 in this region"
+  → `hands_on_level: auto`, `migration_scope: full_stack`, `source_selection: discover`, `target_provisioning: provision_new`, target version OS 3.3, auth sigv4, use current region
 
-## Environment Selection
+- "migrate my data from ES to OpenSearch, I already have both clusters"
+  → `migration_scope: data_only`, `source_selection: custom` or `discover`, `target_provisioning: use_existing`, ask for `hands_on_level`
 
-Support both:
+- "help me migrate"
+  → Ask what they have and what they want
 
-1) Deploy a new MA EKS stage (CloudFormation/CDK; requires explicit confirmation)
-2) Use an existing MA EKS stage by reading CloudFormation exports (`MigrationsExportString*`)
+## Key Rules
 
-## Cluster Selection
-
-Then choose:
-
-1) `aws_discover` (discover Amazon OpenSearch Service domains across regions)
-2) `custom` (user provides endpoints + auth)
-
-Discovery snippet (reference):
-
-```bash
-for r in $(aws ec2 describe-regions --query 'Regions[].RegionName' --output text); do (s=$(aws opensearch list-domain-names --region "$r" --query 'DomainNames[].DomainName' --output text 2>/dev/null) && [ -n "$s" ] && printf "=== %s ===\n%s\n" "$r" "$s") & done; wait
-```
-
-## Quick Start Prompt Template
-
-```text
-hands_on_level: guided
-
-ma_environment:
-  mode: use_existing_stage
-  stage: <stage>
-  region: <region>
-
-clusters:
-  source: aws_discover
-  target: aws_discover
-
-indices: all
-```
+- Do NOT present a structured parameter table and ask the user to fill it in.
+- Do NOT ask for parameters the user already provided in natural language.
+- If the user gave enough info to start, start immediately and discover the rest at runtime.
+- Default to `guided` mode if interaction level is unclear.

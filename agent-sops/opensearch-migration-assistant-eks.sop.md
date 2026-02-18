@@ -46,11 +46,18 @@ This SOP guides an agent through a complete migration from Elasticsearch or Open
 - **run_id** (optional): Identifier for this run. If omitted, generate `YYYY-MM-DD-HHMM-opensearch-migration`.
 
 **Constraints for parameter acquisition:**
-- You MUST ask for all required parameters upfront in a single prompt rather than one at a time because this reduces interruptions during execution.
-- If the user's initial prompt implies scope (e.g., "migrate everything and spin up a parallel app"), you MUST infer parameters from context rather than asking redundant questions.
+- You MUST infer as many parameters as possible from the user's natural language input before asking any questions. For example:
+  - "full stack autonomous migration" → `migration_scope: full_stack`, `hands_on_level: auto`
+  - "my es 8 cluster in EKS" → `source_selection: discover`, source version ES 8
+  - "new OS 3.3 cluster with sigv4" → `target_provisioning: provision_new`, target version OS 3.3, auth sigv4
+  - "in this region" → use the current AWS region from environment
+  - "migrate everything" → `index_allowlist: all`
+  - "manage the whole process yourself" → `hands_on_level: auto`
+- You MUST only ask about parameters that cannot be inferred from context. If the user gave enough info to start, start immediately.
+- If `hands_on_level` is not clear, default to `guided` and ask.
 - You MUST normalize `hands_on_level` to one of: `guided`, `semi_auto`, `auto`.
 - You MUST normalize boolean parameters (`allow_insecure`, `allow_destructive`) to true/false.
-- You MUST confirm successful acquisition and normalization of parameters before proceeding.
+- After inferring parameters, briefly state what you understood and begin executing. Do NOT ask the user to confirm a structured parameter table — just start working.
 
 ## Mode Behavior
 
