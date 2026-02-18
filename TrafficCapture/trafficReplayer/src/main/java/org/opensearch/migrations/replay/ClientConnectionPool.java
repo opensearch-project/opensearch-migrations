@@ -101,7 +101,7 @@ public class ClientConnectionPool {
         var connectionReplaySession = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
         if (connectionReplaySession != null) {
             closeClientConnectionChannel(connectionReplaySession);
-            connectionId2ChannelCache.invalidate(connId);
+            connectionId2ChannelCache.invalidate(getKey(connId, sessionNumber));
         } else {
             log.atTrace()
                 .setMessage("No ChannelFuture for {} in closeConnection.  " +

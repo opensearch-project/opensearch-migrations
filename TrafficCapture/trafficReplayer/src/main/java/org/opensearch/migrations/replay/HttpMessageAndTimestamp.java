@@ -39,7 +39,7 @@ public class HttpMessageAndTimestamp {
 
         @Override
         public String toString() {
-            return super.format(Optional.of(HttpByteBufFormatter.HttpMessageType.REQUEST));
+            return super.format(Optional.of(HttpByteBufFormatter.HttpMessageType.RESPONSE));
         }
     }
 
