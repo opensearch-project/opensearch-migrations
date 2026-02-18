@@ -559,17 +559,35 @@ Configure the MA workflow and execute it.
 - You MUST retrieve the current workflow config and schema at runtime before editing.
 - You MUST set the workflow configuration via supported mechanisms and record what you changed.
 - You MUST set `max_snapshot_rate_mb_per_node: 1000` in the snapshot create config to maximize snapshot throughput. The default (~40 MB/s) is far too slow for large datasets. At 1000 MB/s per node the snapshot runs as fast as S3 and the network allow.
-- You MUST calculate the RFS (Reindex From Snapshot) worker count using this formula:
+- You MUST calculate the RFS (Reindex From Snapshot) worker count using shard-fraction-aligned scaling:
 
   ```
-  rfs_workers = min(target_data_node_total_vcpu / 6, number_of_source_shards)
+  Inputs:
+    total_vcpu = target_data_nodes × vcpu_per_target_data_node
+    S          = number_of_source_primary_shards
+
+  Range (1 worker per 2–4 vCPU):
+    upper = total_vcpu / 2
+    lower = total_vcpu / 4
+
+  Algorithm:
+    if S <= lower:
+      rfs_workers = S                          # shards are the bottleneck
+    else:
+      for N = 1, 2, 3, …:
+        candidate = floor(S / N)
+        if candidate <= upper:
+          rfs_workers = candidate               # largest shard fraction in range
+          break
   ```
+
+  The worker count should be a clean fraction of the shard count (`S/1`, `S/2`, `S/3`, …) so that every batch of workers processes the same number of shards. This avoids a final partial batch where some workers sit idle.
+
+  **Example:** 100 primary shards, target has 120 total vCPU → range [30, 60]. `100/1=100` (>60, skip), `100/2=50` (in range ✓) → **use 50 workers**. Two full rounds of 50 shards each — all workers busy both rounds, faster than 60 workers doing 60+40.
 
   Where:
-  - `target_data_node_total_vcpu` = (number of target data nodes) × (vCPU per target data node)
-  - `number_of_source_shards` = total primary shard count across all indices being migrated
-
-  This ensures workers don't overwhelm the target cluster and don't exceed the parallelism available from source shards.
+  - `total_vcpu` = (number of target data nodes) × (vCPU per target data node)
+  - `S` = total primary shard count across all indices being migrated
 
 - You MUST run the workflow using `workflow submit` and record workflow name/IDs.
 - You MUST NOT use `--wait` or any other blocking wait. After submitting, immediately proceed to Step 8.
