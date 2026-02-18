@@ -61,4 +61,4 @@ curl -fsSL "${RAW_BASE}/agent-sops/opensearch-migration-assistant-eks.sop.md" \
 # --- 4. Start kiro-cli ---
 # Redirect stdin from /dev/tty so kiro-cli gets the real terminal,
 # not the exhausted pipe from `curl | bash`.
-exec kiro-cli chat --agent opensearch-migration --trust-all-tools < /dev/tty
+exec kiro-cli chat --agent opensearch-migration --trust-all-tools "@start" < /dev/tty
