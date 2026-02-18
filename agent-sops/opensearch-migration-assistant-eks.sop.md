@@ -78,6 +78,34 @@ Apply these patterns throughout all steps based on the selected `hands_on_level`
 - You MUST still stop for destructive or irreversible operations unless `allow_destructive=true` because these operations can cause irreversible data loss.
 - You MUST document all decisions, assumptions, and command outputs in the run log.
 
+## Cluster Access Constraints
+
+These rules govern how the agent interacts with the source Elasticsearch/OpenSearch cluster. They apply to ALL steps.
+
+**Resource discovery — kubectl ONLY:**
+- You MUST use `kubectl` to discover source cluster sizing: pod resource requests/limits (CPU, memory), PVC sizes (disk), StatefulSet replica counts, and node specs.
+- You MUST NOT use `kubectl port-forward`, `kubectl exec ... curl`, direct `curl` to NLB/NodePort/ClusterIP endpoints, or any other method to reach the source cluster's HTTP API for resource sizing. The kubectl-derived information (CPU, memory, disk from pod specs and PVCs) is sufficient to size the target cluster.
+
+**ES/OS API calls — migration console ONLY:**
+- You MUST ONLY access the source or target cluster's Elasticsearch/OpenSearch HTTP API through the Migration Console using `console clusters curl`.
+- You MUST NOT use `kubectl port-forward` to the source cluster's service and then `curl localhost:9200`.
+- You MUST NOT use `kubectl exec` into source cluster pods to run `curl` against the cluster API.
+- You MUST NOT `curl` any NLB, NodePort, or LoadBalancer endpoint of the source cluster directly.
+- You MUST NOT attempt any direct HTTP connection to the source cluster from your execution environment.
+- The ONLY permitted way to call ES/OS APIs (e.g., `_cluster/health`, `_cat/indices`, `_mapping`) is via the migration console after MA is deployed in Step 5:
+
+```bash
+CONSOLE_POD=$(kubectl -n {namespace} get pod -l app=migration-console -o jsonpath='{.items[0].metadata.name}')
+kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
+  "source /.venv/bin/activate && console clusters curl --path '/_cluster/health?pretty'"
+```
+
+**Why this matters:**
+- `kubectl port-forward` does not work in many environments (CloudShell, CI/CD, restricted networks).
+- NLB/NodePort endpoints are often internal-only and unreachable from the agent's execution environment.
+- `kubectl exec` into source pods to curl is fragile (curl may not be installed, container may not have shell access).
+- The migration console is purpose-built for cluster API access and handles auth, TLS, and network routing correctly.
+
 ## Steps
 
 ### 0. Initialize Run Workspace
@@ -128,17 +156,68 @@ kubectl get svc --all-namespaces --field-selector spec.type!=ExternalName \
 
 ### 2. Source Cluster Inspection
 
-Inspect the source cluster to understand its configuration, data, and compatibility requirements.
+Inspect the source cluster's Kubernetes resources to understand its sizing, configuration, and network environment. This step uses kubectl ONLY — no direct access to the ES/OS HTTP API.
 
 **Constraints:**
-- You MUST connect to the source cluster and capture:
-  - Cluster health (`GET _cluster/health`)
-  - Node configuration (`GET _cat/nodes?v&h=name,ip,heap.percent,ram.percent,cpu,load_1m,node.role,master`)
-  - Index list with sizes (`GET _cat/indices?v&h=index,health,status,pri,rep,docs.count,store.size&s=store.size:desc`)
-  - Total data size (primary shards)
-  - Shard count and sizing
-  - Per-node vCPU count and memory (from node stats or K8s resource limits)
-- You MUST capture the source cluster's network configuration for target provisioning:
+- You MUST NOT use `kubectl port-forward`, `kubectl exec ... curl`, direct `curl` to NLB/NodePort, or any other method to reach the source cluster's HTTP API. See "Cluster Access Constraints" above.
+- You MUST use `kubectl` to capture all resource sizing information needed to provision the target cluster.
+
+**2a. Pod resource sizing (CPU, memory):**
+
+```bash
+# Get resource requests and limits for all ES/OS pods
+kubectl -n <namespace> get pods -l <es-label> -o jsonpath='{range .items[*]}
+  Pod: {.metadata.name}
+  CPU request: {.spec.containers[0].resources.requests.cpu}
+  CPU limit: {.spec.containers[0].resources.limits.cpu}
+  Memory request: {.spec.containers[0].resources.requests.memory}
+  Memory limit: {.spec.containers[0].resources.limits.memory}
+{end}'
+```
+
+- Record per-pod CPU and memory requests/limits in `{artifacts_dir}/discovery.md`.
+- If resource requests/limits are not set on the pods, fall back to node allocatable resources:
+
+```bash
+# Get node allocatable resources for nodes running ES/OS pods
+kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}: cpu={.status.allocatable.cpu}, memory={.status.allocatable.memory}{"\n"}{end}'
+```
+
+**2b. Disk sizing (PVCs):**
+
+```bash
+# Get PVC sizes for the ES/OS StatefulSet
+kubectl -n <namespace> get pvc -l <es-label> -o jsonpath='{range .items[*]}
+  PVC: {.metadata.name}
+  Size: {.spec.resources.requests.storage}
+  StorageClass: {.spec.storageClassName}
+  Status: {.status.phase}
+{end}'
+```
+
+- Record per-node disk size and storage class in `{artifacts_dir}/discovery.md`.
+
+**2c. Cluster topology (node count, roles):**
+
+```bash
+# Get StatefulSet details for replica count and update strategy
+kubectl -n <namespace> get statefulset -l <es-label> -o jsonpath='{range .items[*]}
+  StatefulSet: {.metadata.name}
+  Replicas: {.spec.replicas}
+  Ready: {.status.readyReplicas}
+{end}'
+```
+
+**2d. Source version (from pod image tag or labels):**
+
+```bash
+# Get the container image to determine ES/OS version
+kubectl -n <namespace> get pods -l <es-label> -o jsonpath='{.items[0].spec.containers[0].image}'
+```
+
+- Parse the version from the image tag (e.g., `elasticsearch:8.19.11` → ES 8.19.11).
+
+**2e. Network configuration for target provisioning:**
 
 ```bash
 # Get the EKS cluster's VPC, subnets, and security groups
@@ -154,27 +233,19 @@ CLUSTER_SG=$(aws eks describe-cluster --name "${EKS_CLUSTER}" --region "${aws_re
 echo "VPC: $VPC_ID  Subnets: $SUBNET_IDS  SGs: $SG_IDS  ClusterSG: $CLUSTER_SG"
 ```
 
-  - Record VPC ID, subnet IDs, and security group IDs in `{artifacts_dir}/discovery.md` — these are used as defaults for target provisioning in Step 4.
-- You MUST inspect field types for compatibility issues:
-  - `GET <index>/_mapping` for each index (or representative indices if many)
-  - Flag known incompatible types: `sparse_vector`, `dense_vector` (may need `knn_vector`), ELSER-specific types, any ML-specific field types
-  - Record compatibility issues in `{artifacts_dir}/discovery.md`
-- You MUST present a summary of what was found:
-  - Cluster version, node count, total data size
-  - Number of indices, total doc count
-  - Any compatibility issues detected
+- Record VPC ID, subnet IDs, and security group IDs in `{artifacts_dir}/discovery.md` — these are used as defaults for target provisioning in Step 4.
+
+**2f. Present a summary of what was found:**
+- You MUST present:
+  - Source version (from image tag), node count (from StatefulSet replicas)
+  - Per-node CPU, memory (from pod resource requests/limits)
+  - Per-node disk size (from PVCs)
+  - Network config (VPC, subnets, SGs)
 - In `guided` mode, you MUST ask the user to confirm the source looks correct before proceeding.
 
-**Recommended connectivity pattern for EKS-based source:**
-
-```bash
-# Port-forward to the source cluster service
-kubectl port-forward -n <namespace> svc/<es-service> 9200:9200 &
-
-# Query the cluster
-curl -s http://localhost:9200/_cluster/health?pretty
-curl -s http://localhost:9200/_cat/indices?v
-```
+**What this step does NOT do:**
+- It does NOT query the ES/OS HTTP API (no `_cluster/health`, `_cat/indices`, `_mapping`). Those API calls happen later in Step 6 (Pre-Migration Validation) through the migration console after MA is deployed.
+- The kubectl-derived sizing (CPU, memory, disk, node count) is sufficient to provision the target cluster in Step 4 and deploy MA in Step 5.
 
 ### 3. Application Discovery (if `migration_scope=full_stack`)
 
@@ -248,7 +319,7 @@ done
 - You MUST match the source data node count exactly.
 - You MUST map source node vCPU and memory to the most modern generation of OpenSearch instance type with equivalent or better specs.
 - Instance type modernization logic:
-  1. Determine source per-node vCPU and memory (from Step 2 node stats or K8s resource limits).
+  1. Determine source per-node vCPU and memory from the kubectl-derived pod resource requests/limits captured in Step 2.
   2. Find the latest generation OpenSearch instance type that matches or exceeds those specs.
   3. Prefer the latest generation available (e.g., `r7g` over `r6g` over `r5`, `m7g` over `m6g` over `m5`).
   4. Use `aws opensearch list-instance-type-details --engine-version OpenSearch_<version> --region "${aws_region}"` to verify the chosen type is available.
@@ -397,29 +468,76 @@ kubectl -n {namespace} exec "${CONSOLE_POD}" -- echo "Console accessible"
 
 ### 6. Pre-Migration Validation
 
-Validate connectivity and configuration from within the Migration Console before starting the workflow.
+Validate connectivity and configuration from within the Migration Console before starting the workflow. This is the FIRST step where ES/OS API calls are made — all through `console clusters curl`.
 
 **Constraints:**
-- You MUST run commands through the Migration Console pod and record them in `{artifacts_dir}/run-log.md`.
-- You MUST validate connectivity to both source and target clusters from the console:
-  - Reported cluster versions
-  - Index list summary for source and target
-  - Whether target has indices that would conflict with migration
-- You MUST determine snapshot configuration:
-  - Locate runtime config sources (ConfigMaps, mounted files, workflow schema)
-  - Determine snapshot repo details (S3 bucket, region, IAM role)
-  - Verify snapshot prerequisites are in place
-- You MUST calculate and present a migration estimate (snapshot + metadata + backfill) using runtime measurements.
+- You MUST run ALL cluster API commands through the Migration Console pod using `console clusters curl`. You MUST NOT use `kubectl port-forward`, `kubectl exec` into source pods, or direct `curl` to any cluster endpoint. See "Cluster Access Constraints" above.
+- You MUST record all commands and outputs in `{artifacts_dir}/run-log.md`.
+
+**6a. Validate connectivity to source and target:**
+
+```bash
+CONSOLE_POD=$(kubectl -n {namespace} get pod -l app=migration-console -o jsonpath='{.items[0].metadata.name}')
+
+# Source cluster health and version
+kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
+  "source /.venv/bin/activate && console clusters curl --path '/' --cluster source"
+
+kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
+  "source /.venv/bin/activate && console clusters curl --path '/_cluster/health?pretty' --cluster source"
+
+# Target cluster health and version
+kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
+  "source /.venv/bin/activate && console clusters curl --path '/' --cluster target"
+
+kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
+  "source /.venv/bin/activate && console clusters curl --path '/_cluster/health?pretty' --cluster target"
+```
+
+**6b. Source cluster data inspection (via migration console):**
+
+This is where you capture the data-level details that were NOT gathered in Step 2 (which only used kubectl for resource sizing):
+
+```bash
+# Index list with sizes
+kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
+  "source /.venv/bin/activate && console clusters curl --path '/_cat/indices?v&h=index,health,status,pri,rep,docs.count,store.size&s=store.size:desc' --cluster source"
+
+# Node configuration
+kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
+  "source /.venv/bin/activate && console clusters curl --path '/_cat/nodes?v&h=name,ip,heap.percent,ram.percent,cpu,load_1m,node.role,master' --cluster source"
+
+# Shard count (for RFS worker calculation in Step 7)
+kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
+  "source /.venv/bin/activate && console clusters curl --path '/_cat/shards?h=index,shard,prirep&s=index' --cluster source" | grep ' p$' | wc -l
+```
+
+- Record total data size, shard count, index list, and doc counts in `{artifacts_dir}/discovery.md`.
+
+**6c. Field type compatibility inspection (via migration console):**
+
+```bash
+# Check mappings for compatibility issues
+kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
+  "source /.venv/bin/activate && console clusters curl --path '/<index>/_mapping' --cluster source"
+```
+
+- Flag known incompatible types: `sparse_vector`, `dense_vector` (may need `knn_vector`), ELSER-specific types, any ML-specific field types.
+- Record compatibility issues in `{artifacts_dir}/discovery.md`.
+
+**6d. Target state check:**
+- Check whether target has indices that would conflict with migration.
 - You MUST classify the following as destructive: deleting/clearing indices, deleting templates, deleting snapshots.
 - In `guided` and `semi_auto`, you MUST ask for explicit confirmation before any destructive action.
 - In `auto`, you MUST NOT perform destructive actions unless `allow_destructive=true`.
 
-**Recommended exec pattern:**
+**6e. Snapshot configuration:**
+- Locate runtime config sources (ConfigMaps, mounted files, workflow schema).
+- Determine snapshot repo details (S3 bucket, region, IAM role).
+- Verify snapshot prerequisites are in place.
 
-```bash
-kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
-  "source /.venv/bin/activate && <command>"
-```
+**6f. Migration estimate:**
+- You MUST calculate and present a migration estimate (snapshot + metadata + backfill) using the data sizes discovered in 6b.
 
 ### 7. Configure and Run the Migration Workflow
 
