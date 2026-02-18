@@ -317,6 +317,7 @@ done
 
 **4b. Data nodes — Match source count and size with modern instance types:**
 - You MUST match the source data node count exactly.
+- The data node count MUST be divisible by the number of Availability Zones. If the source data node count is not evenly divisible by the AZ count, round UP to the nearest multiple (e.g., 5 data nodes across 3 AZs → use 6 data nodes). Inform the user of the adjustment.
 - You MUST map source node vCPU and memory to the most modern generation of OpenSearch instance type with equivalent or better specs.
 - Instance type modernization logic:
   1. Determine source per-node vCPU and memory from the kubectl-derived pod resource requests/limits captured in Step 2.
