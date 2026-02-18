@@ -478,7 +478,7 @@ done
 - After the CFN stack completes, you MUST run `aws-bootstrap.sh` via raw curl to install MA on the EKS cluster. This script reads the CFN exports, installs Helm if needed, clones the repo, and runs `helm install` with the correct configuration:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh | bash
+curl -sL https://raw.githubusercontent.com/gregschohn/opensearch-migrations/9d59a7cb0003a9a2f493b834c6444caf191694c3/deployment/k8s/aws/aws-bootstrap.sh | bash
 ```
 
 - Verify MA pods are running:
