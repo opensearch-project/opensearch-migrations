@@ -547,6 +547,15 @@ kubectl -n {namespace} exec "${CONSOLE_POD}" -- bash -lc \
 - Locate runtime config sources (ConfigMaps, mounted files, workflow schema).
 - Determine snapshot repo details (S3 bucket, region, IAM role).
 - Verify snapshot prerequisites are in place.
+- You MUST increase the source cluster's snapshot speed to maximize throughput before any snapshot operation. Set `indices.recovery.max_bytes_per_sec` to `1000mb` (1000 MB/s per node):
+
+  ```bash
+  console clusters curl --path '/_cluster/settings' --cluster source \
+    -XPUT -H 'Content-Type: application/json' \
+    -d '{"persistent": {"indices.recovery.max_bytes_per_sec": "1000mb"}}'
+  ```
+
+  The default is typically 40 MB/s — this is far too slow for large datasets. 1000 MB/s per node ensures the snapshot is not artificially throttled and completes as fast as the underlying storage (S3) and network allow.
 
 **6f. Migration estimate:**
 - You MUST calculate and present a migration estimate (snapshot + metadata + backfill) using the data sizes discovered in 6b.
