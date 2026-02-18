@@ -78,8 +78,8 @@ function getRfsDeploymentName(sessionName: BaseExpression<string>) {
     return expr.concat(sessionName, expr.literal("-rfs"));
 }
 
-/** StorageClass name suffix — Helm template creates it as <namespace>-s3-csi */
-const S3_STORAGE_CLASS_SUFFIX = "-s3-csi";
+/** Static PVC name — matches the Helm-managed PVC in s3CsiPvc.yaml */
+const S3_SNAPSHOT_PVC_NAME = "s3-snapshot";
 
 function getRfsDeploymentManifest
 (args: {
@@ -196,7 +196,7 @@ function getRfsDeploymentManifest
         args.useLocalstackAwsCreds,
         setupS3CsiVolumeForContainer(
             S3_MOUNT_PATH,
-            expr.concat(expr.getWorkflowValue("namespace"), expr.literal(S3_STORAGE_CLASS_SUFFIX)),
+            expr.literal(S3_SNAPSHOT_PVC_NAME),
             setupLog4jConfigForContainer(
                 useCustomLogging,
                 args.loggingConfigMap,
