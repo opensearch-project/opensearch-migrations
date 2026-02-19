@@ -197,8 +197,11 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
             // Schedule coordinator outage injection, tracking timestamps with nanoTime for monotonic ordering
             var outageInjectedAt = new AtomicLong(0);
             var coordinatorReEnabledAt = new AtomicLong(0);
-            var scheduler = Executors.newSingleThreadScheduledExecutor(
-                r -> new Thread(r, "coordinator-outage-scheduler"));
+            var scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                var t = new Thread(r, "coordinator-outage-scheduler");
+                t.setDaemon(true);
+                return t;
+            });
             try {
                 scheduler.schedule(() -> {
                     coordinatorProxy.disable();
