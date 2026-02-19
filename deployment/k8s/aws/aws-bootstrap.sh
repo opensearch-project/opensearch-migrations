@@ -58,6 +58,7 @@ build_chart_and_dashboards=false
 version=""
 create_vpc_endpoints=""
 ignore_checks=false
+push_images_to_ecr=false
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -91,13 +92,14 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --ignore-checks) ignore_checks=true; shift 1 ;;
+    --push-all-images-to-private-ecr) push_images_to_ecr=true; shift 1 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo ""
       echo "Bootstrap an EKS cluster for the OpenSearch Migration Assistant."
       echo "Optionally deploy the Migration Assistant CloudFormation stack first."
       echo ""
-      echo "CloudFormation deployment options (exactly one required):"
+      echo "CloudFormation deployment variants (one is required):"
       echo "  --deploy-create-vpc-cfn                   Deploy the Create-VPC EKS CloudFormation template."
       echo "                                            Creates a new VPC with all required networking."
       echo "  --deploy-import-vpc-cfn                   Deploy the Import-VPC EKS CloudFormation template."
@@ -105,6 +107,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --skip-cfn-deploy                         Skip CloudFormation deployment. Use when the Migration"
       echo "                                            Assistant stack is already deployed and you only want to"
       echo "                                            bootstrap the EKS cluster (install helm chart, images, etc)."
+      echo ""
+      echo "CloudFormation deployment options:"
       echo "  --stack-name <name>                       CloudFormation stack name (required with --deploy-*-cfn)."
       echo "  --vpc-id <id>                             VPC ID (required with --deploy-import-vpc-cfn)."
       echo "  --subnet-ids <id1,id2>                    Comma-separated subnet IDs, each in a different AZ"
@@ -114,6 +118,9 @@ while [[ $# -gt 0 ]]; do
       echo "                                            No argument or 'all' creates: s3,ecr,ecrDocker,cloudwatchLogs,efs."
       echo "                                            Or specify a comma-separated subset, e.g. 's3,ecr,ecrDocker'."
       echo "  --ignore-checks                           Skip subnet connectivity and VPC endpoint pre-flight checks."
+      echo "  --push-all-images-to-private-ecr          Mirror all required public images and helm charts to the"
+      echo "                                            private ECR registry. Enables deployment on isolated subnets"
+      echo "                                            without internet access. Run from a machine with internet."
       echo ""
       echo "EKS access options:"
       echo "  --eks-access-principal-arn <arn>          Grant an IAM principal (role/user) cluster-admin access"
@@ -830,6 +837,26 @@ if [[ "$build_images" == "true" ]]; then
   echo "Cleaning up docker buildx builder to free buildkit pods..."
   docker buildx rm local-remote-builder 2>/dev/null || true
   echo "Builder removed. Buildkit pods will be terminated by kubernetes driver."
+fi
+
+# --- mirror public images to private ECR (optional) ---
+if [[ "$push_images_to_ecr" == "true" ]]; then
+  echo "Mirroring public images and helm charts to private ECR..."
+  ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
+  SCRIPTS_DIR="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
+  "$SCRIPTS_DIR/mirror-to-ecr.sh" "$ECR_HOST" --region "${AWS_CFN_REGION}"
+
+  echo "Generating private ECR helm values override..."
+  ecr_values_file=$(mktemp)
+  "$SCRIPTS_DIR/generate-private-ecr-values.sh" "$ECR_HOST" > "$ecr_values_file"
+  if [[ -n "$extra_helm_values" ]]; then
+    extra_helm_values="$extra_helm_values,$ecr_values_file"
+  else
+    extra_helm_values="$ecr_values_file"
+  fi
+  echo "Private ECR values written to $ecr_values_file"
+  # Force private images since we're mirroring everything to ECR
+  use_public_images=false
 fi
 
 # --- image source selection ---
