@@ -7,8 +7,9 @@ import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.CreateSnapshot;
@@ -82,14 +83,12 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     //   t=30s  : Coordinator disabled — mid-migration, ~30 docs already sent
     //   t=60s  : All 60 docs reach target, RFS tries to finalize on coordinator (fails)
     //   t=150s : (test 2 only) Coordinator re-enabled after 120s restart window
-    //   t=330s : Hard deadline for the outage scheduler thread
     private static final int COORDINATOR_DISABLE_AFTER_SECONDS = 30;
     private static final int COORDINATOR_REENABLE_AFTER_SECONDS = 120;
-    private static final int TOTAL_TIMEOUT_SECONDS = 330;
 
     // Polling config for checking coordinator working state after RFS completes
-    private static final int COORDINATOR_STATE_OBSERVATION_TIMEOUT_SECONDS = 5;
-    private static final int COORDINATOR_STATE_POLL_MILLIS = 200;
+    private static final Duration COORDINATOR_STATE_OBSERVATION_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration COORDINATOR_STATE_POLL_INTERVAL = Duration.ofMillis(200);
 
     @TempDir
     Path tempRootDir;
@@ -99,8 +98,12 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     void allDocsMigratedButCoordinatorUnavailableAtCompletion() {
         var result = runCoordinatorOutageScenario(false, 0);
 
-        // (1/4) ASSERT : Coordinator outage executed and disabled connectivity as scheduled
-        Assertions.assertTrue(result.outageInjected(), "Coordinator outage was not injected at scheduled time");
+        // (1/4) ASSERT timeline: rfsStarted < outageInjected < rfsEnded
+        Assertions.assertTrue(result.outageInjected(), "Coordinator outage was not injected");
+        Assertions.assertTrue(result.rfsStartedAt() < result.outageInjectedAt(),
+            "RFS should have started before outage was injected");
+        Assertions.assertTrue(result.outageInjectedAt() < result.rfsEndedAt(),
+            "Outage should have been injected before RFS finished");
 
         // (2/4) ASSERT that TARGET cluster has ALL docs from SOURCE cluster
         Assertions.assertEquals(result.expectedDocs(), result.finalDocs(), "All docs should be on target");
@@ -109,9 +112,10 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
         Assertions.assertTrue(result.coordinatorHasIncompleteWorkItems(),
             "Expected coordinator working state to contain incomplete work items after outage");
 
-        // (4/4) ASSERT : RFS threw an exception because coordinator became unavailable during finalize path
-        Assertions.assertNotNull(result.thrownException(),
-            "Expected exception when coordinator becomes unavailable");
+        // (4/4) ASSERT : RFS failed specifically due to coordinator retry exhaustion
+        Assertions.assertInstanceOf(OpenSearchWorkCoordinator.RetriesExceededException.class,
+            result.thrownException(),
+            "Expected RetriesExceededException when coordinator becomes unavailable");
     }
 
     @Test
@@ -120,21 +124,24 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     void allDocsMigratedButCoordinatorLongRestartsAtCompletion() {
         var result = runCoordinatorOutageScenario(true, COORDINATOR_REENABLE_AFTER_SECONDS);
 
-        // (1/5) ASSERT : Coordinator outage thread executed and disabled connectivity as scheduled
-        Assertions.assertTrue(result.outageInjected(), "Coordinator outage was not injected at scheduled time");
+        // (1/4) ASSERT timeline: rfsStarted < outageInjected < reEnabled < rfsEnded
+        Assertions.assertTrue(result.outageInjected(), "Coordinator outage was not injected");
+        Assertions.assertTrue(result.coordinatorReEnabled(), "Coordinator was not re-enabled");
+        Assertions.assertTrue(result.rfsStartedAt() < result.outageInjectedAt(),
+            "RFS should have started before outage was injected");
+        Assertions.assertTrue(result.outageInjectedAt() < result.coordinatorReEnabledAt(),
+            "Outage should have been injected before coordinator was re-enabled");
+        Assertions.assertTrue(result.coordinatorReEnabledAt() < result.rfsEndedAt(),
+            "Coordinator should have been re-enabled before RFS finished");
 
-        // (2/5) ASSERT that COORDINATOR was RE-ENABLED as scheduled
-        Assertions.assertTrue(result.coordinatorReEnabled(),
-            "Coordinator was not re-enabled after long restart window");
-
-        // (3/5) ASSERT that TARGET cluster has ALL docs from SOURCE cluster
+        // (2/4) ASSERT that TARGET cluster has ALL docs from SOURCE cluster
         Assertions.assertEquals(result.expectedDocs(), result.finalDocs(), "All docs should be on target");
 
-        // (4/5) ASSERT that RFS completed without exception
+        // (3/4) ASSERT that RFS completed without exception
         Assertions.assertNull(result.thrownException(),
             "Expected RFS to recover and complete cleanly after coordinator returns");
 
-        // (5/5) ASSERT that every entry in COORDINATOR State has a `completedAt` field
+        // (4/4) ASSERT that every entry in COORDINATOR State has a `completedAt` field
         Assertions.assertFalse(result.coordinatorHasIncompleteWorkItems(),
             "Expected coordinator working state to have no incomplete work items after recovery");
     }
@@ -187,75 +194,79 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
             var expectedDocs = getDocCountFromCluster(esSourceContainer.getUrl(), INDEX_NAME, true);
             Assertions.assertEquals(TOTAL_DOCS, expectedDocs, "Expected source doc count to match configured TOTAL_DOCS");
 
-            // === ACTION : Start outage scheduler
-            var testStartNanos = System.nanoTime();
-            var scenarioTimeoutSeconds = TOTAL_TIMEOUT_SECONDS + (reEnableCoordinator ? reEnableAfterSeconds : 0);
-            var totalDeadlineNanos = testStartNanos + TimeUnit.SECONDS.toNanos(scenarioTimeoutSeconds);
-            var outageInjected = new AtomicBoolean(false);
-            var coordinatorReEnabled = new AtomicBoolean(false);
-            var outageThreadException = new AtomicReference<Throwable>();
-
-            var outageThread = new Thread(() -> {
-                try {
-                    manageCoordinatorOutageWindow(
-                        coordinatorProxy, testStartNanos, totalDeadlineNanos, outageInjected,
-                        coordinatorReEnabled, reEnableCoordinator, reEnableAfterSeconds);
-                } catch (Throwable t) {
-                    outageThreadException.set(t);
-                    log.atError().setCause(t).setMessage("Outage scheduler thread failed").log();
-                }
-            }, "rfs-coordinator-outage-scheduler");
-            outageThread.start();
-
-            // === ACTION : Run RFS in-process with separate coordinator and target connections
-            final var thrownException = new AtomicReference<Exception>();
+            // Schedule coordinator outage injection, tracking timestamps with nanoTime for monotonic ordering
+            var outageInjectedAt = new AtomicLong(0);
+            var coordinatorReEnabledAt = new AtomicLong(0);
+            var scheduler = Executors.newSingleThreadScheduledExecutor(
+                r -> new Thread(r, "coordinator-outage-scheduler"));
             try {
-                runRfsInProcess(
-                    tempDirSnapshot, tempDirLucene,
-                    targetProxy.getProxyUriAsString(),
-                    coordinatorProxy.getProxyUriAsString(),
-                    testContext);
-            } catch (Exception e) {
-                thrownException.set(e);
-                log.atInfo().setCause(e).setMessage("RFS threw exception (expected in outage scenario)").log();
+                scheduler.schedule(() -> {
+                    coordinatorProxy.disable();
+                    outageInjectedAt.set(System.nanoTime());
+                    log.atInfo().setMessage("Coordinator disabled at ~{}s")
+                        .addArgument(COORDINATOR_DISABLE_AFTER_SECONDS).log();
+                }, COORDINATOR_DISABLE_AFTER_SECONDS, TimeUnit.SECONDS);
+
+                if (reEnableCoordinator) {
+                    scheduler.schedule(() -> {
+                        coordinatorProxy.enable();
+                        coordinatorReEnabledAt.set(System.nanoTime());
+                        log.atInfo().setMessage("Coordinator re-enabled after {}s restart window")
+                            .addArgument(reEnableAfterSeconds).log();
+                    }, COORDINATOR_DISABLE_AFTER_SECONDS + reEnableAfterSeconds, TimeUnit.SECONDS);
+                }
+
+                // Run RFS
+                var rfsStartedAt = System.nanoTime();
+                final var thrownException = new AtomicReference<Exception>();
+                try {
+                    runRfs(
+                        tempDirSnapshot, tempDirLucene,
+                        targetProxy.getProxyUriAsString(),
+                        coordinatorProxy.getProxyUriAsString(),
+                        testContext);
+                } catch (Exception e) {
+                    thrownException.set(e);
+                    log.atInfo().setCause(e).setMessage("RFS threw exception").log();
+                }
+                var rfsEndedAt = System.nanoTime();
+
+                // Verify coordinator proxy is in expected state after RFS exits
+                assertClusterReachability(coordinatorProxy.getProxyUriAsString(), "coordinator", reEnableCoordinator);
+
+                var finalDocs = getDocCountFromCluster(osTargetContainer.getUrl(), INDEX_NAME, false);
+                var coordinatorHasIncompleteWorkItems = waitForCoordinatorIncompleteWorkItems(
+                    osCoordinatorContainer.getUrl(), !reEnableCoordinator);
+
+                log.atInfo().setMessage("Test summary: exception={}, outageAt={}ns, rfsDuration={}ns, docs={}/{}")
+                    .addArgument(() -> thrownException.get() != null ? thrownException.get().getClass().getSimpleName() : "none")
+                    .addArgument(outageInjectedAt.get() > 0 ? outageInjectedAt.get() - rfsStartedAt : "never")
+                    .addArgument(rfsEndedAt - rfsStartedAt)
+                    .addArgument(finalDocs)
+                    .addArgument(expectedDocs)
+                    .log();
+
+                return new ScenarioResult(
+                    thrownException.get(),
+                    outageInjectedAt.get(),
+                    coordinatorReEnabledAt.get(),
+                    rfsStartedAt,
+                    rfsEndedAt,
+                    expectedDocs,
+                    finalDocs,
+                    coordinatorHasIncompleteWorkItems);
+            } finally {
+                scheduler.shutdownNow();
             }
-
-            // === ACTION : Wait for outage scheduler thread to finish after RFS exits
-            outageThread.join(TimeUnit.SECONDS.toMillis(reEnableCoordinator ? reEnableAfterSeconds + 10 : 5));
-            Assertions.assertFalse(outageThread.isAlive(),
-                "Outage scheduler thread did not finish. Outage may not have been injected");
-            if (outageThreadException.get() != null) {
-                Assertions.fail("Outage scheduler thread failed", outageThreadException.get());
-            }
-
-            var finalDocs = getDocCountFromCluster(osTargetContainer.getUrl(), INDEX_NAME, false);
-            var coordinatorHasIncompleteWorkItems = waitForCoordinatorIncompleteWorkItems(
-                osCoordinatorContainer.getUrl(), true);
-
-            log.atInfo().setMessage("Test summary: exception={}, outageInjected={}, coordinatorReEnabled={}, docs={}/{}")
-                .addArgument(() -> thrownException.get() != null ? thrownException.get().getClass().getSimpleName() : "none")
-                .addArgument(outageInjected.get())
-                .addArgument(coordinatorReEnabled.get())
-                .addArgument(finalDocs)
-                .addArgument(expectedDocs)
-                .log();
-
-            return new ScenarioResult(
-                thrownException.get(),
-                outageInjected.get(),
-                coordinatorReEnabled.get(),
-                expectedDocs,
-                finalDocs,
-                coordinatorHasIncompleteWorkItems);
         } finally {
             FileSystemUtils.deleteDirectories(tempDirSnapshot.toString(), tempDirLucene.toString());
         }
     }
 
     @SneakyThrows
-    private void runRfsInProcess(Path snapshotDir, Path luceneDir,
-                                 String targetAddress, String coordinatorAddress,
-                                 DocumentMigrationTestContext testContext)
+    private void runRfs(Path snapshotDir, Path luceneDir,
+                        String targetAddress, String coordinatorAddress,
+                        DocumentMigrationTestContext testContext)
         throws RfsMigrateDocuments.NoWorkLeftException
     {
         var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(SOURCE_VERSION, true);
@@ -336,52 +347,6 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     }
 
     @SneakyThrows
-    private void manageCoordinatorOutageWindow(ToxiProxyWrapper coordinatorProxy, long testStartNanos,
-                                               long totalDeadlineNanos, AtomicBoolean outageInjected,
-                                               AtomicBoolean coordinatorReEnabled,
-                                               boolean reEnableCoordinator, int reEnableAfterSeconds) {
-        // Wait until elapsed test time reaches configured outage trigger
-        while (System.nanoTime() - testStartNanos < TimeUnit.SECONDS.toNanos(COORDINATOR_DISABLE_AFTER_SECONDS)) {
-            if (System.nanoTime() >= totalDeadlineNanos) {
-                Assertions.fail("Total timeout reached before scheduled coordinator outage action");
-            }
-            TimeUnit.MILLISECONDS.sleep(100);
-        }
-
-        // Disable coordinator connectivity through the proxy
-        coordinatorProxy.disable();
-
-        // Verify coordinator is actually unreachable after disable
-        assertClusterReachability(coordinatorProxy.getProxyUriAsString(), "coordinator", false);
-
-        // Record that outage was injected for test assertions
-        outageInjected.set(true);
-        log.atInfo().setMessage("Coordinator disabled at ~{}s")
-            .addArgument(COORDINATOR_DISABLE_AFTER_SECONDS)
-            .log();
-
-        if (!reEnableCoordinator) {
-            return;
-        }
-
-        // Wait additional restart window, then bring coordinator back.
-        while (System.nanoTime() - testStartNanos <
-            TimeUnit.SECONDS.toNanos(COORDINATOR_DISABLE_AFTER_SECONDS + reEnableAfterSeconds)) {
-            if (System.nanoTime() >= totalDeadlineNanos) {
-                Assertions.fail("Total timeout reached before scheduled coordinator re-enable action");
-            }
-            TimeUnit.MILLISECONDS.sleep(100);
-        }
-
-        coordinatorProxy.enable();
-        assertClusterReachability(coordinatorProxy.getProxyUriAsString(), "coordinator", true);
-        coordinatorReEnabled.set(true);
-        log.atInfo().setMessage("Coordinator re-enabled after {}s restart window")
-            .addArgument(reEnableAfterSeconds)
-            .log();
-    }
-
-    @SneakyThrows
     private void assertClusterReachability(String host, String clusterLabel, boolean expectedReachable) {
         var client = new RestClient(ConnectionContextTestParams.builder().host(host).build().toConnectionContext());
         try {
@@ -433,45 +398,35 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
         var client = new RestClient(ConnectionContextTestParams.builder()
             .host(coordinatorHost).build().toConnectionContext());
         var coordinatorIndexName = OpenSearchWorkCoordinator.getFinalIndexName(SESSION_NAME);
-        var deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(COORDINATOR_STATE_OBSERVATION_TIMEOUT_SECONDS);
+        var incompleteQuery = "{\"query\":{\"bool\":{\"must_not\":{\"exists\":{\"field\":\"completedAt\"}}}}}";
+        var deadlineNanos = System.nanoTime() + COORDINATOR_STATE_OBSERVATION_TIMEOUT.toNanos();
 
         while (System.nanoTime() < deadlineNanos) {
             var refreshResponse = client.get(coordinatorIndexName + "/_refresh", null);
             if (refreshResponse.statusCode == 200) {
-                var searchResponse = client.get(coordinatorIndexName + "/_search", null);
-                if (searchResponse.statusCode == 200) {
-                    var hasIncomplete = hasIncompleteWorkItems(searchResponse.body);
+                var countResponse = client.asyncRequest(
+                    io.netty.handler.codec.http.HttpMethod.GET,
+                    coordinatorIndexName + "/_count", incompleteQuery, null, null).block();
+                if (countResponse != null && countResponse.statusCode == 200) {
+                    var count = OBJECT_MAPPER.readTree(countResponse.body).path("count").asLong();
+                    var hasIncomplete = count > 0;
                     if (hasIncomplete == expectedIncomplete) {
                         return hasIncomplete;
                     }
                 }
             }
-            TimeUnit.MILLISECONDS.sleep(COORDINATOR_STATE_POLL_MILLIS);
+            TimeUnit.MILLISECONDS.sleep(COORDINATOR_STATE_POLL_INTERVAL.toMillis());
         }
         Assertions.fail("Timed out waiting for coordinator working state to reach expected incomplete="
-            + expectedIncomplete + " within " + COORDINATOR_STATE_OBSERVATION_TIMEOUT_SECONDS + "s");
+            + expectedIncomplete + " within " + COORDINATOR_STATE_OBSERVATION_TIMEOUT);
         return false; // unreachable
     }
 
-    private static boolean hasIncompleteWorkItems(String searchBody) {
-        if (searchBody == null || searchBody.isBlank()) {
-            return false;
-        }
-        try {
-            var hits = OBJECT_MAPPER.readTree(searchBody).path("hits").path("hits");
-            for (var hit : hits) {
-                var source = hit.path("_source");
-                if (source.path("completedAt").isMissingNode() || source.path("completedAt").isNull()) {
-                    return true;
-                }
-            }
-            return false;
-        } catch (Exception e) {
-            throw new RuntimeException("Failed parsing coordinator working state response", e);
-        }
-    }
-
-    private record ScenarioResult(Exception thrownException, boolean outageInjected, boolean coordinatorReEnabled,
+    private record ScenarioResult(Exception thrownException, long outageInjectedAt, long coordinatorReEnabledAt,
+                                  long rfsStartedAt, long rfsEndedAt,
                                   long expectedDocs, long finalDocs,
-                                  boolean coordinatorHasIncompleteWorkItems) {}
+                                  boolean coordinatorHasIncompleteWorkItems) {
+        boolean outageInjected() { return outageInjectedAt > 0; }
+        boolean coordinatorReEnabled() { return coordinatorReEnabledAt > 0; }
+    }
 }

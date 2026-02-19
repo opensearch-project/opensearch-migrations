@@ -352,6 +352,34 @@ public class SourceTestBase {
         String transformationConfig,
         DocumentExceptionAllowlist allowlist
     ) throws RfsMigrateDocuments.NoWorkLeftException {
+        return migrateDocumentsWithOneWorker(sourceRepo, snapshotName, previousSnapshotName, indexAllowlist,
+            targetAddress, null, clockJitter, context, sourceVersion, targetVersion, null,
+            transformationConfig, allowlist);
+    }
+
+    /**
+     * @param coordinatorAddress if null, uses targetAddress for coordination
+     * @param coordinatorVersion if null, uses targetVersion for coordination
+     */
+    @SuppressWarnings("unchecked")
+    @SneakyThrows
+    public static CompletionStatus migrateDocumentsWithOneWorker(
+        SourceRepo sourceRepo,
+        String snapshotName,
+        String previousSnapshotName,
+        List<String> indexAllowlist,
+        String targetAddress,
+        String coordinatorAddress,
+        Random clockJitter,
+        DocumentMigrationTestContext context,
+        Version sourceVersion,
+        Version targetVersion,
+        Version coordinatorVersion,
+        String transformationConfig,
+        DocumentExceptionAllowlist allowlist
+    ) throws RfsMigrateDocuments.NoWorkLeftException {
+        var effectiveCoordinatorAddress = coordinatorAddress != null ? coordinatorAddress : targetAddress;
+        var effectiveCoordinatorVersion = coordinatorVersion != null ? coordinatorVersion : targetVersion;
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
         try (var processManager = new LeaseExpireTrigger(workItemId -> {
@@ -395,21 +423,25 @@ public class SourceTestBase {
                     ));
 
             AtomicReference<WorkItemCursor> progressCursor = new AtomicReference<>();
-            var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
-            var connectionContext = ConnectionContextTestParams.builder()
+            var coordinatorFactory = new WorkCoordinatorFactory(effectiveCoordinatorVersion);
+            var coordinatorConnectionContext = ConnectionContextTestParams.builder()
+                    .host(effectiveCoordinatorAddress)
+                    .build()
+                    .toConnectionContext();
+            var targetConnectionContext = ConnectionContextTestParams.builder()
                     .host(targetAddress)
                     .build()
                     .toConnectionContext();
             var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
 
             try (var workCoordinator = coordinatorFactory.get(
-                    new CoordinateWorkHttpClient(connectionContext),
+                    new CoordinateWorkHttpClient(coordinatorConnectionContext),
                     TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                     UUID.randomUUID().toString(),
                     Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift)),
                     workItemRef::set
             )) {
-                var clientFactory = new OpenSearchClientFactory(connectionContext);
+                var clientFactory = new OpenSearchClientFactory(targetConnectionContext);
                 return RfsMigrateDocuments.run(
                     readerFactory,
                     new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> docTransformer, false, allowlist),
