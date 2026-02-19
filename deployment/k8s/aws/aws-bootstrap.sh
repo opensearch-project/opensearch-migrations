@@ -642,6 +642,12 @@ if [[ "$build_images" == "true" ]]; then
   fi
 
   echo "Building images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"
+  ecr_domain="${MIGRATIONS_ECR_REGISTRY%%/*}"
+  echo "Logging in to ECR registry: $ecr_domain"
+  aws ecr get-login-password --region "${AWS_CFN_REGION}" \
+    | docker login --username AWS --password-stdin "$ecr_domain" \
+    || { echo "ECR login failed"; exit 1; }
+
   "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."
