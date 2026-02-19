@@ -24,3 +24,4 @@ spec:
     volumeHandle: {{ .Release.Namespace }}-s3-snapshot
     volumeAttributes:
       bucketName: {{ $bucketName }}
+      authenticationSource: pod
