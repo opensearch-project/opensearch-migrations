@@ -1,6 +1,9 @@
 package org.opensearch.migrations;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BiPredicate;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -54,6 +57,17 @@ public class MetadataTransformationRegistry {
             .transformerInfo(Transformers.TransformerInfo.builder()
                 .name("dense_vector to knn_vector")
                 .descriptionLine("Convert field data type dense_vector to OpenSearch knn_vector")
+                .build())
+            .build(),
+        TransformerConfigs.builder()
+            .filename("js/es-semantic-text-metadata.js")
+            .isRelevantForVersions(andSourceTargetVersionPredicate(
+                    UnboundVersionMatchers.isGreaterOrEqualES_8_X,
+                    UnboundVersionMatchers.isGreaterOrEqualOS_3_x
+            ))
+            .transformerInfo(Transformers.TransformerInfo.builder()
+                .name("semantic_text to semantic")
+                .descriptionLine("Convert field data type semantic_text to OpenSearch semantic")
                 .build())
             .build(),
         TransformerConfigs.builder()
@@ -118,8 +132,13 @@ public class MetadataTransformationRegistry {
     }
 
     public static Transformers getCustomTransformationByClusterVersions(Version sourceVersion, Version targetVersion) {
+        return getCustomTransformationByClusterVersions(sourceVersion, targetVersion, Collections.emptyMap());
+    }
+
+    public static Transformers getCustomTransformationByClusterVersions(
+            Version sourceVersion, Version targetVersion, Map<String, String> modelMappings) {
         var transformersBuilder = Transformers.builder();
-        var bakedInTransformers = BAKED_IN_TRANSFORMER_CONFIGS
+        var bakedInTransformers = getBakedInConfigs(modelMappings)
             .stream().filter(config ->
                 config.isRelevantForVersions.test(sourceVersion, targetVersion))
             .toList();
@@ -128,6 +147,42 @@ public class MetadataTransformationRegistry {
         logTransformerConfig("Default breaking changes transform config", config);
         transformersBuilder.transformer(configToTransformer(config));
         return transformersBuilder.build();
+    }
+
+    /**
+     * Returns the baked-in transformer configs, injecting model_mappings into the
+     * semantic text transform context if provided.
+     */
+    private static List<TransformerConfigs> getBakedInConfigs(Map<String, String> modelMappings) {
+        if (modelMappings == null || modelMappings.isEmpty()) {
+            return BAKED_IN_TRANSFORMER_CONFIGS;
+        }
+        // Replace the semantic text config with one that includes model_mappings
+        var configs = new ArrayList<TransformerConfigs>();
+        for (var config : BAKED_IN_TRANSFORMER_CONFIGS) {
+            if (config.getFilename().contains("es-semantic-text-metadata")) {
+                configs.add(TransformerConfigs.builder()
+                    .filename(config.getFilename())
+                    .context(buildModelMappingsContext(modelMappings))
+                    .isRelevantForVersions(config.getIsRelevantForVersions())
+                    .transformerInfo(config.getTransformerInfo())
+                    .build());
+            } else {
+                configs.add(config);
+            }
+        }
+        return configs;
+    }
+
+    private static String buildModelMappingsContext(Map<String, String> modelMappings) {
+        var entries = modelMappings.entrySet().stream()
+            .map(e -> "\"" + escapeJson(e.getKey()) + "\":\"" + escapeJson(e.getValue()) + "\"")
+            .collect(Collectors.joining(","));
+        return "{\"model_mappings\":{" + entries + "}}";
+    }
+
+    private static String escapeJson(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private static String getAggregateJSTransformer(List<TransformerConfigs> transformerConfigs) {
