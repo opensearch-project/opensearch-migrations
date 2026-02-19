@@ -1,0 +1,36 @@
+# Strategic patch to add snapshot-fuse sidecar to an RFS worker deployment.
+# Usage: kubectl patch deployment <rfs-deployment> --type strategic --patch-file fuse-sidecar-patch.yaml
+#
+# Required: Set SNAPSHOT_REPO_ROOT and SNAPSHOT_NAME env vars or edit the args below.
+# The sidecar reads from the S3 CSI mount and presents virtual Lucene files at /mnt/lucene.
+# The RFS worker's --lucene-dir should point to /mnt/lucene.
+spec:
+  template:
+    spec:
+      containers:
+      - name: snapshot-fuse
+        image: snapshot-fuse:latest
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--repo-root=$(SNAPSHOT_REPO_ROOT)"
+        - "--snapshot-name=$(SNAPSHOT_NAME)"
+        - "--mount-point=/mnt/lucene"
+        env:
+        - name: RUST_LOG
+          value: "info"
+        - name: SNAPSHOT_REPO_ROOT
+          value: "/mnt/s3/snapshots/repo"  # Override with actual path
+        - name: SNAPSHOT_NAME
+          value: "my-snapshot"              # Override with actual snapshot name
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: snapshot-s3
+          mountPath: /mnt/s3
+          readOnly: true
+        - name: lucene-fuse
+          mountPath: /mnt/lucene
+          mountPropagation: Bidirectional
+      volumes:
+      - name: lucene-fuse
+        emptyDir: {}

@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
@@ -103,6 +104,16 @@ public class SnapshotShardUnpacker {
     }
 
     public Path unpack() {
+        // If the target directory already has Lucene files (e.g., from a FUSE mount),
+        // skip unpacking and use them directly.
+        if (hasLuceneFiles(targetDirectory)) {
+            log.atInfo()
+                .setMessage("Lucene files already present at {}, skipping unpack (FUSE mount or pre-unpacked)")
+                .addArgument(targetDirectory)
+                .log();
+            return targetDirectory;
+        }
+
         try {
             // Some constants
             NativeFSLockFactory lockFactory = NativeFSLockFactory.INSTANCE;
@@ -137,6 +148,21 @@ public class SnapshotShardUnpacker {
         } catch (Exception e) {
             String errorMessage = "Could not unpack shard: Index " + indexId + ", Shard " + shardId;
             throw new CouldNotUnpackShard(errorMessage, e);
+        }
+    }
+
+    /**
+     * Check if the target directory already contains Lucene files (e.g., from a FUSE mount).
+     * Looks for a segments_N file which is always present in a valid Lucene index.
+     */
+    private boolean hasLuceneFiles(Path dir) {
+        if (!Files.isDirectory(dir)) {
+            return false;
+        }
+        try (var stream = Files.list(dir)) {
+            return stream.anyMatch(p -> p.getFileName().toString().startsWith("segments_"));
+        } catch (IOException e) {
+            return false;
         }
     }
 
