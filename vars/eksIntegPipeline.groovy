@@ -146,7 +146,8 @@ def call(Map config = [:]) {
                                           --build-chart-and-dashboards \
                                           --base-dir "\$(pwd)" \
                                           --skip-console-exec \
-                                          --region us-east-1
+                                          --region us-east-1 \
+                                          2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done
                                     """
 
                                     // Capture env vars for later stages and cleanup
