@@ -147,7 +147,7 @@ def call(Map config = [:]) {
                                           --base-dir "\$(pwd)" \
                                           --skip-console-exec \
                                           --region us-east-1 \
-                                          2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done
+                                          2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; exit \${PIPESTATUS[0]}
                                     """
 
                                     // Capture env vars for later stages and cleanup
