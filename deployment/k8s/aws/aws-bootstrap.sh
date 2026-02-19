@@ -269,7 +269,7 @@ validate_args
 
 # --- resolve version once ---
 if [[ -z "$version" || "$version" == "latest" ]]; then
-  RELEASE_VERSION=$(curl -s https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+  RELEASE_VERSION=$(curl -sf https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
   RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
   [[ -n "$RELEASE_VERSION" ]] || { echo "Error: Could not determine latest release version from GitHub."; exit 1; }
   echo "Resolved latest release version: $RELEASE_VERSION"
@@ -295,7 +295,7 @@ install_helm() {
   tmp_dir=$(mktemp -d)
   cd "$tmp_dir" || exit 1
 
-  curl -LO "https://get.helm.sh/helm-v${HELM_VERSION}-${OS}-${TOOLS_ARCH}.tar.gz"
+  curl -fLO "https://get.helm.sh/helm-v${HELM_VERSION}-${OS}-${TOOLS_ARCH}.tar.gz"
   tar -zxvf "helm-v${HELM_VERSION}-${OS}-${TOOLS_ARCH}.tar.gz"
   sudo mv "${OS}-${TOOLS_ARCH}/helm" /usr/local/bin/helm
   cd - >/dev/null || exit 1
@@ -494,17 +494,23 @@ if [[ "$deploy_cfn" == "true" ]]; then
   echo "Deploying CloudFormation stack: $cfn_stack_name"
   # create-stack/update-stack to support both --template-file and --template-url
   if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
-    aws cloudformation update-stack \
+    update_output=$(aws cloudformation update-stack \
       "$cfn_template_flag" "$cfn_template_value" \
       --stack-name "$cfn_stack_name" \
       --parameters "${cfn_params[@]}" \
       --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-      ${region:+--region "$region"} 2>&1 \
-      | grep -v "No updates are to be performed" \
-      || true
-    echo "Waiting for stack update to complete..."
-    aws cloudformation wait stack-update-complete \
-      --stack-name "$cfn_stack_name" ${region:+--region "$region"} 2>/dev/null || true
+      ${region:+--region "$region"} 2>&1) && update_started=true || update_started=false
+    if [[ "$update_started" == "true" ]]; then
+      echo "Waiting for stack update to complete..."
+      aws cloudformation wait stack-update-complete \
+        --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+        || { echo "CloudFormation stack update failed for: $cfn_stack_name"; exit 1; }
+    elif echo "$update_output" | grep -q "No updates are to be performed"; then
+      echo "No updates needed for stack: $cfn_stack_name"
+    else
+      echo "CloudFormation update-stack failed: $update_output" >&2
+      exit 1
+    fi
   else
     aws cloudformation create-stack \
       "$cfn_template_flag" "$cfn_template_value" \
@@ -642,6 +648,12 @@ if [[ "$build_images" == "true" ]]; then
   fi
 
   echo "Building images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"
+  ecr_domain="${MIGRATIONS_ECR_REGISTRY%%/*}"
+  echo "Logging in to ECR registry: $ecr_domain"
+  aws ecr get-login-password --region "${AWS_CFN_REGION}" \
+    | docker login --username AWS --password-stdin "$ecr_domain" \
+    || { echo "ECR login failed"; exit 1; }
+
   "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."
