@@ -273,7 +273,7 @@ validate_args
 
 # --- resolve version once ---
 if [[ -z "$version" || "$version" == "latest" ]]; then
-  RELEASE_VERSION=$(curl -s https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+  RELEASE_VERSION=$(curl -sf https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
   RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
   [[ -n "$RELEASE_VERSION" ]] || { echo "Error: Could not determine latest release version from GitHub."; exit 1; }
   echo "Resolved latest release version: $RELEASE_VERSION"
@@ -299,7 +299,7 @@ install_helm() {
   tmp_dir=$(mktemp -d)
   cd "$tmp_dir" || exit 1
 
-  curl -LO "https://get.helm.sh/helm-v${HELM_VERSION}-${OS}-${TOOLS_ARCH}.tar.gz"
+  curl -fLO "https://get.helm.sh/helm-v${HELM_VERSION}-${OS}-${TOOLS_ARCH}.tar.gz"
   tar -zxvf "helm-v${HELM_VERSION}-${OS}-${TOOLS_ARCH}.tar.gz"
   sudo mv "${OS}-${TOOLS_ARCH}/helm" /usr/local/bin/helm
   cd - >/dev/null || exit 1
