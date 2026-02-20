@@ -122,8 +122,9 @@ public class DocumentReindexer {
     }
 
     /*
-     * TODO: Update the reindexing code to rely on _index field embedded in each doc section rather than requiring it in the
-     * REST path.  See: https://opensearch.atlassian.net/browse/MIGRATIONS-2232
+     * Reindexing currently requires the index name in the REST path. A future improvement (MIGRATIONS-2232)
+     * would rely on the _index field embedded in each doc section instead.
+     * See: https://opensearch.atlassian.net/browse/MIGRATIONS-2232
      */
     Mono<WorkItemCursor> sendBulkRequest(UUID batchId, List<RfsDocument> docsBatch, String indexName, IDocumentReindexContext context, Scheduler scheduler) {
         var lastDoc = docsBatch.get(docsBatch.size() - 1);

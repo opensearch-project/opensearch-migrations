@@ -107,7 +107,7 @@ public class GoldenDocumentExtractionTest {
             if (doc.type != null) {
                 node.put("type", doc.type);
             }
-            node.put("source", doc.source);
+            node.put("source", new String(doc.source, java.nio.charset.StandardCharsets.UTF_8));
             if (doc.routing != null) {
                 node.put("routing", doc.routing);
             }

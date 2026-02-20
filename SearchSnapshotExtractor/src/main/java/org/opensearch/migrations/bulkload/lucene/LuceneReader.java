@@ -155,7 +155,7 @@ public class LuceneReader {
 
         String openSearchDocId = null;
         String type = null;
-        String sourceBytes = null;
+        byte[] sourceBytes = null;
         String routing = null;
 
         try {
@@ -175,8 +175,8 @@ public class LuceneReader {
                         break;
                     }
                     case "_source": {
-                        // All versions (?)
-                        sourceBytes = field.utf8ToStringValue();
+                        // All versions — keep as raw bytes to avoid String allocation
+                        sourceBytes = field.utf8Value();
                         break;
                     }
                     case "_routing": {
@@ -196,7 +196,7 @@ public class LuceneReader {
                 return null;  // Skip documents with missing id
             }
 
-            if (sourceBytes == null || sourceBytes.isEmpty()) {
+            if (sourceBytes == null || sourceBytes.length == 0) {
                 log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have the _source field enabled.")
                     .addArgument(luceneDocId)
                     .addArgument(getSegmentReaderDebugInfo)

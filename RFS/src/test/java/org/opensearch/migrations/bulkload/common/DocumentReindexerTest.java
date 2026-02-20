@@ -303,16 +303,16 @@ class DocumentReindexerTest {
     }
 
     private LuceneDocumentChange createTestDocument(int id) {
-        return new LuceneDocumentChange(id, String.valueOf(id), null, "{\"field\":\"value\"}", null, DocumentChangeType.INDEX);
+        return new LuceneDocumentChange(id, String.valueOf(id), null, "{\"field\":\"value\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8), null, DocumentChangeType.INDEX);
     }
 
     private LuceneDocumentChange createTestDocumentWithWhitespace(int id) {
-        return new LuceneDocumentChange(id, String.valueOf(id), null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ", null, DocumentChangeType.INDEX);
+        return new LuceneDocumentChange(id, String.valueOf(id), null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ".getBytes(java.nio.charset.StandardCharsets.UTF_8), null, DocumentChangeType.INDEX);
     }
 
     private LuceneDocumentChange createLargeTestDocument(int id, int size) {
         String largeField = "x".repeat(size);
-        return new LuceneDocumentChange(id, String.valueOf(id), null, "{\"field\":\"" + largeField + "\"}", null, DocumentChangeType.INDEX);
+        return new LuceneDocumentChange(id, String.valueOf(id), null, ("{\"field\":\"" + largeField + "\"}").getBytes(java.nio.charset.StandardCharsets.UTF_8), null, DocumentChangeType.INDEX);
     }
 
     /**
@@ -323,7 +323,7 @@ class DocumentReindexerTest {
      * @return A new instance of LuceneDocumentChange with the specified _type.
      */
     private LuceneDocumentChange createTestDocumentWithType(int id, String type) {
-        String source = "{\"field\":\"value\"}";
+        byte[] source = "{\"field\":\"value\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         return new LuceneDocumentChange(id, String.valueOf(id), type, source, null, DocumentChangeType.INDEX);
     }
 }

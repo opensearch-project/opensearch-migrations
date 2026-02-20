@@ -228,7 +228,7 @@ public class SnapshotReaderEndToEndTest {
                 assertThat("Document " + doc.getId() + " should have source",
                     doc.getSource(), notNullValue());
                 assertThat("Document " + doc.getId() + " should have non-empty source",
-                    doc.getSource().length(), greaterThan(0));
+                    doc.getSource().length, greaterThan(0));
             }
 
             log.info("Successfully read {} documents from {} snapshot", docs.size(), sourceVersion);
