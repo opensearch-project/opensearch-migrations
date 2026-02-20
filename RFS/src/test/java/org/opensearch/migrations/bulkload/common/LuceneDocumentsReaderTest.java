@@ -119,7 +119,7 @@ public class LuceneDocumentsReaderTest {
             String actualType = doc.type;
 
             String expectedSource = "{\"title\":\"This is a doc with complex history\",\"content\":\"Updated!\"}";
-            String actualSource = doc.source;
+            String actualSource = new String(doc.source, java.nio.charset.StandardCharsets.UTF_8);
             assertDocsEqual(expectedId, actualId, expectedType, actualType, expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
@@ -130,7 +130,7 @@ public class LuceneDocumentsReaderTest {
             String actualType = doc.type;
 
             String expectedSource = "{\"title\":\"This is doc that will be updated\",\"content\":\"Updated!\"}";
-            String actualSource = doc.source;
+            String actualSource = new String(doc.source, java.nio.charset.StandardCharsets.UTF_8);
             assertDocsEqual(expectedId, actualId, expectedType, actualType,
                     expectedSource, actualSource);
             return true;
@@ -142,7 +142,7 @@ public class LuceneDocumentsReaderTest {
             String actualType = doc.type;
 
             String expectedSource = "{\"title\":\"This doc will not be changed\\nIt has multiple lines of text\\nIts source doc has extra newlines.\",\"content\":\"bluh bluh\"}";
-            String actualSource = doc.source;
+            String actualSource = new String(doc.source, java.nio.charset.StandardCharsets.UTF_8);
             assertDocsEqual(expectedId, actualId, expectedType, actualType,
                     expectedSource, actualSource);
             return true;
@@ -185,7 +185,7 @@ public class LuceneDocumentsReaderTest {
             String actualType = doc.type;
 
             String expectedSource = "{\"content\":\"This doc will not be changed\nIt has multiple lines of text\nIts source doc has extra newlines.\"}";
-            String actualSource = doc.source;
+            String actualSource = new String(doc.source, java.nio.charset.StandardCharsets.UTF_8);
             assertDocsEqual(expectedId, actualId, expectedType, actualType, expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
@@ -196,7 +196,7 @@ public class LuceneDocumentsReaderTest {
             String actualType = doc.type;
 
             String expectedSource = "{\"content\":\"Updated!\"}";
-            String actualSource = doc.source;
+            String actualSource = new String(doc.source, java.nio.charset.StandardCharsets.UTF_8);
             assertDocsEqual(expectedId, actualId, expectedType, actualType,
                     expectedSource, actualSource);
             return true;
@@ -208,7 +208,7 @@ public class LuceneDocumentsReaderTest {
              String actualType = doc.type;
 
             String expectedSource = "{\"title\":\"This is a doc with complex history. Updated!\"}";
-            String actualSource = doc.source;
+            String actualSource = new String(doc.source, java.nio.charset.StandardCharsets.UTF_8);
             assertDocsEqual(expectedId, actualId, expectedType, actualType,
                     expectedSource, actualSource);
             return true;

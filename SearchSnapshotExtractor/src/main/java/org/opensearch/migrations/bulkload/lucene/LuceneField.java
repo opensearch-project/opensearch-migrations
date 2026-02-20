@@ -8,6 +8,8 @@ public interface LuceneField {
 
     public String stringValue();
 
+    public byte[] utf8Value();
+
     public String utf8ToStringValue();
 
 }

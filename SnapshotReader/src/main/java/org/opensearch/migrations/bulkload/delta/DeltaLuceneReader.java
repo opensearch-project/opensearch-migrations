@@ -130,8 +130,7 @@ public class DeltaLuceneReader {
             .log();
 
         // Docs to remove are additions between new and old
-        // TODO: Consider updating offset to a int to start at 0 instead of Integer.MIN_VALUE
-        var removes = getAdditionsBetweenSnapshot(currentSegmentToLeafReader, previousSegmentToLeafReader, Integer.MIN_VALUE);
+        var removes = getAdditionsBetweenSnapshot(currentSegmentToLeafReader, previousSegmentToLeafReader, 0);
         var additions = getAdditionsBetweenSnapshot(previousSegmentToLeafReader, currentSegmentToLeafReader, 0);
 
         // Calculate and record metrics

@@ -96,9 +96,9 @@ public class TargetWriteEndToEndTest {
         var indexName = "routed_test";
 
         var docs = List.of(
-            new LuceneDocumentChange(0, "r1", null, "{\"score\": 10}", "shard_a", DocumentChangeType.INDEX),
-            new LuceneDocumentChange(1, "r2", null, "{\"score\": 20}", "shard_a", DocumentChangeType.INDEX),
-            new LuceneDocumentChange(2, "r3", null, "{\"score\": 30}", "shard_b", DocumentChangeType.INDEX)
+            new LuceneDocumentChange(0, "r1", null, "{\"score\": 10}".getBytes(java.nio.charset.StandardCharsets.UTF_8), "shard_a", DocumentChangeType.INDEX),
+            new LuceneDocumentChange(1, "r2", null, "{\"score\": 20}".getBytes(java.nio.charset.StandardCharsets.UTF_8), "shard_a", DocumentChangeType.INDEX),
+            new LuceneDocumentChange(2, "r3", null, "{\"score\": 30}".getBytes(java.nio.charset.StandardCharsets.UTF_8), "shard_b", DocumentChangeType.INDEX)
         );
 
         createIndex(targetCluster, indexName, 1);
@@ -126,12 +126,12 @@ public class TargetWriteEndToEndTest {
 
         // Index 3 docs, then delete one
         var additions = List.<LuceneDocumentChange>of(
-            new LuceneDocumentChange(0, "keep1", null, "{\"val\": 1}", null, DocumentChangeType.INDEX),
-            new LuceneDocumentChange(1, "keep2", null, "{\"val\": 2}", null, DocumentChangeType.INDEX),
-            new LuceneDocumentChange(2, "to_delete", null, "{\"val\": 3}", null, DocumentChangeType.INDEX)
+            new LuceneDocumentChange(0, "keep1", null, "{\"val\": 1}".getBytes(java.nio.charset.StandardCharsets.UTF_8), null, DocumentChangeType.INDEX),
+            new LuceneDocumentChange(1, "keep2", null, "{\"val\": 2}".getBytes(java.nio.charset.StandardCharsets.UTF_8), null, DocumentChangeType.INDEX),
+            new LuceneDocumentChange(2, "to_delete", null, "{\"val\": 3}".getBytes(java.nio.charset.StandardCharsets.UTF_8), null, DocumentChangeType.INDEX)
         );
         var deletions = List.<LuceneDocumentChange>of(
-            new LuceneDocumentChange(3, "to_delete", null, "{\"val\": 3}", null, DocumentChangeType.DELETE)
+            new LuceneDocumentChange(3, "to_delete", null, "{\"val\": 3}".getBytes(java.nio.charset.StandardCharsets.UTF_8), null, DocumentChangeType.DELETE)
         );
 
         createIndex(targetCluster, indexName, 1);
@@ -149,7 +149,7 @@ public class TargetWriteEndToEndTest {
         var nodes = MAPPER.readValue(Files.readString(path), new TypeReference<List<GoldenDoc>>() {});
         return nodes.stream()
             .map(g -> new LuceneDocumentChange(
-                0, g.id, g.type, g.source, g.routing,
+                0, g.id, g.type, g.source.getBytes(java.nio.charset.StandardCharsets.UTF_8), g.routing,
                 DocumentChangeType.valueOf(g.operation)
             ))
             .toList();

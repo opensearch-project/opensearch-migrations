@@ -21,7 +21,7 @@ public class LuceneDocumentChange {
     public final String type;
 
     // The Elasticsearch/OpenSearch _source of the document
-    public final String source;
+    public final byte[] source;
 
     // The Elasticsearch/OpenSearch custom shard routing of the document
     public final String routing;

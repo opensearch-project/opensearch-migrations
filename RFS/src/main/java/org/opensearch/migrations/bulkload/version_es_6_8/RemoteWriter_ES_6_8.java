@@ -55,7 +55,8 @@ public class RemoteWriter_ES_6_8 implements RemoteCluster, ClusterWriter {
 
     @Override
     public GlobalMetadataCreator getGlobalMetadataCreator() {
-        return new GlobalMetadataCreator_OS_2_11( // TODO
+        // ES 6.8 target uses the same REST APIs as OS 2.11 for template and index creation
+        return new GlobalMetadataCreator_OS_2_11(
             getClient(),
             getDataFilterArgs().indexTemplateAllowlist,
             getDataFilterArgs().componentTemplateAllowlist,
@@ -64,8 +65,9 @@ public class RemoteWriter_ES_6_8 implements RemoteCluster, ClusterWriter {
 
     @Override
     public IndexCreator getIndexCreator() {
+        // ES 6.8 target uses the same REST APIs as OS 2.11 for index creation
         return new IndexCreator_OS_2_11(getClient());
-    } // TODO
+    }
 
     @Override
     public Version getVersion() {
