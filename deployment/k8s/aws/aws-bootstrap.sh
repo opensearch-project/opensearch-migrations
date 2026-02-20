@@ -120,7 +120,10 @@ while [[ $# -gt 0 ]]; do
       echo "  --ignore-checks                           Skip subnet connectivity and VPC endpoint pre-flight checks."
       echo "  --push-all-images-to-private-ecr          Mirror all required public images and helm charts to the"
       echo "                                            private ECR registry. Enables deployment on isolated subnets"
-      echo "                                            without internet access. Run from a machine with internet."
+      echo "                                            without internet access. For public networks, this removes"
+      echo "                                            additional dependencies and reduces the risk of a failure due"
+      echo "                                            to images becoming unavailable."
+      echo "                                            Run from a machine with internet."
       echo ""
       echo "EKS access options:"
       echo "  --eks-access-principal-arn <arn>          Grant an IAM principal (role/user) cluster-admin access"
@@ -321,12 +324,12 @@ if [[ "$deploy_import_vpc" == "true" && -n "$subnet_ids" && "$ignore_checks" != 
   done
   if [[ "$has_internet" == "false" ]]; then
     echo "  Subnets are isolated (no NAT/IGW routes)."
-    if [[ "$build_images" != "true" ]]; then
+    if [[ "$build_images" != "true" && "$push_images_to_ecr" != "true" ]]; then
       echo "" >&2
-      echo "Error: --build-images is required when using isolated subnets (no NAT/IGW)." >&2
+      echo "Error: --build-images or --push-all-images-to-private-ecr is required when using isolated subnets (no NAT/IGW)." >&2
       echo "  public.ecr.aws has no VPC endpoint — public images cannot be pulled." >&2
-      echo "  Use --build-images to build and push to the private ECR registry," >&2
-      echo "  which is reachable via ECR VPC endpoints." >&2
+      echo "  Use --push-all-images-to-private-ecr to mirror public images to private ECR," >&2
+      echo "  or --build-images to build from source and push to private ECR." >&2
       echo "  Or use --ignore-checks to skip this check." >&2
       exit 1
     fi
@@ -338,7 +341,7 @@ fi
 
 # --- expand --create-vpc-endpoints value ---
 if [[ "$create_vpc_endpoints" == "all" ]]; then
-  create_vpc_endpoints="s3,ecr,ecrDocker,cloudwatchLogs,efs"
+  create_vpc_endpoints="s3,ecr,ecrDocker,cloudwatchLogs,efs,sts,eksAuth"
 fi
 
 # --- resolve version once ---
@@ -573,6 +576,8 @@ if [[ "$deploy_cfn" == "true" ]]; then
           ecrDocker)       cfn_params+=("ParameterKey=CreateECRDockerEndpoint,ParameterValue=true") ;;
           cloudwatchLogs)  cfn_params+=("ParameterKey=CreateCloudWatchLogsEndpoint,ParameterValue=true") ;;
           efs)             cfn_params+=("ParameterKey=CreateEFSEndpoint,ParameterValue=true") ;;
+          sts)             cfn_params+=("ParameterKey=CreateSTSEndpoint,ParameterValue=true") ;;
+          eksAuth)         cfn_params+=("ParameterKey=CreateEKSAuthEndpoint,ParameterValue=true") ;;
           *) echo "Warning: Unknown VPC endpoint type: $ep (valid: s3,ecr,ecrDocker,cloudwatchLogs,efs)" >&2 ;;
         esac
       done
@@ -755,12 +760,12 @@ if [[ "$ignore_checks" != "true" && -n "${VPC_ID:-}" ]]; then
 
       # Isolated subnets REQUIRE --build-images because public.ecr.aws has no VPC endpoint.
       # Images must be pushed to the private ECR registry and pulled via VPC endpoints.
-      if [[ "$build_images" != "true" ]]; then
+      if [[ "$build_images" != "true" && "$push_images_to_ecr" != "true" ]]; then
         echo "" >&2
-        echo "Error: --build-images is required when using isolated subnets (no NAT/IGW)." >&2
+        echo "Error: --build-images or --push-all-images-to-private-ecr is required when using isolated subnets (no NAT/IGW)." >&2
         echo "  public.ecr.aws has no VPC endpoint — public images cannot be pulled." >&2
-        echo "  Use --build-images to build and push to the private ECR registry," >&2
-        echo "  which is reachable via ECR VPC endpoints." >&2
+        echo "  Use --push-all-images-to-private-ecr to mirror public images to private ECR," >&2
+        echo "  or --build-images to build from source and push to private ECR." >&2
         echo "  Or use --ignore-checks to skip this check." >&2
         exit 1
       fi
@@ -855,6 +860,23 @@ if [[ "$push_images_to_ecr" == "true" ]]; then
     extra_helm_values="$ecr_values_file"
   fi
   echo "Private ECR values written to $ecr_values_file"
+
+  # Mirror MA images to the private ECR repo with expected tags
+  echo "Mirroring MA images to private ECR..."
+  export PATH="${HOME}/bin:${PATH}"
+  aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
+    crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
+  for img in traffic-capture-proxy traffic-replayer reindex-from-snapshot console; do
+    src="public.ecr.aws/opensearchproject/opensearch-migrations-${img}:${RELEASE_VERSION}"
+    tag="migrations_${img//-/_}_latest"
+    dst="${MIGRATIONS_ECR_REGISTRY}:${tag}"
+    echo "  $img → $dst"
+    crane copy "$src" "$dst" 2>&1 | tail -1 || echo "  ❌ FAILED: $img" >&2
+  done
+  # installer uses migration_console image
+  crane copy "${MIGRATIONS_ECR_REGISTRY}:migrations_console_latest" \
+    "${MIGRATIONS_ECR_REGISTRY}:migrations_migration_console_latest" 2>&1 | tail -1 || true
+
   # Force private images since we're mirroring everything to ECR
   use_public_images=false
 fi

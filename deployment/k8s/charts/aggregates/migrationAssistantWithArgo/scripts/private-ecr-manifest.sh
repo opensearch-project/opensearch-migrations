@@ -64,6 +64,7 @@ docker.io/bats/bats:v1.4.1
 # --- etcd-operator ---
 ghcr.io/aenix-io/etcd-operator:v0.4.2
 gcr.io/kubebuilder/kube-rbac-proxy:v0.16.0
+quay.io/coreos/etcd:v3.5.12
 
 # --- otel collector ---
 public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3

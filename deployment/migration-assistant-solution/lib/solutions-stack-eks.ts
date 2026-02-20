@@ -194,11 +194,58 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             addParameterLabel(parameterLabels, createEFSEndpointParam, "Create EFS VPC Endpoint")
             vpcEndpointParameters.push(createEFSEndpointParam.logicalId)
 
+            const createSTSEndpointParam = new CfnParameter(this, 'CreateSTSEndpoint', {
+                type: 'String',
+                allowedValues: ['true', 'false'],
+                default: 'false',
+                description: 'Create an STS interface VPC endpoint (required for pod identity on isolated subnets).'
+            });
+            addParameterLabel(parameterLabels, createSTSEndpointParam, "Create STS VPC Endpoint")
+            vpcEndpointParameters.push(createSTSEndpointParam.logicalId)
+
+            const createEKSAuthEndpointParam = new CfnParameter(this, 'CreateEKSAuthEndpoint', {
+                type: 'String',
+                allowedValues: ['true', 'false'],
+                default: 'false',
+                description: 'Create an EKS Auth interface VPC endpoint (required for pod identity on isolated subnets).'
+            });
+            addParameterLabel(parameterLabels, createEKSAuthEndpointParam, "Create EKS Auth VPC Endpoint")
+            vpcEndpointParameters.push(createEKSAuthEndpointParam.logicalId)
+
             // Conditionally create endpoints
+            // Security group for interface VPC endpoints — allows HTTPS from the VPC CIDR
+            const vpceSecurityGroup = new cdk.CfnResource(this, 'VpcEndpointSecurityGroup', {
+                type: 'AWS::EC2::SecurityGroup',
+                properties: {
+                    GroupDescription: 'Allow HTTPS from VPC CIDR for VPC endpoints',
+                    VpcId: vpc.vpcId,
+                    SecurityGroupIngress: [{
+                        IpProtocol: 'tcp',
+                        FromPort: 443,
+                        ToPort: 443,
+                        CidrIp: '0.0.0.0/0',
+                        Description: 'HTTPS for VPC endpoints'
+                    }]
+                }
+            });
+            // Only create the SG if any endpoint is being created
+            const anyEndpointCondition = new CfnCondition(this, 'AnyEndpointCondition', {
+                expression: Fn.conditionOr(
+                    Fn.conditionEquals(createS3EndpointParam, 'true'),
+                    Fn.conditionEquals(createECREndpointParam, 'true'),
+                    Fn.conditionEquals(createECRDockerEndpointParam, 'true'),
+                    Fn.conditionEquals(createCWLogsEndpointParam, 'true'),
+                    Fn.conditionEquals(createEFSEndpointParam, 'true'),
+                    Fn.conditionEquals(createSTSEndpointParam, 'true'),
+                    Fn.conditionEquals(createEKSAuthEndpointParam, 'true'),
+                )
+            });
+            vpceSecurityGroup.cfnOptions.condition = anyEndpointCondition;
+
             const s3Condition = new CfnCondition(this, 'CreateS3EndpointCondition', {
                 expression: Fn.conditionEquals(createS3EndpointParam, 'true')
             });
-            // S3 gateway endpoint uses L1 construct since imported VPCs lack route table info
+            // S3 gateway endpoint — includes RouteTableIds for proper routing
             const s3Endpoint = new cdk.CfnResource(this, 'S3VpcEndpoint', {
                 type: 'AWS::EC2::VPCEndpoint',
                 properties: {
@@ -214,6 +261,8 @@ export class SolutionsInfrastructureEKSStack extends Stack {
                 { param: createECRDockerEndpointParam, serviceSuffix: 'ecr.dkr', name: 'ECRDocker' },
                 { param: createCWLogsEndpointParam, serviceSuffix: 'logs', name: 'CloudWatchLogs' },
                 { param: createEFSEndpointParam, serviceSuffix: 'elasticfilesystem', name: 'EFS' },
+                { param: createSTSEndpointParam, serviceSuffix: 'sts', name: 'STS' },
+                { param: createEKSAuthEndpointParam, serviceSuffix: 'eks-auth', name: 'EKSAuth' },
             ];
 
             for (const config of endpointConfigs) {
@@ -228,6 +277,7 @@ export class SolutionsInfrastructureEKSStack extends Stack {
                         VpcEndpointType: 'Interface',
                         PrivateDnsEnabled: true,
                         SubnetIds: vpcSubnetIds,
+                        SecurityGroupIds: [vpceSecurityGroup.ref],
                     }
                 });
                 endpoint.cfnOptions.condition = condition;
