@@ -104,6 +104,12 @@ def buildKitProjects = [
                 serviceName: "elasticsearchWithSearchGuard",
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard",
                 imageName:  "elasticsearch_searchguard"
+        ],
+        [
+                serviceName: "snapshotFuse",
+                contextDir: "fuse-lucene",
+                imageName:  "snapshot_fuse",
+                imageTag:   "latest"
         ]
 ]
 

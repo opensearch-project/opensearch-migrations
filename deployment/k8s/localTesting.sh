@@ -99,7 +99,10 @@ if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
     --set "images.trafficReplayer.pullPolicy=Always" \
     --set "images.reindexFromSnapshot.repository=${LOCAL_REGISTRY}/migrations/reindex_from_snapshot" \
     --set "images.reindexFromSnapshot.tag=latest" \
-    --set "images.reindexFromSnapshot.pullPolicy=Always"
+    --set "images.reindexFromSnapshot.pullPolicy=Always" \
+    --set "images.snapshotFuse.repository=${LOCAL_REGISTRY}/migrations/snapshot_fuse" \
+    --set "images.snapshotFuse.tag=latest" \
+    --set "images.snapshotFuse.pullPolicy=Always"
 else
   echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
   helm install --create-namespace -n ma tc charts/aggregates/testClusters \
