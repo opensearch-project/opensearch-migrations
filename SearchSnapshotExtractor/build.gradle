@@ -95,7 +95,7 @@ dependencies {
     implementation libs.jackson.databind
     implementation libs.jackson.dataformat.smile
     implementation libs.zstd.jni
-    implementation libs.reactor.netty.core
+    implementation libs.reactor.core
 
     testImplementation libs.mockito.core
     testImplementation libs.mockito.junit.jupiter

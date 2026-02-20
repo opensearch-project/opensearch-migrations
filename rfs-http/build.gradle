@@ -16,6 +16,10 @@ dependencies {
     implementation libs.reactor.netty.http
     implementation libs.aws.auth
 
-    implementation libs.jcommander
+    compileOnly libs.jcommander
     implementation libs.slf4j.api
+
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testRuntimeOnly libs.junit.jupiter.engine
 }
