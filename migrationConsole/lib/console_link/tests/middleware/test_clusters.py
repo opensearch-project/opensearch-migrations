@@ -80,3 +80,17 @@ def test_call_api_with_error_prints_cleanly():
     result = clusters_.call_api(cluster, "/test_api")
     cluster.call_api.assert_called_once()
     assert result.error_message == f"Error: Unable to perform cluster command with message: {error_message}"
+
+
+def test_call_api_timeout_returns_friendly_message():
+    import requests.exceptions
+    cluster = mock.Mock(spec=Cluster)
+    cluster.call_api.side_effect = requests.exceptions.ConnectTimeout(
+        "HTTPSConnectionPool(host='example.com', port=443): Connect timed out. (connect timeout=15)")
+
+    result = clusters_.call_api(cluster, "/test_api", timeout=15)
+    assert result.http_response is None
+    assert "timed out" in result.error_message
+    assert "15s" in result.error_message
+    assert "--timeout" in result.error_message
+    assert "HTTPSConnectionPool" not in result.error_message

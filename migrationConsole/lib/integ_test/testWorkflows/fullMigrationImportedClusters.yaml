@@ -153,8 +153,8 @@ spec:
             
             # Transform target config to match schema
             TARGET_TRANSFORMED=$(echo "$TARGET_CONFIG" | jq '
-              # Transform version format: OS_1.3 -> OS 1.3
-              .version = (.version | gsub("_"; " "))
+              # Target cluster schema does not accept a version field
+              del(.version)
               # Rename allow_insecure to allowInsecure
               | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
               # Move sigv4 under authConfig

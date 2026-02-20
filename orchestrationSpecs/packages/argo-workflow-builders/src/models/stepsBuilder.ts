@@ -47,7 +47,7 @@ class StepGroupBuilder<
     TasksScope,
     "steps",
     TaskRebinder<ParentWorkflowScope>
-> {
+    > {
     protected readonly label = "steps";
 
     constructor(
@@ -60,9 +60,35 @@ class StepGroupBuilder<
                 new StepGroupBuilder<ParentWorkflowScope, NS>(ctx, scope, t);
         super(parentWorkflowScope, tasksScope, tasks, templateRebind);
     }
-}
 
-type BuilderLike = { getTasks(): { scope: any; taskList: NamedTask[] } };
+    public addStep<
+        Name extends string,
+        TemplateSource,
+        K extends KeyFor<ParentWorkflowScope, TemplateSource>,
+        LoopT extends NonSerializedPlainObject = never
+    >(
+        name: UniqueNameConstraintAtDeclaration<Name, TasksScope>,
+        source: UniqueNameConstraintOutsideDeclaration<Name, TasksScope, TemplateSource>,
+        key: UniqueNameConstraintOutsideDeclaration<Name, TasksScope, K>,
+        ...args: ParamsTuple<
+            InputsFrom<ParentWorkflowScope, TemplateSource, K>,
+            Name,
+            TasksScope,
+            "steps",
+            LoopT,
+            TaskOpts<TasksScope, "steps", LoopT>>
+    ): StepGroupBuilder<
+        ParentWorkflowScope,
+        ExtendScope<
+            TasksScope,
+            { [P in Name]: TasksWithOutputs<Name, OutputsFrom<ParentWorkflowScope, TemplateSource, K>> }
+        >
+    > {
+        return this.addTask<Name, TemplateSource, K, LoopT, TaskOpts<TasksScope, "steps", LoopT>>(
+            name, source, key, ...args
+        );
+    }
+}
 
 // Define the expression context type for StepsBuilder
 type StepsExpressionContext<
@@ -116,32 +142,28 @@ export class StepsBuilder<
     }
 
     /**
-     * Accept **any** builder-like result that has getTasks().
+     * Adds one parallel step group (one inner `steps` array in Argo).
+     * The callback must return StepGroupBuilder to keep strong typing
+     * for chained step additions and step-output references.
      */
-    public addStepGroup<R>(
-        builderFn: (groupBuilder: StepGroupBuilder<ParentWorkflowScope, StepsScope>) => R
-    ): R extends BuilderLike
-        ? StepsBuilder<ParentWorkflowScope, InputParamsScope, ReturnType<R["getTasks"]>["scope"], OutputParamsScope>
-        : R
-    {
+    public addStepGroup<NewStepsScope extends TasksOutputsScope>(
+        builderFn: (
+            groupBuilder: StepGroupBuilder<ParentWorkflowScope, StepsScope>
+        ) => StepGroupBuilder<ParentWorkflowScope, NewStepsScope>
+    ): StepsBuilder<ParentWorkflowScope, InputParamsScope, NewStepsScope, OutputParamsScope> {
         const newGroup = builderFn(
             new StepGroupBuilder(this.parentWorkflowScope, this.bodyScope, [])
+        );
+        const results = newGroup.getTasks();
+        return new StepsBuilder(
+            this.parentWorkflowScope,
+            this.inputsScope,
+            results.scope,
+            [...this.stepGroups, {steps: results.taskList}],
+            this.outputsScope,
+            this.retryParameters,
+            this.synchronization
         ) as any;
-
-        if (newGroup && typeof newGroup.getTasks === "function") {
-            const results = newGroup.getTasks();
-            return new StepsBuilder(
-                this.parentWorkflowScope,
-                this.inputsScope,
-                results.scope,
-                [...this.stepGroups, {steps: results.taskList}],
-                this.outputsScope,
-                this.retryParameters,
-                this.synchronization
-            ) as any;
-        } else {
-            return newGroup; // Propagate the error object to the callsite
-        }
     }
 
     // Convenience method for single step
@@ -174,7 +196,7 @@ export class StepsBuilder<
             return gb.addTask<Name, TemplateSource, K, LoopT, TaskOpts<StepsScope, "steps", LoopT>>(
                 name, source, key, ...args
             );
-        }) as any;
+        });
     }
 
     protected getBody() {

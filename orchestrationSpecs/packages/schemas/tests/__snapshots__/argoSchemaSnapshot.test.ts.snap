@@ -21,10 +21,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "type": "boolean",
                 "default": false
               },
-              "version": {
-                "type": "string",
-                "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
-              },
               "authConfig": {
                 "anyOf": [
                   {
@@ -94,6 +90,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     ]
                   }
                 ]
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
               },
               "snapshotRepos": {
                 "type": "object",
@@ -167,10 +167,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               "allowInsecure": {
                 "type": "boolean",
                 "default": false
-              },
-              "version": {
-                "type": "string",
-                "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
               },
               "authConfig": {
                 "anyOf": [
@@ -249,7 +245,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             },
             "required": [
               "endpoint",
-              "version",
               "label"
             ]
           },
@@ -271,6 +266,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "maxSnapshotRateMbPerNode": {
                       "type": "number",
                       "default": 0
+                    },
+                    "jvmArgs": {
+                      "type": "string",
+                      "default": ""
                     },
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
@@ -327,6 +326,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "clusterAwarenessAttributes": {
                             "type": "number",
                             "default": 1
+                          },
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
                           },
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
@@ -396,6 +399,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type": "number",
                             "default": 1
                           },
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
+                          },
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
                             "default": ""
@@ -415,7 +422,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "initialLeaseDuration": {
                             "type": "string",
-                            "default": "PT10M"
+                            "default": "PT1H"
                           },
                           "maxConnections": {
                             "type": "number",
@@ -428,6 +435,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "otelCollectorEndpoint": {
                             "type": "string",
                             "default": "http://otel-collector:4317"
+                          },
+                          "useTargetClusterForWorkCoordination": {
+                            "type": "boolean",
+                            "default": true
                           },
                           "resources": {
                             "type": "object",
@@ -600,6 +611,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "type": "string",
                 "default": ""
               },
+              "jvmArgs": {
+                "type": "string",
+                "default": ""
+              },
               "loggingConfigurationOverrideConfigMap": {
                 "type": "string",
                 "default": ""
@@ -712,10 +727,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "type": "boolean",
             "default": false
           },
-          "version": {
-            "type": "string",
-            "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
-          },
           "authConfig": {
             "anyOf": [
               {
@@ -785,6 +796,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 ]
               }
             ]
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
           },
           "snapshotRepos": {
             "type": "object",
@@ -858,10 +873,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "type": "boolean",
             "default": false
           },
-          "version": {
-            "type": "string",
-            "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
-          },
           "authConfig": {
             "anyOf": [
               {
@@ -934,8 +945,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           }
         },
         "required": [
-          "endpoint",
-          "version"
+          "endpoint"
         ]
       }
     },
@@ -977,6 +987,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "maxSnapshotRateMbPerNode": {
                       "type": "number",
                       "default": 0
+                    },
+                    "jvmArgs": {
+                      "type": "string",
+                      "default": ""
                     },
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
@@ -1064,6 +1078,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "number",
                             "default": 1
                           },
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
+                          },
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
                             "default": ""
@@ -1140,6 +1158,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "number",
                             "default": 1
                           },
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
+                          },
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
                             "default": ""
@@ -1159,7 +1181,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           },
                           "initialLeaseDuration": {
                             "type": "string",
-                            "default": "PT10M"
+                            "default": "PT1H"
                           },
                           "maxConnections": {
                             "type": "number",
@@ -1176,6 +1198,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "skipApproval": {
                             "type": "boolean",
                             "default": false
+                          },
+                          "useTargetClusterForWorkCoordination": {
+                            "type": "boolean",
+                            "default": true
                           },
                           "resources": {
                             "type": "object",
@@ -1264,6 +1290,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "default": 1
               },
               "authHeaderOverride": {
+                "type": "string",
+                "default": ""
+              },
+              "jvmArgs": {
                 "type": "string",
                 "default": ""
               },
