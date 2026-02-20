@@ -378,8 +378,8 @@ public class SourceTestBase {
         String transformationConfig,
         DocumentExceptionAllowlist allowlist
     ) throws RfsMigrateDocuments.NoWorkLeftException {
-        var effectiveCoordinatorAddress = coordinatorAddress != null ? coordinatorAddress : targetAddress;
-        var effectiveCoordinatorVersion = coordinatorVersion != null ? coordinatorVersion : targetVersion;
+        var resolvedCoordinatorAddress = coordinatorAddress != null ? coordinatorAddress : targetAddress;
+        var resolvedCoordinatorVersion = coordinatorVersion != null ? coordinatorVersion : targetVersion;
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
         try (var processManager = new LeaseExpireTrigger(workItemId -> {
@@ -423,9 +423,9 @@ public class SourceTestBase {
                     ));
 
             AtomicReference<WorkItemCursor> progressCursor = new AtomicReference<>();
-            var coordinatorFactory = new WorkCoordinatorFactory(effectiveCoordinatorVersion);
+            var coordinatorFactory = new WorkCoordinatorFactory(resolvedCoordinatorVersion);
             var coordinatorConnectionContext = ConnectionContextTestParams.builder()
-                    .host(effectiveCoordinatorAddress)
+                    .host(resolvedCoordinatorAddress)
                     .build()
                     .toConnectionContext();
             var targetConnectionContext = ConnectionContextTestParams.builder()
