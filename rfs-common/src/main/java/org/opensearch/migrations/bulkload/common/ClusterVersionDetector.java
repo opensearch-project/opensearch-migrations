@@ -43,7 +43,7 @@ public class ClusterVersionDetector {
         var versionFromRootApi = client.getAsync("", null)
             .flatMap(resp -> {
                 if (resp.statusCode == 200) {
-                    return versionFromResponse(resp);
+                    return versionFromResponse(resp, client);
                 }
                 if (resp.statusCode == 404) {
                     return Mono.just(AMAZON_SERVERLESS_VERSION);
@@ -87,7 +87,7 @@ public class ClusterVersionDetector {
             .block();
     }
 
-    private static Mono<Version> versionFromResponse(HttpResponse resp) {
+    private static Mono<Version> versionFromResponse(HttpResponse resp, RestClient client) {
         try {
             var body = objectMapper.readTree(resp.body);
             var versionNode = body.get("version");
@@ -101,7 +101,8 @@ public class ClusterVersionDetector {
 
             var distroNode = versionNode.get("distribution");
             if (distroNode != null && distroNode.asText().equalsIgnoreCase("opensearch")) {
-                versionBuilder.flavor(Flavor.OPENSEARCH);
+                versionBuilder.flavor(client.getConnectionContext().isAwsSpecificAuthentication()
+                    ? Flavor.AMAZON_MANAGED_OPENSEARCH : Flavor.OPENSEARCH);
             } else {
                 versionBuilder.flavor(Flavor.ELASTICSEARCH);
             }
