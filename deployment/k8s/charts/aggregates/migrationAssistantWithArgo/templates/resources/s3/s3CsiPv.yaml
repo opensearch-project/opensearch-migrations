@@ -24,4 +24,8 @@ spec:
     volumeHandle: {{ .Release.Namespace }}-s3-snapshot
     volumeAttributes:
       bucketName: {{ $bucketName }}
+      {{- if .Values.defaultBucketConfiguration.useLocalStack }}
+      authenticationSource: driver
+      {{- else }}
       authenticationSource: pod
+      {{- end }}
