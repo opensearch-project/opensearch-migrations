@@ -178,8 +178,6 @@ public class ProcessLifecycleTest extends SourceTestBase {
             return !directoryStream.iterator().hasNext();
         }
     }
-        }
-    }
 
     @SneakyThrows
     private static int runProcessAgainstToxicTarget(
