@@ -196,16 +196,15 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                     outageInjectedAt.set(System.nanoTime());
                     log.atInfo().setMessage("Coordinator disabled at ~{}s")
                         .addArgument(COORDINATOR_DISABLE_AFTER_SECONDS).log();
+                    if (reEnableCoordinator) {
+                        scheduler.schedule(() -> {
+                            coordinatorProxy.enable();
+                            coordinatorReEnabledAt.set(System.nanoTime());
+                            log.atInfo().setMessage("Coordinator re-enabled after {}s restart window")
+                                .addArgument(reEnableAfterSeconds).log();
+                        }, reEnableAfterSeconds, TimeUnit.SECONDS);
+                    }
                 }, COORDINATOR_DISABLE_AFTER_SECONDS, TimeUnit.SECONDS);
-
-                if (reEnableCoordinator) {
-                    scheduler.schedule(() -> {
-                        coordinatorProxy.enable();
-                        coordinatorReEnabledAt.set(System.nanoTime());
-                        log.atInfo().setMessage("Coordinator re-enabled after {}s restart window")
-                            .addArgument(reEnableAfterSeconds).log();
-                    }, COORDINATOR_DISABLE_AFTER_SECONDS + reEnableAfterSeconds, TimeUnit.SECONDS);
-                }
 
                 // Run RFS
                 var rfsStartedAt = System.nanoTime();
