@@ -86,10 +86,6 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     private static final int COORDINATOR_DISABLE_AFTER_SECONDS = 30;
     private static final int COORDINATOR_REENABLE_AFTER_SECONDS = 120;
 
-    // Polling config for checking coordinator working state after RFS completes
-    private static final Duration COORDINATOR_STATE_OBSERVATION_TIMEOUT = Duration.ofSeconds(5);
-    private static final Duration COORDINATOR_STATE_POLL_INTERVAL = Duration.ofMillis(200);
-
     @TempDir
     Path tempRootDir;
 
@@ -98,21 +94,17 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     void allDocsMigratedButCoordinatorUnavailableAtCompletion() {
         var result = runCoordinatorOutageScenario(false, 0);
 
-        // (1/4) ASSERT timeline: rfsStarted < outageInjected < rfsEnded
+        // (1/3) ASSERT timeline: rfsStarted < outageInjected < rfsEnded
         Assertions.assertTrue(result.outageInjected(), "Coordinator outage was not injected");
         Assertions.assertTrue(result.rfsStartedAt() < result.outageInjectedAt(),
             "RFS should have started before outage was injected");
         Assertions.assertTrue(result.outageInjectedAt() < result.rfsEndedAt(),
             "Outage should have been injected before RFS finished");
 
-        // (2/4) ASSERT that TARGET cluster has ALL docs from SOURCE cluster
+        // (2/3) ASSERT that TARGET cluster has ALL docs from SOURCE cluster
         Assertions.assertEquals(result.expectedDocs(), result.finalDocs(), "All docs should be on target");
 
-        // (3/4) ASSERT from COORDINATOR that at least one work item should remain incomplete
-        Assertions.assertTrue(result.coordinatorHasIncompleteWorkItems(),
-            "Expected coordinator working state to contain incomplete work items after outage");
-
-        // (4/4) ASSERT : RFS failed specifically due to coordinator retry exhaustion
+        // (3/3) ASSERT : RFS failed specifically due to coordinator retry exhaustion
         Assertions.assertInstanceOf(OpenSearchWorkCoordinator.RetriesExceededException.class,
             result.thrownException(),
             "Expected RetriesExceededException when coordinator becomes unavailable");
@@ -124,7 +116,7 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     void allDocsMigratedButCoordinatorLongRestartsAtCompletion() {
         var result = runCoordinatorOutageScenario(true, COORDINATOR_REENABLE_AFTER_SECONDS);
 
-        // (1/4) ASSERT timeline: rfsStarted < outageInjected < reEnabled < rfsEnded
+        // (1/3) ASSERT timeline: rfsStarted < outageInjected < reEnabled < rfsEnded
         Assertions.assertTrue(result.outageInjected(), "Coordinator outage was not injected");
         Assertions.assertTrue(result.coordinatorReEnabled(), "Coordinator was not re-enabled");
         Assertions.assertTrue(result.rfsStartedAt() < result.outageInjectedAt(),
@@ -134,16 +126,12 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
         Assertions.assertTrue(result.coordinatorReEnabledAt() < result.rfsEndedAt(),
             "Coordinator should have been re-enabled before RFS finished");
 
-        // (2/4) ASSERT that TARGET cluster has ALL docs from SOURCE cluster
+        // (2/3) ASSERT that TARGET cluster has ALL docs from SOURCE cluster
         Assertions.assertEquals(result.expectedDocs(), result.finalDocs(), "All docs should be on target");
 
-        // (3/4) ASSERT that RFS completed without exception
+        // (3/3) ASSERT that RFS completed without exception
         Assertions.assertNull(result.thrownException(),
             "Expected RFS to recover and complete cleanly after coordinator returns");
-
-        // (4/4) ASSERT that every entry in COORDINATOR State has a `completedAt` field
-        Assertions.assertFalse(result.coordinatorHasIncompleteWorkItems(),
-            "Expected coordinator working state to have no incomplete work items after recovery");
     }
 
     @SneakyThrows
@@ -238,8 +226,9 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                 assertClusterReachability(coordinatorProxy.getProxyUriAsString(), "coordinator", reEnableCoordinator);
 
                 var finalDocs = getDocCountFromCluster(osTargetContainer.getUrl(), INDEX_NAME, false);
-                var coordinatorHasIncompleteWorkItems = waitForCoordinatorIncompleteWorkItems(
-                    osCoordinatorContainer.getUrl(), !reEnableCoordinator);
+
+                // Verify coordinator work items reflect the outage scenario outcome
+                assertCoordinatorWorkItemState(osCoordinatorContainer.getUrl(), !reEnableCoordinator);
 
                 log.atInfo().setMessage("Test summary: exception={}, outageAt={}ns, rfsDuration={}ns, docs={}/{}")
                     .addArgument(() -> thrownException.get() != null ? thrownException.get().getClass().getSimpleName() : "none")
@@ -256,8 +245,7 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                     rfsStartedAt,
                     rfsEndedAt,
                     expectedDocs,
-                    finalDocs,
-                    coordinatorHasIncompleteWorkItems);
+                    finalDocs);
             } finally {
                 scheduler.shutdownNow();
             }
@@ -396,39 +384,33 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
         }
     }
 
+    /**
+     * Asserts coordinator work item completion state after RFS exits.
+     * If coordinator stayed down, expect incomplete work items; if re-enabled, expect all completed.
+     */
     @SneakyThrows
-    private static boolean waitForCoordinatorIncompleteWorkItems(String coordinatorHost, boolean expectedIncomplete) {
+    private static void assertCoordinatorWorkItemState(String coordinatorHost, boolean expectedIncomplete) {
         var client = new RestClient(ConnectionContextTestParams.builder()
             .host(coordinatorHost).build().toConnectionContext());
         var coordinatorIndexName = OpenSearchWorkCoordinator.getFinalIndexName(SESSION_NAME);
         var incompleteQuery = "{\"query\":{\"bool\":{\"must_not\":{\"exists\":{\"field\":\"completedAt\"}}}}}";
-        var deadlineNanos = System.nanoTime() + COORDINATOR_STATE_OBSERVATION_TIMEOUT.toNanos();
 
-        while (System.nanoTime() < deadlineNanos) {
-            var refreshResponse = client.get(coordinatorIndexName + "/_refresh", null);
-            if (refreshResponse.statusCode == 200) {
-                var countResponse = client.asyncRequest(
-                    io.netty.handler.codec.http.HttpMethod.GET,
-                    coordinatorIndexName + "/_count", incompleteQuery, null, null).block();
-                if (countResponse != null && countResponse.statusCode == 200) {
-                    var count = OBJECT_MAPPER.readTree(countResponse.body).path("count").asLong();
-                    var hasIncomplete = count > 0;
-                    if (hasIncomplete == expectedIncomplete) {
-                        return hasIncomplete;
-                    }
-                }
-            }
-            TimeUnit.MILLISECONDS.sleep(COORDINATOR_STATE_POLL_INTERVAL.toMillis());
-        }
-        Assertions.fail("Timed out waiting for coordinator working state to reach expected incomplete="
-            + expectedIncomplete + " within " + COORDINATOR_STATE_OBSERVATION_TIMEOUT);
-        return false; // unreachable
+        // ASSERT coordinator index is refreshable
+        Assertions.assertEquals(200, client.get(coordinatorIndexName + "/_refresh", null).statusCode,
+            "Failed to refresh coordinator index");
+        var countResponse = client.post(coordinatorIndexName + "/_count", incompleteQuery, null);
+        // ASSERT coordinator index is queryable
+        Assertions.assertEquals(200, countResponse.statusCode, "Failed to query coordinator index");
+
+        var incompleteCount = OBJECT_MAPPER.readTree(countResponse.body).path("count").asLong();
+        // ASSERT work item completion state matches expected outcome
+        Assertions.assertEquals(expectedIncomplete, incompleteCount > 0,
+            "Expected incomplete work items=" + expectedIncomplete + " but found " + incompleteCount + " incomplete");
     }
 
     private record ScenarioResult(Exception thrownException, long outageInjectedAt, long coordinatorReEnabledAt,
                                   long rfsStartedAt, long rfsEndedAt,
-                                  long expectedDocs, long finalDocs,
-                                  boolean coordinatorHasIncompleteWorkItems) {
+                                  long expectedDocs, long finalDocs) {
         boolean outageInjected() { return outageInjectedAt > 0; }
         boolean coordinatorReEnabled() { return coordinatorReEnabledAt > 0; }
     }
