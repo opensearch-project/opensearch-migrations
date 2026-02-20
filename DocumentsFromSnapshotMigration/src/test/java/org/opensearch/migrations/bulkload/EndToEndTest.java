@@ -20,7 +20,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.utils.FileSystemUtils;
@@ -189,7 +189,7 @@ public class EndToEndTest extends SourceTestBase {
                 }
             }
 
-            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(sourceVersion, true);
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(sourceVersion, true);
             var sourceRepo = new FileSystemRepo(snapshotDir, fileFinder);
 
             var runCounter = new AtomicInteger();

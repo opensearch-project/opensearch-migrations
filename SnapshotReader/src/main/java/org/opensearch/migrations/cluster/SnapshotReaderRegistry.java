@@ -20,7 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @UtilityClass
-public class ClusterProviderRegistry {
+public class SnapshotReaderRegistry {
 
     /** Ensure we are always getting fresh providers when searching for one */
     private List<VersionSpecificCluster> getProviders() {

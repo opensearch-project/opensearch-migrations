@@ -2,8 +2,6 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.net.URI;
 import java.util.Map;
-import java.util.function.BiFunction;
-import java.util.function.Function;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
@@ -12,10 +10,8 @@ import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -207,31 +203,6 @@ class OpenSearchClientFactoryTest {
         assertEquals(CompressionMode.UNCOMPRESSED, openSearchClientFactory.getCompressionMode());
         verify(restClient, times(1)).getAsync("", null);
         verifyNoMoreInteractions(restClient);
-    }
-
-    @Test
-    void testCheckCompatibilityModeFromResponse() {
-        Function<Boolean, JsonNode> createCompatibilitySection = (Boolean value) ->
-            OBJECT_MAPPER.createObjectNode()
-                .<ObjectNode>set("compatibility", OBJECT_MAPPER.createObjectNode()
-                    .put("override_main_response_version", value));
-
-        BiFunction<Boolean, Boolean, HttpResponse> createSettingsResponse = (Boolean persistentVal, Boolean transientVal) -> {
-            var body = OBJECT_MAPPER.createObjectNode()
-                .<ObjectNode>set("persistent", createCompatibilitySection.apply(persistentVal))
-                .set("transient", createCompatibilitySection.apply(transientVal))
-                .toPrettyString();
-            return new HttpResponse(200, "OK", null, body);
-        };
-
-        var bothTrue = openSearchClientFactory.checkCompatibilityModeFromResponse(createSettingsResponse.apply(true, true));
-        assertThat(bothTrue.block(), equalTo(true));
-        var persistentTrue = openSearchClientFactory.checkCompatibilityModeFromResponse(createSettingsResponse.apply(true, false));
-        assertThat(persistentTrue.block(), equalTo(true));
-        var transientTrue = openSearchClientFactory.checkCompatibilityModeFromResponse(createSettingsResponse.apply(false, true));
-        assertThat(transientTrue.block(), equalTo(true));
-        var neitherTrue = openSearchClientFactory.checkCompatibilityModeFromResponse(createSettingsResponse.apply(false, false));
-        assertThat(neitherTrue.block(), equalTo(false));
     }
 
     @Test

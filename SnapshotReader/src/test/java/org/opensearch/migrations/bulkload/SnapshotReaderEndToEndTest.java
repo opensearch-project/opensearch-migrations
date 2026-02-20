@@ -26,8 +26,8 @@ import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.worker.RegularDocumentReaderEngine;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import lombok.extern.slf4j.Slf4j;
@@ -111,9 +111,9 @@ public class SnapshotReaderEndToEndTest {
 
     private SnapshotOnDisk createReaderFromDir(Path dir, ContainerVersion sourceVersion) {
         Version version = sourceVersion.getVersion();
-        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
+        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
         var sourceRepo = new FileSystemRepo(dir, fileFinder);
-        var reader = ClusterProviderRegistry.getSnapshotReader(version, sourceRepo, true);
+        var reader = SnapshotReaderRegistry.getSnapshotReader(version, sourceRepo, true);
         return new SnapshotOnDisk(reader, sourceRepo, version);
     }
 
@@ -136,9 +136,9 @@ public class SnapshotReaderEndToEndTest {
         cluster.copySnapshotData(localDirectory.toString());
 
         Version version = cluster.getContainerVersion().getVersion();
-        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
+        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
         var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
-        var reader = ClusterProviderRegistry.getSnapshotReader(version, sourceRepo, true);
+        var reader = SnapshotReaderRegistry.getSnapshotReader(version, sourceRepo, true);
         return new SnapshotOnDisk(reader, sourceRepo, version);
     }
 

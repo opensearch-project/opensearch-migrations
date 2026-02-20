@@ -13,7 +13,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 
-public class ClusterProviderRegistryTest {
+public class SnapshotReaderRegistryTest {
 
     @Test
     void testGetRemoteWriter_overridden() {
