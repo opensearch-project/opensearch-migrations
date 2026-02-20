@@ -2,7 +2,13 @@ name: SonarQube Analysis
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.repository == 'opensearch-project/opensearch-migrations' && github.ref == 'refs/heads/main') }}
 
 env:
   java-version: '17'
@@ -27,10 +33,12 @@ jobs:
           SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - uses: ./.github/actions/setup-env
+      with:
+        gradle-cache-enabled: true
     - name: Cache SonarQube Scanner
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ~/.sonar/cache
         key: sonar-cache
@@ -89,7 +97,7 @@ jobs:
         fi
     - name: Upload SonarQube Artifacts
       if: always()
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: sonar-reports
         path: issues.json

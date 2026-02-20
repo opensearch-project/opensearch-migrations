@@ -1,4 +1,4 @@
-# OpenSearch Service Migration CDK
+# OpenSearch Service Migration CDK for ECS Deployments
 
 This directory contains the infrastructure-as-code CDK solution for deploying an OpenSearch Domain as well as the infrastructure for the Migration solution. Users have the ability to easily deploy their infrastructure using default values or provide [configuration options](./options.md) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users- rather, this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
 
@@ -22,7 +22,7 @@ Java is used by the opensearch-migrations repo and Gradle, its associated build 
 
 1- It is necessary to run `npm install` within this current directory to install required packages that this app and CDK need for operation.
 
-2- Creating Dockerfiles, this project needs to build the required Dockerfiles that the CDK will use in its services. These Dockerfiles can be built by running the below script which is located in the same directory as this README
+2- Creating Docker Images: This project needs to build the required Docker images that the CDK will use in its services. These images can be built by running the below script which is located in the same directory as this README
 ```shell
 ./buildDockerImages.sh
 ```
@@ -56,7 +56,8 @@ Further CDK documentation [here](https://docs.aws.amazon.com/cdk/v2/guide/cli.ht
 ## Deploying the CDK
 
 ### Which configuration options should I use?
-Update the file named `cdk.context.json` in this directory to select migration options for metadata, historical backfill or traffic capture and replay, see details [here](https://github.com/opensearch-project/opensearch-migrations/wiki/Configuration-Options).
+Update the file named `cdk.context.json` in this directory to select migration options for metadata, historical backfill or traffic capture and replay, see details 
+[here](./options.md).
 
 ### How is the CDK context used in this solution?
 This project uses CDK context parameters to configure deployments. These context values will dictate the composition of your stacks as well as which stacks get deployed.
@@ -92,9 +93,6 @@ To get a list of all the available stack ids that can be deployed/redeployed for
 cdk ls --c contextId=demo-deploy
 ```
 
-## How to use the deployed Migration tools?
-See the [wiki](https://github.com/opensearch-project/opensearch-migrations/wiki) for steps on how to use this tooling to perform different migrations.
-
 ## Accessing the Migration Console
 
 The Migration Console is a deployed ECS service container in this solution that should be accessed for managing/executing different phases of a migration
@@ -105,7 +103,7 @@ To open a shell on the Migration Console container execute the below command. If
 ./accessContainer.sh migration-console dev us-east-1
 ```
 To be able to execute this command the user will need to have their AWS credentials configured for their environment. It is also worth noting that the identity used should have permissions to `ecs:ExecuteCommand` on both the ECS cluster and the given container task, for which an Administrator or Deployment role may already have. An example IAM policy that could be added, which allows accessing any of the containers on the ECS cluster, can be seen below:
-```shell
+```
 {
     "Version": "2012-10-17",
     "Statement": [

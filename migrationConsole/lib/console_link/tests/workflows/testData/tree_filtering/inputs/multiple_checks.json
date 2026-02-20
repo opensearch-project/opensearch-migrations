@@ -1,0 +1,60 @@
+[
+  {
+    "id": "root",
+    "display_name": "workflow",
+    "phase": "Running",
+    "type": "Steps",
+    "boundary_id": null,
+    "children": [
+      {
+        "id": "bulk_load",
+        "display_name": "bulkLoadDocuments",
+        "phase": "Running",
+        "type": "Steps",
+        "boundary_id": "root",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "groupName",
+              "value": "bulk_load_group"
+            }
+          ]
+        },
+        "children": [
+          {
+            "id": "start_backfill",
+            "display_name": "startHistoricalBackfill",
+            "phase": "Succeeded",
+            "type": "Pod",
+            "boundary_id": "bulk_load",
+            "children": []
+          },
+          {
+            "id": "check_1",
+            "display_name": "checkBackfillStatus",
+            "phase": "Failed",
+            "type": "Pod",
+            "boundary_id": "bulk_load",
+            "children": []
+          },
+          {
+            "id": "check_2",
+            "display_name": "checkBackfillStatus",
+            "phase": "Failed",
+            "type": "Pod",
+            "boundary_id": "bulk_load",
+            "children": []
+          },
+          {
+            "id": "check_3",
+            "display_name": "checkBackfillStatus",
+            "phase": "Running",
+            "type": "Pod",
+            "boundary_id": "bulk_load",
+            "children": []
+          }
+        ]
+      }
+    ]
+  }
+]

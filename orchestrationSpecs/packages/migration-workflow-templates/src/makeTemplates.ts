@@ -1,8 +1,7 @@
-import {renderWorkflowTemplate} from "@opensearch-migrations/argo-workflow-builders";
+import {renderWorkflowTemplate, toSafeYamlOutput} from "@opensearch-migrations/argo-workflow-builders";
 import {AllWorkflowTemplates} from "./workflowTemplates/allWorkflowTemplates";
 import * as fs from "node:fs";
 import path from "node:path";
-import {stringify as toYaml} from 'yaml';
 
 function getNamespace(): string {
     // CLI argument takes precedence over environment variable
@@ -53,7 +52,7 @@ async function outputArgoWorkflowTemplate(workflowConfig: any, workflowName: str
     workflowConfig.metadata.namespace = targetNamespace;
 
     // const textFormattedResource = JSON.stringify(workflowConfig, null, 2);
-    const textFormattedResource = toYaml(workflowConfig, { lineWidth: 0});
+    const textFormattedResource = toSafeYamlOutput(workflowConfig);
     if (!outputDirectory) {
         console.log(textFormattedResource);
         return;

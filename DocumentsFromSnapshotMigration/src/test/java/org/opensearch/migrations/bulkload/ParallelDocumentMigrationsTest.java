@@ -147,7 +147,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
 
                 verifyWorkMetrics(testDocMigrationContext, numWorkers, numTotalRuns);
             } finally {
-                FileSystemUtils.deleteTree(tempDir);
+                FileSystemUtils.deleteDirectories(tempDir.toString());
             }
         } finally {
             executorService.shutdown();

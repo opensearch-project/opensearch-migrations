@@ -432,16 +432,13 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             return rval;
         }, () -> "Waiting for previous consumes to set the future")
         .map(f -> f.whenComplete((v, t) -> {
-            try {
-                if (channel == null) {
-                    log.atTrace().setMessage(
-                        "finalizeRequest().whenComplete has no channel present that needs to be to deactivated.").log();
-                } else {
-                    deactivateChannel();
-                }
-            } finally {
+            if (channel == null) {
+                log.atTrace().setMessage(
+                    "finalizeRequest().whenComplete has no channel present that needs to be to deactivated.").log();
                 getCurrentRequestSpan().close();
                 getParentContext().close();
+            } else {
+                deactivateChannel();
             }
         }), () -> "clearing pipeline");
         log.atDebug().setMessage("Chaining finalization work off of {} for {}.  Returning finalization future={}")

@@ -1,0 +1,68 @@
+# Development-specific values for local kubernetes environments
+
+conditionalPackageInstalls:
+  kyverno: true
+
+# Kyverno policy toggles (requires kyverno to be installed)
+kyvernoPolicies:
+  zeroResourceRequests: true
+  mountLocalAwsCreds: false
+  mountLocalAwsCredsPath: "~/.aws"
+
+# Override image pull policy for dev - always pull latest
+images:
+  captureProxy:
+    repository: localhost:5000/migrations/capture_proxy
+    pullPolicy: Always
+  trafficReplayer:
+    repository: localhost:5000/migrations/traffic_replayer
+    pullPolicy: Always
+  reindexFromSnapshot:
+    repository: localhost:5000/migrations/reindex_from_snapshot
+    pullPolicy: Always
+  migrationConsole:
+    repository: localhost:5000/migrations/migration_console
+    pullPolicy: Always
+  installer:
+    repository: localhost:5000/migrations/migration_console
+    pullPolicy: Always
+
+# Kyverno chart configuration
+charts:
+  kyverno:
+    values:
+      cleanupJobs:
+        admissionReports:
+          image:
+            registry: ""
+            repository: localhost:5000/migrations/migration_console
+            tag: latest
+        clusterAdmissionReports:
+          image:
+            registry: ""
+            repository: localhost:5000/migrations/migration_console
+            tag: latest
+      webhooksCleanup:
+        image:
+          registry: ""
+          repository: localhost:5000/migrations/migration_console
+          tag: latest
+  argo-workflows:
+    values:
+      controller:
+        replicas: 1
+        pdb:
+          enabled: false
+      server:
+        replicas: 1
+        pdb:
+          enabled: false
+
+
+  # Lightweight etcd-operator for local development
+  # (no additional values needed - installed via kubectl apply)
+
+# Lightweight etcd cluster for local development
+etcdCluster:
+  replicas: 1
+  storageCapacity: 1Gi

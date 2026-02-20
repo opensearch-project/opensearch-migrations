@@ -19,112 +19,171 @@ permissions:
 jobs:
   draft-a-release:
     name: Draft a release
-    if: github.repository == 'opensearch-project/opensearch-migrations'
+    if: ${{ github.event.act || github.repository == 'opensearch-project/opensearch-migrations' }}
     runs-on: ubuntu-22.04
+    services:
+      registry:
+        image: registry:2 # Ephemeral registry for intermediate (base) images. Final ones only go to opensearchstaging.
+        ports:
+          - 5000:5000
     outputs:
       dockerhub-password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
     steps:
-      - uses: actions/checkout@v5
+      - name: Alias docker-registry to 127.0.0.1
+        run: |
+          echo "127.0.0.1 docker-registry" | sudo tee -a /etc/hosts
+          getent hosts docker-registry
+          curl -sS http://docker-registry:5000/v2/ || true
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
       - id: get_data
         run: |
           echo "approvers=$(cat .github/CODEOWNERS | grep @ | tr -d '*\n ' | sed 's/@/,/g' | sed 's/,//1')" >> $GITHUB_OUTPUT
           echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
       - uses: trstringer/manual-approval@v1
+        if: ${{ !github.event.act }}
         with:
           secret: ${{ github.TOKEN }}
           approvers: ${{ steps.get_data.outputs.approvers }}
-          minimum-approvals: 2
+          minimum-approvals: 1
           issue-title: 'Release opensearch-migrations version ${{ steps.get_data.outputs.version }}'
-          issue-body: "This release requires approval from at least two reviewers. Please approve or deny the release of opensearch-migrations **TAG**: ${{ github.ref_name }}  **COMMIT**: ${{ github.sha }} **VERSION**: ${{ steps.get_data.outputs.version }}. The published TrafficCapture version will be 0.${{ steps.get_data.outputs.version }}."
+          issue-body: "This release requires approval from at least one reviewer. Please approve or deny the release of opensearch-migrations **TAG**: ${{ github.ref_name }}  **COMMIT**: ${{ github.sha }} **VERSION**: ${{ steps.get_data.outputs.version }}. The published TrafficCapture version will be 0.${{ steps.get_data.outputs.version }}."
           exclude-workflow-initiator-as-approver: true
-      - name: Download Repo Tar
-        # Preface Traffic Capture version with 0. to signal interface immaturity
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Buildx builder (BuildKit)
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          # Keep debug on while we troubleshoot this new registry setup
+          buildkitd-flags: --debug
+          # This has to match the -Pbuilder flag for buildImages/build.gradle
+          name: local-remote-builder
+          install: true
+          # ALLOW ACCESS TO HOST NETWORK (Required to see localhost:5000 for docker registry)
+          driver-opts: network=host
+          # CONFIGURE INSECURE REGISTRY (Required for HTTP for docker registry)
+          buildkitd-config-inline: |
+            [registry."docker-registry:5000"]
+              http = true
+              insecure = true
+      - name: Create source archive
         run: |
-          wget https://github.com/opensearch-project/opensearch-migrations/archive/refs/tags/${{ steps.get_data.outputs.version }}.tar.gz -O artifacts.tar.gz
-          gradle publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }} && tar -C build -cvf traffic-capture-artifacts.tar.gz repository
-      - name: Build Docker Images
+          git archive --format=tar.gz \
+            -o opensearch-migrations-source.tar.gz \
+            HEAD
+      - name: Create Kiro assistant archive
         run: |
-          ./deployment/cdk/opensearch-service-migration/buildDockerImages.sh -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }}
-      - name: Generate Solutions Artifact
+          ./gradlew :kiro-cli:packageKiro
+      - name: Build and Publish to Maven
+        if: ${{ !github.event.act }}
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
         run: |
-          ./deployment/migration-assistant-solution/package-artifacts.sh
-      - name: Generate SBOM for migration_console
-        uses: anchore/sbom-action@v0.20.9
-        with:
-          image: migrations/migration_console:latest
-          output-file: opensearch-migrations-console-sbom.spdx.json
-      - name: Generate SBOM for traffic_replayer
-        uses: anchore/sbom-action@v0.20.9
-        with:
-          image: migrations/traffic_replayer:latest
-          output-file: opensearch-migrations-traffic-replayer-sbom.spdx.json
-      - name: Generate SBOM for capture_proxy
-        uses: anchore/sbom-action@v0.20.9
-        with:
-          image: migrations/capture_proxy:latest
-          output-file: opensearch-migrations-traffic-capture-proxy-sbom.spdx.json
-      - name: Generate SBOM for reindex_from_snapshot
-        uses: anchore/sbom-action@v0.20.9
-        with:
-          image: migrations/reindex_from_snapshot:latest
-          output-file: opensearch-migrations-reindex-from-snapshot-sbom.spdx.json
-      - name: Generate SBOM for artifacts
-        uses: anchore/sbom-action@v0.20.9
-        with:
-          file: artifacts.tar.gz
-          output-file: artifacts-sbom.spdx.json
-      - name: Tag Docker image
-        run: |
-          docker tag migrations/migration_console:latest opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }}
-          docker tag migrations/migration_console:latest opensearchstaging/opensearch-migrations-console:latest
-          docker tag migrations/traffic_replayer:latest opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }}
-          docker tag migrations/traffic_replayer:latest opensearchstaging/opensearch-migrations-traffic-replayer:latest
-          docker tag migrations/capture_proxy:latest opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }}
-          docker tag migrations/capture_proxy:latest opensearchstaging/opensearch-migrations-traffic-capture-proxy:latest
-          docker tag migrations/reindex_from_snapshot:latest opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
-          docker tag migrations/reindex_from_snapshot:latest opensearchstaging/opensearch-migrations-reindex-from-snapshot:latest
+          ./gradlew publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }} && tar -C build -cvf opensearch-migrations-build.tar.gz repository
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        if: ${{ !github.event.act }}
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.MIGRATIONS_DOCKER_ROLE }}
           aws-region: us-east-1
       - name: Retrieve Values
+        if: ${{ !github.event.act }}
         id: retrieve-values
         run: |
           DOCKERHUB_PASSWORD=`aws secretsmanager get-secret-value --secret-id jenkins-staging-dockerhub-credential --query SecretString --output text`
           echo "::add-mask::$DOCKERHUB_PASSWORD"
           echo "dockerhub-password=$DOCKERHUB_PASSWORD" >> $GITHUB_OUTPUT
       - name: Login to DockerHub
+        if: ${{ !github.event.act }}
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.MIGRATIONS_DOCKER_USERNAME }}
           password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
-      - name: Push Docker image to Docker Hub
+      - name: Build and Push Docker Images
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
         run: |
-          docker push opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }}
-          docker push opensearchstaging/opensearch-migrations-console:latest
-          docker push opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }}
-          docker push opensearchstaging/opensearch-migrations-traffic-replayer:latest
-          docker push opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }}
-          docker push opensearchstaging/opensearch-migrations-traffic-capture-proxy:latest
-          docker push opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
-          docker push opensearchstaging/opensearch-migrations-reindex-from-snapshot:latest
+          # Preface Traffic Capture version with 0. to signal interface immaturity
+          ./gradlew :buildImages:buildImagesToRegistry \
+            -PintermediateRegistry=localhost:5000 \
+            -PregistryEndpoint=opensearchstaging \
+            -PimageVersion=${{ steps.get_data.outputs.version }} \
+            -PpublishStyle='separateRepos' \
+            -Dbuild.snapshot=false \
+            -Dbuild.version=0.${{ steps.get_data.outputs.version }} \
+            --no-build-cache \
+            --no-configuration-cache \
+            --no-daemon \
+            --no-continue \
+            --info
       - name: Logout to DockerHub
         if: always()
         run: docker logout
+      - name: Generate Solutions Artifact
+        run: |
+          ./deployment/migration-assistant-solution/package-artifacts.sh
+      - name: Pull images from DockerHub for SBOM scanning
+        if: ${{ !github.event.act }}
+        run: |
+          # Pull images that were just pushed to DockerHub
+          docker pull opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }}
+          docker pull opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }}
+          docker pull opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }}
+          docker pull opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
+          # Tag them with the expected names for SBOM scanning
+          docker tag opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }} migrations/migration_console:latest
+          docker tag opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }} migrations/traffic_replayer:latest
+          docker tag opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }} migrations/capture_proxy:latest
+          docker tag opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }} migrations/reindex_from_snapshot:latest
+      - name: Generate SBOM for migration_console
+        uses: anchore/sbom-action@v0.22.2
+        with:
+          image: migrations/migration_console:latest
+          output-file: opensearch-migrations-console-sbom.spdx.json
+      - name: Generate SBOM for traffic_replayer
+        uses: anchore/sbom-action@v0.22.2
+        with:
+          image: migrations/traffic_replayer:latest
+          output-file: opensearch-migrations-traffic-replayer-sbom.spdx.json
+      - name: Generate SBOM for capture_proxy
+        uses: anchore/sbom-action@v0.22.2
+        with:
+          image: migrations/capture_proxy:latest
+          output-file: opensearch-migrations-traffic-capture-proxy-sbom.spdx.json
+      - name: Generate SBOM for reindex_from_snapshot
+        uses: anchore/sbom-action@v0.22.2
+        with:
+          image: migrations/reindex_from_snapshot:latest
+          output-file: opensearch-migrations-reindex-from-snapshot-sbom.spdx.json
+      - name: Generate SBOM for artifacts
+        uses: anchore/sbom-action@v0.22.2
+        with:
+          file: opensearch-migrations-source.tar.gz
+          output-file: opensearch-migrations-source-sbom.spdx.json
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        # Uses latest Helm version by default
+      - name: Package Helm chart
+        run: |
+          helm package deployment/k8s/charts/aggregates/migrationAssistantWithArgo \
+            --version ${{ steps.get_data.outputs.version }} \
+            --app-version ${{ steps.get_data.outputs.version }}
       - name: Configure AWS Credentials for Solutions Credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        if: ${{ !github.event.act }}
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.SOLUTIONS_CREDENTIALS_ROLE }}
           aws-region: us-east-1
       - name: Assume second role for Solutions Upload
+        if: ${{ !github.event.act }}
         run: |
           CREDS=$(aws sts assume-role --role-arn ${{ secrets.SOLUTIONS_UPLOAD_ROLE }} --role-session-name github-actions)
           echo "AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
           echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
           echo "AWS_SESSION_TOKEN=$(echo $CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
       - name: Upload Solutions Artifact to S3
+        if: ${{ !github.event.act }}
         run: |
           aws s3 cp deployment/migration-assistant-solution/build/artifact.zip \
             s3://cornerstone-amazonaws/SO0290/${{ steps.get_data.outputs.version }}/${{ github.sha }}/artifact.zip \
@@ -141,12 +200,17 @@ jobs:
           solutionname="migration-assistant-for-amazon-opensearch-service",\
           solutionversion=${{ steps.get_data.outputs.version }}
       - name: Draft a release
+        if: ${{ !github.event.act }}
         uses: softprops/action-gh-release@v2
         with:
           draft: true
           generate_release_notes: true
           files: |
             deployment/migration-assistant-solution/build/temp/global-s3-assets/*.template
-            artifacts.tar.gz
-            traffic-capture-artifacts.tar.gz
+            opensearch-migrations-source.tar.gz
+            opensearch-migrations-build.tar.gz
+            kiro-cli/build/kiro-assistant.tar.gz
+            migration-assistant-${{ steps.get_data.outputs.version }}.tgz
+            deployment/k8s/aws/aws-bootstrap.sh
+            deployment/k8s/dashboards/*.json
             **/*.spdx.json

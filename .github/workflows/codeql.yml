@@ -2,9 +2,15 @@ name: "CodeQL Advanced"
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   schedule:
     - cron: '25 22 * * 0'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.repository == 'opensearch-project/opensearch-migrations' && github.ref == 'refs/heads/main') }}
 
 jobs:
   analyze:
@@ -24,7 +30,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
 
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v4

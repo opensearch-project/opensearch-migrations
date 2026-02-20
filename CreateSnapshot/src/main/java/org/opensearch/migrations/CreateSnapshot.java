@@ -100,6 +100,18 @@ public class CreateSnapshot {
         public List<String> indexAllowlist = List.of();
 
         @Parameter(
+                names = {"--compression-enabled"},
+                required = false,
+                description = "Whether to enable metadata compression for the snapshot. Defaults to false.")
+        public boolean compressionEnabled = false;
+
+        @Parameter(
+                names = {"--include-global-state"},
+                required = false,
+                description = "Whether to include global state in the snapshot. Defaults to true.")
+        public boolean includeGlobalState = true;
+
+        @Parameter(
                 required = false,
                 names = {"--otel-collector-endpoint" },
                 arity = 1,
@@ -116,7 +128,7 @@ public class CreateSnapshot {
     }
 
     public static void main(String[] args) throws Exception {
-        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_SOURCE_ARGS)));
+        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
         Args arguments = EnvVarParameterPuller.injectFromEnv(new Args(), "CREATE_SNAPSHOT_");
         var argParser = JsonCommandLineParser.newBuilder().addObject(arguments).build();
         argParser.parse(args);
@@ -160,7 +172,9 @@ public class CreateSnapshot {
                     client,
                     arguments.fileSystemRepoPath,
                     arguments.indexAllowlist,
-                    context
+                    context,
+                    arguments.compressionEnabled,
+                    arguments.includeGlobalState
                 );
         } else {
             snapshotCreator = new S3SnapshotCreator(
@@ -173,7 +187,9 @@ public class CreateSnapshot {
                 arguments.indexAllowlist,
                 arguments.maxSnapshotRateMBPerNode,
                 arguments.s3RoleArn,
-                context
+                context,
+                arguments.compressionEnabled,
+                arguments.includeGlobalState
             );
         }
 

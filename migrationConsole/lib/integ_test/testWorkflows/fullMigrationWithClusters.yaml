@@ -1,0 +1,427 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: full-migration-with-clusters
+spec:
+  serviceAccountName: argo-workflow-executor
+  onExit: conditional-cleanup
+  entrypoint: main
+  parallelism: 100
+
+  arguments:
+    parameters:
+      - name: cluster-namespace
+        value: "ma"
+      - name: source-cluster-template
+        value: "elasticsearch-5-6-single-node"
+      - name: target-cluster-template
+        value: "opensearch-2-19-single-node"
+      - name: snapshot-and-migration-configs
+        value: |
+          [{
+            "migrations": [{
+              "metadataMigrationConfig": {},
+              "documentBackfillConfig": {
+                "maxShardSizeBytes": 16000000,
+                "resources": {
+                  requests: { cpu: "25m",   memory: "1Gi", ephemeral-storage: "5Gi" },
+                  limits:   { cpu: "1000m", memory: "2Gi", ephemeral-storage: "5Gi" }
+                }
+              }
+            }]
+          }]
+      - name: replayer-config
+        value: |
+          {"batchSize": 1000, "concurrency": 4}
+      - name: skip-cleanup
+        value: "false"
+      # Any references to workflow.parameters must come from top level workflow
+      - name: etcd-endpoints
+        value: "http://etcd.ma.svc.cluster.local:2379"
+      - name: etcd-user
+        value: "root"
+      - name: etcd-password
+        value: "password"
+      - name: s3-snapshot-configmap
+        value: "migrations-default-s3-config"
+      - name: migration-image-configmap
+        value: "migration-image-config"
+      - name: otel-collector-endpoint
+        value: "http://otel-collector:4317"
+
+  templates:
+    # Main workflow template
+    - name: main
+      steps:
+        - - name: generate-cluster-names
+            template: generate-cluster-names
+            arguments:
+              parameters:
+                - name: imageMigrationConsoleLocation
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: imageMigrationConsolePullPolicy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
+
+        - - name: create-source-cluster
+            templateRef:
+              name: cluster-templates
+              template: "{{workflow.parameters.source-cluster-template}}"
+            arguments:
+              parameters:
+                - name: cluster-name
+                  value: "{{steps.generate-cluster-names.outputs.parameters.source-cluster-name}}"
+                - name: namespace
+                  value: "{{workflow.parameters.cluster-namespace}}"
+
+          - name: create-target-cluster
+            templateRef:
+              name: cluster-templates
+              template: "{{workflow.parameters.target-cluster-template}}"
+            arguments:
+              parameters:
+                - name: cluster-name
+                  value: "{{steps.generate-cluster-names.outputs.parameters.target-cluster-name}}"
+                - name: namespace
+                  value: "{{workflow.parameters.cluster-namespace}}"
+
+        - - name: wait-for-source-cluster
+            template: wait-for-cluster
+            arguments:
+              parameters:
+                - name: cluster-name
+                  value: "{{steps.generate-cluster-names.outputs.parameters.source-cluster-name}}"
+                - name: cluster-type
+                  value: "source"
+                - name: namespace
+                  value: "{{workflow.parameters.cluster-namespace}}"
+
+          - name: wait-for-target-cluster
+            template: wait-for-cluster
+            arguments:
+              parameters:
+                - name: cluster-name
+                  value: "{{steps.generate-cluster-names.outputs.parameters.target-cluster-name}}"
+                - name: cluster-type
+                  value: "target"
+                - name: namespace
+                  value: "{{workflow.parameters.cluster-namespace}}"
+
+        # Pause for integration test data setup
+        - - name: pause-for-test-data
+            template: suspend-step
+
+        # Generate migration configurations
+        - - name: generate-migration-configs
+            template: generate-migration-configs
+            arguments:
+              parameters:
+                - name: source-config
+                  value: "{{steps.create-source-cluster.outputs.parameters.cluster-config}}"
+                - name: target-config
+                  value: "{{steps.create-target-cluster.outputs.parameters.cluster-config}}"
+                - name: snapshot-and-migration-configs
+                  value: "{{workflow.parameters.snapshot-and-migration-configs}}"
+                - name: replayer-config
+                  value: "{{workflow.parameters.replayer-config}}"
+                - name: imageMigrationConsoleLocation
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: imageMigrationConsolePullPolicy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
+
+        # Run the full migration
+        - - name: run-full-migration-with-workflow-cli
+            templateRef:
+              name: full-migration-with-workflow-cli
+              template: main
+            arguments:
+              parameters:
+                - name: migrationConfigBase64
+                  value: "{{steps.generate-migration-configs.outputs.parameters.migrationConfigBase64}}"
+                - name: imageMigrationConsoleLocation
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: imageMigrationConsolePullPolicy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
+        - - name: pause-for-migration-verification
+            template: suspend-step
+
+    # Template to generate unique cluster names based on template types
+    - name: generate-cluster-names
+      inputs:
+        parameters:
+          - name: imageMigrationConsoleLocation
+          - name: imageMigrationConsolePullPolicy
+      container:
+        image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+        imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+        command: [sh, -c]
+        args:
+          - |
+            # Generate unique suffix from workflow UID
+            SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+            
+            SOURCE_TEMPLATE="{{workflow.parameters.source-cluster-template}}"
+            TARGET_TEMPLATE="{{workflow.parameters.target-cluster-template}}"
+            SOURCE_ID=$(echo "${SOURCE_TEMPLATE}" | cut -d'-' -f1-3)
+            TARGET_ID=$(echo "${TARGET_TEMPLATE}" | cut -d'-' -f1-3)
+            
+            SOURCE_CLUSTER_NAME="source-${SOURCE_ID}-${SUFFIX}"
+            TARGET_CLUSTER_NAME="target-${TARGET_ID}-${SUFFIX}"
+            
+            # Output parameters
+            echo "${SOURCE_CLUSTER_NAME}" > /tmp/source-cluster-name
+            echo "${TARGET_CLUSTER_NAME}" > /tmp/target-cluster-name
+            
+            echo "Generated cluster names:"
+            echo "Source: ${SOURCE_CLUSTER_NAME} (from template: ${SOURCE_TEMPLATE})"
+            echo "Target: ${TARGET_CLUSTER_NAME} (from template: ${TARGET_TEMPLATE})"
+      outputs:
+        parameters:
+          - name: source-cluster-name
+            valueFrom:
+              path: /tmp/source-cluster-name
+          - name: target-cluster-name
+            valueFrom:
+              path: /tmp/target-cluster-name
+
+    # Template to wait for cluster readiness
+    - name: wait-for-cluster
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: cluster-type
+          - name: namespace
+      container:
+        image: bitnamisecure/kubectl:latest
+        command: [sh, -c]
+        args:
+          - |
+            echo "Waiting for {{inputs.parameters.cluster-type}} cluster to be ready..."
+            
+            # Try StatefulSet pod first (for helm-based clusters)
+            if kubectl wait --for=condition=ready pod/{{inputs.parameters.cluster-name}}-0 \
+              --namespace={{inputs.parameters.namespace}} \
+              --timeout=10s 2>/dev/null; then
+              echo "{{inputs.parameters.cluster-type}} cluster pod (StatefulSet) is ready!"
+            else
+              # Fallback to Deployment rollout status (for ES 1.5/2.4)
+              echo "StatefulSet pod not found, checking Deployment..."
+              kubectl rollout status deployment/{{inputs.parameters.cluster-name}} \
+                --namespace={{inputs.parameters.namespace}} \
+                --timeout=200s
+              echo "{{inputs.parameters.cluster-type}} cluster deployment is ready!"
+            fi
+            # Check if StatefulSet pod exists first
+            if kubectl get pod/{{inputs.parameters.cluster-name}}-0 \
+                 --namespace={{inputs.parameters.namespace}} >/dev/null 2>&1; then
+              echo "Found StatefulSet pod {{inputs.parameters.cluster-name}}-0, waiting for readiness..."
+              kubectl wait --for=condition=ready pod/{{inputs.parameters.cluster-name}}-0 \
+                --namespace={{inputs.parameters.namespace}} \
+                --timeout=200s
+              echo "{{inputs.parameters.cluster-type}} cluster pod (StatefulSet) is ready!"
+            else
+              echo "StatefulSet pod not found, checking Deployment..."
+              kubectl rollout status deployment/{{inputs.parameters.cluster-name}} \
+                --namespace={{inputs.parameters.namespace}} \
+                --timeout=200s
+              echo "{{inputs.parameters.cluster-type}} cluster deployment is ready!"
+            fi
+
+    # Generic suspend template for pausing workflow execution
+    - name: suspend-step
+      suspend: {}
+
+    # Template to generate migration configurations from cluster configs
+    # Builds the complete OVERALL_MIGRATION_CONFIG structure and encodes as base64
+    - name: generate-migration-configs
+      inputs:
+        parameters:
+          - name: source-config
+          - name: target-config
+          - name: snapshot-and-migration-configs
+          - name: replayer-config
+          - name: imageMigrationConsoleLocation
+          - name: imageMigrationConsolePullPolicy
+          - name: s3Region
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: AWS_REGION
+          - name: s3Endpoint
+            default: ""
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: ENDPOINT
+                optional: true
+          - name: s3BucketName
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: BUCKET_NAME
+          - name: snapshotRoleArn
+            default: ""
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: SNAPSHOT_ROLE_ARN
+                optional: true
+      container:
+        image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+        imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+            
+            SOURCE_CONFIG='{{inputs.parameters.source-config}}'
+            TARGET_CONFIG='{{inputs.parameters.target-config}}'
+            SNAPSHOT_MIGRATION_CONFIGS='{{inputs.parameters.snapshot-and-migration-configs}}'
+            S3_REGION='{{inputs.parameters.s3Region}}'
+            S3_ENDPOINT='{{inputs.parameters.s3Endpoint}}'
+            S3_BUCKET='{{inputs.parameters.s3BucketName}}'
+            SNAPSHOT_ROLE_ARN='{{inputs.parameters.snapshotRoleArn}}'
+            
+            SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+            
+            # Build snapshot repo config
+            SNAPSHOT_REPO=$(jq -n \
+              --arg region "$S3_REGION" \
+              --arg endpoint "$S3_ENDPOINT" \
+              --arg bucket "$S3_BUCKET" \
+              --arg suffix "$SUFFIX" \
+              '{
+                "awsRegion": $region,
+                "endpoint": $endpoint,
+                "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
+              }')
+            
+            # Add s3RoleArn only if provided
+            if [ -n "$SNAPSHOT_ROLE_ARN" ]; then
+              SNAPSHOT_REPO=$(echo "$SNAPSHOT_REPO" | jq --arg roleArn "$SNAPSHOT_ROLE_ARN" '. + {"s3RoleArn": $roleArn}')
+            fi
+            
+            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" '
+              # Add snapshot repos with default key
+              . + {"snapshotRepos": {"default": $repo}}
+            ')
+            
+            SNAPSHOT_EXTRACT_CONFIGS=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '[.[] | {
+              "snapshotConfig": {
+                "repoName": "default",
+                "snapshotNameConfig": {
+                  "snapshotNamePrefix": "testsnapshot"
+                }
+              },
+              "createSnapshotConfig": {},
+              "migrations": .migrations
+            }]')
+            
+            MIGRATION_CONFIG=$(jq -n \
+              --argjson source "$SOURCE_WITH_REPO" \
+              --argjson target "$TARGET_CONFIG" \
+              --argjson snapshotConfigs "$SNAPSHOT_EXTRACT_CONFIGS" \
+              '{
+                "skipApprovals": true,
+                "sourceClusters": {
+                  "source1": $source
+                },
+                "targetClusters": {
+                  "target1": $target
+                },
+                "migrationConfigs": [{
+                  "fromSource": "source1",
+                  "toTarget": "target1",
+                  "snapshotExtractAndLoadConfigs": $snapshotConfigs,
+                  "replayerConfig": {
+                    "podReplicas": 0
+                  }
+                }]
+              }')
+            
+            MIGRATION_CONFIG_BASE64=$(echo "$MIGRATION_CONFIG" | base64 | tr -d '\n')
+            
+            echo "Generated migration config:"
+            echo "$MIGRATION_CONFIG" | jq .
+            
+            echo "$MIGRATION_CONFIG_BASE64" > /tmp/migration-config-base64
+      outputs:
+        parameters:
+          - name: migrationConfigBase64
+            valueFrom:
+              path: /tmp/migration-config-base64
+
+    - name: conditional-cleanup
+      steps:
+        - - name: check-cleanup-needed
+            template: cleanup-all-clusters
+            when: "{{workflow.parameters.skip-cleanup}} != true"
+
+    - name: cleanup-all-clusters
+      container:
+        image: dtzar/helm-kubectl:3.18.6
+        command: [sh, -c]
+        args:
+          - |
+            echo "Starting cluster cleanup process..."
+            
+            # Regenerate the same cluster names using workflow UID and template names
+            SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+            
+            SOURCE_TEMPLATE="{{workflow.parameters.source-cluster-template}}"
+            TARGET_TEMPLATE="{{workflow.parameters.target-cluster-template}}"
+            SOURCE_ID=$(echo "${SOURCE_TEMPLATE}" | cut -d'-' -f1-3)
+            TARGET_ID=$(echo "${TARGET_TEMPLATE}" | cut -d'-' -f1-3)
+            
+            SOURCE_CLUSTER_NAME="source-${SOURCE_ID}-${SUFFIX}"
+            TARGET_CLUSTER_NAME="target-${TARGET_ID}-${SUFFIX}"
+            
+            echo "Cleaning up clusters: ${SOURCE_CLUSTER_NAME}, ${TARGET_CLUSTER_NAME}"
+            
+            # Cleanup source cluster
+            echo "Uninstalling source cluster: ${SOURCE_CLUSTER_NAME}"
+            helm uninstall ${SOURCE_CLUSTER_NAME} \
+              --namespace {{workflow.parameters.cluster-namespace}} \
+              --ignore-not-found || true
+
+            echo "Removing source cluster configmap"
+            kubectl delete configmap ${SOURCE_CLUSTER_NAME}-migration-config --ignore-not-found || true
+            
+            # Cleanup target cluster  
+            echo "Uninstalling target cluster: ${TARGET_CLUSTER_NAME}"
+            helm uninstall ${TARGET_CLUSTER_NAME} \
+              --namespace {{workflow.parameters.cluster-namespace}} \
+              --ignore-not-found || true
+            
+            echo "Removing target cluster configmap"
+            kubectl delete configmap ${TARGET_CLUSTER_NAME}-migration-config --ignore-not-found || true
+            
+            # Cleanup non-Helm resources for ES 1.x and 2.x clusters
+            echo "Cleaning up Kubernetes resources for ${SOURCE_CLUSTER_NAME}"
+            kubectl delete all,configmap,secret -l migration-test=true,cluster-name=${SOURCE_CLUSTER_NAME} \
+              --namespace {{workflow.parameters.cluster-namespace}} \
+              --ignore-not-found || true
+
+            echo "Cleaning up Kubernetes resources for ${TARGET_CLUSTER_NAME}"  
+            kubectl delete all,configmap,secret -l migration-test=true,cluster-name=${TARGET_CLUSTER_NAME} \
+              --namespace {{workflow.parameters.cluster-namespace}} \
+              --ignore-not-found || true
+            
+            echo "Cluster cleanup completed successfully"

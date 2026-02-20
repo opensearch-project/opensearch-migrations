@@ -1,34 +1,33 @@
 {
   "name": "@opensearch-migrations/config-processor",
   "version": "1.0.0",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "development": "./src/index.ts",
-      "default": "./dist/index.js"
-    }
+    ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsc --build",
-    "type-check": "NODE_OPTIONS='--conditions=development' npx  tsgo -p ../../tsconfig.typecheck.processor.json --noEmit",
+    "type-check": "npx tsgo -p ../../tsconfig.typecheck.processor.json --noEmit",
     "start-initialize": "tsx src/RunMigrationConfigTransformer.ts",
     "start-transform": "tsx src/RunMigrationConfigTransformer.ts",
-    "dev-initialize": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationInitializer.ts -- --etcd-endpoints http://localhost:2379 ",
-    "dev-transform": "NODE_OPTIONS='--conditions=development' tsx src/RunMigrationConfigTransformer.ts",
-    "bundle": "npm run build && node makeBundle.js"
+    "dev-cmd": "tsx src/cliRouter.ts",
+    "dev-constrain": "tsx src/constrainUserSchema.ts",
+    "dev-initialize": "tsx src/RunMigrationInitializer.ts -- --etcd-endpoints http://localhost:2379 ",
+    "dev-transform": "tsx src/RunMigrationConfigTransformer.ts",
+    "bundle": "node makeBundle.js",
+    "check-and-bundle": "npm run type-check && npm run test && npm run bundle",
+    "test": "jest --config ./jest.config.js"
   },
   "dependencies": {
     "@opensearch-migrations/schemas": "*",
     "etcd3": "^1.1.2",
     "yaml": "^2.8.1",
-    "zod": "*"
+    "zod": "^4"
   },
   "devDependencies": {
     "@types/node": "^24.0.13",
+    "@types/jest": "*",
     "tsx": "^4.20.5",
-    "typescript": "^5.9.3",
-    "@typescript/native-preview": "*"
+    "typescript": "^5.9.3"
   }
 }

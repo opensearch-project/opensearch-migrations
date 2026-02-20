@@ -13,7 +13,7 @@ jobs:
     outputs:
       output-is-require-approval: ${{ steps.step-is-require-approval.outputs.is-require-approval }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.base.sha }}
       - name: Get CodeOwner List

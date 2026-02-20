@@ -39,7 +39,7 @@ export const CaptureReplay = WorkflowBuilder.create({
     )
 
 
-    .addSuspendTemplate("getUserApproval")
+    .addTemplate("getUserApproval", t => t.addSuspend())
 
 
     .addTemplate("getBrokersList", t => t
@@ -154,20 +154,25 @@ export const CaptureReplay = WorkflowBuilder.create({
                 {dependencies: ["getBrokersList", "kafkaTopicSetup"]}
             )
 
-            .addTask("runMigrationConsole", MigrationConsole, "deployConsole", c =>
-                    c.register({
-                        ...selectInputsForRegister(b, c),
-                        name: expr.concat(expr.literal("diagnostic-console-"), b.inputs.sessionName),
-                        command: "tail -f /dev/null",
-                        kafkaInfo: expr.serialize(
-                            expr.makeDict({
-                                broker_endpoints: c.tasks.getBrokersList.outputs.bootstrapServers,
-                                standard: ""
-                            })
-                        )
-                    }),
-                {dependencies: ["getBrokersList"]}
-            )
+            /**
+             * See the notes for deployConsole - it won't work as it is.
+             * We might have some easy fixes in hand - but this part of the replayer workflow should
+             * be entirely superceded by the workflow focus command once that comes into being.
+             */
+            // .addTask("runMigrationConsole", MigrationConsole, "deployConsole", c =>
+            //         c.register({
+            //             ...selectInputsForRegister(b, c),
+            //             name: expr.concat(expr.literal("diagnostic-console-"), b.inputs.sessionName),
+            //             command: "tail -f /dev/null",
+            //             kafkaInfo: expr.serialize(
+            //                 expr.makeDict({
+            //                     broker_endpoints: c.tasks.getBrokersList.outputs.bootstrapServers,
+            //                     standard: ""
+            //                 })
+            //             )
+            //         }),
+            //     {dependencies: ["getBrokersList"]}
+            // )
         )
     )
 

@@ -3,6 +3,8 @@ package org.opensearch.migrations.bulkload.common;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,10 +15,12 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
+import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
-import org.opensearch.migrations.bulkload.common.bulk.metadata.BaseMetadata;
+import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
+import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
@@ -82,6 +86,12 @@ public abstract class OpenSearchClient {
     }
 
     public AwarenessAttributeSettings getAwarenessAttributeSettings() {
+        // OpenSearch Serverless does not support _cluster/settings API, return default disabled settings
+        if (version.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH) {
+            log.info("Serverless target detected, skipping awareness attribute settings (not supported)");
+            return new AwarenessAttributeSettings(false, 0);
+        }
+
         String settingsPath = "_cluster/settings?flat_settings&include_defaults";
         log.info("Starting getAwarenessAttributeSettings call to path={}", settingsPath);
         long startTime = System.currentTimeMillis();
@@ -411,6 +421,27 @@ public abstract class OpenSearchClient {
         return BULK_RETRY_STRATEGY;
     }
 
+    private BulkOperationSpec stripDocumentId(BulkOperationSpec original) {
+        if (original instanceof IndexOp indexOp) {
+            var metadata = indexOp.getOperation();
+            var newMetadata = IndexOperationMeta.builder()
+                .index(metadata.getIndex())
+                .type(metadata.getType())
+                .routing(metadata.getRouting())
+                .write(metadata.getWrite())
+                .versioning(metadata.getVersioning())
+                .opType(metadata.getOpType())
+                .build();
+            
+            return IndexOp.builder()
+                .operation(newMetadata)
+                .document(original.getDocument())
+                .includeDocument(original.isIncludeDocument())
+                .build();
+        }
+        return original;
+    }
+
     private static String truncateMessageIfNeeded(String input, int maxCharacters) {
         if (input == null || input.length() <= maxCharacters) {
             return input;
@@ -422,15 +453,31 @@ public abstract class OpenSearchClient {
     }
 
     public Mono<BulkResponse> sendBulkRequest(String indexName, List<? extends BulkOperationSpec> docs,
-                                              IRfsContexts.IRequestContext context)
+                                              IRfsContexts.IRequestContext context) {
+        return sendBulkRequest(indexName, docs, context, false, DocumentExceptionAllowlist.empty());
+    }
+
+    public Mono<BulkResponse> sendBulkRequest(String indexName, List<? extends BulkOperationSpec> docs,
+                                              IRfsContexts.IRequestContext context,
+                                              boolean allowServerGeneratedIds,
+                                              DocumentExceptionAllowlist allowlist)
     {
         final AtomicInteger attemptCounter = new AtomicInteger(0);
-        final var docsMap = docs.stream().collect(Collectors.toMap(o ->
-            ((BaseMetadata) o.getOperation()).getId(), d -> d));
+        // Use ArrayList for position-based tracking with swap-to-end compaction
+        final var pendingDocs = new ArrayList<BulkOperationSpec>(docs);
+        
         return Mono.defer(() -> {
             final String targetPath = getBulkRequestPath(indexName);
-            log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap::keySet).log();
-            var body = BulkNdjson.toBulkNdjson(docsMap.values(), OBJECT_MAPPER);
+            log.atTrace().setMessage("Creating bulk body with {} documents").addArgument(pendingDocs::size).log();
+            
+            List<BulkOperationSpec> operationsToSend = pendingDocs;
+            if (allowServerGeneratedIds) {
+                operationsToSend = pendingDocs.stream()
+                    .map(this::stripDocumentId)
+                    .collect(Collectors.toList());
+            }
+            
+            var body = BulkNdjson.toBulkNdjson(operationsToSend, OBJECT_MAPPER);
             var additionalHeaders = new HashMap<String, List<String>>();
             if (CompressionMode.GZIP_BODY_COMPRESSION.equals(compressionMode)) {
                 RestClient.addGzipRequestHeaders(additionalHeaders);
@@ -440,20 +487,25 @@ public abstract class OpenSearchClient {
                 .flatMap(response -> {
                     var resp =
                         new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
+                    
                     if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {
                         return Mono.just(resp);
                     }
                     log.atDebug().setMessage("Response has some errors...: {}").addArgument(response.body).log();
                     log.atDebug().setMessage("... for request: {}").addArgument(body).log();
-                    // Remove all successful documents for the next bulk request attempt
-                    var successfulDocs = resp.getSuccessfulDocs();
-                    successfulDocs.forEach(docsMap::remove);
+                    
+                    // Use position-based compaction: swap failures to front, truncate
+                    int successCount = compactPendingDocs(pendingDocs, resp, allowlist);
+                    
+                    if (pendingDocs.isEmpty()) {
+                        return Mono.just(resp);
+                    }
                     log.atWarn()
                         .setMessage("After bulk request attempt {} on index '{}', {} more documents have succeeded, {} remain. The error response message was: {}")
                         .addArgument(attemptCounter.incrementAndGet())
                         .addArgument(indexName)
-                        .addArgument(successfulDocs::size)
-                        .addArgument(docsMap::size)
+                        .addArgument(successCount)
+                        .addArgument(pendingDocs::size)
                         .addArgument(truncateMessageIfNeeded(response.body, BULK_TRUNCATED_RESPONSE_MAX_LENGTH))
                         .log();
                     return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
@@ -461,21 +513,42 @@ public abstract class OpenSearchClient {
         })
         .retryWhen(getBulkRetryStrategy())
         .doOnError(error -> {
-            if (!docsMap.isEmpty()) {
+            if (!pendingDocs.isEmpty()) {
                 failedRequestsLogger.logBulkFailure(
                     indexName,
-                    docsMap::size,
-                    () -> BulkNdjson.toBulkNdjson(docsMap.values(), OBJECT_MAPPER),
+                    pendingDocs::size,
+                    () -> BulkNdjson.toBulkNdjson(pendingDocs, OBJECT_MAPPER),
                     error
                 );
             } else {
                 log.atError()
                     .setCause(error)
-                    .setMessage("Unexpected empty document map for bulk request on index {}")
+                    .setMessage("Unexpected empty document list for bulk request on index {}")
                     .addArgument(indexName)
                     .log();
             }
         });
+    }
+    
+    /**
+     * Compacts pendingDocs in-place: keeps only failed docs using nextSetBit iteration.
+     * O(f) where f = number of failures, no allocation beyond BitSet.
+     * @return number of successful documents removed
+     */
+    private int compactPendingDocs(ArrayList<BulkOperationSpec> pendingDocs, BulkResponse resp, DocumentExceptionAllowlist allowlist) {
+        BitSet failedPositions = BulkResponseParser.getFailedPositions(resp.body, allowlist);
+        if (failedPositions == null) {
+            // Can't parse response - assume all failed, retry all
+            return 0;
+        }
+        
+        int writeIdx = 0;
+        for (int i = failedPositions.nextSetBit(0); i >= 0; i = failedPositions.nextSetBit(i + 1)) {
+            pendingDocs.set(writeIdx++, pendingDocs.get(i));
+        }
+        int successCount = pendingDocs.size() - writeIdx;
+        pendingDocs.subList(writeIdx, pendingDocs.size()).clear();
+        return successCount;
     }
 
     public HttpResponse refresh(IRfsContexts.IRequestContext context) {
@@ -504,8 +577,12 @@ public abstract class OpenSearchClient {
         }
 
         public List<String> getSuccessfulDocs() {
+            return getSuccessfulDocs(DocumentExceptionAllowlist.empty());
+        }
+
+        public List<String> getSuccessfulDocs(DocumentExceptionAllowlist allowlist) {
             try {
-                return BulkResponseParser.findSuccessDocs(body);
+                return BulkResponseParser.findSuccessDocs(body, allowlist);
             } catch (IOException ioe) {
                 log.warn("Unable to process bulk request for success", ioe);
                 return List.of();

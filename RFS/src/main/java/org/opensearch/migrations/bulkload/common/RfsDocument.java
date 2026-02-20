@@ -30,12 +30,12 @@ public class RfsDocument {
     public final BulkOperationSpec document;
 
     @SneakyThrows
-    public static RfsDocument fromLuceneDocument(RfsLuceneDocument doc, String indexName) {
+    public static RfsDocument fromLuceneDocument(LuceneDocumentChange doc, String indexName) {
         // TODO: We can get a performance improvement by keeping doc.source as a byte array until here
         Map<String, Object> document = OBJECT_MAPPER.readValue(doc.source, new TypeReference<>() {});
 
         // TODO: Consider an inheritance model for builders that would allow us to consolidate this logic
-        if (RfsDocumentOperation.DELETE.equals(doc.operation)) {
+        if (DocumentChangeType.DELETE.equals(doc.operation)) {
             DeleteOperationMeta meta = DeleteOperationMeta.builder()
                 .id(doc.id)
                 .index(indexName)
@@ -47,7 +47,7 @@ public class RfsDocument {
                 .document(document)
                 .build();
             return new RfsDocument(doc.luceneDocNumber, deleteOp);
-        } else if (RfsDocumentOperation.INDEX.equals(doc.operation)) {
+        } else if (DocumentChangeType.INDEX.equals(doc.operation)) {
             IndexOperationMeta meta = IndexOperationMeta.builder()
                 .id(doc.id)
                 .index(indexName)

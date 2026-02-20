@@ -40,6 +40,8 @@ public class EndToEndTest extends SourceTestBase {
     @TempDir
     private File localDirectory;
 
+    private static final String ES5_SINGLE_TYPE_INDEX = "es5_single_type";
+
     private static Stream<Arguments> scenarios() {
         return SupportedClusters.supportedPairs(true).stream()
                 .map(migrationPair -> Arguments.of(migrationPair.source(), migrationPair.target()));
@@ -68,7 +70,7 @@ public class EndToEndTest extends SourceTestBase {
             final SearchClusterContainer.ContainerVersion sourceVersion) {
         try (
                 final var sourceCluster = new SearchClusterContainer(sourceVersion);
-                final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_1)
+                final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
         ) {
             migrationDocumentsWithClusters(sourceCluster, targetCluster);
         }
@@ -147,6 +149,11 @@ public class EndToEndTest extends SourceTestBase {
             sourceClusterOperations.deleteDocument(indexName, "toBeDeleted" , "1", null);
             sourceClusterOperations.post("/" + indexName + "/_refresh", null);
 
+            // For ES 5.x sources (5.5 and 5.6 only)
+            if (sourceClusterOperations.shouldTestEs5SingleType()) {
+                sourceClusterOperations.createEs5SingleTypeIndexWithDocs(ES5_SINGLE_TYPE_INDEX);
+            }
+
             // === ACTION: Take a snapshot ===
             var snapshotName = "my_snap";
             var snapshotRepoName = "my_snap_repo";
@@ -193,7 +200,13 @@ public class EndToEndTest extends SourceTestBase {
                     transformationConfig
             ));
 
-            int totalShards = supportsCompletion ? 2 * numberOfShards : numberOfShards;
+            int totalShards = numberOfShards; // blog_2023 index
+            if (supportsCompletion) {
+                totalShards += numberOfShards; // completion_index
+            }
+            if (sourceClusterOperations.shouldTestEs5SingleType()) {
+                totalShards += 1; // es5_single_type index
+            }
             Assertions.assertEquals(totalShards + 1, expectedTerminationException.numRuns);
 
             // Check that the docs were migrated
@@ -208,9 +221,29 @@ public class EndToEndTest extends SourceTestBase {
             // Check that that docs were migrated with routing, routing field not returned on es1 so skip validation
             checkDocsWithRouting(sourceCluster, testDocMigrationContext, !isSourceES1x);
             checkDocsWithRouting(targetCluster, testDocMigrationContext, !isTargetES1x);
+
+            // Check that docs were migrated for shouldTestEs5SingleType cases
+            verifyEs5SingleTypeIndex(sourceClusterOperations, targetClusterOperations);
         } finally {
-            FileSystemUtils.deleteTree(localDirectory.toPath());
+            FileSystemUtils.deleteDirectories(localDirectory.toString());
         }
+    }
+
+    @SneakyThrows
+    private void verifyEs5SingleTypeIndex(
+            ClusterOperations sourceClusterOperations,
+            ClusterOperations targetClusterOperations) {
+
+        if (!sourceClusterOperations.shouldTestEs5SingleType()) {
+            return;
+        }
+        targetClusterOperations.post("/_refresh", null);
+        var res = targetClusterOperations.get("/" + ES5_SINGLE_TYPE_INDEX + "/_search");
+        String body = res.getValue();
+        Assertions.assertTrue(body.contains("Doc One"),
+                "Expected migrated single_type index to contain 'Doc One'");
+        Assertions.assertTrue(body.contains("Doc Two"),
+                "Expected migrated single_type index to contain 'Doc Two'");
     }
 
     private boolean sourceSupportsCompletionFields(Version sourceVersion) {

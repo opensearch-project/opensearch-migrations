@@ -149,7 +149,7 @@ public class CustomRfsTransformationTest extends SourceTestBase {
                 expectedTargetDocs
             );
         } finally {
-            FileSystemUtils.deleteTree(tempDirSnapshot);
+            FileSystemUtils.deleteDirectories(tempDirSnapshot.toString(), tempDirLucene.toString());
         }
     }
 

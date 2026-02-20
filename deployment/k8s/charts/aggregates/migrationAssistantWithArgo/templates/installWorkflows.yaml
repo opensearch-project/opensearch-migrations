@@ -6,7 +6,7 @@ metadata:
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": hook-succeeded
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 3
@@ -19,16 +19,14 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: migration-console-for-workflows
-          image: {{ .Values.images.migrationConsole.repository}}:{{ .Values.images.migrationConsole.tag }}
+          image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
           command:
             - "/bin/sh"
             - "-c"
             - |
-              set -e
-              echo "Installing templates from originalArgoWorkflows."
-              echo "switch this to `cd newWorkflowTemplates` to install the new templates that will work with the workflow command when ready"
-              cd workflows/templates
+              set -exo pipefail
+              echo "Installing templates for argo workflows."
               NAMESPACE="{{ .Release.Name }}"
               APP_NAME="{{ .Release.Name }}"
               OWNER="{{ .Release.Name }}"
@@ -37,18 +35,28 @@ spec:
               . /etc/profile.d/venv.sh
               source /.venv/bin/activate
 
-              for f in *.yaml; do
-                JSFILE="${f%.yaml}.json"
-                python3 -c 'import sys, yaml, json; json.dump(yaml.safe_load(sys.stdin), sys.stdout)' < "$f" > $JSFILE;
-                jq --arg app "$APP_NAME" \
-                    --arg version "$VERSION" \
-                    --arg managedBy "$OWNER" \
-                    '.metadata.labels.app = $app |
-                    .metadata.labels.version = $version |
-                    .metadata.labels."managed-by" = $managedBy' \
-                    "$JSFILE" > "$JSFILE.tmp"
-                kubectl apply -f $JSFILE.tmp -n $NAMESPACE
-              done
+              apply_workflows() {
+                local dir="$1"
+                echo "Installing workflow templates from $dir"
+                pushd "$dir"
+
+                for f in *.yaml; do
+                  [ -f "$f" ] || continue
+                  JSFILE="${f%.yaml}.json"
+                  python3 -c 'import sys, yaml, json; json.dump(yaml.safe_load(sys.stdin), sys.stdout)' < "$f" > $JSFILE
+                  jq --arg app "$APP_NAME" \
+                      --arg version "$VERSION" \
+                      --arg managedBy "$OWNER" \
+                      '.metadata.labels.app = $app |
+                      .metadata.labels.version = $version |
+                      .metadata.labels."managed-by" = $managedBy' \
+                      "$JSFILE" > "$JSFILE.tmp"
+                  kubectl apply -f $JSFILE.tmp -n $NAMESPACE
+                done
+                popd
+              }
+              apply_workflows "workflows"
+              apply_workflows "lib/integ_test/testWorkflows"
 ---
 # templates/remove-argo-migration-templates
 apiVersion: batch/v1
@@ -58,7 +66,7 @@ metadata:
   annotations:
     "helm.sh/hook": pre-delete
     "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": hook-succeeded
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 3
@@ -71,7 +79,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: migration-console-for-workflows
-          image: {{ .Values.images.migrationConsole.repository}}:{{ .Values.images.migrationConsole.tag }}
+          image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
           command:
             - "/bin/sh"

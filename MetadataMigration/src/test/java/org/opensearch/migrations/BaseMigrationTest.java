@@ -52,10 +52,30 @@ abstract class BaseMigrationTest {
             String snapshotName,
             SnapshotTestContext testSnapshotContext
     ) {
+        createSnapshot(sourceContainer, snapshotName, testSnapshotContext, false, true);
+    }
+
+    /**
+     * Takes a snapshot of the source cluster with configurable compression and global metadata settings
+     * @param sourceContainer Source container to take snapshot of
+     * @param snapshotName Name of the snapshot
+     * @param testSnapshotContext Context for taking the snapshot
+     * @param compressionEnabled Whether to enable compression for the snapshot
+     * @param includeGlobalState Whether to include global metadata in the snapshot
+     */
+    protected void createSnapshot(
+            SearchClusterContainer sourceContainer,
+            String snapshotName,
+            SnapshotTestContext testSnapshotContext,
+            boolean compressionEnabled,
+            boolean includeGlobalState
+    ) {
         var args = new CreateSnapshot.Args();
         args.snapshotName = snapshotName;
         args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
         args.sourceArgs.host = sourceContainer.getUrl();
+        args.compressionEnabled = compressionEnabled;
+        args.includeGlobalState = includeGlobalState;
 
         var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
         snapshotCreator.run();

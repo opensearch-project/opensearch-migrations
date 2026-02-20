@@ -7,9 +7,9 @@ import {
     expr,
     IMAGE_PULL_POLICY,
     INTERNAL,
-    MissingField,
     PlainObject,
     selectInputsForRegister,
+    Serialized,
     TypeToken,
     typeToken,
     WorkflowBuilder
@@ -18,7 +18,9 @@ import {
     CLUSTER_CONFIG,
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
+    DEFAULT_RESOURCES,
     KAFKA_SERVICES_CONFIG,
+    ResourceRequirementsType,
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
 
@@ -26,20 +28,27 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 
-const KafkaServicesConfig = z.object({
+export const CONSOLE_KAFKA_SERVICES_CONFIG = z.object({
     broker_endpoints: z.string(),
     standard: z.string()
-})
+});
 
-const configComponentParameters = {
-    kafkaInfo: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof KafkaServicesConfig>>(),
+export const CONSOLE_BACKFILL_INFO = z.object({
+    sessionName: z.string(),
+    deploymentName: z.string()
+});
+
+export const configComponentParameters = {
+    backfillSession: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof CONSOLE_BACKFILL_INFO>>(),
+        description: "The metadata about the deployment performing the RFS backfill"}),
+    kafkaInfo: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof CONSOLE_KAFKA_SERVICES_CONFIG>>(),
         description: "Snapshot configuration information (JSON)"}),
     sourceConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof CLUSTER_CONFIG>>(),
         description: "Source cluster configuration (JSON)"}),
-    targetConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof TARGET_CLUSTER_CONFIG>>(),
-        description: "Target cluster configuration (JSON)"}),
     snapshotConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
-        description: "Snapshot configuration information (JSON)"})
+        description: "Snapshot configuration information (JSON)"}),
+    targetConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof TARGET_CLUSTER_CONFIG>>(),
+        description: "Target cluster configuration (JSON)"})
 };
 
 // TODO - once the migration console can load secrets from env variables,
@@ -56,145 +65,20 @@ base64 -d > /config/migration_services.yaml_ << EOF
 {{FILE_CONTENTS}}
 EOF
 
-cat /config/migration_services.yaml_ | 
-jq 'def normalizeAuthConfig:
-  if has("authConfig") then
-    if (.authConfig | has("basic")) then
-      .basic_auth = (.authConfig.basic | 
-        if has("secretName") then
-          del(.secretName)
-        else
-          .
-        end)
-    elif (.authConfig | has("sigv4")) then
-      .sigv4_auth = .authConfig.sigv4
-    elif (.authConfig | has("mtls")) then
-      .mtls_auth = .authConfig.mtls
-    else
-      .
-    end
-    | del(.authConfig, .name, .proxy, .snapshotRepo)
-  else
-    .
-  end;
-
-def normalizeAllowInsecure:
-  if has("allowInsecure") then
-    .allow_insecure = .allowInsecure | del(.allowInsecure)
-  else
-    .
-  end;
-
-def normalizeRepoPath:
-  if has("s3RepoPathUri") then
-    .repo_uri = .s3RepoPathUri | del(.s3RepoPathUri) | del(.repoName)
-  else
-    .
-  end;
-
-def normalizeSnapshotName:
-  if has("snapshotName") then
-    .snapshot_name = .snapshotName | del(.snapshotName)
-  else
-    .
-  end;
-
-def normalizeRepoConfig:
-  if has("repoConfig") then
-    .s3 = (.repoConfig | 
-      if has("awsRegion") then
-        .aws_region = .awsRegion | del(.awsRegion)
-      else
-        .
-      end)
-    | del(.repoConfig)
-  else
-    .
-  end;
-
-def removeUseLocalStack:
-  del(.useLocalStack);
-
-# Apply recursively to catch nested objects
-def recurseNormalize:
-  (normalizeAuthConfig
-   | normalizeAllowInsecure
-   | normalizeRepoPath
-   | normalizeSnapshotName
-   | normalizeRepoConfig
-   | removeUseLocalStack)
-  | with_entries(.value |= (if type=="object" then (.|recurseNormalize) else . end));
-
-. | recurseNormalize
-' > /config/migration_services.yaml
+cat /config/migration_services.yaml_ |
+jq -f workflowConfigToServicesConfig.jq > /config/migration_services.yaml
 
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
 
 echo file dump
 echo ---
+export MIGRATION_USE_SERVICES_YAML_CONFIG=true
 cat /config/migration_services.yaml
 echo ---
 
 {{COMMAND}}
 `;
-
-function getConsoleDeploymentResource(
-    name: AllowLiteralOrExpression<string>,
-    migrationConsoleImage: AllowLiteralOrExpression<string>,
-    migrationConsolePullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>,
-    base64ConfigContents: AllowLiteralOrExpression<string>,
-    command: AllowLiteralOrExpression<string>,
-) {
-    return {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {
-            "name": name
-        },
-        "spec": {
-            "replicas": 1,
-            "selector": {
-                "matchLabels": {
-                    "app": "user-environment"
-                }
-            },
-            "template": {
-                "metadata": {
-                    "labels": {
-                        "app": "user-environment"
-                    }
-                },
-                "spec": {
-                    "containers": [
-                        {
-                            "name": "main",
-                            "image": migrationConsoleImage,
-                            "imagePullPolicy": migrationConsolePullPolicy,
-                            "command": [
-                                "/bin/sh",
-                                "-c",
-                                "set -e -x\n\nbase64 -d > /config/migration_services.yaml << EOF\n" +
-                                "" +
-                                base64ConfigContents +
-                                "EOF\n" +
-                                "" +
-                                ". /etc/profile.d/venv.sh\n" +
-                                "source /.venv/bin/activate\n" +
-                                "" +
-                                "echo file dump\necho ---\n" +
-                                "cat /config/migration_services.yaml\n" +
-                                "echo ---\n" +
-                                "" +
-                                command
-                            ]
-                        }
-                    ]
-                }
-            }
-        }
-    }
-}
 
 function makeOptionalDict<
     T extends PlainObject,
@@ -218,22 +102,40 @@ export const MigrationConsole = WorkflowBuilder.create({
             .addStepGroup(c => c))
         .addExpressionOutput("configContents", c =>
             expr.recordToString(expr.mergeDicts(
-                expr.mergeDicts(
-                    makeOptionalDict("kafka", expr.asString(c.inputs.kafkaInfo), typeToken<z.infer<typeof KAFKA_SERVICES_CONFIG>>()),
-                    makeOptionalDict("source_cluster", expr.asString(c.inputs.sourceConfig), typeToken<z.infer<typeof CLUSTER_CONFIG>>())
-                ),
-                expr.mergeDicts(
-                    makeOptionalDict("target_cluster", expr.asString(c.inputs.targetConfig), typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>()),
-                    makeOptionalDict("snapshot", expr.asString(c.inputs.snapshotConfig), typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
+                    expr.mergeDicts(
+                        expr.mergeDicts(
+                            makeOptionalDict("kafka", expr.asString(c.inputs.kafkaInfo), typeToken<z.infer<typeof KAFKA_SERVICES_CONFIG>>()),
+                            makeOptionalDict("source_cluster", expr.asString(c.inputs.sourceConfig), typeToken<z.infer<typeof CLUSTER_CONFIG>>())
+                        ),
+                        expr.mergeDicts(
+                            makeOptionalDict("target_cluster", expr.asString(c.inputs.targetConfig), typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>()),
+                            makeOptionalDict("snapshot", expr.asString(c.inputs.snapshotConfig), typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
+                        )
+                    ),
+                    expr.ternary(expr.isEmpty(c.inputs.backfillSession), expr.literal({}), expr.makeDict({
+                        "backfill": expr.makeDict({
+                            "reindex_from_snapshot": expr.makeDict({
+                                "k8s": expr.makeDict({
+                                    "namespace": expr.getWorkflowValue("namespace"),
+                                    "deployment_name": expr.get(expr.deserializeRecord(c.inputs.backfillSession), "deploymentName")
+                                }),
+                                "backfill_session_name": expr.get(expr.deserializeRecord(c.inputs.backfillSession), "sessionName")
+                            })
+                        })}))
                 )
-            ))
+            )
         )
     )
 
 
-    .addTemplate("runMigrationCommand", t => t
+    .addTemplate("runMigrationCommandForStatus", t => t
         .addRequiredInput("command", typeToken<string>())
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
+        .addOptionalInput("sourceK8sLabel", c => "")
+        .addOptionalInput("targetK8sLabel", c => "")
+        .addOptionalInput("snapshotK8sLabel", c => "")
+        .addOptionalInput("fromSnapshotMigrationK8sLabel", c => "")
+        .addOptionalInput("taskK8sLabel", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(c => c
@@ -243,35 +145,25 @@ export const MigrationConsole = WorkflowBuilder.create({
                 expr.dig(expr.deserializeRecord(c.inputs.configContents), ["source_cluster","authConfig","basic","secretName"], "")))
             .addEnvVarsFromRecord(getTargetHttpAuthCreds(
                 expr.dig(expr.deserializeRecord(c.inputs.configContents), ["target_cluster","authConfig","basic","secretName"], "")))
+            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
             .addArgs([
                 expr.fillTemplate(SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE, {
                     "FILE_CONTENTS": expr.toBase64(expr.asString(c.inputs.configContents)),
                     "COMMAND": c.inputs.command
                 })]
             )
-        )
-    )
-
-
-    .addTemplate("deployConsoleWithConfig", t => t
-        .addRequiredInput("command", typeToken<string>())
-        .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
-        .addRequiredInput("name", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "create",
-                setOwnerReference: true,
-                successCondition: "status.availableReplicas > 0",
-                manifest: getConsoleDeploymentResource(b.inputs.name,
-                    b.inputs.imageMigrationConsoleLocation,
-                    b.inputs.imageMigrationConsolePullPolicy,
-                    expr.toBase64(expr.asString(b.inputs.configContents)),
-                    b.inputs.command)
+            .addPodMetadata(({ inputs }) => ({
+                labels: {
+                    'migrations.opensearch.org/source': inputs.sourceK8sLabel,
+                    'migrations.opensearch.org/target': inputs.targetK8sLabel,
+                    'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
+                    'migrations.opensearch.org/from-snapshot-migration': inputs.fromSnapshotMigrationK8sLabel,
+                    'migrations.opensearch.org/task': inputs.taskK8sLabel
+                }
             }))
-
-        .addJsonPathOutput("deploymentName", "{.metadata.name}", typeToken<string>())
+        )
+        .addPathOutput("statusOutput", "/tmp/status-output.txt", typeToken<string>())
+        .addPathOutput("overriddenPhase", "/tmp/phase-output.txt", typeToken<string>())
     )
 
 
@@ -284,7 +176,7 @@ export const MigrationConsole = WorkflowBuilder.create({
                 c.register(selectInputsForRegister(s, c)))
 
 
-            .addStep("runConsoleWithConfig", INTERNAL, "runMigrationCommand", c =>
+            .addStep("runConsoleWithConfig", INTERNAL, "runMigrationCommandForStatus", c =>
                 c.register({
                     ...selectInputsForRegister(s, c),
                     configContents: c.steps.getConsoleConfig.outputs.configContents
@@ -293,22 +185,5 @@ export const MigrationConsole = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("deployConsole", t => t
-        .addRequiredInput("command", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addInputsFromRecord(configComponentParameters)
-        .addRequiredInput("name", typeToken<string>())
-        .addSteps(s => s
-            .addStep("getConsoleConfig", INTERNAL, "getConsoleConfig", c =>
-                c.register(selectInputsForRegister(s, c)))
-            .addStep("deployConsoleWithConfig", INTERNAL, "deployConsoleWithConfig", c =>
-                c.register({
-                    ...selectInputsForRegister(s, c),
-                    configContents: c.steps.getConsoleConfig.outputs.configContents
-                }))
-        )
-        .addExpressionOutput("deploymentName",
-            c => c.steps.getConsoleConfig.outputs.configContents)
-    )
 
     .getFullScope();

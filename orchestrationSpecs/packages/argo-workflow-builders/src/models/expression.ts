@@ -359,6 +359,7 @@ export type TaskOutputSource = { kind: "tasks_output", taskName: string, paramet
 
 export type WORKFLOW_VALUES =
     "name"
+    | "namespace"
     | "mainEntrypoint"
     | "serviceAccountName"
     | "uid"
@@ -599,6 +600,27 @@ class ExprBuilder {
         return fn<string[], ExpressionType, "complicatedExpression">("split", toExpression(arr), toExpression(delim));
     }
 
+    // Regex functions
+    regexMatch(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
+        return fn<boolean, ExpressionType, "complicatedExpression">("regexMatch", toExpression(pattern), toExpression(text));
+    }
+
+    regexFind(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
+        return fn<string, ExpressionType, "complicatedExpression">("regexFind", toExpression(pattern), toExpression(text));
+    }
+
+    regexFindAll(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>, count: AllowLiteralOrExpression<number>) {
+        return fn<string[], ExpressionType, "complicatedExpression">("regexFindAll", toExpression(pattern), toExpression(text), toExpression(count));
+    }
+
+    regexReplaceAll(pattern: AllowLiteralOrExpression<string>, replacement: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
+        return fn<string, ExpressionType, "complicatedExpression">("regexReplaceAll", toExpression(pattern), toExpression(replacement), toExpression(text));
+    }
+
+    regexSplit(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>, count: AllowLiteralOrExpression<number>) {
+        return fn<string[], ExpressionType, "complicatedExpression">("regexSplit", toExpression(pattern), toExpression(text), toExpression(count));
+    }
+
     fillTemplate<T extends string>(
         template: T,
         replacements: TemplateReplacements<T>
@@ -804,6 +826,13 @@ class ExprBuilder {
         return fn<Serialized<R>,CIn,"complicatedExpression">("toJSON", data);
     }
 
+    toString<
+        R extends PlainObject,
+        CIn extends ExpressionType
+    >(data: AllowLiteralOrExpression<R,CIn>) {
+        return fn<string,CIn,"complicatedExpression">("string", toExpression(data));
+    }
+
     stringToRecord<
         R extends PlainObject,
         CIn extends ExpressionType
@@ -900,7 +929,7 @@ export default expr;
 
 
 // This function and the next tie into the renderer
-export function makeDirectTypeProxy<T extends (boolean|number)>(value: BaseExpression<T>): T {
+export function makeDirectTypeProxy<T extends (boolean|number|NonSerializedPlainObject)>(value: BaseExpression<T>): T {
     return new UnquotedTypeWrapper(value) as any as T;
 }
 

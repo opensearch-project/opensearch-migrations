@@ -40,6 +40,7 @@ void addSubProjects(String path, File dir) {
 rootProject.name = 'OpensearchMigrations'
 include 'awsUtilities'
 include 'coreUtilities'
+include 'deployment:migration-assistant-solution'
 include 'libraries:kafkaCommandLineFormatter'
 include 'libraries:kafkaUtils'
 include 'transformation'
@@ -52,6 +53,7 @@ include 'dashboardsSanitizer'
 include 'DataGenerator'
 include 'MetadataMigration'
 include 'DocumentsFromSnapshotMigration'
+include 'migrationConsole'
 include 'TrafficCapture:captureKafkaOffloader'
 include 'TrafficCapture:captureOffloader'
 include 'TrafficCapture:captureProtobufs'
@@ -61,9 +63,10 @@ include 'TrafficCapture:trafficCaptureProxyServer'
 include 'TrafficCapture:trafficReplayer'
 include 'frontend'
 include 'buildImages'
+include 'kiro-cli'
 include ':console_link'
 
-project(':console_link').projectDir = file('TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link')
+project(':console_link').projectDir = file('migrationConsole/lib/console_link')
 
 
 addSubProjects(':transformation', Paths.get(rootProject.projectDir.getPath(), 'transformation', 'transformationPlugins').toFile())

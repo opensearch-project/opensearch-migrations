@@ -10,81 +10,219 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {ConfigMapKeySelector, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {
     DataOrConfigMapScope,
     DataScope, ExpressionOrConfigMapValue,
     ExtendScope,
     GenericScope,
     InputParamsToExpressions, LowercaseOnly,
-    WorkflowAndTemplatesScope
+    WorkflowAndTemplatesScope,
+    WorkflowInputsToExpressions
 } from "./workflowTypes";
 import {inputsToEnvVars, TypescriptError} from "../utils";
-import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "./templateBodyBuilder"; // <-- import TemplateRebinder
+import {RetryParameters, RetryableTemplateBodyBuilder, RetryableTemplateRebinder} from "./templateBodyBuilder";
 import {extendScope, FieldGroupConstraint, ScopeIsEmptyConstraint} from "./scopeConstraints";
 import {PlainObject} from "./plainObject";
-import {AllowLiteralOrExpression, BaseExpression, toExpression} from "./expression";
+import {AllowLiteralOrExpression, BaseExpression, expr, toExpression} from "./expression";
 import {TypeToken} from "./sharedTypes";
+import {SynchronizationConfig} from "./synchronization";
 
 export type IMAGE_PULL_POLICY = "Always" | "Never" | "IfNotPresent";
 
+export type PodMetadata = {
+    labels?: Record<string, AllowLiteralOrExpression<string>>;
+    annotations?: Record<string, AllowLiteralOrExpression<string>>;
+};
+
+// Kubernetes types for pod scheduling
+export type Toleration = {
+    key?: AllowLiteralOrExpression<string>;
+    operator?: AllowLiteralOrExpression<"Exists" | "Equal">;
+    value?: AllowLiteralOrExpression<string>;
+    effect?: AllowLiteralOrExpression<"NoSchedule" | "PreferNoSchedule" | "NoExecute">;
+    tolerationSeconds?: AllowLiteralOrExpression<number>;
+};
+
+export type NodeSelector = Record<string, AllowLiteralOrExpression<string>>;
+
+export type LabelSelector = {
+    matchLabels?: Record<string, AllowLiteralOrExpression<string>>;
+    matchExpressions?: Array<{
+        key: AllowLiteralOrExpression<string>;
+        operator: AllowLiteralOrExpression<"In" | "NotIn" | "Exists" | "DoesNotExist">;
+        values?: AllowLiteralOrExpression<string>[];
+    }>;
+};
+
+export type NodeSelectorTerm = {
+    matchExpressions?: Array<{
+        key: AllowLiteralOrExpression<string>;
+        operator: AllowLiteralOrExpression<"In" | "NotIn" | "Exists" | "DoesNotExist" | "Gt" | "Lt">;
+        values?: AllowLiteralOrExpression<string>[];
+    }>;
+    matchFields?: Array<{
+        key: AllowLiteralOrExpression<string>;
+        operator: AllowLiteralOrExpression<"In" | "NotIn" | "Exists" | "DoesNotExist" | "Gt" | "Lt">;
+        values?: AllowLiteralOrExpression<string>[];
+    }>;
+};
+
+export type Affinity = {
+    nodeAffinity?: {
+        requiredDuringSchedulingIgnoredDuringExecution?: { nodeSelectorTerms: NodeSelectorTerm[] };
+        preferredDuringSchedulingIgnoredDuringExecution?: Array<{
+            weight: AllowLiteralOrExpression<number>;
+            preference: NodeSelectorTerm;
+        }>;
+    };
+    podAffinity?: {
+        requiredDuringSchedulingIgnoredDuringExecution?: Array<{
+            labelSelector?: LabelSelector;
+            topologyKey: AllowLiteralOrExpression<string>;
+            namespaces?: AllowLiteralOrExpression<string>[];
+        }>;
+        preferredDuringSchedulingIgnoredDuringExecution?: Array<{
+            weight: AllowLiteralOrExpression<number>;
+            podAffinityTerm: {
+                labelSelector?: LabelSelector;
+                topologyKey: AllowLiteralOrExpression<string>;
+                namespaces?: AllowLiteralOrExpression<string>[];
+            };
+        }>;
+    };
+    podAntiAffinity?: {
+        requiredDuringSchedulingIgnoredDuringExecution?: Array<{
+            labelSelector?: LabelSelector;
+            topologyKey: AllowLiteralOrExpression<string>;
+            namespaces?: AllowLiteralOrExpression<string>[];
+        }>;
+        preferredDuringSchedulingIgnoredDuringExecution?: Array<{
+            weight: AllowLiteralOrExpression<number>;
+            podAffinityTerm: {
+                labelSelector?: LabelSelector;
+                topologyKey: AllowLiteralOrExpression<string>;
+                namespaces?: AllowLiteralOrExpression<string>[];
+            };
+        }>;
+    };
+};
+
+export type PodSecurityContext = {
+    runAsUser?: AllowLiteralOrExpression<number>;
+    runAsGroup?: AllowLiteralOrExpression<number>;
+    runAsNonRoot?: AllowLiteralOrExpression<boolean>;
+    fsGroup?: AllowLiteralOrExpression<number>;
+    supplementalGroups?: AllowLiteralOrExpression<number>[];
+    seccompProfile?: {
+        type: AllowLiteralOrExpression<"Unconfined" | "RuntimeDefault" | "Localhost">;
+        localhostProfile?: AllowLiteralOrExpression<string>;
+    };
+};
+
+export type HostAlias = {
+    ip: AllowLiteralOrExpression<string>;
+    hostnames: AllowLiteralOrExpression<string>[];
+};
+
+// Brand types for tracking which pod config fields have been set
+type HasMetadata = { __hasMetadata: true };
+type HasTolerations = { __hasTolerations: true };
+type HasNodeSelector = { __hasNodeSelector: true };
+type HasActiveDeadlineSeconds = { __hasActiveDeadlineSeconds: true };
+type HasAffinity = { __hasAffinity: true };
+type HasSchedulerName = { __hasSchedulerName: true };
+type HasPriorityClassName = { __hasPriorityClassName: true };
+type HasServiceAccountName = { __hasServiceAccountName: true };
+type HasAutomountServiceAccountToken = { __hasAutomountServiceAccountToken: true };
+type HasSecurityContext = { __hasSecurityContext: true };
+type HasHostAliases = { __hasHostAliases: true };
+type HasPodSpecPatch = { __hasPodSpecPatch: true };
+type HasRetryStrategy = { __hasRetryStrategy: true };
+type HasSynchronization = { __hasSynchronization: true };
+
+// Runtime storage for pod config (not tracked in type system individually)
+type PodConfigData = {
+    metadata?: PodMetadata;
+    tolerations?: Toleration[];
+    nodeSelector?: NodeSelector;
+    activeDeadlineSeconds?: AllowLiteralOrExpression<number | string>;
+    affinity?: Affinity;
+    schedulerName?: AllowLiteralOrExpression<string>;
+    priorityClassName?: AllowLiteralOrExpression<string>;
+    serviceAccountName?: AllowLiteralOrExpression<string>;
+    automountServiceAccountToken?: AllowLiteralOrExpression<boolean>;
+    securityContext?: PodSecurityContext;
+    hostAliases?: HostAlias[];
+    podSpecPatch?: AllowLiteralOrExpression<string>;
+};
+
 export class ContainerBuilder<
-    ContextualScope extends WorkflowAndTemplatesScope,
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
     ContainerScope extends GenericScope,
     VolumeScope extends GenericScope,
     EnvScope extends DataOrConfigMapScope,
-    OutputParamsScope extends OutputParametersRecord
-> extends TemplateBodyBuilder<
-    ContextualScope,
+    OutputParamsScope extends OutputParametersRecord,
+    PodConfigBrands extends {} = {}
+> extends RetryableTemplateBodyBuilder<
+    ParentWorkflowScope,
     InputParamsScope,
     ContainerScope,
     OutputParamsScope,
-    ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, any>,
+    ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, any, PodConfigBrands>,
     GenericScope
 > {
     constructor(
-        contextualScope: ContextualScope,
+        parentWorkflowScope: ParentWorkflowScope,
         inputsScope: InputParamsScope,
         bodyScope: ContainerScope,
         public readonly volumeScope: VolumeScope,
         public readonly envScope: EnvScope,
         outputsScope: OutputParamsScope,
-        retryParameters: RetryParameters
+        retryParameters: RetryParameters,
+        synchronization: SynchronizationConfig | undefined,
+        public readonly podConfig: PodConfigData = {}
     ) {
-        // REBINDER: must accept any NewBodyScope extends GenericScope and return ContainerBuilder
-        const rebind: TemplateRebinder<
-            ContextualScope,
+        const templateRebind: RetryableTemplateRebinder<
+            ParentWorkflowScope,
             InputParamsScope,
             GenericScope
-        > = <
-            NewBodyScope extends GenericScope,
-            NewOutputScope extends OutputParametersRecord,
-            Self extends TemplateBodyBuilder<
-                ContextualScope,
-                InputParamsScope,
-                NewBodyScope,
-                NewOutputScope,
-                any,
-                GenericScope
-            >
-        >(
-            ctx: ContextualScope,
-            inputs: InputParamsScope,
-            body: NewBodyScope,
-            outputs: NewOutputScope,
-            retry: RetryParameters
-        ) =>
-            new ContainerBuilder<
-                ContextualScope,
-                InputParamsScope,
-                NewBodyScope,
-                VolumeScope,
-                EnvScope,
-                NewOutputScope
-            >(ctx, inputs, body, this.volumeScope, this.envScope, outputs, retry) as unknown as Self;
+        > = (ctx, inputs, body, outputs, retry, synchronization) =>
+            new ContainerBuilder(
+                ctx, inputs, body, this.volumeScope, this.envScope, outputs, retry, synchronization, this.podConfig
+            ) as any;
 
-        super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, rebind);
+        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, templateRebind);
+    }
+
+    /** Helper to create a new builder with updated fields */
+    private withUpdates<
+        NewBody extends GenericScope = ContainerScope,
+        NewVolume extends GenericScope = VolumeScope,
+        NewEnv extends DataOrConfigMapScope = EnvScope,
+        NewOutput extends OutputParametersRecord = OutputParamsScope,
+        NewBrands extends {} = PodConfigBrands
+    >(updates: {
+        body?: NewBody;
+        volumes?: NewVolume;
+        env?: NewEnv;
+        outputs?: NewOutput;
+        retry?: RetryParameters;
+        sync?: SynchronizationConfig | undefined;
+        podConfig?: PodConfigData;
+    }): ContainerBuilder<ParentWorkflowScope, InputParamsScope, NewBody, NewVolume, NewEnv, NewOutput, NewBrands> {
+        return new ContainerBuilder(
+            this.parentWorkflowScope,
+            this.inputsScope,
+            updates.body ?? this.bodyScope as unknown as NewBody,
+            updates.volumes ?? this.volumeScope as unknown as NewVolume,
+            updates.env ?? this.envScope as unknown as NewEnv,
+            updates.outputs ?? this.outputsScope as unknown as NewOutput,
+            updates.retry ?? this.retryParameters,
+            updates.sync !== undefined ? updates.sync : this.synchronization,
+            updates.podConfig ?? this.podConfig
+        );
     }
 
     protected getBody() {
@@ -98,6 +236,18 @@ export class ContainerBuilder<
             readOnly: config.readOnly
         }));
         return {
+            ...(this.podConfig.metadata && { metadata: this.podConfig.metadata }),
+            ...(this.podConfig.tolerations && { tolerations: this.podConfig.tolerations }),
+            ...(this.podConfig.nodeSelector && { nodeSelector: this.podConfig.nodeSelector }),
+            ...(this.podConfig.activeDeadlineSeconds !== undefined && { activeDeadlineSeconds: this.podConfig.activeDeadlineSeconds }),
+            ...(this.podConfig.affinity && { affinity: this.podConfig.affinity }),
+            ...(this.podConfig.schedulerName && { schedulerName: this.podConfig.schedulerName }),
+            ...(this.podConfig.priorityClassName && { priorityClassName: this.podConfig.priorityClassName }),
+            ...(this.podConfig.serviceAccountName && { serviceAccountName: this.podConfig.serviceAccountName }),
+            ...(this.podConfig.automountServiceAccountToken !== undefined && { automountServiceAccountToken: this.podConfig.automountServiceAccountToken }),
+            ...(this.podConfig.securityContext && { securityContext: this.podConfig.securityContext }),
+            ...(this.podConfig.hostAliases && { hostAliases: this.podConfig.hostAliases }),
+            ...(this.podConfig.podSpecPatch && { podSpecPatch: this.podConfig.podSpecPatch }),
             ...(volumes.length > 0 && { volumes }),
             container: {
                 ...this.bodyScope,
@@ -110,66 +260,75 @@ export class ContainerBuilder<
     // Update existing methods to preserve EnvScope type parameter
 
     addImageInfo(image: AllowLiteralOrExpression<string>,
-                 pullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>):
+                 imagePullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>):
         ContainerBuilder<
-            ContextualScope,
+            ParentWorkflowScope,
             InputParamsScope,
             ExtendScope<ContainerScope, {
                 image: AllowLiteralOrExpression<string>,
-                pullPolicy: AllowLiteralOrExpression<string>
+                imagePullPolicy: AllowLiteralOrExpression<string>
             }>,
             VolumeScope,
             EnvScope,
-            OutputParamsScope
+            OutputParamsScope,
+            PodConfigBrands
         > {
         return new ContainerBuilder(
-            this.contextualScope,
+            this.parentWorkflowScope,
             this.inputsScope,
-            {...this.bodyScope, image, pullPolicy},
+            {...this.bodyScope, image, imagePullPolicy},
             this.volumeScope,
             this.envScope,
             this.outputsScope,
-            this.retryParameters
+            this.retryParameters,
+            this.synchronization,
+            this.podConfig
         );
     }
 
     addCommand(strArr: AllowLiteralOrExpression<string>[]):
         ContainerBuilder<
-            ContextualScope,
+            ParentWorkflowScope,
             InputParamsScope,
             ExtendScope<ContainerScope, { command: BaseExpression<string>[] }>,
             VolumeScope,
             EnvScope,
-            OutputParamsScope
+            OutputParamsScope,
+            PodConfigBrands
         > {
-        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
+        return new ContainerBuilder(this.parentWorkflowScope, this.inputsScope, {
                 ...this.bodyScope,
                 command: strArr.map(s=>toExpression(s))
             },
             this.volumeScope,
-            this.envScope,  // Preserve env scope
+            this.envScope,
             this.outputsScope,
-            this.retryParameters
+            this.retryParameters,
+            this.synchronization,
+            this.podConfig
         );
     }
 
     addArgs(a: AllowLiteralOrExpression<string>[]):
         ContainerBuilder<
-            ContextualScope,
+            ParentWorkflowScope,
             InputParamsScope,
             ExtendScope<ContainerScope, { args: AllowLiteralOrExpression<string>[] }>,
             VolumeScope,
             EnvScope,
-            OutputParamsScope
+            OutputParamsScope,
+            PodConfigBrands
         > {
-        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
+        return new ContainerBuilder(this.parentWorkflowScope, this.inputsScope, {
                 ...this.bodyScope,
                 args: a
             },
             this.volumeScope,
-            this.envScope,  // Preserve env scope
+            this.envScope,
             this.outputsScope,
-            this.retryParameters
+            this.retryParameters,
+            this.synchronization,
+            this.podConfig
         );
     }
 
@@ -177,12 +336,13 @@ export class ContainerBuilder<
         name: Name, pathValue: string, t: TypeToken<T>, descriptionValue?: string
     ):
         ContainerBuilder<
-            ContextualScope,
+            ParentWorkflowScope,
             InputParamsScope,
             ContainerScope,
             VolumeScope,
             EnvScope,
-            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>
+            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>,
+            PodConfigBrands
         > {
         type NewOut = ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>;
         const newOutputs = {
@@ -195,20 +355,23 @@ export class ContainerBuilder<
         } as NewOut;
 
         return new ContainerBuilder<
-            ContextualScope,
+            ParentWorkflowScope,
             InputParamsScope,
             ContainerScope,
             VolumeScope,
             EnvScope,
-            NewOut
+            NewOut,
+            PodConfigBrands
         >(
-            this.contextualScope,
+            this.parentWorkflowScope,
             this.inputsScope,
             this.bodyScope,
             this.volumeScope,
             this.envScope,
             newOutputs,
-            this.retryParameters);
+            this.retryParameters,
+            this.synchronization,
+            this.podConfig);
     }
 
     addVolumesFromRecord<
@@ -216,21 +379,24 @@ export class ContainerBuilder<
     >(
         volumes: FieldGroupConstraint<VolumeScope, R>
     ): ContainerBuilder<
-        ContextualScope,
+        ParentWorkflowScope,
         InputParamsScope,
         ContainerScope,
         ExtendScope<VolumeScope, R>,
         EnvScope,
-        OutputParamsScope
+        OutputParamsScope,
+        PodConfigBrands
     > {
         return new ContainerBuilder(
-            this.contextualScope,
+            this.parentWorkflowScope,
             this.inputsScope,
             this.bodyScope,
             extendScope(this.volumeScope, () => volumes as R),
             this.envScope,
             this.outputsScope,
-            this.retryParameters);
+            this.retryParameters,
+            this.synchronization,
+            this.podConfig);
     }
 
     addEnvVar<Name extends string>(
@@ -241,12 +407,13 @@ export class ContainerBuilder<
                 : Name,
         value: ExpressionOrConfigMapValue<string>
     ): ContainerBuilder<
-        ContextualScope,
+        ParentWorkflowScope,
         InputParamsScope,
         ContainerScope,
         VolumeScope,
         ExtendScope<EnvScope, { [K in Name]: ExpressionOrConfigMapValue<string> }>,
-        OutputParamsScope
+        OutputParamsScope,
+        PodConfigBrands
     > {
         return this.addEnvVarUnchecked(name as string, value) as any;
     }
@@ -256,38 +423,43 @@ export class ContainerBuilder<
     >(
         envVars: FieldGroupConstraint<EnvScope, R>
     ): ContainerBuilder<
-        ContextualScope,
+        ParentWorkflowScope,
         InputParamsScope,
         ContainerScope,
         VolumeScope,
         ExtendScope<EnvScope, R>,
-        OutputParamsScope
+        OutputParamsScope,
+        PodConfigBrands
     > {
         return new ContainerBuilder(
-            this.contextualScope,
+            this.parentWorkflowScope,
             this.inputsScope,
             this.bodyScope,
             this.volumeScope,
             extendScope(this.envScope, () => envVars as R),
             this.outputsScope,
-            this.retryParameters);
+            this.retryParameters,
+            this.synchronization,
+            this.podConfig);
     }
 
     addEnvVars<NewEnvScope extends DataOrConfigMapScope>(
         builderFn: (
-            cb: ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, {}, {}, OutputParamsScope>
-        ) => ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, {}, NewEnvScope, OutputParamsScope>
+            cb: ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, {}, {}, OutputParamsScope, PodConfigBrands>
+        ) => ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, {}, NewEnvScope, OutputParamsScope, PodConfigBrands>
     ): ScopeIsEmptyConstraint<EnvScope,
-        ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, {}, NewEnvScope, OutputParamsScope>
+        ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, {}, NewEnvScope, OutputParamsScope, PodConfigBrands>
     > {
         const emptyEnvBuilder = new ContainerBuilder(
-            this.contextualScope,
+            this.parentWorkflowScope,
             this.inputsScope,
             this.bodyScope,
             this.volumeScope,
             {},
             this.outputsScope,
-            this.retryParameters
+            this.retryParameters,
+            this.synchronization,
+            this.podConfig
         );
         return builderFn(emptyEnvBuilder) as any;
     }
@@ -299,12 +471,13 @@ export class ContainerBuilder<
         name: Name,
         value: ExpressionOrConfigMapValue<string>
     ): ContainerBuilder<
-        ContextualScope,
+        ParentWorkflowScope,
         InputParamsScope,
         ContainerScope,
         VolumeScope,
         ExtendScope<EnvScope, { [K in Name]: ExpressionOrConfigMapValue<string> }>,
-        OutputParamsScope
+        OutputParamsScope,
+        PodConfigBrands
     > {
         const currentEnv = (this.bodyScope as any).env || {};
         const newEnvScope = {
@@ -313,13 +486,15 @@ export class ContainerBuilder<
         } as ExtendScope<EnvScope, { [K in Name]: ExpressionOrConfigMapValue<string> }>;
 
         return new ContainerBuilder(
-            this.contextualScope,
+            this.parentWorkflowScope,
             this.inputsScope,
             {...this.bodyScope, env: {...currentEnv, [name as string]: value}},
             this.volumeScope,
             newEnvScope,
             this.outputsScope,
-            this.retryParameters
+            this.retryParameters,
+            this.synchronization,
+            this.podConfig
         );
     }
 
@@ -338,17 +513,18 @@ export class ContainerBuilder<
             (inputs: InputParamsToExpressions<InputParamsScope>) => inputsToEnvVars(inputs, mode) as any
     ): ScopeIsEmptyConstraint<EnvScope,
         ContainerBuilder<
-            ContextualScope,
+            ParentWorkflowScope,
             InputParamsScope,
             ContainerScope,
             VolumeScope,
             ModifiedInputs,
-            OutputParamsScope
+            OutputParamsScope,
+            PodConfigBrands
         >> {
         const envVars = modifierFn(this.inputs);
 
         return new ContainerBuilder(
-            this.contextualScope,
+            this.parentWorkflowScope,
             this.inputsScope,
             {
                 ...this.bodyScope,
@@ -357,7 +533,139 @@ export class ContainerBuilder<
             this.volumeScope,
             envVars,
             this.outputsScope,
-            this.retryParameters
+            this.retryParameters,
+            this.synchronization,
+            this.podConfig
         ) as any;
+    }
+
+    /**
+     * Add resource requirements (CPU, memory limits and requests) to the container.
+     */
+    addResources(
+        resources: Record<string, any>
+    ): ContainerBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
+        VolumeScope,
+        EnvScope,
+        OutputParamsScope,
+        PodConfigBrands
+    > {
+        const mergedResources = resources;
+        return new ContainerBuilder(
+            {...this.parentWorkflowScope},
+            this.inputsScope,
+            {...this.bodyScope, resources: mergedResources} as ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
+            this.volumeScope,
+            this.envScope,
+            this.outputsScope,
+            this.retryParameters,
+            this.synchronization,
+            this.podConfig
+        );
+    }
+
+    /**
+     * Add metadata (labels and annotations) to the pod created by this container template.
+     * Can only be called once per builder chain.
+     */
+    addPodMetadata(
+        this: PodConfigBrands extends HasMetadata ? never : this,
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => PodMetadata
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasMetadata> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, metadata: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
+    }
+
+    addTolerations(
+        this: PodConfigBrands extends HasTolerations ? never : this,
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => Toleration[]
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasTolerations> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, tolerations: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
+    }
+
+    addNodeSelector(
+        this: PodConfigBrands extends HasNodeSelector ? never : this,
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => NodeSelector
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasNodeSelector> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, nodeSelector: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
+    }
+
+    addActiveDeadlineSeconds(
+        this: PodConfigBrands extends HasActiveDeadlineSeconds ? never : this,
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => AllowLiteralOrExpression<number | string>
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasActiveDeadlineSeconds> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, activeDeadlineSeconds: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
+    }
+
+    addAffinity(
+        this: PodConfigBrands extends HasAffinity ? never : this,
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => Affinity
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasAffinity> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, affinity: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
+    }
+
+    addSchedulerName(
+        this: PodConfigBrands extends HasSchedulerName ? never : this,
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => AllowLiteralOrExpression<string>
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasSchedulerName> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, schedulerName: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
+    }
+
+    addPriorityClassName(
+        this: PodConfigBrands extends HasPriorityClassName ? never : this,
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => AllowLiteralOrExpression<string>
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasPriorityClassName> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, priorityClassName: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
+    }
+
+    addServiceAccountName(
+        this: PodConfigBrands extends HasServiceAccountName ? never : this,
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => AllowLiteralOrExpression<string>
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasServiceAccountName> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, serviceAccountName: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
+    }
+
+    addAutomountServiceAccountToken(
+        this: PodConfigBrands extends HasAutomountServiceAccountToken ? never : this,
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => AllowLiteralOrExpression<boolean>
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasAutomountServiceAccountToken> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, automountServiceAccountToken: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
+    }
+
+    addSecurityContext(
+        this: PodConfigBrands extends HasSecurityContext ? never : this,
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => PodSecurityContext
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasSecurityContext> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, securityContext: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
+    }
+
+    addHostAliases(
+        this: PodConfigBrands extends HasHostAliases ? never : this,
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => HostAlias[]
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasHostAliases> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, hostAliases: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
+    }
+
+    addPodSpecPatch(
+        this: PodConfigBrands extends HasPodSpecPatch ? never : this,
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => AllowLiteralOrExpression<string>
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasPodSpecPatch> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, podSpecPatch: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
+    }
+
+    override addRetryParameters(
+        this: PodConfigBrands extends HasRetryStrategy ? never : this,
+        retryParameters: GenericScope
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasRetryStrategy> {
+        return this.withUpdates({ retry: retryParameters });
+    }
+
+    override addSynchronization(
+        this: PodConfigBrands extends HasSynchronization ? never : this,
+        synchronizationBuilderFn: (b: { inputs: InputParamsToExpressions<InputParamsScope> }) => SynchronizationConfig
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasSynchronization> {
+        return this.withUpdates({ sync: synchronizationBuilderFn({ inputs: this.inputs }) });
     }
 }

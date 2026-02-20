@@ -24,7 +24,8 @@ import {
     applyAppRegistry,
     generateExportString,
     getVpcEndpointForEFS,
-    ParameterLabel
+    ParameterLabel,
+    buildTemplateDescription
 } from "./common-utils";
 
 export interface SolutionsInfrastructureStackEKSProps extends StackProps {
@@ -48,6 +49,12 @@ export class SolutionsInfrastructureEKSStack extends Stack {
     constructor(scope: Construct, id: string, props: SolutionsInfrastructureStackEKSProps) {
         const finalId = props.stackNameSuffix ? `${id}-${props.stackNameSuffix}` : id
         super(scope, finalId, props);
+
+        // Distinct description for EKS create vs import
+        this.templateOptions.description = buildTemplateDescription(
+            props.createVPC ? 'EKS_VPC_CREATE' : 'EKS_VPC_IMPORT'
+        );
+
         this.templateOptions.templateFormatVersion = '2010-09-09';
         new CfnMapping(this, 'Solution', {
             mapping: {

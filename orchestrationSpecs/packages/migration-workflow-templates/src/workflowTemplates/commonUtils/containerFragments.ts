@@ -34,7 +34,7 @@ export function setupTestCredsForContainer(
                 ...(env === undefined ? [] : env),
                 {
                     name: "AWS_SHARED_CREDENTIALS_FILE",
-                    value: makeStringTypeProxy(expr.ternary(useLocalStack, expr.literal("/config/credentials"), expr.literal("")))
+                    value: makeStringTypeProxy(expr.ternary(useLocalStack, expr.literal("/config/credentials/configuration"), expr.literal("")))
                 }
             ],
             volumeMounts: [
@@ -105,7 +105,7 @@ export function setupLog4jConfigForContainer(
             env: [
                 ...(env === undefined ? [] : env),
                 {
-                    name: "JAVA_OPTS",
+                    name: "JDK_JAVA_OPTIONS",
                     value:
                         makeStringTypeProxy(expr.concatWith(" ",
                                 existingJavaOpts,
@@ -128,4 +128,3 @@ export function setupLog4jConfigForContainer(
         }
     } as const;
 }
-

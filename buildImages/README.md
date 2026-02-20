@@ -1,6 +1,8 @@
 # Building Images Locally
 This guide walks through setting up a local docker registry container that can be used to store images for this project, as opposed to the local Docker daemon storage system that comes packaged with Docker. The advantage of this approach is that these images can be used anywhere locally that can reference the local docker registry endpoint, including within a Kubernetes Minikube environment, as well as sets up the structure to be able to push images to a remote repository like AWS ECR.  Additionally, a buildkit container can be setup to enable building the images within its container.
 
+## Using Docker (no Kubernetes/Minikube required to build)
+
 ### Create a docker network
 A docker network is created so that the docker registry and buildkit containers can communicate with each other via their container name e.g. `http://docker-registry:5000`. This step should only be needed once, unless the network gets deleted.
 ```shell
@@ -10,7 +12,7 @@ docker network create local-migrations-network
 ### Create a docker registry container and volume
 This container will act as a docker registry with its own volume for storing images. It will restart whenever docker is restarted, and should ideally be run once and forgotten about.
 ```shell
-docker run -d --name docker-registry --network local-migrations-network -p 5000:5000 -v registry-data:/var/lib/docker-registry-data --restart=always registry:2
+docker run -d --name docker-registry --network local-migrations-network -p 5001:5000 -v registry-data:/var/lib/docker-registry-data --restart=always registry:2
 ```
 
 ### Create a buildkit container
@@ -32,7 +34,11 @@ The following gradle command can be used after setting up the previous steps to 
 ./gradlew buildImagesToRegistry
 ```
 
-Or customized to use a specific registry endpoint and architecture
+Or customized to use a specific registry endpoint
 ```shell
-./gradlew buildImagesToRegistry -PregistryEndpoint=123456789012.dkr.ecr.us-west-2.amazonaws.com/my-ecr-repo -PimageArch=amd64
+./gradlew buildImagesToRegistry -PregistryEndpoint=123456789012.dkr.ecr.us-east-2.amazonaws.com/my-ecr-repo
 ```
+
+## Using Minikube or EKS (using the buildkit container that aws-bootstrap.sh uses)
+
+[README-K8s.sh](README-K8s.md)

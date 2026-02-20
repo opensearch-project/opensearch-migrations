@@ -161,7 +161,7 @@ public class EndToEndCompressionTest extends SourceTestBase {
             // Check that the docs were migrated
             checkClusterMigrationOnFinished(sourceCluster, targetCluster, testDocMigrationContext);
         } finally {
-            FileSystemUtils.deleteTree(localDirectory.toPath());
+            FileSystemUtils.deleteDirectories(localDirectory.toString());
         }
     }
 }

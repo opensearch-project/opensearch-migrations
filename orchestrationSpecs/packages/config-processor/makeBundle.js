@@ -54,7 +54,7 @@ async function bundle() {
     const outputFile = path.join(outputDir, 'index.js');
 
     await esbuild.build({
-        entryPoints: ['dist/RunMigrationInitializer.js'],
+        entryPoints: ['src/cliRouter.ts'],  // Changed from dist/cliRouter.js
         bundle: true,
         platform: 'node',
         target: 'node22',
@@ -65,7 +65,7 @@ async function bundle() {
             'etcd3'
         ],
         banner: {
-            js: '#!/usr/bin/env node'
+            js: '#!/usr/bin/env node\nprocess.env.SUPPRESS_AUTO_LOAD = "true";'
         }
     });
 

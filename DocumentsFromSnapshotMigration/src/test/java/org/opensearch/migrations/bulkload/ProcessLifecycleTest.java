@@ -167,7 +167,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 "The program did not exit with the expected status code."
             );
         } finally {
-            FileSystemUtils.deleteTree(tempDirSnapshot);
+            FileSystemUtils.deleteDirectories(tempDirSnapshot.toString());
             Assertions.assertTrue(isDirectoryEmpty(tempDirLucene),
                 "lucene directory "+tempDirLucene+" is not empty");
         }
@@ -176,6 +176,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
     public static boolean isDirectoryEmpty(Path p) throws IOException {
         try (var directoryStream = Files.newDirectoryStream(p)) {
             return !directoryStream.iterator().hasNext();
+        }
+    }
         }
     }
 

@@ -1,0 +1,194 @@
+import org.opensearch.migrations.common.CommonUtils
+import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
+import com.github.gradle.node.npm.task.NpmTask
+import com.github.gradle.node.NodeExtension
+
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'com.bmuschko.docker-remote-api'
+    id 'com.github.node-gradle.node'
+}
+
+node {
+    version = '22.14.0'
+    download = true
+}
+
+// Define paths at the top level
+def orchestrationSpecsDirP = rootProject.layout.projectDirectory.dir("orchestrationSpecs")
+def orchestrationP     = orchestrationSpecsDirP
+def configProcessorP   = orchestrationP.dir("packages/config-processor")
+def workflowTemplatesP = orchestrationP.dir("packages/migration-workflow-templates")
+def configProcessorStagingP =
+        layout.buildDirectory.dir("dockerContext/nodeStaging/configProcessor")
+def workflowTemplatesStagingP =
+        layout.buildDirectory.dir("dockerContext/nodeStaging/workflowTemplates")
+
+tasks.register('installDependencies', NpmTask) {
+    description = 'Install npm dependencies for orchestrationSpecs'
+    workingDir = orchestrationSpecsDirP.asFile
+    args = ['ci', '--force']
+
+    inputs.file(orchestrationSpecsDirP.file("package.json"))
+    inputs.file(orchestrationSpecsDirP.file("package-lock.json"))
+    inputs.file(orchestrationSpecsDirP.file("tsconfig.base.json"))
+    inputs.file(orchestrationSpecsDirP.file("tsconfig.json"))
+    inputs.file(orchestrationSpecsDirP.file("tsconfig.workspaces.json"))
+    outputs.dir(orchestrationSpecsDirP.dir("node_modules"))
+}
+
+tasks.register('makeAndStageWorkflowTemplates', NpmTask) {
+    description = 'Build the workflow templates from their TypeScript definitions'
+    workingDir = workflowTemplatesP.asFile
+    args = ['run', 'check-and-make-templates', '--', '--outputDirectory', workflowTemplatesStagingP.get().asFile.absolutePath]
+    dependsOn installDependencies
+
+    // Source files
+    inputs.dir(workflowTemplatesP.dir("src"))
+    // Resource files embedded in templates
+    inputs.dir(workflowTemplatesP.dir("resources"))
+    // Package-level config files
+    inputs.file(workflowTemplatesP.file("package.json"))
+    inputs.file(workflowTemplatesP.file("tsconfig.json"))
+    inputs.file(workflowTemplatesP.file("makeTemplates.cjs"))
+    // Root-level tsconfig files that affect compilation
+    inputs.file(orchestrationSpecsDirP.file("tsconfig.base.json"))
+    inputs.file(orchestrationSpecsDirP.file("tsconfig.json"))
+    inputs.file(orchestrationSpecsDirP.file("tsconfig.workspaces.json"))
+    outputs.dir(workflowTemplatesStagingP)
+
+    doFirst {
+        workflowTemplatesStagingP.get().asFile.mkdirs()
+    }
+}
+
+tasks.register('buildAndStageConfigProcessor', NpmTask) {
+    description = 'Build and stage the config-processor TypeScript package directly to staging'
+    workingDir = configProcessorP.asFile
+    args = ['run', 'check-and-bundle', '--', configProcessorStagingP.get().asFile.absolutePath]
+    dependsOn installDependencies
+
+    // Source files
+    inputs.dir(configProcessorP.dir("src"))
+    // Build script
+    inputs.file(configProcessorP.file("makeBundle.js"))
+    // Package-level config files
+    inputs.file(configProcessorP.file("package.json"))
+    inputs.file(configProcessorP.file("tsconfig.json"))
+    // Root-level tsconfig files that affect compilation
+    inputs.file(orchestrationSpecsDirP.file("tsconfig.base.json"))
+    inputs.file(orchestrationSpecsDirP.file("tsconfig.json"))
+    inputs.file(orchestrationSpecsDirP.file("tsconfig.workspaces.json"))
+    outputs.dir(configProcessorStagingP)
+
+    doFirst {
+        configProcessorStagingP.get().asFile.mkdirs()
+    }
+}
+
+def buildAndStageConfigProcessorProvider = tasks.named("buildAndStageConfigProcessor")
+def nodeSetupProvider = tasks.named("nodeSetup")
+def nodeExt = extensions.getByType(NodeExtension)
+
+tasks.register("confirmConfigProcessorStagingPath") {
+    // make sure both bits of work are done
+    dependsOn(buildAndStageConfigProcessorProvider)
+    dependsOn(nodeSetupProvider)
+
+    doLast {
+        def nodeDir = nodeExt.resolvedNodeDir.get().asFile
+        def nodeBin = new File(nodeDir, "bin/node")
+        println "NODEJS_BIN=${nodeBin.absolutePath}"
+        println "CONFIG_PROCESSOR_DIR=${configProcessorStagingP.get().asFile.absolutePath}"
+    }
+}
+
+tasks.register('syncDockerBuildContext', Sync) {
+    into layout.buildDirectory.dir("dockerContext")
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    dependsOn makeAndStageWorkflowTemplates
+    dependsOn buildAndStageConfigProcessor
+
+    // Explicitly declare inputs for all files being synced
+    inputs.file(project.file("Dockerfile"))
+    inputs.file(project.file("kafkaCmdRef.md"))
+    inputs.file(project.file("kafkaExport.sh"))
+    inputs.file(project.file("loadServicesFromParameterStore.sh"))
+    inputs.file(project.file("msk-iam-auth.properties"))
+    inputs.file(project.file("setupVimSchemaChecker.sh"))
+    inputs.file(project.file("start-console.sh"))
+    inputs.file(project.file("workflowConfigToServicesConfig.jq"))
+    inputs.dir(project.file("cluster_tools"))
+    inputs.dir(project.file("lib/console_link/console_link"))
+    inputs.file(project.file("lib/console_link/Pipfile"))
+    inputs.file(project.file("lib/console_link/Pipfile.lock"))
+    inputs.file(project.file("lib/console_link/setup.py"))
+    inputs.dir(project.file("lib/integ_test"))
+
+    // Copy your Dockerfile and any other docker-related files
+    from(project.file("Dockerfile"))
+    from(project.file("kafkaCmdRef.md"))
+    from(project.file("kafkaExport.sh"))
+    from(project.file("loadServicesFromParameterStore.sh"))
+    from(project.file("msk-iam-auth.properties"))
+    from(project.file("setupVimSchemaChecker.sh"))
+    from(project.file("start-console.sh"))
+    from(project.file("workflowConfigToServicesConfig.jq"))
+
+    def commonExcludes = [
+            "**/.venv/**",
+            "**/.vscode/**",
+            "**/node_modules/**",
+            "**/__pycache__/**",
+            "**/.pytest_cache/**"
+    ]
+    from(project.file("cluster_tools")) {
+        into "cluster_tools"
+        exclude commonExcludes
+    }
+    from(project.file("lib/console_link/console_link")) {
+        into "lib/console_link/console_link"
+        exclude commonExcludes
+    }
+    from(project.file("lib/console_link/Pipfile")) {
+        into "lib/console_link"
+        exclude commonExcludes
+    }
+    from(project.file("lib/console_link/Pipfile.lock")) {
+        into "lib/console_link"
+        exclude commonExcludes
+    }
+    from(project.file("lib/console_link/setup.py")) {
+        into "lib/console_link"
+        exclude commonExcludes
+    }
+    from(project.file("lib/integ_test")) {
+        into "lib/integ_test"
+        exclude commonExcludes
+    }
+
+    // Preserve the nodeStaging directory if it exists
+    preserve {
+        include 'nodeStaging/**'
+    }
+}
+
+// Build the base migration console image with Python libraries and scripts
+tasks.register('buildDockerImage_migrationConsoleBase', DockerBuildImage) {
+    CommonUtils.dependOnDockerImage(delegate, ":TrafficCapture:dockerSolution:buildDockerImage_elasticsearch_client_test_console")
+    // Depend on console_link's generated OpenAPI spec (copied into Docker image)
+    dependsOn ":console_link:generateOpenApiSpec"
+    dependsOn syncDockerBuildContext
+
+    def dockerImageName = "migration_console_base"
+    def projectName = "migrationConsoleBase"
+
+    inputDir = layout.buildDirectory.dir("dockerContext").get().asFile
+
+    def hashNonce = CommonUtils.calculateDockerHash(project.fileTree(inputDir) {
+        exclude '**/.venv/**', '**/.gradle/**', '**/build/**', '**/.pytest_cache/**', '**/__pycache__/**'
+    })
+    images.add("migrations/${dockerImageName}:${hashNonce}".toString())
+    images.add("migrations/${dockerImageName}:latest".toString())
+}

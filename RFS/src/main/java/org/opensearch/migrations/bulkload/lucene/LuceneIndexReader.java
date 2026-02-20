@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 
 import org.opensearch.migrations.VersionMatchers;
-import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.lucene.version_5.IndexReader5;
 import org.opensearch.migrations.bulkload.lucene.version_6.IndexReader6;
 import org.opensearch.migrations.bulkload.lucene.version_7.IndexReader7;
@@ -64,7 +64,7 @@ public interface LuceneIndexReader {
      *    Lucene Index.
 
      */
-    default Flux<RfsLuceneDocument> readDocuments(String segmentsFileName, int startDocIdx) {
+    default Flux<LuceneDocumentChange> streamDocumentChanges(String segmentsFileName, int startDocIdx) {
         return Flux.using(
             () -> this.getReader(segmentsFileName),
             reader -> LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx),
@@ -77,8 +77,8 @@ public interface LuceneIndexReader {
         });
     }
 
-    default Flux<RfsLuceneDocument> readDocuments(String segmentsFileName) {
-        return readDocuments(segmentsFileName, 0);
+    default Flux<LuceneDocumentChange> streamDocumentChanges(String segmentsFileName) {
+        return streamDocumentChanges(segmentsFileName, 0);
     }
 
     LuceneDirectoryReader getReader(String segmentsFileName) throws IOException;

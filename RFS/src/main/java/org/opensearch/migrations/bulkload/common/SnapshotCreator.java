@@ -22,14 +22,19 @@ public abstract class SnapshotCreator {
     @Getter
     private final String snapshotRepoName;
     private final List<String> indexAllowlist;
+    protected final boolean compressionEnabled;
+    protected final boolean includeGlobalState;
 
     protected SnapshotCreator(String snapshotName, String snapshotRepoName, List<String> indexAllowlist,
-                              OpenSearchClient client, IRfsContexts.ICreateSnapshotContext context) {
+                              OpenSearchClient client, IRfsContexts.ICreateSnapshotContext context,
+                              boolean compressionEnabled, boolean includeGlobalState) {
         this.snapshotName = snapshotName;
         this.snapshotRepoName = snapshotRepoName;
         this.indexAllowlist = indexAllowlist;
         this.client = client;
         this.context = context;
+        this.compressionEnabled = compressionEnabled;
+        this.includeGlobalState = includeGlobalState;
     }
 
     abstract ObjectNode getRequestBodyForRegisterRepo();
@@ -60,7 +65,7 @@ public abstract class SnapshotCreator {
         ObjectNode body = mapper.createObjectNode();
         body.put("indices", this.getIndexAllowlist());
         body.put("ignore_unavailable", true);
-        body.put("include_global_state", true);
+        body.put("include_global_state", includeGlobalState);
 
         // Create the snapshot; idempotent operation
         try {

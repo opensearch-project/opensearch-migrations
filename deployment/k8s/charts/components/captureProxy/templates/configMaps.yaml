@@ -1,6 +1,0 @@
-{{- include "generic.createConfigMaps" (dict
-    "Parameters" .Values.parameters
-    "PackageName" (include "generic.fullname" .)
-    "include" .Template.Include
-    "Template" .Template
-) | indent 0 -}}

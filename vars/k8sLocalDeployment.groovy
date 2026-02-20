@@ -88,13 +88,37 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Build Docker Images (Minikube)') {
+            stage('Build Docker Images (BuildKit)') {
                 steps {
                     timeout(time: 30, unit: 'MINUTES') {
-                        dir('deployment/k8s') {
-                            script {
-                                sh "./buildDockerImagesMini.sh"
-                            }
+                        script {
+                            sh "helm uninstall buildkit -n buildkit 2>/dev/null || true"
+                            sh "USE_LOCAL_REGISTRY=true BUILDKIT_HELM_ARGS='--set buildkitd.maxParallelism=16 --set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0' ./buildImages/setUpK8sImageBuildServices.sh"
+                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 -x test --info --stacktrace --profile --scan"
+                            sh "docker buildx rm local-remote-builder 2>/dev/null || true"
+                            sh "helm uninstall buildkit -n buildkit 2>/dev/null || true"
+                        }
+                    }
+                }
+            }
+
+            stage('Cleanup Previous MA Deployment') {
+                steps {
+                    timeout(time: 3, unit: 'MINUTES') {
+                        script {
+                            sh "kubectl config use-context minikube"
+                            sh """
+                                # Attempt clean helm uninstall first (triggers hook-based cleanup)
+                                helm uninstall ma -n ma || true
+
+                                # Delete kyverno webhooks in case helm uninstall didn't run cleanly
+                                kubectl delete mutatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found || true
+                                kubectl delete validatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found || true
+
+                                # Force-delete namespaces if they still exist
+                                kubectl delete namespace kyverno-ma --ignore-not-found --grace-period=0 || true
+                                kubectl delete namespace ma --ignore-not-found --grace-period=0 --force || true
+                            """
                         }
                     }
                 }
@@ -116,7 +140,8 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "kubectl config use-context minikube"
-                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs"
+                                def registryIp = sh(script: "kubectl get svc -n buildkit docker-registry -o jsonpath='{.spec.clusterIP}'", returnStdout: true).trim()
+                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='${registryIp}:5000/'"
                             }
                         }
                     }

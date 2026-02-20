@@ -37,6 +37,12 @@ export type ScopeIsEmptyConstraint<S, T> =
     keyof S extends never
         ? T
         : TypescriptError<`Scope must be empty but contains: ${keyof S & string}`>
+ 
+/**
+ * Helper type to extract ContainerScope from a ContainerBuilder type.
+ * This allows us to check for resources in the container scope.
+ */
+export type ExtractContainerScope<T> = T extends { bodyScope: infer CS } ? CS : never;
 
 export function extendScope<OS extends GenericScope, NS extends GenericScope>(orig: OS, fn: ScopeFn<OS, NS>): ExtendScope<OS, NS> {
     return {

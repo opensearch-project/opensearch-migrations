@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.version_universal;
 
-import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.SnapshotRepo.Index;
 
@@ -18,10 +17,5 @@ final class RemoteIndexSnapshotData implements Index {
     @Override
     public String getId() {
         throw new UnsupportedOperationException("Unimplemented method 'getId'");
-    }
-
-    @Override
-    public List<String> getSnapshots() {
-        throw new UnsupportedOperationException("Unimplemented method 'getSnapshots'");
     }
 }

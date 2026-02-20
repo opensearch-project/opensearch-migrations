@@ -1,0 +1,2259 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`Solutions stack ECS stack with import VPC matches snapshot 1`] = `
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "(SO0290) - Migration Assistant for Amazon OpenSearch Service - ECS VPC Import Template v2.0.0",
+  "Mappings": {
+    "Solution": {
+      "Config": {
+        "CodeVersion": "0.0.1",
+        "KeyPrefix": "test-solution/0.0.1",
+        "S3Bucket": "test-bucket",
+        "SendAnonymousUsage": "No",
+        "SolutionId": "SO0000",
+      },
+    },
+  },
+  "Metadata": {
+    "AWS::CloudFormation::Interface": {
+      "ParameterGroups": [
+        {
+          "Label": {
+            "default": "Imported VPC parameters",
+          },
+          "Parameters": [
+            "VPCId",
+            "VPCAvailabilityZones",
+            "VPCPrivateSubnetIds",
+          ],
+        },
+        {
+          "Label": {
+            "default": "Additional parameters",
+          },
+          "Parameters": [
+            "Stage",
+          ],
+        },
+      ],
+      "ParameterLabels": {
+        "VPCAvailabilityZones": {
+          "default": "Availability Zones",
+        },
+        "VPCId": {
+          "default": "VPC",
+        },
+        "VPCPrivateSubnetIds": {
+          "default": "Private Subnets",
+        },
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "Stage": {
+      "Default": "dev",
+      "Description": "Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1.  This name should be unique for the all deployments in the region.",
+      "Type": "String",
+    },
+    "VPCAvailabilityZones": {
+      "Description": "Select Availability Zones in the selected VPC. Please provide two zones at least, corresponding with the private subnets selected next.",
+      "Type": "List<AWS::EC2::AvailabilityZone::Name>",
+    },
+    "VPCId": {
+      "Description": "Select a VPC, we recommend choosing the VPC of the target cluster.",
+      "Type": "AWS::EC2::VPC::Id",
+    },
+    "VPCPrivateSubnetIds": {
+      "Description": "Select Private Subnets in the selected VPC. Please provide two subnets at least, corresponding with the availability zones selected previously.",
+      "Type": "List<AWS::EC2::Subnet::Id>",
+    },
+  },
+  "Resources": {
+    "AppRegistry968496A3": {
+      "Properties": {
+        "Description": "Service Catalog application to track and manage all your resources for the solution test-solution",
+        "Name": {
+          "Fn::Join": [
+            "-",
+            [
+              "test-solution",
+              {
+                "Ref": "AWS::Region",
+              },
+              {
+                "Ref": "AWS::AccountId",
+              },
+              {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-",
+                    {
+                      "Ref": "AWS::Region",
+                    },
+                  ],
+                ],
+              },
+            ],
+          ],
+        },
+        "Tags": {
+          "Solutions:ApplicationType": "AWS-Solutions",
+          "Solutions:SolutionID": "SO0000",
+          "Solutions:SolutionName": "test-solution",
+          "Solutions:SolutionVersion": "0.0.1",
+        },
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::Application",
+    },
+    "AppRegistryAssociation": {
+      "Properties": {
+        "Application": {
+          "Fn::GetAtt": [
+            "AppRegistry968496A3",
+            "Id",
+          ],
+        },
+        "Resource": {
+          "Ref": "AWS::StackId",
+        },
+        "ResourceType": "CFN_STACK",
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::ResourceAssociation",
+    },
+    "BootstrapEC2Instance36A69AF7e7021022bd1e0bb9": {
+      "CreationPolicy": {
+        "ResourceSignal": {
+          "Count": 1,
+          "Timeout": "PT5M",
+        },
+      },
+      "DependsOn": [
+        "BootstrapRoleDefaultPolicy73F5FAC5",
+        "BootstrapRole9F5149C7",
+      ],
+      "Metadata": {
+        "AWS::CloudFormation::Init": {
+          "config": {
+            "commands": {
+              "000": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "echo "export MIGRATIONS_APP_REGISTRY_ARN=",
+                      {
+                        "Fn::GetAtt": [
+                          "AppRegistry968496A3",
+                          "Arn",
+                        ],
+                      },
+                      "; export MIGRATIONS_USER_AGENT=AwsSolution/SO0000/0.0.1; export VPC_ID=",
+                      {
+                        "Ref": "VPCId",
+                      },
+                      "; export STAGE=",
+                      {
+                        "Ref": "Stage",
+                      },
+                      "" > /etc/profile.d/solutionsEnv.sh",
+                    ],
+                  ],
+                },
+              },
+            },
+            "files": {
+              "/opensearch-migrations/initBootstrap.sh": {
+                "content": "#!/bin/bash
+
+usage() {
+  echo "Usage: $0 [--tag <tag_name>] [--branch <branch_name>]"
+  exit 1
+}
+
+tag=""
+branch=""
+
+# Parse options
+while [[ "$#" -gt 0 ]]; do
+  case $1 in
+    --tag)
+      if [ -n "$branch" ]; then
+        echo "Error: You cannot specify both --tag and --branch."
+        usage
+      fi
+      tag="$2"
+      shift
+      ;;
+    --branch)
+      if [ -n "$tag" ]; then
+        echo "Error: You cannot specify both --tag and --branch."
+        usage
+      fi
+      branch="$2"
+      shift
+      ;;
+    *)
+      echo "Unknown parameter passed: $1"
+      usage
+      ;;
+  esac
+  shift
+done
+
+# Check that these Node-22/NPM references are valid
+yum update && yum install -y git java-17-amazon-corretto-devel docker nodejs22 nodejs22-npm https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm
+systemctl start docker
+git init
+git remote | grep "origin" || git remote add -f origin https://github.com/opensearch-project/opensearch-migrations.git
+
+if [ -n "$branch" ]; then
+  git checkout $branch
+elif [ -n "$tag" ]; then
+  git checkout tags/$tag
+else
+  latest_release_tag=$(curl -s https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | jq -r ".tag_name")
+  git checkout tags/$latest_release_tag
+fi
+
+cd deployment/cdk/opensearch-service-migration || exit
+
+if [[ -n "$VPC_ID" ]]; then
+  sed -i "s|<VPC_ID>|$VPC_ID|g" /opensearch-migrations/deployment/cdk/opensearch-service-migration/cdk.context.json
+fi
+if [[ -n "$STAGE" ]]; then
+  sed -i "s|<STAGE>|$STAGE|g" /opensearch-migrations/deployment/cdk/opensearch-service-migration/cdk.context.json
+fi
+
+npm install -g aws-cdk 2>&1
+npm install 2>&1
+./buildDockerImages.sh",
+                "encoding": "plain",
+                "group": "root",
+                "mode": "000744",
+                "owner": "root",
+              },
+            },
+          },
+          "configSets": {
+            "default": [
+              "config",
+            ],
+          },
+        },
+      },
+      "Properties": {
+        "AvailabilityZone": {
+          "Fn::Select": [
+            0,
+            {
+              "Ref": "VPCAvailabilityZones",
+            },
+          ],
+        },
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/xvda",
+            "Ebs": {
+              "VolumeSize": 50,
+            },
+          },
+        ],
+        "IamInstanceProfile": {
+          "Ref": "BootstrapEC2InstanceInstanceProfile987ED32E",
+        },
+        "ImageId": "ami-0e2694e3cb74a4c35",
+        "InstanceType": "t3.large",
+        "LaunchTemplate": {
+          "LaunchTemplateName": "BootstrapEC2InstanceLaunchTemplate",
+          "Version": {
+            "Fn::GetAtt": [
+              "BootstrapEC2InstanceLaunchTemplate3BA48394",
+              "LatestVersionNumber",
+            ],
+          },
+        },
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "BootstrapSecurityGroupF430C916",
+              "GroupId",
+            ],
+          },
+        ],
+        "SubnetId": {
+          "Fn::Select": [
+            0,
+            {
+              "Ref": "VPCPrivateSubnetIds",
+            },
+          ],
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "bootstrap-instance-",
+                  {
+                    "Ref": "Stage",
+                  },
+                  "-",
+                  {
+                    "Ref": "AWS::Region",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash
+# fingerprint: e1f2c192c5813e3b
+(
+  set +e
+  /opt/aws/bin/cfn-init -v --region ",
+                {
+                  "Ref": "AWS::Region",
+                },
+                " --stack ",
+                {
+                  "Ref": "AWS::StackName",
+                },
+                " --resource BootstrapEC2Instance36A69AF7e7021022bd1e0bb9 -c default
+  /opt/aws/bin/cfn-signal -e $? --region ",
+                {
+                  "Ref": "AWS::Region",
+                },
+                " --stack ",
+                {
+                  "Ref": "AWS::StackName",
+                },
+                " --resource BootstrapEC2Instance36A69AF7e7021022bd1e0bb9
+  cat /var/log/cfn-init.log >&2
+)",
+              ],
+            ],
+          },
+        },
+      },
+      "Type": "AWS::EC2::Instance",
+    },
+    "BootstrapEC2InstanceInstanceProfile987ED32E": {
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "BootstrapRole9F5149C7",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::InstanceProfile",
+    },
+    "BootstrapEC2InstanceLaunchTemplate3BA48394": {
+      "Properties": {
+        "LaunchTemplateData": {
+          "MetadataOptions": {
+            "HttpTokens": "required",
+          },
+        },
+        "LaunchTemplateName": "BootstrapEC2InstanceLaunchTemplate",
+      },
+      "Type": "AWS::EC2::LaunchTemplate",
+    },
+    "BootstrapInstanceProfile27016621": {
+      "Properties": {
+        "InstanceProfileName": {
+          "Fn::Join": [
+            "",
+            [
+              "bootstrap-instance-profile-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Roles": [
+          {
+            "Ref": "BootstrapRole9F5149C7",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::InstanceProfile",
+    },
+    "BootstrapRole9F5149C7": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "EC2 Bootstrap Role",
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AdministratorAccess",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "BootstrapRoleDefaultPolicy73F5FAC5": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "cloudformation:DescribeStackResource",
+                "cloudformation:SignalResource",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "AWS::StackId",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "BootstrapRoleDefaultPolicy73F5FAC5",
+        "Roles": [
+          {
+            "Ref": "BootstrapRole9F5149C7",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "BootstrapSecurityGroupF430C916": {
+      "Properties": {
+        "GroupDescription": "TestMigrationAssistantStack/BootstrapSecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+          {
+            "CidrIpv6": "::/0",
+            "Description": "Allow all outbound ipv6 traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VPCId",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "BootstrapShellDoc": {
+      "Properties": {
+        "Content": {
+          "description": "Document to hold regional settings for Session Manager",
+          "inputs": {
+            "cloudWatchEncryptionEnabled": true,
+            "cloudWatchLogGroupName": "",
+            "cloudWatchStreamingEnabled": false,
+            "idleSessionTimeout": "60",
+            "kmsKeyId": "",
+            "maxSessionDuration": "",
+            "runAsDefaultUser": "",
+            "runAsEnabled": false,
+            "shellProfile": {
+              "linux": "cd /opensearch-migrations && sudo -s",
+            },
+          },
+          "schemaVersion": "1.0",
+          "sessionType": "Standard_Stream",
+        },
+        "DocumentType": "Session",
+        "Name": {
+          "Fn::Join": [
+            "",
+            [
+              "BootstrapShellDoc-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Document",
+    },
+    "DefaultApplicationAttributesApplicationAttributeGroupAssociation5303e42e4390C82F1F85": {
+      "Properties": {
+        "Application": {
+          "Fn::GetAtt": [
+            "AppRegistry968496A3",
+            "Id",
+          ],
+        },
+        "AttributeGroup": {
+          "Fn::GetAtt": [
+            "DefaultApplicationAttributesFC1CC26B",
+            "Id",
+          ],
+        },
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::AttributeGroupAssociation",
+    },
+    "DefaultApplicationAttributesFC1CC26B": {
+      "Properties": {
+        "Attributes": {
+          "applicationType": "AWS-Solutions",
+          "solutionID": "SO0000",
+          "solutionName": "test-solution",
+          "version": "0.0.1",
+        },
+        "Description": "Attribute group for solution information",
+        "Name": {
+          "Fn::Join": [
+            "-",
+            [
+              {
+                "Ref": "AWS::Region",
+              },
+              {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-",
+                    {
+                      "Ref": "AWS::Region",
+                    },
+                  ],
+                ],
+              },
+              "attributes",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::AttributeGroup",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`Solutions stack ECS stack with new VPC matches snapshot 1`] = `
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "(SO0290) - Migration Assistant for Amazon OpenSearch Service - ECS VPC Create Template v2.0.0",
+  "Mappings": {
+    "Solution": {
+      "Config": {
+        "CodeVersion": "0.0.1",
+        "KeyPrefix": "test-solution/0.0.1",
+        "S3Bucket": "test-bucket",
+        "SendAnonymousUsage": "No",
+        "SolutionId": "SO0000",
+      },
+    },
+  },
+  "Metadata": {
+    "AWS::CloudFormation::Interface": {
+      "ParameterGroups": [
+        {
+          "Label": {
+            "default": "Additional parameters",
+          },
+          "Parameters": [
+            "Stage",
+          ],
+        },
+      ],
+      "ParameterLabels": {},
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "Stage": {
+      "Default": "dev",
+      "Description": "Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1.  This name should be unique for the all deployments in the region.",
+      "Type": "String",
+    },
+  },
+  "Resources": {
+    "AppRegistry968496A3": {
+      "Properties": {
+        "Description": "Service Catalog application to track and manage all your resources for the solution test-solution",
+        "Name": {
+          "Fn::Join": [
+            "-",
+            [
+              "test-solution",
+              {
+                "Ref": "AWS::Region",
+              },
+              {
+                "Ref": "AWS::AccountId",
+              },
+              {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-",
+                    {
+                      "Ref": "AWS::Region",
+                    },
+                  ],
+                ],
+              },
+            ],
+          ],
+        },
+        "Tags": {
+          "Solutions:ApplicationType": "AWS-Solutions",
+          "Solutions:SolutionID": "SO0000",
+          "Solutions:SolutionName": "test-solution",
+          "Solutions:SolutionVersion": "0.0.1",
+        },
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::Application",
+    },
+    "AppRegistryAssociation": {
+      "Properties": {
+        "Application": {
+          "Fn::GetAtt": [
+            "AppRegistry968496A3",
+            "Id",
+          ],
+        },
+        "Resource": {
+          "Ref": "AWS::StackId",
+        },
+        "ResourceType": "CFN_STACK",
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::ResourceAssociation",
+    },
+    "BootstrapEC2Instance36A69AF7fd76b0caa0c66db9": {
+      "CreationPolicy": {
+        "ResourceSignal": {
+          "Count": 1,
+          "Timeout": "PT5M",
+        },
+      },
+      "DependsOn": [
+        "BootstrapRoleDefaultPolicy73F5FAC5",
+        "BootstrapRole9F5149C7",
+      ],
+      "Metadata": {
+        "AWS::CloudFormation::Init": {
+          "config": {
+            "commands": {
+              "000": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "echo "export MIGRATIONS_APP_REGISTRY_ARN=",
+                      {
+                        "Fn::GetAtt": [
+                          "AppRegistry968496A3",
+                          "Arn",
+                        ],
+                      },
+                      "; export MIGRATIONS_USER_AGENT=AwsSolution/SO0000/0.0.1; export VPC_ID=",
+                      {
+                        "Ref": "Vpc8378EB38",
+                      },
+                      "; export STAGE=",
+                      {
+                        "Ref": "Stage",
+                      },
+                      "" > /etc/profile.d/solutionsEnv.sh",
+                    ],
+                  ],
+                },
+              },
+            },
+            "files": {
+              "/opensearch-migrations/initBootstrap.sh": {
+                "content": "#!/bin/bash
+
+usage() {
+  echo "Usage: $0 [--tag <tag_name>] [--branch <branch_name>]"
+  exit 1
+}
+
+tag=""
+branch=""
+
+# Parse options
+while [[ "$#" -gt 0 ]]; do
+  case $1 in
+    --tag)
+      if [ -n "$branch" ]; then
+        echo "Error: You cannot specify both --tag and --branch."
+        usage
+      fi
+      tag="$2"
+      shift
+      ;;
+    --branch)
+      if [ -n "$tag" ]; then
+        echo "Error: You cannot specify both --tag and --branch."
+        usage
+      fi
+      branch="$2"
+      shift
+      ;;
+    *)
+      echo "Unknown parameter passed: $1"
+      usage
+      ;;
+  esac
+  shift
+done
+
+# Check that these Node-22/NPM references are valid
+yum update && yum install -y git java-17-amazon-corretto-devel docker nodejs22 nodejs22-npm https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm
+systemctl start docker
+git init
+git remote | grep "origin" || git remote add -f origin https://github.com/opensearch-project/opensearch-migrations.git
+
+if [ -n "$branch" ]; then
+  git checkout $branch
+elif [ -n "$tag" ]; then
+  git checkout tags/$tag
+else
+  latest_release_tag=$(curl -s https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | jq -r ".tag_name")
+  git checkout tags/$latest_release_tag
+fi
+
+cd deployment/cdk/opensearch-service-migration || exit
+
+if [[ -n "$VPC_ID" ]]; then
+  sed -i "s|<VPC_ID>|$VPC_ID|g" /opensearch-migrations/deployment/cdk/opensearch-service-migration/cdk.context.json
+fi
+if [[ -n "$STAGE" ]]; then
+  sed -i "s|<STAGE>|$STAGE|g" /opensearch-migrations/deployment/cdk/opensearch-service-migration/cdk.context.json
+fi
+
+npm install -g aws-cdk 2>&1
+npm install 2>&1
+./buildDockerImages.sh",
+                "encoding": "plain",
+                "group": "root",
+                "mode": "000744",
+                "owner": "root",
+              },
+            },
+          },
+          "configSets": {
+            "default": [
+              "config",
+            ],
+          },
+        },
+      },
+      "Properties": {
+        "AvailabilityZone": {
+          "Fn::Select": [
+            0,
+            {
+              "Fn::GetAZs": "",
+            },
+          ],
+        },
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/xvda",
+            "Ebs": {
+              "VolumeSize": 50,
+            },
+          },
+        ],
+        "IamInstanceProfile": {
+          "Ref": "BootstrapEC2InstanceInstanceProfile987ED32E",
+        },
+        "ImageId": "ami-0e2694e3cb74a4c35",
+        "InstanceType": "t3.large",
+        "LaunchTemplate": {
+          "LaunchTemplateName": "BootstrapEC2InstanceLaunchTemplate",
+          "Version": {
+            "Fn::GetAtt": [
+              "BootstrapEC2InstanceLaunchTemplate3BA48394",
+              "LatestVersionNumber",
+            ],
+          },
+        },
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "BootstrapSecurityGroupF430C916",
+              "GroupId",
+            ],
+          },
+        ],
+        "SubnetId": {
+          "Ref": "VpcPrivateSubnet1Subnet536B997A",
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "bootstrap-instance-",
+                  {
+                    "Ref": "Stage",
+                  },
+                  "-",
+                  {
+                    "Ref": "AWS::Region",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash
+# fingerprint: f9318fc038a3f729
+(
+  set +e
+  /opt/aws/bin/cfn-init -v --region ",
+                {
+                  "Ref": "AWS::Region",
+                },
+                " --stack ",
+                {
+                  "Ref": "AWS::StackName",
+                },
+                " --resource BootstrapEC2Instance36A69AF7fd76b0caa0c66db9 -c default
+  /opt/aws/bin/cfn-signal -e $? --region ",
+                {
+                  "Ref": "AWS::Region",
+                },
+                " --stack ",
+                {
+                  "Ref": "AWS::StackName",
+                },
+                " --resource BootstrapEC2Instance36A69AF7fd76b0caa0c66db9
+  cat /var/log/cfn-init.log >&2
+)",
+              ],
+            ],
+          },
+        },
+      },
+      "Type": "AWS::EC2::Instance",
+    },
+    "BootstrapEC2InstanceInstanceProfile987ED32E": {
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "BootstrapRole9F5149C7",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::InstanceProfile",
+    },
+    "BootstrapEC2InstanceLaunchTemplate3BA48394": {
+      "Properties": {
+        "LaunchTemplateData": {
+          "MetadataOptions": {
+            "HttpTokens": "required",
+          },
+        },
+        "LaunchTemplateName": "BootstrapEC2InstanceLaunchTemplate",
+      },
+      "Type": "AWS::EC2::LaunchTemplate",
+    },
+    "BootstrapInstanceProfile27016621": {
+      "Properties": {
+        "InstanceProfileName": {
+          "Fn::Join": [
+            "",
+            [
+              "bootstrap-instance-profile-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Roles": [
+          {
+            "Ref": "BootstrapRole9F5149C7",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::InstanceProfile",
+    },
+    "BootstrapRole9F5149C7": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "EC2 Bootstrap Role",
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AdministratorAccess",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "BootstrapRoleDefaultPolicy73F5FAC5": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "cloudformation:DescribeStackResource",
+                "cloudformation:SignalResource",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "AWS::StackId",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "BootstrapRoleDefaultPolicy73F5FAC5",
+        "Roles": [
+          {
+            "Ref": "BootstrapRole9F5149C7",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "BootstrapSecurityGroupF430C916": {
+      "Properties": {
+        "GroupDescription": "TestMigrationAssistantStack/BootstrapSecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+          {
+            "CidrIpv6": "::/0",
+            "Description": "Allow all outbound ipv6 traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "BootstrapShellDoc": {
+      "Properties": {
+        "Content": {
+          "description": "Document to hold regional settings for Session Manager",
+          "inputs": {
+            "cloudWatchEncryptionEnabled": true,
+            "cloudWatchLogGroupName": "",
+            "cloudWatchStreamingEnabled": false,
+            "idleSessionTimeout": "60",
+            "kmsKeyId": "",
+            "maxSessionDuration": "",
+            "runAsDefaultUser": "",
+            "runAsEnabled": false,
+            "shellProfile": {
+              "linux": "cd /opensearch-migrations && sudo -s",
+            },
+          },
+          "schemaVersion": "1.0",
+          "sessionType": "Standard_Stream",
+        },
+        "DocumentType": "Session",
+        "Name": {
+          "Fn::Join": [
+            "",
+            [
+              "BootstrapShellDoc-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Document",
+    },
+    "DefaultApplicationAttributesApplicationAttributeGroupAssociation5303e42e4390C82F1F85": {
+      "Properties": {
+        "Application": {
+          "Fn::GetAtt": [
+            "AppRegistry968496A3",
+            "Id",
+          ],
+        },
+        "AttributeGroup": {
+          "Fn::GetAtt": [
+            "DefaultApplicationAttributesFC1CC26B",
+            "Id",
+          ],
+        },
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::AttributeGroupAssociation",
+    },
+    "DefaultApplicationAttributesFC1CC26B": {
+      "Properties": {
+        "Attributes": {
+          "applicationType": "AWS-Solutions",
+          "solutionID": "SO0000",
+          "solutionName": "test-solution",
+          "version": "0.0.1",
+        },
+        "Description": "Attribute group for solution information",
+        "Name": {
+          "Fn::Join": [
+            "-",
+            [
+              {
+                "Ref": "AWS::Region",
+              },
+              {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-",
+                    {
+                      "Ref": "AWS::Region",
+                    },
+                  ],
+                ],
+              },
+              "attributes",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::AttributeGroup",
+    },
+    "S3VpcEndpoint1F0CDE18": {
+      "Properties": {
+        "RouteTableIds": [
+          {
+            "Ref": "VpcPrivateSubnet1RouteTableB2C5B500",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2RouteTableA678073B",
+          },
+          {
+            "Ref": "VpcPublicSubnet1RouteTable6C95E38E",
+          },
+          {
+            "Ref": "VpcPublicSubnet2RouteTable94F7E489",
+          },
+        ],
+        "ServiceName": {
+          "Fn::Join": [
+            "",
+            [
+              "com.amazonaws.",
+              {
+                "Ref": "AWS::Region",
+              },
+              ".s3",
+            ],
+          ],
+        },
+        "VpcEndpointType": "Gateway",
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "Vpc8378EB38": {
+      "Properties": {
+        "CidrBlock": "10.212.0.0/16",
+        "EnableDnsHostnames": true,
+        "EnableDnsSupport": true,
+        "InstanceTenancy": "default",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-vpc-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::EC2::VPC",
+    },
+    "VpcEIGW61416F369": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-vpc-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::EgressOnlyInternetGateway",
+    },
+    "VpcIGWD7BA715C": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-vpc-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::EC2::InternetGateway",
+    },
+    "VpcPrivateSubnet1DefaultRoute6B45CB740": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationIpv6CidrBlock": "::/0",
+        "EgressOnlyInternetGatewayId": {
+          "Ref": "VpcEIGW61416F369",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet1RouteTableB2C5B500",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPrivateSubnet1DefaultRouteBE02A9ED": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "NatGatewayId": {
+          "Ref": "VpcPublicSubnet1NATGateway4D7517AA",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet1RouteTableB2C5B500",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPrivateSubnet1RouteTableAssociation70C59FA6": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet1RouteTableB2C5B500",
+        },
+        "SubnetId": {
+          "Ref": "VpcPrivateSubnet1Subnet536B997A",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "VpcPrivateSubnet1RouteTableB2C5B500": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-private-subnet-1-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "VpcPrivateSubnet1Subnet536B997A": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "AssignIpv6AddressOnCreation": true,
+        "AvailabilityZone": {
+          "Fn::Select": [
+            0,
+            {
+              "Fn::GetAZs": "",
+            },
+          ],
+        },
+        "CidrBlock": "10.212.128.0/18",
+        "Ipv6CidrBlock": {
+          "Fn::Select": [
+            2,
+            {
+              "Fn::Cidr": [
+                {
+                  "Fn::Select": [
+                    0,
+                    {
+                      "Fn::GetAtt": [
+                        "Vpc8378EB38",
+                        "Ipv6CidrBlocks",
+                      ],
+                    },
+                  ],
+                },
+                4,
+                "64",
+              ],
+            },
+          ],
+        },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "Private",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Private",
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-private-subnet-1-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "VpcPrivateSubnet2DefaultRoute060D2087": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "NatGatewayId": {
+          "Ref": "VpcPublicSubnet2NATGateway9182C01D",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet2RouteTableA678073B",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPrivateSubnet2DefaultRoute6DDF1236D": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationIpv6CidrBlock": "::/0",
+        "EgressOnlyInternetGatewayId": {
+          "Ref": "VpcEIGW61416F369",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet2RouteTableA678073B",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPrivateSubnet2RouteTableA678073B": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-private-subnet-2-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "VpcPrivateSubnet2RouteTableAssociationA89CAD56": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet2RouteTableA678073B",
+        },
+        "SubnetId": {
+          "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "VpcPrivateSubnet2Subnet3788AAA1": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "AssignIpv6AddressOnCreation": true,
+        "AvailabilityZone": {
+          "Fn::Select": [
+            1,
+            {
+              "Fn::GetAZs": "",
+            },
+          ],
+        },
+        "CidrBlock": "10.212.192.0/18",
+        "Ipv6CidrBlock": {
+          "Fn::Select": [
+            3,
+            {
+              "Fn::Cidr": [
+                {
+                  "Fn::Select": [
+                    0,
+                    {
+                      "Fn::GetAtt": [
+                        "Vpc8378EB38",
+                        "Ipv6CidrBlocks",
+                      ],
+                    },
+                  ],
+                },
+                4,
+                "64",
+              ],
+            },
+          ],
+        },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "Private",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Private",
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-private-subnet-2-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "VpcPublicSubnet1DefaultRoute3DA9E72A": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+        "VpcVPCGWBF912B6E",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "VpcIGWD7BA715C",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet1RouteTable6C95E38E",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPublicSubnet1DefaultRoute6A21265FB": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationIpv6CidrBlock": "::/0",
+        "GatewayId": {
+          "Ref": "VpcIGWD7BA715C",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet1RouteTable6C95E38E",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPublicSubnet1EIPD7E02669": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Domain": "vpc",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-1-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::EC2::EIP",
+    },
+    "VpcPublicSubnet1NATGateway4D7517AA": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+        "VpcPublicSubnet1DefaultRoute3DA9E72A",
+        "VpcPublicSubnet1DefaultRoute6A21265FB",
+        "VpcPublicSubnet1RouteTableAssociation97140677",
+      ],
+      "Properties": {
+        "AllocationId": {
+          "Fn::GetAtt": [
+            "VpcPublicSubnet1EIPD7E02669",
+            "AllocationId",
+          ],
+        },
+        "SubnetId": {
+          "Ref": "VpcPublicSubnet1Subnet5C2D37C4",
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-1-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::EC2::NatGateway",
+    },
+    "VpcPublicSubnet1RouteTable6C95E38E": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-1-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "VpcPublicSubnet1RouteTableAssociation97140677": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet1RouteTable6C95E38E",
+        },
+        "SubnetId": {
+          "Ref": "VpcPublicSubnet1Subnet5C2D37C4",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "VpcPublicSubnet1Subnet5C2D37C4": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "AssignIpv6AddressOnCreation": true,
+        "AvailabilityZone": {
+          "Fn::Select": [
+            0,
+            {
+              "Fn::GetAZs": "",
+            },
+          ],
+        },
+        "CidrBlock": "10.212.0.0/18",
+        "Ipv6CidrBlock": {
+          "Fn::Select": [
+            0,
+            {
+              "Fn::Cidr": [
+                {
+                  "Fn::Select": [
+                    0,
+                    {
+                      "Fn::GetAtt": [
+                        "Vpc8378EB38",
+                        "Ipv6CidrBlocks",
+                      ],
+                    },
+                  ],
+                },
+                4,
+                "64",
+              ],
+            },
+          ],
+        },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "Public",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Public",
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-1-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "VpcPublicSubnet2DefaultRoute63E63096C": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationIpv6CidrBlock": "::/0",
+        "GatewayId": {
+          "Ref": "VpcIGWD7BA715C",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet2RouteTable94F7E489",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPublicSubnet2DefaultRoute97F91067": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+        "VpcVPCGWBF912B6E",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "VpcIGWD7BA715C",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet2RouteTable94F7E489",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPublicSubnet2EIP3C605A87": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Domain": "vpc",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-2-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::EC2::EIP",
+    },
+    "VpcPublicSubnet2NATGateway9182C01D": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+        "VpcPublicSubnet2DefaultRoute97F91067",
+        "VpcPublicSubnet2DefaultRoute63E63096C",
+        "VpcPublicSubnet2RouteTableAssociationDD5762D8",
+      ],
+      "Properties": {
+        "AllocationId": {
+          "Fn::GetAtt": [
+            "VpcPublicSubnet2EIP3C605A87",
+            "AllocationId",
+          ],
+        },
+        "SubnetId": {
+          "Ref": "VpcPublicSubnet2Subnet691E08A3",
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-2-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::EC2::NatGateway",
+    },
+    "VpcPublicSubnet2RouteTable94F7E489": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-2-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "VpcPublicSubnet2RouteTableAssociationDD5762D8": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet2RouteTable94F7E489",
+        },
+        "SubnetId": {
+          "Ref": "VpcPublicSubnet2Subnet691E08A3",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "VpcPublicSubnet2Subnet691E08A3": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "AssignIpv6AddressOnCreation": true,
+        "AvailabilityZone": {
+          "Fn::Select": [
+            1,
+            {
+              "Fn::GetAZs": "",
+            },
+          ],
+        },
+        "CidrBlock": "10.212.64.0/18",
+        "Ipv6CidrBlock": {
+          "Fn::Select": [
+            1,
+            {
+              "Fn::Cidr": [
+                {
+                  "Fn::Select": [
+                    0,
+                    {
+                      "Fn::GetAtt": [
+                        "Vpc8378EB38",
+                        "Ipv6CidrBlocks",
+                      ],
+                    },
+                  ],
+                },
+                4,
+                "64",
+              ],
+            },
+          ],
+        },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "Public",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Public",
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-2-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "VpcVPCGWBF912B6E": {
+      "Properties": {
+        "InternetGatewayId": {
+          "Ref": "VpcIGWD7BA715C",
+        },
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::VPCGatewayAttachment",
+    },
+    "Vpcipv6cidr40D3CB78": {
+      "Properties": {
+        "AmazonProvidedIpv6CidrBlock": true,
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::VPCCidrBlock",
+    },
+    "ecrapiVpcEndpointCCA70B2E": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "ecrapiVpcEndpointSecurityGroup449D3A58",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.ecr.api",
+        "SubnetIds": [
+          {
+            "Ref": "VpcPrivateSubnet1Subnet536B997A",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "ecrapiVpcEndpointSecurityGroup449D3A58": {
+      "Properties": {
+        "GroupDescription": "TestMigrationAssistantStack/ecr.apiVpcEndpoint/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::GetAtt": [
+                "Vpc8378EB38",
+                "CidrBlock",
+              ],
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "from ",
+                  {
+                    "Fn::GetAtt": [
+                      "Vpc8378EB38",
+                      "CidrBlock",
+                    ],
+                  },
+                  ":443",
+                ],
+              ],
+            },
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "ecrdkrVpcEndpointF40451CA": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "ecrdkrVpcEndpointSecurityGroup9D0FF409",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.ecr.dkr",
+        "SubnetIds": [
+          {
+            "Ref": "VpcPrivateSubnet1Subnet536B997A",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "ecrdkrVpcEndpointSecurityGroup9D0FF409": {
+      "Properties": {
+        "GroupDescription": "TestMigrationAssistantStack/ecr.dkrVpcEndpoint/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::GetAtt": [
+                "Vpc8378EB38",
+                "CidrBlock",
+              ],
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "from ",
+                  {
+                    "Fn::GetAtt": [
+                      "Vpc8378EB38",
+                      "CidrBlock",
+                    ],
+                  },
+                  ":443",
+                ],
+              ],
+            },
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "elasticfilesystemVpcEndpoint6435CF45": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "elasticfilesystemVpcEndpointSecurityGroupECB42CD1",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.elasticfilesystem",
+        "SubnetIds": [
+          {
+            "Ref": "VpcPrivateSubnet1Subnet536B997A",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "elasticfilesystemVpcEndpointSecurityGroupECB42CD1": {
+      "Properties": {
+        "GroupDescription": "TestMigrationAssistantStack/elasticfilesystemVpcEndpoint/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::GetAtt": [
+                "Vpc8378EB38",
+                "CidrBlock",
+              ],
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "from ",
+                  {
+                    "Fn::GetAtt": [
+                      "Vpc8378EB38",
+                      "CidrBlock",
+                    ],
+                  },
+                  ":443",
+                ],
+              ],
+            },
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "logsVpcEndpoint032E6ACC": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "logsVpcEndpointSecurityGroupAC2FD242",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.logs",
+        "SubnetIds": [
+          {
+            "Ref": "VpcPrivateSubnet1Subnet536B997A",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "logsVpcEndpointSecurityGroupAC2FD242": {
+      "Properties": {
+        "GroupDescription": "TestMigrationAssistantStack/logsVpcEndpoint/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::GetAtt": [
+                "Vpc8378EB38",
+                "CidrBlock",
+              ],
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "from ",
+                  {
+                    "Fn::GetAtt": [
+                      "Vpc8378EB38",
+                      "CidrBlock",
+                    ],
+                  },
+                  ":443",
+                ],
+              ],
+            },
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;

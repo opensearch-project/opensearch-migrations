@@ -98,21 +98,17 @@ public class LuceneDocumentsReaderTest {
         // Extract files from metadata
         Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
         filesToUnpack.addAll(shardMetadata.getFiles());
-        
-        // Ensure the blob files are prepped
-        repoAccessor.prepBlobFiles(shardMetadata);
 
         SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
             repoAccessor,
-            tempDirectory,
-            Integer.MAX_VALUE
+            tempDirectory
         ).create(filesToUnpack, "test_updates_deletes", shardMetadata.getIndexId(), 0);
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
         var reader = new LuceneIndexReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
-        Flux<RfsLuceneDocument> documents = reader.readDocuments(shardMetadata.getSegmentFileName());
+        Flux<LuceneDocumentChange> documents = reader.streamDocumentChanges(shardMetadata.getSegmentFileName());
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
@@ -168,21 +164,17 @@ public class LuceneDocumentsReaderTest {
         // Extract files from metadata
         Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
         filesToUnpack.addAll(shardMetadata.getFiles());
-        
-        // Ensure the blob files are prepped
-        repoAccessor.prepBlobFiles(shardMetadata);
 
         SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
             repoAccessor,
-            tempDirectory,
-            Integer.MAX_VALUE
+            tempDirectory
         ).create(filesToUnpack, "test_updates_deletes", shardMetadata.getIndexId(), 0);
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
         var reader = new LuceneIndexReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
-        Flux<RfsLuceneDocument> documents = reader.readDocuments(shardMetadata.getSegmentFileName());
+        Flux<LuceneDocumentChange> documents = reader.streamDocumentChanges(shardMetadata.getSegmentFileName());
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
@@ -291,7 +283,7 @@ public class LuceneDocumentsReaderTest {
         }, 500, TimeUnit.MILLISECONDS);
 
         // Read documents
-        List<RfsLuceneDocument> actualDocuments = reader.readDocuments("dummy")
+        List<LuceneDocumentChange> actualDocuments = reader.streamDocumentChanges("dummy")
             .subscribeOn(Schedulers.parallel())
             .collectList()
             .block(Duration.ofSeconds(2));
@@ -328,14 +320,10 @@ public class LuceneDocumentsReaderTest {
         // Extract files from metadata
         Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
         filesToUnpack.addAll(shardMetadata.getFiles());
-        
-        // Ensure the blob files are prepped
-        repoAccessor.prepBlobFiles(shardMetadata);
 
         SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
             repoAccessor,
-            tempDirectory,
-            Integer.MAX_VALUE
+            tempDirectory
         ).create(filesToUnpack, "test_updates_deletes", shardMetadata.getIndexId(), 0);
         Path luceneDir = unpacker.unpack();
 
@@ -344,7 +332,7 @@ public class LuceneDocumentsReaderTest {
 
 
         for (int i = 0; i < documentStartingIndices.size(); i++) {
-            Flux<RfsLuceneDocument> documents = reader.readDocuments(shardMetadata.getSegmentFileName(), documentStartingIndices.get(i));
+            Flux<LuceneDocumentChange> documents = reader.streamDocumentChanges(shardMetadata.getSegmentFileName(), documentStartingIndices.get(i));
 
             var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
             var expectedDocIds = String.join(",", documentIds.get(i));
@@ -372,14 +360,10 @@ public class LuceneDocumentsReaderTest {
         // Extract files from metadata
         Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
         filesToUnpack.addAll(shardMetadata.getFiles());
-        
-        // Ensure the blob files are prepped
-        repoAccessor.prepBlobFiles(shardMetadata);
 
         SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
             repoAccessor,
-            tempDirectory,
-            Integer.MAX_VALUE
+            tempDirectory
         ).create(filesToUnpack, "test_updates_deletes", shardMetadata.getIndexId(), 0);
         Path luceneDir = unpacker.unpack();
 
@@ -388,7 +372,7 @@ public class LuceneDocumentsReaderTest {
 
 
         for (int startingDocIndex = 0; startingDocIndex < documentIds.size(); startingDocIndex++) {
-            Flux<RfsLuceneDocument> documents = reader.readDocuments(shardMetadata.getSegmentFileName(), startingDocIndex);
+            Flux<LuceneDocumentChange> documents = reader.streamDocumentChanges(shardMetadata.getSegmentFileName(), startingDocIndex);
 
             var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
             var expectedDocIds = String.join(",", documentIds.get(startingDocIndex));

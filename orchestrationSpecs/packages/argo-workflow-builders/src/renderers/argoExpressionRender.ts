@@ -38,19 +38,20 @@ function formatArgoFormattedToString(useMarkers: boolean, expr: AnyExpr, rendere
 }
 
 export type MarkerStyle = "Outer" | "None" | "IdentifierOnly";
+export type SCOPE_TYPE = "Expression" | "When" | "RegularTemplate";
 
-export function toArgoExpressionString(expr: AnyExpr, useMarkers: MarkerStyle = "Outer"): string {
+export function toArgoExpressionString(expr: AnyExpr, useMarkers: MarkerStyle = "Outer", scopeType: SCOPE_TYPE = "RegularTemplate"): string {
     if (isTemplateExpression(expr)) {
         const f = expr as TemplateReplacementExpression;
         let result = f.template;
         for (const [key, value] of Object.entries(f.replacements)) {
-            const expandedValue = formatArgoFormattedToString(true, expr, formatExpression(value, false));
+            const expandedValue = formatArgoFormattedToString(true, expr, formatExpression(value, false, scopeType));
             result = result.replaceAll(`{{${key}}}`, expandedValue);
         }
         return result;
     }
 
-    const rval = formatExpression(expr, useMarkers === "IdentifierOnly", true);
+    const rval = formatExpression(expr, useMarkers === "IdentifierOnly", scopeType, true);
     const formattedRval = formatArgoFormattedToString(useMarkers === "Outer", expr, rval);
     if (isSpecialStripQuotesDirective(expr)) {
         return `${REMOVE_PREVIOUS_QUOTE_SENTINEL}${formattedRval}${REMOVE_NEXT_QUOTE_SENTINEL}`;
@@ -59,9 +60,9 @@ export function toArgoExpressionString(expr: AnyExpr, useMarkers: MarkerStyle = 
 }
 
 /** Returns the Argo-formatted string plus whether the expression was compound. */
-function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = false): ArgoFormatted {
+function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, scopeType: SCOPE_TYPE, top = false): ArgoFormatted {
     if (isAsStringExpression(expr)) {
-        return formatExpression(expr.source, useIdentifierMarkers, true);
+        return formatExpression(expr.source, useIdentifierMarkers, scopeType, true);
     }
 
     if (isLiteralExpression(expr)) {
@@ -79,7 +80,7 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = fa
 
     if (isConcatExpression(expr)) {
         const ce = expr as ConcatExpression<BaseExpression<string, any>[]>;
-        const parts = ce.expressions.map(e => formatExpression(e, useIdentifierMarkers));
+        const parts = ce.expressions.map(e => formatExpression(e, useIdentifierMarkers, scopeType));
         const text = parts.map(p => p.text).join(ce.separator ? " + '" + ce.separator + "' + " : "+");
         const compound = (ce.expressions.length > 1) || !!ce.separator || parts.some(p => p.compound);
         return formattedResult(text, compound);
@@ -87,49 +88,49 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = fa
 
     if (isTernaryExpression(expr)) {
         const te = expr as TernaryExpression<any, any, any, any>;
-        const c = formatExpression(te.condition, useIdentifierMarkers);
-        const t = formatExpression(te.whenTrue, useIdentifierMarkers);
-        const f = formatExpression(te.whenFalse, useIdentifierMarkers);
+        const c = formatExpression(te.condition, useIdentifierMarkers, scopeType);
+        const t = formatExpression(te.whenTrue, useIdentifierMarkers, scopeType);
+        const f = formatExpression(te.whenFalse, useIdentifierMarkers, scopeType);
         return formattedResult(`((${c.text}) ? (${t.text}) : (${f.text}))`, true);
     }
 
     if (isFunctionExpression(expr)) {
         const e = expr as FunctionExpression<any, any>;
         if (e.functionName === "toJSON" && isParameterExpression(e.args[0] as AnyExpr)) {
-            return formatExpression(e.args[0], useIdentifierMarkers);
+            return formatExpression(e.args[0], useIdentifierMarkers, scopeType);
         } else if (e.functionName === "fromJSON" && top) {
-            return formatExpression(e.args[0], useIdentifierMarkers);
+            return formatExpression(e.args[0], useIdentifierMarkers, scopeType);
         }
         const formattedArgs =
-            e.args.map(a => formatExpression(a, useIdentifierMarkers));
+            e.args.map(a => formatExpression(a, useIdentifierMarkers, scopeType));
         const combinedFormatted = formattedArgs.map(f => f.text).join(", ");
         return formattedResult(`${e.functionName}(${combinedFormatted})`, true);
     }
 
     if (isComparisonExpression(expr)) {
         const ce = expr as ComparisonExpression<any, any, any>;
-        const l = formatExpression(ce.left, useIdentifierMarkers);
-        const r = formatExpression(ce.right, useIdentifierMarkers);
+        const l = formatExpression(ce.left, useIdentifierMarkers, scopeType);
+        const r = formatExpression(ce.right, useIdentifierMarkers, scopeType);
         return formattedResult(`${l.text} ${ce.operator} ${r.text}`, true);
     }
 
     if (isInfixExpression(expr)) {
         const ae = expr as InfixExpression<any, any, any>;
-        const l = formatExpression(ae.left, useIdentifierMarkers);
-        const r = formatExpression(ae.right, useIdentifierMarkers);
+        const l = formatExpression(ae.left, useIdentifierMarkers, scopeType);
+        const r = formatExpression(ae.right, useIdentifierMarkers, scopeType);
         return formattedResult(`${l.text} ${ae.operator} ${r.text}`, true);
     }
 
     if (isGetExpression(expr)) {
         const ge = expr as RecordGetExpression<any, any, any>;
-        const inner = formatExpression(ge.source, useIdentifierMarkers);
+        const inner = formatExpression(ge.source, useIdentifierMarkers, scopeType);
         return formattedResult(`${inner.text}['${ge.key}']`, true);
 
     }
 
     if (isPathExpression(expr)) {
         const pe = expr as RecordFieldSelectExpression<any, any, any>;
-        const inner = formatExpression(pe.source, useIdentifierMarkers);
+        const inner = formatExpression(pe.source, useIdentifierMarkers, scopeType);
         const source = inner.text;
         const jsonPath = pe.path.replace(/\[(\d+)\]/g, "[$1]").replace(/^/, "$.");
         return formattedResult(`jsonpath(${source}, '${jsonPath}')`, true);
@@ -137,15 +138,15 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = fa
 
     if (isArrayIndexExpression(expr)) {
         const ie = expr as ArrayIndexExpression<any, any, any>;
-        const arr = formatExpression(ie.array, useIdentifierMarkers);
-        const idx = formatExpression(ie.index, useIdentifierMarkers);
+        const arr = formatExpression(ie.array, useIdentifierMarkers, scopeType);
+        const idx = formatExpression(ie.index, useIdentifierMarkers, scopeType);
         return formattedResult(`${arr.text}[${idx.text}]`, true);
     }
 
     if (isArrayMakeExpression(expr)) {
         const ae = expr as ArrayMakeExpression<any>;
         const inner = ae.elements
-            .map((e: AnyExpr) => formatExpression(e, useIdentifierMarkers).text).join(", ");
+            .map((e: AnyExpr) => formatExpression(e, useIdentifierMarkers, scopeType).text).join(", ");
         return formattedResult(`[${inner}]`, true);
     }
 
@@ -153,7 +154,7 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = fa
         const de = expr as DictMakeExpression<Record<string, AnyExpr>>;
         const parts: string[] = [];
         for (const [k, v] of Object.entries(de.entries)) {
-            const fv = formatExpression(v as any, useIdentifierMarkers);
+            const fv = formatExpression(v as any, useIdentifierMarkers, scopeType);
             parts.push(`"${k}"`, fv.text);
         }
         const args = parts.join(", ");
@@ -179,7 +180,7 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = fa
                     throw new Error(`Unknown parameter source: ${(pe.source as any).kind}`);
             }
         }).call({});
-        return formattedResult(useIdentifierMarkers ? `'{{${expandedName}}}'` : expandedName, false);
+        return formattedResult(useIdentifierMarkers ? `{{${expandedName}}}` : expandedName, false);
     }
 
     if (isLoopItem(expr)) {
@@ -191,7 +192,9 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = fa
     if (isWorkflowValue(expr)) {
         const e = expr as WorkflowValueExpression;
         const expandedName = "workflow." + e.variable;
-        return formattedResult(useIdentifierMarkers ? `{{${expandedName}}}` : expandedName, false);
+        return formattedResult(
+            scopeType == "Expression" ? `"{{${expandedName}}}"` :
+                useIdentifierMarkers ? `{{${expandedName}}}` : expandedName, false);
     }
 
     if (isTaskData(expr)) {
@@ -202,7 +205,7 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = fa
 
     if (isSpecialStripQuotesDirective(expr)) {
         const e = expr as UnquotedTypeWrapper<any>;
-        return formatExpression(e.value, useIdentifierMarkers); // skip right by here
+        return formatExpression(e.value, useIdentifierMarkers, scopeType); // skip right by here
     }
 
     throw new Error(`Unsupported expression kind: ${(expr as any).kind}`);

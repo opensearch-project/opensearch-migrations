@@ -230,6 +230,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     .withTracking(false, true, false);
                 var runCounter = new AtomicInteger();
                 var clockJitter = new Random(1);
+                var maxRuns = numberOfShards + 1; // shards + 1 for completion check
 
                 var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
                     sourceRepo,
@@ -242,7 +243,9 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     testDocMigrationContext,
                     sourceCluster.getContainerVersion().getVersion(),
                     targetCluster.getContainerVersion().getVersion(),
-                    null
+                    null,
+                    null,
+                    maxRuns
                 ));
 
                 Assertions.assertEquals(numberOfShards + 1, expectedTerminationException.numRuns);
@@ -273,6 +276,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     .withTracking(false, true, false);
                 var runCounter = new AtomicInteger();
                 var clockJitter = new Random(1);
+                var maxRuns = numberOfShards + 1;
 
                 var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
                     sourceRepo,
@@ -285,7 +289,9 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     testDocMigrationContext,
                     sourceCluster.getContainerVersion().getVersion(),
                     targetCluster.getContainerVersion().getVersion(),
-                    null
+                    null,
+                    null,
+                    maxRuns
                 ));
 
                 Assertions.assertEquals(numberOfShards + 1, expectedTerminationException.numRuns);
@@ -307,9 +313,8 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 // After second run (snapshot2 -> snapsho12): 3 segments, 1 addition, 1 deletion
                 assertDeltaMetrics(testDocMigrationContext, 3, 1, 1);
             }
-
         } finally {
-            FileSystemUtils.deleteTree(localDirectory.toPath());
+            FileSystemUtils.deleteDirectories(localDirectory.toString());
         }
     }
 }

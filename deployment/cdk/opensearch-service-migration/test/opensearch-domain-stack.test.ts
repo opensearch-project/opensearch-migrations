@@ -340,7 +340,7 @@ function assertPrimaryDomainStackTemplate(template: Template) {
     },
     EncryptionAtRestOptions: {
       Enabled: true,
-      KmsKeyId: "abc123de-4888-4fa7-a508-3811e2d49fc3"
+      KmsKeyId: "arn:aws:kms:us-east-1:12345678912:key/abc123de-4888-4fa7-a508-3811e2d49fc3"
     },
     LogPublishingOptions: {
       ES_APPLICATION_LOGS: {

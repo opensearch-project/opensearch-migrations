@@ -51,7 +51,7 @@ public class LeaseExpirationTest extends SourceTestBase {
                         .map(migrationPair ->
                                 Arguments.of(false, migrationPair.source(), migrationPair.target())),
                 // Add test for ES 7 -> OS 2 with forceMoreSegments=true
-                Stream.of(Arguments.of(true, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_1))
+                Stream.of(Arguments.of(true, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_4))
         );
     }
 
@@ -168,10 +168,8 @@ public class LeaseExpirationTest extends SourceTestBase {
                 initialExitCodeCount += exitCode == expectedInitialExitCode ? 1 : 0;
                 finalExitCodeCount += exitCode == expectedEventualExitCode ? 1 : 0;
                 log.atInfo().setMessage("Process exited with code: {}").addArgument(exitCode).log();
-                // Did tree for subsequent run
-                if (Files.exists(tempDirLucene)) {
-                    FileSystemUtils.deleteTree(tempDirLucene);
-                }
+                // Clean tree for subsequent run
+                FileSystemUtils.deleteDirectories(tempDirLucene.toString());
             } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < expectedInitialExitCodeCount + expectedEventualExitCodeCount);
 
             // Assert doc count on the target cluster matches source
@@ -197,9 +195,7 @@ public class LeaseExpirationTest extends SourceTestBase {
                     "The program did not exit with the expected number of " + expectedInitialExitCode +" exit codes"
             );
         } finally {
-            if (Files.exists(tempDirLucene)) {
-                FileSystemUtils.deleteTree(tempDirSnapshot);
-            }
+            FileSystemUtils.deleteDirectories(tempDirSnapshot.toString());
         }
     }
 

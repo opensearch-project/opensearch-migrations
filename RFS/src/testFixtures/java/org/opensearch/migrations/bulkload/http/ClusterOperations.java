@@ -262,6 +262,42 @@ public class ClusterOperations {
     }
 
     /**
+     * Creates a legacy template with no mappings but with custom analyzer settings
+     */
+    @SneakyThrows
+    public void createLegacyTemplateNoMappings(final String templateName, final String pattern, final String aliasName) {
+        var matchPatternClause = (UnboundVersionMatchers.isBelowES_6_X)
+            .test(clusterVersion)
+            ? "\"template\":\"" + pattern + "\","
+            : "\"index_patterns\": [\"" + pattern + "\"],";
+
+        final var templateJson = "{\n" +
+            "  " + matchPatternClause + "\n" +
+            "  \"order\": 0,\n" +
+            "  \"settings\": {\n" +
+            "    \"index\": {\n" +
+            "      \"analysis\": {\n" +
+            "        \"analyzer\": {\n" +
+            "          \"default\": {\n" +
+            "            \"filter\": [\"lowercase\"],\n" +
+            "            \"tokenizer\": \"uax_url_email\"\n" +
+            "          }\n" +
+            "        }\n" +
+            "      },\n" +
+            "      \"number_of_shards\": \"1\"\n" +
+            "    }\n" +
+            "  },\n" +
+            "  \"mappings\": {},\n" +
+            "  \"aliases\": {\n" +
+            "    \"" + aliasName + "\": {}\n" +
+            "  }\n" +
+            "}";
+
+        var response = put("/_template/" + templateName, templateJson);
+        assertThat(response.getKey(), equalTo(200));
+    }
+
+    /**
      * Creates a legacy template
      */
     @SneakyThrows
@@ -421,6 +457,44 @@ public class ClusterOperations {
 
         var response = post("/_aliases", requestBodyJson);
         assertThat(response.getKey(), equalTo(200));
+    }
+
+    public boolean shouldTestEs5SingleType() {
+        return VersionMatchers.equalOrGreaterThanES_5_5.test(clusterVersion) 
+            && VersionMatchers.isES_5_X.test(clusterVersion);
+    }
+
+    /**
+     * Creates an ES5 single-type index with test documents.
+     * The index.mapping.single_type setting only exists in ES 5.5 and ES 5.6.
+     * Callers should check shouldTestEs5SingleType() before invoking this method.
+     */
+    @SneakyThrows
+    public void createEs5SingleTypeIndexWithDocs(String indexName) {
+        // Create index with single_type setting and 1 shard
+        String createIndexJson = """
+        {
+          "settings": {
+            "index": {
+              "mapping": {
+                "single_type": "true"
+              },
+              "number_of_shards": 1,
+              "number_of_replicas": 0
+            }
+          },
+          "mappings": {}
+        }
+        """;
+
+        createIndex(indexName, createIndexJson);
+
+        // Insert test documents
+        String docType = defaultDocType();
+        createDocument(indexName, "1", "{\"title\":\"Doc One\",\"flag\":true}", null, docType);
+        createDocument(indexName, "2", "{\"title\":\"Doc Two\",\"flag\":false}", null, docType);
+
+        post("/" + indexName + "/_refresh", null);
     }
 
     public String defaultDocType() {

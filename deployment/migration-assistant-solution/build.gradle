@@ -1,0 +1,130 @@
+import com.github.gradle.node.npm.task.NpmTask
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import org.gradle.api.tasks.*
+
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'com.bmuschko.docker-remote-api'
+    id 'com.github.node-gradle.node'
+}
+
+node {
+    version = '22.14.0'
+    download = true
+}
+
+tasks.register('installDependencies', NpmTask) {
+    description = 'Install npm dependencies including dev dependencies'
+    args = ['install', '--include=dev']
+
+    inputs.file('package.json')
+    inputs.file('package-lock.json')
+    outputs.dir('node_modules')
+}
+
+abstract class CdkSynthTask extends DefaultTask {
+
+    @Inject
+    abstract ExecOperations getExecOperations()
+
+    @InputDirectory
+    @PathSensitive(PathSensitivity.RELATIVE)
+    abstract DirectoryProperty getNodeModulesDir()
+
+    private FileTree sourceFiles
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    FileTree getSourceFiles() {
+        return sourceFiles
+    }
+
+    void setSourceFiles(FileTree tree) {
+        this.sourceFiles = tree
+    }
+
+    @OutputDirectory
+    abstract DirectoryProperty getCdkOutDir()
+
+    @TaskAction
+    void synth() {
+        def cdkOut = cdkOutDir.get().asFile
+        cdkOut.mkdirs()
+
+        def cdkExecutable = getNodeModulesDir().file('aws-cdk/bin/cdk').get().getAsFile()
+
+        execOperations.exec {
+            commandLine = ['node', cdkExecutable, 'synth', '*']
+            environment 'CDK_OUT', cdkOut.getAbsolutePath()
+        }.assertNormalExitValue()
+    }
+}
+
+tasks.register('cdkSynth', CdkSynthTask) {
+    description = 'Synthesize CDK stacks'
+    group = 'cdk'
+    dependsOn 'installDependencies'
+
+    cdkOutDir.set(layout.projectDirectory.dir('cdk.out'))
+    nodeModulesDir.set(layout.projectDirectory.dir('node_modules'))
+
+    def cdkAppDir = layout.projectDirectory.dir('deployment/migration-assistant-solution')
+    def libDir = layout.projectDirectory.dir('lib')
+    sourceFiles = project.files(cdkAppDir.asFileTree, libDir.asFileTree).getAsFileTree().matching {
+        include '**/*.ts', '**/*.js', '**/*.json'
+        exclude 'cdk.out/**',
+                'build/**',
+                'node_modules/**',
+                'cdk.context.json',
+                '.cdk.staging/**'
+    }
+}
+
+abstract class CdkMinifyTask extends DefaultTask {
+
+    @InputDirectory
+    @PathSensitive(PathSensitivity.RELATIVE)
+    abstract DirectoryProperty getCdkOutDir()
+
+    @OutputDirectory
+    abstract DirectoryProperty getMinifiedDir()
+
+    @TaskAction
+    void minifyTemplates() {
+        def inputDir = cdkOutDir.get()          // Directory
+        def outputDir = minifiedDir.get().asFile
+
+        outputDir.mkdirs()
+
+        // Get files from the input directory without using project.fileTree()
+        def templateFiles = inputDir.asFileTree.matching {
+            include '**/*.template.json'
+        }.files
+
+        def minifiedCount = 0
+        def slurper = new JsonSlurper()
+
+        templateFiles.each { File templateFile ->
+            def relativePath = inputDir.asFile.toPath().relativize(templateFile.toPath())
+            def targetFile = new File(outputDir, relativePath.toString())
+
+            targetFile.parentFile.mkdirs()
+
+            def jsonContent = templateFile.text
+            def json = slurper.parseText(jsonContent)
+            def minifiedJson = JsonOutput.toJson(json)
+
+            targetFile.text = minifiedJson
+            minifiedCount++
+        }
+    }
+}
+
+tasks.register('cdkSynthMinified', CdkMinifyTask) {
+    dependsOn 'cdkSynth'
+    group = 'cdk'
+    description = 'Synthesize CDK and create minified templates for local deployment'
+
+    cdkOutDir.set(layout.projectDirectory.dir('cdk.out'))
+    minifiedDir.set(layout.projectDirectory.dir('cdk.out-minified'))
+}

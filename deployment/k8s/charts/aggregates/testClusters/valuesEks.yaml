@@ -1,0 +1,179 @@
+useDedicatedKarpenterPool: true
+
+
+
+source:
+  rbac:
+    # Use the same account as the migration console so that we can
+    # get the PodIdentity of the console so that we can write to S3
+    serviceAccountName: "migration-console-access-role"
+  # You already have these in your existing values:
+  image: "MUST_BE_OVERRIDDEN_WITH_A_PUBLISHED_SEARCHGUARD_IMAGE_THAT_HAS_S3"
+
+  imageTag: migrations_elasticsearch_searchguard_latest
+  protocol: https
+
+  tolerations:
+    - key: dedicated-search
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: karpenter.sh/nodepool
+              operator: In
+              values: ["dedicated-search-pool"]
+
+  esConfig:
+    elasticsearch.yml: |
+      cluster.name: "test-cluster"
+      network.host: 0.0.0.0
+
+      ######## Start Search Guard Demo Configuration ########
+      # WARNING: revise all the lines below before you go into production
+      searchguard.ssl.transport.pemcert_filepath: esnode.pem
+      searchguard.ssl.transport.pemkey_filepath: esnode-key.pem
+      searchguard.ssl.transport.pemtrustedcas_filepath: root-ca.pem
+      searchguard.ssl.transport.enforce_hostname_verification: false
+      searchguard.ssl.http.enabled: true
+      searchguard.ssl.http.pemcert_filepath: esnode.pem
+      searchguard.ssl.http.pemkey_filepath: esnode-key.pem
+      searchguard.ssl.http.pemtrustedcas_filepath: root-ca.pem
+      searchguard.allow_unsafe_democertificates: true
+      searchguard.allow_default_init_sgindex: true
+      searchguard.authcz.admin_dn:
+        - CN=kirk,OU=client,O=client,L=test, C=de
+
+      searchguard.audit.type: internal_elasticsearch
+      searchguard.enable_snapshot_restore_privilege: true
+      searchguard.check_snapshot_restore_write_privileges: true
+      searchguard.restapi.roles_enabled: ["SGS_ALL_ACCESS"]
+      cluster.routing.allocation.disk.threshold_enabled: false
+      node.max_local_storage_nodes: 3
+      ######## End Search Guard Demo Configuration ########
+      discovery.type: single-node
+
+  # The values below are to set up a key store that is periodically refreshed
+  # with credentials vended via PodIdentity
+  extraVolumes:
+    - name: es-keystore
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: es-keystore
+      mountPath: /usr/share/elasticsearch/config/elasticsearch.keystore
+      subPath: elasticsearch.keystore
+
+  # Create an initial keystore file before ES starts
+  extraInitContainers:
+    - name: init-es-keystore
+      image: "MUST_BE_OVERRIDDEN_WITH_A_PUBLISHED_SEARCHGUARD_IMAGE_THAT_HAS_S3"
+      command: ["/bin/bash", "-ec"]
+      args:
+        - |
+          set -euo pipefail
+          
+          # If keystore already exists in the shared volume, do nothing.
+          if [[ -s /keystore/elasticsearch.keystore ]]; then
+            echo "Keystore already exists; skipping create"
+            exit 0
+          fi
+
+          TMP_CONF="$(mktemp -d)"
+          export ES_PATH_CONF="$TMP_CONF"
+
+          # Create keystore non-interactively in an empty config dir
+          bin/elasticsearch-keystore create
+
+          # Persist into the shared volume
+          cp "$ES_PATH_CONF/elasticsearch.keystore" /keystore/elasticsearch.keystore
+          chmod 0600 /keystore/elasticsearch.keystore
+
+          rm -rf "$TMP_CONF"
+      volumeMounts:
+        - name: es-keystore
+          mountPath: /keystore
+
+  extraContainers:
+    - name: refresh-s3-keystore
+      image: "MUST_BE_OVERRIDDEN_WITH_A_PUBLISHED_SEARCHGUARD_IMAGE_THAT_HAS_S3"
+      command: ["/bin/bash", "-ec"]
+      env:
+        # Make sure that these match what's being used.
+        # This is a test chart that should only ever be used for testing purposes!
+        - name: ES_USERNAME
+          value: "admin"
+        - name: ES_PASSWORD
+          value: "admin"
+        - name: REFRESH_SECONDS
+          value: "60"
+
+      args:
+        - |
+          set -euo pipefail
+
+          # Sanity: Pod Identity env must be present (EKS sets these)
+          : "${AWS_CONTAINER_CREDENTIALS_FULL_URI:?missing}"
+          : "${AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE:?missing}"
+
+          while true; do
+            TOKEN="$(cat "$AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE")"
+            JSON="$(curl -sS -H "Authorization: $TOKEN" "$AWS_CONTAINER_CREDENTIALS_FULL_URI")"
+
+            AK="$(echo "$JSON" | sed -n 's/.*"AccessKeyId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+            SK="$(echo "$JSON" | sed -n 's/.*"SecretAccessKey"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+            ST="$(echo "$JSON" | sed -n 's/.*"Token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+
+            if [[ -z "$AK" || -z "$SK" || -z "$ST" ]]; then
+              echo "Failed to parse credentials JSON: $JSON" >&2
+              sleep 10
+              continue
+            fi
+
+            # Work on a temp config dir; to swap the keystore transactionally
+            TMP_CONF="$(mktemp -d)"
+            export ES_PATH_CONF="$TMP_CONF"
+            cp /usr/share/elasticsearch/config/elasticsearch.keystore "$ES_PATH_CONF/elasticsearch.keystore" || true
+
+            echo -n "$AK" | bin/elasticsearch-keystore add -f -x s3.client.default.access_key
+            echo -n "$SK" | bin/elasticsearch-keystore add -f -x s3.client.default.secret_key
+            echo -n "$ST" | bin/elasticsearch-keystore add -f -x s3.client.default.session_token
+
+            cp "$ES_PATH_CONF/elasticsearch.keystore" /usr/share/elasticsearch/config/elasticsearch.keystore
+            chmod 0600 /usr/share/elasticsearch/config/elasticsearch.keystore
+            rm -rf "$TMP_CONF"
+
+            POD_IP="$(hostname -i | awk '{print $1}')"
+            ES_URL="https://${POD_IP}:9200"
+          
+            # Wait for ES to be responsive, then reload secure settings
+            until curl -k -sS -u "$ES_USERNAME:$ES_PASSWORD" -o /dev/null "$ES_URL"; do sleep 2; done
+            echo "Connection established to {$ES_URL}.  Refreshing secure settings"
+            curl -k -sS -u "$ES_USERNAME:$ES_PASSWORD" \
+              -X POST "$ES_URL/_nodes/reload_secure_settings" >/dev/null || true
+            echo "Finished reloading credentials"
+          
+            sleep "$REFRESH_SECONDS"
+          done
+      volumeMounts:
+        - name: es-keystore
+          mountPath: /usr/share/elasticsearch/config/elasticsearch.keystore
+          subPath: elasticsearch.keystore
+
+target:
+  tolerations:
+    - key: dedicated-search
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+
+  # opensearch-project chart expects nodeAffinity here (not affinity.nodeAffinity)
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: karpenter.sh/nodepool
+              operator: In
+              values: ["dedicated-search-pool"]

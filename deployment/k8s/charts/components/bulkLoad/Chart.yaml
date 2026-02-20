@@ -1,9 +1,0 @@
-apiVersion: v2
-name: bulk-document-loader
-version: 0.1.0
-type: application
-appVersion: "1.16.0"
-dependencies:
-  - name: helm-common
-    repository: file://../../sharedResources/helmCommon
-    version: 0.1.0

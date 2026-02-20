@@ -1,25 +1,20 @@
 {
   "name": "@opensearch-migrations/argo-workflow-builders",
   "version": "1.0.0",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "exports": {
-    ".": {
-      "development": "./src/index.ts",
-      "default": "./dist/index.js"
-    },
+    ".": "./src/index.ts",
     "./*": null,
     "./package.json": "./package.json"
   },
   "scripts": {
     "rebuildK8sSchemas": "./scripts/fetchK8sSchemas.sh && ts-node scripts/generateK8sTypes.ts",
-    "build": "tsc",
     "type-check": "tsc --noEmit",
-    "make-templates": "tsx makeTemplates.cjs",
     "test": "jest"
   },
   "dependencies": {
-    "zod": "*"
+    "zod": "^4"
   },
   "devDependencies": {
     "@types/jest": "*",
@@ -27,7 +22,7 @@
     "json-schema-to-typescript": "^15.0.4"
   },
   "files": [
-    "dist",
+    "src",
     "README.md",
     "LICENSE"
   ]

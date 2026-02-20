@@ -1,36 +1,109 @@
-#./minikubeLocal.sh --start # New code...  Not sure if this breaks some prometheus cAdvisor scraping.  Just want to know first.
+#!/usr/bin/env bash
+
+set -xeuo pipefail
+
+MIGRATIONS_REPO_ROOT_DIR=$(git rev-parse --show-toplevel)
+
+## One time things - will require a restart to minikube if it was already running
+MINIKUBE_CPU_COUNT="${MINIKUBE_CPU_COUNT:-8}"
+MINIKUBE_MEMORY_SIZE="${MINIKUBE_MEMORY_SIZE:-18000}"
+echo "Setting minikube config to use ${MINIKUBE_CPU_COUNT} CPUs and ${MINIKUBE_MEMORY_SIZE} MB memory."
+minikube config set cpus $MINIKUBE_CPU_COUNT
+minikube config set memory $MINIKUBE_MEMORY_SIZE
+
+INSECURE_REGISTRY_CIDR="${INSECURE_REGISTRY_CIDR:-0.0.0.0/0}"
 minikube start \
   --extra-config=kubelet.authentication-token-webhook=true \
   --extra-config=kubelet.authorization-mode=Webhook \
   --extra-config=scheduler.bind-address=0.0.0.0 \
-  --extra-config=controller-manager.bind-address=0.0.0.0
-eval $(minikube docker-env)
+  --extra-config=controller-manager.bind-address=0.0.0.0 \
+  --insecure-registry="${INSECURE_REGISTRY_CIDR}"
+
+cd "${MIGRATIONS_REPO_ROOT_DIR}"
+gradlew() {
+    "${MIGRATIONS_REPO_ROOT_DIR}/gradlew" "$@"
+}
+
+export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-true}"
+"${MIGRATIONS_REPO_ROOT_DIR}"/buildImages/setUpK8sImageBuildServices.sh
+
+LOCAL_REGISTRY_PORT="${LOCAL_REGISTRY_PORT:-30500}"
+MINIKUBE_IP="$(minikube ip)"
+LOCAL_REGISTRY="${MINIKUBE_IP}:${LOCAL_REGISTRY_PORT}"
+export LOCAL_REGISTRY
+echo "Using local registry at: ${LOCAL_REGISTRY}"
+
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64)
+    PLATFORM="amd64"
+    ;;
+  arm64|aarch64)
+    PLATFORM="arm64"
+    ;;
+  *)
+    echo "Unsupported architecture: $ARCH"
+    exit 1
+    ;;
+esac
+
+gradlew :buildImages:buildImagesToRegistry_$PLATFORM
+
 kubectl config set-context --current --namespace=ma
 
-#nice to haves
+# Nice to have additions to minikube
 minikube addons enable metrics-server
-minikube dashboard &
 
-helm dependency build charts/aggregates/testClusters
-helm install --create-namespace -n ma tc charts/aggregates/testClusters
+cd "${MIGRATIONS_REPO_ROOT_DIR}"/deployment/k8s/
 
-helm dependency build charts/aggregates/migrationAssistantWithArgo
-# Use valuesDev.yaml for local development to enable AWS credentials injection
-helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
-  -f charts/aggregates/migrationAssistantWithArgo/valuesDev.yaml
+# Helm installs
+helm dependency update charts/aggregates/testClusters
+helm dependency update charts/aggregates/migrationAssistantWithArgo
 
-# Notice that this doesn't include the capture proxy yet
-kubectl port-forward services/elasticsearch-master 19200:9200 &
-kubectl port-forward services/opensearch-cluster-master 29200:9200 &
+if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
+  echo "Using LOCAL_REGISTRY for images: ${LOCAL_REGISTRY}"
+  helm install --create-namespace -n ma tc charts/aggregates/testClusters \
+      --wait --timeout 10m \
+      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard"
 
-kubectl port-forward svc/argo-server 2746:2746 &
-kubectl port-forward svc/etcd 2379:2379 &
-kubectl port-forward svc/localstack 4566:4566 &
-kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090 &
-kubectl port-forward svc/jaeger-query 16686:16686 &
-kubectl port-forward svc/kube-prometheus-stack-grafana  9000:80 &
+  helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
+    --wait --timeout 10m \
+    -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml \
+    --set "images.captureProxy.repository=${LOCAL_REGISTRY}/migrations/capture_proxy" \
+    --set "images.captureProxy.tag=latest" \
+    --set "images.captureProxy.pullPolicy=Always" \
+    --set "images.installer.repository=${LOCAL_REGISTRY}/migrations/migration_console" \
+    --set "images.installer.tag=latest" \
+    --set "images.installer.pullPolicy=Always" \
+    --set "images.migrationConsole.repository=${LOCAL_REGISTRY}/migrations/migration_console" \
+    --set "images.migrationConsole.tag=latest" \
+    --set "images.migrationConsole.pullPolicy=Always" \
+    --set "images.trafficReplayer.repository=${LOCAL_REGISTRY}/migrations/traffic_replayer" \
+    --set "images.trafficReplayer.tag=latest" \
+    --set "images.trafficReplayer.pullPolicy=Always" \
+    --set "images.reindexFromSnapshot.repository=${LOCAL_REGISTRY}/migrations/reindex_from_snapshot" \
+    --set "images.reindexFromSnapshot.tag=latest" \
+    --set "images.reindexFromSnapshot.pullPolicy=Always"
+else
+  echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
+  helm install --create-namespace -n ma tc charts/aggregates/testClusters \
+    --wait --timeout 10m
+
+  helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
+    --wait --timeout 10m \
+    -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
+fi
+
+
+# Other useful stuff...
+
+# minikube dashboard &
+
+# Port forwards
+# ./devScripts/forwardAllServicePorts.sh
 
 # Grafana password...
-#  kubectl --namespace ma get secrets kube-prometheus-stack-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+# kubectl --namespace ma get secrets kube-prometheus-stack-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
 
-kubectl -n ma exec --stdin --tty migration-console-0 -- /bin/bash
+# Open a migration console terminal on the stateful set that was deployed
+# kubectl -n ma exec --stdin --tty migration-console-0 -- /bin/bash

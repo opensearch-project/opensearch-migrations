@@ -24,7 +24,7 @@ rules:
 
   # Add permissions for pods and pod logs (needed for Argo workflow execution)
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "services", "secrets", "configmaps"]
+    resources: ["pods", "pods/log", "services", "secrets", "configmaps", "serviceaccounts"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # For services

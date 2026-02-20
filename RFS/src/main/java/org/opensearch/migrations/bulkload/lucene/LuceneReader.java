@@ -9,11 +9,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
-import org.opensearch.migrations.bulkload.common.RfsDocumentOperation;
-import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.common.DocumentChangeType;
+import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 
 import lombok.extern.slf4j.Slf4j;
-import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
@@ -28,7 +27,7 @@ public class LuceneReader {
        If the startSegmentIndex is 0, it will start from the first segment.
        If the startDocId is 0, it will start from the first document in the segment.
      */
-    static Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId) {
+    public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId) {
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
@@ -43,7 +42,7 @@ public class LuceneReader {
                     sharedSegmentReaderScheduler,
                     maxDocumentsToReadAtOnce,
                     reader.getIndexDirectoryPath(),
-                    RfsDocumentOperation.INDEX)
+                    DocumentChangeType.INDEX)
             )
             .subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
             .publishOn(Schedulers.boundedElastic()) // Switch scheduler for subsequent chain
@@ -97,8 +96,8 @@ public class LuceneReader {
         return Flux.fromIterable(sortedReaderAndBase.subList(index, sortedReaderAndBase.size()));
     }
 
-    public static Flux<RfsLuceneDocument> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId, Scheduler scheduler,
-                                                int concurrency, Path indexDirectoryPath, RfsDocumentOperation operation) {
+    public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId, Scheduler scheduler,
+                                                int concurrency, Path indexDirectoryPath, DocumentChangeType operation) {
         var segmentReader = readerAndBase.getReader();
         var liveDocs = readerAndBase.getLiveDocs();
 
@@ -127,7 +126,7 @@ public class LuceneReader {
             .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
                     try {
                         // Get document, returns null to skip malformed docs
-                        RfsLuceneDocument document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation);
+                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation);
                         return Mono.justOrEmpty(document); // Emit only non-null documents
                     } catch (Exception e) {
                         // Handle individual document read failures gracefully
@@ -144,7 +143,7 @@ public class LuceneReader {
                 .subscribeOn(scheduler);
     }
 
-    public static RfsLuceneDocument getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, RfsDocumentOperation operation) {
+    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation) {
         LuceneDocument document;
         try {
             document = reader.document(luceneDocId);
@@ -189,7 +188,7 @@ public class LuceneReader {
                 }
             }
             if (openSearchDocId == null) {
-                log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have an referenceable id.")
+                log.atDebug().setMessage("Skipping document with index {} from segment {} from source {}, it does not have an referenceable id.")
                     .addArgument(luceneDocId)
                     .addArgument(getSegmentReaderDebugInfo)
                     .addArgument(indexDirectoryPath)
@@ -225,6 +224,6 @@ public class LuceneReader {
         }
 
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
-        return new RfsLuceneDocument(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes, routing, operation);
+        return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes, routing, operation);
     }
 }

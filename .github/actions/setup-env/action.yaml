@@ -1,5 +1,14 @@
 name: Setup CI Environment
 description: Sets up all required runtimes and environment versions
+inputs:
+  gradle-cache-enabled:
+    description: 'Enable Gradle cache restore'
+    required: false
+    default: 'false'
+  gradle-cache-read-only:
+    description: 'Gradle cache read-only mode (no save)'
+    required: false
+    default: 'true'
 runs:
   using: "composite"
   steps:
@@ -10,7 +19,8 @@ runs:
 
     - uses: gradle/actions/setup-gradle@v4
       with:
-        gradle-version: 8.12.1
+        cache-disabled: ${{ inputs.gradle-cache-enabled != 'true' }}
+        cache-read-only: ${{ inputs.gradle-cache-read-only }}
 
     - uses: actions/setup-python@v5
       with:
@@ -23,7 +33,7 @@ runs:
 
     - uses: actions/setup-node@v4
       with:
-        node-version: 18.x
+        node-version: 22.x
 
     - name: Aggressive disk cleanup
       shell: bash

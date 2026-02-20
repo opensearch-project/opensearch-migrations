@@ -1,0 +1,18 @@
+[
+  {
+    "id": "step1",
+    "display_name": "step1",
+    "phase": "Succeeded",
+    "type": "Pod",
+    "boundary_id": "root",
+    "children": []
+  },
+  {
+    "id": "step2",
+    "display_name": "step2",
+    "phase": "Running",
+    "type": "Pod",
+    "boundary_id": "root",
+    "children": []
+  }
+]

@@ -14,24 +14,39 @@ shift  # Remove first argument, leaving any additional args in $@
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+: "${NODEJS:=node}"
 
 # Default command, can be overridden by setting INITIALIZE_CMD environment variable
-: ${INITIALIZE_CMD:="node $SCRIPT_DIR/index.js"}
+: ${INITIALIZE_CMD:="$NODEJS $SCRIPT_DIR/index.js initialize"}
 
-# Create a temporary file
-TEMPORARY_FILE=$(mktemp)
+# Create a temporary directory for output files
+TEMP_DIR=$(mktemp -d)
 
 # Ensure cleanup on exit
-trap "rm -f $TEMPORARY_FILE" EXIT
+trap "rm -rf $TEMP_DIR" EXIT
 
-UUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+UUID=$(printf '%x' $(date +%s))$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 4)
 echo "Generated unique uniqueRunNonce: $UUID"
 
 echo "Running configuration conversion..."
-$INITIALIZE_CMD --user-config $CONFIG_FILENAME --unique-run-nonce $UUID "$@" > "$TEMPORARY_FILE"
+$INITIALIZE_CMD --user-config $CONFIG_FILENAME --unique-run-nonce $UUID --output-dir $TEMP_DIR $@
+
+echo "Applying Kubernetes resources..."
+
+# Apply approval config maps
+if [ -f "$TEMP_DIR/approvalConfigMaps.yaml" ]; then
+    echo "Applying approval config maps..."
+    kubectl apply -f "$TEMP_DIR/approvalConfigMaps.yaml"
+fi
+
+# Apply concurrency config maps  
+if [ -f "$TEMP_DIR/concurrencyConfigMaps.yaml" ]; then
+    echo "Applying concurrency config maps..."
+    kubectl apply -f "$TEMP_DIR/concurrencyConfigMaps.yaml"
+fi
 
 # Set the name field based on environment variable
-if [ -n "$USE_GENERATE_NAME" ]; then
+if [ -n "$USE_GENERATE_NAME" ] && [ "$USE_GENERATE_NAME" != "false" ] && [ "$USE_GENERATE_NAME" != "0" ]; then
   # Keeping this as 'full-migration' so that it's intentionally different than the
   # one-single default migration that we will normally be using
   NAME_FIELD="generateName: full-migration-${UUID}-"
@@ -53,9 +68,11 @@ spec:
     parameters:
       - name: uniqueRunNonce
         value: "$UUID"
+      - name: approval-config
+        value: "approval-config-0"
       - name: migrationConfigs
         value: |
-$(sed 's/^/          /' "$TEMPORARY_FILE")
+$(sed 's/^/          /' "$TEMP_DIR/workflowMigration.config.yaml")
 EOF
 
 echo "Done! Workflow submitted successfully."

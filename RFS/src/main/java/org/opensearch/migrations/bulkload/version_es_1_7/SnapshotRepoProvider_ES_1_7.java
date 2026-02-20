@@ -119,11 +119,9 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
 
     public static class SimpleIndex implements SnapshotRepo.Index {
         private final String name;
-        private final String snapshotName;
 
         public SimpleIndex(String name, String snapshotName) {
             this.name = name;
-            this.snapshotName = snapshotName;
         }
 
         @Override
@@ -134,11 +132,6 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
         @Override
         public String getId() {
             return getName();
-        }
-
-        @Override
-        public List<String> getSnapshots() {
-            return Collections.singletonList(snapshotName);
         }
 
         @Override

@@ -1,0 +1,33 @@
+{{- if .Values.useDedicatedKarpenterPool }}
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: dedicated-search-pool
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: default
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          # let's not do spot since we're pretty sloppy with these charts and don't configure durable persistence
+          values: ["on-demand"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values:
+            - c6a.large
+            - c6i.large
+            - m6a.large
+            - c7a.large
+            - m7a.large
+      taints:
+        - key: "dedicated-search"
+          value: "true"
+          effect: NoSchedule
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 10m
+{{- end }}

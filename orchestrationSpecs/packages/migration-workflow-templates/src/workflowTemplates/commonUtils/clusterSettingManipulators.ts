@@ -2,14 +2,14 @@ import {BaseExpression, expr, Serialized} from "@opensearch-migrations/argo-work
 import {CLUSTER_CONFIG, SOURCE_CLUSTER_CONFIG, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 
-function makeAuthDict(clusterType: string, targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
+function makeAuthDict(clusterType: string, targetConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
     const safeAuthConfig = (expr.getLoose(expr.deserializeRecord(targetConfig), "authConfig"));
     return expr.ternary(
         expr.hasKey(expr.deserializeRecord(targetConfig), "authConfig"),
         expr.ternary(
             expr.hasKey(safeAuthConfig, "sigv4"),
             expr.makeDict({
-                [`${clusterType}targetAwsServiceSigningName`]: expr.getLoose(expr.getLoose(safeAuthConfig, "sigv4"), "service"),
+                [`${clusterType}AwsServiceSigningName`]: expr.getLoose(expr.getLoose(safeAuthConfig, "sigv4"), "service"),
                 [`${clusterType}AwsRegion`]: expr.getLoose(expr.getLoose(safeAuthConfig, "sigv4"), "region")
             }),
             expr.ternary(
@@ -28,10 +28,19 @@ export function getHttpAuthSecretName(clusterConfig: BaseExpression<Serialized<z
 }
 
 export function makeClusterParamDict(clusterType: string, clusterConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
+    const cc = expr.deserializeRecord(clusterConfig);
     return expr.mergeDicts(
-        makeAuthDict(clusterType, clusterConfig),
+        expr.mergeDicts(
+            makeAuthDict(clusterType, clusterConfig),
+            expr.ternary(
+                expr.hasKey(cc, "endpoint"),
+                expr.makeDict({
+                    [`${clusterType}Host`]: expr.getLoose(cc, "endpoint")
+                }),
+                expr.literal({})
+            )
+        ),
         expr.makeDict({
-            [`${clusterType}Host`]: expr.jsonPathStrict(clusterConfig, "endpoint"),
             [`${clusterType}Insecure`]: expr.dig(expr.deserializeRecord(clusterConfig), ["allowInsecure"], false)
         })
     );
@@ -39,6 +48,10 @@ export function makeClusterParamDict(clusterType: string, clusterConfig: BaseExp
 
 export function makeTargetParamDict(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
     return makeClusterParamDict("target", targetConfig);
+}
+
+export function makeRfsCoordinatorParamDict(rfsCoordinatorConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
+    return makeClusterParamDict("coordinator", rfsCoordinatorConfig);
 }
 
 // The functions below are still used by the replaer, but they should probably be replaced with the ones above

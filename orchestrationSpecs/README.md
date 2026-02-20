@@ -91,11 +91,11 @@ from the root orchestrationSpecs directory
 
 ```shell
 rm k8sResources/*yaml ; \
-kc delete workflows `kc get workflow 2>&1 | tail -n +2  | grep -v "No resources"  | cut -f 1 -d \  ` ; \
-kc delete workflowtemplates `kc get workflowtemplates 2>&1 | tail -n +2  | grep -v "No resources"  | cut -f 1 -d \  ` ; \
 npm run make-templates -- --outputDirectory ${PWD}/k8sResources && \
-kc create -f k8sResources && 
-./packages/config-processor/bundled/createMigrationWorkflowFromUserConfiguration.sh ./packages/config-processor/scripts/sampleMigration.yaml --etcd-endpoints http://localhost:2379
+for file in k8sResources/*.yaml; do kc delete -f "$file" --ignore-not-found=true; done && \
+kc create -f k8sResources && \
+export USE_GENERATE_NAME=true && \
+./packages/config-processor/bundled/createMigrationWorkflowFromUserConfiguration.sh ./packages/config-processor/scripts/sampleMigration.wf.yaml --etcd-endpoints http://localhost:2379
 ```
 
 I'll add something to handle `kc create -f createMigration.yaml` once I wire up

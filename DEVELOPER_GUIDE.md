@@ -1,29 +1,35 @@
 # Development Guide
 
 ## Table of Contents
-- [Development Guide](#development-guide)
-  - [Table of Contents](#table-of-contents)
-  - [Prerequisites](#prerequisites)
-  - [Project Structure](#project-structure)
-  - [Building the Project](#building-the-project)
-  - [Running Tests](#running-tests)
-  - [Code Style](#code-style)
-  - [Pre-Commit Hooks](#pre-commit-hooks)
-  - [Publishing](#publishing)
-  - [Development Environments](#development-environments)
-    - [VSCode](#vscode)
-      - [Python](#python)
+- [Table of Contents](#table-of-contents)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#kubernetes-quick-start)
+- [Project Structure](#project-structure)
+- [Building the Project](#building-the-project)
+- [Running Tests](#running-tests)
+- [Code Style](#code-style)
+- [Pre-Commit Hooks](#pre-commit-hooks)
+- [Publishing](#publishing)
+- [Development Environments](#development-environments)
+  - [VSCode](#vscode)
+    - [Python](#python)
 
 ## Prerequisites
 
 - Java Development Kit (JDK) 11-17
-- Gradle 8
 - Python3
-- Docker and Docker Compose (for local deployment)
+- Docker/Minikube/K3s/etc (for local deployment)
 - [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html#getting-started-install-instructions) (for AWS deployment)
-- [AWS Cloud Development Kit (CDK)](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html) (for AWS deployment)
-- Node.js v18+ (for AWS deployment)
+- Node.js v22 (downloaded automatically by Gradle)
+- [AWS Cloud Development Kit (CDK)](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html) (for AWS deployment, downloaded automatically by Gradle)
 
+## Kubernetes Quick Start
+
+* This [Kubernetes Guide](deployment/k8s/README.md) shows you how to create a minikube cluster locally and deploy the Migration Assistant to it.
+* This [AWS EKS Guide](deployment/k8s/aws/README.md) shows you how to deploy an EKS cluster and deploy the Migration Assistant to it.
+
+See the [project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki)
+to learn more about how to use the migration console and its workflow commands.
 
 ## Project Structure
 
@@ -34,8 +40,8 @@
   - Migration utilities for document reindexing and metadata migration.
   - Includes tracing contexts for both document and metadata migrations.
 - [`TrafficCapture`](TrafficCapture/README.md) (Capture-and-Replay): Projects for proxying, capturing, and replaying HTTP traffic.
-- [`migrationConsole`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/README.md): A comprehensive CLI tool for executing the migration workflow.
-  - [`lib/console_link`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/README.md): Core library for migration operations.
+- [`migrationConsole`](migrationConsole/README.md): A comprehensive CLI tool for executing the migration workflow.
+  - [`lib/console_link`](migrationConsole/lib/console_link/README.md): Core library for migration operations.
 - [`deployment`](deployment/README.md): AWS deployment scripts and configurations.
 - `dev-tools`: Development utilities and API request templates.
 - `docs`: Project documentation and architecture diagrams.
@@ -51,7 +57,7 @@ The migration console CLI provides users with a centralized interface to execute
 - Controlling traffic replay
 - Monitoring migration progress through metrics
 - Handling snapshots and metadata
-- Integrating with various deployment environments (Docker locally and AWS ECS)
+- Integrating with various deployment environments (Docker locally, AWS ECS, EKS, K8s)
 
 Users can interact with the migration process through the CLI, which orchestrates the different components of the migration toolkit to perform a seamless migration between Elasticsearch and OpenSearch clusters.
 
@@ -66,6 +72,27 @@ Users can interact with the migration process through the CLI, which orchestrate
 ```bash
 ./gradlew test
 ```
+
+## Building Images
+
+Build images with docker (requires docker)
+
+```bash
+../gradlew buildDockerImages
+```
+
+Build images with buildkit and jib. 
+See [buildImages](buildImages/README-K8s.md) for instructions to set 
+that up.
+
+```bash
+../gradlew :buildImages:buildImagesToRegistry
+```
+
+## Running the Project
+
+* Running the project in [Kubernetes](deployment/k8s/README.md) 
+* Running the legacy solution with [Docker Compose](TrafficCapture/dockerSolution/README.md)
 
 ## Code Style
 
@@ -84,7 +111,7 @@ Install the pre-commit hooks:
 ./install_githooks.sh
 ```
 
-## Publishing
+## Publishing Images
 
 This project can be published to a local Maven repository with:
 ```sh

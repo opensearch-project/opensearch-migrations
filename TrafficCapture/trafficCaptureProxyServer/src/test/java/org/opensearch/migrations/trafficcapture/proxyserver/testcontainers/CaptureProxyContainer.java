@@ -18,7 +18,7 @@ import org.testcontainers.containers.Container;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.HttpWaitStrategy;
 import org.testcontainers.containers.wait.strategy.WaitStrategyTarget;
-import org.testcontainers.kafka.ConfluentKafkaContainer;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.lifecycle.Startable;
 
 @Slf4j
@@ -47,7 +47,7 @@ public class CaptureProxyContainer extends GenericContainer implements AutoClose
         this(() -> destinationUri, () -> kafkaUri);
     }
 
-    public CaptureProxyContainer(final Container<?> destination, final ConfluentKafkaContainer kafka) {
+    public CaptureProxyContainer(final Container<?> destination, final KafkaContainer kafka) {
         this(() -> getUriFromContainer(destination), () -> getUriFromContainer(kafka));
     }
 

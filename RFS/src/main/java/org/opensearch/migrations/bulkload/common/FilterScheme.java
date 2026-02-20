@@ -9,6 +9,7 @@ public class FilterScheme {
 
     private static final List<String> EXCLUDED_PREFIXES = Arrays.asList(
             ".",
+            "@abc_template@",
             "apm-",
             "apm@",
             "behavioral_analytics-",
@@ -18,6 +19,7 @@ public class FilterScheme {
             "elastic-connectors-",
             "elastic_agent.",
             "ilm-history-",
+            "kibana",
             "logs-elastic_agent",
             "logs-endpoint.",
             "logs-index_pattern",
@@ -68,11 +70,22 @@ public class FilterScheme {
     );
 
     public static Predicate<String> filterByAllowList(List<String> allowlist) {
+        // Validate and pre-compile all allowlist entries to fail fast on invalid patterns
+        final List<AllowlistEntry> compiledEntries;
+        if (allowlist != null && !allowlist.isEmpty()) {
+            compiledEntries = allowlist.stream()
+                .map(AllowlistEntry::new)
+                .toList();
+        } else {
+            compiledEntries = null;
+        }
+        
         return item -> {
-            if (allowlist == null || allowlist.isEmpty()) {
+            if (compiledEntries == null) {
                 return !isExcluded(item);
             } else {
-                return allowlist.contains(item);
+                return compiledEntries.stream()
+                    .anyMatch(entry -> entry.matches(item));
             }
         };
     }
