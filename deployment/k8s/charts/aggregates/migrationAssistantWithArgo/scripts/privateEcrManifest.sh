@@ -1,6 +1,6 @@
 #!/bin/sh
 # =============================================================================
-# private-ecr-manifest.sh
+# privateEcrManifest.sh
 #
 # Version-locked list of ALL container images and helm charts required by the
 # Migration Assistant. Includes production AND development/optional charts.

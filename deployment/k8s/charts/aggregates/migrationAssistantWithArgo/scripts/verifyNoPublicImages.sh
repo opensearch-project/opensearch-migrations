@@ -1,6 +1,6 @@
 #!/bin/sh
 # =============================================================================
-# verify-no-public-images.sh
+# verifyNoPublicImages.sh
 #
 # Verifies that helm template output with ECR values has no references to
 # public registries. Run after generating private-ecr-values.yaml.
@@ -19,7 +19,7 @@ if [ -z "$ECR" ]; then
 fi
 
 VALUES_FILE=$(mktemp)
-"$SCRIPT_DIR/generate-private-ecr-values.sh" "$ECR" > "$VALUES_FILE"
+"$SCRIPT_DIR/generatePrivateEcrValues.sh" "$ECR" > "$VALUES_FILE"
 
 echo "Rendering helm template with ECR values..."
 RENDERED=$(helm template test "$CHART_DIR" \
@@ -45,7 +45,7 @@ if [ -n "$VIOLATIONS" ]; then
     echo "  $line"
   done
   echo ""
-  echo "These images need overrides in generate-private-ecr-values.sh"
+  echo "These images need overrides in generatePrivateEcrValues.sh"
   exit 1
 else
   echo "✅ PASS: All image references point to $ECR"

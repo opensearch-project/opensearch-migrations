@@ -1,6 +1,6 @@
 #!/bin/sh
 # =============================================================================
-# generate-private-ecr-values.sh
+# generatePrivateEcrValues.sh
 #
 # Generates a helm values override that:
 # 1. Points all chart repositories to OCI ECR

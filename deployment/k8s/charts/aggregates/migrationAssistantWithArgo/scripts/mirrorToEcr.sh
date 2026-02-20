@@ -1,6 +1,6 @@
 #!/bin/sh
 # =============================================================================
-# mirror-to-ecr.sh
+# mirrorToEcr.sh
 #
 # Copies all required container images and helm charts from public registries
 # to a private ECR registry. Run this from a machine with internet access.
@@ -11,7 +11,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$SCRIPT_DIR/private-ecr-manifest.sh"
+. "$SCRIPT_DIR/privateEcrManifest.sh"
 
 ECR_HOST="${1:-}"
 shift || true

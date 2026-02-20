@@ -849,11 +849,11 @@ if [[ "$push_images_to_ecr" == "true" ]]; then
   echo "Mirroring public images and helm charts to private ECR..."
   ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
   SCRIPTS_DIR="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
-  "$SCRIPTS_DIR/mirror-to-ecr.sh" "$ECR_HOST" --region "${AWS_CFN_REGION}"
+  "$SCRIPTS_DIR/mirrorToEcr.sh" "$ECR_HOST" --region "${AWS_CFN_REGION}"
 
   echo "Generating private ECR helm values override..."
   ecr_values_file=$(mktemp)
-  "$SCRIPTS_DIR/generate-private-ecr-values.sh" "$ECR_HOST" > "$ecr_values_file"
+  "$SCRIPTS_DIR/generatePrivateEcrValues.sh" "$ECR_HOST" > "$ecr_values_file"
   if [[ -n "$extra_helm_values" ]]; then
     extra_helm_values="$extra_helm_values,$ecr_values_file"
   else
