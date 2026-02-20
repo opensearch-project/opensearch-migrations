@@ -1,5 +1,8 @@
 import {Construct} from 'constructs';
 import {CfnPodIdentityAssociation} from 'aws-cdk-lib/aws-eks';
+// Note: @aws-cdk/aws-eks-v2-alpha is in developer preview. API may change between CDK releases.
+// This replaces the legacy aws-cdk-lib/aws-eks L2 construct with a ground-up rewrite that
+// supports EKS Auto Mode natively and does not require a kubectl Lambda handler.
 import * as eks from '@aws-cdk/aws-eks-v2-alpha';
 import {IVpc, Subnet} from 'aws-cdk-lib/aws-ec2';
 import {
@@ -50,11 +53,13 @@ export class EKSInfra extends Construct {
 
         let vpcSubnets;
         if (props.vpcSubnetIds && props.vpcSubnetIds.length > 0) {
-            vpcSubnets = [{
-                subnets: props.vpcSubnetIds.map((subnetId, i) =>
-                    Subnet.fromSubnetId(this, `ImportedSubnet${i}`, subnetId)
-                )
-            }];
+            const importedSubnets = props.vpcSubnetIds.map((subnetId, i) => {
+                const subnet = Subnet.fromSubnetId(this, `ImportedSubnet${i}`, subnetId);
+                Tags.of(subnet).add(`kubernetes.io/cluster/${props.clusterName}`, 'shared');
+                Tags.of(subnet).add('kubernetes.io/role/internal-elb', '1');
+                return subnet;
+            });
+            vpcSubnets = [{ subnets: importedSubnets }];
         } else {
             for (const subnet of props.vpc.privateSubnets) {
                 Tags.of(subnet).add(`kubernetes.io/cluster/${props.clusterName}`, 'shared');
