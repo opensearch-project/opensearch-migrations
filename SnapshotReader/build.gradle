@@ -5,6 +5,7 @@ plugins {
 
 dependencies {
     implementation project(':rfs-common')
+    implementation project(':rfs-http')
     implementation project(':SearchSnapshotExtractor')
     implementation project(':coreUtilities')
     implementation project(':transformation')

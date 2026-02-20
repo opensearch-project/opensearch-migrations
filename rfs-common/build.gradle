@@ -37,7 +37,6 @@ tasks.named('compileJava') {
 
 dependencies {
     implementation project(':transformation')
-    implementation project(':awsUtilities')
     implementation project(':coreUtilities')
 
     implementation libs.jackson.databind
@@ -47,12 +46,6 @@ dependencies {
 
     implementation libs.jcommander
     implementation libs.slf4j.api
-
-    // HTTP infrastructure (RestClient, ConnectionContext, etc.)
-    implementation libs.netty.codec.http
-    implementation libs.reactor.netty.core
-    implementation libs.reactor.netty.http
-    implementation libs.aws.auth
 
     lucene9 libs.lucene.v9.core
     implementation shadowLucene9.outputs.files
