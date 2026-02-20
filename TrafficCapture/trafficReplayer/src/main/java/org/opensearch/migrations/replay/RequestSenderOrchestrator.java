@@ -399,7 +399,13 @@ public class RequestSenderOrchestrator {
                     return TextTrackedFuture.failedFuture(t, () -> "failed future");
                 }
                 if (dtr.directive == RetryDirective.RETRY) {
-                    var newStartTime = referenceStartTime.plus(nextRetryDelay);
+                    var computedStartTime = referenceStartTime.plus(nextRetryDelay);
+                    // Ensure retry is not scheduled in the past to prevent tight retry loops
+                    // that monopolize event loop threads when referenceStartTime is far in the past
+                    var now = now();
+                    var newStartTime = computedStartTime.isBefore(now)
+                        ? now.plus(nextRetryDelay)
+                        : computedStartTime;
                     log.atInfo().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
                     var schedulingDelay = Duration.between(now(), newStartTime);
                     return NettyFutureBinders.bindNettyScheduleToCompletableFuture(

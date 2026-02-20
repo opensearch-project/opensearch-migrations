@@ -25,3 +25,8 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
 }
+
+tasks.withType(Test).configureEach {
+    // Allow lenient line parsing for compatibility with older clients and tests
+    systemProperty 'io.netty.handler.codec.http.defaultStrictLineParsing', false
+}

@@ -15,8 +15,7 @@ RUN dnf install -y \
         vim \
         wget \
         && \
-    dnf clean all && \
-    rm -rf /var/cache/dnf
+    dnf clean all
 
 # Define the virtual environment path to use for all pipenv runs
 ENV WORKON_HOME=/

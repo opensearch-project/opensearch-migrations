@@ -284,7 +284,7 @@ def test_cli_cluster_run_curl_source_cluster(runner, mocker):
     assert model_mock.call_args.kwargs == {'path': '/new_index/_doc', 'method': HttpMethod.POST,
                                            'data': '{"id": 3, "number": 5}',
                                            'headers': {'Content-Type': 'application/json'},
-                                           'timeout': None, 'session': None, 'raise_error': False}
+                                           'timeout': 15, 'session': None, 'raise_error': False}
     assert result.exit_code == 0
 
 
@@ -297,7 +297,7 @@ def test_cli_cluster_run_curl_target_cluster(runner, mocker):
     middleware_mock.assert_called_once()
     model_mock.assert_called_once()
     assert model_mock.call_args.kwargs == {'path': '/_cat/indices', 'method': HttpMethod.GET,
-                                           'data': None, 'headers': {'user-agent': 'TestAgent'}, 'timeout': None,
+                                           'data': None, 'headers': {'user-agent': 'TestAgent'}, 'timeout': 15,
                                            'session': None, 'raise_error': False}
     assert result.exit_code == 0
 
@@ -347,7 +347,7 @@ def test_cli_cluster_run_curl_multiple_headers(runner, mocker):
     middleware_mock.assert_called_once()
     model_mock.assert_called_once()
     assert model_mock.call_args.kwargs == {'path': '/', 'method': HttpMethod.GET,
-                                           'data': None, 'headers': {k: v for k, v in headers}, 'timeout': None,
+                                           'data': None, 'headers': {k: v for k, v in headers}, 'timeout': 15,
                                            'session': None, 'raise_error': False}
     assert result.exit_code == 0
 
@@ -361,9 +361,24 @@ def test_cli_cluster_run_curl_head_method(runner, mocker):
     middleware_mock.assert_called_once()
     model_mock.assert_called_once()
     assert model_mock.call_args.kwargs == {'path': '/', 'method': HttpMethod.HEAD,
-                                           'data': None, 'headers': {}, 'timeout': None,
+                                           'data': None, 'headers': {}, 'timeout': 15,
                                            'session': None, 'raise_error': False}
     assert result.exit_code == 0
+
+
+def test_cli_cluster_curl_timeout_shows_friendly_error(runner, mocker):
+    import requests.exceptions
+    mocker.patch.object(Cluster, 'call_api', autospec=True,
+                        side_effect=requests.exceptions.ReadTimeout(
+                            "HTTPSConnectionPool(host='example.com', port=443): Read timed out. (read timeout=15)"))
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
+                                 'target_cluster', '/_cluster/health'],
+                           catch_exceptions=True)
+    assert result.exit_code == 0
+    assert "timed out" in result.output
+    assert "--timeout" in result.output
+    assert "HTTPSConnectionPool" not in result.output
+    assert "Traceback" not in result.output
 
 
 def test_cli_cluster_clear_indices(runner, mocker):

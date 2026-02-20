@@ -69,7 +69,7 @@ function makeParamsDict(
         expr.mergeDicts(
             makeTargetParamDict(targetConfig),
              // TODO - tighten the type on mergeDicts - it allowed this to go through w/out first calling fromJSON
-            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap")
+            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "jvmArgs")
         ),
         expr.mergeDicts(
             expr.makeDict({
@@ -144,6 +144,9 @@ export const MetadataMigration = WorkflowBuilder.create({
                     expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
                     expr.literal("/config/credentials/configuration"),
                     expr.literal(""))
+            )
+            .addEnvVar("JDK_JAVA_OPTIONS",
+                expr.dig(expr.deserializeRecord(b.inputs.metadataMigrationConfig), ["jvmArgs"], "")
             )
             .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(b.inputs.targetConfig)))
             .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)

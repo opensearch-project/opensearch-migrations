@@ -17,7 +17,7 @@ RUN dnf install -y \
       python3.11-devel \
       python3.11-pip \
       python3.11-wheel \
-  && dnf clean all && rm -rf /var/cache/dnf
+  && dnf clean all
 
 ENV PIP_ROOT_USER_ACTION ignore
 ENV LANG C.UTF-8
@@ -69,8 +69,7 @@ RUN dnf install -y \
         wget \
         zlib \
         && \
-    dnf clean all && \
-    rm -rf /var/cache/dnf
+    dnf clean all
 
 # Define the virtual environment path to use for all pipenv runs
 ENV WORKON_HOME=/

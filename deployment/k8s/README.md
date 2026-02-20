@@ -209,13 +209,3 @@ aws iam update-assume-role-policy --role-name $role_name --policy-document "$TRU
 eksctl create addon --cluster $cluster_name --name aws-efs-csi-driver --version latest --service-account-role-arn <role_arn> --force
 kubectl apply -f aws/storage-class-efs.yml
 ```
-
-Create an ECR to store images
-```shell
-./buildDockerImagesMini.sh --create-ecr
-```
-
-Build images and push to ECR
-```shell
-./buildDockerImagesMini.sh --sync-ecr
-```

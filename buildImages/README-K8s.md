@@ -4,7 +4,7 @@ This guide walks through setting up BuildKit and a local Docker registry in Mini
 
 Pros of this approach:
 - The gradle package in this project builds java images (currently only 2) with Jib, which are able to be optimized more, especially to minimize developer rebuild times.
-- This lets one test the ability to build images very similar to how a user would do with the aws-bootstrap.sh flag `--build-images true`.
+- This lets one test the ability to build images similar to how a user would do so with the aws-bootstrap.sh flag `--build-images`.
 - Users can override the image locations and pull policies to use a local repository and pull images Always to make continuous testing easier.
 Cons:
 - This is more to configure.
