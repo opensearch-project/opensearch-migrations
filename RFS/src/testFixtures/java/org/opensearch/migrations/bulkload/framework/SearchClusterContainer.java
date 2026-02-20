@@ -295,14 +295,43 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         }
     }
 
+    /**
+     * Build a custom-elasticsearch image on demand via Gradle if not already available locally.
+     */
+    private static void ensureCustomImageAvailable(ContainerVersion version) {
+        if (!version.imageName.startsWith("custom-elasticsearch:") || isImageAvailable(version)) {
+            return;
+        }
+        String tag = version.imageName.split(":")[1]; // e.g. "7.10.2"
+        String[] parts = tag.split("\\.");
+        String taskName = "buildImage_" + parts[0] + "_" + parts[1]; // e.g. "buildImage_7_10"
+
+        File dir = new File(System.getProperty("user.dir"));
+        while (dir != null && !new File(dir, "gradlew").exists()) {
+            dir = dir.getParentFile();
+        }
+        if (dir == null) {
+            throw new RuntimeException("Cannot find gradlew to build " + version.imageName);
+        }
+
+        log.info("Building Docker image on-demand: {} (task: :custom-es-images:{})", version.imageName, taskName);
+        try {
+            Process p = new ProcessBuilder(
+                new File(dir, "gradlew").getAbsolutePath(),
+                ":custom-es-images:" + taskName
+            ).directory(dir).inheritIO().start();
+            if (p.waitFor() != 0) {
+                throw new RuntimeException("Gradle build failed for image: " + version.imageName);
+            }
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException("Failed to build image: " + version.imageName, e);
+        }
+    }
+
     @SuppressWarnings("resource")
     public SearchClusterContainer(final ContainerVersion version) {
         super(DockerImageName.parse(version.imageName));
-        // Skip test if custom-built image not available locally (don't check Docker Hub images)
-        if (version.imageName.startsWith("custom-elasticsearch:") && !isImageAvailable(version)) {
-            org.junit.jupiter.api.Assumptions.assumeTrue(false,
-                "Skipping: Docker image not available locally: " + version.imageName);
-        }
+        ensureCustomImageAvailable(version);
         var builder = this.withExposedPorts(9200, 9300);
 
         if (version instanceof OverrideFile) {
@@ -318,6 +347,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     public SearchClusterContainer(final ContainerVersion version, Map<String, String> supplementaryEnvVariables) {
         super(DockerImageName.parse(version.imageName));
+        ensureCustomImageAvailable(version);
         var builder = this.withExposedPorts(9200, 9300);
 
         var combinedEnvVariables = new ImmutableMap.Builder<String, String>().putAll(
