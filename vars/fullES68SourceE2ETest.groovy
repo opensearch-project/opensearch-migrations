@@ -50,7 +50,8 @@ def call(Map config = [:]) {
             "managerNodeCount": 0,
             "serverAccessType": "ipv4",
             "restrictServerAccessTo": "0.0.0.0/0",
-            "requireImdsv2": false
+            "enableImdsCredentialRefresh": true,
+            "requireImdsv2": true
           }
         }
     """
@@ -100,6 +101,20 @@ def call(Map config = [:]) {
             skipCaptureProxyOnNodeSetup: true,
             jobName: 'full-es68source-e2e-test',
             testUniqueId: testUniqueId,
-            integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py --source_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9201 --target_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9202'
+            integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py --source_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9201 --target_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9202',
+            preIntegTestStep: { deployStage ->
+                def sourceEndpoint = "https://alb.migration.${deployStage}.local:9201"
+                def clusterName = "migration-${deployStage}-ecs-cluster"
+                def taskArn = sh(script: "aws ecs list-tasks --cluster ${clusterName} --family 'migration-${deployStage}-migration-console' | jq --raw-output '.taskArns[0]'", returnStdout: true).trim()
+                def execCmd = { cmd -> sh(script: "aws ecs execute-command --cluster '${clusterName}' --task '${taskArn}' --container 'migration-console' --interactive --command '${cmd}'", returnStatus: true) }
+                // Delete snapshot from source cluster
+                execCmd("curl -k -X DELETE ${sourceEndpoint}/_snapshot/migration_assistant_repo/rfs-snapshot")
+                // Delete snapshot repo from source cluster
+                execCmd("curl -k -X DELETE ${sourceEndpoint}/_snapshot/migration_assistant_repo")
+                // Delete S3 snapshot files
+                def accountId = sh(script: "aws sts get-caller-identity --query Account --output text", returnStdout: true).trim()
+                def region = sh(script: "aws configure get region || echo us-east-1", returnStdout: true).trim()
+                sh(script: "aws s3 rm s3://migration-artifacts-${accountId}-${deployStage}-${region}/rfs-snapshot-repo --recursive", returnStatus: true)
+            }
     )
 }
