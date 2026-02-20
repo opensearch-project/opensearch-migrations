@@ -301,8 +301,8 @@ impl<'a> SmileParser<'a> {
                 Ok(SmileValue::Int(v))
             }
 
-            // Tiny ASCII value strings (1-32 bytes)
-            0x40..=0x5F => {
+            // Short ASCII value strings (1-64 bytes)
+            0x40..=0x7F => {
                 let len = (b - 0x40 + 1) as usize;
                 let s = self.read_safe_utf8(len)?;
                 if self.shared_values_enabled && s.len() <= 64 {
@@ -311,27 +311,13 @@ impl<'a> SmileParser<'a> {
                 Ok(SmileValue::String(s))
             }
 
-            // Tiny Unicode value strings (2-33 bytes)
-            0x60..=0x7F => {
-                let len = (b - 0x60 + 2) as usize;
+            // Short Unicode value strings (2-65 bytes)
+            0x80..=0xBF => {
+                let len = (b - 0x80 + 2) as usize;
                 let s = self.read_safe_utf8(len)?;
                 if self.shared_values_enabled && s.len() <= 64 {
                     self.shared_values.push(s.clone());
                 }
-                Ok(SmileValue::String(s))
-            }
-
-            // Small ASCII value strings (33-64 bytes)
-            0x80..=0x9F => {
-                let len = (b - 0x80 + 33) as usize;
-                let s = self.read_safe_utf8(len)?;
-                Ok(SmileValue::String(s))
-            }
-
-            // Small Unicode value strings (34-65 bytes)
-            0xA0..=0xBF => {
-                let len = (b - 0xA0 + 34) as usize;
-                let s = self.read_safe_utf8(len)?;
                 Ok(SmileValue::String(s))
             }
 

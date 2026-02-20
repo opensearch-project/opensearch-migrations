@@ -88,7 +88,8 @@ impl SnapshotFs {
 
     pub fn mount(self, mountpoint: &Path) -> io::Result<()> {
         let options = vec![
-            MountOption::RO,
+            // Note: NOT using MountOption::RO — we need setxattr for SELinux relabeling in K8s.
+            // Read-only semantics are enforced by returning EROFS from write/create/unlink/etc.
             MountOption::FSName("snapshot-fuse".to_string()),
             MountOption::AllowOther,
             MountOption::DefaultPermissions,
@@ -469,5 +470,19 @@ impl Filesystem for SnapshotFs {
                 reply.error(EISDIR);
             }
         }
+    }
+
+    /// Accept setxattr as a no-op — required for SELinux relabeling in K8s.
+    fn setxattr(
+        &mut self,
+        _req: &Request,
+        _ino: u64,
+        _name: &OsStr,
+        _value: &[u8],
+        _flags: i32,
+        _position: u32,
+        reply: fuser::ReplyEmpty,
+    ) {
+        reply.ok();
     }
 }

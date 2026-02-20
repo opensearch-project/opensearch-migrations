@@ -35,6 +35,11 @@ fn main() -> std::io::Result<()> {
     // Create mount point if it doesn't exist
     std::fs::create_dir_all(&args.mount_point)?;
 
+    // Clean up stale FUSE mount if present (e.g., from a previous pod on the same hostPath)
+    let _ = std::process::Command::new("fusermount")
+        .args(["-uz", args.mount_point.to_str().unwrap_or("")])
+        .output();
+
     let filesystem = snapshot_fuse::fs::SnapshotFs::new(args.repo_root, resolved);
     info!("Starting FUSE mount at {:?}", args.mount_point);
     filesystem.mount(&args.mount_point)
