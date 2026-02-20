@@ -3,13 +3,21 @@ package org.opensearch.migrations.bulkload.common;
 import java.io.InputStream;
 import java.nio.file.Path;
 
-
-// TODO: find a better approach to this (see https://opensearch.atlassian.net/browse/MIGRATIONS-1786)
-public abstract class SourceRepoAccessor {
+// Accesses snapshot repo files through a BlobSource. See MIGRATIONS-1786 for background.
+public class SourceRepoAccessor {
     private final SourceRepo repo;
+    private final BlobSource blobSource;
 
-    protected SourceRepoAccessor(SourceRepo repo) {
+    public SourceRepoAccessor(SourceRepo repo, BlobSource blobSource) {
         this.repo = repo;
+        this.blobSource = blobSource;
+    }
+
+    /**
+     * Convenience constructor for local filesystem access.
+     */
+    public SourceRepoAccessor(SourceRepo repo) {
+        this(repo, BlobSource.fromLocalFilesystem());
     }
 
     public Path getRepoRootDir() {
@@ -44,7 +52,9 @@ public abstract class SourceRepoAccessor {
         return load(repo.getBlobFilePath(indexId, shardId, blobName));
     }
 
-    protected abstract InputStream load(Path path);
+    protected InputStream load(Path path) {
+        return blobSource.readBlob(path);
+    }
 
     public static class CouldNotLoadRepoFile extends RuntimeException {
         public CouldNotLoadRepoFile(String message, Throwable cause) {

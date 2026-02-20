@@ -107,14 +107,6 @@ public class OpenSearchClientFactory {
         return ClusterVersionDetector.detect(client);
     }
 
-    Mono<Boolean> checkCompatibilityModeFromResponse(HttpResponse resp) {
-        return checkBooleanSettingFromResponse(
-                resp,
-                "compatibility",
-                "override_main_response_version",
-                "Unable to determine if the cluster is in compatibility mode");
-    }
-
     Mono<Boolean> checkCompressionFromResponse(HttpResponse resp) {
         return checkBooleanSettingFromResponse(
                 resp,

@@ -10,8 +10,7 @@ import io.netty.handler.codec.http.HttpContent;
 import lombok.AllArgsConstructor;
 
 /**
- * TODO - this is a copy from the replayer project.  Both copies should be folded into a shared package in
- * common/nettyUtils.
+ * Meters outbound HTTP content size. Shared utility used by both RFS and replayer modules.
  */
 @AllArgsConstructor
 public class WriteMeteringHandler extends ChannelOutboundHandlerAdapter {

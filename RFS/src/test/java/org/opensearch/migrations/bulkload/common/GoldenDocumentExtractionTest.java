@@ -13,7 +13,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -77,9 +77,9 @@ public class GoldenDocumentExtractionTest {
         String label, String versionStr, TestResources.Snapshot snapshot, String indexName, String goldenFile
     ) throws Exception {
         var version = Version.fromString(versionStr);
-        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
+        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
         var repo = new FileSystemRepo(snapshot.dir, fileFinder);
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
+        var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(version, repo, false);
         var repoAccessor = new DefaultSourceRepoAccessor(repo);
 
         var shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, indexName, 0);
