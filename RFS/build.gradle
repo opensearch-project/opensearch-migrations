@@ -79,11 +79,6 @@ dependencies {
     testImplementation libs.hamcrest
     testImplementation libs.junit.jupiter.api
     testRuntimeOnly libs.junit.jupiter.engine
-    // why are these under implementation with the above comment for integ tests?
-    implementation libs.httpclient5
-    implementation libs.jackson.databind
-    implementation libs.jackson.core
-    implementation libs.jackson.annotations
 
     testFixturesImplementation project(':transformation')
     testFixturesImplementation testFixtures(project(":coreUtilities"))

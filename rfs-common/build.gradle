@@ -36,15 +36,15 @@ tasks.named('compileJava') {
 }
 
 dependencies {
-    implementation project(':transformation')
-    implementation project(':coreUtilities')
+    api project(':transformation')
+    api project(':coreUtilities')
 
     implementation libs.jackson.databind
     implementation libs.jackson.core
     implementation libs.jackson.annotations
     implementation libs.jackson.dataformat.smile
 
-    implementation libs.jcommander
+    compileOnly libs.jcommander
     implementation libs.slf4j.api
 
     lucene9 libs.lucene.v9.core

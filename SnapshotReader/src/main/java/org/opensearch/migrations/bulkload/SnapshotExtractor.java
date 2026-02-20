@@ -45,6 +45,11 @@ public class SnapshotExtractor {
         this.sourceRepo = sourceRepo;
     }
 
+    // Visible for testing
+    static SnapshotExtractor create(Version version, ClusterSnapshotReader snapshotReader, SourceRepo sourceRepo) {
+        return new SnapshotExtractor(version, snapshotReader, sourceRepo);
+    }
+
     /**
      * Creates a SnapshotExtractor for a local snapshot directory with a known version.
      */
@@ -60,21 +65,17 @@ public class SnapshotExtractor {
      */
     public List<ShardEntry> listShards(String snapshotName, String indexName) {
         var repoDataProvider = snapshotReader.getShardMetadata().getRepoDataProvider();
-        var indices = repoDataProvider.getIndicesInSnapshot(snapshotName);
         var indexId = repoDataProvider.getIndexId(indexName);
 
-        // ShardMetadata.Factory doesn't expose shard count directly, so we probe
-        // by trying to read shard metadata until we get an error
-        return IntStream.iterate(0, i -> i + 1)
+        // Get shard count from index metadata
+        var indexMetadata = snapshotReader.getIndexMetadata().fromRepo(snapshotName, indexName);
+        int shardCount = indexMetadata.getNumberOfShards();
+
+        return IntStream.range(0, shardCount)
             .mapToObj(shardId -> {
-                try {
-                    var meta = snapshotReader.getShardMetadata().fromRepo(snapshotName, indexName, shardId);
-                    return new ShardEntry(snapshotName, indexName, indexId, shardId, meta);
-                } catch (Exception e) {
-                    return null;
-                }
+                var meta = snapshotReader.getShardMetadata().fromRepo(snapshotName, indexName, shardId);
+                return new ShardEntry(snapshotName, indexName, indexId, shardId, meta);
             })
-            .takeWhile(entry -> entry != null)
             .toList();
     }
 

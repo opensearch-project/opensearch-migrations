@@ -101,7 +101,7 @@ public class SnapshotReaderRegistry {
                 return new UnsupportedVersionException(message);
             });
 
-        log.info("Found remote reader for version: " + version);
+        log.atInfo().setMessage("Found remote reader for version: {}").addArgument(version).log();
         return remoteProvider;
     }
 
