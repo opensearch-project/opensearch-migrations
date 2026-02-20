@@ -84,6 +84,7 @@ public class SnapshotReader_ES_7_10 implements ClusterSnapshotReader {
         return version;
     }
 
+    @Override
     public String toString() {
         // These values could be null, don't want to crash during toString
         return String.format("Snapshot: %s %s", version, sourceRepo);

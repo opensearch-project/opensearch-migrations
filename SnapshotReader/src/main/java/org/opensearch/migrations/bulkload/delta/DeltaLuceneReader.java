@@ -187,18 +187,18 @@ public class DeltaLuceneReader {
 
     private static List<ReaderAndBase> getAdditionsBetweenSnapshot(TreeMap<String, LuceneLeafReader>
       previousSegmentReaderMap, TreeMap<String, LuceneLeafReader> currentSegmentReaderMap, int startingOffset) {
-        var prevousSnapshotSegmentReaderKeys    = new TreeSet<>(previousSegmentReaderMap.keySet());
+        var previousSnapshotSegmentReaderKeys = new TreeSet<>(previousSegmentReaderMap.keySet());
         var currentSnapshotSegmentReaderKeys = new TreeSet<>(currentSegmentReaderMap.keySet());
 
-        var onlyIncurrentSnapshotSegmentReaderKeys = new TreeSet<>(currentSnapshotSegmentReaderKeys);
-        onlyIncurrentSnapshotSegmentReaderKeys.removeAll(prevousSnapshotSegmentReaderKeys);
+        var onlyInCurrentSnapshotSegmentReaderKeys = new TreeSet<>(currentSnapshotSegmentReaderKeys);
+        onlyInCurrentSnapshotSegmentReaderKeys.removeAll(previousSnapshotSegmentReaderKeys);
 
-        var inBothKeys        = new TreeSet<>(prevousSnapshotSegmentReaderKeys);
+        var inBothKeys = new TreeSet<>(previousSnapshotSegmentReaderKeys);
         inBothKeys.retainAll(currentSnapshotSegmentReaderKeys);
 
         List<ReaderAndBase> readerAndBases = new ArrayList<>();
         int offset = startingOffset;
-        for (var key : onlyIncurrentSnapshotSegmentReaderKeys) {
+        for (var key : onlyInCurrentSnapshotSegmentReaderKeys) {
             var reader = currentSegmentReaderMap.get(key);
             readerAndBases.add(new ReaderAndBase(reader, offset, reader.getLiveDocs()));
             offset += reader.maxDoc();
