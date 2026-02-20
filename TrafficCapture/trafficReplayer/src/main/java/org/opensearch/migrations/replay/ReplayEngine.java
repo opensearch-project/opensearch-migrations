@@ -121,7 +121,7 @@ public class ReplayEngine {
             f -> f.whenComplete((v, t) -> Utils.setIfLater(lastCompletedSourceTimeEpochMs, timestamp.toEpochMilli()))
                 .whenComplete((v, t) -> {
                     var newCount = totalCountOfScheduledTasksOutstanding.decrementAndGet();
-                    log.atInfo().setMessage("Scheduled task '{}' finished ({}) decremented tasksOutstanding to {}")
+                    log.atDebug().setMessage("Scheduled task '{}' finished ({}) decremented tasksOutstanding to {}")
                         .addArgument(taskDescription)
                         .addArgument(stringableKey)
                         .addArgument(newCount)
@@ -140,7 +140,7 @@ public class ReplayEngine {
     }
 
     private static void logStartOfWork(Object stringableKey, long newCount, Instant start, String label) {
-        log.atInfo().setMessage("Scheduling '{}' ({}) to run at {} incremented tasksOutstanding to {}")
+        log.atDebug().setMessage("Scheduling '{}' ({}) to run at {} incremented tasksOutstanding to {}")
             .addArgument(label)
             .addArgument(stringableKey)
             .addArgument(start)
