@@ -349,11 +349,6 @@ public abstract class OpenSearchClient {
         var putResponse = client.putAsync(targetPath, settings.toString(), context.createSnapshotContext()).flatMap(resp -> {
             if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                 return Mono.just(resp);
-            } else if (resp.statusCode == HttpURLConnection.HTTP_BAD_REQUEST
-                    && resp.body != null
-                    && resp.body.contains("invalid_snapshot_name_exception")) {
-                log.info("Snapshot {} already exists, treating as no-op", snapshotName);
-                return Mono.just(resp);
             } else {
                 String errorMessage = "Could not create snapshot: " + targetPath + "." + getString(resp);
                 return Mono.error(new OperationFailed(errorMessage, resp));
