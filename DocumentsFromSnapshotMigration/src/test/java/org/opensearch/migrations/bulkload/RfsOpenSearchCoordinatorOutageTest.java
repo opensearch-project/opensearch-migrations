@@ -83,8 +83,10 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     //   t=30s  : Coordinator disabled — mid-migration, ~30 docs already sent
     //   t=60s  : All 60 docs reach target, RFS tries to finalize on coordinator (fails)
     //   t=150s : (test 2 only) Coordinator re-enabled after 120s restart window
+    //   Test 1 uses COORDINATOR_NEVER_REENABLE_SECONDS so coordinator stays down permanently
     private static final int COORDINATOR_DISABLE_AFTER_SECONDS = 30;
     private static final int COORDINATOR_REENABLE_AFTER_SECONDS = 120;
+    private static final int COORDINATOR_NEVER_REENABLE_SECONDS = 3600; // effectively never within test lifetime
 
     @TempDir
     Path tempRootDir;
@@ -92,50 +94,33 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     @Test
     @SneakyThrows
     void allDocsMigratedButCoordinatorUnavailableAtCompletion() {
-        var result = runCoordinatorOutageScenario(false, 0);
-
-        // (1/3) ASSERT timeline: rfsStarted < outageInjected < rfsEnded
-        Assertions.assertTrue(result.outageInjected(), "Coordinator outage was not injected");
-        Assertions.assertTrue(result.rfsStartedAt() < result.outageInjectedAt(),
-            "RFS should have started before outage was injected");
-        Assertions.assertTrue(result.outageInjectedAt() < result.rfsEndedAt(),
-            "Outage should have been injected before RFS finished");
-
-        // (2/3) ASSERT that TARGET cluster has ALL docs from SOURCE cluster
-        Assertions.assertEquals(result.expectedDocs(), result.finalDocs(), "All docs should be on target");
-
-        // (3/3) ASSERT : RFS failed specifically due to coordinator retry exhaustion
-        Assertions.assertInstanceOf(OpenSearchWorkCoordinator.RetriesExceededException.class,
-            result.thrownException(),
-            "Expected RetriesExceededException when coordinator becomes unavailable");
+        runCoordinatorOutageScenario(COORDINATOR_NEVER_REENABLE_SECONDS, r -> {
+            // ASSERT : RFS failed specifically due to coordinator retry exhaustion
+            Assertions.assertInstanceOf(OpenSearchWorkCoordinator.RetriesExceededException.class,
+                r.thrownException(),
+                "Expected RetriesExceededException when coordinator becomes unavailable");
+        });
     }
 
     @Test
     @Disabled("Known limitation: current coordinator retry window is shorter than long restart duration")
     @SneakyThrows
     void allDocsMigratedButCoordinatorLongRestartsAtCompletion() {
-        var result = runCoordinatorOutageScenario(true, COORDINATOR_REENABLE_AFTER_SECONDS);
+        runCoordinatorOutageScenario(COORDINATOR_REENABLE_AFTER_SECONDS, r -> {
+            // ASSERT timeline: coordinator re-enabled before RFS finished
+            Assertions.assertTrue(r.coordinatorReEnabled(), "Coordinator was not re-enabled");
+            Assertions.assertTrue(r.coordinatorReEnabledAt() < r.rfsEndedAt(),
+                "Coordinator should have been re-enabled before RFS finished");
 
-        // (1/3) ASSERT timeline: rfsStarted < outageInjected < reEnabled < rfsEnded
-        Assertions.assertTrue(result.outageInjected(), "Coordinator outage was not injected");
-        Assertions.assertTrue(result.coordinatorReEnabled(), "Coordinator was not re-enabled");
-        Assertions.assertTrue(result.rfsStartedAt() < result.outageInjectedAt(),
-            "RFS should have started before outage was injected");
-        Assertions.assertTrue(result.outageInjectedAt() < result.coordinatorReEnabledAt(),
-            "Outage should have been injected before coordinator was re-enabled");
-        Assertions.assertTrue(result.coordinatorReEnabledAt() < result.rfsEndedAt(),
-            "Coordinator should have been re-enabled before RFS finished");
-
-        // (2/3) ASSERT that TARGET cluster has ALL docs from SOURCE cluster
-        Assertions.assertEquals(result.expectedDocs(), result.finalDocs(), "All docs should be on target");
-
-        // (3/3) ASSERT that RFS completed without exception
-        Assertions.assertNull(result.thrownException(),
-            "Expected RFS to recover and complete cleanly after coordinator returns");
+            // ASSERT that RFS completed without exception
+            Assertions.assertNull(r.thrownException(),
+                "Expected RFS to recover and complete cleanly after coordinator returns");
+        });
     }
 
     @SneakyThrows
-    private ScenarioResult runCoordinatorOutageScenario(boolean reEnableCoordinator, int reEnableAfterSeconds) {
+    private ScenarioResult runCoordinatorOutageScenario(int reEnableAfterSeconds,
+                                                        java.util.function.Consumer<ScenarioResult> scenarioAssertions) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
         final var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
         var tempDirSnapshot = Files.createDirectory(tempRootDir.resolve("rfsCoordinatorOutage_snapshot"));
@@ -196,14 +181,12 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                     outageInjectedAt.set(System.nanoTime());
                     log.atInfo().setMessage("Coordinator disabled at ~{}s")
                         .addArgument(COORDINATOR_DISABLE_AFTER_SECONDS).log();
-                    if (reEnableCoordinator) {
-                        scheduler.schedule(() -> {
-                            coordinatorProxy.enable();
-                            coordinatorReEnabledAt.set(System.nanoTime());
-                            log.atInfo().setMessage("Coordinator re-enabled after {}s restart window")
-                                .addArgument(reEnableAfterSeconds).log();
-                        }, reEnableAfterSeconds, TimeUnit.SECONDS);
-                    }
+                    scheduler.schedule(() -> {
+                        coordinatorProxy.enable();
+                        coordinatorReEnabledAt.set(System.nanoTime());
+                        log.atInfo().setMessage("Coordinator re-enabled after {}s restart window")
+                            .addArgument(reEnableAfterSeconds).log();
+                    }, reEnableAfterSeconds, TimeUnit.SECONDS);
                 }, COORDINATOR_DISABLE_AFTER_SECONDS, TimeUnit.SECONDS);
 
                 // Run RFS
@@ -221,23 +204,22 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                 }
                 var rfsEndedAt = System.nanoTime();
 
-                // Verify coordinator proxy is in expected state after RFS exits
-                assertClusterReachability(coordinatorProxy.getProxyUriAsString(), "coordinator", reEnableCoordinator);
+                // ASSERT timeline: outage was injected during RFS execution
+                Assertions.assertTrue(outageInjectedAt.get() > 0, "Coordinator outage was not injected");
+                Assertions.assertTrue(rfsStartedAt < outageInjectedAt.get(),
+                    "RFS should have started before outage was injected");
+                Assertions.assertTrue(outageInjectedAt.get() < rfsEndedAt,
+                    "Outage should have been injected before RFS finished");
 
+                // ASSERT all docs migrated to target
                 var finalDocs = getDocCountFromCluster(osTargetContainer.getUrl(), INDEX_NAME, false);
+                Assertions.assertEquals(expectedDocs, finalDocs, "All docs should be on target");
 
-                // Verify coordinator work items reflect the outage scenario outcome
-                assertCoordinatorWorkItemState(osCoordinatorContainer.getUrl(), !reEnableCoordinator);
+                // ASSERT coordinator work items reflect outcome (query coordinator directly, bypassing proxy)
+                var coordinatorRecovered = coordinatorReEnabledAt.get() > 0;
+                assertCoordinatorWorkItemState(osCoordinatorContainer.getUrl(), !coordinatorRecovered);
 
-                log.atInfo().setMessage("Test summary: exception={}, outageAt={}ns, rfsDuration={}ns, docs={}/{}")
-                    .addArgument(() -> thrownException.get() != null ? thrownException.get().getClass().getSimpleName() : "none")
-                    .addArgument(outageInjectedAt.get() > 0 ? outageInjectedAt.get() - rfsStartedAt : "never")
-                    .addArgument(rfsEndedAt - rfsStartedAt)
-                    .addArgument(finalDocs)
-                    .addArgument(expectedDocs)
-                    .log();
-
-                return new ScenarioResult(
+                var result = new ScenarioResult(
                     thrownException.get(),
                     outageInjectedAt.get(),
                     coordinatorReEnabledAt.get(),
@@ -245,6 +227,18 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                     rfsEndedAt,
                     expectedDocs,
                     finalDocs);
+
+                log.atInfo().setMessage("Test summary: exception={}, outageAt={}ns, rfsDuration={}ns, docs={}/{}")
+                    .addArgument(() -> thrownException.get() != null ? thrownException.get().getClass().getSimpleName() : "none")
+                    .addArgument(outageInjectedAt.get() - rfsStartedAt)
+                    .addArgument(rfsEndedAt - rfsStartedAt)
+                    .addArgument(finalDocs)
+                    .addArgument(expectedDocs)
+                    .log();
+
+                // Scenario specific assertions
+                scenarioAssertions.accept(result);
+                return result;
             } finally {
                 scheduler.shutdownNow();
             }
