@@ -677,7 +677,9 @@ if [[ "$use_public_images" == "false" ]]; then
     --set images.migrationConsole.repository=${MIGRATIONS_ECR_REGISTRY} \
     --set images.migrationConsole.tag=migrations_migration_console_latest \
     --set images.installer.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.installer.tag=migrations_migration_console_latest"
+    --set images.installer.tag=migrations_migration_console_latest \
+    --set images.snapshotFuse.repository=${MIGRATIONS_ECR_REGISTRY} \
+    --set images.snapshotFuse.tag=migrations_snapshot_fuse_latest"
 # Use latest public images
 else
   echo "Using public images tagged '$RELEASE_VERSION'"
@@ -691,7 +693,9 @@ else
     --set images.migrationConsole.repository=public.ecr.aws/opensearchproject/opensearch-migrations-console \
     --set images.migrationConsole.tag=$RELEASE_VERSION \
     --set images.installer.repository=public.ecr.aws/opensearchproject/opensearch-migrations-console \
-    --set images.installer.tag=$RELEASE_VERSION"
+    --set images.installer.tag=$RELEASE_VERSION \
+    --set images.snapshotFuse.repository=public.ecr.aws/opensearchproject/opensearch-migrations-snapshot-fuse \
+    --set images.snapshotFuse.tag=$RELEASE_VERSION"
 fi
 
 # --- chart and dashboard source selection ---
