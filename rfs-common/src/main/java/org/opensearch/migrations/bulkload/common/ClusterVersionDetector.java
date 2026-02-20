@@ -1,7 +1,6 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.util.HashSet;
-import java.util.Optional;
 
 import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.Version;
@@ -9,7 +8,6 @@ import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
@@ -122,33 +120,12 @@ public class ClusterVersionDetector {
             return Mono.error(new UnexpectedStatusCode(resp));
         }
         try {
-            var body = Optional.of(objectMapper.readTree(resp.body));
-            var persistentEnabled = isSettingEnabled(body.map(n -> n.get("persistent")), primaryKey, secondaryKey);
-            var transientEnabled = isSettingEnabled(body.map(n -> n.get("transient")), primaryKey, secondaryKey);
-            var defaultsEnabled = isSettingEnabled(body.map(n -> n.get("defaults")), primaryKey, secondaryKey);
-            return Mono.just(persistentEnabled || transientEnabled || defaultsEnabled);
+            var body = objectMapper.readTree(resp.body);
+            return Mono.just(ClusterSettingsParser.isSettingEnabled(body, primaryKey, secondaryKey));
         } catch (Exception e) {
             log.error("Unable to check setting", e);
             return Mono.error(new UnexpectedStatusCode(resp));
         }
-    }
-
-    private static boolean isSettingEnabled(Optional<JsonNode> node, String primaryKey, String secondaryKey) {
-        return node.filter(n -> !n.isNull())
-            .map(n -> n.get(primaryKey))
-            .filter(n -> !n.isNull())
-            .map(n -> n.get(secondaryKey))
-            .filter(n -> !n.isNull())
-            .map(n -> {
-                if (n.isBoolean()) {
-                    return n.asBoolean();
-                } else if (n.isTextual()) {
-                    return Boolean.parseBoolean(n.asText());
-                } else {
-                    return false;
-                }
-            })
-            .orElse(false);
     }
 
     private static Mono<Version> getVersionFromNodes(HttpResponse resp, RestClient client) {

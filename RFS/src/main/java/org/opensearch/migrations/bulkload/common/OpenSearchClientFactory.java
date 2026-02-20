@@ -1,7 +1,6 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.lang.reflect.InvocationTargetException;
-import java.util.Optional;
 
 import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.UnboundVersionMatchers;
@@ -15,7 +14,6 @@ import org.opensearch.migrations.bulkload.version_es_6_8.OpenSearchClient_ES_6_8
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -141,33 +139,12 @@ public class OpenSearchClientFactory {
             return Mono.error(new OpenSearchClient.UnexpectedStatusCode(resp));
         }
         try {
-            var body = Optional.of(objectMapper.readTree(resp.body));
-            var persistentEnabled = isSettingEnabled(body.map(n -> n.get("persistent")), primaryKey, secondaryKey);
-            var transientEnabled = isSettingEnabled(body.map(n -> n.get("transient")), primaryKey, secondaryKey);
-            var defaultsEnabled = isSettingEnabled(body.map(n -> n.get("defaults")), primaryKey, secondaryKey);
-            return Mono.just(persistentEnabled || transientEnabled || defaultsEnabled);
+            var body = objectMapper.readTree(resp.body);
+            return Mono.just(ClusterSettingsParser.isSettingEnabled(body, primaryKey, secondaryKey));
         } catch (Exception e) {
             log.error(errorLogMessage, e);
             return Mono.error(new OpenSearchClient.OperationFailed(errorLogMessage + " from response: " + e.getMessage(), resp));
         }
-    }
-
-    private boolean isSettingEnabled(Optional<JsonNode> node, String primaryKey, String secondaryKey) {
-        return node.filter(n -> !n.isNull())
-            .map(n -> n.get(primaryKey))
-            .filter(n -> !n.isNull())
-            .map(n -> n.get(secondaryKey))
-            .filter(n -> !n.isNull())
-            .map(n -> {
-                if (n.isBoolean()) {
-                    return n.asBoolean();
-                } else if (n.isTextual()) {
-                    return Boolean.parseBoolean(n.asText());
-                } else {
-                    return false;
-                }
-            })
-            .orElse(false);
     }
 
     /**
