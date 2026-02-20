@@ -9,15 +9,44 @@ import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 public class SnapshotShardUnpackerTest {
+
+    @Test
+    void testUnpack_SkipsUnpacking_WhenLuceneFilesAlreadyExist(@TempDir Path tempDirectory) throws Exception {
+        // Arrange: create a directory with a segments file (simulating FUSE mount or pre-unpacked data)
+        var targetDir = tempDirectory.resolve("test-index").resolve("0");
+        java.nio.file.Files.createDirectories(targetDir);
+        java.nio.file.Files.createFile(targetDir.resolve("segments_3"));
+        java.nio.file.Files.createFile(targetDir.resolve("_0.cfs"));
+
+        var mockRepoAccessor = mock(SourceRepoAccessor.class);
+        var mockFileMetadata = mock(ShardFileInfo.class);
+
+        var unpacker = new SnapshotShardUnpacker(
+            mockRepoAccessor,
+            Set.of(mockFileMetadata),
+            targetDir,
+            "test-index-id",
+            0
+        );
+
+        // Act
+        var result = unpacker.unpack();
+
+        // Assert: should return the target directory without touching the repo
+        assertEquals(targetDir, result);
+        verifyNoInteractions(mockRepoAccessor);
+    }
 
     @Test
     void testUnpack_ThrowsCouldNotUnpackShard_WhenFileUnpackingFails(@TempDir Path tempDirectory) throws Exception {

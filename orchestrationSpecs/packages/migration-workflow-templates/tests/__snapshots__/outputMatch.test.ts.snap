@@ -1453,6 +1453,14 @@ END {
               "name": "resources",
             },
             {
+              "description": "Local path to snapshot repo (S3 CSI mount)",
+              "name": "snapshotLocalDir",
+            },
+            {
+              "description": "Snapshot name for FUSE sidecar",
+              "name": "snapshotName",
+            },
+            {
               "name": "sourceK8sLabel",
             },
             {
@@ -1473,6 +1481,12 @@ END {
             },
             {
               "name": "imageReindexFromSnapshotPullPolicy",
+            },
+            {
+              "name": "imageSnapshotFuseLocation",
+            },
+            {
+              "name": "imageSnapshotFusePullPolicy",
             },
           ],
         },
@@ -1568,9 +1582,31 @@ spec:
             - name: snapshot-s3
               mountPath: /mnt/s3
               readOnly: true
+            - name: lucene-fuse
+              mountPath: /mnt/lucene
+              mountPropagation: HostToContainer
             - name: localstack-test-creds
               mountPath: /config/credentials
               readOnly: true
+        - name: snapshot-fuse
+          image: "{{inputs.parameters.imageSnapshotFuseLocation}}"
+          imagePullPolicy: "{{inputs.parameters.imageSnapshotFusePullPolicy}}"
+          args:
+            - "{{='--repo-root='+inputs.parameters.snapshotLocalDir}}"
+            - "{{='--snapshot-name='+inputs.parameters.snapshotName}}"
+            - --mount-point=/mnt/lucene
+          env:
+            - name: RUST_LOG
+              value: info
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: snapshot-s3
+              mountPath: /mnt/s3
+              readOnly: true
+            - name: lucene-fuse
+              mountPath: /mnt/lucene
+              mountPropagation: Bidirectional
       volumes:
         - name: log4j-configuration
           configMap:
@@ -1580,6 +1616,8 @@ spec:
           persistentVolumeClaim:
             claimName: s3-snapshot
             readOnly: true
+        - name: lucene-fuse
+          emptyDir: {}
         - name: localstack-test-creds
           configMap:
             name: localstack-test-creds
@@ -1621,6 +1659,12 @@ spec:
             {
               "name": "imageReindexFromSnapshotPullPolicy",
             },
+            {
+              "name": "imageSnapshotFuseLocation",
+            },
+            {
+              "name": "imageSnapshotFusePullPolicy",
+            },
           ],
         },
         "name": "starthistoricalbackfillfromconfig",
@@ -1643,6 +1687,14 @@ spec:
                   {
                     "name": "imageReindexFromSnapshotPullPolicy",
                     "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
+                  },
+                  {
+                    "name": "imageSnapshotFuseLocation",
+                    "value": "{{inputs.parameters.imageSnapshotFuseLocation}}",
+                  },
+                  {
+                    "name": "imageSnapshotFusePullPolicy",
+                    "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}",
                   },
                   {
                     "name": "podReplicas",
@@ -1670,7 +1722,15 @@ spec:
                   },
                   {
                     "name": "rfsJsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict("coordinatorAwsServiceSigningName", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['service'], "coordinatorAwsRegion", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict("coordinatorCaCert", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? (sprig.dict("coordinatorHost", fromJSON(inputs.parameters.rfsCoordinatorConfig)['endpoint'])) : ({}))), sprig.dict("coordinatorInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.rfsCoordinatorConfig))))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources', 'useTargetClusterForWorkCoordination', 'jvmArgs')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp', "cleanLocalDirs", true), sprig.dict("snapshotLocalDir", sprig.regexReplaceAll('^s3://[^/]+/', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], '/mnt/s3/')))))}}",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict("coordinatorAwsServiceSigningName", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['service'], "coordinatorAwsRegion", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict("coordinatorCaCert", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? (sprig.dict("coordinatorHost", fromJSON(inputs.parameters.rfsCoordinatorConfig)['endpoint'])) : ({}))), sprig.dict("coordinatorInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.rfsCoordinatorConfig))))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources', 'useTargetClusterForWorkCoordination', 'jvmArgs')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/mnt/lucene', "cleanLocalDirs", false), sprig.dict("snapshotLocalDir", sprig.regexReplaceAll('^s3://[^/]+/', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], '/mnt/s3/')))))}}",
+                  },
+                  {
+                    "name": "snapshotLocalDir",
+                    "value": "{{=sprig.regexReplaceAll('^s3://[^/]+/', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], '/mnt/s3/')}}",
+                  },
+                  {
+                    "name": "snapshotName",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotConfig)['snapshotName']}}",
                   },
                   {
                     "name": "resources",
@@ -1738,6 +1798,12 @@ spec:
               "name": "imageReindexFromSnapshotPullPolicy",
             },
             {
+              "name": "imageSnapshotFuseLocation",
+            },
+            {
+              "name": "imageSnapshotFusePullPolicy",
+            },
+            {
               "name": "imageMigrationConsoleLocation",
             },
             {
@@ -1793,6 +1859,14 @@ spec:
                   {
                     "name": "imageReindexFromSnapshotPullPolicy",
                     "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
+                  },
+                  {
+                    "name": "imageSnapshotFuseLocation",
+                    "value": "{{inputs.parameters.imageSnapshotFuseLocation}}",
+                  },
+                  {
+                    "name": "imageSnapshotFusePullPolicy",
+                    "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}",
                   },
                 ],
               },
@@ -1930,6 +2004,12 @@ spec:
               "name": "imageReindexFromSnapshotPullPolicy",
             },
             {
+              "name": "imageSnapshotFuseLocation",
+            },
+            {
+              "name": "imageSnapshotFusePullPolicy",
+            },
+            {
               "name": "imageMigrationConsoleLocation",
             },
             {
@@ -2003,6 +2083,14 @@ spec:
                   {
                     "name": "imageReindexFromSnapshotPullPolicy",
                     "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
+                  },
+                  {
+                    "name": "imageSnapshotFuseLocation",
+                    "value": "{{inputs.parameters.imageSnapshotFuseLocation}}",
+                  },
+                  {
+                    "name": "imageSnapshotFusePullPolicy",
+                    "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}",
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -2194,6 +2282,12 @@ exports[`test workflow template renderings full-migration 1`] = `
             {
               "name": "imageMigrationConsolePullPolicy",
             },
+            {
+              "name": "imageSnapshotFuseLocation",
+            },
+            {
+              "name": "imageSnapshotFusePullPolicy",
+            },
           ],
         },
         "name": "migratefromsnapshot",
@@ -2281,6 +2375,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
                   },
                   {
+                    "name": "imageSnapshotFuseLocation",
+                    "value": "{{inputs.parameters.imageSnapshotFuseLocation}}",
+                  },
+                  {
+                    "name": "imageSnapshotFusePullPolicy",
+                    "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}",
+                  },
+                  {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
                   },
@@ -2360,6 +2462,12 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
             {
               "name": "imageMigrationConsolePullPolicy",
+            },
+            {
+              "name": "imageSnapshotFuseLocation",
+            },
+            {
+              "name": "imageSnapshotFusePullPolicy",
             },
           ],
         },
@@ -2458,6 +2566,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
+                    "name": "imageSnapshotFuseLocation",
+                    "value": "{{inputs.parameters.imageSnapshotFuseLocation}}",
+                  },
+                  {
+                    "name": "imageSnapshotFusePullPolicy",
+                    "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}",
+                  },
+                  {
                     "name": "label",
                     "value": "{{=jsonpath(toJSON(item), '$.label')}}",
                   },
@@ -2538,6 +2654,12 @@ exports[`test workflow template renderings full-migration 1`] = `
             {
               "name": "imageMigrationConsolePullPolicy",
             },
+            {
+              "name": "imageSnapshotFuseLocation",
+            },
+            {
+              "name": "imageSnapshotFusePullPolicy",
+            },
           ],
         },
         "name": "migration",
@@ -2592,6 +2714,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "imageSnapshotFuseLocation",
+                    "value": "{{inputs.parameters.imageSnapshotFuseLocation}}",
+                  },
+                  {
+                    "name": "imageSnapshotFusePullPolicy",
+                    "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}",
                   },
                   {
                     "name": "createSnapshotConfig",
@@ -2713,6 +2843,26 @@ exports[`test workflow template renderings full-migration 1`] = `
                 },
               },
             },
+            {
+              "name": "imageSnapshotFuseLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "key": "snapshotFuseImage",
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "optional": undefined,
+                },
+              },
+            },
+            {
+              "name": "imageSnapshotFusePullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "key": "snapshotFusePullPolicy",
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "optional": undefined,
+                },
+              },
+            },
           ],
         },
         "name": "main",
@@ -2759,6 +2909,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "imageSnapshotFuseLocation",
+                    "value": "{{inputs.parameters.imageSnapshotFuseLocation}}",
+                  },
+                  {
+                    "name": "imageSnapshotFusePullPolicy",
+                    "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}",
                   },
                   {
                     "name": "sourceConfig",
