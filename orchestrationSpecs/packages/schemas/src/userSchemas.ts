@@ -194,7 +194,7 @@ export const USER_RFS_OPTIONS = z.object({
     allowLooseVersionMatching: z.boolean().default(true).describe("").optional(),
     docTransformerConfigBase64: z.string().default("").optional(),
     documentsPerBulkRequest: z.number().default(0x7fffffff).optional(),
-    initialLeaseDuration: z.string().default("PT10M").optional(),
+    initialLeaseDuration: z.string().default("PT1H").optional(),
     maxConnections: z.number().default(10).optional(),
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional(),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
