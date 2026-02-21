@@ -256,7 +256,7 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             });
             s3Endpoint.cfnOptions.condition = s3Condition;
 
-            const endpointConfigs: Array<{param: CfnParameter, serviceSuffix: string, name: string}> = [
+            const endpointConfigs: {param: CfnParameter, serviceSuffix: string, name: string}[] = [
                 { param: createECREndpointParam, serviceSuffix: 'ecr.api', name: 'ECR' },
                 { param: createECRDockerEndpointParam, serviceSuffix: 'ecr.dkr', name: 'ECRDocker' },
                 { param: createCWLogsEndpointParam, serviceSuffix: 'logs', name: 'CloudWatchLogs' },
