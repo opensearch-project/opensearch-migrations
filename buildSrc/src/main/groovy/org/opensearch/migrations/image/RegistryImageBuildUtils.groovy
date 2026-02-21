@@ -222,6 +222,7 @@ class RegistryImageBuildUtils {
                     // Use primaryDest and cacheDestination which were calculated using registryEndpoint (Container View)
                     def fullArgs = [
                             "docker buildx build",
+                            "--progress=plain",
                             "--platform ${platform}",
                             "--builder ${builder}",
                             // don't include the suffix - this is dangerous, but single-platform builds are supported
@@ -249,6 +250,7 @@ class RegistryImageBuildUtils {
                 commonInputs(it, "")
                 def fullArgs = [
                         "docker buildx build",
+                        "--progress=plain",
                         "--platform linux/amd64,linux/arm64",
                         "--builder ${builder}",
                         "-t ${primaryDest}",

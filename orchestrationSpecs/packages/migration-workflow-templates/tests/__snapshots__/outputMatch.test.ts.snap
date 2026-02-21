@@ -737,11 +737,11 @@ exports[`test workflow template renderings create-snapshot 1`] = `
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
           },
         },
@@ -2117,11 +2117,11 @@ exports[`test workflow template renderings full-migration 1`] = `
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -2986,11 +2986,11 @@ echo "Workflow submit output: $WORKFLOW_OUTPUT"
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -3070,11 +3070,11 @@ exit 0
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -3143,11 +3143,11 @@ fi
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -3371,11 +3371,11 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
           },
           "volumeMounts": [
@@ -3844,11 +3844,11 @@ echo ---
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
           },
         },
@@ -5246,11 +5246,11 @@ echo $SHOULD_FINALIZE",
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -5499,11 +5499,11 @@ echo "Cleanup complete. Workflow stats preserved under /$STATS_KEY/"",
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },

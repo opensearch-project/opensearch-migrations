@@ -247,10 +247,12 @@ def parse_headers(header: str) -> Dict:
 @click.option('-H', '--header', multiple=True, help='Pass custom header(s) to the server.')
 @click.option('-d', '--data', help='Send specified data in a POST request.')
 @click.option('--json', 'json_data', help='Send data as JSON.')
+@click.option('--timeout', type=int, default=15, show_default=True,
+              help='Request timeout in seconds.')
 @click.argument('cluster', required=True, type=click.Choice(['target_cluster', 'source_cluster'], case_sensitive=False))
 @click.argument('path', required=True)
 @click.pass_obj
-def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
+def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data, timeout):
     """This implements a small subset of curl commands, formatted for use against configured source or target clusters.
     By default the cluster definition is configured to use the `/config/migration_services.yaml` file that is
     pre-prepared on the migration console, but `--config-file` can point to any YAML file that defines a
@@ -280,7 +282,7 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
         path = '/' + path
 
     result: clusters_.CallAPIResult = clusters_.call_api(cluster, path, method=HttpMethod[request],
-                                                         headers=headers, data=data)
+                                                         headers=headers, data=data, timeout=timeout)
     if result.error_message:
         click.echo(result.error_message)
     else:

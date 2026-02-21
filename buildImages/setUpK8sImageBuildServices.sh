@@ -16,6 +16,7 @@ if ! helm list -n buildkit | grep -q buildkit; then
     DEPLOY_BUILDKIT_PODS=true   # need static buildkitd pod for remote driver
   fi
 
+  # shellcheck disable=SC2086
   helm install buildkit "${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s/charts/components/buildImages" \
     --create-namespace \
     -n buildkit \
@@ -24,7 +25,8 @@ if ! helm list -n buildkit | grep -q buildkit; then
     --set awsEKSEnabled="${AWS_EKS_ENABLED}" \
     --set multiArchNative="${AWS_EKS_ENABLED}" \
     --set deployBuildkitPods="${DEPLOY_BUILDKIT_PODS}" \
-    ${BUILDKIT_IMAGE:+--set buildkitImage="$BUILDKIT_IMAGE"}
+    ${BUILDKIT_IMAGE:+--set buildkitImage="$BUILDKIT_IMAGE"} \
+    ${BUILDKIT_HELM_ARGS:-}
 else
   echo "buildkit helm release already exists, skipping install"
 fi

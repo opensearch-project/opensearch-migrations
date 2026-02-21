@@ -176,8 +176,7 @@ def call(Map config = [:]) {
                                                   --region "${params.REGION}" \
                                                   --stack-name "${env.STACK_NAME}" \
                                                   --build-images true \
-                                                  --org-name opensearch-project \
-                                                  --branch "${params.GIT_BRANCH}"
+                                                  --skip-cfn-deploy"
                                             """
                                         } else {
                                             sh """
@@ -186,7 +185,8 @@ def call(Map config = [:]) {
                                                 ./awsRunEksValidation.sh \
                                                   --stage "${stage}" \
                                                   --region "${params.REGION}" \
-                                                  --stack-name "${env.STACK_NAME}"
+                                                  --stack-name "${env.STACK_NAME}" \
+                                                  --skip-cfn-deploy
                                             """
                                         }
                                     }

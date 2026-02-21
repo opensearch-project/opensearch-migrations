@@ -44,7 +44,7 @@ export const ConfigManagementHelpers = WorkflowBuilder.create({
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addInputsAsEnvVars({prefix:"", suffix: ""})
             .addCommand(["sh", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
             .addArgs([decrementTlhScript])
 
             .addPathOutput("shouldFinalize", "/tmp/should-finalize", typeToken<boolean>())
@@ -58,7 +58,7 @@ export const ConfigManagementHelpers = WorkflowBuilder.create({
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addInputsAsEnvVars({prefix: "", suffix: ""})
             .addCommand(["sh", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
             .addArgs([cleanupTlhScript])
         )
     )
