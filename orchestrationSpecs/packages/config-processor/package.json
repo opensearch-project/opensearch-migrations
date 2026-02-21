@@ -12,8 +12,8 @@
     "start-transform": "tsx src/RunMigrationConfigTransformer.ts",
     "dev-cmd": "tsx src/cliRouter.ts",
     "dev-constrain": "tsx src/constrainUserSchema.ts",
-    "dev-initialize": "tsx src/RunMigrationInitializer.ts",
-    "dev-transform": "tsx src/RunMigrationConfigTransformer.ts",
+    "dev-initialize": "tsx src/runMigrationInitializer.ts",
+    "dev-transform": "tsx src/runMigrationConfigTransformer.ts",
     "bundle": "node makeBundle.js",
     "check-and-bundle": "npm run type-check && npm run test && npm run bundle",
     "test": "jest --config ./jest.config.js"

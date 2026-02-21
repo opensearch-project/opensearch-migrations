@@ -454,12 +454,14 @@ export abstract class TaskBuilder<
 
             if (source === INTERNAL) {
                 const outputs = (this.parentWorkflowScope.templates as any)?.[keyStr]?.outputs as any;
-                const templateCall = this.callTemplate(name as string, keyStr, params, loopWith);
+                const templateCall =
+                    this.callTemplate(name as string, keyStr, params, loopWith);
                 return this.addTaskHelper(name, templateCall as any, outputs, opts);
             } else {
                 const wf = source as unknown as Workflow<any, any, any>;
                 const outputs = (wf.templates as any)?.[keyStr]?.outputs as any;
-                const templateCall = this.callExternalTemplate(name as string, source as any, keyStr as any, params);
+                const templateCall =
+                    this.callExternalTemplate(name as string, source as any, keyStr as any, params, loopWith);
                 return this.addTaskHelper(name, templateCall as any, outputs, opts);
             }
         }

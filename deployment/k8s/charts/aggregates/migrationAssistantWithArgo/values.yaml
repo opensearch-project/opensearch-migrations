@@ -237,15 +237,6 @@ charts:
         timeoutSeconds: 5
         failureThreshold: 3
 
-      # Recommended baseline resources to ensure the JVM has enough heap for metadata
-      resources:
-        requests:
-          cpu: "250m"
-          memory: "512Mi"
-        limits:
-          cpu: "1000m"
-          memory: "1Gi"
-
 
   argo-workflows:
     version: "0.47.1"
