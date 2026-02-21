@@ -60,6 +60,7 @@ quay.io/kiwigrid/k8s-sidecar:1.30.0
 registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0
 registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.5.3
 docker.io/bats/bats:v1.4.1
+quay.io/thanos/thanos:v0.38.0
 
 # --- etcd-operator ---
 ghcr.io/aenix-io/etcd-operator:v0.4.2
@@ -99,4 +100,7 @@ docker.io/amazon/aws-cli:latest
 
 # --- direct template references ---
 docker.io/amazon/aws-cli:2.25.11
+
+# --- coordinator cluster (used by RFS workflow) ---
+docker.io/opensearchproject/opensearch:3.1.0
 "

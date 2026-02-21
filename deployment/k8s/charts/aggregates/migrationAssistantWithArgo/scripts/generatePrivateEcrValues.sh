@@ -112,6 +112,10 @@ charts:
       kube-state-metrics:
         image:
           registry: "${M}/registry.k8s.io"
+      thanosRuler:
+        thanosRulerSpec:
+          image:
+            registry: "${M}/quay.io"
       grafana:
         image:
           registry: "${ECR}"
@@ -198,6 +202,12 @@ defaultBucketConfiguration:
 
 # --- Otel collector (hardcoded in template, override via values) ---
 otelCollectorImage: "${M}/public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3"
+
+# --- Coordinator cluster image (used by RFS workflow via configmap) ---
+images:
+  coordinatorCluster:
+    repository: "${M}/docker.io/opensearchproject/opensearch"
+    tag: "3.1.0"
 
 # --- Etcd data image (used by etcd-operator CRD) ---
 etcdCluster:

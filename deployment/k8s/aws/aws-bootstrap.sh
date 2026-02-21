@@ -829,6 +829,12 @@ if [[ "$build_images" == "true" ]]; then
   BUILD_TARGET="buildImagesToRegistry"
   export MULTI_ARCH_NATIVE
 
+  # When mirroring, use the ECR-mirrored buildkit image since we'll be building in the isolated EKS cluster
+  if [[ "$push_images_to_ecr" == "true" ]]; then
+    ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
+    export BUILDKIT_IMAGE="${ECR_HOST}/mirrored/docker.io/moby/buildkit:v0.22.0"
+  fi
+
   if docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
     echo "Buildkit already configured and healthy, skipping setup"
   else
@@ -849,7 +855,9 @@ if [[ "$push_images_to_ecr" == "true" ]]; then
   echo "Mirroring public images and helm charts to private ECR..."
   ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
   SCRIPTS_DIR="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
-  "$SCRIPTS_DIR/mirrorToEcr.sh" "$ECR_HOST" --region "${AWS_CFN_REGION}"
+  MIRROR_FLAGS="--region ${AWS_CFN_REGION}"
+  [[ "$build_images" == "true" ]] && MIRROR_FLAGS="$MIRROR_FLAGS --manifest ${base_dir}/deployment/k8s/charts/components/buildImages/buildImagesEcrManifest.sh"
+  "$SCRIPTS_DIR/mirrorToEcr.sh" "$ECR_HOST" $MIRROR_FLAGS
 
   echo "Generating private ECR helm values override..."
   ecr_values_file=$(mktemp)
@@ -862,20 +870,25 @@ if [[ "$push_images_to_ecr" == "true" ]]; then
   echo "Private ECR values written to $ecr_values_file"
 
   # Mirror MA images to the private ECR repo with expected tags
-  echo "Mirroring MA images to private ECR..."
-  export PATH="${HOME}/bin:${PATH}"
-  aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
-    crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
-  for img in traffic-capture-proxy traffic-replayer reindex-from-snapshot console; do
-    src="public.ecr.aws/opensearchproject/opensearch-migrations-${img}:${RELEASE_VERSION}"
-    tag="migrations_${img//-/_}_latest"
-    dst="${MIGRATIONS_ECR_REGISTRY}:${tag}"
-    echo "  $img → $dst"
-    crane copy "$src" "$dst" 2>&1 | tail -1 || echo "  ❌ FAILED: $img" >&2
-  done
-  # installer uses migration_console image
-  crane copy "${MIGRATIONS_ECR_REGISTRY}:migrations_console_latest" \
-    "${MIGRATIONS_ECR_REGISTRY}:migrations_migration_console_latest" 2>&1 | tail -1 || true
+  # Skip if --build-images is set — locally-built images take precedence
+  if [[ "$build_images" != "true" ]]; then
+    echo "Mirroring MA public images to private ECR..."
+    export PATH="${HOME}/bin:${PATH}"
+    aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
+      crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
+    for img in traffic-capture-proxy traffic-replayer reindex-from-snapshot console; do
+      src="public.ecr.aws/opensearchproject/opensearch-migrations-${img}:${RELEASE_VERSION}"
+      tag="migrations_${img//-/_}_latest"
+      dst="${MIGRATIONS_ECR_REGISTRY}:${tag}"
+      echo "  $img → $dst"
+      crane copy "$src" "$dst" 2>&1 | tail -1 || echo "  ❌ FAILED: $img" >&2
+    done
+    # installer uses migration_console image
+    crane copy "${MIGRATIONS_ECR_REGISTRY}:migrations_console_latest" \
+      "${MIGRATIONS_ECR_REGISTRY}:migrations_migration_console_latest" 2>&1 | tail -1 || true
+  else
+    echo "Skipping MA image mirroring — --build-images will push locally-built images."
+  fi
 
   # Force private images since we're mirroring everything to ECR
   use_public_images=false

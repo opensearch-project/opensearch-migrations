@@ -12,6 +12,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/privateEcrManifest.sh"
+# Additional manifests can be sourced before running this script, or passed
+# via --manifest <file> to mirror images for other charts (testClusters, buildImages).
 
 ECR_HOST="${1:-}"
 shift || true
@@ -19,6 +21,16 @@ REGION="${AWS_CFN_REGION:-us-east-1}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --region) REGION="$2"; shift 2 ;;
+    --manifest)
+      . "$2"
+      # Merge additional charts/images if the manifest defines them
+      [ -n "${TEST_CHARTS:-}" ] && CHARTS="$CHARTS
+$TEST_CHARTS"
+      [ -n "${TEST_IMAGES:-}" ] && IMAGES="$IMAGES
+$TEST_IMAGES"
+      [ -n "${BUILD_IMAGES:-}" ] && IMAGES="$IMAGES
+$BUILD_IMAGES"
+      shift 2 ;;
     *) shift ;;
   esac
 done
