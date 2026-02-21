@@ -194,19 +194,32 @@ public class RequestSenderOrchestrator {
             .addArgument(channelInteraction)
             .addArgument(timestamp)
             .log();
-        return submitUnorderedWorkToEventLoop(
-            ctx,
-            sessionNumber,
-            channelInteractionNum,
-            connectionReplaySession -> scheduleCloseOnConnectionReplaySession(
-                ctx,
-                connectionReplaySession,
-                timestamp,
-                sessionNumber,
-                channelInteractionNum,
-                channelInteraction
-            )
-        );
+        // Get the session before invalidating so the close is scheduled on the old session.
+        // Invalidate immediately so new requests arriving after this call get a fresh session.
+        final var replaySession = clientConnectionPool.getCachedSession(ctx, sessionNumber);
+        clientConnectionPool.invalidateSession(ctx.getConnectionId(), sessionNumber);
+        return NettyFutureBinders.bindNettySubmitToTrackableFuture(replaySession.eventLoop)
+            .getDeferredFutureThroughHandle((v, t) -> {
+                log.atTrace().setMessage("adding work item at slot {} for {} with {}")
+                    .addArgument(channelInteractionNum)
+                    .addArgument(replaySession::getChannelKeyContext)
+                    .addArgument(replaySession.scheduleSequencer)
+                    .log();
+                return replaySession.scheduleSequencer.addFutureForWork(
+                    channelInteractionNum,
+                    f -> f.thenCompose(
+                        voidValue -> scheduleCloseOnConnectionReplaySession(
+                            ctx,
+                            replaySession,
+                            timestamp,
+                            sessionNumber,
+                            channelInteractionNum,
+                            channelInteraction
+                        ),
+                        () -> "Work callback on replay session"
+                    )
+                );
+            }, () -> "Waiting for sequencer to finish for slot " + channelInteractionNum);
     }
 
     private TrackedFuture<String, Void> bindNettyScheduleToCompletableFuture(EventLoop eventLoop, Instant timestamp) {

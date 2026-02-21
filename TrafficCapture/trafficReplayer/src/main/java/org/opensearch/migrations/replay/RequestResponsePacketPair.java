@@ -24,7 +24,9 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
     public enum ReconstructionStatus {
         COMPLETE,
         EXPIRED_PREMATURELY,
-        CLOSED_PREMATURELY
+        CLOSED_PREMATURELY,
+        /** Connection closed due to Kafka partition reassignment — not a source-side close. */
+        REASSIGNED
     }
 
     @Getter

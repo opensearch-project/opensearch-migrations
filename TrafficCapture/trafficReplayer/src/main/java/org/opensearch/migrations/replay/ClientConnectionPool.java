@@ -65,16 +65,15 @@ public class ClientConnectionPool {
     }
 
     public ConnectionReplaySession buildConnectionReplaySession(IReplayContexts.IChannelKeyContext channelKeyCtx) {
+        return buildConnectionReplaySession(channelKeyCtx, 0);
+    }
+
+    public ConnectionReplaySession buildConnectionReplaySession(IReplayContexts.IChannelKeyContext channelKeyCtx, int generation) {
         if (eventLoopGroup.isShuttingDown()) {
             throw new IllegalStateException("Event loop group is shutting down.  Not creating a new session.");
         }
-        // arguably the most only thing that matters here is associating this item with an
-        // EventLoop (thread). As the channel needs to be recycled, we'll come back to the
-        // event loop that was tied to the original channel to bind all future channels to
-        // the same event loop. That means that we don't have to worry about concurrent
-        // accesses/changes to the OTHER value that we're storing within the cache.
         var eventLoop = eventLoopGroup.next();
-        return new ConnectionReplaySession(eventLoop, channelKeyCtx, channelCreator);
+        return new ConnectionReplaySession(eventLoop, channelKeyCtx, channelCreator, generation);
     }
 
     @SneakyThrows
@@ -82,9 +81,30 @@ public class ClientConnectionPool {
         IReplayContexts.IChannelKeyContext channelKeyCtx,
         int sessionNumber
     ) {
+        return getCachedSession(channelKeyCtx, sessionNumber, 0);
+    }
+
+    @SneakyThrows
+    public @NonNull ConnectionReplaySession getCachedSession(
+        IReplayContexts.IChannelKeyContext channelKeyCtx,
+        int sessionNumber,
+        int generation
+    ) {
+        var key = getKey(channelKeyCtx.getConnectionId(), sessionNumber);
+        var existing = connectionId2ChannelCache.getIfPresent(key);
+        if (existing != null && existing.generation < generation) {
+            // Stale session from a previous generation — cancel it and create a fresh one
+            log.atInfo().setMessage("Cancelling stale session (gen={}) for {} due to new generation={}")
+                .addArgument(existing.generation)
+                .addArgument(channelKeyCtx::getConnectionId)
+                .addArgument(generation)
+                .log();
+            invalidateSession(channelKeyCtx.getConnectionId(), sessionNumber);
+            closeClientConnectionChannel(existing);
+        }
         var crs = connectionId2ChannelCache.get(
-            getKey(channelKeyCtx.getConnectionId(), sessionNumber),
-            () -> buildConnectionReplaySession(channelKeyCtx)
+            key,
+            () -> buildConnectionReplaySession(channelKeyCtx, generation)
         );
         log.atTrace()
             .setMessage("returning ReplaySession={} for {} from {}")
@@ -100,8 +120,8 @@ public class ClientConnectionPool {
         log.atTrace().setMessage("closing connection for {}").addArgument(connId).log();
         var connectionReplaySession = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
         if (connectionReplaySession != null) {
+            invalidateSession(connId, sessionNumber);
             closeClientConnectionChannel(connectionReplaySession);
-            connectionId2ChannelCache.invalidate(getKey(connId, sessionNumber));
         } else {
             log.atTrace()
                 .setMessage("No ChannelFuture for {} in closeConnection.  " +
@@ -109,6 +129,10 @@ public class ClientConnectionPool {
                 .addArgument(ctx)
                 .log();
         }
+    }
+
+    public void invalidateSession(String connectionId, int sessionNumber) {
+        connectionId2ChannelCache.invalidate(getKey(connectionId, sessionNumber));
     }
 
     public CompletableFuture<Void> shutdownNow() {

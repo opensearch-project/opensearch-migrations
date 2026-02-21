@@ -135,6 +135,31 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     }
 
     @Override
+    public void onPartitionsLost(Collection<TopicPartition> partitions) {
+        if (partitions.isEmpty()) {
+            return;
+        }
+        // Partitions lost due to timeout/fence — commits are impossible, skip safeCommit
+        new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsRevoked(partitions);
+        synchronized (commitDataLock) {
+            partitions.forEach(p -> {
+                var tp = new TopicPartition(topic, p.partition());
+                nextSetOfCommitsMap.remove(tp);
+                nextSetOfKeysContextsBeingCommitted.remove(tp);
+                partitionToOffsetLifecycleTrackerMap.remove(p.partition());
+            });
+            kafkaRecordsLeftToCommitEventually.set(
+                partitionToOffsetLifecycleTrackerMap.values().stream().mapToInt(OffsetLifecycleTracker::size).sum()
+            );
+            kafkaRecordsReadyToCommit.set(!nextSetOfCommitsMap.values().isEmpty());
+            log.atWarn().setMessage("{} partitions lost (no commit attempted) for {}")
+                .addArgument(this)
+                .addArgument(() -> partitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
+                .log();
+        }
+    }
+
+    @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
         if (partitions.isEmpty()) {
             log.atDebug().setMessage("{} revoked no partitions.").addArgument(this).log();

@@ -78,6 +78,11 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     private final KafkaBehavioralPolicy behavioralPolicy;
     private final ChannelContextManager channelContextManager;
     private final AtomicBoolean isClosed;
+    /** Active connections per Kafka partition. Populated as records are consumed; cleared on synthetic close flush. */
+    final java.util.concurrent.ConcurrentHashMap<Integer, java.util.Set<org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey>>
+        partitionToActiveConnections = new java.util.concurrent.ConcurrentHashMap<>();
+    /** How long to delay the first request on a handoff connection (configurable). */
+    private final java.time.Duration quiescentDuration;
 
     public KafkaTrafficCaptureSource(
         @NonNull RootReplayerContext globalContext,
@@ -107,6 +112,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         );
         trafficStreamsRead = new AtomicLong();
         this.behavioralPolicy = behavioralPolicy;
+        this.quiescentDuration = java.time.Duration.ofSeconds(5); // default; TODO: make configurable
         kafkaConsumer.subscribe(Collections.singleton(topic), trackingKafkaConsumer);
         kafkaExecutor = Executors.newSingleThreadExecutor(new DefaultThreadFactory("kafkaConsumerThread"));
         isClosed = new AtomicBoolean(false);
@@ -250,7 +256,27 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                                 kafkaRecord.serializedKeySize() + kafkaRecord.serializedValueSize()
                             );
                     }, ts, offsetData);
-                    return (ITrafficStreamWithKey) new PojoTrafficStreamAndKey(ts, key);
+                    // Track active connections per partition for synthetic close injection
+                    partitionToActiveConnections
+                        .computeIfAbsent(offsetData.getPartition(),
+                            p -> java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>()))
+                        .add(new org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey(
+                            ts.getNodeId(), ts.getConnectionId()));
+                    // Detect handoff connections: not in active set AND no READ/open observation
+                    boolean isHandoff = !partitionToActiveConnections
+                        .getOrDefault(offsetData.getPartition(), java.util.Collections.emptySet())
+                        .contains(new org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey(
+                            ts.getNodeId(), ts.getConnectionId()))
+                        || ts.getSubStreamList().stream().noneMatch(org.opensearch.migrations.trafficcapture.protos.TrafficObservation::hasRead);
+                    // Re-check: connection was just added above, so "not in active set" is always false now.
+                    // Handoff = no READ observation in this stream (another replayer was mid-connection)
+                    boolean startsWithRead = ts.getSubStreamList().stream()
+                        .findFirst().map(org.opensearch.migrations.trafficcapture.protos.TrafficObservation::hasRead).orElse(false);
+                    final java.time.Instant quiescentUntil = (!startsWithRead) ? java.time.Instant.now().plus(quiescentDuration) : null;
+                    return (ITrafficStreamWithKey) new PojoTrafficStreamAndKey(ts, key) {
+                        @Override
+                        public java.time.Instant getQuiescentUntil() { return quiescentUntil; }
+                    };
                 } catch (InvalidProtocolBufferException e) {
                     // Assume the behavioralPolicy instance does any logging that the host may be interested in
                     RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(kafkaRecord, e);

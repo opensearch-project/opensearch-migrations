@@ -189,6 +189,21 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     public void accept(ITrafficStreamWithKey trafficStreamAndKey) {
+        // Synthetic close from partition reassignment — fire onConnectionClose(REASSIGNED) directly
+        if (trafficStreamAndKey instanceof org.opensearch.migrations.replay.kafka.SyntheticPartitionReassignmentClose) {
+            var tsk = trafficStreamAndKey.getKey();
+            tsk.getTrafficStreamsContext().close();
+            listener.underlying.onConnectionClose(
+                0,
+                tsk.getTrafficStreamsContext().getLogicalEnclosingScope(),
+                0,
+                RequestResponsePacketPair.ReconstructionStatus.REASSIGNED,
+                Instant.now(),
+                List.of(tsk)
+            );
+            return;
+        }
+
         var yetToBeSequencedTrafficStream = trafficStreamAndKey.getStream();
         log.atTrace().setMessage("Got trafficStream: {}")
             .addArgument(() -> summarizeTrafficStream(yetToBeSequencedTrafficStream))
@@ -196,6 +211,25 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var partitionId = yetToBeSequencedTrafficStream.getNodeId();
         var connectionId = yetToBeSequencedTrafficStream.getConnectionId();
         var tsk = trafficStreamAndKey.getKey();
+
+        // If the incoming key has a higher generation than the stored accumulation, the partition
+        // was revoked and reassigned.  Discard the stale accumulation before creating a fresh one.
+        var existingAccum = liveStreams.getIfPresent(tsk);
+        if (existingAccum != null && existingAccum.sourceGeneration < tsk.getSourceGeneration()) {
+            log.atInfo()
+                .setMessage("Discarding stale accumulation for {}:{} (stored gen={}, incoming gen={})")
+                .addArgument(partitionId)
+                .addArgument(connectionId)
+                .addArgument(existingAccum.sourceGeneration)
+                .addArgument(tsk::getSourceGeneration)
+                .log();
+            fireAccumulationsCallbacksAndClose(
+                existingAccum,
+                RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY
+            );
+            liveStreams.remove(partitionId, connectionId);
+        }
+
         var accum = liveStreams.getOrCreateWithoutExpiration(tsk, k -> createInitialAccumulation(trafficStreamAndKey));
         var trafficStream = trafficStreamAndKey.getStream();
         for (int i = 0; i < trafficStream.getSubStreamCount(); ++i) {

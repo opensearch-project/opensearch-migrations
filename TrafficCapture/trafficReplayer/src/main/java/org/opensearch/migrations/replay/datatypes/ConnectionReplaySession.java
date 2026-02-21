@@ -37,6 +37,8 @@ public class ConnectionReplaySession {
     public final TimeToResponseFulfillmentFutureMap schedule;
     @Getter
     private final IReplayContexts.IChannelKeyContext channelKeyContext;
+    /** Generation of the Kafka consumer assignment when this session was created. */
+    public final int generation;
 
     @SneakyThrows
     public ConnectionReplaySession(
@@ -44,11 +46,22 @@ public class ConnectionReplaySession {
         IReplayContexts.IChannelKeyContext channelKeyContext,
         BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory
     ) {
+        this(eventLoop, channelKeyContext, channelFutureFutureFactory, 0);
+    }
+
+    @SneakyThrows
+    public ConnectionReplaySession(
+        EventLoop eventLoop,
+        IReplayContexts.IChannelKeyContext channelKeyContext,
+        BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory,
+        int generation
+    ) {
         this.eventLoop = eventLoop;
         this.channelKeyContext = channelKeyContext;
         this.scheduleSequencer = new OnlineRadixSorter(0);
         this.schedule = new TimeToResponseFulfillmentFutureMap();
         this.channelFutureFutureFactory = channelFutureFutureFactory;
+        this.generation = generation;
     }
 
     public TrackedFuture<String, ChannelFuture> getChannelFutureInAnyState() {
