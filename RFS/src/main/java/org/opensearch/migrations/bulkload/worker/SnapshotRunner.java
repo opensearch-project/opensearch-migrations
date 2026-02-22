@@ -17,8 +17,12 @@ public class SnapshotRunner {
     }
 
     public static void runAndWaitForCompletion(SnapshotCreator snapshotCreator) {
+        runAndWaitForCompletion(snapshotCreator, false);
+    }
+
+    public static void runAndWaitForCompletion(SnapshotCreator snapshotCreator, boolean skipRepoRegistration) {
         try {
-            run(snapshotCreator);
+            run(snapshotCreator, skipRepoRegistration);
             waitForSnapshotToFinish(snapshotCreator);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -28,8 +32,16 @@ public class SnapshotRunner {
     }
 
     public static void run(SnapshotCreator snapshotCreator) {
+        run(snapshotCreator, false);
+    }
+
+    public static void run(SnapshotCreator snapshotCreator, boolean skipRepoRegistration) {
         log.info("Attempting to initiate the snapshot...");
-        snapshotCreator.registerRepo();
+        if (!skipRepoRegistration) {
+            snapshotCreator.registerRepo();
+        } else {
+            log.info("Skipping snapshot repo registration as requested");
+        }
         snapshotCreator.createSnapshot();
         log.info("Snapshot in progress...");
     }

@@ -112,6 +112,12 @@ public class CreateSnapshot {
         public boolean includeGlobalState = true;
 
         @Parameter(
+                names = {"--skip-repo-registration"},
+                required = false,
+                description = "Skip registering the snapshot repository. Use when the repo is already registered.")
+        public boolean skipRepoRegistration = false;
+
+        @Parameter(
                 required = false,
                 names = {"--otel-collector-endpoint" },
                 arity = 1,
@@ -195,9 +201,9 @@ public class CreateSnapshot {
 
         try {
             if (arguments.noWait) {
-                SnapshotRunner.run(snapshotCreator);
+                SnapshotRunner.run(snapshotCreator, arguments.skipRepoRegistration);
             } else {
-                SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
+                SnapshotRunner.runAndWaitForCompletion(snapshotCreator, arguments.skipRepoRegistration);
             }
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Unexpected error running CreateSnapshot").log();
