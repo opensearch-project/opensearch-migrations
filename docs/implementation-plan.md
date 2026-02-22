@@ -66,7 +66,7 @@ from `partitionToActiveConnections`, never derived from the `Accumulation` at cl
 
 | Operation | Thread | Synchronization |
 |---|---|---|
-| Populate `partitionToActiveConnections` with full `GenerationalSessionKey` | main thread (`readNextTrafficStreamSynchronously`) | `ConcurrentHashMap` + `ConcurrentHashMap.newKeySet()` |
+| Populate `partitionToActiveConnections` with full `GenerationalSessionKey` | main thread (`CapturedTrafficToHttpTransactionAccumulator.accept()`) | `ConcurrentHashMap` + `ConcurrentHashMap.newKeySet()` |
 | Enqueue synthetic close, increment counter | `kafkaExecutor` (inside `onPartitionsAssigned` OR `onPartitionsLost`) | `computeIfPresent` on Guava cache (thread-safe); `AtomicInteger` |
 | `pendingSyntheticCloses.putIfAbsent` | `kafkaExecutor` | `ConcurrentHashMap` |
 | `onClose` callback fires, `remove` + decrement | Netty event loop | `ConcurrentHashMap.remove` (atomic) |
