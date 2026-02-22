@@ -130,6 +130,51 @@ public class TestCreateSnapshot {
     }
 
     @Test
+    public void testSkipRepoRegistrationOnlyCreatesSnapshot() throws Exception {
+        var snapshotName = "my_snap";
+        var snapshotRepoName = "my_snapshot_repo";
+
+        ArrayList<Map.Entry<FullHttpRequest, String>> capturedRequestList = new ArrayList<>();
+        try (var destinationServer = SimpleNettyHttpServer.makeNettyServer(false,
+                Duration.ofMinutes(10),
+                fl -> {
+                    if (Objects.equals(fl.uri(), "/")) {
+                        return new SimpleHttpResponse(ROOT_RESPONSE_HEADERS, ROOT_RESPONSE_ES_7_10_2, "OK", 200);
+                    } else if (Objects.equals(fl.uri(), "/_cluster/settings?include_defaults=true")) {
+                        return new SimpleHttpResponse(CLUSTER_SETTINGS_COMPATIBILITY_HEADERS, CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED,
+                                "OK", 200);
+                    }
+                    capturedRequestList.add(new AbstractMap.SimpleEntry<>(fl, fl.content().toString(StandardCharsets.UTF_8)));
+                    return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
+                }))
+        {
+            final var endpoint = destinationServer.localhostEndpoint().toString();
+
+            var sourceClientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                    .host(endpoint)
+                    .insecure(true)
+                    .build()
+                    .toConnectionContext());
+            var sourceClient = sourceClientFactory.determineVersionAndCreate();
+            var snapshotCreator = new S3SnapshotCreator(
+                    snapshotName,
+                    snapshotRepoName,
+                    sourceClient,
+                    "s3://new-bucket/path-to-repo",
+                    "us-east-2",
+                    List.of(),
+                    snapshotContext.createSnapshotCreateContext()
+            );
+            SnapshotRunner.run(snapshotCreator, true);
+
+            Assertions.assertEquals(1, capturedRequestList.size(), "Only snapshot creation request should be sent");
+            FullHttpRequest createSnapshotRequest = capturedRequestList.get(0).getKey();
+            Assertions.assertEquals("/_snapshot/" + snapshotRepoName + "/" + snapshotName, createSnapshotRequest.uri());
+            Assertions.assertEquals(HttpMethod.PUT, createSnapshotRequest.method());
+        }
+    }
+
+    @Test
     public void testSnapshotCreateWithIndexAllowlist() throws Exception {
         var snapshotName = "my_snap";
         var snapshotRepoName = "my_snapshot_repo";
