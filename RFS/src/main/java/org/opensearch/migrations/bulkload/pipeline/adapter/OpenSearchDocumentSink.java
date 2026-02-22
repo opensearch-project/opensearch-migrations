@@ -18,6 +18,7 @@ import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor;
 import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -45,10 +46,11 @@ public class OpenSearchDocumentSink implements DocumentSink {
     private final Supplier<IJsonTransformer> transformerSupplier;
     private final boolean allowServerGeneratedIds;
     private final DocumentExceptionAllowlist allowlist;
+    private final Supplier<IRfsContexts.IRequestContext> requestContextSupplier;
 
-    /** Simple constructor — no transformation, no server-generated IDs, no allowlist. */
+    /** Simple constructor — no transformation, no server-generated IDs, no allowlist, no metrics. */
     public OpenSearchDocumentSink(OpenSearchClient client) {
-        this(client, null, false, DocumentExceptionAllowlist.empty());
+        this(client, null, false, DocumentExceptionAllowlist.empty(), null);
     }
 
     /**
@@ -65,10 +67,30 @@ public class OpenSearchDocumentSink implements DocumentSink {
         boolean allowServerGeneratedIds,
         DocumentExceptionAllowlist allowlist
     ) {
+        this(client, transformerSupplier, allowServerGeneratedIds, allowlist, null);
+    }
+
+    /**
+     * Full constructor with request context for HTTP-level metrics (bytes sent/read, request count/duration).
+     *
+     * @param client                    the OpenSearch client
+     * @param transformerSupplier       supplier for document transformers, null for no transformation
+     * @param allowServerGeneratedIds   whether to strip document IDs for server-generated IDs
+     * @param allowlist                 exception types to treat as success during bulk writes
+     * @param requestContextSupplier    supplier for request contexts (enables HTTP metering), null to skip
+     */
+    public OpenSearchDocumentSink(
+        OpenSearchClient client,
+        Supplier<IJsonTransformer> transformerSupplier,
+        boolean allowServerGeneratedIds,
+        DocumentExceptionAllowlist allowlist,
+        Supplier<IRfsContexts.IRequestContext> requestContextSupplier
+    ) {
         this.client = client;
         this.transformerSupplier = transformerSupplier;
         this.allowServerGeneratedIds = allowServerGeneratedIds;
         this.allowlist = allowlist != null ? allowlist : DocumentExceptionAllowlist.empty();
+        this.requestContextSupplier = requestContextSupplier;
     }
 
     @Override
@@ -90,7 +112,9 @@ public class OpenSearchDocumentSink implements DocumentSink {
             .mapToLong(doc -> doc.source() != null ? doc.source().length : 0)
             .sum();
 
-        return client.sendBulkRequest(indexName, opsToSend, null, allowServerGeneratedIds, allowlist)
+        return client.sendBulkRequest(indexName, opsToSend,
+                requestContextSupplier != null ? requestContextSupplier.get() : null,
+                allowServerGeneratedIds, allowlist)
             .then(Mono.just(new ProgressCursor(
                 shardId,
                 batch.size(),

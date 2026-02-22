@@ -11,6 +11,7 @@ import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -164,6 +165,45 @@ class OpenSearchDocumentSinkTest {
                 .verifyComplete();
 
             verify(client).sendBulkRequest(eq("idx"), anyList(), isNull(), eq(true), any(DocumentExceptionAllowlist.class));
+        }
+    }
+
+    @Nested
+    class RequestContextTests {
+
+        @Test
+        void writeBatchPassesRequestContextWhenSupplied() {
+            var mockContext = mock(IRfsContexts.IRequestContext.class);
+            var sinkWithContext = new OpenSearchDocumentSink(
+                client, null, false, DocumentExceptionAllowlist.empty(), () -> mockContext
+            );
+            var shardId = new ShardId("snap", "idx", 0);
+            var doc = new DocumentChange("doc-1", "_doc", "{\"f\":1}".getBytes(), null, DocumentChange.ChangeType.INDEX);
+
+            when(client.sendBulkRequest(eq("idx"), anyList(), eq(mockContext), eq(false), any(DocumentExceptionAllowlist.class)))
+                .thenReturn(Mono.empty());
+
+            StepVerifier.create(sinkWithContext.writeBatch(shardId, "idx", List.of(doc)))
+                .assertNext(cursor -> assertEquals(1, cursor.docsInBatch()))
+                .verifyComplete();
+
+            verify(client).sendBulkRequest(eq("idx"), anyList(), eq(mockContext), eq(false), any(DocumentExceptionAllowlist.class));
+        }
+
+        @Test
+        void writeBatchPassesNullContextWhenNoSupplier() {
+            // Default constructor — no context supplier
+            var shardId = new ShardId("snap", "idx", 0);
+            var doc = new DocumentChange("doc-1", "_doc", "{\"f\":1}".getBytes(), null, DocumentChange.ChangeType.INDEX);
+
+            when(client.sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any(DocumentExceptionAllowlist.class)))
+                .thenReturn(Mono.empty());
+
+            StepVerifier.create(sink.writeBatch(shardId, "idx", List.of(doc)))
+                .assertNext(cursor -> assertEquals(1, cursor.docsInBatch()))
+                .verifyComplete();
+
+            verify(client).sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any(DocumentExceptionAllowlist.class));
         }
     }
 }
