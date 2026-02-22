@@ -19,15 +19,23 @@ def correttoVersion = { String minor ->
     return '21'
 }
 
-// Base image: Corretto 8 uses -al2023-jre (no headless variant), others use -al2023-headless
-def baseImage = { String corretto ->
-    return corretto == '8' ? "amazoncorretto:${corretto}-al2023-jre" : "amazoncorretto:${corretto}-al2023-headless"
-}
+// Corretto version → base image and JAVA_HOME (inlined in task configs for configuration cache compat)
+// Corretto 8: amazonlinux:2023 base + multi-stage JRE copy (avoids JavaFX/GTK bloat)
+// Corretto 11+: amazoncorretto headless images directly
 
 versions.each { minor, info ->
     def safeName = minor.replace('.', '_')
     def version = info.version
     def url = info.url
+
+    // Resolve all values at configuration time (required for Gradle configuration cache)
+    def parts = minor.split('\\.')
+    int maj = parts[0] as int, min = parts[1] as int
+    def corretto = (maj <= 5 || (maj == 6 && min <= 4)) ? '8' :
+                   (maj == 6 || (maj == 7 && min <= 10)) ? '11' :
+                   (maj == 7) ? '17' : '21'
+    def base = corretto == '8' ? "amazonlinux:2023" : "amazoncorretto:${corretto}-al2023-headless"
+    def javaHome = corretto == '8' ? '/usr/lib/jvm/java-1.8.0-amazon-corretto' : "/usr/lib/jvm/java-${corretto}-amazon-corretto"
 
     // Local docker build — Dockerfile downloads the tarball using TARGETARCH for multi-arch
     tasks.register("buildImage_${safeName}", Exec) {
@@ -35,18 +43,18 @@ versions.each { minor, info ->
         description = "Build ${imagePrefix}:${version}"
         inputs.file('dockerfiles/Dockerfile')
         inputs.property('version', version)
-        def corretto = correttoVersion(minor)
-        def base = baseImage(corretto)
         def dockerfilePath = file('dockerfiles/Dockerfile').absolutePath
+        def contextPath = file('dockerfiles').absolutePath
         doFirst {
             commandLine 'docker', 'build',
                     '--build-arg', "CORRETTO_VERSION=${corretto}",
                     '--build-arg', "BASE_IMAGE=${base}",
+                    '--build-arg', "JAVA_HOME_PATH=${javaHome}",
                     '--build-arg', "ES_VERSION=${version}",
                     '--build-arg', "TARBALL_URL=${url}",
                     '-f', dockerfilePath,
                     '-t', "${imagePrefix}:${version}",
-                    file('dockerfiles').absolutePath
+                    contextPath
         }
     }
 }
@@ -100,9 +108,15 @@ if (!pushVersionsList.isEmpty()) {
         tasks.register("pushImage_${safeName}", Exec) {
             group = 'docker'
             description = "Build and push ${imagePrefix}:${version} to ${registry.containerUrl}"
-            def corretto = correttoVersion(minor)
-            def base = baseImage(corretto)
+            def pushParts = minor.split('\\.')
+            int pushMaj = pushParts[0] as int, pushMin = pushParts[1] as int
+            def corretto = (pushMaj <= 5 || (pushMaj == 6 && pushMin <= 4)) ? '8' :
+                           (pushMaj == 6 || (pushMaj == 7 && pushMin <= 10)) ? '11' :
+                           (pushMaj == 7) ? '17' : '21'
+            def base = corretto == '8' ? "amazonlinux:2023" : "amazoncorretto:${corretto}-al2023-headless"
+            def javaHome = corretto == '8' ? '/usr/lib/jvm/java-1.8.0-amazon-corretto' : "/usr/lib/jvm/java-${corretto}-amazon-corretto"
             def dockerfilePath = file('dockerfiles/Dockerfile').absolutePath
+            def contextPath = file('dockerfiles').absolutePath
             doFirst {
                 def buildArgs = [
                         "docker buildx build",
@@ -111,13 +125,14 @@ if (!pushVersionsList.isEmpty()) {
                         "-f ${dockerfilePath}",
                         "--build-arg CORRETTO_VERSION=${corretto}",
                         "--build-arg BASE_IMAGE=${base}",
+                        "--build-arg JAVA_HOME_PATH=${javaHome}",
                         "--build-arg ES_VERSION=${version}",
                         "--build-arg TARBALL_URL=${url}",
                         "-t ${dest}",
                         "--push",
                         "--cache-to=type=registry,ref=${cacheDest},mode=max",
                         "--cache-from=type=registry,ref=${cacheDest}",
-                        file('dockerfiles').absolutePath
+                        contextPath
                 ]
                 commandLine 'sh', '-c', buildArgs.join(" ")
             }

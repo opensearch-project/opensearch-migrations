@@ -44,9 +44,18 @@ get_corretto_version() {
 get_base_image() {
   local corretto=$1
   if [ "$corretto" = "8" ]; then
-    echo "amazoncorretto:${corretto}-al2023-jre"
+    echo "amazonlinux:2023"
   else
     echo "amazoncorretto:${corretto}-al2023-headless"
+  fi
+}
+
+get_java_home_path() {
+  local corretto=$1
+  if [ "$corretto" = "8" ]; then
+    echo "/usr/lib/jvm/java-1.8.0-amazon-corretto"
+  else
+    echo "/usr/lib/jvm/java-${corretto}-amazon-corretto"
   fi
 }
 
@@ -83,12 +92,15 @@ print(f\"{v['version']}|{v['url']}\")")
   corretto=$(get_corretto_version "$es_major" "$es_minor")
   local base_image
   base_image=$(get_base_image "$corretto")
+  local java_home
+  java_home=$(get_java_home_path "$corretto")
 
   echo "=== Building ${tag} (Corretto ${corretto}) ==="
 
   docker build \
     --build-arg CORRETTO_VERSION="${corretto}" \
     --build-arg BASE_IMAGE="${base_image}" \
+    --build-arg JAVA_HOME_PATH="${java_home}" \
     --build-arg ES_VERSION="${version}" \
     --build-arg TARBALL_URL="${url}" \
     -f "${SCRIPT_DIR}/dockerfiles/Dockerfile" \

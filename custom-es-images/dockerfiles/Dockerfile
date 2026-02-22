@@ -3,7 +3,7 @@
 # Multi-arch: uses TARGETARCH to download the correct tarball
 # ============================================================
 ARG CORRETTO_VERSION=8
-ARG BASE_IMAGE=amazoncorretto:${CORRETTO_VERSION}-al2023-jre
+ARG BASE_IMAGE=amazonlinux:2023
 ARG ES_VERSION
 ARG TARBALL_URL
 
@@ -20,6 +20,13 @@ RUN dnf install -y --allowerasing tar gzip findutils curl && dnf clean all && \
       *) ES_ARCH="x86_64" ;; \
     esac && \
     RESOLVED_URL=$(echo "${TARBALL_URL}" | sed "s/ARCH/${ES_ARCH}/g") && \
+    # Fallback: if aarch64 tarball doesn't exist (ES 7.0-7.6), use no-jdk variant
+    if [ "${ES_ARCH}" = "aarch64" ]; then \
+      HTTP_CODE=$(curl -sI -o /dev/null -w "%{http_code}" "${RESOLVED_URL}") && \
+      if [ "${HTTP_CODE}" = "404" ]; then \
+        RESOLVED_URL=$(echo "${TARBALL_URL}" | sed "s/-linux-ARCH/-no-jdk-linux-x86_64/g"); \
+      fi; \
+    fi && \
     mkdir -p /opt/elasticsearch && \
     curl -fSL --retry 5 --retry-delay 5 --retry-max-time 300 --retry-all-errors \
          -o /tmp/es.tar.gz "${RESOLVED_URL}" && \
@@ -99,11 +106,32 @@ RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
     fi && \
     chmod +x /tmp/scripts/entrypoint.sh
 
-# --- Stage 4: Runtime ---
+# --- Stage 4: Corretto 8 JRE builder (strips JavaFX bloat via multi-stage copy) ---
+FROM amazonlinux:2023 AS java8-builder
+ARG CORRETTO_VERSION
+RUN if [ "${CORRETTO_VERSION}" = "8" ]; then \
+      dnf install -y java-1.8.0-amazon-corretto && dnf clean all && \
+      # Strip JavaFX files (the real win is not copying GTK/mesa deps to runtime)
+      JVM_DIR=$(ls -d /usr/lib/jvm/java-1.8.0-amazon-corretto.*) && \
+      rm -f "${JVM_DIR}/jre/lib/ext/jfxrt.jar" \
+            "${JVM_DIR}/jre/lib/jfxswt.jar" \
+            "${JVM_DIR}/jre/lib/javafx.properties" && \
+      rm -f "${JVM_DIR}"/jre/lib/*/libglass*.so \
+            "${JVM_DIR}"/jre/lib/*/libprism*.so \
+            "${JVM_DIR}"/jre/lib/*/libjavafx*.so \
+            "${JVM_DIR}"/jre/lib/*/libdecora_sse.so && \
+      # Create arch-independent symlink
+      ln -sf "${JVM_DIR}" /usr/lib/jvm/java-1.8.0-amazon-corretto; \
+    else \
+      mkdir -p /usr/lib/jvm/java-1.8.0-amazon-corretto; \
+    fi
+
+# --- Stage 5: Runtime ---
 FROM ${BASE_IMAGE}
 
 ARG ES_VERSION
 ARG CORRETTO_VERSION
+ARG JAVA_HOME_PATH
 LABEL org.opencontainers.image.title="custom-elasticsearch" \
       org.opencontainers.image.version="${ES_VERSION}" \
       org.opencontainers.image.description="Custom Elasticsearch ${ES_VERSION} on Amazon Corretto"
@@ -111,8 +139,17 @@ LABEL org.opencontainers.image.title="custom-elasticsearch" \
 ENV ES_HOME=/usr/share/elasticsearch \
     ES_VERSION=${ES_VERSION}
 
+# For Corretto 8: copy stripped JRE from builder (avoids ~700MB of JavaFX/GTK/mesa bloat)
+# For Corretto 11+: base image already has Java, this copies an empty dir (no-op)
+COPY --from=java8-builder /usr/lib/jvm/java-1.8.0-amazon-corretto /usr/lib/jvm/java-1.8.0-amazon-corretto
+
 # Install minimal runtime deps — bash for ES scripts, curl for healthcheck
-RUN dnf install -y --allowerasing bash coreutils curl hostname shadow-utils which && dnf clean all && \
+# For Corretto 8: also install glibc/zlib/freetype needed by the copied JRE
+RUN dnf install -y --allowerasing bash coreutils curl hostname shadow-utils which util-linux && \
+    if [ "${CORRETTO_VERSION}" = "8" ]; then \
+      dnf install -y glibc zlib freetype fontconfig; \
+    fi && \
+    dnf clean all && rm -rf /var/cache/dnf && \
     groupadd -g 1000 elasticsearch && \
     useradd -u 1000 -g elasticsearch -d ${ES_HOME} -M elasticsearch && \
     mkdir -p /tmp/snapshots && chown 1000:1000 /tmp/snapshots
@@ -122,21 +159,10 @@ COPY --from=cgroup-fixer /opt/fix/libcgroup_fix.so* /usr/local/lib/
 COPY --from=config-builder /tmp/scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --from=config-builder /tmp/config/elasticsearch.yml ${ES_HOME}/config/elasticsearch.yml
 
-# Remove JavaFX files and GTK3 dependency tree (x86_64 Corretto 8 only, not present on aarch64)
-RUN if [ "${CORRETTO_VERSION}" = "8" ] && [ "$(uname -m)" = "x86_64" ]; then \
-      rm -f /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/ext/jfxrt.jar \
-            /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/jfxswt.jar \
-            /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/javafx.properties \
-            /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/amd64/libglass*.so \
-            /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/amd64/libprism*.so \
-            /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/amd64/libjavafx*.so \
-            /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/amd64/libdecora_sse.so && \
-      dnf remove -y gtk3 cairo pango mesa-libGL atk harfbuzz 2>/dev/null; \
-      dnf clean all && rm -rf /var/cache/dnf; \
-    fi
-
-# ES 7+ uses ES_JAVA_HOME — point it to the Corretto JAVA_HOME from base image
-ENV ES_JAVA_HOME=${JAVA_HOME}
+# Set JAVA_HOME explicitly (needed for amazonlinux:2023 base, harmless override for amazoncorretto bases)
+ENV JAVA_HOME=${JAVA_HOME_PATH}
+ENV ES_JAVA_HOME=${JAVA_HOME_PATH}
+ENV PATH="${JAVA_HOME_PATH}/bin:${JAVA_HOME_PATH}/jre/bin:${PATH}"
 
 RUN mkdir -p ${ES_HOME}/data ${ES_HOME}/logs && \
     chown -R 1000:1000 ${ES_HOME}
