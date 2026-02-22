@@ -96,6 +96,19 @@ public class RequestTransformerAndSender<T> {
         @NonNull Instant start,
         @NonNull Instant end,
         Supplier<Stream<byte[]>> packetsSupplier) {
+        return transformAndSendRequest(inputRequestTransformerFactory, replayEngine,
+            finishedAccumulatingResponseFuture, ctx, start, end, packetsSupplier, null);
+    }
+
+    public TrackedFuture<String, T> transformAndSendRequest(
+        PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
+        ReplayEngine replayEngine,
+        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        @NonNull Instant start,
+        @NonNull Instant end,
+        Supplier<Stream<byte[]>> packetsSupplier,
+        Instant quiescentUntil) {
         try {
             var requestReadyFuture = replayEngine.scheduleTransformationWork(
                 ctx,
@@ -106,9 +119,7 @@ public class RequestTransformerAndSender<T> {
                 .addArgument(ctx)
                 .addArgument(requestReadyFuture)
                 .log();
-            // It might be safer to chain this work directly inside the scheduleWork call above so that the
-            // read buffer horizons aren't set after the transformation work finishes, but after the packets
-            // are fully handled
+            final Instant effectiveQuiescentUntil = quiescentUntil;
             return requestReadyFuture.thenCompose(
                 transformedRequest -> replayEngine.scheduleRequest(
                     ctx,
@@ -117,7 +128,8 @@ public class RequestTransformerAndSender<T> {
                     transformedRequest.transformedOutput.size(),
                     transformedRequest.transformedOutput,
                     getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture,
-                        arr -> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx))
+                        arr -> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx)),
+                    effectiveQuiescentUntil
                 ),
                 () -> "transitioning transformed packets onto the wire"
             );

@@ -342,14 +342,26 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
         IReplayContexts.IReplayerHttpTransactionContext ctx
     ) {
+        var start = request.getFirstPacketTimestamp();
+        var end = request.getLastPacketTimestamp();
+        // Apply quiescent delay for handoff connections (first request only)
+        Instant quiescentUntil = null;
+        if (request instanceof HttpMessageAndTimestamp.Request) {
+            quiescentUntil = ((HttpMessageAndTimestamp.Request) request).quiescentUntil;
+            if (quiescentUntil != null) {
+                log.atInfo().setMessage("Applying quiescent delay until {} for first request on {}")
+                    .addArgument(quiescentUntil).addArgument(ctx).log();
+            }
+        }
         return transformAndSendRequest(
             inputRequestTransformerFactory,
             replayEngine,
             finishedAccumulatingResponseFuture,
             ctx,
-            request.getFirstPacketTimestamp(),
-            request.getLastPacketTimestamp(),
-            request.packetBytes::stream);
+            start,
+            end,
+            request.packetBytes::stream,
+            quiescentUntil);
     }
 
     @Override

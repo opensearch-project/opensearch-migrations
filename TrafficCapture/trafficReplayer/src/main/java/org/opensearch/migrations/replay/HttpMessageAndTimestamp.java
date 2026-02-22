@@ -22,6 +22,9 @@ import lombok.extern.slf4j.Slf4j;
 public class HttpMessageAndTimestamp {
 
     public static class Request extends HttpMessageAndTimestamp {
+        /** Wall-clock instant before which this request must not be sent. Null = no delay. */
+        public java.time.Instant quiescentUntil;
+
         public Request(Instant firstPacketTimestamp) {
             super(firstPacketTimestamp);
         }

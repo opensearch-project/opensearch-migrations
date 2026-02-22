@@ -173,9 +173,27 @@ public class ReplayEngine {
         ByteBufList packets,
         RequestSenderOrchestrator.RetryVisitor<T> retryVisitor
     ) {
+        return scheduleRequest(ctx, originalStart, originalEnd, numPackets, packets, retryVisitor, null);
+    }
+
+    public <T> TrackedFuture<String, T> scheduleRequest(
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        Instant originalStart,
+        Instant originalEnd,
+        int numPackets,
+        ByteBufList packets,
+        RequestSenderOrchestrator.RetryVisitor<T> retryVisitor,
+        Instant quiescentUntil
+    ) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "request";
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
+        // Apply quiescent delay: wall-clock floor for first request on handoff connections
+        if (quiescentUntil != null && start.isBefore(quiescentUntil)) {
+            log.atInfo().setMessage("Applying quiescent delay: shifting start from {} to {} for {}")
+                .addArgument(start).addArgument(quiescentUntil).addArgument(ctx).log();
+            start = quiescentUntil;
+        }
         var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
         var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets - 1L) : Duration.ZERO;
         var requestKey = ctx.getReplayerRequestKey();

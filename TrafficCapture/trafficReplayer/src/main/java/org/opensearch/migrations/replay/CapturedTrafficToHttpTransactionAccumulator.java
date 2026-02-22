@@ -289,7 +289,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .log();
         }
 
-        return new Accumulation(streamWithKey.getKey(), stream);
+        return new Accumulation(streamWithKey.getKey(), stream, streamWithKey.getQuiescentUntil());
     }
 
     private enum CONNECTION_STATUS {
@@ -536,6 +536,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var httpMessage = rrPair.requestData;
         assert (httpMessage != null);
         assert (!httpMessage.hasInProgressSegment());
+        // Propagate quiescentUntil to the first request on this connection
+        if (accumulation.quiescentUntil != null && accumulation.getIndexOfCurrentRequest() == 0
+                && httpMessage instanceof HttpMessageAndTimestamp.Request) {
+            ((HttpMessageAndTimestamp.Request) httpMessage).quiescentUntil = accumulation.quiescentUntil;
+        }
         var requestCtx = rrPair.getRequestContext();
         rrPair.rotateRequestGatheringToResponse();
         var callbackTrackedData = listener.onRequestReceived(requestCtx, httpMessage);
