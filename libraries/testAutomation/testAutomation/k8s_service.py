@@ -356,7 +356,7 @@ class K8sService:
             logger.error(f"Failed to list ConfigMaps in namespace '{target_namespace}': {e.stderr}")
             raise subprocess.CalledProcessError(e.returncode, e.cmd, e.stderr)
 
-    def delete_configmap(self, configmap_name: str) -> CompletedProcess | bool:
+    def delete_configmap(self, configmap_name: str) -> CompletedProcess:
         target_namespace = self.namespace
         logger.info(f"Deleting ConfigMap '{configmap_name}' from namespace '{target_namespace}'...")
         delete_command = ["kubectl", "delete", "configmap", configmap_name, "-n", target_namespace, "--ignore-not-found"]
