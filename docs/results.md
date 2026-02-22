@@ -96,10 +96,24 @@ BUILD SUCCESSFUL in 39s — all unit tests PASSED.
 
 ---
 
-## Final Full Suite
+## Full Integration Suite (isolatedTest) — Final
+
+All tests passed. BUILD FAILED only due to Gradle failing to write XML result files (I/O issue), not test failures.
 
 ```
-./gradlew :TrafficCapture:trafficReplayer:test :TrafficCapture:trafficReplayer:isolatedTest
+KafkaRestartingTrafficReplayerTest > fullTest [1] 3, false    PASSED
+KafkaRestartingTrafficReplayerTest > fullTest [2] -1, false   PASSED
+KafkaRestartingTrafficReplayerTest > fullTest [3] 3, true     PASSED
+KafkaRestartingTrafficReplayerTest > fullTest [4] -1, true    PASSED
+KafkaCommitsWorkBetweenLongPollsTest                          PASSED
+KafkaKeepAliveTests [2]                                       PASSED
+KafkaTrafficCaptureSourceLongTermTest                         PASSED
 ```
 
-(Results to be recorded here)
+Notable fixes required during integration testing:
+- Phase 1 (cache invalidation) reverted: immediate invalidation caused deadlock with
+  finishedAccumulatingResponseFuture on old session never completing
+- bisectExhaustiveSeeds test was running (not skipping) without system properties, consuming
+  memory before fullTest — fixed with Assumptions.assumeTrue guard
+- partitionToActiveConnections growing unboundedly — fixed with onConnectionDone callback
+- Test JVM heap bumped to 5g (from 2g) to handle exhaustive test traffic generation

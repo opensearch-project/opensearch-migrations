@@ -94,8 +94,12 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
     @Tag("isolatedTest")
     @ResourceLock("TrafficReplayerRunner")
     public void bisectExhaustiveSeeds() throws Throwable {
-        int seedStart = Integer.getInteger("bisect.start", 0);
-        int seedEnd = Integer.getInteger("bisect.end", 10);        var allSeeds = ExhaustiveTrafficStreamGenerator.RANDOM_GENERATOR_SEEDS_FOR_SUFFICIENT_TRAFFIC_VARIANCE;
+        var bisectStart = System.getProperty("bisect.start");
+        var bisectEnd = System.getProperty("bisect.end");
+        org.junit.jupiter.api.Assumptions.assumeTrue(bisectStart != null && bisectEnd != null,
+            "bisect.start and bisect.end system properties not set — skipping bisection test");
+        int seedStart = Integer.parseInt(bisectStart);
+        int seedEnd = Integer.parseInt(bisectEnd);        var allSeeds = ExhaustiveTrafficStreamGenerator.RANDOM_GENERATOR_SEEDS_FOR_SUFFICIENT_TRAFFIC_VARIANCE;
         var seeds = allSeeds.subList(seedStart, Math.min(seedEnd, allSeeds.size()));
         log.atInfo().setMessage("bisectExhaustiveSeeds: running seeds {} to {} = {}")
             .addArgument(seedStart).addArgument(seedEnd).addArgument(seeds).log();
@@ -134,7 +138,7 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
     }
 
     @ParameterizedTest
-    @CsvSource(value = { "3,false", "3,true", })
+    @CsvSource(value = { "3,false", "-1,false", "3,true", "-1,true", })
     @ResourceLock("TrafficReplayerRunner")
     public void fullTest(int testSize, boolean randomize) throws Throwable {        var random = new Random(1);
         try (
