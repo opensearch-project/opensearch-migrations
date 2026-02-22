@@ -675,12 +675,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "default": {
                   "limits": {
-                    "cpu": "2000m",
-                    "memory": "4000Mi"
+                    "cpu": "3500m",
+                    "memory": "3500Mi"
                   },
                   "requests": {
-                    "cpu": "2000m",
-                    "memory": "4000Mi"
+                    "cpu": "3500m",
+                    "memory": "3500Mi"
                   }
                 },
                 "required": [
@@ -1357,12 +1357,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 },
                 "default": {
                   "limits": {
-                    "cpu": "2000m",
-                    "memory": "4000Mi"
+                    "cpu": "3500m",
+                    "memory": "3500Mi"
                   },
                   "requests": {
-                    "cpu": "2000m",
-                    "memory": "4000Mi"
+                    "cpu": "3500m",
+                    "memory": "3500Mi"
                   }
                 },
                 "required": [

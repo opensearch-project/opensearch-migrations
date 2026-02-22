@@ -155,6 +155,24 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Pre-Integ Test Cleanup') {
+                steps {
+                    timeout(time: 10, unit: 'MINUTES') {
+                        dir('test') {
+                            script {
+                                if (config.preIntegTestStep) {
+                                    withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                            config.preIntegTestStep(stage)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             stage('Integ Tests') {
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
