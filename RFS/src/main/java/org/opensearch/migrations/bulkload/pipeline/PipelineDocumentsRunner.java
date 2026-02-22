@@ -3,6 +3,8 @@ package org.opensearch.migrations.bulkload.pipeline;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -84,6 +86,9 @@ public class PipelineDocumentsRunner {
                     var pipeline = new MigrationPipeline(source, sink, maxDocsPerBatch, maxBytesPerBatch);
                     var latch = new CountDownLatch(1);
                     var lastCursor = new AtomicReference<ProgressCursor>();
+                    var batchCount = new AtomicInteger();
+                    var totalDocsMigrated = new AtomicLong();
+                    var totalBytesMigrated = new AtomicLong();
                     var finishScheduler = Schedulers.newSingle("pipelineFinishScheduler");
 
                     var disposable = pipeline.migrateShard(shardId, wi.getIndexName(), startingOffset)
@@ -92,6 +97,9 @@ public class PipelineDocumentsRunner {
                         .subscribe(
                             cursor -> {
                                 lastCursor.set(cursor);
+                                batchCount.incrementAndGet();
+                                totalDocsMigrated.addAndGet(cursor.docsInBatch());
+                                totalBytesMigrated.addAndGet(cursor.bytesInBatch());
                                 cursorConsumer.accept(new WorkItemCursor(cursor.lastDocProcessed()));
                             },
                             error -> {
@@ -113,8 +121,16 @@ public class PipelineDocumentsRunner {
                     try {
                         long start = System.currentTimeMillis();
                         latch.await();
-                        log.info("Pipeline latch released after {} ms for index={}, shard={}",
-                            System.currentTimeMillis() - start, wi.getIndexName(), wi.getShardNumber());
+                        long durationMs = System.currentTimeMillis() - start;
+                        log.atInfo()
+                            .setMessage("Shard migration stats: index={}, shard={}, docs={}, bytes={}, batches={}, duration={}ms")
+                            .addArgument(wi.getIndexName())
+                            .addArgument(wi.getShardNumber())
+                            .addArgument(totalDocsMigrated::get)
+                            .addArgument(totalBytesMigrated::get)
+                            .addArgument(batchCount::get)
+                            .addArgument(durationMs)
+                            .log();
                         return CompletionStatus.WORK_COMPLETED;
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();

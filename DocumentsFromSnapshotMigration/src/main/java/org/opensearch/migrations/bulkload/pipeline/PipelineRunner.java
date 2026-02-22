@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.pipeline;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -129,7 +130,16 @@ public class PipelineRunner {
             throw new IllegalStateException("workCoordinator must be set for coordinated migration");
         }
         var source = createDocumentSource();
-        var sink = createDocumentSink();
+        // Bridge: capture the context reference so the sink can create per-batch request contexts
+        // for HTTP-level metrics (bytes sent/read, request count/duration)
+        var contextRef = new AtomicReference<IDocumentMigrationContexts.IDocumentReindexContext>();
+        var sink = new OpenSearchDocumentSink(
+            targetClient, transformerSupplier, allowServerGeneratedIds, allowlist,
+            () -> {
+                var ctx = contextRef.get();
+                return ctx != null ? ctx.createBulkRequest() : null;
+            }
+        );
         var runner = new PipelineDocumentsRunner(
             workCoordinator,
             maxInitialLeaseDuration,
@@ -141,7 +151,11 @@ public class PipelineRunner {
             cursorConsumer,
             cancellationTriggerConsumer
         );
-        return runner.migrateNextShard(contextSupplier);
+        return runner.migrateNextShard(() -> {
+            var ctx = contextSupplier.get();
+            contextRef.set(ctx);
+            return ctx;
+        });
     }
 
     private LuceneSnapshotSource createDocumentSource() {
