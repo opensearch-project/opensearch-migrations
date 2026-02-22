@@ -359,7 +359,9 @@ class K8sService:
     def delete_configmap(self, configmap_name: str) -> CompletedProcess:
         target_namespace = self.namespace
         logger.info(f"Deleting ConfigMap '{configmap_name}' from namespace '{target_namespace}'...")
-        delete_command = ["kubectl", "delete", "configmap", configmap_name, "-n", target_namespace, "--ignore-not-found"]
+        delete_command = [
+            "kubectl", "delete", "configmap", configmap_name, "-n", target_namespace, "--ignore-not-found"
+        ]
         return self.run_command(delete_command)
 
     def delete_all_argo_templates(self) -> None:
