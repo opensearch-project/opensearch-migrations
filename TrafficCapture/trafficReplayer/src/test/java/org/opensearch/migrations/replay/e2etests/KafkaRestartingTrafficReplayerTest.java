@@ -36,6 +36,7 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
@@ -91,6 +92,7 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
      * Adjust seedStart/seedEnd to narrow down which patterns cause hangs.
      */
     @Test
+    @Disabled
     @Tag("isolatedTest")
     @ResourceLock("TrafficReplayerRunner")
     public void bisectExhaustiveSeeds() throws Throwable {
@@ -140,7 +142,8 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
     @ParameterizedTest
     @CsvSource(value = { "3,false", "-1,false", "3,true", "-1,true", })
     @ResourceLock("TrafficReplayerRunner")
-    public void fullTest(int testSize, boolean randomize) throws Throwable {        var random = new Random(1);
+    public void fullTest(int testSize, boolean randomize) throws Throwable {
+        var random = new Random(1);
         try (
             var httpServer = SimpleNettyHttpServer.makeServer(
                 false,

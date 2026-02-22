@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay.kafka;
 
 import java.time.Duration;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;

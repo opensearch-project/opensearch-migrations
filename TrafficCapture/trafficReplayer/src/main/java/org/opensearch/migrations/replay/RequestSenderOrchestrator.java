@@ -161,16 +161,12 @@ public class RequestSenderOrchestrator {
     ) {
         var sessionNumber = requestKey.sourceRequestIndexSessionIdentifier;
         var channelInteractionNum = requestKey.getReplayerRequestIndex();
-        // TODO: Separate socket connection from the first bytes sent.
-        // Ideally, we would match the relative timestamps of when connections were being initiated
-        // as well as the period between connection and the first bytes sent. However, this code is a
-        // bit too cavalier. It should be tightened at some point by adding a first packet that is empty.
-        // Thankfully, given the trickiness of this class, that would be something that should be tracked
-        // upstream and should be handled transparently by this class.
+        var generation = requestKey.trafficStreamKey.getSourceGeneration();
         return submitUnorderedWorkToEventLoop(
             ctx.getLogicalEnclosingScope(),
             sessionNumber,
             channelInteractionNum,
+            generation,
             connectionReplaySession -> scheduleSendRequestOnConnectionReplaySession(
                 ctx,
                 connectionReplaySession,
@@ -248,7 +244,17 @@ public class RequestSenderOrchestrator {
         int channelInteractionNumber,
         Function<ConnectionReplaySession, TrackedFuture<String, T>> onSessionCallback
     ) {
-        final var replaySession = clientConnectionPool.getCachedSession(ctx, sessionNumber);
+        return submitUnorderedWorkToEventLoop(ctx, sessionNumber, channelInteractionNumber, 0, onSessionCallback);
+    }
+
+    private <T> TrackedFuture<String, T> submitUnorderedWorkToEventLoop(
+        IReplayContexts.IChannelKeyContext ctx,
+        int sessionNumber,
+        int channelInteractionNumber,
+        int generation,
+        Function<ConnectionReplaySession, TrackedFuture<String, T>> onSessionCallback
+    ) {
+        final var replaySession = clientConnectionPool.getCachedSession(ctx, sessionNumber, generation);
         return NettyFutureBinders.bindNettySubmitToTrackableFuture(replaySession.eventLoop)
             .getDeferredFutureThroughHandle((v, t) -> {
                 log.atTrace().setMessage("adding work item at slot {} for {} with {}")

@@ -6,7 +6,6 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.HashMap;
 
-import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
