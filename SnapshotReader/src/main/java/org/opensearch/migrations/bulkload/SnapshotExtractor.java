@@ -140,6 +140,7 @@ public class SnapshotExtractor {
     /**
      * Represents a shard within a snapshot index.
      */
+    @SuppressWarnings({"java:S100", "java:S1186"})
     public record ShardEntry(
         String snapshotName,
         String indexName,

@@ -156,7 +156,7 @@ public class ClusterVersionDetector {
     }
 
     public static class UnexpectedStatusCode extends RuntimeException {
-        public final HttpResponse response;
+        public final transient HttpResponse response;
 
         public UnexpectedStatusCode(HttpResponse response) {
             super("Unexpected status code: " + response.statusCode);
