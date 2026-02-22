@@ -130,3 +130,19 @@ exclusively by the synthetic close path.
 
 ### Integration test results
 All 4 `KafkaRestartingTrafficReplayerTest.fullTest` cases PASSED. BUILD SUCCESSFUL in 3m 25s.
+
+---
+
+## Phase A — Complete Synthetic Close Wiring
+
+All unit tests PASSED. All integration tests PASSED (BUILD SUCCESSFUL in 15m 43s).
+
+```
+KafkaRestartingTrafficReplayerTest > fullTest [1] 3, false    PASSED
+KafkaRestartingTrafficReplayerTest > fullTest [2] -1, false   PASSED
+KafkaRestartingTrafficReplayerTest > fullTest [3] 3, true     PASSED
+KafkaRestartingTrafficReplayerTest > fullTest [4] -1, true    PASSED
+KafkaCommitsWorkBetweenLongPollsTest                          PASSED
+KafkaKeepAliveTests [2]                                       PASSED
+KafkaTrafficCaptureSourceLongTermTest                         PASSED
+```
