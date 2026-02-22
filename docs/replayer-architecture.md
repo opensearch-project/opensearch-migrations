@@ -1,5 +1,77 @@
 # Traffic Replayer Architecture
 
+## Design Goals and Invariants
+
+The replayer faithfully reproduces HTTP traffic from a source cluster against a target cluster,
+preserving the relative timing and ordering of the original traffic while allowing time scaling.
+
+### Delivery Guarantees
+
+- **At-least-once delivery**: The Kafka commit offset only advances after all records up to and
+  including that offset have been fully processed. On restart, the replayer re-reads from the last
+  committed offset, ensuring no records are skipped. Records may be replayed more than once across
+  restarts.
+
+- **Per-connection ordering**: Requests on the same source connection are replayed in the same
+  order they were originally sent. The `OnlineRadixSorter` in `ConnectionReplaySession` enforces
+  this sequencing on the Netty event loop. Exception: after a Kafka partition reassignment, the
+  quiescent period is applied to handoff connections to reduce (but not eliminate) the risk of
+  racing with the previous consumer's in-flight requests.
+
+### Time Fidelity
+
+- **Relative timing preserved**: The replayer time-shifts source timestamps to real time via
+  `TimeShifter`. The first packet seen sets the reference point; all subsequent packets are
+  scheduled relative to that reference, scaled by the configured `speedupFactor`. A source
+  message that arrived 30 minutes after the first will be sent 15 minutes after the first if
+  `speedupFactor=2`.
+
+- **Transformation latency bound**: Requests are not transformed (JSON rewriting, auth signing,
+  etc.) more than a few seconds before they are scheduled to be sent. The `ReplayEngine` schedules
+  transformation work at `scheduledSendTime - EXPECTED_TRANSFORMATION_DURATION` to bound the
+  window between transformation and transmission.
+
+### Backpressure and Memory Bounds
+
+- **Bounded read-ahead**: The replayer only reads from Kafka as far ahead as needed. `BlockingTrafficSource`
+  gates reads behind a time window (`bufferTimeWindow`): it will not read records whose source
+  timestamp is more than `bufferTimeWindow` ahead of the current replay position. This prevents
+  unbounded memory accumulation from reading too far into the future.
+
+- **Concurrency cap**: `TrafficStreamLimiter` limits the number of in-flight requests to prevent
+  memory exhaustion from too many simultaneous open transactions.
+
+### Connection Fidelity
+
+- **Connection reuse**: The replayer maintains the same logical connections as the source, reusing
+  `ConnectionReplaySession` objects (and their underlying Netty channels) across requests on the
+  same connection. TLS handshakes are performed once per connection, not per request, matching
+  source behavior.
+
+- **Retry on mismatch**: When a replayed request receives a response that doesn't match the source
+  response, the replayer retries the request according to the configured `RequestRetryEvaluator`
+  policy.
+
+- **Source response optional**: The replayer will send requests to the target even when the source
+  response is not available (e.g., the source stream was truncated or the connection expired). This
+  is a deliberate policy choice — completeness of replay is prioritized over strict source/target
+  comparison.
+
+### Partition Reassignment
+
+- **Synthetic closes on partition loss**: When a Kafka partition is truly lost (revoked and not
+  reassigned back to this consumer), the replayer synthesizes close events for all active
+  connections on that partition. This closes the corresponding target connections and cleans up
+  accumulator state, preventing resource leaks on the target cluster.
+
+- **Quiescent period for handoff connections**: When a partition is reassigned to this consumer
+  and a connection's first stream has no READ observation (indicating another replayer was
+  mid-connection), the first request is delayed by a configurable quiescent period. This reduces
+  the risk of the new consumer's requests racing with the previous consumer's in-flight requests
+  on the target.
+
+---
+
 ## Overview
 
 The replayer reads captured HTTP traffic from Kafka, reconstructs request/response pairs per
