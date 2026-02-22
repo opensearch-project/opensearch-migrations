@@ -45,7 +45,8 @@ versions.each { minor, info ->
             dest.parentFile.mkdirs()
             if (!dest.exists()) {
                 def proc = ['curl', '-fSL', '--retry', '5', '--retry-delay', '5',
-                            '--retry-max-time', '300', '-o', dest.absolutePath, url].execute()
+                            '--retry-max-time', '300', '--retry-all-errors',
+                            '-o', dest.absolutePath, url].execute()
                 proc.waitForProcessOutput(System.out, System.err)
                 if (proc.exitValue() != 0) {
                     throw new GradleException("Download failed for ${url} (exit code ${proc.exitValue()})")
