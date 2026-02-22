@@ -1,4 +1,5 @@
-FROM custom-elasticsearch:7.10.2
+ARG BASE_IMAGE=custom-elasticsearch:7.10.2
+FROM ${BASE_IMAGE}
 
 # Custom image runs as user 1000 — need root for package install and file ops
 USER root

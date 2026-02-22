@@ -101,9 +101,29 @@ def buildKitProjects = [
         ],
         // Not required for main MA operations, but has been helpful for creating test scenarios
         [
+                serviceName: "customElasticsearch710",
+                contextDir: "custom-es-images/dockerfiles",
+                imageName:  "custom_elasticsearch_7_10_2",
+                imageTag:   "latest",
+                buildArgs: [
+                        CORRETTO_VERSION: "11",
+                        BASE_IMAGE: "amazoncorretto:11-al2023-headless",
+                        JAVA_HOME_PATH: "/usr/lib/jvm/java-11-amazon-corretto",
+                        ES_VERSION: "7.10.2",
+                        TARBALL_URL: "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.10.2-linux-ARCH.tar.gz"
+                ]
+        ],
+        [
                 serviceName: "elasticsearchWithSearchGuard",
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard",
-                imageName:  "elasticsearch_searchguard"
+                imageName:  "elasticsearch_searchguard",
+                buildArgs: [
+                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImage(
+                                intermediateRegistry, "migrations", "custom_elasticsearch_7_10_2", "latest")
+                ],
+                requiredDependencies: [
+                        "buildKit_customElasticsearch710"
+                ]
         ]
 ]
 
