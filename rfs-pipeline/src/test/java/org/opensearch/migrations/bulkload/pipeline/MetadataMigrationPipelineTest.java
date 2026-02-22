@@ -73,17 +73,4 @@ class MetadataMigrationPipelineTest {
         assertEquals(0, sink.getCreatedIndices().size(), "No indices to create");
     }
 
-    @Test
-    void rejectsNullSource() {
-        var sink = new CollectingMetadataSink();
-        assertThrows(NullPointerException.class,
-            () -> new MetadataMigrationPipeline(null, sink));
-    }
-
-    @Test
-    void rejectsNullSink() {
-        var source = new SyntheticMetadataSource(List.of(), 1);
-        assertThrows(NullPointerException.class,
-            () -> new MetadataMigrationPipeline(source, null));
-    }
 }

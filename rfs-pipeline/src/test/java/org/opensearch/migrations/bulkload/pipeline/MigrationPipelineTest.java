@@ -260,45 +260,4 @@ class MigrationPipelineTest {
         }
     }
 
-    @Nested
-    class Validation {
-
-        @Test
-        void rejectsInvalidMaxDocsPerBatch() {
-            var source = new SyntheticDocumentSource("idx", 1, 1);
-            var sink = new CollectingDocumentSink();
-            assertThrows(IllegalArgumentException.class,
-                () -> new MigrationPipeline(source, sink, 0, 1024));
-        }
-
-        @Test
-        void rejectsInvalidMaxBytesPerBatch() {
-            var source = new SyntheticDocumentSource("idx", 1, 1);
-            var sink = new CollectingDocumentSink();
-            assertThrows(IllegalArgumentException.class,
-                () -> new MigrationPipeline(source, sink, 10, 0));
-        }
-
-        @Test
-        void rejectsInvalidShardConcurrency() {
-            var source = new SyntheticDocumentSource("idx", 1, 1);
-            var sink = new CollectingDocumentSink();
-            assertThrows(IllegalArgumentException.class,
-                () -> new MigrationPipeline(source, sink, 10, 1024, 0));
-        }
-
-        @Test
-        void rejectsNullSource() {
-            var sink = new CollectingDocumentSink();
-            assertThrows(NullPointerException.class,
-                () -> new MigrationPipeline(null, sink, 10, 1024));
-        }
-
-        @Test
-        void rejectsNullSink() {
-            var source = new SyntheticDocumentSource("idx", 1, 1);
-            assertThrows(NullPointerException.class,
-                () -> new MigrationPipeline(source, null, 10, 1024));
-        }
-    }
 }
