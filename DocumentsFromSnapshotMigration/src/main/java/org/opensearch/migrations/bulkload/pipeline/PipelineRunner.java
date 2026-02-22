@@ -7,6 +7,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
+import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
@@ -14,6 +15,7 @@ import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSin
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchMetadataSink;
 import org.opensearch.migrations.bulkload.pipeline.adapter.SnapshotMetadataSource;
 import org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
@@ -78,6 +80,14 @@ public class PipelineRunner {
     private final boolean allowServerGeneratedIds = false;
     @Builder.Default
     private final DocumentExceptionAllowlist allowlist = DocumentExceptionAllowlist.empty();
+
+    // Optional: delta snapshot support
+    @Builder.Default
+    private final String previousSnapshotName = null;
+    @Builder.Default
+    private final DeltaMode deltaMode = null;
+    @Builder.Default
+    private final Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory = null;
 
     // Optional: work coordination
     @Builder.Default
@@ -159,6 +169,13 @@ public class PipelineRunner {
     }
 
     private LuceneSnapshotSource createDocumentSource() {
+        if (previousSnapshotName != null && deltaMode != null) {
+            log.info("Creating delta document source: previous={}, mode={}", previousSnapshotName, deltaMode);
+            return new LuceneSnapshotSource(
+                extractor, snapshotName, workDir,
+                previousSnapshotName, deltaMode, deltaContextFactory
+            );
+        }
         return new LuceneSnapshotSource(extractor, snapshotName, workDir);
     }
 

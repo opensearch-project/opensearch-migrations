@@ -559,7 +559,9 @@ public class RfsMigrateDocuments {
                     sourceResourceProvider.getIndexMetadata(),
                     arguments.indexAllowlist,
                     context,
-                    cancellationRunnableRef);
+                    cancellationRunnableRef,
+                    arguments.experimental.previousSnapshotName,
+                    arguments.experimental.experimentalDeltaMode);
             } else {
                 run(
                     new LuceneIndexReader.Factory(sourceResourceProvider),
@@ -868,7 +870,9 @@ public class RfsMigrateDocuments {
         IndexMetadata.Factory indexMetadataFactory,
         List<String> indexAllowlist,
         RootDocumentMigrationContext rootDocumentContext,
-        AtomicReference<Runnable> cancellationRunnable
+        AtomicReference<Runnable> cancellationRunnable,
+        String previousSnapshotName,
+        DeltaMode deltaMode
     ) throws IOException, InterruptedException, NoWorkLeftException {
         var scopedWorkCoordinator = prepareWorkCoordination(
             workCoordinator, leaseExpireTrigger, indexMetadataFactory,
@@ -885,6 +889,11 @@ public class RfsMigrateDocuments {
             .transformerSupplier(transformerSupplier)
             .allowServerGeneratedIds(useServerGeneratedIds)
             .allowlist(allowlist)
+            .previousSnapshotName(previousSnapshotName)
+            .deltaMode(deltaMode)
+            .deltaContextFactory(previousSnapshotName != null && deltaMode != null
+                ? () -> new RfsContexts.DeltaStreamContext(rootDocumentContext, null)
+                : null)
             .workCoordinator(scopedWorkCoordinator)
             .maxInitialLeaseDuration(maxInitialLeaseDuration)
             .cursorConsumer(progressCursor::set)

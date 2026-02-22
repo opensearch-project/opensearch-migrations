@@ -4,12 +4,14 @@ import java.nio.file.Path;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
+import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -132,5 +134,82 @@ class LuceneSnapshotSourceTest {
             .verifyComplete();
 
         verify(extractor).listShards(SNAPSHOT, INDEX);
+    }
+
+    @Test
+    void deltaModeDelegatesToReadDeltaDocuments() {
+        var previousSnapshot = "prev-snap";
+        @SuppressWarnings("unchecked")
+        var deltaContextFactory = (java.util.function.Supplier<IRfsContexts.IDeltaStreamContext>) mock(java.util.function.Supplier.class);
+        var deltaSource = new LuceneSnapshotSource(
+            extractor, SNAPSHOT, workDir,
+            previousSnapshot, DeltaMode.UPDATES_AND_DELETES, deltaContextFactory
+        );
+
+        assertTrue(deltaSource.isDeltaMode());
+
+        var currentEntry = new SnapshotExtractor.ShardEntry(SNAPSHOT, INDEX, "idx-id", 0, shardMetadata);
+        var previousEntry = new SnapshotExtractor.ShardEntry(previousSnapshot, INDEX, "idx-id", 0, shardMetadata);
+        when(extractor.listShards(SNAPSHOT, INDEX)).thenReturn(List.of(currentEntry));
+        when(extractor.listShards(previousSnapshot, INDEX)).thenReturn(List.of(previousEntry));
+
+        var deletion = new LuceneDocumentChange(0, "del-1", "_doc", null, null, DocumentChangeType.DELETE);
+        var addition = new LuceneDocumentChange(1, "add-1", "_doc", "{\"f\":1}".getBytes(), null, DocumentChangeType.INDEX);
+        when(extractor.readDeltaDocuments(
+            eq(currentEntry), eq(previousEntry), eq(DeltaMode.UPDATES_AND_DELETES),
+            any(Path.class), eq(deltaContextFactory)
+        )).thenReturn(Flux.just(deletion, addition));
+
+        deltaSource.listShards(INDEX);
+        var shardId = new ShardId(SNAPSHOT, INDEX, 0);
+
+        StepVerifier.create(deltaSource.readDocuments(shardId, 0))
+            .assertNext(doc -> {
+                assertEquals("del-1", doc.id());
+                assertEquals(DocumentChange.ChangeType.DELETE, doc.operation());
+            })
+            .assertNext(doc -> {
+                assertEquals("add-1", doc.id());
+                assertEquals(DocumentChange.ChangeType.INDEX, doc.operation());
+            })
+            .verifyComplete();
+
+        verify(extractor).readDeltaDocuments(
+            eq(currentEntry), eq(previousEntry), eq(DeltaMode.UPDATES_AND_DELETES),
+            any(Path.class), eq(deltaContextFactory)
+        );
+    }
+
+    @Test
+    void deltaModeFallsBackToRegularWhenNoPreviousShard() {
+        var previousSnapshot = "prev-snap";
+        @SuppressWarnings("unchecked")
+        var deltaContextFactory = (java.util.function.Supplier<IRfsContexts.IDeltaStreamContext>) mock(java.util.function.Supplier.class);
+        var deltaSource = new LuceneSnapshotSource(
+            extractor, SNAPSHOT, workDir,
+            previousSnapshot, DeltaMode.UPDATES_AND_DELETES, deltaContextFactory
+        );
+
+        var currentEntry = new SnapshotExtractor.ShardEntry(SNAPSHOT, INDEX, "idx-id", 0, shardMetadata);
+        when(extractor.listShards(SNAPSHOT, INDEX)).thenReturn(List.of(currentEntry));
+        // Previous snapshot has no shards for this index
+        when(extractor.listShards(previousSnapshot, INDEX)).thenReturn(List.of());
+
+        var doc = new LuceneDocumentChange(0, "id-0", "_doc", "{\"f\":0}".getBytes(), null, DocumentChangeType.INDEX);
+        when(extractor.readDocuments(eq(currentEntry), any(Path.class))).thenReturn(Flux.just(doc));
+
+        deltaSource.listShards(INDEX);
+        var shardId = new ShardId(SNAPSHOT, INDEX, 0);
+
+        StepVerifier.create(deltaSource.readDocuments(shardId, 0))
+            .assertNext(d -> {
+                assertEquals("id-0", d.id());
+                assertEquals(DocumentChange.ChangeType.INDEX, d.operation());
+            })
+            .verifyComplete();
+
+        // Should NOT call readDeltaDocuments — falls back to regular read
+        verify(extractor, never()).readDeltaDocuments(any(), any(), any(), any(), any());
+        verify(extractor).readDocuments(eq(currentEntry), any(Path.class));
     }
 }

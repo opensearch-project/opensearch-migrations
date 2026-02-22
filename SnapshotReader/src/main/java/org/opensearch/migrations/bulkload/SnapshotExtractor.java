@@ -1,22 +1,35 @@
 package org.opensearch.migrations.bulkload;
 
+import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepoAccessor;
+import org.opensearch.migrations.bulkload.delta.DeltaLuceneReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
+import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
 /**
@@ -32,6 +45,7 @@ import reactor.core.publisher.Flux;
  * }
  * }</pre>
  */
+@Slf4j
 public class SnapshotExtractor {
 
     @Getter
@@ -131,6 +145,76 @@ public class SnapshotExtractor {
         Path shardPath = workDir.resolve(shard.indexName()).resolve(String.valueOf(shard.shardId()));
         LuceneIndexReader indexReader = readerFactory.getReader(shardPath);
         return indexReader.streamDocumentChanges(shard.metadata().getSegmentFileName());
+    }
+
+    /**
+     * Reads delta documents between a previous and current shard. Returns deletions first,
+     * then additions — matching the ordering used by {@code DocumentReindexer}.
+     *
+     * @param currentShard        the current snapshot's shard entry
+     * @param previousShard       the previous snapshot's shard entry
+     * @param deltaMode           which changes to include (additions, deletions, or both)
+     * @param workDir             temporary directory for unpacked Lucene files
+     * @param deltaContextFactory supplier for delta stream metrics context
+     * @return a Flux of document changes (deletions first, then additions)
+     */
+    public Flux<LuceneDocumentChange> readDeltaDocuments(
+        ShardEntry currentShard,
+        ShardEntry previousShard,
+        DeltaMode deltaMode,
+        Path workDir,
+        Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory
+    ) {
+        var repoAccessor = new SourceRepoAccessor(sourceRepo);
+        var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, workDir);
+        var readerFactory = new LuceneIndexReader.Factory(snapshotReader);
+
+        // Combine files from both snapshots for unpacking
+        Set<ShardFileInfo> filesToUnpack = Stream.concat(
+                currentShard.metadata().getFiles().stream(),
+                previousShard.metadata().getFiles().stream())
+            .collect(Collectors.toCollection(
+                () -> new TreeSet<>(Comparator.comparing(ShardFileInfo::key))));
+
+        var unpacker = unpackerFactory.create(
+            filesToUnpack,
+            currentShard.indexName(),
+            currentShard.indexId(),
+            currentShard.shardId()
+        );
+        unpacker.unpack();
+
+        Path shardPath = workDir.resolve(currentShard.indexName())
+            .resolve(String.valueOf(currentShard.shardId()));
+        LuceneIndexReader indexReader = readerFactory.getReader(shardPath);
+
+        LuceneDirectoryReader previousReader;
+        LuceneDirectoryReader currentReader;
+        try {
+            previousReader = indexReader.getReader(previousShard.metadata().getSegmentFileName());
+            currentReader = indexReader.getReader(currentShard.metadata().getSegmentFileName());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to open delta readers for " + currentShard, e);
+        }
+
+        DeltaLuceneReader.DeltaResult deltaResult;
+        try (var deltaContext = deltaContextFactory.get()) {
+            deltaResult = DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(
+                previousReader, currentReader, 0, deltaContext);
+        }
+
+        var deletions = switch (deltaMode) {
+            case UPDATES_ONLY -> Flux.<LuceneDocumentChange>empty();
+            case UPDATES_AND_DELETES, DELETES_ONLY -> deltaResult.deletions;
+        };
+        var additions = switch (deltaMode) {
+            case DELETES_ONLY -> Flux.<LuceneDocumentChange>empty();
+            case UPDATES_ONLY, UPDATES_AND_DELETES -> deltaResult.additions;
+        };
+
+        log.info("Reading delta documents for {} (mode={})", currentShard.indexName(), deltaMode);
+        return Flux.concat(deletions, additions)
+            .doFinally(s -> LuceneDirectoryReader.getCleanupRunnable(previousReader, currentReader).run());
     }
 
     /**
