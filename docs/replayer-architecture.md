@@ -562,7 +562,9 @@ Synthetic close injection and drain:
   (`TrafficReplayerTopLevel`) atomically checks the `ClientConnectionPool` cache for each active
   connection using `computeIfPresent`. If the session is present, it is registered in
   `pendingSyntheticCloses` (a `ConcurrentHashMap<GenerationalConnectionKey, Boolean>` keyed by
-  `(nodeId, connectionId, generation)`) and `outstandingSyntheticCloseSessions` is incremented.
+  `(connectionId, sessionNumber, generation)`) and `outstandingSyntheticCloseSessions` is
+  incremented. The `sessionNumber` is `Accumulation.startingSourceRequestIndex` captured at
+  synthetic close time — this is the pool's actual cache key dimension, not `nodeId`.
   If the session is already gone, nothing is registered and the counter is not incremented.
 - `readNextTrafficStreamSynchronously` drains the synthetic close queue first, then returns
   empty batches while `outstandingSyntheticCloseSessions > 0`, then resumes real Kafka records.
@@ -580,15 +582,22 @@ Synthetic close injection and drain:
 
 **Session close callback (universal, not synthetic-close-specific)**:
 - Every `ConnectionReplaySession` is constructed with an `onClose` callback
-  (`Consumer<ConnectionReplaySession>`) passed from the coordinator at pool construction time
-- `closeClientConnectionChannel` fires this callback in its completion handler — for every
-  close, regardless of cause (source close, expiry, synthetic close)
-- The callback calls `pendingSyntheticCloses.remove(connKey_with_gen)`. Only the first caller
+  (`Runnable`) passed from the coordinator at pool construction time
+- `closeClientConnectionChannel` fires this callback in its completion handler, wrapped in
+  try-finally to guarantee it fires even if the channel close throws — for every close,
+  regardless of cause (source close, expiry, synthetic close)
+- The callback calls `pendingSyntheticCloses.remove(connKey_with_gen)` where
+  `connKey_with_gen = (connectionId, sessionNumber, generation)`. Only the first caller
   gets a non-null return (atomic `ConcurrentHashMap.remove`). If non-null, decrement
   `outstandingSyntheticCloseSessions`. This guarantees exactly one decrement per registered
   synthetic close, regardless of whether the regular close or the synthetic close runs first.
+- Registration uses `putIfAbsent` (not `put`) to protect against duplicate registration.
 - When the counter reaches 0, real Kafka data resumes — old and new sessions are mutually
   exclusive in time, with the cache invalidation as the synchronization point.
+- Heartbeat is unaffected during the drain: `touch()` runs on `kafkaExecutor` independently
+  of the main thread returning empty batches.
+- On shutdown: `shutdownNow()` closes all channels, firing all `onClose` callbacks and
+  draining the counter; the main thread exits the empty-batch loop when `stopReadingRef` is set.
 
 **Handling the double-close case** (regular source close + synthetic close both in flight):
 - Both call `scheduleClose` on the same `ConnectionReplaySession` at different sorter slots
