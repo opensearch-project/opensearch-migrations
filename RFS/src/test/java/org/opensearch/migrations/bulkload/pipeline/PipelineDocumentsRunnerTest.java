@@ -13,6 +13,7 @@ import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
+import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
@@ -71,7 +72,7 @@ class PipelineDocumentsRunnerTest {
         var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
         var status = runner.migrateNextShard(testContext::createReindexContext);
 
-        assertEquals(PipelineDocumentsRunner.CompletionStatus.WORK_COMPLETED, status);
+        assertEquals(CompletionStatus.WORK_COMPLETED, status);
         assertFalse(cursors.isEmpty());
         assertEquals(1, cursors.get(0).getProgressCheckpointNum());
         assertNotNull(cancellationRef.get());
@@ -98,7 +99,7 @@ class PipelineDocumentsRunnerTest {
         var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
         var status = runner.migrateNextShard(testContext::createReindexContext);
 
-        assertEquals(PipelineDocumentsRunner.CompletionStatus.NOTHING_DONE, status);
+        assertEquals(CompletionStatus.NOTHING_DONE, status);
         verifyNoInteractions(source, sink);
     }
 
@@ -123,7 +124,7 @@ class PipelineDocumentsRunnerTest {
         var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
         var status = runner.migrateNextShard(testContext::createReindexContext);
 
-        assertEquals(PipelineDocumentsRunner.CompletionStatus.NOTHING_DONE, status);
+        assertEquals(CompletionStatus.NOTHING_DONE, status);
     }
 
     @Test

@@ -45,8 +45,11 @@ public class SnapshotExtractor {
         this.sourceRepo = sourceRepo;
     }
 
-    // Visible for testing
-    static SnapshotExtractor create(Version version, ClusterSnapshotReader snapshotReader, SourceRepo sourceRepo) {
+    /**
+     * Creates a SnapshotExtractor with the given components. Useful when the caller
+     * has already constructed the snapshot reader and source repo (e.g. from CLI args).
+     */
+    public static SnapshotExtractor create(Version version, ClusterSnapshotReader snapshotReader, SourceRepo sourceRepo) {
         return new SnapshotExtractor(version, snapshotReader, sourceRepo);
     }
 
