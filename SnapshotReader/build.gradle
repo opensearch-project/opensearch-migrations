@@ -6,6 +6,7 @@ plugins {
 dependencies {
     implementation project(':rfs-common')
     implementation project(':rfs-http')
+    implementation project(':rfs-pipeline')
     implementation project(':SearchSnapshotExtractor')
 
     implementation libs.jackson.databind
