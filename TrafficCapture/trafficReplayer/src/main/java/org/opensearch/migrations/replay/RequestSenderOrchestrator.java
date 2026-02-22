@@ -324,8 +324,9 @@ public class RequestSenderOrchestrator {
             connectionReplaySession,
             timestamp,
             new ChannelTask<>(ChannelTaskType.CLOSE, tf -> tf.whenComplete((v, t) -> {
-                log.trace("Calling closeConnection at slot " + channelInteraction);
-                clientConnectionPool.closeConnection(ctx, connectionReplaySessionNum);
+                log.trace("Closing channel at slot " + channelInteraction);
+                // Close the channel directly — cache was already invalidated in scheduleClose()
+                clientConnectionPool.closeChannelForSession(connectionReplaySession);
             }, () -> "Close connection"))
         );
     }

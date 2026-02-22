@@ -110,6 +110,10 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     private final AtomicInteger consumerConnectionGeneration;
     private final AtomicInteger kafkaRecordsLeftToCommitEventually;
     private final AtomicBoolean kafkaRecordsReadyToCommit;
+    /** Partitions revoked but not yet confirmed lost — cleared in onPartitionsAssigned. */
+    private final java.util.Set<Integer> pendingCleanupPartitions = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+    /** Called with truly lost partition numbers after onPartitionsAssigned confirms they didn't come back. */
+    private java.util.function.Consumer<java.util.Collection<Integer>> onPartitionsTrulyLostCallback = ignored -> {};
 
     public TrackingKafkaConsumer(
         @NonNull RootReplayerContext globalContext,
@@ -132,6 +136,14 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         kafkaRecordsReadyToCommit = new AtomicBoolean();
         this.keepAliveInterval = keepAliveInterval;
         this.onCommitKeyCallback = onCommitKeyCallback;
+    }
+
+    public int getConsumerConnectionGeneration() {
+        return consumerConnectionGeneration.get();
+    }
+
+    public void setOnPartitionsTrulyLostCallback(java.util.function.Consumer<java.util.Collection<Integer>> callback) {
+        this.onPartitionsTrulyLostCallback = callback;
     }
 
     @Override
@@ -184,6 +196,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 .addArgument(() -> partitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
                 .log();
         }
+        // Record for deferred cleanup — onPartitionsAssigned will determine which are truly lost
+        partitions.forEach(p -> pendingCleanupPartitions.add(p.partition()));
     }
 
     @Override
@@ -207,6 +221,18 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 .addArgument(this)
                 .addArgument(() -> newPartitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
                 .log();
+        }
+        // Compute truly lost = pending cleanup - newly assigned
+        if (!pendingCleanupPartitions.isEmpty()) {
+            var newPartitionNums = newPartitions.stream().map(TopicPartition::partition).collect(Collectors.toSet());
+            var trulyLost = pendingCleanupPartitions.stream()
+                .filter(p -> !newPartitionNums.contains(p))
+                .collect(Collectors.toList());
+            pendingCleanupPartitions.clear();
+            if (!trulyLost.isEmpty()) {
+                log.atInfo().setMessage("Partitions truly lost (not reassigned): {}").addArgument(trulyLost).log();
+                onPartitionsTrulyLostCallback.accept(trulyLost);
+            }
         }
     }
 

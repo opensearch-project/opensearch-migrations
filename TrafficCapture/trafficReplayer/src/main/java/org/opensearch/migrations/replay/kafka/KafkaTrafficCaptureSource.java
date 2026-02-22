@@ -81,6 +81,9 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     /** Active connections per Kafka partition. Populated as records are consumed; cleared on synthetic close flush. */
     final java.util.concurrent.ConcurrentHashMap<Integer, java.util.Set<org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey>>
         partitionToActiveConnections = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Synthetic close events to drain before returning real Kafka records. */
+    private final java.util.Queue<SyntheticPartitionReassignmentClose> syntheticCloseQueue =
+        new java.util.concurrent.ConcurrentLinkedQueue<>();
     /** How long to delay the first request on a handoff connection (configurable). */
     private final java.time.Duration quiescentDuration;
 
@@ -116,6 +119,26 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         kafkaConsumer.subscribe(Collections.singleton(topic), trackingKafkaConsumer);
         kafkaExecutor = Executors.newSingleThreadExecutor(new DefaultThreadFactory("kafkaConsumerThread"));
         isClosed = new AtomicBoolean(false);
+        // Register callback: when partitions are truly lost, enqueue synthetic closes for their active connections
+        trackingKafkaConsumer.setOnPartitionsTrulyLostCallback(this::enqueueSyntheticClosesForPartitions);
+    }
+
+    private void enqueueSyntheticClosesForPartitions(java.util.Collection<Integer> lostPartitions) {
+        for (int partition : lostPartitions) {
+            var active = partitionToActiveConnections.remove(partition);
+            if (active == null) continue;
+            for (var connKey : active) {
+                var ts = org.opensearch.migrations.trafficcapture.protos.TrafficStream.newBuilder()
+                    .setNodeId(connKey.nodeId).setConnectionId(connKey.connectionId)
+                    .setNumberOfThisLastChunk(0).build();
+                var key = new TrafficStreamKeyWithKafkaRecordId(tsk -> {
+                    var channelKeyCtx = channelContextManager.retainOrCreateContext(tsk);
+                    return channelContextManager.getGlobalContext()
+                        .createTrafficStreamContextForKafkaSource(channelKeyCtx, "", 0);
+                }, ts, new PojoKafkaCommitOffsetData(trackingKafkaConsumer.getConsumerConnectionGeneration(), partition, -1));
+                syntheticCloseQueue.add(new SyntheticPartitionReassignmentClose(key));
+            }
+        }
     }
 
     private void onKeyFinishedCommitting(ITrafficStreamKey trafficStreamKey) {
@@ -237,6 +260,16 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         ITrafficSourceContexts.IReadChunkContext context
     ) {
         log.atTrace().setMessage("readNextTrafficStreamSynchronously()").log();
+        // Drain synthetic closes before returning real Kafka records
+        if (!syntheticCloseQueue.isEmpty()) {
+            var closes = new java.util.ArrayList<ITrafficStreamWithKey>();
+            SyntheticPartitionReassignmentClose close;
+            while ((close = syntheticCloseQueue.poll()) != null) {
+                closes.add(close);
+            }
+            log.atInfo().setMessage("Returning {} synthetic close(s) before real Kafka records").addArgument(closes::size).log();
+            return closes;
+        }
         try {
             return trackingKafkaConsumer.getNextBatchOfRecords(context, (offsetData, kafkaRecord) -> {
                 try {
@@ -257,22 +290,20 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                             );
                     }, ts, offsetData);
                     // Track active connections per partition for synthetic close injection
-                    partitionToActiveConnections
+                    var connKey = new org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey(
+                        ts.getNodeId(), ts.getConnectionId());
+                    var activeSet = partitionToActiveConnections
                         .computeIfAbsent(offsetData.getPartition(),
-                            p -> java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>()))
-                        .add(new org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey(
-                            ts.getNodeId(), ts.getConnectionId()));
-                    // Detect handoff connections: not in active set AND no READ/open observation
-                    boolean isHandoff = !partitionToActiveConnections
-                        .getOrDefault(offsetData.getPartition(), java.util.Collections.emptySet())
-                        .contains(new org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey(
-                            ts.getNodeId(), ts.getConnectionId()))
-                        || ts.getSubStreamList().stream().noneMatch(org.opensearch.migrations.trafficcapture.protos.TrafficObservation::hasRead);
-                    // Re-check: connection was just added above, so "not in active set" is always false now.
-                    // Handoff = no READ observation in this stream (another replayer was mid-connection)
+                            p -> java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>()));
+                    boolean isNewConnection = activeSet.add(connKey);
+                    // Handoff: first time we see this connection on this partition AND no READ observation
+                    // (another replayer was mid-connection). Continuation streams for known connections are not handoffs.
                     boolean startsWithRead = ts.getSubStreamList().stream()
-                        .findFirst().map(org.opensearch.migrations.trafficcapture.protos.TrafficObservation::hasRead).orElse(false);
-                    final java.time.Instant quiescentUntil = (!startsWithRead) ? java.time.Instant.now().plus(quiescentDuration) : null;
+                        .findFirst()
+                        .map(org.opensearch.migrations.trafficcapture.protos.TrafficObservation::hasRead)
+                        .orElse(false);
+                    final java.time.Instant quiescentUntil = (isNewConnection && !startsWithRead)
+                        ? java.time.Instant.now().plus(quiescentDuration) : null;
                     return (ITrafficStreamWithKey) new PojoTrafficStreamAndKey(ts, key) {
                         @Override
                         public java.time.Instant getQuiescentUntil() { return quiescentUntil; }

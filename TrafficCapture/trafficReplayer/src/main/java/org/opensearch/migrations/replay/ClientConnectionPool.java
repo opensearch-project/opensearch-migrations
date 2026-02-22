@@ -131,6 +131,11 @@ public class ClientConnectionPool {
         }
     }
 
+    /** Closes the Netty channel for a session without touching the cache. */
+    public TrackedFuture<String, Channel> closeChannelForSession(ConnectionReplaySession session) {
+        return closeClientConnectionChannel(session);
+    }
+
     public void invalidateSession(String connectionId, int sessionNumber) {
         connectionId2ChannelCache.invalidate(getKey(connectionId, sessionNumber));
     }

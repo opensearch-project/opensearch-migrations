@@ -132,8 +132,8 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             },
             secrets: secrets,
             cpuArchitecture: props.fargateCpuArch,
-            taskCpuUnits: 1024,
-            taskMemoryLimitMiB: 4096,
+            taskCpuUnits: 8192,
+            taskMemoryLimitMiB: 49152,
             ...props
         });
 

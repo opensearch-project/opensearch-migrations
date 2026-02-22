@@ -272,6 +272,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             @NonNull Instant timestamp,
             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
         ) {
+            if (status == RequestResponsePacketPair.ReconstructionStatus.REASSIGNED) {
+                // Partition reassignment close — don't commit, just close tracing contexts
+                commitTrafficStreams(false, trafficStreamKeysBeingHeld);
+                return;
+            }
             replayEngine.setFirstTimestamp(timestamp);
             var cf = replayEngine.closeConnection(channelInteractionNum, ctx, channelSessionNumber, timestamp);
             cf.map(
