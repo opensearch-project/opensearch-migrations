@@ -261,6 +261,9 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         }
         kafkaProps.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokers);
         kafkaProps.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        // Use cooperative sticky rebalancing to avoid stop-the-world partition revocation
+        kafkaProps.putIfAbsent(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
+            "org.apache.kafka.clients.consumer.CooperativeStickyAssignor");
         return kafkaProps;
     }
 
