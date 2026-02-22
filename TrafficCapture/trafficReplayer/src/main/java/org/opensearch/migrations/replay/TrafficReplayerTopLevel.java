@@ -157,6 +157,16 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout)
         );
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
+        // Wire session close callback so KafkaTrafficCaptureSource can track synthetic close drain
+        clientConnectionPool.setGlobalOnSessionClose(session ->
+            trafficSource.onSessionClosed(
+                session.getChannelKeyContext().getConnectionId(),
+                // sessionNumber is the key used in the pool — derive from the session's context
+                // For now use 0 as a placeholder; full GenerationalSessionKey wiring is Phase A4
+                0,
+                session.generation
+            )
+        );
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
             new CapturedTrafficToHttpTransactionAccumulator(
                 observedPacketConnectionTimeout,

@@ -84,6 +84,15 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     /** Synthetic close events to drain before returning real Kafka records. */
     private final java.util.Queue<SyntheticPartitionReassignmentClose> syntheticCloseQueue =
         new java.util.concurrent.ConcurrentLinkedQueue<>();
+    /** Counter of synthetic closes registered but not yet confirmed closed. */
+    final java.util.concurrent.atomic.AtomicInteger outstandingSyntheticCloseSessions =
+        new java.util.concurrent.atomic.AtomicInteger(0);
+    /**
+     * Registered synthetic closes keyed by (connectionId, sessionNumber, generation).
+     * The first onSessionClosed call for a given key decrements the counter.
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, Boolean> pendingSyntheticCloses =
+        new java.util.concurrent.ConcurrentHashMap<>();
     /** How long to delay the first request on a handoff connection (configurable). */
     private final java.time.Duration quiescentDuration;
 
@@ -136,8 +145,24 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     return channelContextManager.getGlobalContext()
                         .createTrafficStreamContextForKafkaSource(channelKeyCtx, "", 0);
                 }, ts, new PojoKafkaCommitOffsetData(trackingKafkaConsumer.getConsumerConnectionGeneration(), partition, -1));
-                syntheticCloseQueue.add(new SyntheticPartitionReassignmentClose(key));
+                // Register in pendingSyntheticCloses — onSessionClosed will decrement the counter
+                var sessionKey = connKey.connectionId + ":" + 0 + ":" + trackingKafkaConsumer.getConsumerConnectionGeneration();
+                if (pendingSyntheticCloses.putIfAbsent(sessionKey, Boolean.TRUE) == null) {
+                    outstandingSyntheticCloseSessions.incrementAndGet();
+                    syntheticCloseQueue.add(new SyntheticPartitionReassignmentClose(key));
+                }
             }
+        }
+    }
+
+    @Override
+    public void onSessionClosed(String connectionId, int sessionNumber, int generation) {
+        var sessionKey = connectionId + ":" + sessionNumber + ":" + generation;
+        if (pendingSyntheticCloses.remove(sessionKey) != null) {
+            outstandingSyntheticCloseSessions.decrementAndGet();
+            log.atDebug().setMessage("Synthetic close confirmed for {}:{} gen={}, outstanding={}").
+                addArgument(connectionId).addArgument(sessionNumber).addArgument(generation)
+                .addArgument(outstandingSyntheticCloseSessions::get).log();
         }
     }
 
@@ -280,6 +305,12 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             }
             log.atInfo().setMessage("Returning {} synthetic close(s) before real Kafka records").addArgument(closes::size).log();
             return closes;
+        }
+        // Block real data until all synthetic closes have been confirmed closed
+        if (outstandingSyntheticCloseSessions.get() > 0) {
+            log.atDebug().setMessage("Returning empty batch: {} synthetic close sessions still outstanding")
+                .addArgument(outstandingSyntheticCloseSessions::get).log();
+            return java.util.Collections.emptyList();
         }
         try {
             return trackingKafkaConsumer.getNextBatchOfRecords(context, (offsetData, kafkaRecord) -> {

@@ -263,9 +263,17 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             @NonNull Instant timestamp,
             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
         ) {
+            // For REASSIGNED: close tracing contexts (no commit) AND schedule channel close
+            // so the ConnectionReplaySession drains and the onClose callback fires
             if (status == RequestResponsePacketPair.ReconstructionStatus.REASSIGNED) {
-                // Partition reassignment close — don't commit, just close tracing contexts
                 commitTrafficStreams(false, trafficStreamKeysBeingHeld);
+                notifyConnectionDone(trafficStreamKeysBeingHeld);
+                replayEngine.setFirstTimestamp(timestamp);
+                var cf = replayEngine.closeConnection(channelInteractionNum, ctx, channelSessionNumber, timestamp);
+                cf.map(
+                    f -> f.whenComplete((v, t) -> {}),
+                    () -> "closing reassigned channel"
+                );
                 return;
             }
             notifyConnectionDone(trafficStreamKeysBeingHeld);

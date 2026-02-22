@@ -32,6 +32,8 @@ public class ClientConnectionPool {
         channelCreator;
     private final NioEventLoopGroup eventLoopGroup;
     private final LoadingCache<Key, ConnectionReplaySession> connectionId2ChannelCache;
+    /** Called when any session's channel is closed. Default no-op; set by coordinator. */
+    private java.util.function.Consumer<ConnectionReplaySession> globalOnSessionClose = session -> {};
 
     @EqualsAndHashCode
     @AllArgsConstructor
@@ -64,6 +66,10 @@ public class ClientConnectionPool {
         return eventLoopGroup.next().scheduleAtFixedRate(runnable, initialDelay, delay, timeUnit);
     }
 
+    public void setGlobalOnSessionClose(java.util.function.Consumer<ConnectionReplaySession> callback) {
+        this.globalOnSessionClose = callback;
+    }
+
     public ConnectionReplaySession buildConnectionReplaySession(IReplayContexts.IChannelKeyContext channelKeyCtx) {
         return buildConnectionReplaySession(channelKeyCtx, 0);
     }
@@ -73,7 +79,12 @@ public class ClientConnectionPool {
             throw new IllegalStateException("Event loop group is shutting down.  Not creating a new session.");
         }
         var eventLoop = eventLoopGroup.next();
-        return new ConnectionReplaySession(eventLoop, channelKeyCtx, channelCreator, generation);
+        var session = new ConnectionReplaySession(eventLoop, channelKeyCtx, channelCreator, generation);
+        // Wire the global onClose callback — captured via lambda so it uses the session reference
+        var capturedSession = session;
+        session = new ConnectionReplaySession(eventLoop, channelKeyCtx, channelCreator, generation,
+            () -> globalOnSessionClose.accept(capturedSession));
+        return session;
     }
 
     @SneakyThrows
@@ -146,6 +157,9 @@ public class ClientConnectionPool {
                             "It may have already been reset.")
                         .addArgument(session::getChannelKeyContext)
                         .log();
+                    try { session.onClose.run(); } catch (Exception e) {
+                        log.atWarn().setCause(e).setMessage("onClose callback threw for {}").addArgument(session::getChannelKeyContext).log();
+                    }
                     return TextTrackedFuture.completedFuture(null, () -> "");
                 }
                 log.atTrace().setMessage("closing channel {} ({})...")
@@ -168,6 +182,11 @@ public class ClientConnectionPool {
                                 .log();
                         }
                         session.schedule.clear();
+                        try {
+                            session.onClose.run();
+                        } catch (Exception e) {
+                            log.atWarn().setCause(e).setMessage("onClose callback threw for {}").addArgument(session::getChannelKeyContext).log();
+                        }
                         return channelFuture.channel();
                     }, () -> "clearing work");
             }, () -> "composing close through retrieved channel from the session");

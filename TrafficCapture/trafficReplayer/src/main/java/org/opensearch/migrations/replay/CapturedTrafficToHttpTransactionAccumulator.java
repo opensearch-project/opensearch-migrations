@@ -189,18 +189,35 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     public void accept(ITrafficStreamWithKey trafficStreamAndKey) {
-        // Synthetic close from partition reassignment — fire onConnectionClose(REASSIGNED) directly
+        // Synthetic close from partition reassignment
         if (trafficStreamAndKey instanceof org.opensearch.migrations.replay.kafka.SyntheticPartitionReassignmentClose) {
             var tsk = trafficStreamAndKey.getKey();
-            tsk.getTrafficStreamsContext().close();
-            listener.underlying.onConnectionClose(
-                0,
-                tsk.getTrafficStreamsContext().getLogicalEnclosingScope(),
-                0,
-                RequestResponsePacketPair.ReconstructionStatus.REASSIGNED,
-                Instant.now(),
-                List.of(tsk)
-            );
+            var partitionId = tsk.getNodeId();
+            var connectionId = tsk.getConnectionId();
+
+            var existingAccum = liveStreams.getIfPresent(tsk);
+            if (existingAccum != null) {
+                // fireAccumulationsCallbacksAndClose with REASSIGNED status:
+                // - completes finishedAccumulatingResponseFuture (ACCUMULATING_WRITES)
+                // - fires onConnectionClose(REASSIGNED) in its finally block with correct slot numbers
+                fireAccumulationsCallbacksAndClose(
+                    existingAccum,
+                    RequestResponsePacketPair.ReconstructionStatus.REASSIGNED
+                );
+                liveStreams.remove(partitionId, connectionId);
+            } else {
+                // No accumulation — fire onConnectionClose directly so replayEngine.closeConnection
+                // is called and the session drains
+                tsk.getTrafficStreamsContext().close();
+                listener.underlying.onConnectionClose(
+                    0,
+                    tsk.getTrafficStreamsContext().getLogicalEnclosingScope(),
+                    0,
+                    RequestResponsePacketPair.ReconstructionStatus.REASSIGNED,
+                    Instant.now(),
+                    List.of(tsk)
+                );
+            }
             return;
         }
 

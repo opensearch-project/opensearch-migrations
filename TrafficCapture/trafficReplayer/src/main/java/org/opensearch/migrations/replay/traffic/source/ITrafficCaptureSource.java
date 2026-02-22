@@ -31,6 +31,12 @@ public interface ITrafficCaptureSource extends AutoCloseable {
      */
     default void onConnectionDone(ITrafficStreamKey trafficStreamKey) {}
 
+    /**
+     * Called when a ConnectionReplaySession's channel is closed (regardless of cause).
+     * Implementations may use this to decrement outstanding synthetic close counters.
+     */
+    default void onSessionClosed(String connectionId, int sessionNumber, int generation) {}
+
     default void close() throws Exception {}
 
     /**
