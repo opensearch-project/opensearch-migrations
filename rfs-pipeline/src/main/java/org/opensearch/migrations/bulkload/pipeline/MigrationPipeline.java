@@ -78,6 +78,10 @@ public class MigrationPipeline {
      * Migrate all documents for a single shard from source to sink.
      * Batches are processed sequentially to preserve document ordering.
      *
+     * <p>The emitted {@link ProgressCursor} tracks cumulative document offset from
+     * {@code startingDocOffset}, enabling resumability — a pipeline can restart from
+     * the last cursor's {@code lastDocProcessed} value.
+     *
      * @param shardId           the shard to migrate
      * @param indexName         the target index name
      * @param startingDocOffset the document offset to resume from (0 for start)
@@ -85,12 +89,22 @@ public class MigrationPipeline {
      */
     public Flux<ProgressCursor> migrateShard(ShardId shardId, String indexName, int startingDocOffset) {
         log.info("Starting shard migration: {} from offset {}", shardId, startingDocOffset);
+        final int[] cumulativeOffset = { startingDocOffset };
         return source.readDocuments(shardId, startingDocOffset)
             .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
             .flatMapSequential(batch -> sink.writeBatch(shardId, indexName, batch)
+                .map(cursor -> {
+                    cumulativeOffset[0] += (int) cursor.docsInBatch();
+                    return new ProgressCursor(
+                        shardId,
+                        cumulativeOffset[0],
+                        cursor.docsInBatch(),
+                        cursor.bytesInBatch()
+                    );
+                })
                 .doOnNext(cursor -> log.debug(
-                    "Batch written for {}: {} docs, {} bytes",
-                    shardId, cursor.docsInBatch(), cursor.bytesInBatch()
+                    "Batch written for {}: {} docs, {} bytes, cumulative offset {}",
+                    shardId, cursor.docsInBatch(), cursor.bytesInBatch(), cursor.lastDocProcessed()
                 ))
             )
             .onErrorMap(e -> !(e instanceof PipelineException),

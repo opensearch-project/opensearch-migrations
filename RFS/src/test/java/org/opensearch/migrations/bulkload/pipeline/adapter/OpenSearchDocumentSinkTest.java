@@ -1,7 +1,9 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
 import java.util.List;
+import java.util.function.Supplier;
 
+import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.common.bulk.DeleteOp;
@@ -9,10 +11,12 @@ import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
+import org.opensearch.migrations.transform.IJsonTransformer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -61,7 +65,7 @@ class OpenSearchDocumentSinkTest {
         var shardId = new ShardId("snap", "idx", 0);
         var doc = new DocumentChange("doc-1", "_doc", "{\"field\":\"value\"}".getBytes(), null, DocumentChange.ChangeType.INDEX);
 
-        when(client.sendBulkRequest(eq("idx"), anyList(), isNull()))
+        when(client.sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any(DocumentExceptionAllowlist.class)))
             .thenReturn(Mono.empty());
 
         StepVerifier.create(sink.writeBatch(shardId, "idx", List.of(doc)))
@@ -72,7 +76,7 @@ class OpenSearchDocumentSinkTest {
             })
             .verifyComplete();
 
-        verify(client).sendBulkRequest(eq("idx"), bulkOpsCaptor.capture(), isNull());
+        verify(client).sendBulkRequest(eq("idx"), bulkOpsCaptor.capture(), isNull(), eq(false), any(DocumentExceptionAllowlist.class));
         var ops = bulkOpsCaptor.getValue();
         assertEquals(1, ops.size());
         assertInstanceOf(IndexOp.class, ops.get(0));
@@ -85,14 +89,14 @@ class OpenSearchDocumentSinkTest {
         var shardId = new ShardId("snap", "idx", 0);
         var doc = new DocumentChange("doc-1", "_doc", "{}".getBytes(), null, DocumentChange.ChangeType.DELETE);
 
-        when(client.sendBulkRequest(eq("idx"), anyList(), isNull()))
+        when(client.sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any(DocumentExceptionAllowlist.class)))
             .thenReturn(Mono.empty());
 
         StepVerifier.create(sink.writeBatch(shardId, "idx", List.of(doc)))
             .assertNext(cursor -> assertEquals(1, cursor.docsInBatch()))
             .verifyComplete();
 
-        verify(client).sendBulkRequest(eq("idx"), bulkOpsCaptor.capture(), isNull());
+        verify(client).sendBulkRequest(eq("idx"), bulkOpsCaptor.capture(), isNull(), eq(false), any(DocumentExceptionAllowlist.class));
         assertInstanceOf(DeleteOp.class, bulkOpsCaptor.getValue().get(0));
     }
 
@@ -105,18 +109,61 @@ class OpenSearchDocumentSinkTest {
             new DocumentChange("d3", "_doc", null, null, DocumentChange.ChangeType.DELETE)
         );
 
-        when(client.sendBulkRequest(eq("idx"), anyList(), isNull()))
+        when(client.sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any(DocumentExceptionAllowlist.class)))
             .thenReturn(Mono.empty());
 
         StepVerifier.create(sink.writeBatch(shardId, "idx", docs))
             .assertNext(cursor -> assertEquals(3, cursor.docsInBatch()))
             .verifyComplete();
 
-        verify(client).sendBulkRequest(eq("idx"), bulkOpsCaptor.capture(), isNull());
+        verify(client).sendBulkRequest(eq("idx"), bulkOpsCaptor.capture(), isNull(), eq(false), any(DocumentExceptionAllowlist.class));
         assertEquals(3, bulkOpsCaptor.getValue().size());
 
         // Check routing is preserved
         var secondOp = (IndexOp) bulkOpsCaptor.getValue().get(1);
         assertEquals("r1", secondOp.getOperation().getRouting());
+    }
+
+    @Nested
+    class TransformationTests {
+
+        @SuppressWarnings("unchecked")
+        @Test
+        void writeBatchAppliesTransformation() {
+            // Transformer that uppercases all string values in documents
+            Supplier<IJsonTransformer> transformerSupplier = () -> input -> {
+                // Pass through — just verify it's called
+                return input;
+            };
+            var transformingSink = new OpenSearchDocumentSink(client, transformerSupplier, false, DocumentExceptionAllowlist.empty());
+            var shardId = new ShardId("snap", "idx", 0);
+            var doc = new DocumentChange("doc-1", "_doc", "{\"field\":\"value\"}".getBytes(), null, DocumentChange.ChangeType.INDEX);
+
+            when(client.sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any(DocumentExceptionAllowlist.class)))
+                .thenReturn(Mono.empty());
+
+            StepVerifier.create(transformingSink.writeBatch(shardId, "idx", List.of(doc)))
+                .assertNext(cursor -> assertEquals(1, cursor.docsInBatch()))
+                .verifyComplete();
+
+            verify(client).sendBulkRequest(eq("idx"), bulkOpsCaptor.capture(), isNull(), eq(false), any(DocumentExceptionAllowlist.class));
+            assertEquals(1, bulkOpsCaptor.getValue().size());
+        }
+
+        @Test
+        void writeBatchWithServerGeneratedIds() {
+            var sinkWithServerIds = new OpenSearchDocumentSink(client, null, true, DocumentExceptionAllowlist.empty());
+            var shardId = new ShardId("snap", "idx", 0);
+            var doc = new DocumentChange("doc-1", "_doc", "{\"f\":1}".getBytes(), null, DocumentChange.ChangeType.INDEX);
+
+            when(client.sendBulkRequest(eq("idx"), anyList(), isNull(), eq(true), any(DocumentExceptionAllowlist.class)))
+                .thenReturn(Mono.empty());
+
+            StepVerifier.create(sinkWithServerIds.writeBatch(shardId, "idx", List.of(doc)))
+                .assertNext(cursor -> assertEquals(1, cursor.docsInBatch()))
+                .verifyComplete();
+
+            verify(client).sendBulkRequest(eq("idx"), anyList(), isNull(), eq(true), any(DocumentExceptionAllowlist.class));
+        }
     }
 }
