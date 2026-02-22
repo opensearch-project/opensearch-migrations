@@ -1,0 +1,23 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+}
+
+dependencies {
+    // The adapter package bridges existing rfs-common types to the clean pipeline IR.
+    // Core pipeline types have ZERO dependency on rfs-common.
+    compileOnly project(':rfs-common')
+
+    implementation libs.jackson.databind
+    implementation libs.reactor.core
+    implementation libs.slf4j.api
+
+    testImplementation project(':rfs-common')
+    testImplementation libs.reactor.test
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testImplementation libs.mockito.core
+    testRuntimeOnly libs.junit.jupiter.engine
+    testRuntimeOnly libs.log4j.slf4j2.impl
+    testRuntimeOnly libs.log4j.core
+}
