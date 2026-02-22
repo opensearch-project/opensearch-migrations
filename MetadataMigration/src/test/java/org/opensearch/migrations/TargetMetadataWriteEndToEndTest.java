@@ -6,6 +6,7 @@ import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
+import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.version_os_2_11.GlobalMetadataData_OS_2_11;
@@ -47,7 +48,7 @@ class TargetMetadataWriteEndToEndTest {
             var context = MetadataMigrationTestContext.factory().noOtelTracking();
             var connectionContext = ConnectionContextTestParams.builder()
                 .host(target.getUrl()).build().toConnectionContext();
-            var writer = ClusterWriterRegistry.getRemoteWriter(connectionContext, null, null, true);
+            var writer = ClusterWriterRegistry.getRemoteWriter(connectionContext, null, new DataFilterArgs(), true);
 
             // Synthetic GlobalMetadata with a legacy template
             var globalMetadata = syntheticGlobalMetadataWithLegacyTemplate(
@@ -77,7 +78,7 @@ class TargetMetadataWriteEndToEndTest {
             var context = MetadataMigrationTestContext.factory().noOtelTracking();
             var connectionContext = ConnectionContextTestParams.builder()
                 .host(target.getUrl()).build().toConnectionContext();
-            var writer = ClusterWriterRegistry.getRemoteWriter(connectionContext, null, null, true);
+            var writer = ClusterWriterRegistry.getRemoteWriter(connectionContext, null, new DataFilterArgs(), true);
 
             // Synthetic IndexMetadata
             var indexMetadata = syntheticIndexMetadata("test_index", "idx001");
@@ -107,7 +108,7 @@ class TargetMetadataWriteEndToEndTest {
             var context = MetadataMigrationTestContext.factory().noOtelTracking();
             var connectionContext = ConnectionContextTestParams.builder()
                 .host(target.getUrl()).build().toConnectionContext();
-            var writer = ClusterWriterRegistry.getRemoteWriter(connectionContext, null, null, true);
+            var writer = ClusterWriterRegistry.getRemoteWriter(connectionContext, null, new DataFilterArgs(), true);
 
             // Pre-create the index
             var ops = new ClusterOperations(target);
