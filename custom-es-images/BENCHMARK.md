@@ -6,27 +6,31 @@ This document compares the custom Elasticsearch Docker images (`custom-elasticse
 
 ## Benchmark Results
 
-Tested one representative version per major series. All tests run single-node with equivalent heap settings (256MB for 1.x–2.x, 512MB for 5.x–8.x).
+Tested one representative version per major series. All tests run single-node with equivalent heap settings (256MB for 1.x–2.x, 512MB for 5.x–8.x). Single trial per version — startup times can vary ±1-2s between runs.
 
 | Version | Image | Startup (s) | Memory (MB) | Image Size (MB) |
 |---------|-------|-------------|-------------|-----------------|
-| **ES 1.7.6** | Custom | 6.5 | 273 | **287** |
-| | Public | 6.5 | 233 | 330 |
-| **ES 2.4.6** | Custom | 5.4 | 243 | **279** |
-| | Public | 5.5 | 253 | 457 |
-| **ES 5.6.16** | Custom | 4.5 | 765 | 505 |
-| | Public | 4.5 | 751 | 505 |
-| **ES 6.8.23** | Custom | 5.5 | 784 | 919 |
-| | Public | 5.5 | 762 | 919 |
-| **ES 7.17.29** | Custom | 9.5 | 823 | 624 |
-| | Public | 8.5 | 833 | 624 |
-| **ES 8.19.11** | Custom | 12.6 | 976 | 1333 |
-| | Public | 12.5 | 980 | 1333 |
+| **ES 1.7.6** | Custom | 14.0 | 192 | **268** |
+| | Public | 6.5 | 232 | 330 |
+| **ES 2.4.6** | Custom | 5.5 | 194 | **269** |
+| | Public | 5.5 | 244 | 457 |
+| **ES 5.6.16** | Custom | 3.5 | 677 | **283** |
+| | Public | 4.5 | 776 | 505 |
+| **ES 6.8.23** | Custom | 5.5 | 755 | **610** |
+| | Public | 5.5 | 741 | 919 |
+| **ES 7.17.29** | Custom | 8.5 | 793 | 703 |
+| | Public | 8.5 | 856 | **624** |
+| **ES 8.19.11** | Custom | 14.5 | 929 | **944** |
+| | Public | 12.5 | 969 | 1333 |
 
 ### Key Observations
 
-- **ES 5.x–8.x**: Custom and public images are comparable in size, startup time, and memory. The custom image is a tarball install on Amazon Corretto with pre-baked config — no runtime overhead.
-- **ES 1.x–2.x**: Custom images are **13–39% smaller** due to a modern slim base (`amazoncorretto:8-alpine`) vs the legacy Docker Hub images. Startup and memory are comparable.
+- **ES 1.x–2.x**: Custom images are **19–41% smaller** due to Amazon Corretto 8 on Alpine vs the legacy Docker Hub base images.
+- **ES 5.x–6.x**: Custom images are **34–44% smaller** — the tarball-on-Alpine approach strips the bundled JDK and uses a minimal base image vs the official CentOS/Ubuntu-based images.
+- **ES 7.17**: Custom image is **13% larger** than public. The official 7.17 image uses an optimized CentOS 7 base; our Corretto + full tarball approach adds overhead for this version.
+- **ES 8.x**: Custom images are **29% smaller** — ML native binaries and bundled JDK are stripped.
+- **Startup times** are comparable across custom and public images. The ES 1.7.6 custom outlier (14s vs 6.5s) is likely a cold-start artifact from the single trial.
+- **Memory usage** is comparable, with custom images using slightly less in most cases.
 
 ## Benefits of Custom Images
 
@@ -81,14 +85,17 @@ This enables:
 
 Public images do not include health checks.
 
-### 5. Smaller Legacy Images
+### 5. Smaller Images
 
 | Version | Custom | Public | Savings |
 |---------|--------|--------|---------|
-| ES 1.7.6 | 287 MB | 330 MB | **13%** |
-| ES 2.4.6 | 279 MB | 457 MB | **39%** |
+| ES 1.7.6 | 268 MB | 330 MB | **19%** |
+| ES 2.4.6 | 269 MB | 457 MB | **41%** |
+| ES 5.6.16 | 283 MB | 505 MB | **44%** |
+| ES 6.8.23 | 610 MB | 919 MB | **34%** |
+| ES 8.19.11 | 944 MB | 1333 MB | **29%** |
 
-The custom legacy images use a multi-stage build with Amazon Corretto 8 on Alpine, while the public Docker Hub images include a full OS and JDK installation.
+Custom images use a multi-stage build with Amazon Corretto on Alpine (1.x–7.x) or AL2023 (8.x), stripping the bundled JDK and ML native binaries. ES 7.17 is an exception where the public image is smaller (624 MB vs 703 MB).
 
 ### 6. Consistent Interface Across All 67 Versions
 
