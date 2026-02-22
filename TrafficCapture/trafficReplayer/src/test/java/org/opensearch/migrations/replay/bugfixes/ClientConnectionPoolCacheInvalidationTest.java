@@ -118,15 +118,11 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
             var session1 = pool.getCachedSession(channelKeyCtx, 0, 1);
             Assertions.assertEquals(1, session1.generation);
 
-            // Schedule a request with generation 2 — should cancel session1 and create session2
-            var reqCtx = rootContext.getTestConnectionRequestContext("conn-A", 0);
-            // Simulate generation 2 by directly calling getCachedSession with gen 2
-            // (the real path goes through scheduleRequest → submitUnorderedWorkToEventLoop)
+            // getCachedSession with generation 2 returns the same session (no cancellation in getCachedSession)
+            // Cancellation is handled by the synthetic close path to avoid finishedAccumulatingResponseFuture deadlocks
             var session2 = pool.getCachedSession(channelKeyCtx, 0, 2);
-
-            Assertions.assertNotSame(session1, session2,
-                "higher generation in scheduleRequest must cancel old session and create new one");
-            Assertions.assertEquals(2, session2.generation);
+            Assertions.assertSame(session1, session2,
+                "getCachedSession must not cancel on generation bump — synthetic close path handles that");
         } finally {
             pool.shutdownNow().get();
         }
@@ -134,51 +130,41 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
 
     /**
      * Verifies that the generation from ITrafficStreamKey flows through scheduleRequest
-     * all the way to getCachedSession. This is the end-to-end wiring test.
-     * Before fix: submitUnorderedWorkToEventLoop calls getCachedSession(ctx, sessionNumber)
-     * without generation, so generation 0 is always used.
+     * to getCachedSession, so new sessions are created with the correct generation.
+     * Session cancellation on generation bump is NOT done here (would cause deadlocks);
+     * it is handled by the synthetic close path.
      */
     @Test
     @SneakyThrows
     void scheduleRequest_generationFlowsThroughToSessionLookup() throws Exception {
-        var sessionsCreated = new java.util.concurrent.atomic.AtomicInteger(0);
         var pool = new ClientConnectionPool(
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
             "test-pool", 1
-        ) {
-            @Override
-            public ConnectionReplaySession buildConnectionReplaySession(
-                IReplayContexts.IChannelKeyContext channelKeyCtx, int generation
-            ) {
-                sessionsCreated.incrementAndGet();
-                return super.buildConnectionReplaySession(channelKeyCtx, generation);
-            }
-        };
-        var orchestrator = new RequestSenderOrchestrator(pool, (session, ctx) -> null);
+        );
 
         try {
             var channelKeyCtx = rootContext.getTestConnectionRequestContext("conn-A", 0).getChannelKeyContext();
 
-            // Prime cache with generation 1
-            pool.getCachedSession(channelKeyCtx, 0, 1);
-            int sessionsBefore = sessionsCreated.get();
+            // First session created with generation 1
+            var session1 = pool.getCachedSession(channelKeyCtx, 0, 1);
+            Assertions.assertEquals(1, session1.generation);
 
-            // After fix: getCachedSession with gen 2 should return a new session
-            // (the old gen-1 session was cancelled when scheduleRequest used gen 2)
-            var sessionAfter = pool.getCachedSession(channelKeyCtx, 0, 2);
-            Assertions.assertEquals(2, sessionAfter.generation,
-                "after fix: generation threaded through scheduleRequest, new session has generation 2");
-            Assertions.assertTrue(sessionsCreated.get() > sessionsBefore,
-                "after fix: a new session must have been created for generation 2");
+            // After the synthetic close path invalidates the cache, a new session
+            // created via getCachedSession with generation 2 carries generation 2
+            pool.invalidateSession(channelKeyCtx.getConnectionId(), 0);
+            var session2 = pool.getCachedSession(channelKeyCtx, 0, 2);
+            Assertions.assertEquals(2, session2.generation,
+                "new session created after cache invalidation must carry the new generation");
+            Assertions.assertNotSame(session1, session2);
         } finally {
             pool.shutdownNow().get();
         }
     }
 
     /**
-     * When getCachedSession is called with a generation higher than the cached session's
-     * generation, the old session must be cancelled and a new one returned.
-     * Before fix: no generation check — same session returned regardless of generation.
+     * getCachedSession stores the generation on the session for tracking purposes.
+     * Session cancellation on generation bump is handled by the synthetic close path,
+     * not by getCachedSession (which would cause finishedAccumulatingResponseFuture deadlocks).
      */
     @Test
     @SneakyThrows
@@ -190,13 +176,14 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         try {
             var channelKeyCtx = rootContext.getTestConnectionRequestContext("conn-A", 0).getChannelKeyContext();
 
-            var session1 = pool.getCachedSession(channelKeyCtx, 0, 1); // generation 1
-            var session2 = pool.getCachedSession(channelKeyCtx, 0, 2); // generation 2 — should cancel session1
+            var session1 = pool.getCachedSession(channelKeyCtx, 0, 1);
+            Assertions.assertEquals(1, session1.generation, "session must carry the generation it was created with");
 
-            Assertions.assertNotSame(session1, session2,
-                "higher generation must produce a new session, not reuse the old one");
-            Assertions.assertEquals(2, session2.generation,
-                "new session must carry the new generation");
+            // getCachedSession with a higher generation returns the SAME session (no cancellation here —
+            // cancellation is handled by the synthetic close path to avoid deadlocks)
+            var session2 = pool.getCachedSession(channelKeyCtx, 0, 2);
+            Assertions.assertSame(session1, session2,
+                "getCachedSession must not cancel sessions on generation bump — that causes deadlocks");
         } finally {
             pool.shutdownNow().get();
         }

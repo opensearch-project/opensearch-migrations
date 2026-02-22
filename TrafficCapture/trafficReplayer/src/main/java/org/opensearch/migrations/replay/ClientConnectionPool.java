@@ -91,24 +91,14 @@ public class ClientConnectionPool {
         int generation
     ) {
         var key = getKey(channelKeyCtx.getConnectionId(), sessionNumber);
-        var existing = connectionId2ChannelCache.getIfPresent(key);
-        if (existing != null && existing.generation < generation) {
-            // Stale session from a previous generation — cancel it and create a fresh one
-            log.atInfo().setMessage("Cancelling stale session (gen={}) for {} due to new generation={}")
-                .addArgument(existing.generation)
-                .addArgument(channelKeyCtx::getConnectionId)
-                .addArgument(generation)
-                .log();
-            invalidateSession(channelKeyCtx.getConnectionId(), sessionNumber);
-            closeClientConnectionChannel(existing);
-        }
         var crs = connectionId2ChannelCache.get(
             key,
             () -> buildConnectionReplaySession(channelKeyCtx, generation)
         );
         log.atTrace()
-            .setMessage("returning ReplaySession={} for {} from {}")
+            .setMessage("returning ReplaySession={} (gen={}) for {} from {}")
             .addArgument(crs)
+            .addArgument(crs.generation)
             .addArgument(channelKeyCtx::getConnectionId)
             .addArgument(channelKeyCtx)
             .log();
