@@ -37,6 +37,7 @@ import reactor.core.publisher.Flux;
  */
 @Slf4j
 @Builder
+@SuppressWarnings("java:S1170") // Builder.Default fields are instance-level, not static
 public class PipelineRunner {
 
     private final SnapshotExtractor extractor;
