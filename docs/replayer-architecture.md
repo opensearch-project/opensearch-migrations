@@ -184,13 +184,13 @@ flowchart TD
 
     SQ -.->|SyntheticPartitionReassignmentClose\nbefore real records| ACC
 
-    ACC -.->|"fireAccumulationsCallbacksAndClose [NEW]\ncomplete finishedAccumulatingResponseFuture\nfor in-flight requests on revoked connections"| ACC
+    ACC -.->|"fireAccumulationsCallbacksAndClose [NEW]\ncomplete finishedAccumulatingResponseFuture\nfor in-flight requests on revoked connections"| CRS
     ACC -.->|"onConnectionClose + onTrafficStreamsExpired\nConsumer callback [NEW]\nupdates partitionToActiveConnections\n+ releaseContextFor on ChannelContextManager"| KCS
 
     ACC -->|"onConnectionClose REASSIGNED\n[NOW calls replayEngine.closeConnection]"| RE
     RE -->|scheduleClose| CCP
     CCP -->|"close channel\ncascades failures through OnlineRadixSorter"| Target
-    CCP -.->|"closeConnection callback [NEW]\ndecrement OSC"| OSC
+    CCP -.->|"onClose callback on every session close [NEW]\npendingSyntheticCloses.remove → decrement OSC"| OSC
 
     ACC -->|onRequestReceived| RE
     RE -.->|"quiescentUntil metadata [NEW]\ndelay first request scheduling"| RE
@@ -224,7 +224,7 @@ Key changes summarized:
 | 3 | `outstandingSyntheticCloseSessions` counter + empty-batch drain in `readNextTrafficStreamSynchronously` | `KafkaTrafficCaptureSource` |
 | 4 | `fireAccumulationsCallbacksAndClose` on existing accumulation when synthetic close fires (completes `finishedAccumulatingResponseFuture`) | `CapturedTrafficToHttpTransactionAccumulator` |
 | 5 | `onConnectionClose(REASSIGNED)` calls `replayEngine.closeConnection()` (currently skipped) | `TrafficReplayerAccumulationCallbacks` |
-| 6 | `closeConnection` callback to decrement `outstandingSyntheticCloseSessions` | `ClientConnectionPool` |
+| 6 | Universal `onClose` callback on every `ConnectionReplaySession`; coordinator uses `pendingSyntheticCloses.remove(connKey_with_gen)` to decrement `outstandingSyntheticCloseSessions` exactly once per registered synthetic close | `ClientConnectionPool`, `ConnectionReplaySession`, coordinator in `TrafficReplayerTopLevel` |
 | 7 | `ConnectionReplaySession.generation` field; generation threaded from `ITrafficStreamKey` through `scheduleRequest` to `getCachedSession` | `ConnectionReplaySession`, `RequestSenderOrchestrator` |
 | 8 | Quiescent metadata tagged on handoff streams; `ReplayEngine` delays first request to `max(timeShiftedStart, quiescentUntil)` | `KafkaTrafficCaptureSource`, `ITrafficStreamWithKey`, `Accumulation`, `ReplayEngine` |
 | 9 | `onPartitionsLost` override — skip commit, go directly to synthetic close queue | `TrackingKafkaConsumer` |
@@ -558,22 +558,44 @@ Active connection tracking (`KafkaTrafficCaptureSource`):
   `channelContextManager.releaseContextFor()`.
 
 Synthetic close injection and drain:
-- When `onPartitionsAssigned` determines a partition is truly lost, enqueue a
-  `SyntheticPartitionReassignmentClose` for each active connection; increment
-  `outstandingSyntheticCloseSessions` counter per connection
+- When `onPartitionsAssigned` determines a partition is truly lost, the coordinator
+  (`TrafficReplayerTopLevel`) atomically checks the `ClientConnectionPool` cache for each active
+  connection using `computeIfPresent`. If the session is present, it is registered in
+  `pendingSyntheticCloses` (a `ConcurrentHashMap<GenerationalConnectionKey, Boolean>` keyed by
+  `(nodeId, connectionId, generation)`) and `outstandingSyntheticCloseSessions` is incremented.
+  If the session is already gone, nothing is registered and the counter is not incremented.
 - `readNextTrafficStreamSynchronously` drains the synthetic close queue first, then returns
-  empty batches while `outstandingSyntheticCloseSessions > 0`, then resumes real Kafka records
+  empty batches while `outstandingSyntheticCloseSessions > 0`, then resumes real Kafka records.
+  The accumulator cache entry is cleared synchronously on the main thread when the synthetic
+  close is processed — before any new data can arrive for that connection.
 - `SyntheticPartitionReassignmentClose` is handled in `accept()` by:
   1. Calling `fireAccumulationsCallbacksAndClose(CLOSED_PREMATURELY)` on the existing
      `Accumulation` — this completes `finishedAccumulatingResponseFuture` for any in-flight
-     requests, allowing them to drain fast
-  2. Firing `onConnectionClose(REASSIGNED, ...)` with `ReconstructionStatus.REASSIGNED`
-- `onConnectionClose(REASSIGNED)` calls `replayEngine.closeConnection()` — the channel close
-  cascades failures through the `OnlineRadixSorter`, draining all pending slots quickly
-- `ClientConnectionPool.closeConnection()` invalidates the cache and fires a callback to
-  decrement `outstandingSyntheticCloseSessions`
+     requests in `ACCUMULATING_WRITES` state, allowing the `OnlineRadixSorter` to drain fast.
+     For `ACCUMULATING_READS` state, no future exists yet (request not yet dispatched), so
+     nothing needs completing.
+  2. Clearing the accumulator cache entry for the connection
+  3. Firing `onConnectionClose(REASSIGNED, ...)` → `replayEngine.closeConnection()` → close
+     scheduled on the `OnlineRadixSorter` after all in-flight requests complete
+
+**Session close callback (universal, not synthetic-close-specific)**:
+- Every `ConnectionReplaySession` is constructed with an `onClose` callback
+  (`Consumer<ConnectionReplaySession>`) passed from the coordinator at pool construction time
+- `closeClientConnectionChannel` fires this callback in its completion handler — for every
+  close, regardless of cause (source close, expiry, synthetic close)
+- The callback calls `pendingSyntheticCloses.remove(connKey_with_gen)`. Only the first caller
+  gets a non-null return (atomic `ConcurrentHashMap.remove`). If non-null, decrement
+  `outstandingSyntheticCloseSessions`. This guarantees exactly one decrement per registered
+  synthetic close, regardless of whether the regular close or the synthetic close runs first.
 - When the counter reaches 0, real Kafka data resumes — old and new sessions are mutually
-  exclusive in time
+  exclusive in time, with the cache invalidation as the synchronization point.
+
+**Handling the double-close case** (regular source close + synthetic close both in flight):
+- Both call `scheduleClose` on the same `ConnectionReplaySession` at different sorter slots
+- The first to run closes the channel and invalidates the cache; the second finds the cache
+  empty in `closeConnection` and is a no-op at the pool level
+- The `onClose` callback fires once (from the first close); `pendingSyntheticCloses.remove`
+  is called by both paths but only the first returns non-null and decrements the counter
 
 **2. `ConnectionReplaySession.generation` field**
 
