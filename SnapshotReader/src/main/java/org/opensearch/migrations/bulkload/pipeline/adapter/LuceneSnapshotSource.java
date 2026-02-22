@@ -11,7 +11,6 @@ import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
@@ -57,14 +56,7 @@ public class LuceneSnapshotSource implements DocumentSource {
     public IndexMetadataSnapshot readIndexMetadata(String indexName) {
         var meta = extractor.getSnapshotReader().getIndexMetadata()
             .fromRepo(snapshotName, indexName);
-        return new IndexMetadataSnapshot(
-            indexName,
-            meta.getNumberOfShards(),
-            meta.getSettings().path("number_of_replicas").asInt(0),
-            (ObjectNode) meta.getMappings(),
-            (ObjectNode) meta.getSettings(),
-            (ObjectNode) meta.getAliases()
-        );
+        return IndexMetadataConverter.convert(indexName, meta);
     }
 
     @Override

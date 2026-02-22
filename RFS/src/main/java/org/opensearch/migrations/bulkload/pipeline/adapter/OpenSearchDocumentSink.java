@@ -22,7 +22,6 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
@@ -74,20 +73,8 @@ public class OpenSearchDocumentSink implements DocumentSink {
 
     @Override
     public Mono<Void> createIndex(IndexMetadataSnapshot metadata) {
-        return Mono.fromCallable(() -> {
-            ObjectNode body = OBJECT_MAPPER.createObjectNode();
-            if (metadata.mappings() != null) {
-                body.set("mappings", metadata.mappings());
-            }
-            if (metadata.settings() != null) {
-                body.set("settings", metadata.settings());
-            }
-            if (metadata.aliases() != null) {
-                body.set("aliases", metadata.aliases());
-            }
-            client.createIndex(metadata.indexName(), body, null);
-            return null;
-        }).then();
+        return Mono.fromRunnable(() -> OpenSearchIndexCreator.createIndex(client, metadata, OBJECT_MAPPER))
+            .then();
     }
 
     @Override

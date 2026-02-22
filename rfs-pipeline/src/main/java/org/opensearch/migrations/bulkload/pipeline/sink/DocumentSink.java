@@ -27,10 +27,15 @@ public interface DocumentSink extends AutoCloseable {
     /**
      * Write a batch of documents to the target.
      *
+     * <p>The returned {@link ProgressCursor} should report batch-local stats:
+     * {@code docsInBatch} and {@code bytesInBatch}. The {@code lastDocProcessed} field
+     * should be set to the batch size — the pipeline will overwrite it with the
+     * cumulative offset for resumability tracking.
+     *
      * @param shardId   the shard these documents belong to
      * @param indexName the target index name
      * @param batch     the documents to write, must not be empty
-     * @return a progress cursor indicating what was written
+     * @return a progress cursor with batch-local stats
      */
     Mono<ProgressCursor> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch);
 

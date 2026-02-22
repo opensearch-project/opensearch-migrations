@@ -813,18 +813,10 @@ public class RfsMigrateDocuments {
                                        WorkItemTimeProvider timeProvider)
         throws IOException, InterruptedException, NoWorkLeftException
     {
-        var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
-        confirmShardPrepIsComplete(indexMetadataFactory,
-            snapshotName,
-            indexAllowlist,
-            scopedWorkCoordinator,
-            rootDocumentContext
+        var scopedWorkCoordinator = prepareWorkCoordination(
+            workCoordinator, leaseExpireTrigger, indexMetadataFactory,
+            snapshotName, indexAllowlist, rootDocumentContext
         );
-        if (!workCoordinator.workItemsNotYetComplete(
-            rootDocumentContext.getWorkCoordinationContext()::createItemsPendingContext
-        )) {
-            throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
-        }
         Function<String, BiFunction<String, Integer, ShardMetadata>> shardMetadataSupplierFactory = snapshot -> (indexName, shardId) -> {
             var shardMetadata = shardMetadataFactory.fromRepo(snapshot, indexName, shardId);
             log.atInfo()
@@ -878,14 +870,10 @@ public class RfsMigrateDocuments {
         RootDocumentMigrationContext rootDocumentContext,
         AtomicReference<Runnable> cancellationRunnable
     ) throws IOException, InterruptedException, NoWorkLeftException {
-        var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
-        confirmShardPrepIsComplete(indexMetadataFactory, snapshotName, indexAllowlist,
-            scopedWorkCoordinator, rootDocumentContext);
-        if (!workCoordinator.workItemsNotYetComplete(
-            rootDocumentContext.getWorkCoordinationContext()::createItemsPendingContext
-        )) {
-            throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
-        }
+        var scopedWorkCoordinator = prepareWorkCoordination(
+            workCoordinator, leaseExpireTrigger, indexMetadataFactory,
+            snapshotName, indexAllowlist, rootDocumentContext
+        );
 
         var runner = PipelineRunner.builder()
             .extractor(extractor)
@@ -904,6 +892,29 @@ public class RfsMigrateDocuments {
             .build();
 
         return runner.migrateNextShard(rootDocumentContext::createReindexContext);
+    }
+
+    /**
+     * Shared work-coordination setup: creates a scoped coordinator, ensures shard prep
+     * is complete, and verifies there is still work to do.
+     */
+    private static ScopedWorkCoordinator prepareWorkCoordination(
+        IWorkCoordinator workCoordinator,
+        LeaseExpireTrigger leaseExpireTrigger,
+        IndexMetadata.Factory indexMetadataFactory,
+        String snapshotName,
+        List<String> indexAllowlist,
+        RootDocumentMigrationContext rootDocumentContext
+    ) throws IOException, InterruptedException, NoWorkLeftException {
+        var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
+        confirmShardPrepIsComplete(indexMetadataFactory, snapshotName, indexAllowlist,
+            scopedWorkCoordinator, rootDocumentContext);
+        if (!workCoordinator.workItemsNotYetComplete(
+            rootDocumentContext.getWorkCoordinationContext()::createItemsPendingContext
+        )) {
+            throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
+        }
+        return scopedWorkCoordinator;
     }
 
     private static void confirmShardPrepIsComplete(
