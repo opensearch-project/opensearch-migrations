@@ -20,8 +20,8 @@ def correttoVersion = { String minor ->
 }
 
 // Corretto version → base image and JAVA_HOME (inlined in task configs for configuration cache compat)
-// Corretto 8: amazonlinux:2023 base + multi-stage JRE copy (avoids JavaFX/GTK bloat)
-// Corretto 11+: amazoncorretto headless images directly
+// Corretto 8: amazoncorretto:8-alpine (small, no JavaFX/GTK bloat)
+// Corretto 11+: amazoncorretto headless images on AL2023
 
 versions.each { minor, info ->
     def safeName = minor.replace('.', '_')
@@ -34,8 +34,8 @@ versions.each { minor, info ->
     def corretto = (maj <= 5 || (maj == 6 && min <= 4)) ? '8' :
                    (maj == 6 || (maj == 7 && min <= 10)) ? '11' :
                    (maj == 7) ? '17' : '21'
-    def base = corretto == '8' ? "amazonlinux:2023" : "amazoncorretto:${corretto}-al2023-headless"
-    def javaHome = corretto == '8' ? '/usr/lib/jvm/java-1.8.0-amazon-corretto' : "/usr/lib/jvm/java-${corretto}-amazon-corretto"
+    def base = corretto == '8' ? "amazoncorretto:8-alpine" : "amazoncorretto:${corretto}-al2023-headless"
+    def javaHome = corretto == '8' ? '/usr/lib/jvm/java-8-amazon-corretto' : "/usr/lib/jvm/java-${corretto}-amazon-corretto"
 
     // Local docker build — Dockerfile downloads the tarball using TARGETARCH for multi-arch
     tasks.register("buildImage_${safeName}", Exec) {
@@ -113,8 +113,8 @@ if (!pushVersionsList.isEmpty()) {
             def corretto = (pushMaj <= 5 || (pushMaj == 6 && pushMin <= 4)) ? '8' :
                            (pushMaj == 6 || (pushMaj == 7 && pushMin <= 10)) ? '11' :
                            (pushMaj == 7) ? '17' : '21'
-            def base = corretto == '8' ? "amazonlinux:2023" : "amazoncorretto:${corretto}-al2023-headless"
-            def javaHome = corretto == '8' ? '/usr/lib/jvm/java-1.8.0-amazon-corretto' : "/usr/lib/jvm/java-${corretto}-amazon-corretto"
+            def base = corretto == '8' ? "amazoncorretto:8-alpine" : "amazoncorretto:${corretto}-al2023-headless"
+            def javaHome = corretto == '8' ? '/usr/lib/jvm/java-8-amazon-corretto' : "/usr/lib/jvm/java-${corretto}-amazon-corretto"
             def dockerfilePath = file('dockerfiles/Dockerfile').absolutePath
             def contextPath = file('dockerfiles').absolutePath
             doFirst {

@@ -44,7 +44,7 @@ get_corretto_version() {
 get_base_image() {
   local corretto=$1
   if [ "$corretto" = "8" ]; then
-    echo "amazonlinux:2023"
+    echo "amazoncorretto:8-alpine"
   else
     echo "amazoncorretto:${corretto}-al2023-headless"
   fi
@@ -53,7 +53,7 @@ get_base_image() {
 get_java_home_path() {
   local corretto=$1
   if [ "$corretto" = "8" ]; then
-    echo "/usr/lib/jvm/java-1.8.0-amazon-corretto"
+    echo "/usr/lib/jvm/java-8-amazon-corretto"
   else
     echo "/usr/lib/jvm/java-${corretto}-amazon-corretto"
   fi

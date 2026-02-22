@@ -1,9 +1,11 @@
 # ============================================================
-# Dockerfile — All ES versions (1.x–8.x) on Amazon Corretto (AL2023)
+# Dockerfile — All ES versions (1.x–8.x) on Amazon Corretto
+# Corretto 8: Alpine base (small, no JavaFX/GTK bloat)
+# Corretto 11+: AL2023 headless base
 # Multi-arch: uses TARGETARCH to download the correct tarball
 # ============================================================
 ARG CORRETTO_VERSION=8
-ARG BASE_IMAGE=amazonlinux:2023
+ARG BASE_IMAGE=amazoncorretto:8-alpine
 ARG ES_VERSION
 ARG TARBALL_URL
 
@@ -53,14 +55,19 @@ RUN dnf install -y --allowerasing tar gzip findutils curl && dnf clean all && \
     rm -rf lib/sigar 2>/dev/null; true
 
 # --- Stage 2: Build cgroups v2 fix for ES 5.1-5.2 ---
-FROM amazonlinux:2023 AS cgroup-fixer
+FROM ${BASE_IMAGE} AS cgroup-fixer
 ARG ES_VERSION
 
 RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
     MINOR=$(echo "${ES_VERSION}" | cut -d. -f2) && \
     mkdir -p /opt/fix && \
     if [ "$MAJOR" -eq 5 ] && [ "$MINOR" -le 2 ]; then \
-      dnf install -y gcc glibc-devel && dnf clean all && \
+      # Detect Alpine (apk) vs AL2023 (dnf) for compiler installation
+      if command -v apk >/dev/null 2>&1; then \
+        apk add --no-cache gcc musl-dev; \
+      else \
+        dnf install -y gcc glibc-devel && dnf clean all; \
+      fi && \
       printf '#define _GNU_SOURCE\n#include <stdio.h>\n#include <string.h>\n#include <dlfcn.h>\n#include <fcntl.h>\n#include <stdarg.h>\n#include <unistd.h>\nstatic const char *rp="/proc/self/cgroup";\nstatic const char *fp="/tmp/cgroup_filtered";\nstatic const char *fix(const char *p){return (p&&strcmp(p,rp)==0)?fp:p;}\ntypedef int (*open_t)(const char*,int,...);\nint open(const char *p,int f,...){open_t r=(open_t)dlsym(RTLD_NEXT,"open");mode_t m=0;if(f&O_CREAT){va_list a;va_start(a,f);m=va_arg(a,mode_t);va_end(a);}return r(fix(p),f,m);}\nint open64(const char *p,int f,...){open_t r=(open_t)dlsym(RTLD_NEXT,"open64");mode_t m=0;if(f&O_CREAT){va_list a;va_start(a,f);m=va_arg(a,mode_t);va_end(a);}return r(fix(p),f,m);}\nint openat(int d,const char *p,int f,...){typedef int(*fn)(int,const char*,int,...);fn r=(fn)dlsym(RTLD_NEXT,"openat");mode_t m=0;if(f&O_CREAT){va_list a;va_start(a,f);m=va_arg(a,mode_t);va_end(a);}return r(d,fix(p),f,m);}\ntypedef FILE*(*fopen_t)(const char*,const char*);\nFILE*fopen(const char*p,const char*m){fopen_t r=(fopen_t)dlsym(RTLD_NEXT,"fopen");return r(fix(p),m);}\nFILE*fopen64(const char*p,const char*m){fopen_t r=(fopen_t)dlsym(RTLD_NEXT,"fopen64");return r(fix(p),m);}\n' > /tmp/fix.c && \
       gcc -shared -fPIC -o /opt/fix/libcgroup_fix.so /tmp/fix.c -ldl; \
     else \
@@ -106,27 +113,7 @@ RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
     fi && \
     chmod +x /tmp/scripts/entrypoint.sh
 
-# --- Stage 4: Corretto 8 JRE builder (strips JavaFX bloat via multi-stage copy) ---
-FROM amazonlinux:2023 AS java8-builder
-ARG CORRETTO_VERSION
-RUN if [ "${CORRETTO_VERSION}" = "8" ]; then \
-      dnf install -y java-1.8.0-amazon-corretto && dnf clean all && \
-      # Strip JavaFX files (the real win is not copying GTK/mesa deps to runtime)
-      JVM_DIR=$(ls -d /usr/lib/jvm/java-1.8.0-amazon-corretto.*) && \
-      rm -f "${JVM_DIR}/jre/lib/ext/jfxrt.jar" \
-            "${JVM_DIR}/jre/lib/jfxswt.jar" \
-            "${JVM_DIR}/jre/lib/javafx.properties" && \
-      rm -f "${JVM_DIR}"/jre/lib/*/libglass*.so \
-            "${JVM_DIR}"/jre/lib/*/libprism*.so \
-            "${JVM_DIR}"/jre/lib/*/libjavafx*.so \
-            "${JVM_DIR}"/jre/lib/*/libdecora_sse.so && \
-      # Create arch-independent symlink
-      ln -sf "${JVM_DIR}" /usr/lib/jvm/java-1.8.0-amazon-corretto; \
-    else \
-      mkdir -p /usr/lib/jvm/java-1.8.0-amazon-corretto; \
-    fi
-
-# --- Stage 5: Runtime ---
+# --- Stage 4: Runtime ---
 FROM ${BASE_IMAGE}
 
 ARG ES_VERSION
@@ -139,17 +126,14 @@ LABEL org.opencontainers.image.title="custom-elasticsearch" \
 ENV ES_HOME=/usr/share/elasticsearch \
     ES_VERSION=${ES_VERSION}
 
-# For Corretto 8: copy stripped JRE from builder (avoids ~700MB of JavaFX/GTK/mesa bloat)
-# For Corretto 11+: base image already has Java, this copies an empty dir (no-op)
-COPY --from=java8-builder /usr/lib/jvm/java-1.8.0-amazon-corretto /usr/lib/jvm/java-1.8.0-amazon-corretto
-
 # Install minimal runtime deps — bash for ES scripts, curl for healthcheck
-# For Corretto 8: also install glibc/zlib/freetype needed by the copied JRE
-RUN dnf install -y --allowerasing bash coreutils curl hostname shadow-utils which util-linux && \
-    if [ "${CORRETTO_VERSION}" = "8" ]; then \
-      dnf install -y glibc zlib freetype fontconfig; \
+# Alpine (Corretto 8): apk, AL2023 (Corretto 11+): dnf
+RUN if command -v apk >/dev/null 2>&1; then \
+      apk add --no-cache bash coreutils curl shadow which; \
+    else \
+      dnf install -y --allowerasing bash coreutils curl hostname shadow-utils which util-linux && \
+      dnf clean all && rm -rf /var/cache/dnf; \
     fi && \
-    dnf clean all && rm -rf /var/cache/dnf && \
     groupadd -g 1000 elasticsearch && \
     useradd -u 1000 -g elasticsearch -d ${ES_HOME} -M elasticsearch && \
     mkdir -p /tmp/snapshots && chown 1000:1000 /tmp/snapshots
@@ -159,7 +143,7 @@ COPY --from=cgroup-fixer /opt/fix/libcgroup_fix.so* /usr/local/lib/
 COPY --from=config-builder /tmp/scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --from=config-builder /tmp/config/elasticsearch.yml ${ES_HOME}/config/elasticsearch.yml
 
-# Set JAVA_HOME explicitly (needed for amazonlinux:2023 base, harmless override for amazoncorretto bases)
+# Set JAVA_HOME explicitly
 ENV JAVA_HOME=${JAVA_HOME_PATH}
 ENV ES_JAVA_HOME=${JAVA_HOME_PATH}
 ENV PATH="${JAVA_HOME_PATH}/bin:${JAVA_HOME_PATH}/jre/bin:${PATH}"

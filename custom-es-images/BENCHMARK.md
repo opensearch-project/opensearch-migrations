@@ -10,23 +10,22 @@ Tested one representative version per major series. All tests run single-node wi
 
 | Version | Image | Startup (s) | Memory (MB) | Image Size (MB) |
 |---------|-------|-------------|-------------|-----------------|
-| **ES 1.7.6** | Custom | 5.4 | 241 | **361** |
-| | Public | 6.5 | 226 | 330 |
-| **ES 2.4.6** | Custom | 5.5 | 253 | **362** |
-| | Public | 5.4 | 261 | 457 |
-| **ES 5.6.16** | Custom | 3.5 | 727 | **376** |
-| | Public | 4.5 | 753 | 505 |
-| **ES 6.8.23** | Custom | 5.6 | 788 | **721** |
-| | Public | 5.5 | 770 | 919 |
-| **ES 7.17.29** | Custom | 8.5 | 802 | 814 |
-| | Public | 8.5 | 865 | **624** |
-| **ES 8.19.11** | Custom | 13.5 | 996 | **1048** |
-| | Public | 12.5 | 965 | 1333 |
+| **ES 1.7.6** | Custom | 6.5 | 197 | **267** |
+| | Public | 6.5 | 246 | 330 |
+| **ES 2.4.6** | Custom | 5.5 | 194 | **268** |
+| | Public | 5.5 | 247 | 457 |
+| **ES 5.6.16** | Custom | 3.5 | 678 | **282** |
+| | Public | 4.5 | 751 | 505 |
+| **ES 6.8.23** | Custom | 5.5 | 786 | **721** |
+| | Public | 5.5 | 766 | 919 |
+| **ES 7.17.29** | Custom | 8.5 | 821 | 814 |
+| | Public | 9.5 | 841 | **624** |
+| **ES 8.19.11** | Custom | 13.5 | 995 | **1048** |
+| | Public | 12.5 | 997 | 1333 |
 
 ### Key Observations
 
-- **ES 1.x–5.x**: Custom images are now **significantly smaller** than the previous AL2023-JRE approach. Multi-stage build copies only the stripped Corretto 8 JRE (~110MB) into a clean `amazonlinux:2023` base, avoiding ~700MB of JavaFX/GTK3/mesa bloat. ES 2.x–5.x custom images are **21–26% smaller** than public.
-- **ES 1.x**: Custom is slightly larger than public (361 vs 330 MB) — the public image uses a very compact legacy Debian base.
+- **ES 1.x–5.x**: Custom images use Amazon Corretto 8 on Alpine Linux (~209MB base), resulting in images **19–44% smaller** than public. Alpine's minimal footprint plus stripped tarballs (no bundled JDK, no Sigar libs) keeps these very lean.
 - **ES 6.x**: Custom images are **22% smaller** (721 vs 919 MB) — Corretto 11 headless on AL2023 is lean, and the tarball approach strips the bundled JDK.
 - **ES 7.17**: Custom image is **30% larger** than public. The official 7.17 image uses an optimized CentOS 7 base.
 - **ES 8.x**: Custom images are **21% smaller** (1048 vs 1333 MB) — ML native binaries and bundled JDK are stripped.
@@ -64,7 +63,7 @@ Custom images bake all of this in — every version starts with a single `docker
 ### 2. Modern Docker Compatibility
 
 - **ES 1.x–2.x**: Public Docker Hub images (`elasticsearch:1.x/2.x`) use old base images that may have compatibility issues with modern Docker runtimes and cgroups v2.
-- **Custom images**: Built on `amazonlinux:2023` with Amazon Corretto, fully compatible with modern Docker.
+- **Custom images**: Built on Amazon Corretto Alpine (Java 8) or AL2023 (Java 11+), fully compatible with modern Docker.
 
 ### 3. cgroups v2 Fix for ES 5.1–5.2
 
@@ -86,18 +85,17 @@ This enables:
 
 Public images do not include health checks.
 
-### 5. Smaller Images (ES 2.x+)
+### 5. Smaller Images (ES 1.x–6.x, 8.x)
 
 | Version | Custom | Public | Savings |
 |---------|--------|--------|---------|
-| ES 2.4.6 | 362 MB | 457 MB | **21%** |
-| ES 5.6.16 | 376 MB | 505 MB | **26%** |
+| ES 1.7.6 | 267 MB | 330 MB | **19%** |
+| ES 2.4.6 | 268 MB | 457 MB | **41%** |
+| ES 5.6.16 | 282 MB | 505 MB | **44%** |
 | ES 6.8.23 | 721 MB | 919 MB | **22%** |
 | ES 8.19.11 | 1048 MB | 1333 MB | **21%** |
 
-Custom images use a multi-stage build: Corretto 8 JRE is installed in a builder stage, JavaFX files are stripped, and only the JRE is copied to a clean `amazonlinux:2023` base — avoiding ~700MB of JavaFX/GTK3/mesa dependencies. ES 6.x+ uses Corretto 11/17/21 headless on AL2023, stripping the bundled JDK and ML native binaries. ES 7.17 is an exception where the public image is smaller (624 MB vs 814 MB).
-
-Note: ES 1.x custom images are slightly larger than public (361 vs 330 MB) because the public images use very compact legacy Debian bases.
+Custom images use Amazon Corretto 8 on Alpine Linux for ES 1.x–5.x (small base, no JavaFX/GTK bloat) and Corretto 11/17/21 headless on AL2023 for ES 6.x+, stripping the bundled JDK and ML native binaries. ES 7.17 is an exception where the public image is smaller (624 MB vs 814 MB).
 
 ### 6. Consistent Interface Across All 67 Versions
 

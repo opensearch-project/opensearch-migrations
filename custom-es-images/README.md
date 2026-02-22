@@ -6,10 +6,10 @@ Build and test custom Elasticsearch Docker images for **every minor version** fr
 
 | Major | Minor Versions | Base Image |
 |-------|---------------|------------|
-| 1.x   | 1.0–1.7 (8 versions) | Amazon Corretto 8 (AL2023) |
-| 2.x   | 2.0–2.4 (5 versions) | Amazon Corretto 8 (AL2023) |
-| 5.x   | 5.0–5.6 (7 versions) | Amazon Corretto 8 (AL2023) |
-| 6.x   | 6.0–6.8 (9 versions) | Amazon Corretto 8–11 (AL2023) |
+| 1.x   | 1.0–1.7 (8 versions) | Amazon Corretto 8 (Alpine) |
+| 2.x   | 2.0–2.4 (5 versions) | Amazon Corretto 8 (Alpine) |
+| 5.x   | 5.0–5.6 (7 versions) | Amazon Corretto 8 (Alpine) |
+| 6.x   | 6.0–6.8 (9 versions) | Amazon Corretto 8–11 (Alpine/AL2023) |
 | 7.x   | 7.0–7.17 (18 versions) | Amazon Corretto 11–17 (AL2023) |
 | 8.x   | 8.0–8.19 (20 versions) | Amazon Corretto 21 (AL2023) |
 
