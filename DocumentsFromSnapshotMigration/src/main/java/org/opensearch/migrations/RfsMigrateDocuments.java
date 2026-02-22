@@ -20,6 +20,7 @@ import java.util.regex.Pattern;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
+import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
@@ -36,6 +37,7 @@ import org.opensearch.migrations.bulkload.delta.DeltaDocumentReaderEngine;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
+import org.opensearch.migrations.bulkload.pipeline.PipelineRunner;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
@@ -267,6 +269,12 @@ public class RfsMigrateDocuments {
                 "allowing specific errors (e.g., 'version_conflict_engine_exception') to be treated as success " +
                 "rather than failure. Example: --allowed-doc-exception-types version_conflict_engine_exception")
         public List<String> allowedDocExceptionTypes = List.of();
+
+        @Parameter(required = false,
+            names = { "--use-pipeline" },
+            description = "Experimental. Use the clean pipeline implementation instead of the default " +
+                "DocumentsRunner flow. The pipeline uses a Lucene-agnostic IR with clean source/sink ports.")
+        public boolean usePipeline = false;
     }
 
     public static class ExperimentalArgs {
@@ -530,24 +538,48 @@ public class RfsMigrateDocuments {
                 luceneDirPath
             );
 
-            run(
-                new LuceneIndexReader.Factory(sourceResourceProvider),
-                reindexer,
-                progressCursor,
-                workCoordinator,
-                arguments.initialLeaseDuration,
-                processManager,
-                sourceResourceProvider.getIndexMetadata(),
-                arguments.snapshotName,
-                arguments.experimental.previousSnapshotName,
-                arguments.experimental.experimentalDeltaMode,
-                arguments.indexAllowlist,
-                sourceResourceProvider.getShardMetadata(),
-                unpackerFactory,
-                arguments.maxShardSizeBytes,
-                context,
-                cancellationRunnableRef,
-                workItemTimeProvider);
+            if (arguments.usePipeline) {
+                log.info("Using pipeline implementation (--use-pipeline)");
+                var extractor = SnapshotExtractor.create(
+                    arguments.sourceVersion, sourceResourceProvider, sourceRepo);
+                runWithPipeline(
+                    extractor,
+                    targetClient,
+                    arguments.snapshotName,
+                    luceneDirPath,
+                    docTransformerSupplier,
+                    useServerGeneratedIds,
+                    allowlist,
+                    arguments.numDocsPerBulkRequest,
+                    arguments.numBytesPerBulkRequest,
+                    progressCursor,
+                    workCoordinator,
+                    arguments.initialLeaseDuration,
+                    processManager,
+                    sourceResourceProvider.getIndexMetadata(),
+                    arguments.indexAllowlist,
+                    context,
+                    cancellationRunnableRef);
+            } else {
+                run(
+                    new LuceneIndexReader.Factory(sourceResourceProvider),
+                    reindexer,
+                    progressCursor,
+                    workCoordinator,
+                    arguments.initialLeaseDuration,
+                    processManager,
+                    sourceResourceProvider.getIndexMetadata(),
+                    arguments.snapshotName,
+                    arguments.experimental.previousSnapshotName,
+                    arguments.experimental.experimentalDeltaMode,
+                    arguments.indexAllowlist,
+                    sourceResourceProvider.getShardMetadata(),
+                    unpackerFactory,
+                    arguments.maxShardSizeBytes,
+                    context,
+                    cancellationRunnableRef,
+                    workItemTimeProvider);
+            }
             cleanShutdownCompleted.set(true);
         } catch (NoWorkLeftException e) {
             log.atInfo().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
@@ -824,6 +856,53 @@ public class RfsMigrateDocuments {
             cancellationRunnable::set,
             timeProvider,
             (indexName, shardNumber) -> engine);
+        return runner.migrateNextShard(rootDocumentContext::createReindexContext);
+    }
+
+    public static CompletionStatus runWithPipeline(
+        SnapshotExtractor extractor,
+        OpenSearchClient targetClient,
+        String snapshotName,
+        java.nio.file.Path workDir,
+        Supplier<IJsonTransformer> transformerSupplier,
+        boolean useServerGeneratedIds,
+        DocumentExceptionAllowlist allowlist,
+        int maxDocsPerBatch,
+        long maxBytesPerBatch,
+        AtomicReference<WorkItemCursor> progressCursor,
+        IWorkCoordinator workCoordinator,
+        Duration maxInitialLeaseDuration,
+        LeaseExpireTrigger leaseExpireTrigger,
+        IndexMetadata.Factory indexMetadataFactory,
+        List<String> indexAllowlist,
+        RootDocumentMigrationContext rootDocumentContext,
+        AtomicReference<Runnable> cancellationRunnable
+    ) throws IOException, InterruptedException, NoWorkLeftException {
+        var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
+        confirmShardPrepIsComplete(indexMetadataFactory, snapshotName, indexAllowlist,
+            scopedWorkCoordinator, rootDocumentContext);
+        if (!workCoordinator.workItemsNotYetComplete(
+            rootDocumentContext.getWorkCoordinationContext()::createItemsPendingContext
+        )) {
+            throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
+        }
+
+        var runner = PipelineRunner.builder()
+            .extractor(extractor)
+            .targetClient(targetClient)
+            .snapshotName(snapshotName)
+            .workDir(workDir)
+            .maxDocsPerBatch(maxDocsPerBatch)
+            .maxBytesPerBatch(maxBytesPerBatch)
+            .transformerSupplier(transformerSupplier)
+            .allowServerGeneratedIds(useServerGeneratedIds)
+            .allowlist(allowlist)
+            .workCoordinator(scopedWorkCoordinator)
+            .maxInitialLeaseDuration(maxInitialLeaseDuration)
+            .cursorConsumer(progressCursor::set)
+            .cancellationTriggerConsumer(cancellationRunnable::set)
+            .build();
+
         return runner.migrateNextShard(rootDocumentContext::createReindexContext);
     }
 

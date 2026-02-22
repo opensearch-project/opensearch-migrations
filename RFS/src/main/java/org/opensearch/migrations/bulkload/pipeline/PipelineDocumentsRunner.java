@@ -12,6 +12,7 @@ import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
+import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
@@ -37,11 +38,6 @@ import reactor.core.scheduler.Schedulers;
 @Slf4j
 @AllArgsConstructor
 public class PipelineDocumentsRunner {
-
-    public enum CompletionStatus {
-        WORK_COMPLETED,
-        NOTHING_DONE
-    }
 
     private final ScopedWorkCoordinator workCoordinator;
     private final Duration maxInitialLeaseDuration;

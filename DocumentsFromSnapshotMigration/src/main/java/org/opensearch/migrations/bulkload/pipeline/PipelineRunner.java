@@ -14,6 +14,7 @@ import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchMetadataSin
 import org.opensearch.migrations.bulkload.pipeline.adapter.SnapshotMetadataSource;
 import org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
+import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -121,7 +122,7 @@ public class PipelineRunner {
      *
      * @return completion status indicating whether work was done
      */
-    public PipelineDocumentsRunner.CompletionStatus migrateNextShard(
+    public CompletionStatus migrateNextShard(
         Supplier<IDocumentMigrationContexts.IDocumentReindexContext> contextSupplier
     ) throws java.io.IOException, InterruptedException {
         if (workCoordinator == null) {
