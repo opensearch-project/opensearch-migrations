@@ -40,12 +40,24 @@ keep-alive requests.
 
 **Authoritative source for session keys**: `partitionToActiveConnections` is changed from
 `Map<partition, Set<ScopedConnectionIdKey>>` to `Map<partition, Set<GenerationalSessionKey>>`
-where `GenerationalSessionKey = (connectionId, sessionNumber, generation)`. This map is
-populated on the main thread in `readNextTrafficStreamSynchronously` where both the
-`sessionNumber` (from the current `Accumulation.startingSourceRequestIndex`) and the
-`generation` (from `ITrafficStreamKey.getSourceGeneration()`) are available. The rebalance
-callbacks read from this map — they never need to touch the `Accumulation` to get the session
-key.
+where `GenerationalSessionKey = (connectionId, sessionNumber, generation)`.
+
+**Where and when the key is produced**: `sessionNumber = Accumulation.startingSourceRequestIndex`
+is only known after the `Accumulation` is created or updated — which happens in
+`CapturedTrafficToHttpTransactionAccumulator.accept()` on the main thread. Therefore
+`partitionToActiveConnections` is populated and updated in `accept()`, not in
+`readNextTrafficStreamSynchronously`. Specifically:
+- On `getOrCreateWithoutExpiration` creating a new `Accumulation`: insert
+  `GenerationalSessionKey(connectionId, startingSourceRequestIndex, generation)` into the
+  partition's set. The partition number and generation come from `tsk.getPartition()` and
+  `tsk.getSourceGeneration()` on the `ITrafficStreamKey`.
+- On `resetForNextRequest()` (keep-alive reuse, new request on same TCP connection):
+  `startingSourceRequestIndex` increments. Remove the old key and insert the new one with the
+  updated `sessionNumber`. This keeps the map current for the active session.
+
+**Removal semantics**: the `onConnectionDone` callback must carry the exact
+`GenerationalSessionKey` that was inserted (not just the stream key), so the correct entry can
+be removed. The callback is registered with the full key at insertion time in `accept()`.
 
 The coordinator registration key is `(connectionId, sessionNumber, generation)` — always read
 from `partitionToActiveConnections`, never derived from the `Accumulation` at close time.

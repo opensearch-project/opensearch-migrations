@@ -552,14 +552,16 @@ The following items are planned but not yet implemented:
 Active connection tracking (`KafkaTrafficCaptureSource`):
 - Maintains `Map<Integer, Set<GenerationalSessionKey>> partitionToActiveConnections`
   where `GenerationalSessionKey = (connectionId, sessionNumber, generation)`. This is the
-  authoritative source for session keys at rebalance time — populated on the main thread in
-  `readNextTrafficStreamSynchronously` where both `sessionNumber`
-  (`Accumulation.startingSourceRequestIndex`) and `generation`
-  (`ITrafficStreamKey.getSourceGeneration()`) are available.
-- Adds a connection when its first `TrafficStream` is consumed from a partition
-- Removes a connection via a single callback registered with the accumulator, called from both
-  `onConnectionClose` and `onTrafficStreamsExpired`. This callback both updates
-  `partitionToActiveConnections` AND calls `channelContextManager.releaseContextFor()`.
+  authoritative source for session keys at rebalance time.
+- **Population point**: `accept()` on the main thread — the only place where both
+  `sessionNumber` (`Accumulation.startingSourceRequestIndex`) and `generation`
+  (`tsk.getSourceGeneration()`) are simultaneously available. Updated in two cases:
+  - New `Accumulation` created: insert the key
+  - `resetForNextRequest()` called (keep-alive reuse): remove old key, insert new key with
+    updated `sessionNumber`
+- **Removal**: the `onConnectionDone` callback carries the exact `GenerationalSessionKey` that
+  was inserted (registered at insertion time in `accept()`), so the correct entry is removed.
+  The callback also calls `channelContextManager.releaseContextFor()`.
 
 Synthetic close injection and drain:
 - When a partition is truly lost, the coordinator (`TrafficReplayerTopLevel`) atomically
