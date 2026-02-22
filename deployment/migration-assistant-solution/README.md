@@ -46,9 +46,8 @@ sequenceDiagram
     participant Cfn as Cloud Formation
     participant MA as Migration Assistant EKS Cluster
 
-    User ->> Cfn: Deploy EKS
-    User ->> MA: `aws-bootstrap.sh` Deploys Helm Chart and Configures EKS Cluster 
-    User ->> MA: kubectl Logs into Migration Assistant Console
+    User ->> MA: `aws-bootstrap.sh` Deploys EKS and then the Migration Assistant Helm Chart into it 
+    User ->> MA: `kubectl exec` Logs into Migration Assistant Console
     User ->> MA: Migration Workflow Commands Perform Migration Tasks
 ```
 ## Development

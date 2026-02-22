@@ -1,3 +1,5 @@
+import requests.exceptions
+
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.snapshot import Snapshot
 from dataclasses import dataclass
@@ -25,6 +27,11 @@ def call_api(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, head
         r = cluster.call_api(path=path, method=method, data=data, headers=headers, timeout=timeout, session=session,
                              raise_error=raise_error)
         return CallAPIResult(http_response=r, error_message=None)
+    except requests.exceptions.Timeout:
+        timeout_msg = f" after {timeout}s" if timeout else ""
+        return CallAPIResult(http_response=None,
+                             error_message=f"Error: Request timed out{timeout_msg}. "
+                                           f"Use --timeout to specify a longer timeout.")
     except Exception as e:
         logger.debug("Exception occurred when using call_api on cluster: ", exc_info=True)
         return CallAPIResult(http_response=None, error_message=f"Error: Unable to perform cluster command "
