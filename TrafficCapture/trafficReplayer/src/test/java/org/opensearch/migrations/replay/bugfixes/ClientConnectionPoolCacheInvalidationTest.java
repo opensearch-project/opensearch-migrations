@@ -62,43 +62,36 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
     }
 
     /**
-     * Verifies that scheduleClose() invalidates the cache entry immediately — before the Netty
-     * channel close completes — so that new requests arriving after scheduleClose() get a fresh
-     * ConnectionReplaySession rather than the one being closed.
-     *
-     * Before the fix: the cache is only invalidated inside the Netty close completion callback,
-     * leaving a window where new requests reuse the closing session.
-     * After the fix: the cache is invalidated synchronously in scheduleClose().
+     * Verifies that scheduleClose() keeps the cache entry alive until the close actually runs,
+     * so that in-flight response futures can complete on the same session.
+     * Immediate invalidation caused deadlocks: new requests got a new session, leaving
+     * finishedAccumulatingResponseFuture on the old session permanently incomplete.
      */
     @Test
     @SneakyThrows
-    void scheduleClose_invalidatesCacheImmediately() throws Exception {        var pool = new ClientConnectionPool(
+    void scheduleClose_cacheRemainsUntilCloseCompletes() throws Exception {        var pool = new ClientConnectionPool(
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
             "test-pool",
             1
         );
         var orchestrator = new RequestSenderOrchestrator(
             pool,
-            (session, ctx) -> null // no packet consumer needed
+            (session, ctx) -> null
         );
 
         try {
             var channelKeyCtx = rootContext.getTestConnectionRequestContext("conn-A", 0)
                 .getChannelKeyContext();
 
-            // Populate the cache
             pool.getCachedSession(channelKeyCtx, 0);
             Assertions.assertEquals(1, getCache(pool).size());
 
-            // Schedule a close — should invalidate the cache immediately
             var closeFuture = orchestrator.scheduleClose(channelKeyCtx, 0, 0, Instant.now());
-
-            // Cache must be empty NOW, before the close future completes
-            Assertions.assertEquals(0, getCache(pool).size(),
-                "cache must be invalidated immediately when scheduleClose() is called, "
-                    + "not deferred until the Netty close completes");
-
             closeFuture.get(Duration.ofSeconds(5));
+
+            // After close completes, cache must be evicted
+            Assertions.assertEquals(0, getCache(pool).size(),
+                "cache must be evicted after close completes");
         } finally {
             pool.shutdownNow().get();
         }
