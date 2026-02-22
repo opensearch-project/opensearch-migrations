@@ -31,7 +31,7 @@ import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordin
 import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
@@ -253,9 +253,9 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                         DocumentMigrationTestContext testContext)
         throws RfsMigrateDocuments.NoWorkLeftException
     {
-        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(SOURCE_VERSION, true);
+        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(SOURCE_VERSION, true);
         var sourceRepo = new FileSystemRepo(snapshotDir, fileFinder);
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(SOURCE_VERSION, sourceRepo, false);
+        var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(SOURCE_VERSION, sourceRepo, false);
         var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
         var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, luceneDir);
         var readerFactory = new LuceneIndexReader.Factory(sourceResourceProvider);
