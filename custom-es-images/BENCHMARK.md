@@ -10,26 +10,26 @@ Tested one representative version per major series. All tests run single-node wi
 
 | Version | Image | Startup (s) | Memory (MB) | Image Size (MB) |
 |---------|-------|-------------|-------------|-----------------|
-| **ES 1.7.6** | Custom | 14.0 | 192 | **268** |
-| | Public | 6.5 | 232 | 330 |
-| **ES 2.4.6** | Custom | 5.5 | 194 | **269** |
-| | Public | 5.5 | 244 | 457 |
-| **ES 5.6.16** | Custom | 3.5 | 677 | **283** |
-| | Public | 4.5 | 776 | 505 |
-| **ES 6.8.23** | Custom | 5.5 | 755 | **610** |
-| | Public | 5.5 | 741 | 919 |
-| **ES 7.17.29** | Custom | 8.5 | 793 | 703 |
-| | Public | 8.5 | 856 | **624** |
-| **ES 8.19.11** | Custom | 14.5 | 929 | **944** |
-| | Public | 12.5 | 969 | 1333 |
+| **ES 1.7.6** | Custom | 5.4 | 240 | 1054 |
+| | Public | 6.4 | 218 | **330** |
+| **ES 2.4.6** | Custom | 5.5 | 244 | 1055 |
+| | Public | 5.4 | 251 | **457** |
+| **ES 5.6.16** | Custom | 3.5 | 704 | 1068 |
+| | Public | 4.5 | 755 | **505** |
+| **ES 6.8.23** | Custom | 5.5 | 785 | **701** |
+| | Public | 5.5 | 752 | 919 |
+| **ES 7.17.29** | Custom | 8.6 | 817 | 794 |
+| | Public | 9.5 | 835 | **624** |
+| **ES 8.19.11** | Custom | 13.6 | 983 | **1029** |
+| | Public | 12.5 | 973 | 1333 |
 
 ### Key Observations
 
-- **ES 1.x–2.x**: Custom images are **19–41% smaller** due to Amazon Corretto 8 on AL2023 vs the legacy Docker Hub base images.
-- **ES 5.x–6.x**: Custom images are **34–44% smaller** — the tarball-on-AL2023 approach strips the bundled JDK and uses a minimal base image vs the official CentOS/Ubuntu-based images.
-- **ES 7.17**: Custom image is **13% larger** than public. The official 7.17 image uses an optimized CentOS 7 base; our Corretto + full tarball approach adds overhead for this version.
-- **ES 8.x**: Custom images are **29% smaller** — ML native binaries and bundled JDK are stripped.
-- **Startup times** are comparable across custom and public images. The ES 1.7.6 custom outlier (14s vs 6.5s) is likely a cold-start artifact from the single trial.
+- **ES 1.x–5.x**: Custom images are **larger** than public. The `amazoncorretto:8-al2023-jre` base image (~1GB) includes JavaFX and GTK3 dependencies that cannot be cleanly removed via `dnf` without cascading to the JRE itself. Public images use much smaller legacy base images (Debian/CentOS).
+- **ES 6.x**: Custom images are **24% smaller** (701 vs 919 MB) — Corretto 11 headless on AL2023 is lean, and the tarball approach strips the bundled JDK.
+- **ES 7.17**: Custom image is **27% larger** than public. The official 7.17 image uses an optimized CentOS 7 base.
+- **ES 8.x**: Custom images are **23% smaller** (1029 vs 1333 MB) — ML native binaries and bundled JDK are stripped.
+- **Startup times** are comparable across custom and public images.
 - **Memory usage** is comparable, with custom images using slightly less in most cases.
 
 ## Benefits of Custom Images
@@ -85,17 +85,16 @@ This enables:
 
 Public images do not include health checks.
 
-### 5. Smaller Images
+### 5. Smaller Images (ES 6.x+)
 
 | Version | Custom | Public | Savings |
 |---------|--------|--------|---------|
-| ES 1.7.6 | 268 MB | 330 MB | **19%** |
-| ES 2.4.6 | 269 MB | 457 MB | **41%** |
-| ES 5.6.16 | 283 MB | 505 MB | **44%** |
-| ES 6.8.23 | 610 MB | 919 MB | **34%** |
-| ES 8.19.11 | 944 MB | 1333 MB | **29%** |
+| ES 6.8.23 | 701 MB | 919 MB | **24%** |
+| ES 8.19.11 | 1029 MB | 1333 MB | **23%** |
 
-Custom images use a multi-stage build with Amazon Corretto on AL2023, stripping the bundled JDK and ML native binaries. ES 7.17 is an exception where the public image is smaller (624 MB vs 703 MB).
+Custom images for ES 6.x+ use Amazon Corretto headless on AL2023, stripping the bundled JDK and ML native binaries. ES 7.17 is an exception where the public image is smaller (624 MB vs 794 MB).
+
+Note: ES 1.x–5.x custom images are larger than public (~1GB vs 330–505 MB) because the `amazoncorretto:8-al2023-jre` base image includes JavaFX/GTK3 dependencies. The tradeoff is modern base image compatibility and security updates.
 
 ### 6. Consistent Interface Across All 67 Versions
 

@@ -2,42 +2,42 @@
   {
     "version": "1.7.6",
     "major": 1,
-    "custom": { "startup_ms": 14002, "memory_mb": 191.5, "image_size_mb": 267.9 },
-    "public": { "startup_ms": 6496, "memory_mb": 231.8, "image_size_mb": 330.2 }
+    "custom": { "startup_ms": 5431, "memory_mb": 239.8, "image_size_mb": 1053.7 },
+    "public": { "startup_ms": 6438, "memory_mb": 218.4, "image_size_mb": 330.2 }
   }
 ,
   {
     "version": "2.4.6",
     "major": 2,
-    "custom": { "startup_ms": 5456, "memory_mb": 194.1, "image_size_mb": 269.2 },
-    "public": { "startup_ms": 5474, "memory_mb": 243.9, "image_size_mb": 456.6 }
+    "custom": { "startup_ms": 5474, "memory_mb": 244.2, "image_size_mb": 1054.9 },
+    "public": { "startup_ms": 5397, "memory_mb": 250.8, "image_size_mb": 456.6 }
   }
 ,
   {
     "version": "5.6.16",
     "major": 5,
-    "custom": { "startup_ms": 3545, "memory_mb": 677.3, "image_size_mb": 282.5 },
-    "public": { "startup_ms": 4503, "memory_mb": 775.9, "image_size_mb": 504.7 }
+    "custom": { "startup_ms": 3516, "memory_mb": 704, "image_size_mb": 1068.3 },
+    "public": { "startup_ms": 4516, "memory_mb": 754.7, "image_size_mb": 504.7 }
   }
 ,
   {
     "version": "6.8.23",
     "major": 6,
-    "custom": { "startup_ms": 5521, "memory_mb": 755.3, "image_size_mb": 610.4 },
-    "public": { "startup_ms": 5478, "memory_mb": 740.8, "image_size_mb": 918.7 }
+    "custom": { "startup_ms": 5547, "memory_mb": 785, "image_size_mb": 701.0 },
+    "public": { "startup_ms": 5517, "memory_mb": 752.4, "image_size_mb": 918.7 }
   }
 ,
   {
     "version": "7.17.29",
     "major": 7,
-    "custom": { "startup_ms": 8523, "memory_mb": 792.9, "image_size_mb": 702.6 },
-    "public": { "startup_ms": 8489, "memory_mb": 855.6, "image_size_mb": 624.2 }
+    "custom": { "startup_ms": 8600, "memory_mb": 816.7, "image_size_mb": 793.9 },
+    "public": { "startup_ms": 9528, "memory_mb": 834.9, "image_size_mb": 624.2 }
   }
 ,
   {
     "version": "8.19.11",
     "major": 8,
-    "custom": { "startup_ms": 14527, "memory_mb": 928.7, "image_size_mb": 943.8 },
-    "public": { "startup_ms": 12517, "memory_mb": 969, "image_size_mb": 1333.3 }
+    "custom": { "startup_ms": 13572, "memory_mb": 983.1, "image_size_mb": 1028.7 },
+    "public": { "startup_ms": 12509, "memory_mb": 972.9, "image_size_mb": 1333.3 }
   }
 ]

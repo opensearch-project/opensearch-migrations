@@ -36,11 +36,12 @@ versions.each { minor, info ->
         inputs.file('dockerfiles/Dockerfile')
         inputs.property('version', version)
         def corretto = correttoVersion(minor)
+        def base = baseImage(corretto)
         def dockerfilePath = file('dockerfiles/Dockerfile').absolutePath
         doFirst {
             commandLine 'docker', 'build',
                     '--build-arg', "CORRETTO_VERSION=${corretto}",
-                    '--build-arg', "BASE_IMAGE=${baseImage(corretto)}",
+                    '--build-arg', "BASE_IMAGE=${base}",
                     '--build-arg', "ES_VERSION=${version}",
                     '--build-arg', "TARBALL_URL=${url}",
                     '-f', dockerfilePath,
@@ -100,6 +101,7 @@ if (!pushVersionsList.isEmpty()) {
             group = 'docker'
             description = "Build and push ${imagePrefix}:${version} to ${registry.containerUrl}"
             def corretto = correttoVersion(minor)
+            def base = baseImage(corretto)
             def dockerfilePath = file('dockerfiles/Dockerfile').absolutePath
             doFirst {
                 def buildArgs = [
@@ -108,7 +110,7 @@ if (!pushVersionsList.isEmpty()) {
                         "--builder ${builder}",
                         "-f ${dockerfilePath}",
                         "--build-arg CORRETTO_VERSION=${corretto}",
-                        "--build-arg BASE_IMAGE=${baseImage(corretto)}",
+                        "--build-arg BASE_IMAGE=${base}",
                         "--build-arg ES_VERSION=${version}",
                         "--build-arg TARBALL_URL=${url}",
                         "-t ${dest}",

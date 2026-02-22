@@ -13,7 +13,7 @@ ARG ES_VERSION
 ARG TARBALL_URL
 ARG TARGETARCH
 
-RUN dnf install -y tar gzip findutils curl && dnf clean all && \
+RUN dnf install -y --allowerasing tar gzip findutils curl && dnf clean all && \
     # Map Docker TARGETARCH (amd64/arm64) to ES arch names (x86_64/aarch64)
     case "${TARGETARCH}" in \
       arm64) ES_ARCH="aarch64" ;; \
@@ -112,7 +112,7 @@ ENV ES_HOME=/usr/share/elasticsearch \
     ES_VERSION=${ES_VERSION}
 
 # Install minimal runtime deps — bash for ES scripts, curl for healthcheck
-RUN dnf install -y --allowerasing bash coreutils curl hostname shadow-utils && dnf clean all && \
+RUN dnf install -y --allowerasing bash coreutils curl hostname shadow-utils which && dnf clean all && \
     groupadd -g 1000 elasticsearch && \
     useradd -u 1000 -g elasticsearch -d ${ES_HOME} -M elasticsearch && \
     mkdir -p /tmp/snapshots && chown 1000:1000 /tmp/snapshots
@@ -122,7 +122,7 @@ COPY --from=cgroup-fixer /opt/fix/libcgroup_fix.so* /usr/local/lib/
 COPY --from=config-builder /tmp/scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --from=config-builder /tmp/config/elasticsearch.yml ${ES_HOME}/config/elasticsearch.yml
 
-# Remove JavaFX and its GTK3 dependency tree (x86_64 Corretto 8 only, not present on aarch64)
+# Remove JavaFX files and GTK3 dependency tree (x86_64 Corretto 8 only, not present on aarch64)
 RUN if [ "${CORRETTO_VERSION}" = "8" ] && [ "$(uname -m)" = "x86_64" ]; then \
       rm -f /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/ext/jfxrt.jar \
             /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/jfxswt.jar \
@@ -131,10 +131,8 @@ RUN if [ "${CORRETTO_VERSION}" = "8" ] && [ "$(uname -m)" = "x86_64" ]; then \
             /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/amd64/libprism*.so \
             /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/amd64/libjavafx*.so \
             /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/amd64/libdecora_sse.so && \
-      dnf remove -y gtk3 cairo pango mesa-libGL atk harfbuzz && \
-      dnf autoremove -y && \
-      dnf clean all && \
-      rm -rf /var/cache/dnf; \
+      dnf remove -y gtk3 cairo pango mesa-libGL atk harfbuzz 2>/dev/null; \
+      dnf clean all && rm -rf /var/cache/dnf; \
     fi
 
 # ES 7+ uses ES_JAVA_HOME — point it to the Corretto JAVA_HOME from base image
