@@ -117,3 +117,16 @@ Notable fixes required during integration testing:
   memory before fullTest — fixed with Assumptions.assumeTrue guard
 - partitionToActiveConnections growing unboundedly — fixed with onConnectionDone callback
 - Test JVM heap bumped to 5g (from 2g) to handle exhaustive test traffic generation
+
+---
+
+## Phase 5 — ConnectionReplaySession Generation Threading
+
+### Key finding
+Session cancellation in `getCachedSession` on generation bump caused the same
+`finishedAccumulatingResponseFuture` deadlock as Phase 1. Removed cancellation from
+`getCachedSession`; generation is stored for tracking only. Cancellation is handled
+exclusively by the synthetic close path.
+
+### Integration test results
+All 4 `KafkaRestartingTrafficReplayerTest.fullTest` cases PASSED. BUILD SUCCESSFUL in 3m 25s.
