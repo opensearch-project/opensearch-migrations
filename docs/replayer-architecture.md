@@ -550,17 +550,23 @@ The following items are planned but not yet implemented:
 **1. Synthetic close events with session drain backpressure**
 
 Active connection tracking (`KafkaTrafficCaptureSource`):
-- Maintains `Map<Integer, Set<ScopedConnectionIdKey>> partitionToActiveConnections`
+- Maintains `Map<Integer, Set<GenerationalSessionKey>> partitionToActiveConnections`
+  where `GenerationalSessionKey = (connectionId, sessionNumber, generation)`. This is the
+  authoritative source for session keys at rebalance time — populated on the main thread in
+  `readNextTrafficStreamSynchronously` where both `sessionNumber`
+  (`Accumulation.startingSourceRequestIndex`) and `generation`
+  (`ITrafficStreamKey.getSourceGeneration()`) are available.
 - Adds a connection when its first `TrafficStream` is consumed from a partition
-- Removes a connection via a single `Consumer<ScopedConnectionIdKey>` callback registered with
-  the accumulator, called from both `onConnectionClose` and `onTrafficStreamsExpired`. This
-  callback both updates `partitionToActiveConnections` AND calls
-  `channelContextManager.releaseContextFor()`.
+- Removes a connection via a single callback registered with the accumulator, called from both
+  `onConnectionClose` and `onTrafficStreamsExpired`. This callback both updates
+  `partitionToActiveConnections` AND calls `channelContextManager.releaseContextFor()`.
 
 Synthetic close injection and drain:
-- When `onPartitionsAssigned` determines a partition is truly lost, the coordinator
-  (`TrafficReplayerTopLevel`) atomically checks the `ClientConnectionPool` cache for each active
-  connection using `computeIfPresent`. If the session is present, it is registered in
+- When a partition is truly lost, the coordinator (`TrafficReplayerTopLevel`) atomically
+  checks the `ClientConnectionPool` cache for each active connection using `computeIfPresent`.
+  This is triggered from three paths: `onPartitionsAssigned` (for `trulyLost = pending - new`),
+  `onPartitionsAssigned` when `newPartitions.isEmpty()` (all pending are truly lost), and
+  `onPartitionsLost` (all partitions are immediately truly lost — no deferred diff needed). If the session is present, it is registered in
   `pendingSyntheticCloses` (a `ConcurrentHashMap<GenerationalConnectionKey, Boolean>` keyed by
   `(connectionId, sessionNumber, generation)`) and `outstandingSyntheticCloseSessions` is
   incremented. The `sessionNumber` is `Accumulation.startingSourceRequestIndex` captured at
@@ -577,8 +583,11 @@ Synthetic close injection and drain:
      For `ACCUMULATING_READS` state, no future exists yet (request not yet dispatched), so
      nothing needs completing.
   2. Clearing the accumulator cache entry for the connection
-  3. Firing `onConnectionClose(REASSIGNED, ...)` → `replayEngine.closeConnection()` → close
-     scheduled on the `OnlineRadixSorter` after all in-flight requests complete
+  3. Firing `onConnectionClose(REASSIGNED, ...)` using the `GenerationalSessionKey` from
+     `partitionToActiveConnections` (NOT from the `Accumulation`) → `replayEngine.closeConnection()`
+     → close scheduled on the `OnlineRadixSorter` after all in-flight requests complete.
+     If no accumulation exists, skip step 1 and still fire `onConnectionClose` using the key
+     from `partitionToActiveConnections`. There is no `sessionNumber=0` fallback.
 
 **Session close callback (universal, not synthetic-close-specific)**:
 - Every `ConnectionReplaySession` is constructed with an `onClose` callback

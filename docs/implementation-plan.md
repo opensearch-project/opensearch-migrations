@@ -34,19 +34,28 @@ counter.
 
 ### Session Identity
 
-The active connections are tracked as `(nodeId, connectionId)` but the pool is keyed by
-`(connectionId, sessionNumber)`. The `sessionNumber` is `Accumulation.startingSourceRequestIndex`
-— it changes each time a connection is reused across keep-alive requests. One
-`(nodeId, connectionId)` maps to exactly one active `(connectionId, sessionNumber)` at any given
-time (the current session). The coordinator registration key is therefore
-`(connectionId, sessionNumber, generation)` — all three captured from the `Accumulation` at the
-time the synthetic close fires in `accept()`.
+The pool is keyed by `(connectionId, sessionNumber)`. The `sessionNumber` is
+`Accumulation.startingSourceRequestIndex` — it changes each time a connection is reused across
+keep-alive requests.
+
+**Authoritative source for session keys**: `partitionToActiveConnections` is changed from
+`Map<partition, Set<ScopedConnectionIdKey>>` to `Map<partition, Set<GenerationalSessionKey>>`
+where `GenerationalSessionKey = (connectionId, sessionNumber, generation)`. This map is
+populated on the main thread in `readNextTrafficStreamSynchronously` where both the
+`sessionNumber` (from the current `Accumulation.startingSourceRequestIndex`) and the
+`generation` (from `ITrafficStreamKey.getSourceGeneration()`) are available. The rebalance
+callbacks read from this map — they never need to touch the `Accumulation` to get the session
+key.
+
+The coordinator registration key is `(connectionId, sessionNumber, generation)` — always read
+from `partitionToActiveConnections`, never derived from the `Accumulation` at close time.
 
 ### Threading Contract
 
 | Operation | Thread | Synchronization |
 |---|---|---|
-| Enqueue synthetic close, increment counter | `kafkaExecutor` (inside `onPartitionsAssigned`) | `computeIfPresent` on Guava cache (thread-safe); `AtomicInteger` |
+| Populate `partitionToActiveConnections` with full `GenerationalSessionKey` | main thread (`readNextTrafficStreamSynchronously`) | `ConcurrentHashMap` + `ConcurrentHashMap.newKeySet()` |
+| Enqueue synthetic close, increment counter | `kafkaExecutor` (inside `onPartitionsAssigned` OR `onPartitionsLost`) | `computeIfPresent` on Guava cache (thread-safe); `AtomicInteger` |
 | `pendingSyntheticCloses.putIfAbsent` | `kafkaExecutor` | `ConcurrentHashMap` |
 | `onClose` callback fires, `remove` + decrement | Netty event loop | `ConcurrentHashMap.remove` (atomic) |
 | `readNextTrafficStreamSynchronously` reads counter | `kafkaExecutor` | `AtomicInteger.get()` |
@@ -58,16 +67,16 @@ time the synthetic close fires in `accept()`.
 In `CapturedTrafficToHttpTransactionAccumulator.accept()`, when handling a
 `SyntheticPartitionReassignmentClose`:
 1. Look up the existing `Accumulation` via `liveStreams.getIfPresent(tsk)`
-2. If accumulation exists: capture `channelInteractionNum = accum.numberOfResets` and
-   `sessionNumber = accum.startingSourceRequestIndex` before any state changes
-3. Call `fireAccumulationsCallbacksAndClose(CLOSED_PREMATURELY)` — completes
-   `finishedAccumulatingResponseFuture` for `ACCUMULATING_WRITES` state; no-op for
-   `ACCUMULATING_READS` (no future exists yet)
-4. Remove the accumulation from `liveStreams`
-5. Fire `onConnectionClose(REASSIGNED, channelInteractionNum, ctx, sessionNumber, ...)`
-6. If no accumulation exists: still fire `onConnectionClose(REASSIGNED, ...)` with
-   `channelInteractionNum=0, sessionNumber=0` — the coordinator will have already registered
-   the session via the cache check (A4), so the close will still drain correctly
+2. If accumulation exists: call `fireAccumulationsCallbacksAndClose(CLOSED_PREMATURELY)` —
+   completes `finishedAccumulatingResponseFuture` for `ACCUMULATING_WRITES` state; no-op for
+   `ACCUMULATING_READS` (no future exists yet). Remove the accumulation from `liveStreams`.
+3. Fire `onConnectionClose(REASSIGNED, ...)` — the `channelInteractionNum` and `sessionNumber`
+   come from the `GenerationalSessionKey` stored in `partitionToActiveConnections`, NOT from
+   the `Accumulation`. This ensures the correct session is targeted even when no accumulation
+   exists.
+4. If no accumulation exists: skip `fireAccumulationsCallbacksAndClose`; still fire
+   `onConnectionClose(REASSIGNED, ...)` using the key from `partitionToActiveConnections`.
+   The session close will still drain correctly via the `onClose` callback.
 
 **A2. `onConnectionClose(REASSIGNED)` must call `replayEngine.closeConnection()`**
 
@@ -89,8 +98,14 @@ In `KafkaTrafficCaptureSource`:
 **A4. Coordinator logic in `TrafficReplayerTopLevel`**
 
 Move synthetic close registration from `KafkaTrafficCaptureSource` to `TrafficReplayerTopLevel`
-(which has access to both the source and `ClientConnectionPool`). For each active connection on
-a truly lost partition:
+(which has access to both the source and `ClientConnectionPool`). The same registration logic
+is called from three paths — all must use it:
+- `onPartitionsAssigned`: for `trulyLost = pendingCleanupPartitions - newPartitions`
+- `onPartitionsAssigned` when `newPartitions.isEmpty()`: all of `pendingCleanupPartitions` are
+  truly lost
+- `onPartitionsLost`: all partitions are truly lost immediately (no deferred diff needed)
+
+For each active connection on a truly lost partition:
 
 ```
 sessionKey = (connectionId, sessionNumber, generation)
@@ -111,13 +126,15 @@ if (registered):
 // else: session already gone — accumulation cleanup happens in accept(), nothing to drain
 ```
 
-**Enqueue criteria:**
-- Accumulation exists, cache session exists → register + enqueue (normal case)
-- Accumulation exists, no cache session → no request was ever dispatched; accumulation cleanup
-  happens synchronously in `accept()`; don't increment counter
-- No accumulation, cache session exists → connection had requests dispatched but accumulation
-  already expired/cleaned up; register + enqueue so the session drains
-- Neither exists → connection fully closed; skip
+**Enqueue criteria** (all decisions use `partitionToActiveConnections` as the key source):
+- Key in `partitionToActiveConnections`, cache session present → register + enqueue (normal case)
+- Key in `partitionToActiveConnections`, no cache session → session already closed; accumulation
+  cleanup happens synchronously in `accept()`; don't increment counter
+- Key NOT in `partitionToActiveConnections` → connection never seen on this partition; skip
+- Neither accumulation nor cache session → connection fully closed; skip
+
+There is no `sessionNumber=0` fallback. If the key is not in `partitionToActiveConnections`,
+the connection is skipped entirely.
 
 **A5. Universal `onClose` callback on `ConnectionReplaySession`**
 
