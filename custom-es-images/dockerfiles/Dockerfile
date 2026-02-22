@@ -1,20 +1,28 @@
 # ============================================================
 # Dockerfile — All ES versions (1.x–8.x) on Amazon Corretto (AL2023)
+# Multi-arch: uses TARGETARCH to download the correct tarball
 # ============================================================
 ARG CORRETTO_VERSION=8
 ARG BASE_IMAGE=amazoncorretto:${CORRETTO_VERSION}-al2023-jre
 ARG ES_VERSION
-ARG TARBALL_FILE
+ARG TARBALL_URL
 
-# --- Stage 1: Extract pre-downloaded tarball (AL2023) ---
+# --- Stage 1: Download and extract tarball (AL2023) ---
 FROM amazonlinux:2023 AS downloader
 ARG ES_VERSION
-ARG TARBALL_FILE
+ARG TARBALL_URL
+ARG TARGETARCH
 
-COPY ${TARBALL_FILE} /tmp/es.tar.gz
-
-RUN dnf install -y tar gzip findutils && dnf clean all && \
+RUN dnf install -y tar gzip findutils curl && dnf clean all && \
+    # Map Docker TARGETARCH (amd64/arm64) to ES arch names (x86_64/aarch64)
+    case "${TARGETARCH}" in \
+      arm64) ES_ARCH="aarch64" ;; \
+      *) ES_ARCH="x86_64" ;; \
+    esac && \
+    RESOLVED_URL=$(echo "${TARBALL_URL}" | sed "s/ARCH/${ES_ARCH}/g") && \
     mkdir -p /opt/elasticsearch && \
+    curl -fSL --retry 5 --retry-delay 5 --retry-max-time 300 --retry-all-errors \
+         -o /tmp/es.tar.gz "${RESOLVED_URL}" && \
     tar -xzf /tmp/es.tar.gz --strip-components=1 -C /opt/elasticsearch && \
     rm /tmp/es.tar.gz && \
     cd /opt/elasticsearch && \
@@ -95,6 +103,7 @@ RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
 FROM ${BASE_IMAGE}
 
 ARG ES_VERSION
+ARG CORRETTO_VERSION
 LABEL org.opencontainers.image.title="custom-elasticsearch" \
       org.opencontainers.image.version="${ES_VERSION}" \
       org.opencontainers.image.description="Custom Elasticsearch ${ES_VERSION} on Amazon Corretto"
@@ -112,6 +121,21 @@ COPY --from=downloader --chown=1000:1000 /opt/elasticsearch ${ES_HOME}
 COPY --from=cgroup-fixer /opt/fix/libcgroup_fix.so* /usr/local/lib/
 COPY --from=config-builder /tmp/scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --from=config-builder /tmp/config/elasticsearch.yml ${ES_HOME}/config/elasticsearch.yml
+
+# Remove JavaFX and its GTK3 dependency tree (x86_64 Corretto 8 only, not present on aarch64)
+RUN if [ "${CORRETTO_VERSION}" = "8" ] && [ "$(uname -m)" = "x86_64" ]; then \
+      rm -f /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/ext/jfxrt.jar \
+            /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/jfxswt.jar \
+            /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/javafx.properties \
+            /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/amd64/libglass*.so \
+            /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/amd64/libprism*.so \
+            /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/amd64/libjavafx*.so \
+            /usr/lib/jvm/java-1.8.0-amazon-corretto/jre/lib/amd64/libdecora_sse.so && \
+      dnf remove -y gtk3 cairo pango mesa-libGL atk harfbuzz && \
+      dnf autoremove -y && \
+      dnf clean all && \
+      rm -rf /var/cache/dnf; \
+    fi
 
 # ES 7+ uses ES_JAVA_HOME — point it to the Corretto JAVA_HOME from base image
 ENV ES_JAVA_HOME=${JAVA_HOME}

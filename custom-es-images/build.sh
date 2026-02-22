@@ -41,6 +41,15 @@ get_corretto_version() {
   fi
 }
 
+get_base_image() {
+  local corretto=$1
+  if [ "$corretto" = "8" ]; then
+    echo "amazoncorretto:${corretto}-al2023-jre"
+  else
+    echo "amazoncorretto:${corretto}-al2023-headless"
+  fi
+}
+
 list_versions() {
   python3 -c "
 import json
@@ -72,11 +81,14 @@ print(f\"{v['version']}|{v['url']}\")")
   es_minor=$(echo "$minor" | cut -d. -f2)
   local corretto
   corretto=$(get_corretto_version "$es_major" "$es_minor")
+  local base_image
+  base_image=$(get_base_image "$corretto")
 
   echo "=== Building ${tag} (Corretto ${corretto}) ==="
 
   docker build \
     --build-arg CORRETTO_VERSION="${corretto}" \
+    --build-arg BASE_IMAGE="${base_image}" \
     --build-arg ES_VERSION="${version}" \
     --build-arg TARBALL_URL="${url}" \
     -f "${SCRIPT_DIR}/dockerfiles/Dockerfile" \

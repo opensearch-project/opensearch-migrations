@@ -13,13 +13,13 @@ Build and test custom Elasticsearch Docker images for **every minor version** fr
 | 7.x   | 7.0–7.17 (18 versions) | Amazon Corretto 11–17 (AL2023) |
 | 8.x   | 8.0–8.19 (20 versions) | Amazon Corretto 21 (AL2023) |
 
-**Total: 67 images** covering all ES minor versions. All versions are built from official Elastic tarballs on Amazon Corretto.
+**Total: 67 images** covering all ES minor versions. All versions are built from official Elastic tarballs on Amazon Corretto. Multi-arch support (x86_64/aarch64) is handled automatically via Docker's `TARGETARCH`.
 
 ## Architecture
 
 A single unified Dockerfile handles all 67 versions:
 
-- **`dockerfiles/Dockerfile`** — Multi-stage build: extracts pre-downloaded tarball, generates version-specific config (network, discovery, security), and runs on Amazon Corretto
+- **`dockerfiles/Dockerfile`** — Multi-stage build: downloads the correct arch-specific tarball via `TARGETARCH`, generates version-specific config (network, discovery, security), and runs on Amazon Corretto
 
 All images are configured for single-node development use with security disabled (ES 8.x).
 
@@ -61,7 +61,7 @@ docker run -d -p 9200:9200 custom-elasticsearch:7.10.2
 
 ## Gradle Integration
 
-The primary build mechanism for CI and on-demand image building is Gradle (`build.gradle`). It handles tarball downloading with caching, per-version Docker builds, and registry push support.
+The primary build mechanism for CI and on-demand image building is Gradle (`build.gradle`). It handles per-version Docker builds and registry push support. Tarballs are downloaded inside the Dockerfile with automatic arch detection.
 
 ```bash
 # Build a specific version
@@ -83,8 +83,8 @@ Images are also built **on-demand** during test execution — if a test needs `c
 
 ```
 custom-es-images/
-├── versions.json              # Version manifest (67 versions, each with version + tarball URL)
-├── build.gradle               # Gradle build (download, build, push tasks per version)
+├── versions.json              # Version manifest (67 versions, each with version + tarball URL template)
+├── build.gradle               # Gradle build (build, push tasks per version)
 ├── build.sh                   # Standalone build script
 ├── test.sh                    # Health check + version verify test
 ├── feature-test.sh            # Comprehensive feature tests (CRUD, bulk, search, snapshots, etc.)
@@ -101,4 +101,4 @@ custom-es-images/
 
 Edit `versions.json` to add or update versions. Each entry specifies:
 - `version`: Full version string (e.g., `"7.10.2"`)
-- `url`: Tarball download URL from `artifacts.elastic.co`
+- `url`: Tarball download URL (7.0+ uses `ARCH` placeholder resolved by Docker's `TARGETARCH`)
