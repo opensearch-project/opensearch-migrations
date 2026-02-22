@@ -159,6 +159,17 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         channelContextManager.releaseContextFor(kafkaCtx.getImmediateEnclosingScope());
     }
 
+    /**
+     * Called by the accumulator when a connection is fully done (closed or expired).
+     * Removes the connection from partitionToActiveConnections so the map doesn't grow unboundedly.
+     */
+    @Override
+    public void onConnectionDone(ITrafficStreamKey trafficStreamKey) {
+        var connKey = new org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey(
+            trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId());
+        partitionToActiveConnections.values().forEach(set -> set.remove(connKey));
+    }
+
     public static KafkaTrafficCaptureSource buildKafkaSource(
         @NonNull RootReplayerContext globalContext,
         @NonNull String brokers,

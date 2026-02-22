@@ -231,15 +231,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             }
         }
 
-        @Override
-        public void onTrafficStreamsExpired(
-            RequestResponsePacketPair.ReconstructionStatus status,
-            @NonNull IReplayContexts.IChannelKeyContext ctx,
-            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
-        ) {
-            commitTrafficStreams(status, trafficStreamKeysBeingHeld);
-        }
-
         @SneakyThrows
         private void commitTrafficStreams(
             RequestResponsePacketPair.ReconstructionStatus status,
@@ -277,12 +268,29 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 commitTrafficStreams(false, trafficStreamKeysBeingHeld);
                 return;
             }
+            notifyConnectionDone(trafficStreamKeysBeingHeld);
             replayEngine.setFirstTimestamp(timestamp);
             var cf = replayEngine.closeConnection(channelInteractionNum, ctx, channelSessionNumber, timestamp);
             cf.map(
                 f -> f.whenComplete((v, t) -> commitTrafficStreams(status, trafficStreamKeysBeingHeld)),
                 () -> "closing the channel in the ReplayEngine"
             );
+        }
+
+        @Override
+        public void onTrafficStreamsExpired(
+            RequestResponsePacketPair.ReconstructionStatus status,
+            @NonNull IReplayContexts.IChannelKeyContext ctx,
+            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+        ) {
+            notifyConnectionDone(trafficStreamKeysBeingHeld);
+            commitTrafficStreams(status, trafficStreamKeysBeingHeld);
+        }
+
+        private void notifyConnectionDone(List<ITrafficStreamKey> keys) {
+            if (keys != null && !keys.isEmpty()) {
+                trafficCaptureSource.onConnectionDone(keys.get(0));
+            }
         }
 
         @Override

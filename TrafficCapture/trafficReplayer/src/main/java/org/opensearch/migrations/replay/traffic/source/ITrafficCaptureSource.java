@@ -25,6 +25,12 @@ public interface ITrafficCaptureSource extends AutoCloseable {
 
     CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException;
 
+    /**
+     * Called when a connection is fully done (closed or expired by the accumulator).
+     * Implementations may use this to clean up per-connection tracking state.
+     */
+    default void onConnectionDone(ITrafficStreamKey trafficStreamKey) {}
+
     default void close() throws Exception {}
 
     /**
