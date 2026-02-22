@@ -25,8 +25,8 @@ Tested one representative version per major series. All tests run single-node wi
 
 ### Key Observations
 
-- **ES 1.x–2.x**: Custom images are **19–41% smaller** due to Amazon Corretto 8 on Alpine vs the legacy Docker Hub base images.
-- **ES 5.x–6.x**: Custom images are **34–44% smaller** — the tarball-on-Alpine approach strips the bundled JDK and uses a minimal base image vs the official CentOS/Ubuntu-based images.
+- **ES 1.x–2.x**: Custom images are **19–41% smaller** due to Amazon Corretto 8 on AL2023 vs the legacy Docker Hub base images.
+- **ES 5.x–6.x**: Custom images are **34–44% smaller** — the tarball-on-AL2023 approach strips the bundled JDK and uses a minimal base image vs the official CentOS/Ubuntu-based images.
 - **ES 7.17**: Custom image is **13% larger** than public. The official 7.17 image uses an optimized CentOS 7 base; our Corretto + full tarball approach adds overhead for this version.
 - **ES 8.x**: Custom images are **29% smaller** — ML native binaries and bundled JDK are stripped.
 - **Startup times** are comparable across custom and public images. The ES 1.7.6 custom outlier (14s vs 6.5s) is likely a cold-start artifact from the single trial.
@@ -63,7 +63,7 @@ Custom images bake all of this in — every version starts with a single `docker
 ### 2. Modern Docker Compatibility
 
 - **ES 1.x–2.x**: Public Docker Hub images (`elasticsearch:1.x/2.x`) use old base images that may have compatibility issues with modern Docker runtimes and cgroups v2.
-- **Custom images**: Built on `amazoncorretto:8-alpine`, fully compatible with modern Docker.
+- **Custom images**: Built on `amazoncorretto:8-al2023-jre`, fully compatible with modern Docker.
 
 ### 3. cgroups v2 Fix for ES 5.1–5.2
 
@@ -95,7 +95,7 @@ Public images do not include health checks.
 | ES 6.8.23 | 610 MB | 919 MB | **34%** |
 | ES 8.19.11 | 944 MB | 1333 MB | **29%** |
 
-Custom images use a multi-stage build with Amazon Corretto on Alpine (1.x–7.x) or AL2023 (8.x), stripping the bundled JDK and ML native binaries. ES 7.17 is an exception where the public image is smaller (624 MB vs 703 MB).
+Custom images use a multi-stage build with Amazon Corretto on AL2023, stripping the bundled JDK and ML native binaries. ES 7.17 is an exception where the public image is smaller (624 MB vs 703 MB).
 
 ### 6. Consistent Interface Across All 67 Versions
 

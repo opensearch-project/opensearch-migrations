@@ -20,11 +20,9 @@ def correttoVersion = { String minor ->
     return '21'
 }
 
-// ES 5.0-5.2 crash with SIGSEGV on Alpine/musl — use glibc-based image
-def needsGlibc = { String minor ->
-    def parts = minor.split('\\.')
-    int maj = parts[0] as int, min = parts[1] as int
-    return maj == 5 && min <= 2
+// Base image: Corretto 8 uses -al2023-jre (no headless variant), others use -al2023-headless
+def baseImage = { String corretto ->
+    return corretto == '8' ? "amazoncorretto:${corretto}-al2023-jre" : "amazoncorretto:${corretto}-al2023-headless"
 }
 
 versions.each { minor, info ->
@@ -65,21 +63,16 @@ versions.each { minor, info ->
         inputs.file('dockerfiles/Dockerfile')
         inputs.property('version', version)
         def corretto = correttoVersion(minor)
-        def useGlibc = needsGlibc(minor)
         def dockerfilePath = file('dockerfiles/Dockerfile').absolutePath
         doFirst {
-            def args = ['docker', 'build',
+            commandLine 'docker', 'build',
                     '--build-arg', "CORRETTO_VERSION=${corretto}",
+                    '--build-arg', "BASE_IMAGE=${baseImage(corretto)}",
                     '--build-arg', "ES_VERSION=${version}",
                     '--build-arg', "TARBALL_FILE=${filename}",
-                    '-f', dockerfilePath]
-            if (useGlibc) {
-                args += ['--build-arg', "BASE_IMAGE=amazoncorretto:${corretto}-al2023",
-                         '--build-arg', 'CGROUP_FIXER_BASE=amazonlinux:2023']
-            }
-            args += ['-t', "${imagePrefix}:${version}",
-                     tarballDir.get().asFile.absolutePath]
-            commandLine args
+                    '-f', dockerfilePath,
+                    '-t', "${imagePrefix}:${version}",
+                    tarballDir.get().asFile.absolutePath
         }
     }
 }
@@ -141,7 +134,6 @@ if (!pushVersionsList.isEmpty()) {
             description = "Build and push ${imagePrefix}:${version} to ${registry.containerUrl}"
             dependsOn "downloadTarball_${safeName}"
             def corretto = correttoVersion(minor)
-            def useGlibc = needsGlibc(minor)
             def dockerfilePath = file('dockerfiles/Dockerfile').absolutePath
             doFirst {
                 def buildArgs = [
@@ -150,16 +142,9 @@ if (!pushVersionsList.isEmpty()) {
                         "--builder ${builder}",
                         "-f ${dockerfilePath}",
                         "--build-arg CORRETTO_VERSION=${corretto}",
+                        "--build-arg BASE_IMAGE=${baseImage(corretto)}",
                         "--build-arg ES_VERSION=${version}",
                         "--build-arg TARBALL_FILE=${filename}",
-                ]
-                if (useGlibc) {
-                    buildArgs += [
-                        "--build-arg BASE_IMAGE=amazoncorretto:${corretto}-al2023",
-                        "--build-arg CGROUP_FIXER_BASE=amazonlinux:2023",
-                    ]
-                }
-                buildArgs += [
                         "-t ${dest}",
                         "--push",
                         "--cache-to=type=registry,ref=${cacheDest},mode=max",

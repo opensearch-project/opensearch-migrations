@@ -1,11 +1,8 @@
 # ============================================================
-# Dockerfile — All ES versions (1.x–8.x) on Amazon Corretto
-# Default: Alpine runtime for minimal size
-# ES 5.0-5.2: glibc runtime (AL2023) to avoid musl SIGSEGV crashes
+# Dockerfile — All ES versions (1.x–8.x) on Amazon Corretto (AL2023)
 # ============================================================
 ARG CORRETTO_VERSION=8
-ARG BASE_IMAGE=amazoncorretto:${CORRETTO_VERSION}-alpine
-ARG CGROUP_FIXER_BASE=alpine:3.18
+ARG BASE_IMAGE=amazoncorretto:${CORRETTO_VERSION}-al2023-jre
 ARG ES_VERSION
 ARG TARBALL_FILE
 
@@ -16,7 +13,7 @@ ARG TARBALL_FILE
 
 COPY ${TARBALL_FILE} /tmp/es.tar.gz
 
-RUN dnf install -y tar gzip findutils && \
+RUN dnf install -y tar gzip findutils && dnf clean all && \
     mkdir -p /opt/elasticsearch && \
     tar -xzf /tmp/es.tar.gz --strip-components=1 -C /opt/elasticsearch && \
     rm /tmp/es.tar.gz && \
@@ -37,22 +34,18 @@ RUN dnf install -y tar gzip findutils && \
     # Remove ingest-geoip data only for 8.x+ (where it's downloaded on demand)
     MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
     if [ "$MAJOR" -ge 8 ]; then rm -rf modules/ingest-geoip/*.mmdb 2>/dev/null; fi && \
-    # Remove Sigar native libs (ES 1.x-2.x) — glibc-compiled, crash on Alpine/musl
+    # Remove Sigar native libs (ES 1.x-2.x)
     rm -rf lib/sigar 2>/dev/null; true
 
-# --- Stage 2: Build cgroups v2 fix for ES 5.1-5.2 (must match runtime libc) ---
-FROM ${CGROUP_FIXER_BASE} AS cgroup-fixer
+# --- Stage 2: Build cgroups v2 fix for ES 5.1-5.2 ---
+FROM amazonlinux:2023 AS cgroup-fixer
 ARG ES_VERSION
 
 RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
     MINOR=$(echo "${ES_VERSION}" | cut -d. -f2) && \
     mkdir -p /opt/fix && \
     if [ "$MAJOR" -eq 5 ] && [ "$MINOR" -le 2 ]; then \
-      if command -v apk >/dev/null 2>&1; then \
-        apk add --no-cache gcc musl-dev; \
-      else \
-        dnf install -y gcc glibc-devel; \
-      fi && \
+      dnf install -y gcc glibc-devel && dnf clean all && \
       printf '#define _GNU_SOURCE\n#include <stdio.h>\n#include <string.h>\n#include <dlfcn.h>\n#include <fcntl.h>\n#include <stdarg.h>\n#include <unistd.h>\nstatic const char *rp="/proc/self/cgroup";\nstatic const char *fp="/tmp/cgroup_filtered";\nstatic const char *fix(const char *p){return (p&&strcmp(p,rp)==0)?fp:p;}\ntypedef int (*open_t)(const char*,int,...);\nint open(const char *p,int f,...){open_t r=(open_t)dlsym(RTLD_NEXT,"open");mode_t m=0;if(f&O_CREAT){va_list a;va_start(a,f);m=va_arg(a,mode_t);va_end(a);}return r(fix(p),f,m);}\nint open64(const char *p,int f,...){open_t r=(open_t)dlsym(RTLD_NEXT,"open64");mode_t m=0;if(f&O_CREAT){va_list a;va_start(a,f);m=va_arg(a,mode_t);va_end(a);}return r(fix(p),f,m);}\nint openat(int d,const char *p,int f,...){typedef int(*fn)(int,const char*,int,...);fn r=(fn)dlsym(RTLD_NEXT,"openat");mode_t m=0;if(f&O_CREAT){va_list a;va_start(a,f);m=va_arg(a,mode_t);va_end(a);}return r(d,fix(p),f,m);}\ntypedef FILE*(*fopen_t)(const char*,const char*);\nFILE*fopen(const char*p,const char*m){fopen_t r=(fopen_t)dlsym(RTLD_NEXT,"fopen");return r(fix(p),m);}\nFILE*fopen64(const char*p,const char*m){fopen_t r=(fopen_t)dlsym(RTLD_NEXT,"fopen64");return r(fix(p),m);}\n' > /tmp/fix.c && \
       gcc -shared -fPIC -o /opt/fix/libcgroup_fix.so /tmp/fix.c -ldl; \
     else \
@@ -110,17 +103,9 @@ ENV ES_HOME=/usr/share/elasticsearch \
     ES_VERSION=${ES_VERSION}
 
 # Install minimal runtime deps — bash for ES scripts, curl for healthcheck
-# gcompat + libstdc++: ES 8.x ships glibc-compiled native libs (libzstd.so, libvec.so)
-# Detect package manager to support both Alpine (apk) and AL2023 (dnf)
-RUN if command -v apk >/dev/null 2>&1; then \
-      apk add --no-cache bash coreutils curl gcompat libstdc++ && \
-      addgroup -g 1000 elasticsearch && \
-      adduser -u 1000 -G elasticsearch -h ${ES_HOME} -D elasticsearch; \
-    else \
-      dnf install -y --allowerasing bash coreutils curl hostname shadow-utils && dnf clean all && \
-      groupadd -g 1000 elasticsearch && \
-      useradd -u 1000 -g elasticsearch -d ${ES_HOME} -M elasticsearch; \
-    fi && \
+RUN dnf install -y --allowerasing bash coreutils curl hostname shadow-utils && dnf clean all && \
+    groupadd -g 1000 elasticsearch && \
+    useradd -u 1000 -g elasticsearch -d ${ES_HOME} -M elasticsearch && \
     mkdir -p /tmp/snapshots && chown 1000:1000 /tmp/snapshots
 
 COPY --from=downloader --chown=1000:1000 /opt/elasticsearch ${ES_HOME}

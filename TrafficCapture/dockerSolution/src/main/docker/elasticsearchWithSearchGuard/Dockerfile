@@ -1,8 +1,8 @@
 FROM custom-elasticsearch:7.10.2
 
-# Custom image runs as user 1000 on Alpine — need root for package install and file ops
+# Custom image runs as user 1000 — need root for package install and file ops
 USER root
-RUN apk add --no-cache bash
+RUN dnf install -y bash && dnf clean all
 
 # Switch to elasticsearch user for plugin installs
 USER 1000
