@@ -4,23 +4,24 @@ Build and test custom Elasticsearch Docker images for **every minor version** fr
 
 ## Versions Covered
 
-| Major | Minor Versions | Install Method |
-|-------|---------------|----------------|
-| 1.x   | 1.0–1.7 (8 versions) | Tarball on JDK 8 |
-| 2.x   | 2.0–2.4 (5 versions) | Tarball on JDK 8 |
-| 5.x   | 5.0–5.6 (7 versions) | Official Docker image |
-| 6.x   | 6.0–6.8 (9 versions) | Official Docker image |
-| 7.x   | 7.0–7.17 (18 versions) | Official Docker image |
-| 8.x   | 8.0–8.19 (20 versions) | Official Docker image |
+| Major | Minor Versions | Base Image |
+|-------|---------------|------------|
+| 1.x   | 1.0–1.7 (8 versions) | Amazon Corretto 8 (Alpine) |
+| 2.x   | 2.0–2.4 (5 versions) | Amazon Corretto 8 (Alpine) |
+| 5.x   | 5.0–5.6 (7 versions) | Amazon Corretto 8 (Alpine; AL2023 for 5.0–5.2) |
+| 6.x   | 6.0–6.8 (9 versions) | Amazon Corretto 8–11 (Alpine) |
+| 7.x   | 7.0–7.17 (18 versions) | Amazon Corretto 11–17 (Alpine) |
+| 8.x   | 8.0–8.19 (20 versions) | Amazon Corretto 21 (Alpine) |
 
-**Total: 67 images** covering all ES minor versions.
+**Total: 67 images** covering all ES minor versions. All versions are built from official Elastic tarballs on Amazon Corretto.
+
+ES 5.0–5.2 use AL2023 (glibc) instead of Alpine (musl) to avoid SIGSEGV crashes in the JVM.
 
 ## Architecture
 
-Two Dockerfiles handle all 67 versions:
+A single unified Dockerfile handles all 67 versions:
 
-- **`Dockerfile.legacy`** (ES 1.x–2.x) — Multi-stage: downloads tarball in Alpine, installs on JDK 8 slim
-- **`Dockerfile.official`** (ES 5.x–8.x) — Multi-stage: prepares version-specific config in Alpine, layers on official Elastic image
+- **`dockerfiles/Dockerfile`** — Multi-stage build: extracts pre-downloaded tarball, generates version-specific config (network, discovery, security), and runs on Amazon Corretto
 
 All images are configured for single-node development use with security disabled (ES 8.x).
 
@@ -53,21 +54,48 @@ make bt-all
 ./test.sh --major 8           # All 8.x
 ./test.sh --all               # Everything
 
+# Feature tests (CRUD, bulk, search, mappings, aliases, snapshots, etc.)
+./feature-test.sh 7.10 7.17
+
 # Run an image
 docker run -d -p 9200:9200 custom-elasticsearch:7.10.2
 ```
+
+## Gradle Integration
+
+The primary build mechanism for CI and on-demand image building is Gradle (`build.gradle`). It handles tarball downloading with caching, per-version Docker builds, and registry push support.
+
+```bash
+# Build a specific version
+./gradlew :custom-es-images:buildImage_7_10
+
+# Build core test images (versions used in integration tests)
+./gradlew :custom-es-images:buildCoreTestImages
+
+# Build all images for a major version
+./gradlew :custom-es-images:buildMajor_7
+
+# Build and push to registry
+./gradlew :custom-es-images:pushImage_7_10 -PpushVersions=7.10 -PregistryEndpoint=localhost:5001
+```
+
+Images are also built **on-demand** during test execution — if a test needs `custom-elasticsearch:7.10.2` and it's not available locally, the test framework automatically invokes the Gradle build task.
 
 ## Project Structure
 
 ```
 custom-es-images/
-├── versions.json              # Version manifest (67 versions)
-├── build.sh                   # Build script
-├── test.sh                    # Test script (health check + version verify)
+├── versions.json              # Version manifest (67 versions, each with version + tarball URL)
+├── build.gradle               # Gradle build (download, build, push tasks per version)
+├── build.sh                   # Standalone build script
+├── test.sh                    # Health check + version verify test
+├── feature-test.sh            # Comprehensive feature tests (CRUD, bulk, search, snapshots, etc.)
+├── benchmark.sh               # Benchmark script (startup, memory, image size)
 ├── Makefile                   # Convenience targets
 ├── dockerfiles/
-│   ├── Dockerfile.legacy      # ES 1.x–2.x (tarball multi-stage)
-│   └── Dockerfile.official    # ES 5.x–8.x (official image multi-stage)
+│   └── Dockerfile             # All ES versions (1.x–8.x, unified multi-stage on Corretto)
+├── BENCHMARK.md               # Benchmark results and benefits summary
+├── .dockerignore
 └── README.md
 ```
 
@@ -75,5 +103,4 @@ custom-es-images/
 
 Edit `versions.json` to add or update versions. Each entry specifies:
 - `version`: Full version string (e.g., `"7.10.2"`)
-- `method`: `"tarball"` or `"official"`
-- `url`: Download URL (tarball method only)
+- `url`: Tarball download URL from `artifacts.elastic.co`

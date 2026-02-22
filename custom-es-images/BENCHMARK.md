@@ -25,8 +25,8 @@ Tested one representative version per major series. All tests run single-node wi
 
 ### Key Observations
 
-- **ES 5.x–8.x**: Custom and public images are identical in size, startup time, and memory. The custom image is a thin config layer on top of the official image — no runtime overhead.
-- **ES 1.x–2.x**: Custom images are **13–39% smaller** due to a modern slim base (`eclipse-temurin:8-jre-jammy`) vs the legacy Docker Hub images. Startup and memory are comparable.
+- **ES 5.x–8.x**: Custom and public images are comparable in size, startup time, and memory. The custom image is a tarball install on Amazon Corretto with pre-baked config — no runtime overhead.
+- **ES 1.x–2.x**: Custom images are **13–39% smaller** due to a modern slim base (`amazoncorretto:8-alpine`) vs the legacy Docker Hub images. Startup and memory are comparable.
 
 ## Benefits of Custom Images
 
@@ -59,7 +59,7 @@ Custom images bake all of this in — every version starts with a single `docker
 ### 2. Modern Docker Compatibility
 
 - **ES 1.x–2.x**: Public Docker Hub images (`elasticsearch:1.x/2.x`) use old base images that may have compatibility issues with modern Docker runtimes and cgroups v2.
-- **Custom images**: Built on `eclipse-temurin:8-jre-jammy` (Ubuntu 22.04 based), fully compatible with modern Docker.
+- **Custom images**: Built on `amazoncorretto:8-alpine`, fully compatible with modern Docker.
 
 ### 3. cgroups v2 Fix for ES 5.1–5.2
 
@@ -88,7 +88,7 @@ Public images do not include health checks.
 | ES 1.7.6 | 287 MB | 330 MB | **13%** |
 | ES 2.4.6 | 279 MB | 457 MB | **39%** |
 
-The custom legacy images use a multi-stage build with a slim JDK 8 runtime, while the public Docker Hub images include a full OS and JDK installation.
+The custom legacy images use a multi-stage build with Amazon Corretto 8 on Alpine, while the public Docker Hub images include a full OS and JDK installation.
 
 ### 6. Consistent Interface Across All 67 Versions
 
