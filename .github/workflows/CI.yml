@@ -124,6 +124,11 @@ jobs:
           skip_validation: true
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
+      - name: List Docker images
+        if: always()
+        run: |
+          echo "Recording Docker images. These include standard images pre-cached by GitHub Actions when Docker is run as root."
+          docker image list --format '{{ if ne .Repository "<none>" }}{{ .Repository }}{{ if ne .Tag "<none>" }}:{{ .Tag }}{{ end }}{{ else }}{{ .ID }}{{ end }}'
 
   generate-test-matrix:
     runs-on: ubuntu-22.04
@@ -210,6 +215,11 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
+      - name: List Docker images
+        if: always()
+        run: |
+          echo "Recording Docker images. These include standard images pre-cached by GitHub Actions when Docker is run as root."
+          docker image list --format '{{ if ne .Repository "<none>" }}{{ .Repository }}{{ if ne .Tag "<none>" }}:{{ .Tag }}{{ end }}{{ else }}{{ .ID }}{{ end }}'
       - name: Show disk usage
         if: always()
         run: |
@@ -239,6 +249,11 @@ jobs:
       - name: Run E2E test script
         run: |
           docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
+      - name: List Docker images
+        if: always()
+        run: |
+          echo "Recording Docker images. These include standard images pre-cached by GitHub Actions when Docker is run as root."
+          docker image list --format '{{ if ne .Repository "<none>" }}{{ .Repository }}{{ if ne .Tag "<none>" }}:{{ .Tag }}{{ end }}{{ else }}{{ .ID }}{{ end }}'
       - name: Show disk usage
         if: always()
         run: |
