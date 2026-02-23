@@ -18,6 +18,7 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import java.io.ByteArrayOutputStream;
 
 /**
  * Tests for synthetic close drain accounting correctness (Plan tests #1, #2, #3, #5).
@@ -152,7 +153,7 @@ class SyntheticCloseAccountingTest extends InstrumentationTest {
                     .setData(ByteString.copyFrom("GET / HTTP/1.1\r\n\r\n", StandardCharsets.UTF_8))
                     .build()).build())
             .build();
-        try (var baos = new java.io.ByteArrayOutputStream()) {
+        try (var baos = new ByteArrayOutputStream()) {
             ts.writeTo(baos);
             mc.addRecord(new ConsumerRecord<>(tp.topic(), tp.partition(), offset, "k", baos.toByteArray()));
         } catch (Exception e) {

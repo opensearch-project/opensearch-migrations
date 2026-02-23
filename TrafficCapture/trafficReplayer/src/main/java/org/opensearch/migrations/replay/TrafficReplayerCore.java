@@ -35,6 +35,7 @@ import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import java.time.Duration;
 
 @Slf4j
 public abstract class TrafficReplayerCore extends RequestTransformerAndSender<TransformedTargetRequestAndResponseList> {
@@ -98,7 +99,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         private Consumer<SourceTargetCaptureTuple> resultTupleConsumer;
         private ITrafficCaptureSource trafficCaptureSource;
         /** How long to delay the first request on a handoff connection. Configurable via CLI. */
-        private final java.time.Duration quiescentDuration;
+        private final Duration quiescentDuration;
 
         @Override
         public Consumer<RequestResponsePacketPair> onRequestReceived(
@@ -106,7 +107,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             @NonNull HttpMessageAndTimestamp request,
             boolean isHandoffConnection
         ) {
-            var quiescentUntil = isHandoffConnection ? java.time.Instant.now().plus(quiescentDuration) : null;
+            var quiescentUntil = isHandoffConnection ? Instant.now().plus(quiescentDuration) : null;
             if (quiescentUntil != null) {
                 log.atInfo().setMessage("Applying quiescent delay until {} for handoff connection {}")
                     .addArgument(quiescentUntil).addArgument(ctx).log();
@@ -155,7 +156,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             HttpMessageAndTimestamp request,
             UniqueReplayerRequestKey requestKey,
             TextTrackedFuture<RequestResponsePacketPair> finishedAccumulatingResponseFuture,
-            java.time.Instant quiescentUntil) {
+            Instant quiescentUntil) {
             var workDequeuedByLimiterFuture = new TextTrackedFuture<TrafficStreamLimiter.WorkItem>(
                 () -> "waiting for " + ctx + " to be queued and run through TrafficStreamLimiter"
             );
@@ -350,7 +351,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         HttpMessageAndTimestamp request,
         TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
         IReplayContexts.IReplayerHttpTransactionContext ctx,
-        java.time.Instant quiescentUntil
+        Instant quiescentUntil
     ) {
         return transformAndSendRequest(
             inputRequestTransformerFactory,

@@ -19,6 +19,8 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import java.io.ByteArrayOutputStream;
+import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
 /**
  * Unit tests for quiescent period tagging on handoff connections.
@@ -47,12 +49,12 @@ class QuiescentConnectionTest extends InstrumentationTest {
                     .setNodeId("node1").setConnectionId("handoff-conn").setNumberOfThisLastChunk(0)
                     .addSubStream(TrafficObservation.newBuilder()
                         .setTs(Timestamp.newBuilder().setSeconds(1).build())
-                        .setWrite(org.opensearch.migrations.trafficcapture.protos.WriteObservation.newBuilder()
+                        .setWrite(WriteObservation.newBuilder()
                             .setData(ByteString.copyFromUtf8("HTTP/1.1 200 OK\r\n\r\n"))
                             .build())
                         .build())
                     .build();
-                try (var baos = new java.io.ByteArrayOutputStream()) {
+                try (var baos = new ByteArrayOutputStream()) {
                     ts.writeTo(baos);
                     mc.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, "k", baos.toByteArray()));
                 } catch (Exception e) { throw new RuntimeException(e); }
@@ -91,7 +93,7 @@ class QuiescentConnectionTest extends InstrumentationTest {
                             .build())
                         .build())
                     .build();
-                try (var baos = new java.io.ByteArrayOutputStream()) {
+                try (var baos = new ByteArrayOutputStream()) {
                     ts.writeTo(baos);
                     mc.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, "k", baos.toByteArray()));
                 } catch (Exception e) { throw new RuntimeException(e); }

@@ -37,6 +37,10 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.slf4j.event.Level;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * This is a wrapper around Kafka's Consumer class that provides tracking of partitions
@@ -111,9 +115,9 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     private final AtomicInteger kafkaRecordsLeftToCommitEventually;
     private final AtomicBoolean kafkaRecordsReadyToCommit;
     /** Partitions revoked but not yet confirmed lost — cleared in onPartitionsAssigned. */
-    private final java.util.Set<Integer> pendingCleanupPartitions = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+    private final Set<Integer> pendingCleanupPartitions = Collections.newSetFromMap(new ConcurrentHashMap<>());
     /** Called with truly lost partition numbers after onPartitionsAssigned confirms they didn't come back. */
-    private java.util.function.Consumer<java.util.Collection<Integer>> onPartitionsTrulyLostCallback = ignored -> {};
+    private java.util.function.Consumer<Collection<Integer>> onPartitionsTrulyLostCallback = ignored -> {};
 
     public TrackingKafkaConsumer(
         @NonNull RootReplayerContext globalContext,
@@ -142,7 +146,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         return consumerConnectionGeneration.get();
     }
 
-    public void setOnPartitionsTrulyLostCallback(java.util.function.Consumer<java.util.Collection<Integer>> callback) {
+    public void setOnPartitionsTrulyLostCallback(java.util.function.Consumer<Collection<Integer>> callback) {
         this.onPartitionsTrulyLostCallback = callback;
     }
 
@@ -153,7 +157,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
         // Partitions lost due to timeout/fence — commits are impossible, skip safeCommit
         new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsRevoked(partitions);
-        var lostPartitionNums = new java.util.ArrayList<Integer>();
+        var lostPartitionNums = new ArrayList<Integer>();
         synchronized (commitDataLock) {
             partitions.forEach(p -> {
                 var tp = new TopicPartition(topic, p.partition());
@@ -212,7 +216,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         if (newPartitions.isEmpty() && !pendingCleanupPartitions.isEmpty()) {
             log.atInfo().setMessage("{} assigned no new partitions; flushing {} pending cleanup partitions as truly lost.")
                 .addArgument(this).addArgument(pendingCleanupPartitions::size).log();
-            var trulyLost = new java.util.ArrayList<>(pendingCleanupPartitions);
+            var trulyLost = new ArrayList<>(pendingCleanupPartitions);
             pendingCleanupPartitions.clear();
             onPartitionsTrulyLostCallback.accept(trulyLost);
             return;

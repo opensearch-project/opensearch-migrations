@@ -24,6 +24,7 @@ import lombok.EqualsAndHashCode;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import java.util.function.Consumer;
 
 @Slf4j
 public class ClientConnectionPool {
@@ -33,7 +34,7 @@ public class ClientConnectionPool {
     private final NioEventLoopGroup eventLoopGroup;
     private final LoadingCache<Key, ConnectionReplaySession> connectionId2ChannelCache;
     /** Called when any session's channel is closed. Default no-op; set by coordinator. */
-    private java.util.function.Consumer<ConnectionReplaySession> globalOnSessionClose = session -> {};
+    private Consumer<ConnectionReplaySession> globalOnSessionClose = session -> {};
 
     @EqualsAndHashCode
     @AllArgsConstructor
@@ -66,7 +67,7 @@ public class ClientConnectionPool {
         return eventLoopGroup.next().scheduleAtFixedRate(runnable, initialDelay, delay, timeUnit);
     }
 
-    public void setGlobalOnSessionClose(java.util.function.Consumer<ConnectionReplaySession> callback) {
+    public void setGlobalOnSessionClose(Consumer<ConnectionReplaySession> callback) {
         this.globalOnSessionClose = callback;
     }
 

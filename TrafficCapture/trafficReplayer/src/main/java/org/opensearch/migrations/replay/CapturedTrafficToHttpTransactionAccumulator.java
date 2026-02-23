@@ -21,6 +21,7 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.replay.kafka.SyntheticPartitionReassignmentClose;
 
 /**
  * This class consumes TrafficObservation objects, which will be predominated by reads and writes that
@@ -191,7 +192,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     public void accept(ITrafficStreamWithKey trafficStreamAndKey) {
         // Synthetic close from partition reassignment
-        if (trafficStreamAndKey instanceof org.opensearch.migrations.replay.kafka.SyntheticPartitionReassignmentClose) {
+        if (trafficStreamAndKey instanceof SyntheticPartitionReassignmentClose) {
             var tsk = trafficStreamAndKey.getKey();
             var partitionId = tsk.getNodeId();
             var connectionId = tsk.getConnectionId();

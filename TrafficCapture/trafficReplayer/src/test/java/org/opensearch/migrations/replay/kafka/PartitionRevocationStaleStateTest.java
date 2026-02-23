@@ -27,6 +27,8 @@ import com.google.protobuf.Timestamp;
 import lombok.NonNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Verifies that stale per-connection state (ChannelContextManager and
@@ -217,7 +219,7 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
             .setNumberOfThisLastChunk(0)
             .build();
         return new TrafficStreamKeyWithKafkaRecordId(
-            k -> new org.opensearch.migrations.replay.tracing.ReplayContexts.KafkaRecordContext(
+            k -> new ReplayContexts.KafkaRecordContext(
                 rootContext,
                 new ChannelContextManager(rootContext).retainOrCreateContext(k),
                 "",
@@ -238,7 +240,7 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
             .setNumberOfThisLastChunk(0)
             .build();
         return new TrafficStreamKeyWithKafkaRecordId(
-            k -> new org.opensearch.migrations.replay.tracing.ReplayContexts.KafkaRecordContext(
+            k -> new ReplayContexts.KafkaRecordContext(
                 rootContext,
                 new ChannelContextManager(rootContext).retainOrCreateContext(k),
                 "",
@@ -279,11 +281,11 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
      */
     @Test
     void accumulatorHandlesSyntheticClose() {
-        var capturedStatus = new java.util.concurrent.atomic.AtomicReference<RequestResponsePacketPair.ReconstructionStatus>();
+        var capturedStatus = new AtomicReference<RequestResponsePacketPair.ReconstructionStatus>();
         var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
             Duration.ofSeconds(30), null, new AccumulationCallbacks() {
                 @Override
-                public java.util.function.Consumer<RequestResponsePacketPair> onRequestReceived(
+                public Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                     @NonNull HttpMessageAndTimestamp request,
                     boolean isHandoffConnection

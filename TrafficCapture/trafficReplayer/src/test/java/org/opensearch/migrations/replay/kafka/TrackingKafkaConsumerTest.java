@@ -14,6 +14,9 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import java.time.Clock;
+import java.util.Map;
+import java.util.ArrayList;
 
 /**
  * Unit tests for TrackingKafkaConsumer rebalance callbacks.
@@ -33,7 +36,7 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
 
     private TrackingKafkaConsumer buildConsumer(MockConsumer<String, byte[]> mc) {
         return new TrackingKafkaConsumer(
-            rootContext, mc, TOPIC, Duration.ofSeconds(30), java.time.Clock.systemUTC(), tsk -> {}
+            rootContext, mc, TOPIC, Duration.ofSeconds(30), Clock.systemUTC(), tsk -> {}
         );
     }
 
@@ -54,7 +57,7 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
         var commitAttempted = new AtomicBoolean(false);
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST) {
             @Override
-            public synchronized void commitSync(java.util.Map<TopicPartition, org.apache.kafka.clients.consumer.OffsetAndMetadata> offsets) {
+            public synchronized void commitSync(Map<TopicPartition, org.apache.kafka.clients.consumer.OffsetAndMetadata> offsets) {
                 commitAttempted.set(true);
                 // Simulate a fenced consumer — commit is rejected
                 throw new org.apache.kafka.common.errors.FencedInstanceIdException("fenced");
@@ -113,7 +116,7 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
 
         consumer.onPartitionsAssigned(List.of(tp));
 
-        var trulyLostPartitions = new java.util.ArrayList<Integer>();
+        var trulyLostPartitions = new ArrayList<Integer>();
         consumer.setOnPartitionsTrulyLostCallback(trulyLostPartitions::addAll);
 
         consumer.onPartitionsLost(List.of(tp));
@@ -139,7 +142,7 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
 
         consumer.onPartitionsAssigned(List.of(tp));
 
-        var trulyLostPartitions = new java.util.ArrayList<Integer>();
+        var trulyLostPartitions = new ArrayList<Integer>();
         consumer.setOnPartitionsTrulyLostCallback(trulyLostPartitions::addAll);
 
         // Revoke partition 0 — records it in pendingCleanupPartitions

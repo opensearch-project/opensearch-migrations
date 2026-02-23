@@ -6,16 +6,23 @@ import java.io.InputStream;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -26,8 +33,10 @@ import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -78,21 +87,18 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     private final KafkaBehavioralPolicy behavioralPolicy;
     private final ChannelContextManager channelContextManager;
     private final AtomicBoolean isClosed;
-    /** Active connections per Kafka partition. Populated as records are consumed; cleared on synthetic close flush. */
-    final java.util.concurrent.ConcurrentHashMap<Integer, java.util.Set<org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey>>
-        partitionToActiveConnections = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Active connections per Kafka partition. Populated as records are consumed; entries removed when connections close or expire. */
+    final ConcurrentHashMap<Integer, Set<ScopedConnectionIdKey>> partitionToActiveConnections =
+        new ConcurrentHashMap<>();
     /** Synthetic close events to drain before returning real Kafka records. */
-    private final java.util.Queue<SyntheticPartitionReassignmentClose> syntheticCloseQueue =
-        new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private final Queue<SyntheticPartitionReassignmentClose> syntheticCloseQueue = new ConcurrentLinkedQueue<>();
     /** Counter of synthetic closes registered but not yet confirmed closed. */
-    final java.util.concurrent.atomic.AtomicInteger outstandingSyntheticCloseSessions =
-        new java.util.concurrent.atomic.AtomicInteger(0);
+    final AtomicInteger outstandingSyntheticCloseSessions = new AtomicInteger(0);
     /**
      * Registered synthetic closes keyed by (connectionId, sessionNumber, generation).
      * The first onSessionClosed call for a given key decrements the counter.
      */
-    final java.util.concurrent.ConcurrentHashMap<String, Boolean> pendingSyntheticCloses =
-        new java.util.concurrent.ConcurrentHashMap<>();
+    final ConcurrentHashMap<String, Boolean> pendingSyntheticCloses = new ConcurrentHashMap<>();
 
     public KafkaTrafficCaptureSource(
         @NonNull RootReplayerContext globalContext,
@@ -129,12 +135,12 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         trackingKafkaConsumer.setOnPartitionsTrulyLostCallback(this::enqueueSyntheticClosesForPartitions);
     }
 
-    private void enqueueSyntheticClosesForPartitions(java.util.Collection<Integer> lostPartitions) {
+    private void enqueueSyntheticClosesForPartitions(Collection<Integer> lostPartitions) {
         for (int partition : lostPartitions) {
             var active = partitionToActiveConnections.remove(partition);
             if (active == null) continue;
             for (var connKey : active) {
-                var ts = org.opensearch.migrations.trafficcapture.protos.TrafficStream.newBuilder()
+                var ts = TrafficStream.newBuilder()
                     .setNodeId(connKey.nodeId).setConnectionId(connKey.connectionId)
                     .setNumberOfThisLastChunk(0).build();
                 var key = new TrafficStreamKeyWithKafkaRecordId(tsk -> {
@@ -187,8 +193,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
      */
     @Override
     public void onConnectionDone(ITrafficStreamKey trafficStreamKey) {
-        var connKey = new org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey(
-            trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId());
+        var connKey = new ScopedConnectionIdKey(trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId());
         partitionToActiveConnections.values().forEach(set -> set.remove(connKey));
     }
 
@@ -298,7 +303,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         log.atTrace().setMessage("readNextTrafficStreamSynchronously()").log();
         // Drain synthetic closes before returning real Kafka records
         if (!syntheticCloseQueue.isEmpty()) {
-            var closes = new java.util.ArrayList<ITrafficStreamWithKey>();
+            var closes = new ArrayList<ITrafficStreamWithKey>();
             SyntheticPartitionReassignmentClose close;
             while ((close = syntheticCloseQueue.poll()) != null) {
                 closes.add(close);
@@ -310,7 +315,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         if (outstandingSyntheticCloseSessions.get() > 0) {
             log.atDebug().setMessage("Returning empty batch: {} synthetic close sessions still outstanding")
                 .addArgument(outstandingSyntheticCloseSessions::get).log();
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
         try {
             return trackingKafkaConsumer.getNextBatchOfRecords(context, (offsetData, kafkaRecord) -> {
@@ -332,17 +337,17 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                             );
                     }, ts, offsetData);
                     // Track active connections per partition for synthetic close injection
-                    var connKey = new org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey(
+                    var connKey = new ScopedConnectionIdKey(
                         ts.getNodeId(), ts.getConnectionId());
                     var activeSet = partitionToActiveConnections
                         .computeIfAbsent(offsetData.getPartition(),
-                            p -> java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>()));
+                            p -> Collections.newSetFromMap(new ConcurrentHashMap<>()));
                     boolean isNewConnection = activeSet.add(connKey);
                     // Handoff: first time we see this connection on this partition AND no READ observation
                     // (another replayer was mid-connection). Continuation streams for known connections are not handoffs.
                     boolean startsWithRead = ts.getSubStreamList().stream()
                         .findFirst()
-                        .map(org.opensearch.migrations.trafficcapture.protos.TrafficObservation::hasRead)
+                        .map(TrafficObservation::hasRead)
                         .orElse(false);
                     final boolean handoff = isNewConnection && !startsWithRead;
                     return (ITrafficStreamWithKey) new PojoTrafficStreamAndKey(ts, key) {

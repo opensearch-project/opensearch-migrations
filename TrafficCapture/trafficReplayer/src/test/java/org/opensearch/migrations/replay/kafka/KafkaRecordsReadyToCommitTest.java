@@ -20,6 +20,8 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static org.mockito.Mockito.mock;
+import org.opensearch.migrations.replay.kafka.KafkaCommitOffsetData;
+import java.util.Map;
 
 /**
  * Verifies that TrackingKafkaConsumer.kafkaRecordsReadyToCommit is set to true when
@@ -47,7 +49,7 @@ public class KafkaRecordsReadyToCommitTest extends InstrumentationTest {
     private Object getOffsetTracker(TrackingKafkaConsumer consumer, int partition) {
         Field f = TrackingKafkaConsumer.class.getDeclaredField("partitionToOffsetLifecycleTrackerMap");
         f.setAccessible(true);
-        var map = (java.util.Map<Integer, ?>) f.get(consumer);
+        var map = (Map<Integer, ?>) f.get(consumer);
         return map.get(partition);
     }
 
@@ -63,7 +65,7 @@ public class KafkaRecordsReadyToCommitTest extends InstrumentationTest {
                                       PojoKafkaCommitOffsetData offsetData) {
         Method m = TrackingKafkaConsumer.class.getDeclaredMethod("commitKafkaKey",
             ITrafficStreamKey.class,
-            org.opensearch.migrations.replay.kafka.KafkaCommitOffsetData.class);
+            KafkaCommitOffsetData.class);
         m.setAccessible(true);
         return m.invoke(consumer, streamKey, offsetData);
     }

@@ -45,6 +45,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.ConfluentKafkaContainer;
+import java.util.Arrays;
 
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
@@ -119,10 +120,10 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
                 TestContext.noOtelTracking(),
                 seeds.stream().mapToInt(i -> i)
             ).toArray(ExhaustiveTrafficStreamGenerator.RandomTrafficStreamAndTransactionSizes[]::new);
-            var trafficStreams = java.util.Arrays.stream(generatedCases)
-                .flatMap(c -> java.util.Arrays.stream(c.trafficStreams))
+            var trafficStreams = Arrays.stream(generatedCases)
+                .flatMap(c -> Arrays.stream(c.trafficStreams))
                 .collect(Collectors.toList());
-            int numExpected = java.util.Arrays.stream(generatedCases)
+            int numExpected = Arrays.stream(generatedCases)
                 .mapToInt(c -> c.requestByteSizes.length).sum();
 
             loadStreamsToKafka(buildKafkaConsumer(),

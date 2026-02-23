@@ -28,6 +28,11 @@ import com.google.protobuf.Timestamp;
 import lombok.NonNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import java.io.ByteArrayOutputStream;
+import java.util.Collections;
+import java.util.HashMap;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
+import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 
 /**
  * Phase A failing tests for synthetic close wiring.
@@ -115,7 +120,7 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
                     .build()).build())
             .addSubStream(TrafficObservation.newBuilder().setTs(ts)
                 .setEndOfMessageIndicator(
-                    org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication.newBuilder()
+                    EndOfMessageIndication.newBuilder()
                         .setFirstLineByteLength(16).setHeadersByteLength(12).build())
                 .build())
             .build();
@@ -230,14 +235,14 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
         var mc = new org.apache.kafka.clients.consumer.MockConsumer<String, byte[]>(
             org.apache.kafka.clients.consumer.OffsetResetStrategy.EARLIEST);
         var tp = new org.apache.kafka.common.TopicPartition("test", 0);
-        mc.updateBeginningOffsets(new java.util.HashMap<>(java.util.Collections.singletonMap(tp, 0L)));
+        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, "test", Duration.ofHours(1))) {
             // Simulate counter > 0
             source.outstandingSyntheticCloseSessions.set(1);
 
             mc.schedulePollTask(() -> {
-                mc.rebalance(java.util.Collections.singletonList(tp));
+                mc.rebalance(Collections.singletonList(tp));
                 // Add a real record
                 var ts = TrafficStream.newBuilder()
                     .setNodeId("n").setConnectionId("c").setNumberOfThisLastChunk(0)
@@ -247,7 +252,7 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
                             .setData(ByteString.copyFrom("GET / HTTP/1.1\r\n\r\n", StandardCharsets.UTF_8))
                             .build()).build())
                     .build();
-                try (var baos = new java.io.ByteArrayOutputStream()) {
+                try (var baos = new ByteArrayOutputStream()) {
                     ts.writeTo(baos);
                     mc.addRecord(new org.apache.kafka.clients.consumer.ConsumerRecord<>(
                         "test", 0, 0, "k", baos.toByteArray()));
@@ -267,7 +272,7 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
         var ts = TrafficStream.newBuilder()
             .setNodeId(nodeId).setConnectionId(connectionId).setNumberOfThisLastChunk(0).build();
         return new TrafficStreamKeyWithKafkaRecordId(
-            k -> new org.opensearch.migrations.replay.tracing.ReplayContexts.KafkaRecordContext(
+            k -> new ReplayContexts.KafkaRecordContext(
                 rootContext,
                 new ChannelContextManager(rootContext).retainOrCreateContext(k),
                 "", 1
