@@ -8,10 +8,6 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import org.opensearch.migrations.replay.AccumulationCallbacks;
-import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
-import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
-import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;

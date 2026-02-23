@@ -4,8 +4,6 @@ import java.net.URI;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.opensearch.migrations.replay.AggregatedRawResponse;
-import org.opensearch.migrations.replay.TrafficReplayerCore;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;

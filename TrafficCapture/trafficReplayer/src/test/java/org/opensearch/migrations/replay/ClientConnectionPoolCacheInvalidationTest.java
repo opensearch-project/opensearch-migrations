@@ -4,8 +4,6 @@ import java.lang.reflect.Field;
 import java.time.Duration;
 import java.time.Instant;
 
-import org.opensearch.migrations.replay.ClientConnectionPool;
-import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 

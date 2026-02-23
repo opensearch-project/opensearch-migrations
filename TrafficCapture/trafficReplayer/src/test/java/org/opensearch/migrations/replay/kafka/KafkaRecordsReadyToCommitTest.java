@@ -9,8 +9,6 @@ import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.kafka.PojoKafkaCommitOffsetData;
-import org.opensearch.migrations.replay.kafka.TrackingKafkaConsumer;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
 import lombok.SneakyThrows;
