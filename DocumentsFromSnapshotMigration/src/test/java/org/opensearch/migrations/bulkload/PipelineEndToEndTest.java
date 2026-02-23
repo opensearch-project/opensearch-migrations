@@ -4,6 +4,7 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
@@ -26,6 +27,7 @@ import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -43,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * to validate the complete pipeline wiring end-to-end.
  */
 @Slf4j
+@Timeout(value = 10, unit = TimeUnit.MINUTES)
 public class PipelineEndToEndTest {
 
     private static final String SNAPSHOT_NAME = "test_snapshot";
