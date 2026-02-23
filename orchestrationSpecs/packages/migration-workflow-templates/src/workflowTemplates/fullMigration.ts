@@ -84,7 +84,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["sh", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
             .addArgs(["echo runReplayerForTarget"])))
 
 

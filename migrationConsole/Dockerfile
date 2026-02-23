@@ -87,8 +87,7 @@ RUN dnf install -y  \
         nodejs22-npm \
         bash-completion \
         && \
-        dnf clean all && \
-        rm -rf /var/cache/dnf
+        dnf clean all
 
 COPY setupVimSchemaChecker.sh /tmp/setupVimSchemaChecker.sh
 RUN chmod +x /tmp/setupVimSchemaChecker.sh && \

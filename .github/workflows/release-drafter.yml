@@ -211,4 +211,6 @@ jobs:
             opensearch-migrations-build.tar.gz
             kiro-cli/build/kiro-assistant.tar.gz
             migration-assistant-${{ steps.get_data.outputs.version }}.tgz
+            deployment/k8s/aws/aws-bootstrap.sh
+            deployment/k8s/dashboards/*.json
             **/*.spdx.json

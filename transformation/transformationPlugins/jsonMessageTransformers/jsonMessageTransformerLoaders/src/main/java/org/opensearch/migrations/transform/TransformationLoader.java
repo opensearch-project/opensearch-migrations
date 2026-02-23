@@ -55,7 +55,7 @@ public class TransformationLoader {
         throws JsonProcessingException {
         var configList = fullConfig == null ? List.of() : parseFullConfig(fullConfig);
         if (configList.isEmpty() || providers.isEmpty()) {
-            log.warn("No transformer configuration specified.  No custom transformations will be performed");
+            log.info("No transformer configuration specified.  No custom transformations will be performed");
             return Stream.of();
         } else {
             return configList.stream().map(c -> configureTransformerFromConfig((Map<String, Object>) c));
@@ -64,7 +64,7 @@ public class TransformationLoader {
 
     public Stream<IJsonTransformer> getTransformerFactoryFromServiceLoaderParsed(List<Object> configList) {
         if (configList.isEmpty() || providers.isEmpty()) {
-            log.warn("No transformer configuration specified.  No custom transformations will be performed");
+            log.info("No transformer configuration specified.  No custom transformations will be performed");
             return Stream.of();
         } else {
             return configList.stream().map(c -> configureTransformerFromConfig((Map<String, Object>) c));
