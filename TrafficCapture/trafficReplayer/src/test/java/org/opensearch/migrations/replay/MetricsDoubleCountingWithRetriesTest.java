@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.bugfixes;
+package org.opensearch.migrations.replay;
 
 import java.net.URI;
 import java.util.concurrent.CompletableFuture;
