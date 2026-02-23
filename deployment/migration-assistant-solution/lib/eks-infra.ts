@@ -70,7 +70,7 @@ export class EKSInfra extends Construct {
 
         this.cluster = new eks.Cluster(this, 'MigrationsEKSCluster', {
             clusterName: props.clusterName,
-            version: eks.KubernetesVersion.V1_34,
+            version: eks.KubernetesVersion.of('1.35'),
             vpc: props.vpc,
             vpcSubnets,
         });
