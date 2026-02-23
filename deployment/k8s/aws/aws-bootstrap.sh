@@ -324,13 +324,14 @@ if [[ "$deploy_import_vpc" == "true" && -n "$subnet_ids" && "$ignore_checks" != 
   done
   if [[ "$has_internet" == "false" ]]; then
     echo "  Subnets are isolated (no NAT/IGW routes)."
-    if [[ "$build_images" != "true" && "$push_images_to_ecr" != "true" ]]; then
+    if [[ "$push_images_to_ecr" != "true" ]]; then
       echo "" >&2
-      echo "Error: --build-images or --push-all-images-to-private-ecr is required when using isolated subnets (no NAT/IGW)." >&2
-      echo "  public.ecr.aws has no VPC endpoint — public images cannot be pulled." >&2
-      echo "  Use --push-all-images-to-private-ecr to mirror public images to private ECR," >&2
-      echo "  or --build-images to build from source and push to private ECR." >&2
-      echo "  Or use --ignore-checks to skip this check." >&2
+      echo "Error: --push-all-images-to-private-ecr is required when using isolated subnets (no NAT/IGW)." >&2
+      echo "  Images cannot be pulled from ECR registries, including, but not limited to ECR, docker.io, quay.io, etc)." >&2
+      echo "  Use --push-all-images-to-private-ecr to mirror public images to private ECR." >&2
+      echo "  Using --build-images will push those migrations images to the private ECR, " >&2
+      echo "  but additional images are required to run the solution." >&2
+      echo "  Use --ignore-checks to skip this check." >&2
       exit 1
     fi
     echo "  Subnets are isolated — --build-images is set, will use private ECR. ✅"
