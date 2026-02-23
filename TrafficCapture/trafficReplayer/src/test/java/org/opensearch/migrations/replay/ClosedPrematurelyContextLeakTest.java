@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.bugfixes;
+package org.opensearch.migrations.replay;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;

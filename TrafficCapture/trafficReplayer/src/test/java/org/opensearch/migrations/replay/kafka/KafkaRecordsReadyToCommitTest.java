@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.bugfixes;
+package org.opensearch.migrations.replay.kafka;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
