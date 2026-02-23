@@ -93,8 +93,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
      */
     final java.util.concurrent.ConcurrentHashMap<String, Boolean> pendingSyntheticCloses =
         new java.util.concurrent.ConcurrentHashMap<>();
-    /** How long to delay the first request on a handoff connection (configurable). */
-    private final java.time.Duration quiescentDuration;
 
     public KafkaTrafficCaptureSource(
         @NonNull RootReplayerContext globalContext,
@@ -124,7 +122,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         );
         trafficStreamsRead = new AtomicLong();
         this.behavioralPolicy = behavioralPolicy;
-        this.quiescentDuration = java.time.Duration.ofSeconds(5); // default; TODO: make configurable
         kafkaConsumer.subscribe(Collections.singleton(topic), trackingKafkaConsumer);
         kafkaExecutor = Executors.newSingleThreadExecutor(new DefaultThreadFactory("kafkaConsumerThread"));
         isClosed = new AtomicBoolean(false);
@@ -347,11 +344,10 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                         .findFirst()
                         .map(org.opensearch.migrations.trafficcapture.protos.TrafficObservation::hasRead)
                         .orElse(false);
-                    final java.time.Instant quiescentUntil = (isNewConnection && !startsWithRead)
-                        ? java.time.Instant.now().plus(quiescentDuration) : null;
+                    final boolean handoff = isNewConnection && !startsWithRead;
                     return (ITrafficStreamWithKey) new PojoTrafficStreamAndKey(ts, key) {
                         @Override
-                        public java.time.Instant getQuiescentUntil() { return quiescentUntil; }
+                        public boolean isHandoffConnection() { return handoff; }
                     };
                 } catch (InvalidProtocolBufferException e) {
                     // Assume the behavioralPolicy instance does any logging that the host may be interested in

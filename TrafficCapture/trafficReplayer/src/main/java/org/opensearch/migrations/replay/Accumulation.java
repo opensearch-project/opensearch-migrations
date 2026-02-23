@@ -49,8 +49,8 @@ public class Accumulation {
     int startingSourceRequestIndex;
     private boolean hasBeenExpired;
     final int sourceGeneration;
-    /** Wall-clock instant before which the first request must not be sent. Null = no delay. */
-    final java.time.Instant quiescentUntil;
+    /** True when this connection was mid-flight during a partition reassignment (handoff). */
+    final boolean isHandoffConnection;
 
     public Accumulation(ITrafficStreamKey key, TrafficStream ts) {
         this(
@@ -58,22 +58,22 @@ public class Accumulation {
             ts.getPriorRequestsReceived() + (ts.hasLastObservationWasUnterminatedRead() ? 1 : 0),
             ts.getLastObservationWasUnterminatedRead(),
             key.getSourceGeneration(),
-            null
+            false
         );
     }
 
-    public Accumulation(ITrafficStreamKey key, TrafficStream ts, java.time.Instant quiescentUntil) {
+    public Accumulation(ITrafficStreamKey key, TrafficStream ts, boolean isHandoffConnection) {
         this(
             key,
             ts.getPriorRequestsReceived() + (ts.hasLastObservationWasUnterminatedRead() ? 1 : 0),
             ts.getLastObservationWasUnterminatedRead(),
             key.getSourceGeneration(),
-            quiescentUntil
+            isHandoffConnection
         );
     }
 
     public Accumulation(@NonNull ITrafficStreamKey trafficChannelKey, int startingSourceRequestIndex) {
-        this(trafficChannelKey, startingSourceRequestIndex, false, 0, null);
+        this(trafficChannelKey, startingSourceRequestIndex, false, 0, false);
     }
 
     public Accumulation(
@@ -81,7 +81,7 @@ public class Accumulation {
         int startingSourceRequestIndex,
         boolean dropObservationsLeftoverFromPrevious
     ) {
-        this(trafficChannelKey, startingSourceRequestIndex, dropObservationsLeftoverFromPrevious, 0, null);
+        this(trafficChannelKey, startingSourceRequestIndex, dropObservationsLeftoverFromPrevious, 0, false);
     }
 
     public Accumulation(
@@ -90,7 +90,7 @@ public class Accumulation {
         boolean dropObservationsLeftoverFromPrevious,
         int sourceGeneration
     ) {
-        this(trafficChannelKey, startingSourceRequestIndex, dropObservationsLeftoverFromPrevious, sourceGeneration, null);
+        this(trafficChannelKey, startingSourceRequestIndex, dropObservationsLeftoverFromPrevious, sourceGeneration, false);
     }
 
     public Accumulation(
@@ -98,7 +98,7 @@ public class Accumulation {
         int startingSourceRequestIndex,
         boolean dropObservationsLeftoverFromPrevious,
         int sourceGeneration,
-        java.time.Instant quiescentUntil
+        boolean isHandoffConnection
     ) {
         this.trafficChannelKey = trafficChannelKey;
         numberOfResets = new AtomicInteger();
@@ -108,7 +108,7 @@ public class Accumulation {
             ? State.IGNORING_LAST_REQUEST
             : State.WAITING_FOR_NEXT_READ_CHUNK;
         this.sourceGeneration = sourceGeneration;
-        this.quiescentUntil = quiescentUntil;
+        this.isHandoffConnection = isHandoffConnection;
     }
 
     public boolean hasBeenExpired() {

@@ -75,7 +75,8 @@ public class WriteSegmentMissingTimestampTest extends InstrumentationTest {
                 @Override
                 public Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                    @NonNull HttpMessageAndTimestamp request
+                    @NonNull HttpMessageAndTimestamp request,
+                    boolean isHandoffConnection
                 ) {
                     return results::add;
                 }

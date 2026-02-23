@@ -61,7 +61,8 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
                 @Override
                 public Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                    @NonNull HttpMessageAndTimestamp request
+                    @NonNull HttpMessageAndTimestamp request,
+                    boolean isHandoffConnection
                 ) {
                     // Return the "finishedAccumulatingResponseFuture" completion callback
                     return pair -> {
@@ -170,7 +171,8 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
                 @Override
                 public Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                    @NonNull HttpMessageAndTimestamp request
+                    @NonNull HttpMessageAndTimestamp request,
+                    boolean isHandoffConnection
                 ) { return pair -> {}; }
 
                 @Override

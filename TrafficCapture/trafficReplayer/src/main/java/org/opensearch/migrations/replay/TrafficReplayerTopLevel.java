@@ -171,7 +171,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             new CapturedTrafficToHttpTransactionAccumulator(
                 observedPacketConnectionTimeout,
                 "(see command line option " + TrafficReplayer.PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
-                new TrafficReplayerAccumulationCallbacks(replayEngine, resultTupleConsumer, trafficSource)
+                new TrafficReplayerAccumulationCallbacks(replayEngine, resultTupleConsumer, trafficSource,
+                    java.time.Duration.ofSeconds(5)) // TODO: wire from --quiescent-period-ms CLI option
             );
         try {
             pullCaptureFromSourceToAccumulator(trafficSource, trafficToHttpTransactionAccumulator);

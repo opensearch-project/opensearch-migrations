@@ -104,10 +104,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
         public Consumer<RequestResponsePacketPair> onRequestReceived(
             IReplayContexts.IRequestAccumulationContext requestCtx,
-            @NonNull HttpMessageAndTimestamp request
+            @NonNull HttpMessageAndTimestamp request,
+            boolean isHandoffConnection
         ) {
             requestCtx.close();
-            var innerCallback = underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request);
+            var innerCallback = underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request, isHandoffConnection);
             return rrpp -> {
                 rrpp.getResponseContext().close();
                 innerCallback.accept(rrpp);
@@ -289,7 +290,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .log();
         }
 
-        return new Accumulation(streamWithKey.getKey(), stream, streamWithKey.getQuiescentUntil());
+        return new Accumulation(streamWithKey.getKey(), stream, streamWithKey.isHandoffConnection());
     }
 
     private enum CONNECTION_STATUS {
@@ -536,14 +537,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var httpMessage = rrPair.requestData;
         assert (httpMessage != null);
         assert (!httpMessage.hasInProgressSegment());
-        // Propagate quiescentUntil to the first request on this connection
-        if (accumulation.quiescentUntil != null && accumulation.getIndexOfCurrentRequest() == 0
-                && httpMessage instanceof HttpMessageAndTimestamp.Request) {
-            ((HttpMessageAndTimestamp.Request) httpMessage).quiescentUntil = accumulation.quiescentUntil;
-        }
+        boolean isHandoffConnection = accumulation.getIndexOfCurrentRequest() == 0 && accumulation.isHandoffConnection;
         var requestCtx = rrPair.getRequestContext();
         rrPair.rotateRequestGatheringToResponse();
-        var callbackTrackedData = listener.onRequestReceived(requestCtx, httpMessage);
+        var callbackTrackedData = listener.onRequestReceived(requestCtx, httpMessage, isHandoffConnection);
         rrPairWithCallback.setFullDataContinuation(callbackTrackedData);
         accumulation.state = Accumulation.State.ACCUMULATING_WRITES;
         return true;

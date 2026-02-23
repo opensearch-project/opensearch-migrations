@@ -97,12 +97,20 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         private final ReplayEngine replayEngine;
         private Consumer<SourceTargetCaptureTuple> resultTupleConsumer;
         private ITrafficCaptureSource trafficCaptureSource;
+        /** How long to delay the first request on a handoff connection. Configurable via CLI. */
+        private final java.time.Duration quiescentDuration;
 
         @Override
         public Consumer<RequestResponsePacketPair> onRequestReceived(
             @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-            @NonNull HttpMessageAndTimestamp request
+            @NonNull HttpMessageAndTimestamp request,
+            boolean isHandoffConnection
         ) {
+            var quiescentUntil = isHandoffConnection ? java.time.Instant.now().plus(quiescentDuration) : null;
+            if (quiescentUntil != null) {
+                log.atInfo().setMessage("Applying quiescent delay until {} for handoff connection {}")
+                    .addArgument(quiescentUntil).addArgument(ctx).log();
+            }
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
             var requestKey = ctx.getReplayerRequestKey();
@@ -119,7 +127,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             );
 
             var allWorkFinishedForTransactionFuture =
-                sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey, finishedAccumulatingResponseFuture)
+                sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey, finishedAccumulatingResponseFuture, quiescentUntil)
                     .getDeferredFutureThroughHandle(
                         // TODO - what if finishedAccumulatingResponseFuture completed exceptionally?
                         (arr, httpRequestException) -> finishedAccumulatingResponseFuture.thenCompose(
@@ -146,13 +154,14 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             IReplayContexts.IReplayerHttpTransactionContext ctx,
             HttpMessageAndTimestamp request,
             UniqueReplayerRequestKey requestKey,
-            TextTrackedFuture<RequestResponsePacketPair> finishedAccumulatingResponseFuture) {
+            TextTrackedFuture<RequestResponsePacketPair> finishedAccumulatingResponseFuture,
+            java.time.Instant quiescentUntil) {
             var workDequeuedByLimiterFuture = new TextTrackedFuture<TrafficStreamLimiter.WorkItem>(
                 () -> "waiting for " + ctx + " to be queued and run through TrafficStreamLimiter"
             );
             var wi = liveTrafficStreamLimiter.queueWork(1, ctx, workDequeuedByLimiterFuture.future::complete);
             var httpSentRequestFuture = workDequeuedByLimiterFuture.thenCompose(
-                    ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx),
+                    ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx, quiescentUntil),
                     () -> "Waiting to get response from target"
                 )
                 .whenComplete(
@@ -340,28 +349,27 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         ReplayEngine replayEngine,
         HttpMessageAndTimestamp request,
         TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
-        IReplayContexts.IReplayerHttpTransactionContext ctx
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        java.time.Instant quiescentUntil
     ) {
-        var start = request.getFirstPacketTimestamp();
-        var end = request.getLastPacketTimestamp();
-        // Apply quiescent delay for handoff connections (first request only)
-        Instant quiescentUntil = null;
-        if (request instanceof HttpMessageAndTimestamp.Request) {
-            quiescentUntil = ((HttpMessageAndTimestamp.Request) request).quiescentUntil;
-            if (quiescentUntil != null) {
-                log.atInfo().setMessage("Applying quiescent delay until {} for first request on {}")
-                    .addArgument(quiescentUntil).addArgument(ctx).log();
-            }
-        }
         return transformAndSendRequest(
             inputRequestTransformerFactory,
             replayEngine,
             finishedAccumulatingResponseFuture,
             ctx,
-            start,
-            end,
+            request.getFirstPacketTimestamp(),
+            request.getLastPacketTimestamp(),
             request.packetBytes::stream,
             quiescentUntil);
+    }
+
+    public TrackedFuture<String, TransformedTargetRequestAndResponseList> transformAndSendRequest(
+        ReplayEngine replayEngine,
+        HttpMessageAndTimestamp request,
+        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
+        IReplayContexts.IReplayerHttpTransactionContext ctx
+    ) {
+        return transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx, null);
     }
 
     @Override

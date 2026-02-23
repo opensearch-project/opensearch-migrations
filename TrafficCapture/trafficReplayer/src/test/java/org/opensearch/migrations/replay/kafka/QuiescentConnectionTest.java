@@ -31,7 +31,7 @@ class QuiescentConnectionTest extends InstrumentationTest {
     /**
      * A stream for a connection NOT in the active set and NOT starting with a READ observation
      * (i.e., another replayer was mid-connection) must be tagged with a non-null quiescentUntil.
-     * Before fix: getQuiescentUntil() always returns null.
+     * Before fix: isHandoffConnection() always returns null.
      */
     @Test
     @SneakyThrows
@@ -63,10 +63,8 @@ class QuiescentConnectionTest extends InstrumentationTest {
             Assertions.assertFalse(streams.isEmpty());
             var stream = streams.get(0);
 
-            Assertions.assertNotNull(stream.getQuiescentUntil(),
-                "handoff connection (no open, not in active set) must be tagged with quiescentUntil");
-            Assertions.assertTrue(stream.getQuiescentUntil().isAfter(Instant.now().minusSeconds(1)),
-                "quiescentUntil must be in the near future");
+            Assertions.assertTrue(stream.isHandoffConnection(),
+                "handoff connection (no open, not in active set) must have isHandoffConnection=true");
         }
     }
 
@@ -102,8 +100,8 @@ class QuiescentConnectionTest extends InstrumentationTest {
 
             var streams = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
             Assertions.assertFalse(streams.isEmpty());
-            Assertions.assertNull(streams.get(0).getQuiescentUntil(),
-                "fresh connection (starts with READ) must not be tagged with quiescentUntil");
+            Assertions.assertFalse(streams.get(0).isHandoffConnection(),
+                "fresh connection (starts with READ) must have isHandoffConnection=false");
         }
     }
 }

@@ -139,7 +139,8 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
                 @Override
                 public Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                    @NonNull HttpMessageAndTimestamp request
+                    @NonNull HttpMessageAndTimestamp request,
+                    boolean isHandoffConnection
                 ) {
                     requestsReceived.incrementAndGet();
                     return fullPair -> {

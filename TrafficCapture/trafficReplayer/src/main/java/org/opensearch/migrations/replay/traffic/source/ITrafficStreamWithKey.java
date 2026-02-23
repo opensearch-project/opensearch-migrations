@@ -1,7 +1,5 @@
 package org.opensearch.migrations.replay.traffic.source;
 
-import java.time.Instant;
-
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -11,11 +9,11 @@ public interface ITrafficStreamWithKey {
     TrafficStream getStream();
 
     /**
-     * Wall-clock instant before which the first request on this connection should not be sent.
-     * Non-null only for handoff connections (no open observation, not in the active connection set)
-     * where another replayer may have had in-flight requests. Null means no delay.
+     * True when this is the first stream for a connection that was mid-flight during a Kafka
+     * partition reassignment — another replayer may have had in-flight requests on this connection.
+     * The replay engine should apply a quiescent delay before sending the first request.
      */
-    default Instant getQuiescentUntil() {
-        return null;
+    default boolean isHandoffConnection() {
+        return false;
     }
 }

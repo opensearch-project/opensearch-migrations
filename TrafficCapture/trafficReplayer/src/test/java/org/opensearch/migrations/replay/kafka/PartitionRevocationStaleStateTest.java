@@ -99,7 +99,8 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
                 @Override
                 public Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                    @NonNull HttpMessageAndTimestamp request
+                    @NonNull HttpMessageAndTimestamp request,
+                    boolean isHandoffConnection
                 ) {
                     requestsReceived.incrementAndGet();
                     return pair -> {};
@@ -161,7 +162,8 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
                 @Override
                 public Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                    @NonNull HttpMessageAndTimestamp request
+                    @NonNull HttpMessageAndTimestamp request,
+                    boolean isHandoffConnection
                 ) {
                     return pair -> {};
                 }
@@ -283,7 +285,8 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
                 @Override
                 public java.util.function.Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                    @NonNull HttpMessageAndTimestamp request
+                    @NonNull HttpMessageAndTimestamp request,
+                    boolean isHandoffConnection
                 ) { return pair -> {}; }
 
                 @Override
