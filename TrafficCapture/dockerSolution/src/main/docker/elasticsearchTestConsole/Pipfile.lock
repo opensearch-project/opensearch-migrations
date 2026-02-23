@@ -222,12 +222,12 @@
         },
         "awscli": {
             "hashes": [
-                "sha256:2f70e50240c8231229526d0a5635bf737be6c87696b5a37989f77de37be7191e",
-                "sha256:b7b1ba83b32cee6d5b12a070cb5ed8b9a6a2d1a3b0f9340927c2ad4e08f6104e"
+                "sha256:ce060f2ee8a95a00b3ed39ec42043000d1dbaecf1e432b296780d732eeae03e6",
+                "sha256:ddd7645fd2115b88b1ca6e562033b53b346323bef0b3bf8b987e782aedc66976"
             ],
             "index": "pypi",
             "markers": "python_version >= '3.9'",
-            "version": "==1.44.40"
+            "version": "==1.44.44"
         },
         "awscurl": {
             "hashes": [
@@ -256,11 +256,11 @@
         },
         "botocore": {
             "hashes": [
-                "sha256:3ec7004009d1557a881b1d076d54b5768230849fa9ccdebfd409f0571490e691",
-                "sha256:de1e128e4898f4e66877bfabbbb03c61f99366f27520442539339e8a74afe3a5"
+                "sha256:853a0822de66d060aeebafa07ca13a03799f7958313d1b29f8dc7e2e1be8f527",
+                "sha256:ab203d4e57d22913c8386a695d048e003b7508a8a4a7a46c9ddf4ebd67a20b69"
             ],
             "markers": "python_version >= '3.9'",
-            "version": "==1.42.50"
+            "version": "==1.42.54"
         },
         "cachetools": {
             "hashes": [
