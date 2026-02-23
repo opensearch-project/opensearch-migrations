@@ -48,11 +48,15 @@ public class OpenSearchMetadataSink implements MetadataSink {
         templates.fieldNames().forEachRemaining(name -> {
             ObjectNode body = (ObjectNode) templates.get(name);
             log.info("Creating {} template: {}", type, name);
-            switch (type) {
-                case "legacy" -> client.createLegacyTemplate(name, body, null);
-                case "index" -> client.createIndexTemplate(name, body, null);
-                case "component" -> client.createComponentTemplate(name, body, null);
-                default -> log.warn("Unknown template type: {}", type);
+            try {
+                switch (type) {
+                    case "legacy" -> client.createLegacyTemplate(name, body, null);
+                    case "index" -> client.createIndexTemplate(name, body, null);
+                    case "component" -> client.createComponentTemplate(name, body, null);
+                    default -> log.warn("Unknown template type: {}", type);
+                }
+            } catch (Exception e) {
+                log.warn("Failed to create {} template '{}': {}", type, name, e.getMessage());
             }
         });
     }
