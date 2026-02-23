@@ -91,7 +91,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
      * Registered synthetic closes keyed by (connectionId, sessionNumber, generation).
      * The first onSessionClosed call for a given key decrements the counter.
      */
-    private final java.util.concurrent.ConcurrentHashMap<String, Boolean> pendingSyntheticCloses =
+    final java.util.concurrent.ConcurrentHashMap<String, Boolean> pendingSyntheticCloses =
         new java.util.concurrent.ConcurrentHashMap<>();
     /** How long to delay the first request on a handoff connection (configurable). */
     private final java.time.Duration quiescentDuration;

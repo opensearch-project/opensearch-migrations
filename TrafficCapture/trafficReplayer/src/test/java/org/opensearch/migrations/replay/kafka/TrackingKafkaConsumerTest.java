@@ -95,4 +95,60 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
         Assertions.assertFalse(consumer.partitionToOffsetLifecycleTrackerMap.containsKey(0),
             "partition state must be cleaned up after onPartitionsLost");
     }
+
+    // -------------------------------------------------------------------------
+    // Phase A: onPartitionsLost triggers synthetic close enqueue
+    // -------------------------------------------------------------------------
+
+    /**
+     * Test #6: onPartitionsLost with active connections must trigger the
+     * onPartitionsTrulyLostCallback, which enqueues synthetic closes.
+     * Before fix: onPartitionsLost did not call onPartitionsTrulyLostCallback.
+     */
+    @Test
+    void reassignedClose_onPartitionsLost_path() {
+        var mc = buildMockConsumer();
+        var consumer = buildConsumer(mc);
+        var tp = new TopicPartition(TOPIC, 0);
+
+        consumer.onPartitionsAssigned(List.of(tp));
+
+        var trulyLostPartitions = new java.util.ArrayList<Integer>();
+        consumer.setOnPartitionsTrulyLostCallback(trulyLostPartitions::addAll);
+
+        consumer.onPartitionsLost(List.of(tp));
+
+        Assertions.assertEquals(List.of(0), trulyLostPartitions,
+            "onPartitionsLost must call onPartitionsTrulyLostCallback with the lost partition numbers");
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase C: onPartitionsAssigned empty assignment flushes pending cleanup
+    // -------------------------------------------------------------------------
+
+    /**
+     * Test #10: Simulate revoke then assign-empty (no new partitions).
+     * Assert truly-lost cleanup still runs (all pending partitions treated as truly lost).
+     * Before fix: onPartitionsAssigned returned early when newPartitions was empty.
+     */
+    @Test
+    void onPartitionsAssigned_emptyAssignment_flushesPendingCleanup() {
+        var mc = buildMockConsumer();
+        var consumer = buildConsumer(mc);
+        var tp = new TopicPartition(TOPIC, 0);
+
+        consumer.onPartitionsAssigned(List.of(tp));
+
+        var trulyLostPartitions = new java.util.ArrayList<Integer>();
+        consumer.setOnPartitionsTrulyLostCallback(trulyLostPartitions::addAll);
+
+        // Revoke partition 0 — records it in pendingCleanupPartitions
+        consumer.onPartitionsRevoked(List.of(tp));
+
+        // Assign empty — all pending must be flushed as truly lost
+        consumer.onPartitionsAssigned(Collections.emptyList());
+
+        Assertions.assertEquals(List.of(0), trulyLostPartitions,
+            "Empty assignment must flush all pending cleanup partitions as truly lost");
+    }
 }

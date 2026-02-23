@@ -153,12 +153,14 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
         // Partitions lost due to timeout/fence — commits are impossible, skip safeCommit
         new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsRevoked(partitions);
+        var lostPartitionNums = new java.util.ArrayList<Integer>();
         synchronized (commitDataLock) {
             partitions.forEach(p -> {
                 var tp = new TopicPartition(topic, p.partition());
                 nextSetOfCommitsMap.remove(tp);
                 nextSetOfKeysContextsBeingCommitted.remove(tp);
                 partitionToOffsetLifecycleTrackerMap.remove(p.partition());
+                lostPartitionNums.add(p.partition());
             });
             kafkaRecordsLeftToCommitEventually.set(
                 partitionToOffsetLifecycleTrackerMap.values().stream().mapToInt(OffsetLifecycleTracker::size).sum()
@@ -168,6 +170,10 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 .addArgument(this)
                 .addArgument(() -> partitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
                 .log();
+        }
+        // All lost partitions are immediately truly lost — no deferred diff needed
+        if (!lostPartitionNums.isEmpty()) {
+            onPartitionsTrulyLostCallback.accept(lostPartitionNums);
         }
     }
 
@@ -202,6 +208,15 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
 
     @Override
     public void onPartitionsAssigned(Collection<TopicPartition> newPartitions) {
+        // Flush pending cleanup even when no new partitions are assigned (all pending are truly lost)
+        if (newPartitions.isEmpty() && !pendingCleanupPartitions.isEmpty()) {
+            log.atInfo().setMessage("{} assigned no new partitions; flushing {} pending cleanup partitions as truly lost.")
+                .addArgument(this).addArgument(pendingCleanupPartitions::size).log();
+            var trulyLost = new java.util.ArrayList<>(pendingCleanupPartitions);
+            pendingCleanupPartitions.clear();
+            onPartitionsTrulyLostCallback.accept(trulyLost);
+            return;
+        }
         if (newPartitions.isEmpty()) {
             log.atInfo().setMessage("{} assigned no new partitions.").addArgument(this).log();
             return;
