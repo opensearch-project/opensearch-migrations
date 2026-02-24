@@ -1,9 +1,12 @@
 package org.opensearch.migrations.replay.kafka;
 
+import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.opensearch.migrations.tracing.InstrumentationTest;
@@ -14,9 +17,6 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import java.time.Clock;
-import java.util.Map;
-import java.util.ArrayList;
 
 /**
  * Unit tests for TrackingKafkaConsumer rebalance callbacks.

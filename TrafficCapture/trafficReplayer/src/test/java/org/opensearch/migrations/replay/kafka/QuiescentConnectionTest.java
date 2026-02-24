@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.kafka;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Collections;
@@ -9,6 +10,7 @@ import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
@@ -19,8 +21,6 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import java.io.ByteArrayOutputStream;
-import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
 /**
  * Unit tests for quiescent period tagging on handoff connections.

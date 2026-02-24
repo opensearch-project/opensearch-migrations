@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.kafka;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Collections;
@@ -18,7 +19,6 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import java.io.ByteArrayOutputStream;
 
 /**
  * Tests for synthetic close drain accounting correctness (Plan tests #1, #2, #3, #5).

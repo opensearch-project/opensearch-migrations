@@ -6,6 +6,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
@@ -20,8 +21,6 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static org.mockito.Mockito.mock;
-import org.opensearch.migrations.replay.kafka.KafkaCommitOffsetData;
-import java.util.Map;
 
 /**
  * Verifies that TrackingKafkaConsumer.kafkaRecordsReadyToCommit is set to true when

@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay.e2etests;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import java.util.Random;
@@ -45,7 +46,6 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.ConfluentKafkaContainer;
-import java.util.Arrays;
 
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
