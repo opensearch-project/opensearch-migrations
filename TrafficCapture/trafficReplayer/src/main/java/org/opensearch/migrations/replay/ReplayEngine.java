@@ -183,13 +183,15 @@ public class ReplayEngine {
         int numPackets,
         ByteBufList packets,
         RequestSenderOrchestrator.RetryVisitor<T> retryVisitor,
-        Instant quiescentUntil
+        Duration quiescentDurationForRequest
     ) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "request";
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
-        // Apply quiescent delay: wall-clock floor for first request on resumed connections
-        if (quiescentUntil != null && start.isBefore(quiescentUntil)) {
+        // Apply quiescent delay relative to the time-shifted start (not wall-clock now),
+        // so the delay is consistent regardless of when the request is processed
+        if (quiescentDurationForRequest != null) {
+            var quiescentUntil = start.plus(quiescentDurationForRequest);
             log.atInfo().setMessage("Applying quiescent delay: shifting start from {} to {} for {}")
                 .addArgument(start).addArgument(quiescentUntil).addArgument(ctx).log();
             start = quiescentUntil;

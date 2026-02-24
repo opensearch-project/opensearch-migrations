@@ -107,11 +107,9 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             @NonNull HttpMessageAndTimestamp request,
             boolean isResumedConnection
         ) {
-            var quiescentUntil = isResumedConnection ? Instant.now().plus(quiescentDuration) : null;
-            if (quiescentUntil != null) {
-                log.atInfo().setMessage("Applying quiescent delay until {} for resumed connection {}")
-                    .addArgument(quiescentUntil).addArgument(ctx).log();
-            }
+            // quiescentDuration is passed to ReplayEngine which applies it relative to the
+            // time-shifted start, not relative to now
+            var quiescentDurationForRequest = isResumedConnection ? quiescentDuration : null;
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
             var requestKey = ctx.getReplayerRequestKey();
@@ -128,7 +126,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             );
 
             var allWorkFinishedForTransactionFuture =
-                sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey, finishedAccumulatingResponseFuture, quiescentUntil)
+                sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey, finishedAccumulatingResponseFuture, quiescentDurationForRequest)
                     .getDeferredFutureThroughHandle(
                         // TODO - what if finishedAccumulatingResponseFuture completed exceptionally?
                         (arr, httpRequestException) -> finishedAccumulatingResponseFuture.thenCompose(
@@ -156,13 +154,13 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             HttpMessageAndTimestamp request,
             UniqueReplayerRequestKey requestKey,
             TextTrackedFuture<RequestResponsePacketPair> finishedAccumulatingResponseFuture,
-            Instant quiescentUntil) {
+            Duration quiescentDurationForRequest) {
             var workDequeuedByLimiterFuture = new TextTrackedFuture<TrafficStreamLimiter.WorkItem>(
                 () -> "waiting for " + ctx + " to be queued and run through TrafficStreamLimiter"
             );
             var wi = liveTrafficStreamLimiter.queueWork(1, ctx, workDequeuedByLimiterFuture.future::complete);
             var httpSentRequestFuture = workDequeuedByLimiterFuture.thenCompose(
-                    ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx, quiescentUntil),
+                    ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx, quiescentDurationForRequest),
                     () -> "Waiting to get response from target"
                 )
                 .whenComplete(
@@ -351,7 +349,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         HttpMessageAndTimestamp request,
         TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
         IReplayContexts.IReplayerHttpTransactionContext ctx,
-        Instant quiescentUntil
+        Duration quiescentDurationForRequest
     ) {
         return transformAndSendRequest(
             inputRequestTransformerFactory,
@@ -361,7 +359,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             request.getFirstPacketTimestamp(),
             request.getLastPacketTimestamp(),
             request.packetBytes::stream,
-            quiescentUntil);
+            quiescentDurationForRequest);
     }
 
     public TrackedFuture<String, TransformedTargetRequestAndResponseList> transformAndSendRequest(

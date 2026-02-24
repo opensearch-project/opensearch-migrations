@@ -67,20 +67,23 @@ class ReplayEngineQuiescentTest {
             .thenReturn(TextTrackedFuture.completedFuture(null, () -> "mock"));
 
         var sourceRequestTime = Instant.parse("2025-01-01T00:00:00.100Z");
-        // quiescentUntil is 200ms in the future — should override the time-shifted start
-        var quiescentUntil = Instant.now().plusMillis(200);
+        // quiescentDuration is 200ms — applied relative to the time-shifted start
+        var quiescentDuration = Duration.ofMillis(200);
 
         var ctx = buildMockCtx();
         var packets = new ByteBufList(Unpooled.wrappedBuffer("test".getBytes()));
         engine.scheduleRequest(ctx, sourceRequestTime, sourceRequestTime.plusMillis(50),
-            1, packets, (reqBytes, arr, t) -> null, quiescentUntil);
+            1, packets, (reqBytes, arr, t) -> null, quiescentDuration);
 
         var startCaptor = ArgumentCaptor.forClass(Instant.class);
         verify(orchestrator).scheduleRequest(any(), any(), startCaptor.capture(), any(), any(), any());
 
         var effectiveStart = startCaptor.getValue();
-        Assertions.assertFalse(effectiveStart.isBefore(quiescentUntil),
-            "Effective start time (" + effectiveStart + ") must be >= quiescentUntil (" + quiescentUntil + ")");
+        // The time-shifted start is sourceRequestTime (TimeShifter is identity in tests)
+        // quiescentUntil = timeShiftedStart + 200ms
+        var expectedMinStart = sourceRequestTime.plus(quiescentDuration);
+        Assertions.assertFalse(effectiveStart.isBefore(expectedMinStart),
+            "Effective start time (" + effectiveStart + ") must be >= timeShiftedStart + quiescentDuration (" + expectedMinStart + ")");
     }
 
     /**

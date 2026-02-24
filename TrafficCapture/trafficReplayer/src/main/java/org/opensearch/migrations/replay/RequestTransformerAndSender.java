@@ -18,6 +18,7 @@ import io.netty.buffer.Unpooled;
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import java.time.Duration;
 
 @Slf4j
 @AllArgsConstructor
@@ -108,7 +109,7 @@ public class RequestTransformerAndSender<T> {
         @NonNull Instant start,
         @NonNull Instant end,
         Supplier<Stream<byte[]>> packetsSupplier,
-        Instant quiescentUntil) {
+        Duration quiescentDurationForRequest) {
         try {
             var requestReadyFuture = replayEngine.scheduleTransformationWork(
                 ctx,
@@ -119,7 +120,7 @@ public class RequestTransformerAndSender<T> {
                 .addArgument(ctx)
                 .addArgument(requestReadyFuture)
                 .log();
-            final Instant effectiveQuiescentUntil = quiescentUntil;
+            final Duration effectiveQuiescentDuration = quiescentDurationForRequest;
             return requestReadyFuture.thenCompose(
                 transformedRequest -> replayEngine.scheduleRequest(
                     ctx,
@@ -129,7 +130,7 @@ public class RequestTransformerAndSender<T> {
                     transformedRequest.transformedOutput,
                     getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture,
                         arr -> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx)),
-                    effectiveQuiescentUntil
+                    effectiveQuiescentDuration
                 ),
                 () -> "transitioning transformed packets onto the wire"
             );

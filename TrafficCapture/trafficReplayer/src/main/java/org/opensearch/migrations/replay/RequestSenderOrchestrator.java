@@ -162,6 +162,12 @@ public class RequestSenderOrchestrator {
         var sessionNumber = requestKey.sourceRequestIndexSessionIdentifier;
         var channelInteractionNum = requestKey.getReplayerRequestIndex();
         var generation = requestKey.trafficStreamKey.getSourceGeneration();
+        // TODO: Separate socket connection from the first bytes sent.
+        // Ideally, we would match the relative timestamps of when connections were being initiated
+        // as well as the period between connection and the first bytes sent. However, this code is a
+        // bit too cavalier. It should be tightened at some point by adding a first packet that is empty.
+        // Thankfully, given the trickiness of this class, that would be something that should be tracked
+        // upstream and should be handled transparently by this class.
         return submitUnorderedWorkToEventLoop(
             ctx.getLogicalEnclosingScope(),
             sessionNumber,
