@@ -87,18 +87,21 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     private final KafkaBehavioralPolicy behavioralPolicy;
     private final ChannelContextManager channelContextManager;
     private final AtomicBoolean isClosed;
-    /** Active connections per Kafka partition. Populated as records are consumed; entries removed when connections close or expire. */
+    /** Active connections per Kafka partition. Entries removed when connections are closed */
     final ConcurrentHashMap<Integer, Set<ScopedConnectionIdKey>> partitionToActiveConnections =
         new ConcurrentHashMap<>();
-    /** Synthetic close events to drain before returning real Kafka records. */
-    private final Queue<SyntheticPartitionReassignmentClose> syntheticCloseQueue = new ConcurrentLinkedQueue<>();
-    /** Counter of synthetic closes registered but not yet confirmed closed. */
-    final AtomicInteger outstandingSyntheticCloseSessions = new AtomicInteger(0);
+    /** Batches of synthetic close events to drain before returning real Kafka records.
+     *  Each entry is one batch from a single partition-revocation event. */
+    private final Queue<List<SyntheticPartitionReassignmentClose>> syntheticCloseQueue = new ConcurrentLinkedQueue<>();
     /**
      * Registered synthetic closes keyed by (connectionId, sessionNumber, generation).
      * The first onSessionClosed call for a given key decrements the counter.
      */
     final ConcurrentHashMap<String, Boolean> pendingSyntheticCloses = new ConcurrentHashMap<>();
+    /** Consistent counter of registered-but-not-yet-closed synthetic closes. Uses AtomicInteger
+     *  for volatile visibility — decrementAndGet() on the Netty thread is immediately visible
+     *  to get() on kafkaExecutor, preventing a premature isEmpty() race. */
+    final AtomicInteger outstandingSyntheticCloseSessions = new AtomicInteger(0);
 
     public KafkaTrafficCaptureSource(
         @NonNull RootReplayerContext globalContext,
@@ -139,6 +142,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         for (int partition : lostPartitions) {
             var active = partitionToActiveConnections.remove(partition);
             if (active == null) continue;
+            var batch = new ArrayList<SyntheticPartitionReassignmentClose>();
             for (var connKey : active) {
                 var ts = TrafficStream.newBuilder()
                     .setNodeId(connKey.nodeId).setConnectionId(connKey.connectionId)
@@ -148,12 +152,14 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     return channelContextManager.getGlobalContext()
                         .createTrafficStreamContextForKafkaSource(channelKeyCtx, "", 0);
                 }, ts, new PojoKafkaCommitOffsetData(trackingKafkaConsumer.getConsumerConnectionGeneration(), partition, -1));
-                // Register in pendingSyntheticCloses — onSessionClosed will decrement the counter
                 var sessionKey = connKey.connectionId + ":" + 0 + ":" + trackingKafkaConsumer.getConsumerConnectionGeneration();
                 if (pendingSyntheticCloses.putIfAbsent(sessionKey, Boolean.TRUE) == null) {
                     outstandingSyntheticCloseSessions.incrementAndGet();
-                    syntheticCloseQueue.add(new SyntheticPartitionReassignmentClose(key));
+                    batch.add(new SyntheticPartitionReassignmentClose(key));
                 }
+            }
+            if (!batch.isEmpty()) {
+                syntheticCloseQueue.add(batch);
             }
         }
     }
@@ -194,7 +200,15 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     @Override
     public void onConnectionDone(ITrafficStreamKey trafficStreamKey) {
         var connKey = new ScopedConnectionIdKey(trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId());
-        partitionToActiveConnections.values().forEach(set -> set.remove(connKey));
+        if (trafficStreamKey instanceof KafkaCommitOffsetData) {
+            var partition = ((KafkaCommitOffsetData) trafficStreamKey).getPartition();
+            var set = partitionToActiveConnections.get(partition);
+            if (set != null) {
+                set.remove(connKey);
+            }
+        } else {
+            partitionToActiveConnections.values().forEach(set -> set.remove(connKey));
+        }
     }
 
     public static KafkaTrafficCaptureSource buildKafkaSource(
@@ -301,20 +315,22 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         ITrafficSourceContexts.IReadChunkContext context
     ) {
         log.atTrace().setMessage("readNextTrafficStreamSynchronously()").log();
-        // Drain synthetic closes before returning real Kafka records
-        if (!syntheticCloseQueue.isEmpty()) {
-            var closes = new ArrayList<ITrafficStreamWithKey>();
-            SyntheticPartitionReassignmentClose close;
-            while ((close = syntheticCloseQueue.poll()) != null) {
-                closes.add(close);
-            }
-            log.atInfo().setMessage("Returning {} synthetic close(s) before real Kafka records").addArgument(closes::size).log();
-            return closes;
+        // Drain synthetic closes before returning real Kafka records — one batch per revocation event
+        var closeBatch = syntheticCloseQueue.poll();
+        if (closeBatch != null) {
+            log.atInfo().setMessage("Returning {} synthetic close(s) before real Kafka records")
+                .addArgument(closeBatch::size).log();
+            return Collections.unmodifiableList(closeBatch);
         }
         // Block real data until all synthetic closes have been confirmed closed
         if (outstandingSyntheticCloseSessions.get() > 0) {
             log.atDebug().setMessage("Returning empty batch: {} synthetic close sessions still outstanding")
                 .addArgument(outstandingSyntheticCloseSessions::get).log();
+            // The spin here is intentional.
+            // We should be draining very fast and if we block, we risk falling out of the Kafka group,
+            // which could then have knock-on effects throughout the fleet since we're recovering from
+            // the last recovery/partition reassignment.
+            Thread.yield();
             return Collections.emptyList();
         }
         try {
