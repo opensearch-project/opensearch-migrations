@@ -187,7 +187,7 @@ flowchart TD
     ACC -.->|"fireAccumulationsCallbacksAndClose [NEW]\ncomplete finishedAccumulatingResponseFuture\nfor in-flight requests on revoked connections"| CRS
     ACC -.->|"onConnectionClose + onTrafficStreamsExpired\nConsumer callback [NEW]\nupdates partitionToActiveConnections\n+ releaseContextFor on ChannelContextManager"| KCS
 
-    ACC -->|"onConnectionClose TRAFFIC_SOURCE_READER_INTERRUPTED\n[NOW calls replayEngine.closeConnection]"| RE
+    ACC -->|"onConnectionClose TRAFFIC_SOURCE_READER_INTERRUPTED\n→ replayEngine.cancelConnection()\n(bypasses sorter + time-shift, sets cancelled flag)"| RE
     RE -->|scheduleClose| CCP
     CCP -->|"close channel\ncascades failures through OnlineRadixSorter"| Target
     CCP -.->|"onClose callback on every session close [NEW]\npendingTrafficSourceReaderInterruptedCloses.remove → decrement OSC"| OSC
@@ -225,7 +225,7 @@ Key changes summarized:
 | 2 | Traffic-source-reader-interrupted close events (`TrafficSourceReaderInterruptedClose`, `ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED`) drained before real records | `KafkaTrafficCaptureSource`, `Accumulator`, `TrafficReplayerAccumulationCallbacks` |
 | 3 | `outstandingTrafficSourceReaderInterruptedCloseSessions` counter + empty-batch drain in `readNextTrafficStreamSynchronously` | `KafkaTrafficCaptureSource` |
 | 4 | `fireAccumulationsCallbacksAndClose` on existing accumulation when traffic-source-reader-interrupted close fires (completes `finishedAccumulatingResponseFuture`) | `CapturedTrafficToHttpTransactionAccumulator` |
-| 5 | `onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED)` calls `replayEngine.closeConnection()` (currently skipped) | `TrafficReplayerAccumulationCallbacks` |
+| 5 | `onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED)` calls `replayEngine.cancelConnection()` — bypasses `OnlineRadixSorter` and time-shifting, marks `ConnectionReplaySession.cancelled=true` to prevent reconnection, closes channel immediately | `TrafficReplayerAccumulationCallbacks`, `ReplayEngine`, `RequestSenderOrchestrator`, `ClientConnectionPool`, `ConnectionReplaySession` |
 | 6 | Universal `onClose` callback on every `ConnectionReplaySession`; coordinator uses `pendingTrafficSourceReaderInterruptedCloses.remove(connKey_with_gen)` to decrement `outstandingTrafficSourceReaderInterruptedCloseSessions` exactly once per registered traffic-source-reader-interrupted close | `ClientConnectionPool`, `ConnectionReplaySession`, coordinator in `TrafficReplayerTopLevel` |
 | 7 | `ConnectionReplaySession.generation` field; generation threaded from `ITrafficStreamKey` through `scheduleRequest` to `getCachedSession` | `ConnectionReplaySession`, `RequestSenderOrchestrator` |
 | 8 | Quiescent metadata tagged on resumed streams; `ReplayEngine` delays first request to `max(timeShiftedStart, quiescentUntil)` | `KafkaTrafficCaptureSource`, `ITrafficStreamWithKey`, `Accumulation`, `ReplayEngine` |
@@ -524,8 +524,8 @@ flowchart TD
     ASN -->|trulyLost partitions| SYNTH
     LOST -->|immediately| SYNTH
     SYNTH -->|TrafficSourceReaderInterruptedClose| ACC2
-    ACC2 -->|ReplayEngine.closeConnection| CANCEL
-    CANCEL -->|ClientConnectionPool.closeConnection| Target[(Target Cluster)]
+    ACC2 -->|"replayEngine.cancelConnection()\n(bypasses sorter+time-shift)"| CANCEL
+    CANCEL -->|"ClientConnectionPool.cancelConnection()\nsession.cancelled=true + channel.close()"| Target[(Target Cluster)]
 ```
 
 ### Generation-Based Stale State Fix (implemented)
@@ -588,7 +588,7 @@ Traffic-source-reader-interrupted close injection and drain:
      nothing needs completing.
   2. Clearing the accumulator cache entry for the connection
   3. Firing `onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED, ...)` using the `GenerationalSessionKey` from
-     `partitionToActiveConnections` (NOT from the `Accumulation`) → `replayEngine.closeConnection()`
+     `partitionToActiveConnections` (NOT from the `Accumulation`) → `replayEngine.cancelConnection()`
      → close scheduled on the `OnlineRadixSorter` after all in-flight requests complete.
      If no accumulation exists, skip step 1 and still fire `onConnectionClose` using the key
      from `partitionToActiveConnections`. There is no `sessionNumber=0` fallback.
@@ -615,7 +615,7 @@ Traffic-source-reader-interrupted close injection and drain:
 **Handling the double-close case** (regular source close + traffic-source-reader-interrupted close both in flight):
 - Both call `scheduleClose` on the same `ConnectionReplaySession` at different sorter slots
 - The first to run closes the channel and invalidates the cache; the second finds the cache
-  empty in `closeConnection` and is a no-op at the pool level
+  empty in `cancelConnection` and is a no-op at the pool level
 - The `onClose` callback fires once (from the first close); `pendingTrafficSourceReaderInterruptedCloses.remove`
   is called by both paths but only the first returns non-null and decrements the counter
 

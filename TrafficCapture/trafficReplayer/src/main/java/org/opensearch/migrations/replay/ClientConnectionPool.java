@@ -23,6 +23,7 @@ import io.netty.util.concurrent.ScheduledFuture;
 import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.NonNull;
+import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -34,6 +35,7 @@ public class ClientConnectionPool {
     private final NioEventLoopGroup eventLoopGroup;
     private final LoadingCache<Key, ConnectionReplaySession> connectionId2ChannelCache;
     /** Called when any session's channel is closed. Default no-op; set by coordinator. */
+    @Setter
     private Consumer<ConnectionReplaySession> globalOnSessionClose = session -> {};
 
     @EqualsAndHashCode
@@ -65,10 +67,6 @@ public class ClientConnectionPool {
                                                   long delay,
                                                   TimeUnit timeUnit) {
         return eventLoopGroup.next().scheduleAtFixedRate(runnable, initialDelay, delay, timeUnit);
-    }
-
-    public void setGlobalOnSessionClose(Consumer<ConnectionReplaySession> callback) {
-        this.globalOnSessionClose = callback;
     }
 
     public ConnectionReplaySession buildConnectionReplaySession(IReplayContexts.IChannelKeyContext channelKeyCtx) {
@@ -136,6 +134,20 @@ public class ClientConnectionPool {
     /** Closes the Netty channel for a session without touching the cache. */
     public TrackedFuture<String, Channel> closeChannelForSession(ConnectionReplaySession session) {
         return closeClientConnectionChannel(session);
+    }
+
+    /**
+     * Immediately cancels a connection: marks the session cancelled (prevents reconnection),
+     * then closes the channel and invalidates the cache.
+     */
+    public TrackedFuture<String, Void> cancelConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
+        var connId = ctx.getConnectionId();
+        var session = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
+        if (session != null) {
+            session.cancelled = true;
+            closeConnection(ctx, sessionNumber);
+        }
+        return TextTrackedFuture.completedFuture(null, () -> "cancelled");
     }
 
     public void invalidateSession(String connectionId, int sessionNumber) {

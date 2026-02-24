@@ -121,6 +121,9 @@ public class RequestTransformerAndSender<T> {
                 .addArgument(requestReadyFuture)
                 .log();
             final Duration effectiveQuiescentDuration = quiescentDurationForRequest;
+            // It might be safer to chain this work directly inside the scheduleWork call above so that the
+            // read buffer horizons aren't set after the transformation work finishes, but after the packets
+            // are fully handled
             return requestReadyFuture.thenCompose(
                 transformedRequest -> replayEngine.scheduleRequest(
                     ctx,

@@ -212,6 +212,20 @@ public class ReplayEngine {
         return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
     }
 
+    /**
+     * Immediately cancels a connection due to a traffic source reader interruption.
+     * Unlike {@link #closeConnection}, this bypasses the OnlineRadixSorter and time-shifting —
+     * the channel is closed directly and the session is marked cancelled to prevent reconnection.
+     */
+    public TrackedFuture<String, Void> cancelConnection(
+        IReplayContexts.IChannelKeyContext ctx,
+        int channelSessionNumber
+    ) {
+        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
+        var future = networkSendOrchestrator.cancelConnection(ctx, channelSessionNumber);
+        return hookWorkFinishingUpdates(future, Instant.now(), ctx.getChannelKey(), "cancel");
+    }
+
     public TrackedFuture<String, Void> closeConnection(
         int channelInteractionNum,
         IReplayContexts.IChannelKeyContext ctx,

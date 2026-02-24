@@ -42,6 +42,12 @@ public class ConnectionReplaySession {
     public final int generation;
     /** Called when the session's channel is closed (regardless of cause). */
     public final Consumer<ConnectionReplaySession> onClose;
+    /**
+     * When true, this session has been cancelled due to a traffic source reader interruption.
+     * {@link #getChannelFutureInActiveState} will return a failed future rather than reconnecting,
+     * preventing self-healing reconnects after a partition reassignment cancel.
+     */
+    public volatile boolean cancelled = false;
 
     @SneakyThrows
     public ConnectionReplaySession(
@@ -90,6 +96,11 @@ public class ConnectionReplaySession {
     {
         TextTrackedFuture<ChannelFuture> trigger = new TextTrackedFuture<>("procuring a connection");
         eventLoop.submit(() -> {
+            if (cancelled) {
+                trigger.future.completeExceptionally(
+                    new IllegalStateException("Session cancelled due to traffic source reader interruption — not reconnecting"));
+                return;
+            }
             if (cachedChannel != null && cachedChannel.channel().isActive()) {
                 trigger.future.complete(cachedChannel);
             } else {

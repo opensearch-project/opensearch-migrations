@@ -184,6 +184,14 @@ public class RequestSenderOrchestrator {
         );
     }
 
+    /**
+     * Immediately cancels a connection without going through the OnlineRadixSorter.
+     * Delegates directly to {@link ClientConnectionPool#cancelConnection}.
+     */
+    public TrackedFuture<String, Void> cancelConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
+        return clientConnectionPool.cancelConnection(ctx, sessionNumber);
+    }
+
     public TrackedFuture<String, Void> scheduleClose(
         IReplayContexts.IChannelKeyContext ctx,
         int sessionNumber,

@@ -276,12 +276,9 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             if (status == RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED) {
                 commitTrafficStreams(false, trafficStreamKeysBeingHeld);
                 notifyConnectionDone(trafficStreamKeysBeingHeld);
-                replayEngine.setFirstTimestamp(timestamp);
-                var cf = replayEngine.closeConnection(channelInteractionNum, ctx, channelSessionNumber, timestamp);
-                cf.map(
-                    f -> f.whenComplete((v, t) -> {}),
-                    () -> "closing reassigned channel"
-                );
+                // cancelConnection bypasses the sorter and time-shifting: marks the session cancelled
+                // (prevents reconnection) and closes the channel immediately
+                replayEngine.cancelConnection(ctx, channelSessionNumber);
                 return;
             }
             notifyConnectionDone(trafficStreamKeysBeingHeld);
