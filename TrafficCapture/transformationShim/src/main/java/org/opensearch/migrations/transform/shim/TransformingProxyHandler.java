@@ -47,6 +47,7 @@ public class TransformingProxyHandler extends SimpleChannelInboundHandler<FullHt
     private static final Set<String> RESTRICTED_HEADERS = Set.of(
         "host", "content-length", "transfer-encoding", "connection",
         "keep-alive", "proxy-connection", "upgrade");
+    private static final String URI_PATH_SEPARATOR = "/";
 
     private final URI backendUri;
     private final IJsonTransformer requestTransformer;
@@ -187,7 +188,7 @@ public class TransformingProxyHandler extends SimpleChannelInboundHandler<FullHt
         var method = (String) requestMap.get(JsonKeysForHttpMessage.METHOD_KEY);
         var uri = (String) requestMap.get(JsonKeysForHttpMessage.URI_KEY);
         var base = backendUri.toString().replaceAll("/+$", "");
-        var path = uri.startsWith("/") ? uri : "/" + uri;
+        var path = uri.startsWith(URI_PATH_SEPARATOR) ? uri : URI_PATH_SEPARATOR + uri;
 
         var builder = HttpRequest.newBuilder()
             .uri(URI.create(base + path))
@@ -209,8 +210,7 @@ public class TransformingProxyHandler extends SimpleChannelInboundHandler<FullHt
         if (headers == null) return;
         for (var entry : headers.entrySet()) {
             if (RESTRICTED_HEADERS.contains(entry.getKey().toLowerCase())) continue;
-            addHeaderValues(entry.getKey(), entry.getValue(),
-                (name, val) -> builder.header(name, val));
+            addHeaderValues(entry.getKey(), entry.getValue(), builder::header);
         }
     }
 

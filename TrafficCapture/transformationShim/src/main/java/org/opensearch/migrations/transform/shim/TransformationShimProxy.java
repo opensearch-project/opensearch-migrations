@@ -14,6 +14,7 @@ import javax.net.ssl.X509TrustManager;
 
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
@@ -116,6 +117,7 @@ public class TransformationShimProxy {
         return builder.build();
     }
 
+    @SuppressWarnings("java:S4830") // Intentionally trust-all for --insecureDestination mode
     private static SSLContext resolveBackendSslContext(SSLContext provided, boolean allowInsecure) {
         if (provided != null) return provided;
         if (!allowInsecure) return null;
@@ -123,12 +125,16 @@ public class TransformationShimProxy {
             var ctx = SSLContext.getInstance("TLS");
             ctx.init(null, new TrustManager[]{new X509TrustManager() {
                 public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-                public void checkClientTrusted(X509Certificate[] certs, String t) {}
-                public void checkServerTrusted(X509Certificate[] certs, String t) {}
+                public void checkClientTrusted(X509Certificate[] certs, String t) {
+                    // Intentionally empty — insecure mode trusts all certificates
+                }
+                public void checkServerTrusted(X509Certificate[] certs, String t) {
+                    // Intentionally empty — insecure mode trusts all certificates
+                }
             }}, new SecureRandom());
             return ctx;
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to create insecure SSLContext", e);
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("Failed to create insecure SSLContext", e);
         }
     }
 

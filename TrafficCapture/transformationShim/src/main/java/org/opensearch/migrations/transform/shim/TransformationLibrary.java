@@ -35,6 +35,7 @@ import org.opensearch.migrations.transform.JsonCompositeTransformer;
 public class TransformationLibrary {
 
     /** A paired request + response transformer. */
+    @SuppressWarnings({"java:S100", "java:S1186"}) // Record accessors are auto-generated
     public record TransformationPair(IJsonTransformer request, IJsonTransformer response) {}
 
     private final Map<String, TransformationPair> entries = new LinkedHashMap<>();
