@@ -15,7 +15,7 @@ preserving the relative timing and ordering of the original traffic while allowi
 - **Per-connection ordering**: Requests on the same source connection are replayed in the same
   order they were originally sent. The `OnlineRadixSorter` in `ConnectionReplaySession` enforces
   this sequencing on the Netty event loop. Exception: after a Kafka partition reassignment, the
-  quiescent period is applied to handoff connections to reduce (but not eliminate) the risk of
+  quiescent period is applied to resumed connections to reduce (but not eliminate) the risk of
   racing with the previous consumer's in-flight requests.
 
 ### Time Fidelity
@@ -59,12 +59,12 @@ preserving the relative timing and ordering of the original traffic while allowi
 
 ### Partition Reassignment
 
-- **Synthetic closes on partition loss**: When a Kafka partition is truly lost (revoked and not
+- **Traffic-source-reader-interrupted closes on partition loss**: When a Kafka partition is truly lost (revoked and not
   reassigned back to this consumer), the replayer synthesizes close events for all active
   connections on that partition. This closes the corresponding target connections and cleans up
   accumulator state, preventing resource leaks on the target cluster.
 
-- **Quiescent period for handoff connections**: When a partition is reassigned to this consumer
+- **Quiescent period for resumed connections**: When a partition is reassigned to this consumer
   and a connection's first stream has no READ observation (indicating another replayer was
   mid-connection), the first request is delayed by a configurable quiescent period. This reduces
   the risk of the new consumer's requests racing with the previous consumer's in-flight requests
@@ -166,15 +166,15 @@ flowchart TD
 
     subgraph planned_source["KafkaTrafficCaptureSource — new state [NEW]"]
         PAC["partitionToActiveConnections\nMap&lt;partition, Set&lt;connId&gt;&gt;"]
-        SQ["syntheticCloseQueue"]
-        OSC["outstandingSyntheticCloseSessions\nAtomicInteger"]
+        SQ["trafficSourceReaderInterruptedCloseQueue"]
+        OSC["outstandingTrafficSourceReaderInterruptedCloseSessions\nAtomicInteger"]
     end
 
     Kafka -->|ConsumerRecord| TKC
     TKC -->|ITrafficStreamWithKey| KCS
     KCS -->|add connId on first record| PAC
     KCS -.->|"tag stream with quiescentUntil [NEW]\nif: no open obs + not in active set"| BTS
-    KCS -->|"1. drain syntheticCloseQueue first\n2. return empty if OSC > 0\n3. else real Kafka records"| BTS
+    KCS -->|"1. drain trafficSourceReaderInterruptedCloseQueue first\n2. return empty if OSC > 0\n3. else real Kafka records"| BTS
     BTS --> ACC
 
     TKC -->|onPartitionsRevoked\nrecord pendingCleanupPartitions| TKC
@@ -182,15 +182,15 @@ flowchart TD
     TKC -.->|onPartitionsLost override\nskip commit go direct| SQ
     SQ -.->|increment OSC per connection| OSC
 
-    SQ -.->|SyntheticPartitionReassignmentClose\nbefore real records| ACC
+    SQ -.->|TrafficSourceReaderInterruptedClose\nbefore real records| ACC
 
     ACC -.->|"fireAccumulationsCallbacksAndClose [NEW]\ncomplete finishedAccumulatingResponseFuture\nfor in-flight requests on revoked connections"| CRS
     ACC -.->|"onConnectionClose + onTrafficStreamsExpired\nConsumer callback [NEW]\nupdates partitionToActiveConnections\n+ releaseContextFor on ChannelContextManager"| KCS
 
-    ACC -->|"onConnectionClose REASSIGNED\n[NOW calls replayEngine.closeConnection]"| RE
+    ACC -->|"onConnectionClose TRAFFIC_SOURCE_READER_INTERRUPTED\n[NOW calls replayEngine.closeConnection]"| RE
     RE -->|scheduleClose| CCP
     CCP -->|"close channel\ncascades failures through OnlineRadixSorter"| Target
-    CCP -.->|"onClose callback on every session close [NEW]\npendingSyntheticCloses.remove → decrement OSC"| OSC
+    CCP -.->|"onClose callback on every session close [NEW]\npendingTrafficSourceReaderInterruptedCloses.remove → decrement OSC"| OSC
 
     ACC -->|onRequestReceived| RE
     RE -.->|"quiescentUntil metadata [NEW]\ndelay first request scheduling"| RE
@@ -198,9 +198,9 @@ flowchart TD
     CRS -->|normal send| Target
 ```
 
-**Key behaviors of the synthetic close backpressure design:**
+**Key behaviors of the traffic-source-reader-interrupted close backpressure design:**
 
-**Mutual exclusivity of old and new sessions**: The `outstandingSyntheticCloseSessions` counter
+**Mutual exclusivity of old and new sessions**: The `outstandingTrafficSourceReaderInterruptedCloseSessions` counter
 ensures `readNextTrafficStreamSynchronously` returns empty batches until all old
 `ConnectionReplaySession` objects for revoked partitions are fully closed and cache-invalidated.
 Only then does real Kafka data flow. Old and new sessions for the same connection are strictly
@@ -212,22 +212,22 @@ completed by `fireAccumulationsCallbacksAndClose` before the channel close, so i
 drain fast. The `OnlineRadixSorter` cascades failures through remaining slots when the channel
 closes, so the close slot runs quickly.
 
-**`TrafficStreamLimiter` is not involved**: Synthetic closes and the empty-batch drain period
+**`TrafficStreamLimiter` is not involved**: Traffic-source-reader-interrupted closes and the empty-batch drain period
 do not go through the limiter. The limiter only gates `onRequestReceived`.
 
 Key changes summarized:
 
 | # | Change | Where |
 |---|---|---|
-| 1 | `partitionToActiveConnections` + `onConnectionDone` callback (updates active set + `releaseContextFor`) | `KafkaTrafficCaptureSource`, `TrafficReplayerAccumulationCallbacks` |
-| 2 | Synthetic close events (`SyntheticPartitionReassignmentClose`, `ReconstructionStatus.REASSIGNED`) drained before real records | `KafkaTrafficCaptureSource`, `Accumulator`, `TrafficReplayerAccumulationCallbacks` |
-| 3 | `outstandingSyntheticCloseSessions` counter + empty-batch drain in `readNextTrafficStreamSynchronously` | `KafkaTrafficCaptureSource` |
-| 4 | `fireAccumulationsCallbacksAndClose` on existing accumulation when synthetic close fires (completes `finishedAccumulatingResponseFuture`) | `CapturedTrafficToHttpTransactionAccumulator` |
-| 5 | `onConnectionClose(REASSIGNED)` calls `replayEngine.closeConnection()` (currently skipped) | `TrafficReplayerAccumulationCallbacks` |
-| 6 | Universal `onClose` callback on every `ConnectionReplaySession`; coordinator uses `pendingSyntheticCloses.remove(connKey_with_gen)` to decrement `outstandingSyntheticCloseSessions` exactly once per registered synthetic close | `ClientConnectionPool`, `ConnectionReplaySession`, coordinator in `TrafficReplayerTopLevel` |
+| 1 | `partitionToActiveConnections` + `onConnectionAccumulationComplete` callback (updates active set + `releaseContextFor`) | `KafkaTrafficCaptureSource`, `TrafficReplayerAccumulationCallbacks` |
+| 2 | Traffic-source-reader-interrupted close events (`TrafficSourceReaderInterruptedClose`, `ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED`) drained before real records | `KafkaTrafficCaptureSource`, `Accumulator`, `TrafficReplayerAccumulationCallbacks` |
+| 3 | `outstandingTrafficSourceReaderInterruptedCloseSessions` counter + empty-batch drain in `readNextTrafficStreamSynchronously` | `KafkaTrafficCaptureSource` |
+| 4 | `fireAccumulationsCallbacksAndClose` on existing accumulation when traffic-source-reader-interrupted close fires (completes `finishedAccumulatingResponseFuture`) | `CapturedTrafficToHttpTransactionAccumulator` |
+| 5 | `onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED)` calls `replayEngine.closeConnection()` (currently skipped) | `TrafficReplayerAccumulationCallbacks` |
+| 6 | Universal `onClose` callback on every `ConnectionReplaySession`; coordinator uses `pendingTrafficSourceReaderInterruptedCloses.remove(connKey_with_gen)` to decrement `outstandingTrafficSourceReaderInterruptedCloseSessions` exactly once per registered traffic-source-reader-interrupted close | `ClientConnectionPool`, `ConnectionReplaySession`, coordinator in `TrafficReplayerTopLevel` |
 | 7 | `ConnectionReplaySession.generation` field; generation threaded from `ITrafficStreamKey` through `scheduleRequest` to `getCachedSession` | `ConnectionReplaySession`, `RequestSenderOrchestrator` |
-| 8 | Quiescent metadata tagged on handoff streams; `ReplayEngine` delays first request to `max(timeShiftedStart, quiescentUntil)` | `KafkaTrafficCaptureSource`, `ITrafficStreamWithKey`, `Accumulation`, `ReplayEngine` |
-| 9 | `onPartitionsLost` override — skip commit, go directly to synthetic close queue | `TrackingKafkaConsumer` |
+| 8 | Quiescent metadata tagged on resumed streams; `ReplayEngine` delays first request to `max(timeShiftedStart, quiescentUntil)` | `KafkaTrafficCaptureSource`, `ITrafficStreamWithKey`, `Accumulation`, `ReplayEngine` |
+| 9 | `onPartitionsLost` override — skip commit, go directly to traffic-source-reader-interrupted close queue | `TrackingKafkaConsumer` |
 | 10 | Cooperative rebalancing (`CooperativeStickyAssignor`) — simplifies revocation logic, eliminates stop-the-world | configuration |
 
 ---
@@ -240,8 +240,8 @@ TrafficReplayer (main)
      └─ KafkaTrafficCaptureSource      (Kafka consumer, async executor)
          ├─ TrackingKafkaConsumer      (offset lifecycle, rebalance callbacks)
          ├─ partitionToActiveConnections  Map<partition, Set<connId>>
-         ├─ syntheticCloseQueue        Queue<SyntheticPartitionReassignmentClose>
-         └─ outstandingSyntheticCloseSessions  AtomicInteger [planned]
+         ├─ trafficSourceReaderInterruptedCloseQueue        Queue<TrafficSourceReaderInterruptedClose>
+         └─ outstandingTrafficSourceReaderInterruptedCloseSessions  AtomicInteger [planned]
 
 TrafficReplayerTopLevel
  └─ setupRunAndWaitForReplayToFinish
@@ -421,7 +421,7 @@ and trigger any pending commits), then resumes.
 
 The `touch()` call runs on `kafkaExecutor` (via `BlockingTrafficSource-executor` submitting to it)
 and is independent of the main read loop thread. This means the heartbeat is maintained even while
-the main thread is processing a large batch of synthetic close events (see Partition Revocation
+the main thread is processing a large batch of traffic-source-reader-interrupted close events (see Partition Revocation
 section below).
 
 ---
@@ -472,7 +472,7 @@ check in `commitKafkaKey()` and return `IGNORED`.
 
 Called instead of `onPartitionsRevoked` when partitions are lost due to a consumer timeout or
 group fence. Commits are not possible. Must skip the commit attempt and go directly to enqueuing
-synthetic close events. The default implementation calls `onPartitionsRevoked`, which would
+traffic-source-reader-interrupted close events. The default implementation calls `onPartitionsRevoked`, which would
 attempt a commit that will fail — this needs to be overridden.
 
 ### Rebalance Protocol Note
@@ -513,15 +513,15 @@ flowchart TD
     end
 
     subgraph mainThread["main thread"]
-        SYNTH[readNextTrafficStreamChunk\nreturn synthetic closes first]
-        ACC2[Accumulator.accept\nSyntheticPartitionReassignmentClose\n→ onConnectionClose REASSIGNED]
+        SYNTH[readNextTrafficStreamChunk\nreturn traffic-source-reader-interrupted closes first]
+        ACC2[Accumulator.accept\nTrafficSourceReaderInterruptedClose\n→ onConnectionClose TRAFFIC_SOURCE_READER_INTERRUPTED]
         CANCEL[ConnectionReplaySession\ncomplete scheduleFutures exceptionally\nclose Netty channel]
     end
 
     REV -->|pendingCleanupPartitions| ASN
     ASN -->|trulyLost partitions| SYNTH
     LOST -->|immediately| SYNTH
-    SYNTH -->|SyntheticPartitionReassignmentClose| ACC2
+    SYNTH -->|TrafficSourceReaderInterruptedClose| ACC2
     ACC2 -->|ReplayEngine.closeConnection| CANCEL
     CANCEL -->|ClientConnectionPool.closeConnection| Target[(Target Cluster)]
 ```
@@ -547,7 +547,7 @@ connections that are never seen again after revocation.
 
 The following items are planned but not yet implemented:
 
-**1. Synthetic close events with session drain backpressure**
+**1. Traffic-source-reader-interrupted close events with session drain backpressure**
 
 Active connection tracking (`KafkaTrafficCaptureSource`):
 - Maintains `Map<Integer, Set<GenerationalSessionKey>> partitionToActiveConnections`
@@ -559,33 +559,33 @@ Active connection tracking (`KafkaTrafficCaptureSource`):
   - New `Accumulation` created: insert the key
   - `resetForNextRequest()` called (keep-alive reuse): remove old key, insert new key with
     updated `sessionNumber`
-- **Removal**: the `onConnectionDone` callback carries the exact `GenerationalSessionKey` that
+- **Removal**: the `onConnectionAccumulationComplete` callback carries the exact `GenerationalSessionKey` that
   was inserted (registered at insertion time in `accept()`), so the correct entry is removed.
   The callback also calls `channelContextManager.releaseContextFor()`.
 
-Synthetic close injection and drain:
+Traffic-source-reader-interrupted close injection and drain:
 - When a partition is truly lost, the coordinator (`TrafficReplayerTopLevel`) atomically
   checks the `ClientConnectionPool` cache for each active connection using `computeIfPresent`.
   This is triggered from three paths: `onPartitionsAssigned` (for `trulyLost = pending - new`),
   `onPartitionsAssigned` when `newPartitions.isEmpty()` (all pending are truly lost), and
   `onPartitionsLost` (all partitions are immediately truly lost — no deferred diff needed). If the session is present, it is registered in
-  `pendingSyntheticCloses` (a `ConcurrentHashMap<GenerationalConnectionKey, Boolean>` keyed by
-  `(connectionId, sessionNumber, generation)`) and `outstandingSyntheticCloseSessions` is
+  `pendingTrafficSourceReaderInterruptedCloses` (a `ConcurrentHashMap<GenerationalConnectionKey, Boolean>` keyed by
+  `(connectionId, sessionNumber, generation)`) and `outstandingTrafficSourceReaderInterruptedCloseSessions` is
   incremented. The `sessionNumber` is `Accumulation.startingSourceRequestIndex` captured at
-  synthetic close time — this is the pool's actual cache key dimension, not `nodeId`.
+  traffic-source-reader-interrupted close time — this is the pool's actual cache key dimension, not `nodeId`.
   If the session is already gone, nothing is registered and the counter is not incremented.
-- `readNextTrafficStreamSynchronously` drains the synthetic close queue first, then returns
-  empty batches while `outstandingSyntheticCloseSessions > 0`, then resumes real Kafka records.
+- `readNextTrafficStreamSynchronously` drains the traffic-source-reader-interrupted close queue first, then returns
+  empty batches while `outstandingTrafficSourceReaderInterruptedCloseSessions > 0`, then resumes real Kafka records.
   The accumulator cache entry is cleared synchronously on the main thread when the synthetic
   close is processed — before any new data can arrive for that connection.
-- `SyntheticPartitionReassignmentClose` is handled in `accept()` by:
+- `TrafficSourceReaderInterruptedClose` is handled in `accept()` by:
   1. Calling `fireAccumulationsCallbacksAndClose(CLOSED_PREMATURELY)` on the existing
      `Accumulation` — this completes `finishedAccumulatingResponseFuture` for any in-flight
      requests in `ACCUMULATING_WRITES` state, allowing the `OnlineRadixSorter` to drain fast.
      For `ACCUMULATING_READS` state, no future exists yet (request not yet dispatched), so
      nothing needs completing.
   2. Clearing the accumulator cache entry for the connection
-  3. Firing `onConnectionClose(REASSIGNED, ...)` using the `GenerationalSessionKey` from
+  3. Firing `onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED, ...)` using the `GenerationalSessionKey` from
      `partitionToActiveConnections` (NOT from the `Accumulation`) → `replayEngine.closeConnection()`
      → close scheduled on the `OnlineRadixSorter` after all in-flight requests complete.
      If no accumulation exists, skip step 1 and still fire `onConnectionClose` using the key
@@ -596,12 +596,12 @@ Synthetic close injection and drain:
   (`Runnable`) passed from the coordinator at pool construction time
 - `closeClientConnectionChannel` fires this callback in its completion handler, wrapped in
   try-finally to guarantee it fires even if the channel close throws — for every close,
-  regardless of cause (source close, expiry, synthetic close)
-- The callback calls `pendingSyntheticCloses.remove(connKey_with_gen)` where
+  regardless of cause (source close, expiry, traffic-source-reader-interrupted close)
+- The callback calls `pendingTrafficSourceReaderInterruptedCloses.remove(connKey_with_gen)` where
   `connKey_with_gen = (connectionId, sessionNumber, generation)`. Only the first caller
   gets a non-null return (atomic `ConcurrentHashMap.remove`). If non-null, decrement
-  `outstandingSyntheticCloseSessions`. This guarantees exactly one decrement per registered
-  synthetic close, regardless of whether the regular close or the synthetic close runs first.
+  `outstandingTrafficSourceReaderInterruptedCloseSessions`. This guarantees exactly one decrement per registered
+  traffic-source-reader-interrupted close, regardless of whether the regular close or the traffic-source-reader-interrupted close runs first.
 - Registration uses `putIfAbsent` (not `put`) to protect against duplicate registration.
 - When the counter reaches 0, real Kafka data resumes — old and new sessions are mutually
   exclusive in time, with the cache invalidation as the synchronization point.
@@ -610,11 +610,11 @@ Synthetic close injection and drain:
 - On shutdown: `shutdownNow()` closes all channels, firing all `onClose` callbacks and
   draining the counter; the main thread exits the empty-batch loop when `stopReadingRef` is set.
 
-**Handling the double-close case** (regular source close + synthetic close both in flight):
+**Handling the double-close case** (regular source close + traffic-source-reader-interrupted close both in flight):
 - Both call `scheduleClose` on the same `ConnectionReplaySession` at different sorter slots
 - The first to run closes the channel and invalidates the cache; the second finds the cache
   empty in `closeConnection` and is a no-op at the pool level
-- The `onClose` callback fires once (from the first close); `pendingSyntheticCloses.remove`
+- The `onClose` callback fires once (from the first close); `pendingTrafficSourceReaderInterruptedCloses.remove`
   is called by both paths but only the first returns non-null and decrements the counter
 
 **2. `ConnectionReplaySession.generation` field**
@@ -623,9 +623,9 @@ The generation from `ITrafficStreamKey.getSourceGeneration()` is threaded throug
 `scheduleRequest` → `submitUnorderedWorkToEventLoop` → `getCachedSession`, so new sessions
 are stamped with the correct generation for observability. Session cancellation on generation
 bump is NOT done in `getCachedSession` (would cause `finishedAccumulatingResponseFuture`
-deadlocks); it is handled exclusively by the synthetic close path above.
+deadlocks); it is handled exclusively by the traffic-source-reader-interrupted close path above.
 
-**3. Quiescent period for handoff connections**
+**3. Quiescent period for resumed connections**
 
 When a `TrafficStream` arrives for a connection not in `partitionToActiveConnections` AND not
 starting with a READ observation, the stream is tagged with a `quiescentUntil` wall-clock
@@ -636,7 +636,7 @@ start time. No buffering in the source; backpressure is unaffected.
 **4. `onPartitionsLost` override**
 
 Override to skip `safeCommit()` (commits fail when fenced) and go directly to enqueuing
-synthetic closes.
+traffic-source-reader-interrupted closes.
 
 **5. Cooperative rebalancing (recommended)**
 
@@ -668,9 +668,9 @@ ECS replaces the task.
 | `partitionToOffsetLifecycleTrackerMap` | `TrackingKafkaConsumer` | Kafka partition # | ✅ Yes — `onPartitionsRevoked` |
 | `nextSetOfCommitsMap` | `TrackingKafkaConsumer` | `TopicPartition` | ✅ Yes — `onPartitionsRevoked` |
 | `nextSetOfKeysContextsBeingCommitted` | `TrackingKafkaConsumer` | `TopicPartition` | ✅ Yes — `onPartitionsRevoked` |
-| `connectionToChannelContextMap` | `ChannelContextManager` | connection ID string | ⚠️ Partial — generation check on next access; full cleanup via synthetic closes (planned) |
+| `connectionToChannelContextMap` | `ChannelContextManager` | connection ID string | ⚠️ Partial — generation check on next access; full cleanup via traffic-source-reader-interrupted closes (planned) |
 | `connectionAccumulationMap` | `ExpiringTrafficStreamMap` | `(nodeId, connectionId)` | ⚠️ Partial — generation check on next access; expires when source time advances |
 | `nodeToExpiringBucketMap` | `ExpiringTrafficStreamMap` | capture nodeId | ⚠️ Expires when source time advances |
-| `connectionId2ChannelCache` | `ClientConnectionPool` | `(connectionId, sessionNumber)` | ❌ Not yet — planned via synthetic close drain (Phase A) |
+| `connectionId2ChannelCache` | `ClientConnectionPool` | `(connectionId, sessionNumber)` | ❌ Not yet — planned via traffic-source-reader-interrupted close drain (Phase A) |
 | `requestWorkTracker` | `TrafficReplayerCore` | `UniqueReplayerRequestKey` | ⚠️ In-flight requests complete normally; commits dropped via generation check |
-| `partitionToActiveConnections` | `KafkaTrafficCaptureSource` | Kafka partition # | ✅ Drained when synthetic closes are flushed (planned) |
+| `partitionToActiveConnections` | `KafkaTrafficCaptureSource` | Kafka partition # | ✅ Drained when traffic-source-reader-interrupted closes are flushed (planned) |
