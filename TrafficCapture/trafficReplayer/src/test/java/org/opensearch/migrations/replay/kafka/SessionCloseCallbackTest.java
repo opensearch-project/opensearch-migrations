@@ -49,7 +49,7 @@ class SessionCloseCallbackTest extends InstrumentationTest {
             channelKeyCtx,
             (el, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no-op channel factory"),
             0,
-            () -> onCloseFired.set(true)
+            ignored -> onCloseFired.set(true)
         );
 
         // Use ClientConnectionPool.closeChannelForSession to trigger the close path

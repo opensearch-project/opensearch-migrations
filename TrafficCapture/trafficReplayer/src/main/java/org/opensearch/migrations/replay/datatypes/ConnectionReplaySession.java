@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.datatypes;
 
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.utils.OnlineRadixSorter;
@@ -40,7 +41,7 @@ public class ConnectionReplaySession {
     /** Generation of the Kafka consumer assignment when this session was created. */
     public final int generation;
     /** Called when the session's channel is closed (regardless of cause). */
-    public final Runnable onClose;
+    public final Consumer<ConnectionReplaySession> onClose;
 
     @SneakyThrows
     public ConnectionReplaySession(
@@ -58,7 +59,7 @@ public class ConnectionReplaySession {
         BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory,
         int generation
     ) {
-        this(eventLoop, channelKeyContext, channelFutureFutureFactory, generation, () -> {});
+        this(eventLoop, channelKeyContext, channelFutureFutureFactory, generation, ignored -> {});
     }
 
     @SneakyThrows
@@ -67,7 +68,7 @@ public class ConnectionReplaySession {
         IReplayContexts.IChannelKeyContext channelKeyContext,
         BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory,
         int generation,
-        Runnable onClose
+        Consumer<ConnectionReplaySession> onClose
     ) {
         this.eventLoop = eventLoop;
         this.channelKeyContext = channelKeyContext;

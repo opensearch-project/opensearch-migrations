@@ -79,13 +79,13 @@ public class ClientConnectionPool {
         if (eventLoopGroup.isShuttingDown()) {
             throw new IllegalStateException("Event loop group is shutting down.  Not creating a new session.");
         }
-        var eventLoop = eventLoopGroup.next();
-        var session = new ConnectionReplaySession(eventLoop, channelKeyCtx, channelCreator, generation);
-        // Wire the global onClose callback — captured via lambda so it uses the session reference
-        var capturedSession = session;
-        session = new ConnectionReplaySession(eventLoop, channelKeyCtx, channelCreator, generation,
-            () -> globalOnSessionClose.accept(capturedSession));
-        return session;
+        // arguably the most only thing that matters here is associating this item with an
+        // EventLoop (thread). As the channel needs to be recycled, we'll come back to the
+        // event loop that was tied to the original channel to bind all future channels to
+        // the same event loop. That means that we don't have to worry about concurrent
+        // accesses/changes to the OTHER value that we're storing within the cache.
+        return new ConnectionReplaySession(eventLoopGroup.next(), channelKeyCtx, channelCreator, generation,
+            globalOnSessionClose);
     }
 
     @SneakyThrows
@@ -158,7 +158,7 @@ public class ClientConnectionPool {
                             "It may have already been reset.")
                         .addArgument(session::getChannelKeyContext)
                         .log();
-                    try { session.onClose.run(); } catch (Exception e) {
+                    try { session.onClose.accept(session); } catch (Exception e) {
                         log.atWarn().setCause(e).setMessage("onClose callback threw for {}").addArgument(session::getChannelKeyContext).log();
                     }
                     return TextTrackedFuture.completedFuture(null, () -> "");
@@ -184,7 +184,7 @@ public class ClientConnectionPool {
                         }
                         session.schedule.clear();
                         try {
-                            session.onClose.run();
+                            session.onClose.accept(session);
                         } catch (Exception e) {
                             log.atWarn().setCause(e).setMessage("onClose callback threw for {}").addArgument(session::getChannelKeyContext).log();
                         }
