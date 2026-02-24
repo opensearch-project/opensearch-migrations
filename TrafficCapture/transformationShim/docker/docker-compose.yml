@@ -1,0 +1,45 @@
+version: "3.8"
+
+services:
+  opensearch:
+    image: opensearchproject/opensearch:3.0.0
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Admin_1234!
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  solr:
+    image: solr:8
+    ports:
+      - "8983:8983"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8983/solr/admin/info/system || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  transformation-shim:
+    image: migrations/transformation_shim
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./transforms:/transforms:ro
+    command:
+      - --listenPort
+      - "8080"
+      - --backendUri
+      - http://opensearch:9200
+      - --requestTransformScript
+      - /transforms/solr-request-transform.js
+      - --responseTransformScript
+      - /transforms/solr-response-transform.js
+    depends_on:
+      opensearch:
+        condition: service_healthy
