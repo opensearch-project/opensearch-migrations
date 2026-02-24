@@ -219,7 +219,7 @@ subprojects {
 
                 systemProperty 'junit.jupiter.extensions.autodetection.enabled', true
                 // Verify assertions in tests
-                jvmArgs += ['-ea', '-Xmx5g']
+                jvmArgs += ['-ea', '-XX:+HeapDumpOnOutOfMemoryError', '-Xmx5g']
                 systemProperty "junit.jupiter.execution.timeout.default", "5m"
                 jacoco {
                     enabled = true
