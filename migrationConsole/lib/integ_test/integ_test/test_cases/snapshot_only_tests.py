@@ -63,7 +63,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         self.s3_region = os.environ.get('BYOS_S3_REGION', 'us-west-2')
         self.s3_endpoint = os.environ.get('BYOS_S3_ENDPOINT', '')
         self.pod_replicas = int(os.environ.get('BYOS_POD_REPLICAS', '1'))
-        # Monitor retry limit: ~1 retry/min after backoff cap. Default 33 (~30 min), 900 for ~15 hours
+        # Monitor retry limit: exponential backoff (2s start, factor 2, cap 15s)
         self.monitor_retry_limit = int(os.environ.get('BYOS_MONITOR_RETRY_LIMIT', '900'))
 
     def import_existing_clusters(self):
@@ -133,5 +133,11 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         logger.info(target_response)
 
     def verify_clusters(self):
-        """Workflow success is the exit criteria."""
-        pass
+        """Verify target cluster has indices with documents after migration."""
+        target_response = cat_indices(cluster=self.target_cluster, refresh=True).decode("utf-8")
+        lines = [line for line in target_response.strip().split('\n')
+                 if line.strip() and not line.split()[2].startswith('.')]
+        assert len(lines) > 0, "No user indices found on target cluster after migration"
+        total_docs = sum(int(line.split()[6]) for line in lines)
+        assert total_docs > 0, f"Target cluster has {len(lines)} indices but 0 documents"
+        logger.info(f"Verified: {len(lines)} indices with {total_docs} total documents on target")
