@@ -10,6 +10,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
+import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
@@ -201,6 +202,7 @@ public class EndToEndTest extends SourceTestBase {
 
             var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
                     sourceRepo,
+                    null,
                     snapshotName,
                     List.of(),
                     targetCluster,
@@ -209,7 +211,10 @@ public class EndToEndTest extends SourceTestBase {
                     testDocMigrationContext,
                     sourceVersion,
                     targetCluster.getContainerVersion().getVersion(),
-                    transformationConfig
+                    transformationConfig,
+                    DocumentExceptionAllowlist.empty(),
+                    Integer.MAX_VALUE,
+                    true // use pipeline
             ));
 
             int totalShards = numberOfShards;

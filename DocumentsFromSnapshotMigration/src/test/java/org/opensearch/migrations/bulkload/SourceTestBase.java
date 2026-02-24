@@ -274,21 +274,47 @@ public class SourceTestBase {
         DocumentExceptionAllowlist allowlist,
         int maxRuns
     ) {
+        return migrateDocumentsSequentially(sourceRepo, previousSnapshotName, snapshotName, indexAllowlist,
+            target, runCounter, clockJitter, testContext, sourceVersion, targetVersion,
+            transformationConfig, allowlist, maxRuns, false);
+    }
+
+    /**
+     * Core sequential migration loop. When {@code usePipeline} is true, uses the clean pipeline
+     * (LuceneSnapshotSource → OpenSearchDocumentSink) instead of the legacy DocumentsRunner.
+     */
+    public static int migrateDocumentsSequentially(
+        FileSystemRepo sourceRepo,
+        String previousSnapshotName,
+        String snapshotName,
+        List<String> indexAllowlist,
+        SearchClusterContainer target,
+        AtomicInteger runCounter,
+        Random clockJitter,
+        DocumentMigrationTestContext testContext,
+        Version sourceVersion,
+        Version targetVersion,
+        String transformationConfig,
+        DocumentExceptionAllowlist allowlist,
+        int maxRuns,
+        boolean usePipeline
+    ) {
         for (int runNumber = 1; runNumber <= maxRuns; ++runNumber) {
             try {
-                var workResult = migrateDocumentsWithOneWorker(
-                    sourceRepo,
-                    snapshotName,
-                    previousSnapshotName,
-                    indexAllowlist,
-                    target.getUrl(),
-                    clockJitter,
-                    testContext,
-                    sourceVersion,
-                    targetVersion,
-                    transformationConfig,
-                    allowlist
-                );
+                CompletionStatus workResult;
+                if (usePipeline) {
+                    workResult = migrateDocumentsWithPipeline(
+                        sourceRepo, snapshotName, previousSnapshotName, indexAllowlist,
+                        target.getUrl(), clockJitter, testContext,
+                        sourceVersion, targetVersion, transformationConfig, allowlist
+                    );
+                } else {
+                    workResult = migrateDocumentsWithOneWorker(
+                        sourceRepo, snapshotName, previousSnapshotName, indexAllowlist,
+                        target.getUrl(), clockJitter, testContext,
+                        sourceVersion, targetVersion, transformationConfig, allowlist
+                    );
+                }
                 if (workResult == CompletionStatus.NOTHING_DONE) {
                     return runNumber;
                 } else {
@@ -469,6 +495,82 @@ public class SourceTestBase {
         }
     }
 
+    /**
+     * Pipeline-based migration: uses the clean pipeline (LuceneSnapshotSource → OpenSearchDocumentSink)
+     * instead of the legacy DocumentsRunner path. Same work coordination, different execution engine.
+     */
+    @SneakyThrows
+    public static CompletionStatus migrateDocumentsWithPipeline(
+        SourceRepo sourceRepo,
+        String snapshotName,
+        String previousSnapshotName,
+        List<String> indexAllowlist,
+        String targetAddress,
+        Random clockJitter,
+        DocumentMigrationTestContext context,
+        Version sourceVersion,
+        Version targetVersion,
+        String transformationConfig,
+        DocumentExceptionAllowlist allowlist
+    ) throws RfsMigrateDocuments.NoWorkLeftException {
+        var tempDir = Files.createTempDirectory("opensearchMigrationPipeline_test_lucene");
+        try (var processManager = new LeaseExpireTrigger(workItemId -> {
+            log.atDebug().setMessage("Lease expired for {} (pipeline mode)")
+                .addArgument(workItemId).log();
+        })) {
+            final int ms_window = 1000;
+            final var nextClockShift = (int) (clockJitter.nextDouble() * ms_window) - (ms_window / 2);
+
+            var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(sourceVersion, sourceRepo, false);
+            var extractor = SnapshotExtractor.create(sourceVersion, sourceResourceProvider, sourceRepo);
+
+            var docTransformer = new TransformationLoader().getTransformerFactoryLoader(
+                Optional.ofNullable(transformationConfig).orElse(
+                    RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG
+                ));
+
+            AtomicReference<WorkItemCursor> progressCursor = new AtomicReference<>();
+            var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
+            var connectionContext = ConnectionContextTestParams.builder()
+                .host(targetAddress)
+                .build()
+                .toConnectionContext();
+            var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+
+            try (var workCoordinator = coordinatorFactory.get(
+                new CoordinateWorkHttpClient(connectionContext),
+                TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                UUID.randomUUID().toString(),
+                Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift)),
+                workItemRef::set
+            )) {
+                var clientFactory = new OpenSearchClientFactory(connectionContext);
+                return RfsMigrateDocuments.runWithPipeline(
+                    extractor,
+                    clientFactory.determineVersionAndCreate(),
+                    snapshotName,
+                    tempDir,
+                    () -> docTransformer,
+                    false,
+                    allowlist,
+                    1000,
+                    Long.MAX_VALUE,
+                    progressCursor,
+                    workCoordinator,
+                    Duration.ofMinutes(10),
+                    processManager,
+                    sourceResourceProvider.getIndexMetadata(),
+                    indexAllowlist,
+                    context,
+                    new AtomicReference<>(),
+                    previousSnapshotName,
+                    previousSnapshotName != null ? DeltaMode.UPDATES_AND_DELETES : null
+                );
+            }
+        } finally {
+            FileSystemUtils.deleteDirectories(tempDir.toString());
+        }
+    }
     @AllArgsConstructor
     @Getter
     public static class RunData {

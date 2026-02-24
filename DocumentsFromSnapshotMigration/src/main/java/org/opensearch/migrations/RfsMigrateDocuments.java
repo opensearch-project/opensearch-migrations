@@ -272,9 +272,11 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--use-pipeline" },
-            description = "Experimental. Use the clean pipeline implementation instead of the default " +
-                "DocumentsRunner flow. The pipeline uses a Lucene-agnostic IR with clean source/sink ports.")
-        public boolean usePipeline = false;
+            arity = 1,
+            description = "Use the clean pipeline implementation instead of the legacy " +
+                "DocumentsRunner flow. The pipeline uses a Lucene-agnostic IR with clean source/sink ports. " +
+                "Pass --use-pipeline false to use the legacy flow.")
+        public boolean usePipeline = true;
     }
 
     public static class ExperimentalArgs {
