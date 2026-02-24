@@ -13,7 +13,6 @@ deployment/k8s/charts/aggregates/migrationAssistantWithArgo/
   scripts/
     privateEcrManifest.sh          # Production images + charts
     testClustersEcrManifest.sh     # Test cluster images + charts  
-    buildImagesEcrManifest.sh      # Build tooling images
     generatePrivateEcrValues.sh    # Helm values overrides for ECR
     mirrorToEcr.sh                 # Copies everything to ECR
     verifyNoPublicImages.sh        # Validates no public refs remain
@@ -89,8 +88,6 @@ registry/path:tag
 ```
 
 **`testClustersEcrManifest.sh`**: Only test cluster images (elasticsearch, opensearch).
-
-**`buildImagesEcrManifest.sh`**: Only build tooling (moby/buildkit).
 
 ### 6. Update `generatePrivateEcrValues.sh`
 

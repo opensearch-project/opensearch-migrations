@@ -64,6 +64,10 @@ ECR_PASS=$(aws ecr get-login-password --region "$REGION")
 echo "$ECR_PASS" | crane auth login "$ECR_HOST" -u AWS --password-stdin
 echo "$ECR_PASS" | helm registry login "$ECR_HOST" -u AWS --password-stdin
 
+# Authenticate with public ECR (needed for public.ecr.aws images)
+aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
+  crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
+
 # --- mirror container images ---
 echo ""
 echo "=== Mirroring container images ==="

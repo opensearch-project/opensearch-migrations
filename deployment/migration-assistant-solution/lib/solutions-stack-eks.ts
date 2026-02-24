@@ -110,6 +110,7 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             new GatewayVpcEndpoint(this, 'S3VpcEndpoint', {
                 service: GatewayVpcEndpointAwsService.S3,
                 vpc: vpc,
+                subnets: [{ subnets: vpc.privateSubnets }],
             });
 
             const serviceEndpoints = [
@@ -245,13 +246,23 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             const s3Condition = new CfnCondition(this, 'CreateS3EndpointCondition', {
                 expression: Fn.conditionEquals(createS3EndpointParam, 'true')
             });
-            // S3 gateway endpoint — includes RouteTableIds for proper routing
+
+            const s3EndpointRouteTableIdsParam = new CfnParameter(this, 'S3EndpointRouteTableIds', {
+                type: 'CommaDelimitedList',
+                default: '',
+                description: 'Route table IDs for S3 gateway endpoint association (resolved from subnet IDs by the bootstrap script).'
+            });
+            addParameterLabel(parameterLabels, s3EndpointRouteTableIdsParam, "S3 Endpoint Route Table IDs")
+            vpcEndpointParameters.push(s3EndpointRouteTableIdsParam.logicalId)
+
+            // S3 gateway endpoint — RouteTableIds required so ECR layer downloads route through the gateway
             const s3Endpoint = new cdk.CfnResource(this, 'S3VpcEndpoint', {
                 type: 'AWS::EC2::VPCEndpoint',
                 properties: {
                     ServiceName: `com.amazonaws.${this.region}.s3`,
                     VpcId: vpc.vpcId,
                     VpcEndpointType: 'Gateway',
+                    RouteTableIds: s3EndpointRouteTableIdsParam.valueAsList,
                 }
             });
             s3Endpoint.cfnOptions.condition = s3Condition;

@@ -42,9 +42,9 @@ quay.io/strimzi/kaniko-executor:0.47.0
 quay.io/strimzi/maven-builder:0.47.0
 
 # --- argo-workflows ---
-quay.io/argoproj/workflow-controller:v3.7.8
-quay.io/argoproj/argocli:v3.7.8
-quay.io/argoproj/argoexec:v3.7.8
+quay.io/argoproj/workflow-controller:v3.7.9
+quay.io/argoproj/argocli:v3.7.9
+quay.io/argoproj/argoexec:v3.7.9
 
 # --- fluent-bit ---
 cr.fluentbit.io/fluent/fluent-bit:4.0.1
@@ -95,7 +95,7 @@ registry.k8s.io/kubectl:v1.32.7
 docker.io/library/busybox:1.35
 
 # --- localstack ---
-docker.io/localstack/localstack:latest
+docker.io/localstack/localstack:4.3.0
 docker.io/amazon/aws-cli:latest
 
 # --- direct template references ---

@@ -59,7 +59,7 @@ charts:
     repository: "oci://${ECR}/charts/argo-workflows"
     values:
       images:
-        tag: v3.7.8
+        tag: v3.7.9
       controller:
         image:
           registry: "${M}/quay.io"
@@ -100,6 +100,8 @@ charts:
         prometheusSpec:
           image:
             registry: "${M}/quay.io"
+          thanos:
+            image: "${M}/quay.io/thanos/thanos:v0.38.0"
       alertmanager:
         alertmanagerSpec:
           image:
@@ -144,6 +146,8 @@ charts:
       manager:
         image:
           repository: "${M}/ghcr.io/open-telemetry/opentelemetry-operator/opentelemetry-operator"
+        collectorImage:
+          repository: "${M}/public.ecr.aws/aws-observability/aws-otel-collector"
       kubeRBACProxy:
         image:
           repository: "${M}/quay.io/brancz/kube-rbac-proxy"
