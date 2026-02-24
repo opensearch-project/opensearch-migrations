@@ -31,6 +31,8 @@ final class IndexMetadataConverter {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    private static final String SETTINGS_KEY = "settings";
+
     // Known top-level mapping keywords that are NOT type names.
     private static final Set<String> MAPPING_KEYWORDS = Set.of(
         "properties", "_source", "_routing", "_meta", "dynamic", "enabled",
@@ -42,7 +44,7 @@ final class IndexMetadataConverter {
 
     static IndexMetadataSnapshot convert(String indexName, IndexMetadata meta) {
         ObjectNode mappings = safeGetObjectNode(meta::getMappings, "mappings", indexName);
-        ObjectNode settings = safeGetObjectNode(meta::getSettings, "settings", indexName);
+        ObjectNode settings = safeGetObjectNode(meta::getSettings, SETTINGS_KEY, indexName);
 
         // Structural normalization at the IR boundary
         if (mappings != null) {
@@ -88,9 +90,9 @@ final class IndexMetadataConverter {
         settings = TransformFunctions.convertFlatSettingsToTree(settings);
         // Wrap in a temporary root to use removeIntermediateIndexSettingsLevel
         ObjectNode tempRoot = MAPPER.createObjectNode();
-        tempRoot.set("settings", settings);
+        tempRoot.set(SETTINGS_KEY, settings);
         TransformFunctions.removeIntermediateIndexSettingsLevel(tempRoot);
-        return (ObjectNode) tempRoot.get("settings");
+        return (ObjectNode) tempRoot.get(SETTINGS_KEY);
     }
 
     private static int safeGetReplicas(IndexMetadata meta) {
