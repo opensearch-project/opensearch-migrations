@@ -41,3 +41,5 @@ ignore:
   - "**/frontend/out/**"
   - "**/generated/**"
   - "**/orchestrationSpecs/**"
+  - "**/Dockerfile*"
+  - "**/*.sh"
