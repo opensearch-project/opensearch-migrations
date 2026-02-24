@@ -1928,6 +1928,12 @@ spec:
             {
               "name": "imageMigrationConsolePullPolicy",
             },
+            {
+              "name": "imageCoordinatorClusterLocation",
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
+            },
           ],
         },
         "name": "setupandrunbulkload",
@@ -1942,6 +1948,10 @@ spec:
                   {
                     "name": "clusterName",
                     "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}",
+                  },
+                  {
+                    "name": "coordinatorImage",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
                   },
                 ],
               },
@@ -2187,6 +2197,12 @@ exports[`test workflow template renderings full-migration 1`] = `
             {
               "name": "imageMigrationConsolePullPolicy",
             },
+            {
+              "name": "imageCoordinatorClusterLocation",
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
+            },
           ],
         },
         "name": "migratefromsnapshot",
@@ -2282,6 +2298,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}",
+                  },
+                  {
                     "name": "sessionName",
                     "value": "{{steps.idGenerator.id}}",
                   },
@@ -2353,6 +2377,12 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
             {
               "name": "imageMigrationConsolePullPolicy",
+            },
+            {
+              "name": "imageCoordinatorClusterLocation",
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
             },
           ],
         },
@@ -2451,6 +2481,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}",
+                  },
+                  {
                     "name": "label",
                     "value": "{{=jsonpath(toJSON(item), '$.label')}}",
                   },
@@ -2531,6 +2569,12 @@ exports[`test workflow template renderings full-migration 1`] = `
             {
               "name": "imageMigrationConsolePullPolicy",
             },
+            {
+              "name": "imageCoordinatorClusterLocation",
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
+            },
           ],
         },
         "name": "migration",
@@ -2585,6 +2629,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}",
                   },
                   {
                     "name": "createSnapshotConfig",
@@ -2706,6 +2758,26 @@ exports[`test workflow template renderings full-migration 1`] = `
                 },
               },
             },
+            {
+              "name": "imageCoordinatorClusterLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "key": "coordinatorClusterImage",
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "optional": undefined,
+                },
+              },
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "key": "coordinatorClusterPullPolicy",
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "optional": undefined,
+                },
+              },
+            },
           ],
         },
         "name": "main",
@@ -2752,6 +2824,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}",
                   },
                   {
                     "name": "sourceConfig",
@@ -4281,6 +4361,9 @@ spec:
             {
               "name": "clusterName",
             },
+            {
+              "name": "coordinatorImage",
+            },
           ],
         },
         "name": "createrfscoordinatorstatefulset",
@@ -4316,7 +4399,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: opensearch
-          image: opensearchproject/opensearch:3.1.0
+          image: "{{inputs.parameters.coordinatorImage}}"
           ports:
             - name: https
               containerPort: 9200
@@ -4380,6 +4463,9 @@ spec:
               "name": "clusterName",
             },
             {
+              "name": "coordinatorImage",
+            },
+            {
               "name": "groupName",
               "value": "Start RFS OpenSearch cluster for worker coordination",
             },
@@ -4423,6 +4509,10 @@ spec:
                   {
                     "name": "clusterName",
                     "value": "{{inputs.parameters.clusterName}}",
+                  },
+                  {
+                    "name": "coordinatorImage",
+                    "value": "{{inputs.parameters.coordinatorImage}}",
                   },
                 ],
               },

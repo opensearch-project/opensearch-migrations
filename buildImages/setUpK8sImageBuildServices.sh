@@ -25,6 +25,7 @@ if ! helm list -n buildkit | grep -q buildkit; then
     --set awsEKSEnabled="${AWS_EKS_ENABLED}" \
     --set multiArchNative="${AWS_EKS_ENABLED}" \
     --set deployBuildkitPods="${DEPLOY_BUILDKIT_PODS}" \
+    ${BUILDKIT_IMAGE:+--set buildkitImage="$BUILDKIT_IMAGE"} \
     ${BUILDKIT_HELM_ARGS:-}
 else
   echo "buildkit helm release already exists, skipping install"

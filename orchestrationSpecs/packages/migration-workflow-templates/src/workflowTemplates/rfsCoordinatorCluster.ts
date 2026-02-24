@@ -56,7 +56,7 @@ function createRfsCoordinatorServiceManifest(clusterName: BaseExpression<string>
     };
 }
 
-function createRfsCoordinatorStatefulSetManifest(clusterName: BaseExpression<string>) {
+function createRfsCoordinatorStatefulSetManifest(clusterName: BaseExpression<string>, coordinatorImage: BaseExpression<string>) {
     return {
         apiVersion: "apps/v1",
         kind: "StatefulSet",
@@ -94,7 +94,7 @@ function createRfsCoordinatorStatefulSetManifest(clusterName: BaseExpression<str
                     containers: [
                         {
                             name: "opensearch",
-                            image: "opensearchproject/opensearch:3.1.0",
+                            image: coordinatorImage,
                             ports: [
                                 {
                                     name: "https",
@@ -233,17 +233,19 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
 
     .addTemplate("createRfsCoordinatorStatefulSet", t => t
         .addRequiredInput("clusterName", typeToken<string>())
+        .addRequiredInput("coordinatorImage", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
                 setOwnerReference: true,
                 successCondition: "status.readyReplicas > 0",
-                manifest: createRfsCoordinatorStatefulSetManifest(b.inputs.clusterName)
+                manifest: createRfsCoordinatorStatefulSetManifest(b.inputs.clusterName, b.inputs.coordinatorImage)
             }))
     )
 
     .addTemplate("createRfsCoordinator", t => t
         .addRequiredInput("clusterName", typeToken<string>())
+        .addRequiredInput("coordinatorImage", typeToken<string>())
         .addOptionalInput("groupName", c => "Start RFS OpenSearch cluster for worker coordination")
         .addSteps(b => b
             .addStep("createSecret", INTERNAL, "createRfsCoordinatorSecret", c =>
@@ -252,7 +254,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                 .addStep("createService", INTERNAL, "createRfsCoordinatorService", c =>
                     c.register({ clusterName: b.inputs.clusterName }))
                 .addStep("createStatefulSet", INTERNAL, "createRfsCoordinatorStatefulSet", c =>
-                    c.register({ clusterName: b.inputs.clusterName }))
+                    c.register({ clusterName: b.inputs.clusterName, coordinatorImage: b.inputs.coordinatorImage }))
             )
         )
     )
