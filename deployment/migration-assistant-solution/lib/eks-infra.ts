@@ -1,9 +1,6 @@
 import {Construct} from 'constructs';
 import {CfnPodIdentityAssociation} from 'aws-cdk-lib/aws-eks';
-// Note: @aws-cdk/aws-eks-v2-alpha is in developer preview. API may change between CDK releases.
-// This replaces the legacy aws-cdk-lib/aws-eks L2 construct with a ground-up rewrite that
-// supports EKS Auto Mode natively and does not require a kubectl Lambda handler.
-import * as eks from '@aws-cdk/aws-eks-v2-alpha';
+import * as eks from 'aws-cdk-lib/aws-eks-v2';
 import {IVpc, Subnet} from 'aws-cdk-lib/aws-ec2';
 import {
     Effect,
