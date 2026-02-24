@@ -3,6 +3,8 @@ plugins {
     id 'io.freefair.lombok'
 }
 
+evaluationDependsOn ':SearchSnapshotExtractor'
+
 dependencies {
     implementation project(':rfs-common')
     implementation project(':rfs-http')
@@ -24,6 +26,11 @@ dependencies {
     testImplementation testFixtures(project(':coreUtilities'))
     testImplementation testFixtures(project(':testHelperFixtures'))
     testImplementation project(':CreateSnapshot')
+
+    // Shadow lucene jars needed for reading older snapshot formats in tests
+    testImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene5').map { it.outputs.files }
+    testImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene6').map { it.outputs.files }
+    testImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene7').map { it.outputs.files }
 
     testImplementation libs.reactor.test
     testImplementation libs.testcontainers

@@ -3,7 +3,6 @@ package org.opensearch.migrations.bulkload.common;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
@@ -32,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * Golden file tests for document extraction. Validates that reading documents from
  * pre-built snapshot fixtures produces stable, expected output.
  *
- * Golden files are stored in test-resources/golden/ as pretty-printed JSON.
+ * Golden files are stored in RFS/test-resources/golden/ as pretty-printed JSON.
  * To regenerate: delete the golden file and run the test — it will write the current output.
  */
 @Slf4j
@@ -40,8 +39,7 @@ public class GoldenDocumentExtractionTest {
     private static final ObjectMapper MAPPER = new ObjectMapper()
         .enable(SerializationFeature.INDENT_OUTPUT);
 
-    private static final Path GOLDEN_DIR = Paths.get(System.getProperty("user.dir"))
-        .resolve("test-resources/golden");
+    private static final Path GOLDEN_DIR = TestResources.GOLDEN_DIR;
 
     private Path tempDirectory;
 
