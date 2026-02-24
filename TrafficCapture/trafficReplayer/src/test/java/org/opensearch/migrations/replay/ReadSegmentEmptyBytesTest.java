@@ -77,7 +77,7 @@ public class ReadSegmentEmptyBytesTest extends InstrumentationTest {
                 public Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                     @NonNull HttpMessageAndTimestamp request,
-                    boolean isHandoffConnection
+                    boolean isResumedConnection
                 ) {
                     return results::add;
                 }

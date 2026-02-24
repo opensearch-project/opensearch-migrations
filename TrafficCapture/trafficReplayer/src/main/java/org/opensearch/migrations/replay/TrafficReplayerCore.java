@@ -98,18 +98,18 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         private final ReplayEngine replayEngine;
         private Consumer<SourceTargetCaptureTuple> resultTupleConsumer;
         private ITrafficCaptureSource trafficCaptureSource;
-        /** How long to delay the first request on a handoff connection. Configurable via CLI. */
+        /** How long to delay the first request on a resumed connection. Configurable via CLI. */
         private final Duration quiescentDuration;
 
         @Override
         public Consumer<RequestResponsePacketPair> onRequestReceived(
             @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
             @NonNull HttpMessageAndTimestamp request,
-            boolean isHandoffConnection
+            boolean isResumedConnection
         ) {
-            var quiescentUntil = isHandoffConnection ? Instant.now().plus(quiescentDuration) : null;
+            var quiescentUntil = isResumedConnection ? Instant.now().plus(quiescentDuration) : null;
             if (quiescentUntil != null) {
-                log.atInfo().setMessage("Applying quiescent delay until {} for handoff connection {}")
+                log.atInfo().setMessage("Applying quiescent delay until {} for resumed connection {}")
                     .addArgument(quiescentUntil).addArgument(ctx).log();
             }
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
@@ -273,9 +273,9 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             @NonNull Instant timestamp,
             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
         ) {
-            // For REASSIGNED: close tracing contexts (no commit) AND schedule channel close
+            // For TRAFFIC_SOURCE_READER_INTERRUPTED: close tracing contexts (no commit) AND schedule channel close
             // so the ConnectionReplaySession drains and the onClose callback fires
-            if (status == RequestResponsePacketPair.ReconstructionStatus.REASSIGNED) {
+            if (status == RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED) {
                 commitTrafficStreams(false, trafficStreamKeysBeingHeld);
                 notifyConnectionDone(trafficStreamKeysBeingHeld);
                 replayEngine.setFirstTimestamp(timestamp);
@@ -307,7 +307,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
 
         private void notifyConnectionDone(List<ITrafficStreamKey> keys) {
             if (keys != null && !keys.isEmpty()) {
-                trafficCaptureSource.onConnectionDone(keys.get(0));
+                trafficCaptureSource.onConnectionAccumulationComplete(keys.get(0));
             }
         }
 

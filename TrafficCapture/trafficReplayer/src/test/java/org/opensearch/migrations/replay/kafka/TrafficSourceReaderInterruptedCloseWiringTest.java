@@ -37,7 +37,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Phase A failing tests for synthetic close wiring.
  */
-public class SyntheticCloseWiringTest extends InstrumentationTest {
+public class TrafficSourceReaderInterruptedCloseWiringTest extends InstrumentationTest {
 
     @Override
     protected TestContext makeInstrumentationContext() {
@@ -45,7 +45,7 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
     }
 
     /**
-     * When a SyntheticPartitionReassignmentClose fires for a connection in ACCUMULATING_WRITES
+     * When a TrafficSourceReaderInterruptedClose fires for a connection in ACCUMULATING_WRITES
      * state, fireAccumulationsCallbacksAndClose must be called BEFORE onConnectionClose, so that
      * finishedAccumulatingResponseFuture is completed and the OnlineRadixSorter can drain.
      *
@@ -54,7 +54,7 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
      * is never invoked for the in-flight request.
      */
     @Test
-    void syntheticClose_completesFinishedAccumulatingResponseFuture() {
+    void trafficSourceReaderInterruptedClose_completesFinishedAccumulatingResponseFuture() {
         var responseAccumulatedCallbackFired = new AtomicBoolean(false);
         var connectionCloseFired = new AtomicBoolean(false);
 
@@ -67,7 +67,7 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
                 public Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                     @NonNull HttpMessageAndTimestamp request,
-                    boolean isHandoffConnection
+                    boolean isResumedConnection
                 ) {
                     // Return the "finishedAccumulatingResponseFuture" completion callback
                     return pair -> {
@@ -132,17 +132,17 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
         // which calls handleEndOfResponse → fullDataContinuation.accept(rrPair)
         // i.e., the responseCallback fires BEFORE onConnectionClose
         var syntheticKey = makeKafkaKey("node1", "conn1", 1, 0, 1);
-        accumulator.accept(new SyntheticPartitionReassignmentClose(syntheticKey));
+        accumulator.accept(new TrafficSourceReaderInterruptedClose(syntheticKey));
 
         Assertions.assertTrue(connectionCloseFired.get(),
-            "onConnectionClose(REASSIGNED) must fire for synthetic close");
-        Assertions.assertEquals(RequestResponsePacketPair.ReconstructionStatus.REASSIGNED,
+            "onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED) must fire for synthetic close");
+        Assertions.assertEquals(RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED,
             // check via orderTracker
             orderTracker.stream().filter(s -> s.startsWith("connectionClose:"))
                 .map(s -> s.substring("connectionClose:".length()))
                 .map(RequestResponsePacketPair.ReconstructionStatus::valueOf)
                 .findFirst().orElse(null),
-            "status must be REASSIGNED");
+            "status must be TRAFFIC_SOURCE_READER_INTERRUPTED");
 
         // The response callback (finishedAccumulatingResponseFuture completion) must fire
         // before onConnectionClose so the sorter can drain
@@ -159,15 +159,15 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
     }
 
     /**
-     * onConnectionClose(REASSIGNED) must call replayEngine.closeConnection() — currently skipped.
-     * We verify this indirectly: the REASSIGNED path must NOT return early before scheduling
+     * onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED) must call replayEngine.closeConnection() — currently skipped.
+     * We verify this indirectly: the TRAFFIC_SOURCE_READER_INTERRUPTED path must NOT return early before scheduling
      * the close. We check that the close IS scheduled by verifying the session's sorter has work.
      *
      * This test is a placeholder — the full verification requires integration with ReplayEngine.
-     * The key assertion: REASSIGNED status does NOT skip replayEngine.closeConnection().
+     * The key assertion: TRAFFIC_SOURCE_READER_INTERRUPTED status does NOT skip replayEngine.closeConnection().
      */
     @Test
-    void syntheticClose_doesNotSkipReplayEngineClose() {
+    void trafficSourceReaderInterruptedClose_doesNotSkipReplayEngineClose() {
         var reassignedCloseCallCount = new AtomicInteger(0);
         var replayEngineCloseCalled = new AtomicBoolean(false);
 
@@ -177,7 +177,7 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
                 public Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                     @NonNull HttpMessageAndTimestamp request,
-                    boolean isHandoffConnection
+                    boolean isResumedConnection
                 ) { return pair -> {}; }
 
                 @Override
@@ -198,7 +198,7 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
                     @NonNull Instant when,
                     @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
                 ) {
-                    if (status == RequestResponsePacketPair.ReconstructionStatus.REASSIGNED) {
+                    if (status == RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED) {
                         reassignedCloseCallCount.incrementAndGet();
                         // After fix: channelInteractionNum and sessionNumber should be valid
                         // (not both 0 unless the accumulation was empty)
@@ -215,19 +215,19 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
         );
 
         var key = makeKafkaKey("node1", "conn2", 1, 0, 0);
-        accumulator.accept(new SyntheticPartitionReassignmentClose(key));
+        accumulator.accept(new TrafficSourceReaderInterruptedClose(key));
 
         Assertions.assertEquals(1, reassignedCloseCallCount.get(),
-            "onConnectionClose(REASSIGNED) must be called exactly once for synthetic close");
+            "onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED) must be called exactly once for synthetic close");
     }
 
     // -------------------------------------------------------------------------
-    // Phase A: outstandingSyntheticCloseSessions counter tests
+    // Phase A: outstandingTrafficSourceReaderInterruptedCloseSessions counter tests
     // -------------------------------------------------------------------------
 
     /**
-     * After draining syntheticCloseQueue, readNextTrafficStreamSynchronously must return
-     * empty list while outstandingSyntheticCloseSessions > 0.
+     * After draining trafficSourceReaderInterruptedCloseQueue, readNextTrafficStreamSynchronously must return
+     * empty list while outstandingTrafficSourceReaderInterruptedCloseSessions > 0.
      * Before fix: counter doesn't exist, real records returned immediately.
      */
     @Test
@@ -239,7 +239,7 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, "test", Duration.ofHours(1))) {
             // Simulate counter > 0
-            source.outstandingSyntheticCloseSessions.set(1);
+            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
 
             mc.schedulePollTask(() -> {
                 mc.rebalance(Collections.singletonList(tp));
@@ -262,7 +262,7 @@ public class SyntheticCloseWiringTest extends InstrumentationTest {
             var result = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
 
             Assertions.assertTrue(result.isEmpty(),
-                "must return empty batch while outstandingSyntheticCloseSessions > 0, got: " + result.size());
+                "must return empty batch while outstandingTrafficSourceReaderInterruptedCloseSessions > 0, got: " + result.size());
         }
     }
 

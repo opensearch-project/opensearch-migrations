@@ -13,7 +13,7 @@ public interface ITrafficStreamWithKey {
      * partition reassignment — another replayer may have had in-flight requests on this connection.
      * The replay engine should apply a quiescent delay before sending the first request.
      */
-    default boolean isHandoffConnection() {
+    default boolean isResumedConnection() {
         return false;
     }
 }

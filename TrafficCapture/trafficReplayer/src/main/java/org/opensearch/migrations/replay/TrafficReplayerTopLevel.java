@@ -159,7 +159,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
         // Wire session close callback so KafkaTrafficCaptureSource can track synthetic close drain
         clientConnectionPool.setGlobalOnSessionClose(session ->
-            trafficSource.onSessionClosed(
+            trafficSource.onNetworkConnectionClosed(
                 session.getChannelKeyContext().getConnectionId(),
                 // sessionNumber is the key used in the pool — derive from the session's context
                 // For now use 0 as a placeholder; full GenerationalSessionKey wiring is Phase A4

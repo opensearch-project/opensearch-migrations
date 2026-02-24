@@ -10,12 +10,12 @@ import lombok.RequiredArgsConstructor;
 /**
  * Synthetic record injected by KafkaTrafficCaptureSource when a partition is truly lost
  * (revoked and not reassigned back to this consumer). Signals the accumulator to close
- * the connection with ReconstructionStatus.REASSIGNED rather than a source-side close.
+ * the connection with ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED rather than a source-side close.
  * Does not carry a real Kafka offset and must not trigger a Kafka commit.
  */
 @RequiredArgsConstructor
 @Getter
-public class SyntheticPartitionReassignmentClose implements ITrafficStreamWithKey {
+public class TrafficSourceReaderInterruptedClose implements ITrafficStreamWithKey {
     private final ITrafficStreamKey key;
 
     @Override

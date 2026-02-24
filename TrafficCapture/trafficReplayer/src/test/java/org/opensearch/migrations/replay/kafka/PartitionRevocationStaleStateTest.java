@@ -102,7 +102,7 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
                 public Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                     @NonNull HttpMessageAndTimestamp request,
-                    boolean isHandoffConnection
+                    boolean isResumedConnection
                 ) {
                     requestsReceived.incrementAndGet();
                     return pair -> {};
@@ -165,7 +165,7 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
                 public Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                     @NonNull HttpMessageAndTimestamp request,
-                    boolean isHandoffConnection
+                    boolean isResumedConnection
                 ) {
                     return pair -> {};
                 }
@@ -275,12 +275,12 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
     // -------------------------------------------------------------------------
 
     /**
-     * SyntheticPartitionReassignmentClose fed to the accumulator must fire
-     * onConnectionClose with ReconstructionStatus.REASSIGNED.
+     * TrafficSourceReaderInterruptedClose fed to the accumulator must fire
+     * onConnectionClose with ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED.
      * Before fix: accumulator doesn't handle this type — no onConnectionClose fires.
      */
     @Test
-    void accumulatorHandlesSyntheticClose() {
+    void accumulatorHandlesTrafficSourceReaderInterruptedClose() {
         var capturedStatus = new AtomicReference<RequestResponsePacketPair.ReconstructionStatus>();
         var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
             Duration.ofSeconds(30), null, new AccumulationCallbacks() {
@@ -288,7 +288,7 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
                 public Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                     @NonNull HttpMessageAndTimestamp request,
-                    boolean isHandoffConnection
+                    boolean isResumedConnection
                 ) { return pair -> {}; }
 
                 @Override
@@ -319,12 +319,12 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
         );
 
         var key = makeKafkaKey("node1", "conn-synth", 1, 0, 0);
-        accumulator.accept(new SyntheticPartitionReassignmentClose(key));
+        accumulator.accept(new TrafficSourceReaderInterruptedClose(key));
 
         Assertions.assertEquals(
-            RequestResponsePacketPair.ReconstructionStatus.REASSIGNED,
+            RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED,
             capturedStatus.get(),
-            "SyntheticPartitionReassignmentClose must trigger onConnectionClose with REASSIGNED status"
+            "TrafficSourceReaderInterruptedClose must trigger onConnectionClose with TRAFFIC_SOURCE_READER_INTERRUPTED status"
         );
     }
 }

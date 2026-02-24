@@ -212,7 +212,7 @@ class TrafficReplayerTest extends InstrumentationTest {
                         public Consumer<RequestResponsePacketPair> onRequestReceived(
                             @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                             @NonNull HttpMessageAndTimestamp request,
-                    boolean isHandoffConnection
+                    boolean isResumedConnection
                 ) {
                             var bytesList = request.stream().collect(Collectors.toList());
                             byteArrays.add(bytesList);
@@ -289,7 +289,7 @@ class TrafficReplayerTest extends InstrumentationTest {
                         public Consumer<RequestResponsePacketPair> onRequestReceived(
                             @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
                             @NonNull HttpMessageAndTimestamp request,
-                    boolean isHandoffConnection
+                    boolean isResumedConnection
                 ) {
                             var bytesList = request.stream().collect(Collectors.toList());
                             byteArrays.add(bytesList);

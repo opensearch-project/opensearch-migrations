@@ -92,16 +92,16 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         new ConcurrentHashMap<>();
     /** Batches of synthetic close events to drain before returning real Kafka records.
      *  Each entry is one batch from a single partition-revocation event. */
-    private final Queue<List<SyntheticPartitionReassignmentClose>> syntheticCloseQueue = new ConcurrentLinkedQueue<>();
+    private final Queue<List<TrafficSourceReaderInterruptedClose>> trafficSourceReaderInterruptedCloseQueue = new ConcurrentLinkedQueue<>();
     /**
      * Registered synthetic closes keyed by (connectionId, sessionNumber, generation).
-     * The first onSessionClosed call for a given key decrements the counter.
+     * The first onNetworkConnectionClosed call for a given key decrements the counter.
      */
-    final ConcurrentHashMap<String, Boolean> pendingSyntheticCloses = new ConcurrentHashMap<>();
+    final ConcurrentHashMap<String, Boolean> pendingTrafficSourceReaderInterruptedCloses = new ConcurrentHashMap<>();
     /** Consistent counter of registered-but-not-yet-closed synthetic closes. Uses AtomicInteger
      *  for volatile visibility — decrementAndGet() on the Netty thread is immediately visible
      *  to get() on kafkaExecutor, preventing a premature isEmpty() race. */
-    final AtomicInteger outstandingSyntheticCloseSessions = new AtomicInteger(0);
+    final AtomicInteger outstandingTrafficSourceReaderInterruptedCloseSessions = new AtomicInteger(0);
 
     public KafkaTrafficCaptureSource(
         @NonNull RootReplayerContext globalContext,
@@ -135,14 +135,14 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         kafkaExecutor = Executors.newSingleThreadExecutor(new DefaultThreadFactory("kafkaConsumerThread"));
         isClosed = new AtomicBoolean(false);
         // Register callback: when partitions are truly lost, enqueue synthetic closes for their active connections
-        trackingKafkaConsumer.setOnPartitionsTrulyLostCallback(this::enqueueSyntheticClosesForPartitions);
+        trackingKafkaConsumer.setOnPartitionsTrulyLostCallback(this::enqueueTrafficSourceReaderInterruptedClosesForPartitions);
     }
 
-    private void enqueueSyntheticClosesForPartitions(Collection<Integer> lostPartitions) {
+    private void enqueueTrafficSourceReaderInterruptedClosesForPartitions(Collection<Integer> lostPartitions) {
         for (int partition : lostPartitions) {
             var active = partitionToActiveConnections.remove(partition);
             if (active == null) continue;
-            var batch = new ArrayList<SyntheticPartitionReassignmentClose>();
+            var batch = new ArrayList<TrafficSourceReaderInterruptedClose>();
             for (var connKey : active) {
                 var ts = TrafficStream.newBuilder()
                     .setNodeId(connKey.nodeId).setConnectionId(connKey.connectionId)
@@ -153,25 +153,25 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                         .createTrafficStreamContextForKafkaSource(channelKeyCtx, "", 0);
                 }, ts, new PojoKafkaCommitOffsetData(trackingKafkaConsumer.getConsumerConnectionGeneration(), partition, -1));
                 var sessionKey = connKey.connectionId + ":" + 0 + ":" + trackingKafkaConsumer.getConsumerConnectionGeneration();
-                if (pendingSyntheticCloses.putIfAbsent(sessionKey, Boolean.TRUE) == null) {
-                    outstandingSyntheticCloseSessions.incrementAndGet();
-                    batch.add(new SyntheticPartitionReassignmentClose(key));
+                if (pendingTrafficSourceReaderInterruptedCloses.putIfAbsent(sessionKey, Boolean.TRUE) == null) {
+                    outstandingTrafficSourceReaderInterruptedCloseSessions.incrementAndGet();
+                    batch.add(new TrafficSourceReaderInterruptedClose(key));
                 }
             }
             if (!batch.isEmpty()) {
-                syntheticCloseQueue.add(batch);
+                trafficSourceReaderInterruptedCloseQueue.add(batch);
             }
         }
     }
 
     @Override
-    public void onSessionClosed(String connectionId, int sessionNumber, int generation) {
+    public void onNetworkConnectionClosed(String connectionId, int sessionNumber, int generation) {
         var sessionKey = connectionId + ":" + sessionNumber + ":" + generation;
-        if (pendingSyntheticCloses.remove(sessionKey) != null) {
-            outstandingSyntheticCloseSessions.decrementAndGet();
+        if (pendingTrafficSourceReaderInterruptedCloses.remove(sessionKey) != null) {
+            outstandingTrafficSourceReaderInterruptedCloseSessions.decrementAndGet();
             log.atDebug().setMessage("Synthetic close confirmed for {}:{} gen={}, outstanding={}").
                 addArgument(connectionId).addArgument(sessionNumber).addArgument(generation)
-                .addArgument(outstandingSyntheticCloseSessions::get).log();
+                .addArgument(outstandingTrafficSourceReaderInterruptedCloseSessions::get).log();
         }
     }
 
@@ -198,7 +198,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
      * Removes the connection from partitionToActiveConnections so the map doesn't grow unboundedly.
      */
     @Override
-    public void onConnectionDone(ITrafficStreamKey trafficStreamKey) {
+    public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
         var connKey = new ScopedConnectionIdKey(trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId());
         if (trafficStreamKey instanceof KafkaCommitOffsetData) {
             var partition = ((KafkaCommitOffsetData) trafficStreamKey).getPartition();
@@ -316,16 +316,16 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     ) {
         log.atTrace().setMessage("readNextTrafficStreamSynchronously()").log();
         // Drain synthetic closes before returning real Kafka records — one batch per revocation event
-        var closeBatch = syntheticCloseQueue.poll();
+        var closeBatch = trafficSourceReaderInterruptedCloseQueue.poll();
         if (closeBatch != null) {
             log.atInfo().setMessage("Returning {} synthetic close(s) before real Kafka records")
                 .addArgument(closeBatch::size).log();
             return Collections.unmodifiableList(closeBatch);
         }
         // Block real data until all synthetic closes have been confirmed closed
-        if (outstandingSyntheticCloseSessions.get() > 0) {
+        if (outstandingTrafficSourceReaderInterruptedCloseSessions.get() > 0) {
             log.atDebug().setMessage("Returning empty batch: {} synthetic close sessions still outstanding")
-                .addArgument(outstandingSyntheticCloseSessions::get).log();
+                .addArgument(outstandingTrafficSourceReaderInterruptedCloseSessions::get).log();
             // The spin here is intentional.
             // We should be draining very fast and if we block, we risk falling out of the Kafka group,
             // which could then have knock-on effects throughout the fleet since we're recovering from
@@ -360,15 +360,15 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                             p -> Collections.newSetFromMap(new ConcurrentHashMap<>()));
                     boolean isNewConnection = activeSet.add(connKey);
                     // Handoff: first time we see this connection on this partition AND no READ observation
-                    // (another replayer was mid-connection). Continuation streams for known connections are not handoffs.
+                    // (another replayer was mid-connection). Continuation streams for known connections are not resumeds.
                     boolean startsWithRead = ts.getSubStreamList().stream()
                         .findFirst()
                         .map(TrafficObservation::hasRead)
                         .orElse(false);
-                    final boolean handoff = isNewConnection && !startsWithRead;
+                    final boolean resumed = isNewConnection && !startsWithRead;
                     return (ITrafficStreamWithKey) new PojoTrafficStreamAndKey(ts, key) {
                         @Override
-                        public boolean isHandoffConnection() { return handoff; }
+                        public boolean isResumedConnection() { return resumed; }
                     };
                 } catch (InvalidProtocolBufferException e) {
                     // Assume the behavioralPolicy instance does any logging that the host may be interested in

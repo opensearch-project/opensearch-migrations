@@ -188,7 +188,7 @@ public class ReplayEngine {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "request";
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
-        // Apply quiescent delay: wall-clock floor for first request on handoff connections
+        // Apply quiescent delay: wall-clock floor for first request on resumed connections
         if (quiescentUntil != null && start.isBefore(quiescentUntil)) {
             log.atInfo().setMessage("Applying quiescent delay: shifting start from {} to {} for {}")
                 .addArgument(start).addArgument(quiescentUntil).addArgument(ctx).log();

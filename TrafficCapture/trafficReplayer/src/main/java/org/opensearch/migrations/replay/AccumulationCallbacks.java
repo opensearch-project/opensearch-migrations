@@ -11,13 +11,13 @@ import lombok.NonNull;
 
 public interface AccumulationCallbacks {
     /**
-     * @param isHandoffConnection true when this is the first request on a connection that was
+     * @param isResumedConnection true when this is the first request on a connection that was
      *                            mid-flight during a Kafka partition reassignment.
      */
     Consumer<RequestResponsePacketPair> onRequestReceived(
         @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
         @NonNull HttpMessageAndTimestamp request,
-        boolean isHandoffConnection
+        boolean isResumedConnection
     );
 
     void onTrafficStreamsExpired(

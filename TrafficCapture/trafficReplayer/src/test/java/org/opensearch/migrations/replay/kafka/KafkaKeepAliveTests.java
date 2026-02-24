@@ -179,11 +179,11 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
         for (int i = 0; i < count;) {
             var trafficStreams = trafficSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
             for (var ts : trafficStreams) {
-                if (ts instanceof SyntheticPartitionReassignmentClose) {
+                if (ts instanceof TrafficSourceReaderInterruptedClose) {
                     // Drain synthetic closes and decrement the counter so real records can resume
                     var key = ts.getKey();
                     log.atInfo().setMessage("Draining synthetic close for {}").addArgument(key).log();
-                    kafkaSource.onSessionClosed(key.getConnectionId(), 0, key.getSourceGeneration());
+                    kafkaSource.onNetworkConnectionClosed(key.getConnectionId(), 0, key.getSourceGeneration());
                     continue;
                 }
                 var tsk = ts.getKey();

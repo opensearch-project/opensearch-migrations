@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * Unit tests for quiescent period tagging on handoff connections.
+ * Unit tests for quiescent period tagging on resumed connections.
  */
 class QuiescentConnectionTest extends InstrumentationTest {
 
@@ -32,11 +32,11 @@ class QuiescentConnectionTest extends InstrumentationTest {
     /**
      * A stream for a connection NOT in the active set and NOT starting with a READ observation
      * (i.e., another replayer was mid-connection) must be tagged with a non-null quiescentUntil.
-     * Before fix: isHandoffConnection() always returns null.
+     * Before fix: isResumedConnection() always returns null.
      */
     @Test
     @SneakyThrows
-    void handoffConnection_taggedWithQuiescentUntil() throws Exception {
+    void resumedConnection_taggedWithQuiescentUntil() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var tp = new TopicPartition(TOPIC, 0);
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
@@ -46,7 +46,7 @@ class QuiescentConnectionTest extends InstrumentationTest {
                 mc.rebalance(Collections.singletonList(tp));
                 // Stream with NO read observation (mid-connection, no open)
                 var ts = TrafficStream.newBuilder()
-                    .setNodeId("node1").setConnectionId("handoff-conn").setNumberOfThisLastChunk(0)
+                    .setNodeId("node1").setConnectionId("resumed-conn").setNumberOfThisLastChunk(0)
                     .addSubStream(TrafficObservation.newBuilder()
                         .setTs(Timestamp.newBuilder().setSeconds(1).build())
                         .setWrite(WriteObservation.newBuilder()
@@ -64,14 +64,14 @@ class QuiescentConnectionTest extends InstrumentationTest {
             Assertions.assertFalse(streams.isEmpty());
             var stream = streams.get(0);
 
-            Assertions.assertTrue(stream.isHandoffConnection(),
-                "handoff connection (no open, not in active set) must have isHandoffConnection=true");
+            Assertions.assertTrue(stream.isResumedConnection(),
+                "resumed connection (no open, not in active set) must have isResumedConnection=true");
         }
     }
 
     /**
      * A stream starting with a READ observation for a new connection must NOT be tagged
-     * (it's a fresh connection, not a handoff).
+     * (it's a fresh connection, not a resumed).
      */
     @Test
     @SneakyThrows
@@ -101,8 +101,8 @@ class QuiescentConnectionTest extends InstrumentationTest {
 
             var streams = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
             Assertions.assertFalse(streams.isEmpty());
-            Assertions.assertFalse(streams.get(0).isHandoffConnection(),
-                "fresh connection (starts with READ) must have isHandoffConnection=false");
+            Assertions.assertFalse(streams.get(0).isResumedConnection(),
+                "fresh connection (starts with READ) must have isResumedConnection=false");
         }
     }
 }

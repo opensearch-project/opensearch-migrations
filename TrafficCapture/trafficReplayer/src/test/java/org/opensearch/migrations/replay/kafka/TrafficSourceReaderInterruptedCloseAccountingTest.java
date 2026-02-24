@@ -23,16 +23,16 @@ import org.junit.jupiter.api.Test;
 /**
  * Tests for synthetic close drain accounting correctness (Plan tests #1, #2, #3, #5).
  */
-class SyntheticCloseAccountingTest extends InstrumentationTest {
+class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationTest {
 
     private static final String TOPIC = "test-topic";
 
     /**
-     * Test #1: Force a connection with non-zero sessionNumber. Assert onSessionClosed
-     * decrements outstandingSyntheticCloseSessions.
+     * Test #1: Force a connection with non-zero sessionNumber. Assert onNetworkConnectionClosed
+     * decrements outstandingTrafficSourceReaderInterruptedCloseSessions.
      */
     @Test
-    void syntheticClose_counterDecrements_withNonZeroSessionNumber() throws Exception {
+    void trafficSourceReaderInterruptedClose_counterDecrements_withNonZeroSessionNumber() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var tp = new TopicPartition(TOPIC, 0);
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
@@ -40,13 +40,13 @@ class SyntheticCloseAccountingTest extends InstrumentationTest {
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
             // Manually register a synthetic close with sessionNumber=2
             var sessionKey = "conn1:2:5";
-            source.pendingSyntheticCloses.put(sessionKey, Boolean.TRUE);
-            source.outstandingSyntheticCloseSessions.set(1);
+            source.pendingTrafficSourceReaderInterruptedCloses.put(sessionKey, Boolean.TRUE);
+            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
 
-            source.onSessionClosed("conn1", 2, 5);
+            source.onNetworkConnectionClosed("conn1", 2, 5);
 
-            Assertions.assertEquals(0, source.outstandingSyntheticCloseSessions.get(),
-                "onSessionClosed must decrement counter for non-zero sessionNumber");
+            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
+                "onNetworkConnectionClosed must decrement counter for non-zero sessionNumber");
         }
     }
 
@@ -55,25 +55,25 @@ class SyntheticCloseAccountingTest extends InstrumentationTest {
      * Fire synthetic close → counter stays at 0 (no double-decrement).
      */
     @Test
-    void syntheticClose_exactlyOneDecrement_regularBeforeSynthetic() throws Exception {
+    void trafficSourceReaderInterruptedClose_exactlyOneDecrement_regularBeforeSynthetic() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var tp = new TopicPartition(TOPIC, 0);
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
             var sessionKey = "conn1:0:3";
-            source.pendingSyntheticCloses.put(sessionKey, Boolean.TRUE);
-            source.outstandingSyntheticCloseSessions.set(1);
+            source.pendingTrafficSourceReaderInterruptedCloses.put(sessionKey, Boolean.TRUE);
+            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
 
             // Regular close fires first (same key)
-            source.onSessionClosed("conn1", 0, 3);
-            Assertions.assertEquals(0, source.outstandingSyntheticCloseSessions.get(),
-                "First onSessionClosed must decrement counter to 0");
+            source.onNetworkConnectionClosed("conn1", 0, 3);
+            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
+                "First onNetworkConnectionClosed must decrement counter to 0");
 
             // Synthetic close fires second — must NOT double-decrement
-            source.onSessionClosed("conn1", 0, 3);
-            Assertions.assertEquals(0, source.outstandingSyntheticCloseSessions.get(),
-                "Second onSessionClosed must not double-decrement (counter stays at 0)");
+            source.onNetworkConnectionClosed("conn1", 0, 3);
+            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
+                "Second onNetworkConnectionClosed must not double-decrement (counter stays at 0)");
         }
     }
 
@@ -81,34 +81,34 @@ class SyntheticCloseAccountingTest extends InstrumentationTest {
      * Test #3: Same as #2 but reversed order — synthetic close fires first.
      */
     @Test
-    void syntheticClose_exactlyOneDecrement_syntheticBeforeRegular() throws Exception {
+    void trafficSourceReaderInterruptedClose_exactlyOneDecrement_syntheticBeforeRegular() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var tp = new TopicPartition(TOPIC, 0);
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
             var sessionKey = "conn1:0:3";
-            source.pendingSyntheticCloses.put(sessionKey, Boolean.TRUE);
-            source.outstandingSyntheticCloseSessions.set(1);
+            source.pendingTrafficSourceReaderInterruptedCloses.put(sessionKey, Boolean.TRUE);
+            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
 
             // Synthetic close fires first
-            source.onSessionClosed("conn1", 0, 3);
-            Assertions.assertEquals(0, source.outstandingSyntheticCloseSessions.get(),
-                "First onSessionClosed (synthetic path) must decrement counter to 0");
+            source.onNetworkConnectionClosed("conn1", 0, 3);
+            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
+                "First onNetworkConnectionClosed (synthetic path) must decrement counter to 0");
 
             // Regular close fires second — must NOT double-decrement
-            source.onSessionClosed("conn1", 0, 3);
-            Assertions.assertEquals(0, source.outstandingSyntheticCloseSessions.get(),
-                "Second onSessionClosed (regular path) must not double-decrement");
+            source.onNetworkConnectionClosed("conn1", 0, 3);
+            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
+                "Second onNetworkConnectionClosed (regular path) must not double-decrement");
         }
     }
 
     /**
-     * Test #5: Enqueue N synthetic closes (counter=N). Fire onSessionClosed for each.
+     * Test #5: Enqueue N synthetic closes (counter=N). Fire onNetworkConnectionClosed for each.
      * Assert counter reaches 0 and readNextTrafficStreamSynchronously returns real records.
      */
     @Test
-    void outstandingSyntheticCloseSessions_reachesZeroAfterAllSessionsClose() throws Exception {
+    void outstandingTrafficSourceReaderInterruptedCloseSessions_reachesZeroAfterAllSessionsClose() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var tp = new TopicPartition(TOPIC, 0);
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
@@ -117,9 +117,9 @@ class SyntheticCloseAccountingTest extends InstrumentationTest {
             int N = 3;
             // Register N synthetic closes
             for (int i = 0; i < N; i++) {
-                source.pendingSyntheticCloses.put("conn" + i + ":0:1", Boolean.TRUE);
+                source.pendingTrafficSourceReaderInterruptedCloses.put("conn" + i + ":0:1", Boolean.TRUE);
             }
-            source.outstandingSyntheticCloseSessions.set(N);
+            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(N);
 
             // Verify empty batch while counter > 0
             mc.schedulePollTask(() -> {
@@ -128,13 +128,13 @@ class SyntheticCloseAccountingTest extends InstrumentationTest {
             });
             var emptyResult = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
             Assertions.assertTrue(emptyResult.isEmpty(),
-                "Must return empty batch while outstandingSyntheticCloseSessions > 0");
+                "Must return empty batch while outstandingTrafficSourceReaderInterruptedCloseSessions > 0");
 
             // Close all sessions
             for (int i = 0; i < N; i++) {
-                source.onSessionClosed("conn" + i, 0, 1);
+                source.onNetworkConnectionClosed("conn" + i, 0, 1);
             }
-            Assertions.assertEquals(0, source.outstandingSyntheticCloseSessions.get(),
+            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
                 "Counter must reach 0 after all sessions close");
 
             // Now real records should be returned

@@ -49,8 +49,8 @@ public class Accumulation {
     int startingSourceRequestIndex;
     private boolean hasBeenExpired;
     final int sourceGeneration;
-    /** True when this connection was mid-flight during a partition reassignment (handoff). */
-    final boolean isHandoffConnection;
+    /** True when this connection was mid-flight during a partition reassignment (resumed). */
+    final boolean isResumedConnection;
 
     public Accumulation(ITrafficStreamKey key, TrafficStream ts) {
         this(
@@ -62,13 +62,13 @@ public class Accumulation {
         );
     }
 
-    public Accumulation(ITrafficStreamKey key, TrafficStream ts, boolean isHandoffConnection) {
+    public Accumulation(ITrafficStreamKey key, TrafficStream ts, boolean isResumedConnection) {
         this(
             key,
             ts.getPriorRequestsReceived() + (ts.hasLastObservationWasUnterminatedRead() ? 1 : 0),
             ts.getLastObservationWasUnterminatedRead(),
             key.getSourceGeneration(),
-            isHandoffConnection
+            isResumedConnection
         );
     }
 
@@ -98,7 +98,7 @@ public class Accumulation {
         int startingSourceRequestIndex,
         boolean dropObservationsLeftoverFromPrevious,
         int sourceGeneration,
-        boolean isHandoffConnection
+        boolean isResumedConnection
     ) {
         this.trafficChannelKey = trafficChannelKey;
         numberOfResets = new AtomicInteger();
@@ -108,7 +108,7 @@ public class Accumulation {
             ? State.IGNORING_LAST_REQUEST
             : State.WAITING_FOR_NEXT_READ_CHUNK;
         this.sourceGeneration = sourceGeneration;
-        this.isHandoffConnection = isHandoffConnection;
+        this.isResumedConnection = isResumedConnection;
     }
 
     public boolean hasBeenExpired() {

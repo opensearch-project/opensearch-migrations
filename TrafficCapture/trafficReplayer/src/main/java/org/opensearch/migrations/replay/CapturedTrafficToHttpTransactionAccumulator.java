@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.kafka.SyntheticPartitionReassignmentClose;
+import org.opensearch.migrations.replay.kafka.TrafficSourceReaderInterruptedClose;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
@@ -106,10 +106,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         public Consumer<RequestResponsePacketPair> onRequestReceived(
             IReplayContexts.IRequestAccumulationContext requestCtx,
             @NonNull HttpMessageAndTimestamp request,
-            boolean isHandoffConnection
+            boolean isResumedConnection
         ) {
             requestCtx.close();
-            var innerCallback = underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request, isHandoffConnection);
+            var innerCallback = underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request, isResumedConnection);
             return rrpp -> {
                 rrpp.getResponseContext().close();
                 innerCallback.accept(rrpp);
@@ -192,19 +192,19 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
     public void accept(ITrafficStreamWithKey trafficStreamAndKey) {
         // Synthetic close from partition reassignment
-        if (trafficStreamAndKey instanceof SyntheticPartitionReassignmentClose) {
+        if (trafficStreamAndKey instanceof TrafficSourceReaderInterruptedClose) {
             var tsk = trafficStreamAndKey.getKey();
             var partitionId = tsk.getNodeId();
             var connectionId = tsk.getConnectionId();
 
             var existingAccum = liveStreams.getIfPresent(tsk);
             if (existingAccum != null) {
-                // fireAccumulationsCallbacksAndClose with REASSIGNED status:
+                // fireAccumulationsCallbacksAndClose with TRAFFIC_SOURCE_READER_INTERRUPTED status:
                 // - completes finishedAccumulatingResponseFuture (ACCUMULATING_WRITES)
-                // - fires onConnectionClose(REASSIGNED) in its finally block with correct slot numbers
+                // - fires onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED) in its finally block with correct slot numbers
                 fireAccumulationsCallbacksAndClose(
                     existingAccum,
-                    RequestResponsePacketPair.ReconstructionStatus.REASSIGNED
+                    RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED
                 );
                 liveStreams.remove(partitionId, connectionId);
             } else {
@@ -215,7 +215,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     0,
                     tsk.getTrafficStreamsContext().getLogicalEnclosingScope(),
                     0,
-                    RequestResponsePacketPair.ReconstructionStatus.REASSIGNED,
+                    RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED,
                     Instant.now(),
                     List.of(tsk)
                 );
@@ -291,7 +291,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .log();
         }
 
-        return new Accumulation(streamWithKey.getKey(), stream, streamWithKey.isHandoffConnection());
+        return new Accumulation(streamWithKey.getKey(), stream, streamWithKey.isResumedConnection());
     }
 
     private enum CONNECTION_STATUS {
@@ -538,10 +538,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var httpMessage = rrPair.requestData;
         assert (httpMessage != null);
         assert (!httpMessage.hasInProgressSegment());
-        boolean isHandoffConnection = accumulation.getIndexOfCurrentRequest() == 0 && accumulation.isHandoffConnection;
+        boolean isResumedConnection = accumulation.getIndexOfCurrentRequest() == 0 && accumulation.isResumedConnection;
         var requestCtx = rrPair.getRequestContext();
         rrPair.rotateRequestGatheringToResponse();
-        var callbackTrackedData = listener.onRequestReceived(requestCtx, httpMessage, isHandoffConnection);
+        var callbackTrackedData = listener.onRequestReceived(requestCtx, httpMessage, isResumedConnection);
         rrPairWithCallback.setFullDataContinuation(callbackTrackedData);
         accumulation.state = Accumulation.State.ACCUMULATING_WRITES;
         return true;

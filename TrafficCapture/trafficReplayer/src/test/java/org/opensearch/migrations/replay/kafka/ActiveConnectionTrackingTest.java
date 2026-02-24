@@ -77,10 +77,10 @@ class ActiveConnectionTrackingTest extends InstrumentationTest {
 
     /**
      * Test #12: Add two connections to partitionToActiveConnections for the same partition.
-     * Fire onConnectionDone for one connection. Assert only that connection is removed.
+     * Fire onConnectionAccumulationComplete for one connection. Assert only that connection is removed.
      */
     @Test
-    void onConnectionDone_removesCorrectKeyFromActiveConnections() throws Exception {
+    void onConnectionAccumulationComplete_removesCorrectKeyFromActiveConnections() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var tp = new TopicPartition(TOPIC, 0);
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
@@ -113,13 +113,13 @@ class ActiveConnectionTrackingTest extends InstrumentationTest {
             var active = source.partitionToActiveConnections.get(0);
             Assertions.assertEquals(2, active.size(), "Both connections must be tracked");
 
-            // Fire onConnectionDone for conn0 only
+            // Fire onConnectionAccumulationComplete for conn0 only
             var tsk = mock(ITrafficStreamKey.class);
             when(tsk.getNodeId()).thenReturn("node1");
             when(tsk.getConnectionId()).thenReturn("conn0");
-            source.onConnectionDone(tsk);
+            source.onConnectionAccumulationComplete(tsk);
 
-            Assertions.assertEquals(1, active.size(), "Only one connection should remain after onConnectionDone");
+            Assertions.assertEquals(1, active.size(), "Only one connection should remain after onConnectionAccumulationComplete");
             Assertions.assertFalse(active.contains(new ScopedConnectionIdKey("node1", "conn0")),
                 "conn0 must be removed");
             Assertions.assertTrue(active.contains(new ScopedConnectionIdKey("node1", "conn1")),
