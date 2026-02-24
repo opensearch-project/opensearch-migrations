@@ -206,7 +206,9 @@ ensures `readNextTrafficStreamSynchronously` returns empty batches until all old
 Only then does real Kafka data flow. Old and new sessions for the same connection are strictly
 sequential — the cache invalidation is the synchronization point.
 
-**No deadlock**: The main thread is never blocked — it returns empty batches while waiting.
+**No deadlock**: The main thread never holds and waits.  
+To block new Kafka Traffic from being propagated before all of the previously 
+assigned partitions' connections have drained, it returns empty batches while waiting.
 The Netty event loop processes completions freely. `finishedAccumulatingResponseFuture` is
 completed by `fireAccumulationsCallbacksAndClose` before the channel close, so in-flight requests
 drain fast. The `OnlineRadixSorter` cascades failures through remaining slots when the channel
