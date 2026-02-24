@@ -150,6 +150,7 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
             "CreateEFSEndpoint",
             "CreateSTSEndpoint",
             "CreateEKSAuthEndpoint",
+            "S3EndpointRouteTableIds",
           ],
         },
         {
@@ -182,6 +183,9 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
         },
         "CreateSTSEndpoint": {
           "default": "Create STS VPC Endpoint",
+        },
+        "S3EndpointRouteTableIds": {
+          "default": "S3 Endpoint Route Table IDs",
         },
         "VPCId": {
           "default": "VPC",
@@ -372,6 +376,11 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
       "Default": "false",
       "Description": "Create an STS interface VPC endpoint (required for pod identity on isolated subnets).",
       "Type": "String",
+    },
+    "S3EndpointRouteTableIds": {
+      "Default": "",
+      "Description": "Route table IDs for S3 gateway endpoint association (resolved from subnet IDs by the bootstrap script).",
+      "Type": "CommaDelimitedList",
     },
     "Stage": {
       "Default": "dev",
@@ -1177,6 +1186,9 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
     "S3VpcEndpoint": {
       "Condition": "CreateS3EndpointCondition",
       "Properties": {
+        "RouteTableIds": {
+          "Ref": "S3EndpointRouteTableIds",
+        },
         "ServiceName": "com.amazonaws.us-west-1.s3",
         "VpcEndpointType": "Gateway",
         "VpcId": {
@@ -2173,12 +2185,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           },
           {
             "Ref": "VpcPrivateSubnet2RouteTableA678073B",
-          },
-          {
-            "Ref": "VpcPublicSubnet1RouteTable6C95E38E",
-          },
-          {
-            "Ref": "VpcPublicSubnet2RouteTable94F7E489",
           },
         ],
         "ServiceName": {
