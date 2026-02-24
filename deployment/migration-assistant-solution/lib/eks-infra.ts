@@ -9,7 +9,7 @@ import {
     Role,
     ServicePrincipal,
 } from "aws-cdk-lib/aws-iam";
-import {RemovalPolicy, Stack, Tags} from "aws-cdk-lib";
+import {Aws, RemovalPolicy, Stack, Tags} from "aws-cdk-lib";
 import {Repository} from "aws-cdk-lib/aws-ecr";
 
 
@@ -74,7 +74,7 @@ export class EKSInfra extends Construct {
 
         // Grant EKS readonly access to all IAM principals in the account
         this.cluster.grantAccess('AccountReadonlyAccess',
-            `arn:aws:iam::${Stack.of(this).account}:root`,
+            `arn:${Aws.PARTITION}:iam::${Stack.of(this).account}:root`,
             [eks.AccessPolicy.fromAccessPolicyName('AmazonEKSViewPolicy', {
                 accessScopeType: eks.AccessScopeType.CLUSTER,
             })],
