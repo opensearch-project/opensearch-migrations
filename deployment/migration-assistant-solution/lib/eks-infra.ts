@@ -89,12 +89,12 @@ export class EKSInfra extends Construct {
         this.snapshotRole.addToPolicy(new PolicyStatement({
             effect: Effect.ALLOW,
             actions: ['s3:ListBucket'],
-            resources: ['arn:aws:s3:::migrations-*'],
+            resources: [`arn:${Aws.PARTITION}:s3:::migrations-*`],
         }));
         this.snapshotRole.addToPolicy(new PolicyStatement({
             effect: Effect.ALLOW,
             actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
-            resources: ['arn:aws:s3:::migrations-*/*'],
+            resources: [`arn:${Aws.PARTITION}:s3:::migrations-*/*`],
         }));
         this.snapshotRole.grantPassRole(podIdentityRole);
 
@@ -235,7 +235,7 @@ export class EKSInfra extends Construct {
             new PolicyStatement({
                 effect: Effect.ALLOW,
                 actions: ['iam:PassRole'],
-                resources: [`arn:aws:iam::${Stack.of(this).account}:role/*`]
+                resources: [`arn:${Aws.PARTITION}:iam::${Stack.of(this).account}:role/*`]
             })
         );
         return podIdentityRole

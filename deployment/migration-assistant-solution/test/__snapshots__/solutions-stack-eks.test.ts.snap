@@ -1127,7 +1127,11 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
                 "Fn::Join": [
                   "",
                   [
-                    "arn:aws:iam::",
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":iam::",
                     {
                       "Ref": "AWS::AccountId",
                     },
@@ -1343,7 +1347,18 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
             {
               "Action": "s3:ListBucket",
               "Effect": "Allow",
-              "Resource": "arn:aws:s3:::migrations-*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":s3:::migrations-*",
+                  ],
+                ],
+              },
             },
             {
               "Action": [
@@ -1352,7 +1367,18 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
                 "s3:DeleteObject",
               ],
               "Effect": "Allow",
-              "Resource": "arn:aws:s3:::migrations-*/*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":s3:::migrations-*/*",
+                  ],
+                ],
+              },
             },
           ],
           "Version": "2012-10-17",
@@ -2237,7 +2263,11 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                 "Fn::Join": [
                   "",
                   [
-                    "arn:aws:iam::",
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":iam::",
                     {
                       "Ref": "AWS::AccountId",
                     },
@@ -2448,7 +2478,18 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             {
               "Action": "s3:ListBucket",
               "Effect": "Allow",
-              "Resource": "arn:aws:s3:::migrations-*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":s3:::migrations-*",
+                  ],
+                ],
+              },
             },
             {
               "Action": [
@@ -2457,7 +2498,18 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                 "s3:DeleteObject",
               ],
               "Effect": "Allow",
-              "Resource": "arn:aws:s3:::migrations-*/*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":s3:::migrations-*/*",
+                  ],
+                ],
+              },
             },
           ],
           "Version": "2012-10-17",
