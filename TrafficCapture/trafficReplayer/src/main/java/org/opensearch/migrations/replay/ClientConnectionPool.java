@@ -158,9 +158,7 @@ public class ClientConnectionPool {
                             "It may have already been reset.")
                         .addArgument(session::getChannelKeyContext)
                         .log();
-                    try { session.onClose.accept(session); } catch (Exception e) {
-                        log.atWarn().setCause(e).setMessage("onClose callback threw for {}").addArgument(session::getChannelKeyContext).log();
-                    }
+                    session.onClose.accept(session);
                     return TextTrackedFuture.completedFuture(null, () -> "");
                 }
                 log.atTrace().setMessage("closing channel {} ({})...")
@@ -183,11 +181,7 @@ public class ClientConnectionPool {
                                 .log();
                         }
                         session.schedule.clear();
-                        try {
-                            session.onClose.accept(session);
-                        } catch (Exception e) {
-                            log.atWarn().setCause(e).setMessage("onClose callback threw for {}").addArgument(session::getChannelKeyContext).log();
-                        }
+                        session.onClose.accept(session);
                         return channelFuture.channel();
                     }, () -> "clearing work");
             }, () -> "composing close through retrieved channel from the session");
