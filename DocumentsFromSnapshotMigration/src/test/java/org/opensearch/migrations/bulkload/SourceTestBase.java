@@ -269,7 +269,10 @@ public class SourceTestBase {
                     sourceVersion, targetVersion, transformationConfig, allowlist
                 );
                 if (workResult == CompletionStatus.NOTHING_DONE) {
-                    return runNumber;
+                    throw new ExpectedMigrationWorkTerminationException(
+                        new RfsMigrateDocuments.NoWorkLeftException("Pipeline returned NOTHING_DONE"),
+                        runNumber
+                    );
                 } else {
                     runCounter.incrementAndGet();
                 }
