@@ -200,8 +200,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             var existingAccum = liveStreams.getIfPresent(tsk);
             if (existingAccum != null) {
                 // fireAccumulationsCallbacksAndClose with TRAFFIC_SOURCE_READER_INTERRUPTED status:
-                // - completes finishedAccumulatingResponseFuture (ACCUMULATING_WRITES)
-                // - fires onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED) in its finally block with correct slot numbers
+                // - completes finishedAccumulatingResponseFuture for any in-flight request
+                //   (ACCUMULATING_WRITES state), allowing the OnlineRadixSorter to drain
+                // - fires onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED) in its finally block,
+                //   which calls replayEngine.closeConnection() to schedule the channel close after
+                //   any in-flight requests complete
                 fireAccumulationsCallbacksAndClose(
                     existingAccum,
                     RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED
@@ -232,11 +235,15 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var tsk = trafficStreamAndKey.getKey();
 
         // If the incoming key has a higher generation than the stored accumulation, the partition
-        // was revoked and reassigned.  Discard the stale accumulation before creating a fresh one.
+        // was revoked and reassigned without a TrafficSourceReaderInterruptedClose being processed
+        // for this connection. This should not happen in normal operation — the interrupted-close
+        // path should have cleaned up the accumulation before new-generation data arrives.
+        // Log an error and discard the stale accumulation defensively.
         var existingAccum = liveStreams.getIfPresent(tsk);
         if (existingAccum != null && existingAccum.sourceGeneration < tsk.getSourceGeneration()) {
-            log.atInfo()
-                .setMessage("Discarding stale accumulation for {}:{} (stored gen={}, incoming gen={})")
+            log.atError().setMessage("Stale accumulation found for {}:{} (stored gen={}, incoming gen={}) — " +
+                    "TrafficSourceReaderInterruptedClose was not processed for this connection. " +
+                    "This indicates a gap in interrupted-close coverage.")
                 .addArgument(partitionId)
                 .addArgument(connectionId)
                 .addArgument(existingAccum.sourceGeneration)
