@@ -27,6 +27,7 @@ import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -45,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * to validate the complete pipeline wiring end-to-end.
  */
 @Slf4j
+@Tag("isolatedTest")
 @Timeout(value = 10, unit = TimeUnit.MINUTES)
 public class PipelineEndToEndTest {
 

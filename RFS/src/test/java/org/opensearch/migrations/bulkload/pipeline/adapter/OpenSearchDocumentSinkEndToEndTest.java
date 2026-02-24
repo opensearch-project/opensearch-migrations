@@ -18,6 +18,7 @@ import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -34,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * <p>No source snapshot needed — validates the M side of the N+M testing strategy.
  */
 @Slf4j
+@Tag("isolatedTest")
 public class OpenSearchDocumentSinkEndToEndTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
