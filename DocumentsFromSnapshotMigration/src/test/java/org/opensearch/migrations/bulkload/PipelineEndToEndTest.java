@@ -7,6 +7,9 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.UnboundVersionMatchers;
+import org.opensearch.migrations.Version;
+import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
@@ -53,6 +56,7 @@ public class PipelineEndToEndTest {
     private static final String SNAPSHOT_NAME = "test_snapshot";
     private static final String REPO_NAME = "test_repo";
     private static final String INDEX_NAME = "pipeline_e2e";
+    private static final String COMPLEX_INDEX = "pipeline_complex";
 
     @TempDir private File localDirectory;
 
@@ -145,6 +149,58 @@ public class PipelineEndToEndTest {
         }
     }
 
+    // --- Complex scenario tests ---
+
+    @ParameterizedTest(name = "complex: {0} → {1}")
+    @MethodSource("smokePairs")
+    void pipelineWithComplexData(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
+        var extractor = createComplexSnapshot(sourceVersion);
+        Path workDir = Files.createTempDirectory("pipeline_e2e_complex");
+
+        try (var targetCluster = new SearchClusterContainer(targetVersion)) {
+            targetCluster.start();
+            var targetClient = createClient(targetCluster);
+
+            var source = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, workDir);
+            var sink = new OpenSearchDocumentSink(targetClient);
+            var pipeline = new MigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
+
+            var cursors = pipeline.migrateAll().collectList().block();
+            assertThat("Should have progress cursors", cursors.size(), greaterThan(0));
+
+            Version srcVersion = sourceVersion.getVersion();
+            boolean supportsSoftDeletes = VersionMatchers.equalOrGreaterThanES_6_5.test(srcVersion);
+            boolean supportsCompletion = !UnboundVersionMatchers.isBelowES_2_X.test(srcVersion);
+            boolean isEs5SingleType = VersionMatchers.isES_5_X.test(srcVersion);
+
+            // Verify main index: 2 large + 4 regular + 1 remaining - 1 deleted (if soft deletes)
+            int expectedDocs = supportsSoftDeletes ? 7 : 8;
+            verifyDocCount(targetCluster, COMPLEX_INDEX, expectedDocs);
+
+            // Verify routing
+            var restClient = createRestClient(targetCluster);
+            var context = DocumentMigrationTestContext.factory().noOtelTracking();
+            restClient.get("_refresh", context.createUnboundRequestContext());
+            var requests = new SearchClusterRequests(context);
+            var hits = requests.searchIndexByQueryString(restClient, COMPLEX_INDEX, "active:true", "1");
+            assertThat("Routing search should find docs", hits.size(), greaterThan(0));
+
+            // Verify completion index
+            if (supportsCompletion) {
+                verifyDocCount(targetCluster, "completion_pipeline", 1);
+            }
+
+            // Verify ES5 single-type index
+            if (isEs5SingleType) {
+                verifyDocCount(targetCluster, "es5_single_type_pipeline", 2);
+            }
+
+            log.info("Complex pipeline {} → {} complete", sourceVersion, targetVersion);
+        } finally {
+            deleteDir(workDir);
+        }
+    }
+
     // --- Helpers ---
 
     private SnapshotExtractor createSnapshot(ContainerVersion sourceVersion) throws Exception {
@@ -208,6 +264,90 @@ public class PipelineEndToEndTest {
         var counts = requests.getMapOfIndexAndDocCount(restClient);
         assertEquals(expected, counts.getOrDefault(indexName, 0),
             "Expected " + expected + " docs in " + indexName);
+    }
+
+    private SnapshotExtractor createComplexSnapshot(ContainerVersion sourceVersion) throws Exception {
+        String cacheKey = sourceVersion.getVersion() + "-pipeline-e2e-complex";
+        Path snapshotDir = localDirectory.toPath();
+
+        if (fixtureCache.restoreIfCached(cacheKey, snapshotDir)) {
+            return SnapshotExtractor.forLocalSnapshot(snapshotDir, sourceVersion.getVersion());
+        }
+
+        try (var cluster = new SearchClusterContainer(sourceVersion)) {
+            cluster.start();
+            var ops = new ClusterOperations(cluster);
+            Version srcVersion = sourceVersion.getVersion();
+            boolean supportsSoftDeletes = VersionMatchers.equalOrGreaterThanES_6_5.test(srcVersion);
+            boolean supportsCompletion = !UnboundVersionMatchers.isBelowES_2_X.test(srcVersion);
+            boolean isEs5SingleType = VersionMatchers.isES_5_X.test(srcVersion);
+
+            // Main index with large docs, routing, and deletes
+            String indexBody = String.format(
+                "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0%s}}",
+                supportsSoftDeletes ? ",\"index.soft_deletes.enabled\":true" : ""
+            );
+            ops.createIndex(COMPLEX_INDEX, indexBody);
+
+            // Large documents (2MB+)
+            String largeDoc = generateLargeDocJson(2);
+            ops.createDocument(COMPLEX_INDEX, "large1", largeDoc);
+            ops.createDocument(COMPLEX_INDEX, "large2", largeDoc);
+
+            // Regular docs with routing
+            ops.createDocument(COMPLEX_INDEX, "r1", "{\"score\":42,\"active\":true}", "1", null);
+            ops.createDocument(COMPLEX_INDEX, "r2", "{\"score\":55,\"active\":true}", "1", null);
+            ops.createDocument(COMPLEX_INDEX, "r3", "{\"score\":60,\"active\":false}", "2", null);
+            ops.createDocument(COMPLEX_INDEX, "r4", "{\"score\":77}", null, null);
+
+            // Delete scenario
+            ops.createDocument(COMPLEX_INDEX, "toDelete", "{\"score\":99,\"active\":true}", "1", null);
+            ops.createDocument(COMPLEX_INDEX, "remaining", "{\"score\":88}", null, null);
+            ops.post("/" + COMPLEX_INDEX + "/_refresh", null);
+            ops.deleteDocument(COMPLEX_INDEX, "toDelete", "1", null);
+            ops.post("/" + COMPLEX_INDEX + "/_refresh", null);
+
+            // Completion field index
+            if (supportsCompletion) {
+                ops.createIndexWithCompletionField("completion_pipeline", 1);
+                String docType = ops.defaultDocType();
+                ops.createDocument("completion_pipeline", "1", "{\"completion\":\"bananas\"}", null, docType);
+                ops.post("/completion_pipeline/_refresh", null);
+            }
+
+            // ES5 single-type index
+            if (isEs5SingleType) {
+                ops.createEs5SingleTypeIndexWithDocs("es5_single_type_pipeline");
+            }
+
+            var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+            var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                .host(cluster.getUrl()).insecure(true).build().toConnectionContext());
+            var snapshotCreator = new FileSystemSnapshotCreator(
+                SNAPSHOT_NAME, REPO_NAME, clientFactory.determineVersionAndCreate(),
+                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, List.of(),
+                snapshotContext.createSnapshotCreateContext()
+            );
+            SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
+            cluster.copySnapshotData(localDirectory.toString());
+            fixtureCache.store(cacheKey, snapshotDir);
+        }
+
+        return SnapshotExtractor.forLocalSnapshot(snapshotDir, sourceVersion.getVersion());
+    }
+
+    private static String generateLargeDocJson(int sizeInMB) {
+        int targetBytes = sizeInMB * 1024 * 1024;
+        int bytesPerEntry = 8; // 7 digits + comma
+        int numEntries = targetBytes / bytesPerEntry;
+        StringBuilder sb = new StringBuilder(targetBytes + 100);
+        sb.append("{\"numbers\":[");
+        for (int i = 0; i < numEntries; i++) {
+            sb.append("1000000");
+            if (i < numEntries - 1) sb.append(",");
+        }
+        sb.append("]}");
+        return sb.toString();
     }
 
     private static void deleteDir(Path dir) {

@@ -89,6 +89,7 @@ public class PipelineDocumentsRunner {
                     var batchCount = new AtomicInteger();
                     var totalDocsMigrated = new AtomicLong();
                     var totalBytesMigrated = new AtomicLong();
+                    var migrationError = new AtomicReference<Throwable>();
                     var finishScheduler = Schedulers.newSingle("pipelineFinishScheduler");
 
                     var disposable = pipeline.migrateShard(shardId, wi.getIndexName(), startingOffset)
@@ -108,6 +109,7 @@ public class PipelineDocumentsRunner {
                                     .setMessage("Pipeline error for {}")
                                     .addArgument(wi)
                                     .log();
+                                migrationError.set(error);
                                 latch.countDown();
                             },
                             () -> {
@@ -131,6 +133,11 @@ public class PipelineDocumentsRunner {
                             .addArgument(batchCount::get)
                             .addArgument(durationMs)
                             .log();
+
+                        var error = migrationError.get();
+                        if (error != null) {
+                            throw new RuntimeException("Shard migration failed for " + wi, error);
+                        }
                         return CompletionStatus.WORK_COMPLETED;
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();

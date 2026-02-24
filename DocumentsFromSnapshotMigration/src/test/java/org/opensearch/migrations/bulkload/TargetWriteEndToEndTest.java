@@ -18,6 +18,9 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParam
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
+import org.opensearch.migrations.bulkload.pipeline.MigrationPipeline;
+import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
+import org.opensearch.migrations.bulkload.pipeline.source.SyntheticDocumentSource;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -72,6 +75,15 @@ public class TargetWriteEndToEndTest {
         try (var targetCluster = new SearchClusterContainer(targetVersion)) {
             targetCluster.start();
             writeAndVerifyDocsWithDeletes(targetCluster);
+        }
+    }
+
+    @ParameterizedTest(name = "Pipeline sink: Target {0}")
+    @MethodSource("targetVersions")
+    void pipelineSinkWritesToTarget(SearchClusterContainer.ContainerVersion targetVersion) {
+        try (var targetCluster = new SearchClusterContainer(targetVersion)) {
+            targetCluster.start();
+            writeAndVerifyViaPipelineSink(targetCluster, "pipeline_sink_test", 1, 5);
         }
     }
 
@@ -142,6 +154,31 @@ public class TargetWriteEndToEndTest {
         reindexChangeset(targetCluster, indexName, deletions, List.of(), context);
 
         refreshAndVerifyDocCount(targetCluster, indexName, 2, context);
+    }
+
+    @SneakyThrows
+    private void writeAndVerifyViaPipelineSink(
+        SearchClusterContainer targetCluster,
+        String indexName,
+        int shardCount,
+        int docsPerShard
+    ) {
+        var connectionContext = ConnectionContextTestParams.builder()
+            .host(targetCluster.getUrl()).build().toConnectionContext();
+        var targetClient = new OpenSearchClientFactory(connectionContext).determineVersionAndCreate();
+
+        var source = new SyntheticDocumentSource(indexName, shardCount, docsPerShard);
+        var sink = new OpenSearchDocumentSink(targetClient);
+        var pipeline = new MigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
+
+        var cursors = pipeline.migrateAll().collectList().block();
+
+        Assertions.assertNotNull(cursors);
+        Assertions.assertFalse(cursors.isEmpty(), "Should have progress cursors");
+
+        int expectedTotal = shardCount * docsPerShard;
+        var context = DocumentMigrationTestContext.factory().noOtelTracking();
+        refreshAndVerifyDocCount(targetCluster, indexName, expectedTotal, context);
     }
 
     private List<LuceneDocumentChange> loadGoldenDocs(String filename) throws IOException {

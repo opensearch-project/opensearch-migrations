@@ -1,9 +1,13 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.util.Set;
+
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
+import org.opensearch.migrations.bulkload.transformers.TransformFunctions;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 
@@ -11,21 +15,82 @@ import lombok.extern.slf4j.Slf4j;
  * Converts existing {@link IndexMetadata} to the clean pipeline IR.
  * Shared by both {@link LuceneSnapshotSource} and {@link SnapshotMetadataSource}
  * to avoid duplicating the conversion logic.
+ *
+ * <p>Applies structural normalization at the IR boundary:
+ * <ul>
+ *   <li>Strips single-type mapping wrappers (e.g. {@code {"_doc": {"properties": ...}}} → {@code {"properties": ...}})</li>
+ *   <li>Converts flat dotted settings to tree structure</li>
+ *   <li>Removes intermediate {@code settings.index} level</li>
+ * </ul>
+ *
+ * <p>Version-specific transformations (field type upgrades, etc.) are NOT applied here —
+ * those belong in the transformer chain ({@link org.opensearch.migrations.bulkload.transformers.CanonicalTransformer}).
  */
 @Slf4j
 final class IndexMetadataConverter {
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    // Known top-level mapping keywords that are NOT type names.
+    private static final Set<String> MAPPING_KEYWORDS = Set.of(
+        "properties", "_source", "_routing", "_meta", "dynamic", "enabled",
+        "date_detection", "dynamic_date_formats", "dynamic_templates", "numeric_detection",
+        "_all", "_field_names", "_size"
+    );
+
     private IndexMetadataConverter() {}
 
     static IndexMetadataSnapshot convert(String indexName, IndexMetadata meta) {
+        ObjectNode mappings = safeGetObjectNode(meta::getMappings, "mappings", indexName);
+        ObjectNode settings = safeGetObjectNode(meta::getSettings, "settings", indexName);
+
+        // Structural normalization at the IR boundary
+        if (mappings != null) {
+            mappings = stripTypeMappings(mappings.deepCopy());
+        }
+        if (settings != null) {
+            settings = normalizeSettings(settings.deepCopy());
+        }
+
         return new IndexMetadataSnapshot(
             indexName,
             meta.getNumberOfShards(),
             safeGetReplicas(meta),
-            safeGetObjectNode(meta::getMappings, "mappings", indexName),
-            safeGetObjectNode(meta::getSettings, "settings", indexName),
+            mappings,
+            settings,
             safeGetObjectNode(meta::getAliases, "aliases", indexName)
         );
+    }
+
+    /**
+     * Unwraps single-type mapping wrappers from older ES versions.
+     * E.g. {@code {"_doc": {"properties": {...}}}} → {@code {"properties": {...}}}
+     */
+    static ObjectNode stripTypeMappings(ObjectNode mappings) {
+        if (mappings.size() != 1) {
+            return mappings;
+        }
+        var fieldName = mappings.fieldNames().next();
+        if (MAPPING_KEYWORDS.contains(fieldName)) {
+            return mappings;
+        }
+        var inner = mappings.get(fieldName);
+        if (inner != null && inner.isObject()) {
+            return (ObjectNode) inner;
+        }
+        return mappings;
+    }
+
+    /**
+     * Normalizes settings: flat dotted keys → tree, remove intermediate "index" level.
+     */
+    private static ObjectNode normalizeSettings(ObjectNode settings) {
+        settings = TransformFunctions.convertFlatSettingsToTree(settings);
+        // Wrap in a temporary root to use removeIntermediateIndexSettingsLevel
+        ObjectNode tempRoot = MAPPER.createObjectNode();
+        tempRoot.set("settings", settings);
+        TransformFunctions.removeIntermediateIndexSettingsLevel(tempRoot);
+        return (ObjectNode) tempRoot.get("settings");
     }
 
     private static int safeGetReplicas(IndexMetadata meta) {

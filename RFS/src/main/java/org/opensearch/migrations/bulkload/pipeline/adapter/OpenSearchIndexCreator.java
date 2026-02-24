@@ -1,7 +1,5 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
-import java.util.Set;
-
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.parsing.ObjectNodeUtils;
@@ -13,6 +11,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * Shared helper for creating an index on an OpenSearch cluster from pipeline IR metadata.
  * Used by both {@link OpenSearchDocumentSink} and {@link OpenSearchMetadataSink}
  * to avoid duplicating the body-building logic.
+ *
+ * <p>Only strips internal settings (which are always invalid on target).
+ * Type mapping normalization and field type upgrades are delegated to the transformer chain
+ * ({@link org.opensearch.migrations.bulkload.transformers.CanonicalTransformer}), which is
+ * the canonical place for version-specific transformations.
  */
 final class OpenSearchIndexCreator {
 
@@ -22,21 +25,12 @@ final class OpenSearchIndexCreator {
         "index.mapping.single_type", "index.mapper.dynamic"
     };
 
-    // Known top-level mapping keywords that are NOT type names.
-    private static final Set<String> MAPPING_KEYWORDS = Set.of(
-        "properties", "_source", "_routing", "_meta", "dynamic", "enabled",
-        "date_detection", "dynamic_date_formats", "dynamic_templates", "numeric_detection",
-        "_all", "_field_names", "_size"
-    );
-
     private OpenSearchIndexCreator() {}
 
     static void createIndex(OpenSearchClient client, IndexMetadataSnapshot metadata, ObjectMapper mapper) {
         ObjectNode body = mapper.createObjectNode();
         if (metadata.mappings() != null) {
-            ObjectNode mappings = stripTypeMappings(metadata.mappings().deepCopy());
-            upgradeDeprecatedFieldTypes(mappings);
-            body.set("mappings", mappings);
+            body.set("mappings", metadata.mappings().deepCopy());
         }
         if (metadata.settings() != null) {
             ObjectNode settings = metadata.settings().deepCopy();
@@ -61,43 +55,6 @@ final class OpenSearchIndexCreator {
         // Handle flat dotted keys (e.g. ES 1.7/2.4 where the key is literally "index.creation_date")
         for (var key : FLAT_SETTINGS) {
             settings.remove(key);
-        }
-    }
-
-    /**
-     * Unwraps single-type mapping wrappers from older ES versions.
-     * E.g. {@code {"doc": {"properties": {...}}}} → {@code {"properties": {...}}}
-     */
-    static ObjectNode stripTypeMappings(ObjectNode mappings) {
-        if (mappings.size() != 1) {
-            return mappings;
-        }
-        var fieldName = mappings.fieldNames().next();
-        if (MAPPING_KEYWORDS.contains(fieldName)) {
-            return mappings;
-        }
-        var inner = mappings.get(fieldName);
-        if (inner != null && inner.isObject()) {
-            return (ObjectNode) inner;
-        }
-        return mappings;
-    }
-
-    /**
-     * Converts deprecated ES field types to their modern equivalents.
-     * E.g. {@code "type": "string"} → {@code "type": "text"} (removed in ES 5.0).
-     */
-    private static void upgradeDeprecatedFieldTypes(ObjectNode node) {
-        for (var entry : node.properties()) {
-            var value = entry.getValue();
-            if (value.isObject()) {
-                var obj = (ObjectNode) value;
-                var typeNode = obj.get("type");
-                if (typeNode != null && "string".equals(typeNode.asText())) {
-                    obj.put("type", "text");
-                }
-                upgradeDeprecatedFieldTypes(obj);
-            }
         }
     }
 }
