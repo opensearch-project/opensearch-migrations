@@ -71,9 +71,17 @@ aws:
 # EKS cluster configuration for Karpenter NodeClass
 cluster:
   # Set to true for EKS clusters with Karpenter, false for other cluster types
-  isEKS: false
-  name: ""  # Set this to your EKS cluster name (required when isEKS: true)
-  nodeInstanceProfile: "KarpenterNodeInstanceProfile"  # Default Karpenter node instance profile
+  dedicatedKarpenterNodePoolForMigrationConsole: false
+  useCustomKarpenterNodePool: false
+
+# Migrations NodePool configuration (EKS only)
+workloadsNodePool:
+  architectures: []  # Empty = no constraint (Karpenter picks). Set ["amd64"] or ["arm64"] to restrict.
+  # These limits are keep the entire aggregate compute size under these values.
+  # This is an arbiter on total cost that a deployment can consume per unit of time
+  limits:
+    cpu: "64000m"
+    memory: "128Gi"
 
 stageName: dev
 
@@ -281,11 +289,14 @@ charts:
           failureThreshold: 1
 
   argo-workflows:
-    version: "0.45.24"
+    version: "0.47.1"
     repository: "https://argoproj.github.io/argo-helm"
     values:
       fullnameOverride: "argo"
       images:
+        # Override appVersion v3.7.8 to v3.7.9 to incorporate retry delay overflow fix
+        # https://github.com/argoproj/argo-workflows/pull/15277
+        tag: v3.7.9
         pullPolicy: IfNotPresent
       controller:
         pdb:
@@ -324,6 +335,8 @@ charts:
         pdb:
           enabled: true
           minAvailable: 1  # Ensures at least 1 pod always running
+        livenessProbe:
+          enabled: true
         affinity:
           podAntiAffinity:
             preferredDuringSchedulingIgnoredDuringExecution:
@@ -608,9 +621,14 @@ charts:
         enabled: false
 
   kyverno:
+    uninstallTimeout: 120         # Timeout for helm uninstall (seconds), with force-cleanup fallback
+    preUninstallCleanup:
+      webhooks: true             # Delete mutating/validating webhook configs before uninstall
+    postUninstallCleanup:
+      crds: true                 # Delete CRDs after uninstall
     version: "3.5.2"
     repository: "https://kyverno.github.io/kyverno/"
-    namespace: ma
+    namespace: kyverno-ma
     values:
       admissionController:
         replicas: 1
@@ -638,4 +656,4 @@ charts:
           requests: null
           limits: null
       config:
-        excludeKyvernoNamespace: false
+        excludeKyvernoNamespace: true

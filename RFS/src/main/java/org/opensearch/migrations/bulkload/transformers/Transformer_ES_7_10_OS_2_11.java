@@ -75,7 +75,6 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
 
                 log.atInfo().setMessage("Transforming component template: {}").addArgument(templateName).log();
                 log.atDebug().setMessage("Original component template: {}").addArgument(template).log();
-                // No transformation needed for component templates
                 log.atDebug().setMessage("Transformed component template: {}").addArgument(template).log();
                 componentTemplateValuesRoot.set(templateName, template);
             });

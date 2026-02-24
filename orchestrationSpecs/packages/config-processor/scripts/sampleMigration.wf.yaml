@@ -1,50 +1,53 @@
 {
   skipApprovals : false,
   sourceClusters: {
-    "source1": {
+    "source": {
       "endpoint": "https://elasticsearch-master-headless:9200",
       "allowInsecure": true,
       "version": "ES 7.10",
       "authConfig": {
         "basic": {
-          "secretName": "source1-creds"
+          "secretName": "source-creds"
         }
       },
-      "snapshotRepo": {
-        "awsRegion": "us-east-2",
-        # Notice that the localstack name will become an IP address.
-        # If you're not able to resolve the IP Address (e.g. if you're
-        # running out of the k8s cluster, you can set it manually
-        "endpoint": "localstack://localstack.ma.svc.cluster.local:4566",
-        "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2"
+      "snapshotRepos": {
+        "default": {
+          "awsRegion": "us-east-2",
+          # Notice that the localstack name will become an IP address.
+          # If you're not able to resolve the IP Address (e.g. if you're
+          # running out of the k8s cluster, you can set it manually
+          "endpoint": "localstack://localstack.ma.svc.cluster.local:4566",
+          "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2"
+        }
       },
       "proxy": { }
     }
   },
   targetClusters: {
-    "target1": {
+    "target": {
       "endpoint": "https://opensearch-cluster-master-headless:9200",
       "allowInsecure": true,
-      "version": "OS 2.11",
       "authConfig": {
         "basic": {
-          "secretName": "target1-creds"
+          "secretName": "target-creds"
         }
       }
     }
   },
   migrationConfigs: [
     {
-      "fromSource": "source1",
-      "toTarget": "target1",
+      "fromSource": "source",
+      "toTarget": "target",
       "skipApprovals": false,
 
       "snapshotExtractAndLoadConfigs": [
         {
+          label: "t2Migration",
           "snapshotConfig": {
+            "repoName": "default",
             "snapshotNameConfig": {
-#              "externallyManagedSnapshot": "source1_source1snapshot1_88a9f10c-207e-4c04-b6c6-fbc058501131",
-              "snapshotNamePrefix": "source1snapshot1"
+#              "externallyManagedSnapshot": "source_sourcesnapshot1_88a9f10c-207e-4c04-b6c6-fbc058501131",
+              "snapshotNamePrefix": "sourcesnapshot1"
             },
           },
           "createSnapshotConfig": {
@@ -55,6 +58,7 @@
                 "skipEvaluateApproval" : true,
                 "skipMigrateApproval" : true
               },
+              "label": "everything",
               "documentBackfillConfig": {
                 "documentsPerBulkRequest": 1000,
                 "maxShardSizeBytes": 16000000,

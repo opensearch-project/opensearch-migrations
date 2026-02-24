@@ -2,6 +2,7 @@
 
 import logging
 import os
+import subprocess
 import click
 
 from ..models.utils import ExitCode
@@ -156,12 +157,13 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
             click.echo("\nEnsure CONFIG_PROCESSOR_DIR is set correctly and contains:", err=True)
             click.echo("  - createMigrationWorkflowFromUserConfiguration.sh", err=True)
             ctx.exit(ExitCode.FAILURE.value)
+        except subprocess.CalledProcessError:
+            # Error details already printed by script_runner with direct_output=True
+            ctx.exit(ExitCode.FAILURE.value)
         except Exception as e:
             click.echo(f"Error submitting workflow: {str(e)}", err=True)
-            logger.exception("Workflow submission failed")
             ctx.exit(ExitCode.FAILURE.value)
 
     except Exception as e:
-        logger.exception(f"Unexpected error submitting workflow: {e}")
         click.echo(f"Error: {str(e)}", err=True)
         ctx.exit(ExitCode.FAILURE.value)

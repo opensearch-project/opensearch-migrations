@@ -5,6 +5,21 @@ repositoryUrl: "https://github.com/opensearch-project/opensearch-migrations.git"
 repositoryBranch: "main"
 buildImagesBaseImage: "amazoncorretto:17-al2023"
 awsEKSEnabled: false
+multiArchNative: false
+deployBuildkitPods: false
 keepJobAlive: false
 localRepoMount: false
 skipBuildJob: false
+
+# BuildKit daemon configuration
+buildkitd:
+  maxParallelism: 4
+  resources:
+    requests:
+      cpu: "4000m"
+      memory: "8Gi"
+      ephemeralStorage: "30Gi"
+    limits:
+      cpu: "8000m"
+      memory: "12Gi"
+      ephemeralStorage: "80Gi"

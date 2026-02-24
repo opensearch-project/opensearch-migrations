@@ -38,7 +38,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/bash", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addEnvVar("MIGRATION_CONFIG_BASE64", cb.inputs.migrationConfigBase64)
             .addArgs([configureAndSubmitScript])
         )
@@ -50,7 +50,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/bash", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addArgs([monitorScript])
             // Monitor script exit codes:
             // - Exit 0: Workflow is in terminal state (Succeeded or Failed) - stop retrying
@@ -79,7 +79,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/bash", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addEnvVar("MONITOR_RESULT", cb.inputs.monitorResult)
             .addArgs([`
 set -e
