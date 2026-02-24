@@ -213,8 +213,7 @@ public class EndToEndTest extends SourceTestBase {
                     targetCluster.getContainerVersion().getVersion(),
                     transformationConfig,
                     DocumentExceptionAllowlist.empty(),
-                    Integer.MAX_VALUE,
-                    true // use pipeline
+                    Integer.MAX_VALUE
             ));
 
             int totalShards = numberOfShards;
