@@ -31,6 +31,7 @@ import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -52,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * No target cluster needed.
  */
 @Slf4j
+@Tag("isolatedTest")
 public class SnapshotReaderEndToEndTest {
 
     private static final String SNAPSHOT_NAME = "test_snapshot";
