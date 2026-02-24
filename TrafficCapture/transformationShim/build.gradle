@@ -1,0 +1,31 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+}
+
+dependencies {
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformer')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
+
+    implementation libs.netty.all
+    implementation libs.jackson.databind
+    implementation libs.slf4j.api
+
+    runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformerProvider')
+
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testImplementation libs.testcontainers
+    testImplementation libs.testcontainers.junit.jupiter
+    testImplementation libs.testcontainers.opensearch
+    testImplementation libs.httpclient5
+    testImplementation libs.log4j.api
+    testImplementation libs.log4j.core
+    testImplementation libs.log4j.slf4j2.impl
+    testRuntimeOnly libs.junit.jupiter.engine
+}
+
+tasks.withType(Test).configureEach {
+    systemProperty 'io.netty.handler.codec.http.defaultStrictLineParsing', false
+}
