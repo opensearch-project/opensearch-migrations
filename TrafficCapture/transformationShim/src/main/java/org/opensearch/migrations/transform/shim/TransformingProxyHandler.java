@@ -12,10 +12,13 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
+import java.util.Set;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
@@ -29,66 +32,132 @@ import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpVersion;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Netty handler that receives an HTTP request, transforms it, forwards to backend,
- * transforms the response, and sends it back.
+ * Netty handler that receives HTTP requests, transforms them asynchronously,
+ * forwards to backend, transforms the response, and sends it back.
+ * <p>
+ * Production features: async I/O, configurable timeout, keep-alive, backpressure via semaphore.
  */
 @Slf4j
 public class TransformingProxyHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
+    private static final Set<String> RESTRICTED_HEADERS = Set.of(
+        "host", "content-length", "transfer-encoding", "connection",
+        "keep-alive", "proxy-connection", "upgrade");
+
     private final URI backendUri;
     private final IJsonTransformer requestTransformer;
     private final IJsonTransformer responseTransformer;
     private final HttpClient httpClient;
+    private final Duration timeout;
+    private final Semaphore concurrencySemaphore;
+    private final AtomicInteger activeRequests;
 
-    public TransformingProxyHandler(URI backendUri,
-                                    IJsonTransformer requestTransformer,
-                                    IJsonTransformer responseTransformer) {
+    TransformingProxyHandler(
+        URI backendUri,
+        IJsonTransformer requestTransformer,
+        IJsonTransformer responseTransformer,
+        HttpClient httpClient,
+        Duration timeout,
+        int maxConcurrentRequests,
+        AtomicInteger activeRequests
+    ) {
         this.backendUri = backendUri;
         this.requestTransformer = requestTransformer;
         this.responseTransformer = responseTransformer;
-        this.httpClient = HttpClient.newHttpClient();
+        this.httpClient = httpClient;
+        this.timeout = timeout;
+        this.concurrencySemaphore = new Semaphore(maxConcurrentRequests);
+        this.activeRequests = activeRequests;
     }
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest request) {
-        ctx.channel().eventLoop().execute(() -> {
-            try {
-                var response = processRequest(request);
-                ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
-            } catch (Exception e) {
-                log.error("Error processing request", e);
-                sendError(ctx, e);
-            }
-        });
+        boolean keepAlive = HttpUtil.isKeepAlive(request);
+
+        // Backpressure: reject if at capacity
+        if (!concurrencySemaphore.tryAcquire()) {
+            sendResponse(ctx, makeErrorResponse(HttpResponseStatus.SERVICE_UNAVAILABLE,
+                "Proxy at capacity"), false);
+            return;
+        }
+
+        activeRequests.incrementAndGet();
+        // Retain request since we're going async
+        request.retain();
+
+        try {
+            processRequest(ctx, request, keepAlive);
+        } catch (RuntimeException e) {
+            releaseRequestResources(request);
+            log.error("Error processing request", e);
+            sendResponse(ctx, makeErrorResponse(HttpResponseStatus.BAD_GATEWAY,
+                "Proxy request processing failed"), false);
+        }
     }
 
-    private FullHttpResponse processRequest(FullHttpRequest nettyRequest) throws Exception {
-        // 1. Convert incoming request to map format
-        var requestMap = nettyRequestToMap(nettyRequest);
-        log.debug("Original request map: {}", requestMap);
-
-        // 2. Transform request
+    private void processRequest(ChannelHandlerContext ctx, FullHttpRequest request, boolean keepAlive) {
+        var requestMap = nettyRequestToMap(request);
         @SuppressWarnings("unchecked")
         var transformedRequest = (Map<String, Object>) requestTransformer.transformJson(requestMap);
-        log.debug("Transformed request map: {}", transformedRequest);
 
-        // 3. Forward to backend
-        var backendResponse = forwardToBackend(transformedRequest);
+        // Health check shortcut
+        String uri = (String) transformedRequest.get(JsonKeysForHttpMessage.URI_KEY);
+        if ("/_shim/health".equals(uri)) {
+            releaseRequestResources(request);
+            sendResponse(ctx, makeHealthResponse(), keepAlive);
+            return;
+        }
 
-        // 4. Convert backend response to map format
-        var responseMap = httpResponseToMap(backendResponse);
-        log.debug("Backend response map: {}", responseMap);
+        var httpRequest = buildBackendRequest(transformedRequest);
+        httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
+            .orTimeout(timeout.getSeconds(), java.util.concurrent.TimeUnit.SECONDS)
+            .whenComplete((backendResponse, error) ->
+                handleBackendResponse(ctx, request, keepAlive, backendResponse, error));
+    }
 
-        // 5. Transform response
-        @SuppressWarnings("unchecked")
-        var transformedResponse = (Map<String, Object>) responseTransformer.transformJson(responseMap);
-        log.debug("Transformed response map: {}", transformedResponse);
+    private void handleBackendResponse(
+        ChannelHandlerContext ctx, FullHttpRequest request, boolean keepAlive,
+        HttpResponse<String> backendResponse, Throwable error
+    ) {
+        try {
+            if (error != null) {
+                log.error("Backend call failed", error);
+                sendResponse(ctx, makeErrorResponse(HttpResponseStatus.BAD_GATEWAY,
+                    "Backend request failed"), false);
+                return;
+            }
 
-        // 6. Convert back to Netty response
-        return mapToNettyResponse(transformedResponse);
+            var responseMap = httpResponseToMap(backendResponse);
+            @SuppressWarnings("unchecked")
+            var transformedResponse = (Map<String, Object>) responseTransformer.transformJson(responseMap);
+            sendResponse(ctx, mapToNettyResponse(transformedResponse), keepAlive);
+        } catch (RuntimeException e) {
+            log.error("Error processing response", e);
+            sendResponse(ctx, makeErrorResponse(HttpResponseStatus.BAD_GATEWAY,
+                "Response transformation failed"), false);
+        } finally {
+            releaseRequestResources(request);
+        }
+    }
+
+    private void releaseRequestResources(FullHttpRequest request) {
+        request.release();
+        activeRequests.decrementAndGet();
+        concurrencySemaphore.release();
+    }
+
+    private void sendResponse(ChannelHandlerContext ctx, FullHttpResponse response, boolean keepAlive) {
+        if (keepAlive) {
+            response.headers().set(HttpHeaderNames.CONNECTION, "keep-alive");
+            ctx.writeAndFlush(response);
+        } else {
+            response.headers().set(HttpHeaderNames.CONNECTION, "close");
+            ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -114,47 +183,43 @@ public class TransformingProxyHandler extends SimpleChannelInboundHandler<FullHt
         return map;
     }
 
-    private HttpResponse<String> forwardToBackend(Map<String, Object> requestMap) throws Exception {
+    private HttpRequest buildBackendRequest(Map<String, Object> requestMap) {
         var method = (String) requestMap.get(JsonKeysForHttpMessage.METHOD_KEY);
         var uri = (String) requestMap.get(JsonKeysForHttpMessage.URI_KEY);
-        var targetUri = URI.create(backendUri.toString() + uri);
+        var base = backendUri.toString().replaceAll("/+$", "");
+        var path = uri.startsWith("/") ? uri : "/" + uri;
 
-        String body = null;
-        @SuppressWarnings("unchecked")
-        var payload = (Map<String, Object>) requestMap.get(JsonKeysForHttpMessage.PAYLOAD_KEY);
-        if (payload != null) {
-            body = (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY);
-        }
+        var builder = HttpRequest.newBuilder()
+            .uri(URI.create(base + path))
+            .timeout(timeout);
 
-        var builder = HttpRequest.newBuilder().uri(targetUri);
+        copyRequestHeaders(requestMap, builder);
 
-        // Copy transformed headers (skip hop-by-hop and restricted headers)
-        @SuppressWarnings("unchecked")
-        var headers = (Map<String, Object>) requestMap.get(JsonKeysForHttpMessage.HEADERS_KEY);
-        var restrictedHeaders = java.util.Set.of(
-            "host", "content-length", "transfer-encoding", "connection",
-            "keep-alive", "proxy-connection", "upgrade");
-        if (headers != null) {
-            for (var entry : headers.entrySet()) {
-                var key = entry.getKey().toLowerCase();
-                if (restrictedHeaders.contains(key)) continue;
-                var val = entry.getValue();
-                if (val instanceof List) {
-                    for (var v : (List<?>) val) {
-                        builder.header(entry.getKey(), v.toString());
-                    }
-                } else {
-                    builder.header(entry.getKey(), val.toString());
-                }
-            }
-        }
-
+        var body = extractBodyString(requestMap);
         var bodyPublisher = body != null
             ? HttpRequest.BodyPublishers.ofString(body)
             : HttpRequest.BodyPublishers.noBody();
         builder.method(method, bodyPublisher);
+        return builder.build();
+    }
 
-        return httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    @SuppressWarnings("unchecked")
+    private void copyRequestHeaders(Map<String, Object> requestMap, HttpRequest.Builder builder) {
+        var headers = (Map<String, Object>) requestMap.get(JsonKeysForHttpMessage.HEADERS_KEY);
+        if (headers == null) return;
+        for (var entry : headers.entrySet()) {
+            if (RESTRICTED_HEADERS.contains(entry.getKey().toLowerCase())) continue;
+            addHeaderValues(entry.getKey(), entry.getValue(),
+                (name, val) -> builder.header(name, val));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String extractBodyString(Map<String, Object> requestMap) {
+        var payload = (Map<String, Object>) requestMap.get(JsonKeysForHttpMessage.PAYLOAD_KEY);
+        return payload != null
+            ? (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY)
+            : null;
     }
 
     static Map<String, Object> httpResponseToMap(HttpResponse<String> response) {
@@ -164,7 +229,7 @@ public class TransformingProxyHandler extends SimpleChannelInboundHandler<FullHt
 
         var headers = new LinkedHashMap<String, Object>();
         response.headers().map().forEach((name, values) -> {
-            if (!name.startsWith(":")) { // skip HTTP/2 pseudo-headers
+            if (!name.startsWith(":")) {
                 headers.put(name, values.size() == 1 ? values.get(0) : values);
             }
         });
@@ -184,14 +249,7 @@ public class TransformingProxyHandler extends SimpleChannelInboundHandler<FullHt
         var statusCode = responseMap.get(JsonKeysForHttpMessage.STATUS_CODE_KEY);
         int code = statusCode instanceof Number ? ((Number) statusCode).intValue() : 200;
 
-        byte[] bodyBytes = new byte[0];
-        var payload = (Map<String, Object>) responseMap.get(JsonKeysForHttpMessage.PAYLOAD_KEY);
-        if (payload != null) {
-            var textBody = (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY);
-            if (textBody != null) {
-                bodyBytes = textBody.getBytes(StandardCharsets.UTF_8);
-            }
-        }
+        byte[] bodyBytes = extractResponseBodyBytes(responseMap);
 
         var response = new DefaultFullHttpResponse(
             HttpVersion.HTTP_1_1,
@@ -199,35 +257,62 @@ public class TransformingProxyHandler extends SimpleChannelInboundHandler<FullHt
             Unpooled.wrappedBuffer(bodyBytes)
         );
 
-        var headers = (Map<String, Object>) responseMap.get(JsonKeysForHttpMessage.HEADERS_KEY);
-        if (headers != null) {
-            for (var entry : headers.entrySet()) {
-                var key = entry.getKey().toLowerCase();
-                if (key.equals("content-length") || key.equals("transfer-encoding")) continue;
-                var val = entry.getValue();
-                if (val instanceof List) {
-                    for (var v : (List<?>) val) {
-                        response.headers().add(entry.getKey(), v.toString());
-                    }
-                } else {
-                    response.headers().set(entry.getKey(), val.toString());
-                }
-            }
-        }
+        copyResponseHeaders(responseMap, response);
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, bodyBytes.length);
         return response;
     }
 
-    private void sendError(ChannelHandlerContext ctx, Exception e) {
-        var body = ("Proxy error: " + e.getMessage()).getBytes(StandardCharsets.UTF_8);
+    @SuppressWarnings("unchecked")
+    private static byte[] extractResponseBodyBytes(Map<String, Object> responseMap) {
+        var payload = (Map<String, Object>) responseMap.get(JsonKeysForHttpMessage.PAYLOAD_KEY);
+        if (payload != null) {
+            var textBody = (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY);
+            if (textBody != null) {
+                return textBody.getBytes(StandardCharsets.UTF_8);
+            }
+        }
+        return new byte[0];
+    }
+
+    private static final Set<String> SKIP_RESPONSE_HEADERS = Set.of("content-length", "transfer-encoding");
+
+    @SuppressWarnings("unchecked")
+    private static void copyResponseHeaders(Map<String, Object> responseMap, FullHttpResponse response) {
+        var headers = (Map<String, Object>) responseMap.get(JsonKeysForHttpMessage.HEADERS_KEY);
+        if (headers == null) return;
+        for (var entry : headers.entrySet()) {
+            if (SKIP_RESPONSE_HEADERS.contains(entry.getKey().toLowerCase())) continue;
+            addHeaderValues(entry.getKey(), entry.getValue(),
+                (name, val) -> response.headers().add(name, val));
+        }
+    }
+
+    private static void addHeaderValues(String name, Object value, java.util.function.BiConsumer<String, String> adder) {
+        if (value instanceof List) {
+            for (var v : (List<?>) value) {
+                adder.accept(name, v.toString());
+            }
+        } else {
+            adder.accept(name, value.toString());
+        }
+    }
+
+    private static FullHttpResponse makeErrorResponse(HttpResponseStatus status, String message) {
+        var body = message.getBytes(StandardCharsets.UTF_8);
         var response = new DefaultFullHttpResponse(
-            HttpVersion.HTTP_1_1,
-            HttpResponseStatus.BAD_GATEWAY,
-            Unpooled.wrappedBuffer(body)
-        );
+            HttpVersion.HTTP_1_1, status, Unpooled.wrappedBuffer(body));
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, body.length);
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/plain");
-        ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+        return response;
+    }
+
+    private static FullHttpResponse makeHealthResponse() {
+        var body = "{\"status\":\"ok\"}".getBytes(StandardCharsets.UTF_8);
+        var response = new DefaultFullHttpResponse(
+            HttpVersion.HTTP_1_1, HttpResponseStatus.OK, Unpooled.wrappedBuffer(body));
+        response.headers().set(HttpHeaderNames.CONTENT_LENGTH, body.length);
+        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
+        return response;
     }
 
     @Override
