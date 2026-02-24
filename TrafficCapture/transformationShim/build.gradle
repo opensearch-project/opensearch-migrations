@@ -1,6 +1,7 @@
 plugins {
-    id 'org.opensearch.migrations.java-library-conventions'
+    id 'org.opensearch.migrations.java-application-conventions'
     id 'io.freefair.lombok'
+    id 'com.google.cloud.tools.jib'
 }
 
 dependencies {
@@ -10,7 +11,11 @@ dependencies {
 
     implementation libs.netty.all
     implementation libs.jackson.databind
+    implementation libs.jcommander
     implementation libs.slf4j.api
+    implementation libs.log4j.api
+    implementation libs.log4j.core
+    implementation libs.log4j.slf4j2.impl
 
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformerProvider')
 
@@ -19,10 +24,20 @@ dependencies {
     testImplementation libs.testcontainers
     testImplementation libs.testcontainers.junit.jupiter
     testImplementation libs.testcontainers.opensearch
-    testImplementation libs.log4j.api
-    testImplementation libs.log4j.core
-    testImplementation libs.log4j.slf4j2.impl
     testRuntimeOnly libs.junit.jupiter.engine
+}
+
+application {
+    mainClass = 'org.opensearch.migrations.transform.shim.TransformationShimMain'
+}
+
+jib {
+    to {
+        image = 'migrations/transformation_shim'
+    }
+    from {
+        image = 'amazoncorretto:17-al2023-headless'
+    }
 }
 
 tasks.withType(Test).configureEach {
