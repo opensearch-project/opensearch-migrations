@@ -4,7 +4,7 @@ services:
 
   prometheus:
     container_name: prometheus
-    image: prom/prometheus:v2.53.0
+    image: mirror.gcr.io/prom/prometheus:v2.53.0
     networks:
       - migrations
     volumes:
@@ -19,7 +19,7 @@ services:
   # Found regression with latest tag not being able to connect to port 4317 on docker startup, reverted to '1' tag
   # until resolved
   jaeger:
-    image: jaegertracing/all-in-one:1.58.1
+    image: mirror.gcr.io/jaegertracing/all-in-one:1.58.1
     networks:
       - migrations
     ports:
@@ -43,7 +43,7 @@ services:
       - prometheus
 
   kafka:
-    image: apache/kafka:3.9.1
+    image: mirror.gcr.io/apache/kafka:3.9.1
     networks:
       - migrations
     ports:
@@ -81,7 +81,7 @@ services:
 #   command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer --speedup-factor 2 https://opensearchtarget:9200 --auth-header-value Basic\\ YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE= --insecure --kafka-traffic-brokers kafka:9092 --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id logging-group-default --otelCollectorEndpoint http://otel-collector:4317  "
     command: /bin/sh -c "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer --speedup-factor 2 https://opensearchtarget:9200 --auth-header-value Basic\\ YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE= --insecure --kafka-traffic-brokers kafka:9092 --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id logging-group-default --otelCollectorEndpoint http://otel-collector:4317 --transformer-config '[{\"TypeMappingSanitizationTransformerProvider\":{\"sourceProperties\":{\"version\":{\"major\":7,\"minor\":10}}}}]'"
   opensearchtarget:
-    image: 'opensearchproject/opensearch:2.15.0'
+    image: 'mirror.gcr.io/opensearchproject/opensearch:2.15.0'
     environment:
       - discovery.type=single-node
       - OPENSEARCH_INITIAL_ADMIN_PASSWORD=myStrongPassword123!
