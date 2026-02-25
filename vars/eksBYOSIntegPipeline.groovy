@@ -253,8 +253,7 @@ def call(Map config = [:]) {
                                             sigv4: [
                                                     region: params.REGION,
                                                     service: "es"
-                                            ],
-                                            version: env.targetVer
+                                            ]
                                     ]
                                     sh """
                                       kubectl create configmap target-${targetVersionExpanded}-migration-config \
