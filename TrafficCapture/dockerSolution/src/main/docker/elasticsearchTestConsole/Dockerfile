@@ -17,10 +17,10 @@ RUN dnf install -y \
       python3.11-devel \
       python3.11-pip \
       python3.11-wheel \
-  && dnf clean all && rm -rf /var/cache/dnf
+  && dnf clean all
 
-ENV PIP_ROOT_USER_ACTION ignore
-ENV LANG C.UTF-8
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV LANG=C.UTF-8
 
 # Define the virtual environment path to use for all pipenv runs
 ENV WORKON_HOME=/
@@ -38,8 +38,8 @@ RUN pipenv install --deploy
 # ---------- 2) Runtime ----------
 FROM amazonlinux:2023
 
-ENV PIP_ROOT_USER_ACTION ignore
-ENV LANG C.UTF-8
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV LANG=C.UTF-8
 
 # Minimal runtime deps (no compilers, no *-devel)
 RUN dnf install -y \
@@ -69,8 +69,7 @@ RUN dnf install -y \
         wget \
         zlib \
         && \
-    dnf clean all && \
-    rm -rf /var/cache/dnf
+    dnf clean all
 
 # Define the virtual environment path to use for all pipenv runs
 ENV WORKON_HOME=/
@@ -95,4 +94,4 @@ RUN chmod ug+x /root/*.sh
 RUN chmod ug+x /root/*.py
 RUN ln -s $(command -v vim) /usr/local/bin/vi
 
-CMD tail -f /dev/null
+CMD ["tail", "-f", "/dev/null"]

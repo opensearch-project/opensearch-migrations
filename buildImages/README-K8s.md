@@ -4,7 +4,7 @@ This guide walks through setting up BuildKit and a local Docker registry in Mini
 
 Pros of this approach:
 - The gradle package in this project builds java images (currently only 2) with Jib, which are able to be optimized more, especially to minimize developer rebuild times.
-- This lets one test the ability to build images very similar to how a user would do with the aws-bootstrap.sh flag `--build-images true`.
+- This lets one test the ability to build images similar to how a user would do so with the aws-bootstrap.sh flag `--build-images`.
 - Users can override the image locations and pull policies to use a local repository and pull images Always to make continuous testing easier.
 Cons:
 - This is more to configure.
@@ -154,10 +154,9 @@ eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`Mig
 echo "Login to your remote registry first"
 aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-2.amazonaws.com
 
-echo "Build with custom registry endpoint and architecture"
+echo "Build with custom registry endpoint (for both amd64 and arm64)"
 ./gradlew buildImagesToRegistry \
-  -PregistryEndpoint=$MIGRATIONS_ECR_REGISTRY \
-  -PimageArch=amd64
+  -PregistryEndpoint=$MIGRATIONS_ECR_REGISTRY
 ```
 
 This is how the production build job works - it uses the same BuildKit setup but pushes to ECR instead of a local registry.
@@ -216,6 +215,16 @@ docker run -it --rm host.docker.internal:5001/migrations/migration_console:lates
 
 ## Cleaning Up
 
+**Important**: When you're done building images, clean up the buildkit resources to free up cluster capacity and avoid unnecessary costs.
+
+### Remove the docker buildx builder (frees buildkit pods)
+```bash
+echo "Remove buildx builder - this will cause kubernetes driver to terminate buildkit pods"
+docker buildx rm local-remote-builder
+```
+
+For EKS deployments using the kubernetes driver, removing the builder will automatically terminate the buildkit pods that were created for the build.
+
 ### Stop port forwards but keep everything running
 ```bash
 echo "Kill port forward processes"
@@ -235,7 +244,7 @@ pkill -f "port-forward.*buildkit"
 echo "Remove registry"
 kubectl delete -f docker-registry.yaml
 
-echo "Uninstall helm chart"
+echo "Uninstall helm chart (removes nodepool and any remaining resources)"
 helm uninstall buildkit -n buildkit
 
 echo "Delete namespace"

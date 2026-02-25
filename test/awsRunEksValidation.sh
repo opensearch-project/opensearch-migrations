@@ -28,7 +28,7 @@ usage() {
   echo ""
   echo "Examples:"
   echo "  # Standard validation with public images"
-  echo "  ./awsRunEksValidation.sh --stage eks-cfn-deploy --region us-east-1"
+  echo "  ./awsRunEksValidation.sh --stage ekscreatevpc --region us-east-1"
   echo ""
   echo "  # Test from a feature branch"
   echo "  ./awsRunEksValidation.sh --stage dev --region us-east-1 --build-images true --branch feature-xyz"
@@ -155,11 +155,13 @@ run_aws_bootstrap() {
     echo "Invoking aws-bootstrap.sh with extra args: ${BOOTSTRAP_ARGS[*]}"
     ./aws-bootstrap.sh \
       --skip-console-exec \
+      --stage "${STAGE}" \
       "${BOOTSTRAP_ARGS[@]}"
   else
     echo "Invoking aws-bootstrap.sh with default args (public images)."
     ./aws-bootstrap.sh \
-      --skip-console-exec
+      --skip-console-exec \
+      --stage "${STAGE}"
   fi
 
   echo "aws-bootstrap.sh completed successfully."

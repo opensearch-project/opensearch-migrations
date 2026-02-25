@@ -417,11 +417,19 @@ class SnapshotStatus(BaseModel):
 
         if stats := snapshot_info.get("stats"):
             # OpenSearch: byte-level stats
-            total_units = total_bytes = stats.get("total", {}).get("size_in_bytes", 0)
-            processed_units = processed_bytes = (
-                stats.get("processed", {}).get("size_in_bytes", 0) +
-                stats.get("incremental", {}).get("size_in_bytes", 0)
-            )
+            # For incremental snapshots, use incremental as the work to be done
+            incremental_bytes = stats.get("incremental", {}).get("size_in_bytes", 0)
+            total_stat_bytes = stats.get("total", {}).get("size_in_bytes", 0)
+            processed_stat_bytes = stats.get("processed", {}).get("size_in_bytes", 0)
+
+            # Use incremental as total for progress (actual work for this snapshot)
+            # Fall back to total if incremental is 0 (first snapshot or legacy format)
+            total_bytes = incremental_bytes if incremental_bytes > 0 else total_stat_bytes
+            # For completed snapshots, processed may be 0/missing - use incremental as processed
+            processed_bytes = processed_stat_bytes if processed_stat_bytes > 0 else incremental_bytes
+            total_units = total_bytes
+            processed_units = processed_bytes
+
             start_ms = stats.get("start_time_in_millis", 0)
             elapsed_ms = stats.get("time_in_millis", 0)
             duration_ms = stats.get("time_in_millis", 0)
@@ -531,6 +539,7 @@ class SnapshotStatus(BaseModel):
 def convert_snapshot_state_to_step_state(snapshot_state: str) -> StepState:
     state_mapping = {
         "FAILED": StepState.FAILED,
+        "STARTED": StepState.RUNNING,
         "IN_PROGRESS": StepState.RUNNING,
         "PARTIAL": StepState.FAILED,
         "SUCCESS": StepState.COMPLETED,
@@ -564,20 +573,23 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
     if not deep_check:
         return SnapshotStateAndDetails(state, None)
 
+    # For deep check, try status API first (for running snapshots)
     try:
         path = f"/_snapshot/{repository}/{snapshot}/_status"
         response = cluster.call_api(path, HttpMethod.GET)
         logging.debug(f"Raw get snapshot status full response: {response.text}")
         response.raise_for_status()
+        
+        snapshot_data = response.json()
+        snapshots = snapshot_data.get('snapshots', [])
+        if snapshots and snapshots[0]:
+            return SnapshotStateAndDetails(state, snapshots[0])
     except HTTPError:
-        raise SnapshotStatusUnavailable()
-
-    snapshot_data = response.json()
-    snapshots = snapshot_data.get('snapshots', [])
-    if not snapshots or not snapshots[0]:
-        raise SnapshotStatusUnavailable()
-
-    return SnapshotStateAndDetails(state, snapshots[0])
+        # Status API failed, snapshot likely completed - fall back to basic info
+        logging.debug(f"Status API unavailable for snapshot {snapshot}, using basic snapshot info")
+    
+    # Use the basic snapshot info we already have
+    return SnapshotStateAndDetails(state, snapshot_info)
 
 
 def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_check: bool) -> CommandResult:

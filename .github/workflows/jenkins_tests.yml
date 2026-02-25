@@ -2,11 +2,14 @@ name: Jenkins
 
 on:
   push:
-    branches-ignore:
-      - 'backport/**'
-      - 'dependabot/**'
+    branches:
+      - main
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.repository == 'opensearch-project/opensearch-migrations' && github.ref == 'refs/heads/main') }}
 
 env:
   python-version: '3.11'
@@ -48,3 +51,22 @@ jobs:
           job_name: "elasticsearch-5x-k8s-local-test"
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }}"
+
+  eks-integ-test:
+    if: |
+      github.event_name == 'push' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'run-eks-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-eks-tests'))
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - name: Jenkins Job Trigger and Monitor
+        uses: lewijacn/jenkins-trigger@1.0.4
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: "eks-integ-test"
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }}"
+          job_timeout_minutes: "120"

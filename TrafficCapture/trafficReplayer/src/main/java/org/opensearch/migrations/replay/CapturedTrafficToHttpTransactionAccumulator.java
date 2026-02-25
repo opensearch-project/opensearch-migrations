@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.kafka.TrafficSourceReaderInterruptedClose;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
@@ -104,10 +105,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
         public Consumer<RequestResponsePacketPair> onRequestReceived(
             IReplayContexts.IRequestAccumulationContext requestCtx,
-            @NonNull HttpMessageAndTimestamp request
+            @NonNull HttpMessageAndTimestamp request,
+            boolean isResumedConnection
         ) {
             requestCtx.close();
-            var innerCallback = underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request);
+            var innerCallback = underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request, isResumedConnection);
             return rrpp -> {
                 rrpp.getResponseContext().close();
                 innerCallback.accept(rrpp);
@@ -189,6 +191,41 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     public void accept(ITrafficStreamWithKey trafficStreamAndKey) {
+        // Synthetic close from partition reassignment
+        if (trafficStreamAndKey instanceof TrafficSourceReaderInterruptedClose) {
+            var tsk = trafficStreamAndKey.getKey();
+            var partitionId = tsk.getNodeId();
+            var connectionId = tsk.getConnectionId();
+
+            var existingAccum = liveStreams.getIfPresent(tsk);
+            if (existingAccum != null) {
+                // fireAccumulationsCallbacksAndClose with TRAFFIC_SOURCE_READER_INTERRUPTED status:
+                // - completes finishedAccumulatingResponseFuture for any in-flight request
+                //   (ACCUMULATING_WRITES state), allowing the OnlineRadixSorter to drain
+                // - fires onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED) in its finally block,
+                //   which calls replayEngine.closeConnection() to schedule the channel close after
+                //   any in-flight requests complete
+                fireAccumulationsCallbacksAndClose(
+                    existingAccum,
+                    RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED
+                );
+                liveStreams.remove(partitionId, connectionId);
+            } else {
+                // No accumulation — fire onConnectionClose directly so replayEngine.closeConnection
+                // is called and the session drains
+                tsk.getTrafficStreamsContext().close();
+                listener.underlying.onConnectionClose(
+                    0,
+                    tsk.getTrafficStreamsContext().getLogicalEnclosingScope(),
+                    0,
+                    RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED,
+                    Instant.now(),
+                    List.of(tsk)
+                );
+            }
+            return;
+        }
+
         var yetToBeSequencedTrafficStream = trafficStreamAndKey.getStream();
         log.atTrace().setMessage("Got trafficStream: {}")
             .addArgument(() -> summarizeTrafficStream(yetToBeSequencedTrafficStream))
@@ -196,6 +233,29 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var partitionId = yetToBeSequencedTrafficStream.getNodeId();
         var connectionId = yetToBeSequencedTrafficStream.getConnectionId();
         var tsk = trafficStreamAndKey.getKey();
+
+        // If the incoming key has a higher generation than the stored accumulation, the partition
+        // was revoked and reassigned without a TrafficSourceReaderInterruptedClose being processed
+        // for this connection. This should not happen in normal operation — the interrupted-close
+        // path should have cleaned up the accumulation before new-generation data arrives.
+        // Log an error and discard the stale accumulation defensively.
+        var existingAccum = liveStreams.getIfPresent(tsk);
+        if (existingAccum != null && existingAccum.sourceGeneration < tsk.getSourceGeneration()) {
+            log.atError().setMessage("Stale accumulation found for {}:{} (stored gen={}, incoming gen={}) — " +
+                    "TrafficSourceReaderInterruptedClose was not processed for this connection. " +
+                    "This indicates a gap in interrupted-close coverage.")
+                .addArgument(partitionId)
+                .addArgument(connectionId)
+                .addArgument(existingAccum.sourceGeneration)
+                .addArgument(tsk::getSourceGeneration)
+                .log();
+            fireAccumulationsCallbacksAndClose(
+                existingAccum,
+                RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY
+            );
+            liveStreams.remove(partitionId, connectionId);
+        }
+
         var accum = liveStreams.getOrCreateWithoutExpiration(tsk, k -> createInitialAccumulation(trafficStreamAndKey));
         var trafficStream = trafficStreamAndKey.getStream();
         for (int i = 0; i < trafficStream.getSubStreamCount(); ++i) {
@@ -238,7 +298,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .log();
         }
 
-        return new Accumulation(streamWithKey.getKey(), stream);
+        return new Accumulation(streamWithKey.getKey(), stream, streamWithKey.isResumedConnection());
     }
 
     private enum CONNECTION_STATUS {
@@ -374,7 +434,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 rrPair.requestData = new HttpMessageAndTimestamp.Request(timestamp);
                 requestCounter.incrementAndGet();
             }
-            rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
             rrPair.requestData.addSegment(observation.getReadSegment().getData().toByteArray());
             log.atTrace().setMessage("Added request segment for accum[{}]={}")
                 .addArgument(connectionId)
@@ -425,6 +484,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 rrPair.responseData = new HttpMessageAndTimestamp.Response(timestamp);
             }
             rrPair.responseData.addSegment(observation.getWriteSegment().getData().toByteArray());
+            rrPair.responseData.setLastPacketTimestamp(timestamp);
             log.atTrace().setMessage("Added response segment for accum[{}]={}")
                 .addArgument(connectionId)
                 .addArgument(accum)
@@ -485,9 +545,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var httpMessage = rrPair.requestData;
         assert (httpMessage != null);
         assert (!httpMessage.hasInProgressSegment());
+        boolean isResumedConnection = accumulation.getIndexOfCurrentRequest() == 0 && accumulation.isResumedConnection;
         var requestCtx = rrPair.getRequestContext();
         rrPair.rotateRequestGatheringToResponse();
-        var callbackTrackedData = listener.onRequestReceived(requestCtx, httpMessage);
+        var callbackTrackedData = listener.onRequestReceived(requestCtx, httpMessage, isResumedConnection);
         rrPairWithCallback.setFullDataContinuation(callbackTrackedData);
         accumulation.state = Accumulation.State.ACCUMULATING_WRITES;
         return true;

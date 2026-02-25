@@ -1,23 +1,26 @@
 import org.opensearch.migrations.image.RegistryImageBuildUtils
-import org.opensearch.migrations.image.ImageRegistryFormatterFactory
+import org.opensearch.migrations.image.RegistryImageBuildUtils.Registry
 
-def registryEndpoint = rootProject.hasProperty('registryEndpoint') ? rootProject.property('registryEndpoint') : 'localhost:5001'
-rootProject.ext.registryEndpoint = registryEndpoint
-def buildKitRegistryEndpoint = registryEndpoint == "localhost:5001" ? 'docker-registry:5000' : registryEndpoint
-rootProject.ext.buildKitRegistryEndpoint = buildKitRegistryEndpoint
-def imageArch = rootProject.hasProperty('imageArch') ? rootProject.property('imageArch') : ''
-if (!imageArch) {
-    def arch = System.getProperty("os.arch")
-    if (arch == "aarch64") {
-        imageArch = "arm64"
-    } else if (arch == "x86_64" || arch == "amd64") {
-        imageArch= "amd64"
-    } else {
-        logger.warn("Unsupported architecture detected: ${arch}, defaulting to 'amd64'")
-        imageArch= "amd64"
-    }
+def publishedUrl = rootProject.findProperty('registryEndpoint') ?: 'localhost:5001'
+def intermediateUrl = rootProject.findProperty('intermediateRegistry') ?: publishedUrl
+
+def publishedRegistry = new Registry(publishedUrl.toString())
+def intermediateRegistry = new Registry(intermediateUrl.toString())
+
+def publishStyle = (rootProject.findProperty("publishStyle") ?: "paths").toString()
+def publishedRepoByImageName = [
+        migration_console     : "opensearch-migrations-console",
+        traffic_replayer      : "opensearch-migrations-traffic-replayer",
+        capture_proxy         : "opensearch-migrations-traffic-capture-proxy",
+        reindex_from_snapshot : "opensearch-migrations-reindex-from-snapshot",
+]
+
+def getRepoNameIfPublishing = { Map cfg ->
+    if (publishStyle != 'separateRepos') return null
+    def imageName = cfg.get('imageName')?.toString()
+    if (!imageName) return null
+    return publishedRepoByImageName[imageName]
 }
-rootProject.ext.imageArch = imageArch
 
 def jibProjects = [
         "TrafficCapture:trafficReplayer": [
@@ -26,11 +29,11 @@ def jibProjects = [
                 imageName     : "traffic_replayer",
                 imageTag      : "latest",
                 requiredDependencies: [
-                    ":TrafficCapture:trafficReplayer": ["copyVersionFile_traffic_replayer"]
+                    ":TrafficCapture:trafficReplayer": ["syncVersionFile_traffic_replayer"]
                 ]
         ],
         "TrafficCapture:trafficCaptureProxyServer": [
-                baseImageRegistryEndpoint: rootProject.ext.registryEndpoint,
+                baseImageRegistryEndpoint: intermediateRegistry.hostUrl,
                 baseImageGroup : "migrations",
                 baseImageName  : "capture_proxy_base",
                 baseImageTag   : "latest",
@@ -38,12 +41,14 @@ def jibProjects = [
                 imageTag       : "latest",
                 requiredDependencies: [
                     "": ["buildKit_captureProxyBase"],
-                    ":TrafficCapture:trafficCaptureProxyServer": ["copyVersionFile_capture_proxy"]
+                    ":TrafficCapture:trafficCaptureProxyServer": ["syncVersionFile_capture_proxy"]
                 ]
         ]
 ]
+jibProjects.values().each { cfg ->
+    cfg.repoName = getRepoNameIfPublishing(cfg)
+}
 
-def formatter = ImageRegistryFormatterFactory.getFormatter(rootProject.ext.buildKitRegistryEndpoint)
 def buildKitProjects = [
         [
                 serviceName: "elasticsearchTestConsole",
@@ -64,17 +69,16 @@ def buildKitProjects = [
                 imageTag:   "latest",
                 requiredDependencies: [
                         ":DocumentsFromSnapshotMigration:copyDockerRuntimeJars",
-                        ":DocumentsFromSnapshotMigration:copyVersionFile_reindexFromSnapshot"
+                        ":DocumentsFromSnapshotMigration:syncVersionFile_reindexFromSnapshot"
                 ]
         ],
         [
                 serviceName: "migrationConsoleBase",
                 contextDir: "migrationConsole/build/dockerContext",
                 imageName:  "migration_console_base",
-                imageTag:   "latest",
                 buildArgs: [
-                        BASE_IMAGE: formatter.getFullBaseImageIdentifier(rootProject.ext.buildKitRegistryEndpoint,
-                                "migrations", "elasticsearch_test_console", "latest")
+                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImage(
+                                intermediateRegistry, "migrations", "elasticsearch_test_console", "latest")
                 ],
                 requiredDependencies: [
                         ":migrationConsole:syncDockerBuildContext",
@@ -87,8 +91,8 @@ def buildKitProjects = [
                 imageName:  "migration_console",
                 imageTag:   "latest",
                 buildArgs: [
-                        BASE_IMAGE: formatter.getFullBaseImageIdentifier(rootProject.ext.buildKitRegistryEndpoint,
-                                "migrations", "migration_console_base", "latest")
+                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImage(
+                                intermediateRegistry, "migrations", "migration_console_base", "latest")
                 ],
                 requiredDependencies: [
                         ":TrafficCapture:dockerSolution:syncArtifact_migration_console_staging_noDockerBuild",
@@ -99,35 +103,103 @@ def buildKitProjects = [
         [
                 serviceName: "elasticsearchWithSearchGuard",
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard",
-                imageName:  "elasticsearch_searchguard",
-                imageTag:   "latest"
+                imageName:  "elasticsearch_searchguard"
         ]
 ]
 
+buildKitProjects.each { cfg ->
+    cfg.repoName = getRepoNameIfPublishing(cfg)
+}
 
 gradle.projectsEvaluated {
     def imageHelper = new RegistryImageBuildUtils()
-    imageHelper.registerLoginTask(rootProject)
-    imageHelper.applyJibConfigurations(rootProject, jibProjects)
-    imageHelper.applyBuildKitConfigurations(rootProject, buildKitProjects)
+
+    imageHelper.registerLoginTask(rootProject, publishedRegistry)
+
+    imageHelper.applyBuildKitConfigurations(
+            rootProject,
+            buildKitProjects,
+            publishedRegistry,
+            intermediateRegistry
+    )
+    imageHelper.applyJibConfigurations(
+            rootProject,
+            jibProjects,
+            publishedRegistry,
+            intermediateRegistry
+    )
 }
 
 tasks.register("jibAll") {
     group = "build"
-    description = "Build all Jib images in all subprojects"
+    description = "Build all Jib multi-arch images in all subprojects"
     dependsOn rootProject.subprojects.collect { proj ->
         proj.tasks.matching { it.name == "jib" }
     }.flatten()
 }
 
+tasks.register("jibAll_amd64") {
+    group = "build"
+    description = "Build all Jib amd64 images in all subprojects"
+    dependsOn rootProject.subprojects.collect { proj ->
+        proj.tasks.matching { it.name == "jib_amd64" }
+    }.flatten()
+}
+
+tasks.register("jibAll_arm64") {
+    group = "build"
+    description = "Build all Jib arm64 images in all subprojects"
+    dependsOn rootProject.subprojects.collect { proj ->
+        proj.tasks.matching { it.name == "jib_arm64" }
+    }.flatten()
+}
+
 tasks.register("buildKitAll") {
     group = "build"
-    description = "Build all BuildKit images"
-    dependsOn rootProject.tasks.matching { it.name.startsWith("buildKit_") }
+    description = "Build all BuildKit multi-arch images"
+    dependsOn rootProject.tasks.matching {
+        it.name.startsWith("buildKit_") &&
+                !it.name.endsWith("_amd64") &&
+                !it.name.endsWith("_arm64")
+    }
+}
+
+tasks.register("buildKitAll_amd64") {
+    group = "build"
+    description = "Build all BuildKit amd64 images"
+    dependsOn rootProject.tasks.matching {
+        it.name.startsWith("buildKit_") && it.name.endsWith("_amd64")
+    }
+}
+
+tasks.register("buildKitAll_arm64") {
+    group = "build"
+    description = "Build all BuildKit arm64 images"
+    dependsOn rootProject.tasks.matching {
+        it.name.startsWith("buildKit_") && it.name.endsWith("_arm64")
+    }
 }
 
 tasks.register("buildImagesToRegistry") {
-    println "buildImagesToRegistry will build images to registry: ${registryEndpoint} (${imageArch}) with buildKit container using registry: ${buildKitRegistryEndpoint}"
+    group = "build"
+    description = "Build all multi-arch images to registry: ${publishedRegistry}"
+    println "buildImagesToRegistry will build images to registry: ${publishedRegistry}"
     dependsOn("buildKitAll")
     dependsOn("jibAll")
+}
+
+tasks.register("buildImagesToRegistry_amd64") {
+    group = "build"
+    description = "Build all amd64 images to registry: ${publishedRegistry}"
+    println "buildImagesToRegistry_amd64 will build amd64 images to registry: ${publishedRegistry}"
+    dependsOn("buildKitAll_amd64")
+    dependsOn("jibAll_amd64")
+}
+
+tasks.register("buildImagesToRegistry_arm64") {
+    group = "build"
+    description = "Build all arm64 images to registry: ${publishedRegistry}"
+    println "buildImagesToRegistry_arm64 will build arm64 images to registry: ${publishedRegistry}"
+    dependsOn("buildKitAll_arm64")
+    dependsOn("jibAll_arm64")
 }

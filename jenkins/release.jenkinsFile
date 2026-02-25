@@ -51,13 +51,13 @@ pipeline {
                                 String assetUrl = null
                                 def parsedJson = readJSON text: assets
                                 parsedJson.each { item ->
-                                    if(item.name == 'artifacts.tar.gz') {
+                                    if(item.name == 'opensearch-migrations-source.tar.gz') {
                                         echo "Downloading artifacts from ${item.url}"
-                                        sh "curl -J -L -H 'Accept: application/octet-stream' -H 'Authorization: Bearer ${GITHUB_TOKEN}' ${item.url} -o artifacts.tar.gz && tar -xvf artifacts.tar.gz"
+                                        sh "curl -J -L -H 'Accept: application/octet-stream' -H 'Authorization: Bearer ${GITHUB_TOKEN}' ${item.url} -o opensearch-migrations-source.tar.gz && tar -xvf opensearch-migrations-source.tar.gz"
                                         }
-                                    if(item.name == 'traffic-capture-artifacts.tar.gz') {
+                                    if(item.name == 'opensearch-migrations-build.tar.gz') {
                                         echo "Downloading artifacts from ${item.url}"
-                                        sh "curl -J -L -H 'Accept: application/octet-stream' -H 'Authorization: Bearer ${GITHUB_TOKEN}' ${item.url} -o traffic-capture-artifacts.tar.gz && tar -xvf traffic-capture-artifacts.tar.gz"
+                                        sh "curl -J -L -H 'Accept: application/octet-stream' -H 'Authorization: Bearer ${GITHUB_TOKEN}' ${item.url} -o opensearch-migrations-build.tar.gz && tar -xvf opensearch-migrations-build.tar.gz"
                                         }
                                     }
                             }
@@ -70,7 +70,7 @@ pipeline {
                     script {
                         publishToArtifactsProdBucket(
                             assumedRoleName: 'opensearch-migrations-upload-role',
-                            source: "${WORKSPACE}/artifacts.tar.gz",
+                            source: "${WORKSPACE}/opensearch-migrations-source.tar.gz",
                             destination: "migrations/${tag}/opensearch-migrations-${tag}.tar.gz",
                             signingPlatform: 'linux',
                             sigType: '.sig',

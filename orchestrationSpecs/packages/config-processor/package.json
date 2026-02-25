@@ -22,7 +22,7 @@
     "@opensearch-migrations/schemas": "*",
     "etcd3": "^1.1.2",
     "yaml": "^2.8.1",
-    "zod": "*"
+    "zod": "^4"
   },
   "devDependencies": {
     "@types/node": "^24.0.13",

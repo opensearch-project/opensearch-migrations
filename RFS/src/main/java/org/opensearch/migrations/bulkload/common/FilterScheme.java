@@ -9,6 +9,7 @@ public class FilterScheme {
 
     private static final List<String> EXCLUDED_PREFIXES = Arrays.asList(
             ".",
+            "@abc_template@",
             "apm-",
             "apm@",
             "behavioral_analytics-",
@@ -18,6 +19,7 @@ public class FilterScheme {
             "elastic-connectors-",
             "elastic_agent.",
             "ilm-history-",
+            "kibana",
             "logs-elastic_agent",
             "logs-endpoint.",
             "logs-index_pattern",

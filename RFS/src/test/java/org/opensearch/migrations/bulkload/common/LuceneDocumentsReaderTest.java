@@ -108,7 +108,7 @@ public class LuceneDocumentsReaderTest {
         // Use the LuceneDocumentsReader to get the documents
         var reader = new LuceneIndexReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
-        Flux<RfsLuceneDocument> documents = reader.readDocuments(shardMetadata.getSegmentFileName());
+        Flux<LuceneDocumentChange> documents = reader.streamDocumentChanges(shardMetadata.getSegmentFileName());
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
@@ -174,7 +174,7 @@ public class LuceneDocumentsReaderTest {
         // Use the LuceneDocumentsReader to get the documents
         var reader = new LuceneIndexReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
-        Flux<RfsLuceneDocument> documents = reader.readDocuments(shardMetadata.getSegmentFileName());
+        Flux<LuceneDocumentChange> documents = reader.streamDocumentChanges(shardMetadata.getSegmentFileName());
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
@@ -283,7 +283,7 @@ public class LuceneDocumentsReaderTest {
         }, 500, TimeUnit.MILLISECONDS);
 
         // Read documents
-        List<RfsLuceneDocument> actualDocuments = reader.readDocuments("dummy")
+        List<LuceneDocumentChange> actualDocuments = reader.streamDocumentChanges("dummy")
             .subscribeOn(Schedulers.parallel())
             .collectList()
             .block(Duration.ofSeconds(2));
@@ -332,7 +332,7 @@ public class LuceneDocumentsReaderTest {
 
 
         for (int i = 0; i < documentStartingIndices.size(); i++) {
-            Flux<RfsLuceneDocument> documents = reader.readDocuments(shardMetadata.getSegmentFileName(), documentStartingIndices.get(i));
+            Flux<LuceneDocumentChange> documents = reader.streamDocumentChanges(shardMetadata.getSegmentFileName(), documentStartingIndices.get(i));
 
             var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
             var expectedDocIds = String.join(",", documentIds.get(i));
@@ -372,7 +372,7 @@ public class LuceneDocumentsReaderTest {
 
 
         for (int startingDocIndex = 0; startingDocIndex < documentIds.size(); startingDocIndex++) {
-            Flux<RfsLuceneDocument> documents = reader.readDocuments(shardMetadata.getSegmentFileName(), startingDocIndex);
+            Flux<LuceneDocumentChange> documents = reader.streamDocumentChanges(shardMetadata.getSegmentFileName(), startingDocIndex);
 
             var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
             var expectedDocIds = String.join(",", documentIds.get(startingDocIndex));

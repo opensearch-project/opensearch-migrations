@@ -10,8 +10,8 @@ plugins {
     id 'com.gradleup.shadow' version '8.3.8' apply false
     id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
     id 'com.github.node-gradle.node' version '7.1.0' apply false
-    id 'com.google.protobuf' version "0.9.5" apply false
-    id 'com.google.cloud.tools.jib' version '3.4.5' apply false
+    id 'com.google.protobuf' version "0.9.6" apply false
+    id 'com.google.cloud.tools.jib' apply false // version is set in buildSrc
 
     // Used in top level build.gradle
     id 'jacoco' apply true
@@ -117,25 +117,29 @@ spotless {
 }
 
 subprojects {
-    apply plugin: "com.diffplug.spotless"
     apply plugin: 'jacoco'
     apply plugin: 'maven-publish'
 
-    // See https://github.com/diffplug/spotless/tree/main/plugin-gradle#java for some documentation,
-    // though what '#' does is still undocumented from what I can tell
-    spotless {
-        java {
-            target "**/*.java"
-            targetExclude '**/build/**', ".gradle/**", "**/node_modules/**"
-            importOrder(
-                    'javax',
-                    'java',
-                    'org.opensearch',
-                    '',
-                    '\\#')
-            leadingTabsToSpaces()
-            endWithNewline()
-            removeUnusedImports()
+    // Skip spotless for frontend as it has no Java code and node_modules causes scan failures
+    if (project.name != 'frontend') {
+        apply plugin: "com.diffplug.spotless"
+
+        // See https://github.com/diffplug/spotless/tree/main/plugin-gradle#java for some documentation,
+        // though what '#' does is still undocumented from what I can tell
+        spotless {
+            java {
+                target "**/*.java"
+                targetExclude '**/build/**', ".gradle/**", "**/node_modules/**"
+                importOrder(
+                        'javax',
+                        'java',
+                        'org.opensearch',
+                        '',
+                        '\\#')
+                leadingTabsToSpaces()
+                endWithNewline()
+                removeUnusedImports()
+            }
         }
     }
 
@@ -201,6 +205,10 @@ subprojects {
                 //   ./gradlew test -Dtest.striping.total=3 -Dtest.striping.index=0
                 def total = System.getProperty("test.striping.total")
                 def index = System.getProperty("test.striping.index")
+
+                // Register striping params as inputs so tests rerun when striping changes
+                inputs.property("test.striping.total", total).optional(true)
+                inputs.property("test.striping.index", index).optional(true)
 
                 if (total != null) {
                     systemProperty "test.striping.total", total

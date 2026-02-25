@@ -4,8 +4,6 @@ import os
 import pytest
 import re
 import json
-import datetime
-from unittest.mock import patch
 
 from base64 import b64encode
 from botocore.auth import SigV4Auth
@@ -402,13 +400,8 @@ def test_sigv4_authentication_signature(requests_mock, method, endpoint, data, h
         requests_mock.get(url, json={'status': 'green'})
     elif method == HttpMethod.POST:
         requests_mock.post(url, json={'hits': {'total': 0, 'hits': []}})
-    # Mock datetime to return a specific timestamp
-    specific_time = datetime.datetime(2025, 1, 1, 12, 0, 0)
-    # Patch botocore's datetime usage instead of the datetime module itself
-    with mock_aws(), patch('botocore.auth.datetime') as mock_datetime:
-        mock_datetime.datetime.utcnow.return_value = specific_time
-        mock_datetime.datetime.now.return_value = specific_time
-        mock_datetime.datetime.strftime = datetime.datetime.strftime
+
+    with mock_aws():
 
         # Add default headers to the request
         headers = {
@@ -476,29 +469,28 @@ def test_sigv4_authentication_signature(requests_mock, method, endpoint, data, h
         credentials = session.get_credentials()
         service_name = cluster.auth_details.get("service", "es")
         region_name = cluster.auth_details.get("region", "us-east-1")
-        # Create a new AWSRequest
+        # Create a new AWSRequest for re-signing verification
+        # Include x-amz-date from original request to ensure same timestamp is used
+        verification_headers = {k: v for k, v in last_request.headers.items() if
+                                k.lower() not in requests.utils.default_headers().keys()}
         aws_request = AWSRequest(
             method=last_request.method,
             url=last_request.url,
             data=last_request.body,
-            headers={k: v for k, v in last_request.headers.items() if
-                     k.lower() not in requests.utils.default_headers().keys()}
+            headers=verification_headers
         )
-        # Sign the request
-        SigV4Auth(credentials, service_name, region_name).add_auth(aws_request)
+        # Set the timestamp in context before signing to match original request
+        aws_request.context['timestamp'] = amz_date_header
+        # Sign the request (this will use our timestamp from context)
+        auth = SigV4Auth(credentials, service_name, region_name)
+        # Manually perform signing steps using the original timestamp
+        auth._modify_request_before_signing(aws_request)
+        canonical_request = auth.canonical_request(aws_request)
+        string_to_sign = auth.string_to_sign(aws_request, canonical_request)
+        new_signature = auth.signature(string_to_sign, aws_request)
 
-        # Extract the new signature
-        new_auth_header = aws_request.headers.get('Authorization')
-        assert new_auth_header is not None, "Failed to generate new Authorization header"
-
-        # Compare timestamp
-        assert amz_date_header == aws_request.headers.get("x-amz-date")
         # Compare signatures
         original_signature = signature_match.group(1)
-        new_signature_match = re.search(r"Signature=([a-f0-9]+)", new_auth_header)
-        assert new_signature_match is not None, "New signature not found in Authorization header"
-        new_signature = new_signature_match.group(1)
-
         assert original_signature == new_signature, "Signatures do not match"
 
 

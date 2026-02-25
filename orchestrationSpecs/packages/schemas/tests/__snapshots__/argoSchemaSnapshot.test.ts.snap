@@ -21,10 +21,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "type": "boolean",
                 "default": false
               },
-              "version": {
-                "type": "string",
-                "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
-              },
               "authConfig": {
                 "anyOf": [
                   {
@@ -95,33 +91,43 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   }
                 ]
               },
-              "snapshotRepo": {
+              "version": {
+                "type": "string",
+                "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
+              },
+              "snapshotRepos": {
                 "type": "object",
-                "properties": {
-                  "awsRegion": {
-                    "type": "string",
-                    "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "awsRegion": {
+                      "type": "string",
+                      "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                    },
+                    "endpoint": {
+                      "type": "string",
+                      "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                      "default": "",
+                      "description": "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
+                    },
+                    "s3RepoPathUri": {
+                      "type": "string",
+                      "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                      "description": "s3://BUCKETNAME/PATH"
+                    },
+                    "s3RoleArn": {
+                      "type": "string",
+                      "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                      "default": "",
+                      "description": "IAM role ARN to assume when accessing S3 for snapshot operations"
+                    }
                   },
-                  "endpoint": {
-                    "type": "string",
-                    "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
-                    "default": "",
-                    "description": "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
-                  },
-                  "s3RepoPathUri": {
-                    "type": "string",
-                    "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
-                    "description": "s3://BUCKETNAME/PATH"
-                  },
-                  "repoName": {
-                    "type": "string",
-                    "default": "migration_assistant_repo"
-                  }
+                  "required": [
+                    "awsRegion",
+                    "s3RepoPathUri"
+                  ]
                 },
-                "required": [
-                  "awsRegion",
-                  "s3RepoPathUri"
-                ]
+                "description": "Keys are the repository names that are managed by the source cluster"
               },
               "proxy": {
                 "type": "object",
@@ -142,13 +148,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   }
                 }
               },
-              "name": {
+              "label": {
                 "type": "string"
               }
             },
             "required": [
               "version",
-              "name"
+              "label"
             ]
           },
           "targetConfig": {
@@ -161,10 +167,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               "allowInsecure": {
                 "type": "boolean",
                 "default": false
-              },
-              "version": {
-                "type": "string",
-                "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
               },
               "authConfig": {
                 "anyOf": [
@@ -236,15 +238,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   }
                 ]
               },
-              "name": {
+              "label": {
                 "type": "string",
                 "pattern": "^[a-zA-Z0-9_]+$"
               }
             },
             "required": [
               "endpoint",
-              "version",
-              "name"
+              "label"
             ]
           },
           "snapshotExtractAndLoadConfigArray": {
@@ -266,84 +267,24 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 0
                     },
+                    "jvmArgs": {
+                      "type": "string",
+                      "default": ""
+                    },
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
                       "default": ""
                     },
-                    "s3RoleArn": {
-                      "type": "string",
-                      "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
-                      "default": ""
-                    }
-                  }
-                },
-                "name": {
-                  "type": "string"
-                },
-                "snapshotConfig": {
-                  "type": "object",
-                  "properties": {
-                    "snapshotNameConfig": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "externallyManagedSnapshot": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "externallyManagedSnapshot"
-                          ]
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "snapshotNamePrefix": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "snapshotNamePrefix"
-                          ]
-                        }
-                      ]
+                    "semaphoreConfigMapName": {
+                      "type": "string"
                     },
-                    "repoConfig": {
-                      "type": "object",
-                      "properties": {
-                        "awsRegion": {
-                          "type": "string",
-                          "description": "The AWS region that the bucket reside in (us-east-2, etc)"
-                        },
-                        "endpoint": {
-                          "type": "string",
-                          "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
-                          "default": ""
-                        },
-                        "s3RepoPathUri": {
-                          "type": "string",
-                          "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
-                          "description": "s3://BUCKETNAME/PATH"
-                        },
-                        "repoName": {
-                          "type": "string",
-                          "default": "migration_assistant_repo"
-                        },
-                        "useLocalStack": {
-                          "type": "boolean",
-                          "default": false
-                        }
-                      },
-                      "required": [
-                        "awsRegion",
-                        "s3RepoPathUri"
-                      ]
+                    "semaphoreKey": {
+                      "type": "string"
                     }
                   },
                   "required": [
-                    "snapshotNameConfig",
-                    "repoConfig"
+                    "semaphoreConfigMapName",
+                    "semaphoreKey"
                   ]
                 },
                 "migrations": {
@@ -351,7 +292,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "items": {
                     "type": "object",
                     "properties": {
-                      "name": {
+                      "label": {
                         "type": "string"
                       },
                       "metadataMigrationConfig": {
@@ -385,6 +326,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "clusterAwarenessAttributes": {
                             "type": "number",
                             "default": 1
+                          },
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
                           },
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
@@ -454,6 +399,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type": "number",
                             "default": 1
                           },
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
+                          },
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
                             "default": ""
@@ -473,7 +422,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "initialLeaseDuration": {
                             "type": "string",
-                            "default": "PT10M"
+                            "default": "PT1H"
                           },
                           "maxConnections": {
                             "type": "number",
@@ -486,6 +435,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "otelCollectorEndpoint": {
                             "type": "string",
                             "default": "http://otel-collector:4317"
+                          },
+                          "useTargetClusterForWorkCoordination": {
+                            "type": "boolean",
+                            "default": true
                           },
                           "resources": {
                             "type": "object",
@@ -552,15 +505,94 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       }
                     },
                     "required": [
-                      "name"
+                      "label"
                     ]
                   }
+                },
+                "label": {
+                  "type": "string"
+                },
+                "snapshotConfig": {
+                  "type": "object",
+                  "properties": {
+                    "snapshotNameConfig": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "externallyManagedSnapshot": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "externallyManagedSnapshot"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "snapshotNamePrefix": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "snapshotNamePrefix"
+                          ]
+                        }
+                      ]
+                    },
+                    "repoConfig": {
+                      "type": "object",
+                      "properties": {
+                        "awsRegion": {
+                          "type": "string",
+                          "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                        },
+                        "endpoint": {
+                          "type": "string",
+                          "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                          "default": ""
+                        },
+                        "s3RepoPathUri": {
+                          "type": "string",
+                          "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "s3://BUCKETNAME/PATH"
+                        },
+                        "s3RoleArn": {
+                          "type": "string",
+                          "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "default": ""
+                        },
+                        "useLocalStack": {
+                          "type": "boolean",
+                          "default": false
+                        },
+                        "repoName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "awsRegion",
+                        "s3RepoPathUri",
+                        "repoName"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "snapshotNameConfig",
+                    "repoConfig",
+                    "label"
+                  ]
                 }
               },
               "required": [
-                "name",
-                "snapshotConfig",
-                "migrations"
+                "createSnapshotConfig",
+                "migrations",
+                "label",
+                "snapshotConfig"
               ]
             }
           },
@@ -576,6 +608,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "default": 1
               },
               "authHeaderOverride": {
+                "type": "string",
+                "default": ""
+              },
+              "jvmArgs": {
                 "type": "string",
                 "default": ""
               },
@@ -639,12 +675,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "default": {
                   "limits": {
-                    "cpu": "2000m",
-                    "memory": "4000Mi"
+                    "cpu": "3500m",
+                    "memory": "3500Mi"
                   },
                   "requests": {
-                    "cpu": "2000m",
-                    "memory": "4000Mi"
+                    "cpu": "3500m",
+                    "memory": "3500Mi"
                   }
                 },
                 "required": [
@@ -691,10 +727,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "type": "boolean",
             "default": false
           },
-          "version": {
-            "type": "string",
-            "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
-          },
           "authConfig": {
             "anyOf": [
               {
@@ -765,33 +797,43 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               }
             ]
           },
-          "snapshotRepo": {
+          "version": {
+            "type": "string",
+            "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
+          },
+          "snapshotRepos": {
             "type": "object",
-            "properties": {
-              "awsRegion": {
-                "type": "string",
-                "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "awsRegion": {
+                  "type": "string",
+                  "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                },
+                "endpoint": {
+                  "type": "string",
+                  "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                  "default": "",
+                  "description": "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
+                },
+                "s3RepoPathUri": {
+                  "type": "string",
+                  "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                  "description": "s3://BUCKETNAME/PATH"
+                },
+                "s3RoleArn": {
+                  "type": "string",
+                  "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                  "default": "",
+                  "description": "IAM role ARN to assume when accessing S3 for snapshot operations"
+                }
               },
-              "endpoint": {
-                "type": "string",
-                "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
-                "default": "",
-                "description": "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
-              },
-              "s3RepoPathUri": {
-                "type": "string",
-                "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
-                "description": "s3://BUCKETNAME/PATH"
-              },
-              "repoName": {
-                "type": "string",
-                "default": "migration_assistant_repo"
-              }
+              "required": [
+                "awsRegion",
+                "s3RepoPathUri"
+              ]
             },
-            "required": [
-              "awsRegion",
-              "s3RepoPathUri"
-            ]
+            "description": "Keys are the repository names that are managed by the source cluster"
           },
           "proxy": {
             "type": "object",
@@ -831,10 +873,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "type": "boolean",
             "default": false
           },
-          "version": {
-            "type": "string",
-            "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
-          },
           "authConfig": {
             "anyOf": [
               {
@@ -907,8 +945,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           }
         },
         "required": [
-          "endpoint",
-          "version"
+          "endpoint"
         ]
       }
     },
@@ -932,7 +969,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "items": {
               "type": "object",
               "properties": {
-                "name": {
+                "label": {
                   "type": "string",
                   "pattern": "^[a-zA-Z][a-zA-Z0-9]*",
                   "default": ""
@@ -951,13 +988,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "type": "number",
                       "default": 0
                     },
-                    "loggingConfigurationOverrideConfigMap": {
+                    "jvmArgs": {
                       "type": "string",
                       "default": ""
                     },
-                    "s3RoleArn": {
+                    "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
-                      "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                       "default": ""
                     }
                   }
@@ -990,10 +1026,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           ]
                         }
                       ]
+                    },
+                    "repoName": {
+                      "type": "string"
                     }
                   },
                   "required": [
-                    "snapshotNameConfig"
+                    "snapshotNameConfig",
+                    "repoName"
                   ]
                 },
                 "migrations": {
@@ -1001,7 +1041,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "items": {
                     "type": "object",
                     "properties": {
-                      "name": {
+                      "label": {
                         "type": "string",
                         "pattern": "^[a-zA-Z][a-zA-Z0-9]*",
                         "default": ""
@@ -1037,6 +1077,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "clusterAwarenessAttributes": {
                             "type": "number",
                             "default": 1
+                          },
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
                           },
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
@@ -1114,6 +1158,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "number",
                             "default": 1
                           },
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
+                          },
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
                             "default": ""
@@ -1133,7 +1181,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           },
                           "initialLeaseDuration": {
                             "type": "string",
-                            "default": "PT10M"
+                            "default": "PT1H"
                           },
                           "maxConnections": {
                             "type": "number",
@@ -1150,6 +1198,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "skipApproval": {
                             "type": "boolean",
                             "default": false
+                          },
+                          "useTargetClusterForWorkCoordination": {
+                            "type": "boolean",
+                            "default": true
                           },
                           "resources": {
                             "type": "object",
@@ -1241,6 +1293,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "type": "string",
                 "default": ""
               },
+              "jvmArgs": {
+                "type": "string",
+                "default": ""
+              },
               "loggingConfigurationOverrideConfigMap": {
                 "type": "string",
                 "default": ""
@@ -1301,12 +1357,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 },
                 "default": {
                   "limits": {
-                    "cpu": "2000m",
-                    "memory": "4000Mi"
+                    "cpu": "3500m",
+                    "memory": "3500Mi"
                   },
                   "requests": {
-                    "cpu": "2000m",
-                    "memory": "4000Mi"
+                    "cpu": "3500m",
+                    "memory": "3500Mi"
                   }
                 },
                 "required": [

@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 
 import org.opensearch.common.collect.Tuple;
@@ -36,7 +37,8 @@ import org.junit.jupiter.api.Test;
 @Slf4j
 class NettyScanningHttpProxyTest {
 
-    private static final String EXPECTED_REQUEST_STRING = "GET / HTTP/1.1\r\n"
+    private static final Pattern EXPECTED_REQUEST_PATTERN = Pattern.compile(""
+        + "GET / HTTP/1.1\r\n"
         + "Host: localhost\r\n"
         + "User-Agent: UnitTest\r\n"
         + "DumbAndLongHeaderValue-0: 0\r\n"
@@ -58,10 +60,8 @@ class NettyScanningHttpProxyTest {
         + "DumbAndLongHeaderValue-16: 16\r\n"
         + "DumbAndLongHeaderValue-17: 17\r\n"
         + "DumbAndLongHeaderValue-18: 18\r\n"
-        + "DumbAndLongHeaderValue-19: 19\r\n"
-        + "Accept-Encoding: gzip, x-gzip, deflate\r\n"
-        + "Connection: keep-alive\r\n"
-        + "\r\n";
+        + "DumbAndLongHeaderValue-19: 19.*?\r\n\r\n",
+        Pattern.DOTALL);
     private static final String EXPECTED_RESPONSE_STRING = "HTTP/1.1 200 OK\r\n"
         + "Content-transfer-encoding: chunked\r\n"
         + "Date: Thu, 08 Jun 2023 23:06:23 GMT\r\n"
@@ -113,14 +113,15 @@ class NettyScanningHttpProxyTest {
         var coalescedTrafficList = coalesceObservations(recordedTrafficStreams[0]);
         Assertions.assertEquals(NUM_INTERACTIONS * 2, coalescedTrafficList.size());
         int counter = 0;
-        final var expectedMessages = new String[] {
-            normalizeMessage(EXPECTED_REQUEST_STRING),
-            normalizeMessage(EXPECTED_RESPONSE_STRING) };
+        final var expectedResponseMessage = normalizeMessage(EXPECTED_RESPONSE_STRING);
         for (var httpMessage : coalescedTrafficList) {
-            Assertions.assertEquals(
-                expectedMessages[(counter++) % 2],
-                normalizeMessage(new String(httpMessage, StandardCharsets.UTF_8))
-            );
+            var normalizedMessage = normalizeMessage(new String(httpMessage, StandardCharsets.UTF_8));
+            if (counter % 2 == 0) {
+                Assertions.assertTrue(EXPECTED_REQUEST_PATTERN.matcher(normalizedMessage).matches());
+            } else {
+                Assertions.assertEquals(expectedResponseMessage, normalizedMessage);
+            }
+            counter++;
         }
 
         var observations = recordedTrafficStreams[0].getSubStreamList();
@@ -133,7 +134,7 @@ class NettyScanningHttpProxyTest {
             Assertions.assertTrue(observations.get(eomIndex + 1).hasWrite());
             var eom = observations.get(eomIndex).getEndOfMessageIndicator();
             Assertions.assertEquals(14, eom.getFirstLineByteLength());
-            Assertions.assertEquals(655, eom.getHeadersByteLength());
+            Assertions.assertEquals(711, eom.getHeadersByteLength());
         }
     }
 

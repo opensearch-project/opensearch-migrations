@@ -38,7 +38,7 @@ class MetadataDropFieldsTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
         var scenarios = Stream.<Arguments>builder();
-        scenarios.add(Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_1));
+        scenarios.add(Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_4));
         return scenarios.build();
     }
 

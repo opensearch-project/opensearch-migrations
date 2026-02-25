@@ -1,6 +1,6 @@
 import logging
 from ..common_utils import convert_to_b64
-from ..cluster_version import ElasticsearchV5_X, OpensearchV1_X, OpensearchV2_X
+from ..cluster_version import ElasticsearchV5_X, OpensearchV1_X, OpensearchV2_X, OpensearchV3_X
 from .ma_argo_test_base import MATestBase, MATestUserArguments
 
 logger = logging.getLogger(__name__)
@@ -11,6 +11,7 @@ class Test0004MultiTypeUnionMigration(MATestBase):
         allow_combinations = [
             (ElasticsearchV5_X, OpensearchV1_X),
             (ElasticsearchV5_X, OpensearchV2_X),
+            (ElasticsearchV5_X, OpensearchV3_X),
         ]
         description = "Performs metadata and backfill migrations with a multi-type union transformation."
         super().__init__(user_args=user_args,
@@ -48,7 +49,12 @@ class Test0004MultiTypeUnionMigration(MATestBase):
                     "transformerConfigBase64": transformation_b64
                 },
                 "documentBackfillConfig": {
-                    "docTransformerConfigBase64": transformation_b64
+                    "docTransformerConfigBase64": transformation_b64,
+                    "maxShardSizeBytes": 16000000,
+                    "resources": {
+                        "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},
+                        "limits": {"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"}
+                    }
                 }
             }]
         }]
@@ -82,6 +88,7 @@ class Test0005MultiTypeSplitMigration(MATestBase):
         allow_combinations = [
             (ElasticsearchV5_X, OpensearchV1_X),
             (ElasticsearchV5_X, OpensearchV2_X),
+            (ElasticsearchV5_X, OpensearchV3_X),
         ]
         description = "Performs metadata and backfill migrations with a multi-type split transformation."
         super().__init__(user_args=user_args,
@@ -123,7 +130,12 @@ class Test0005MultiTypeSplitMigration(MATestBase):
                     "transformerConfigBase64": transformation_b64
                 },
                 "documentBackfillConfig": {
-                    "docTransformerConfigBase64": transformation_b64
+                    "docTransformerConfigBase64": transformation_b64,
+                    "maxShardSizeBytes": 16000000,
+                    "resources": {
+                        "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},
+                        "limits": {"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"}
+                    }
                 }
             }]
         }]

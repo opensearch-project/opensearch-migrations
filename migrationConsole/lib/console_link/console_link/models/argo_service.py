@@ -91,6 +91,75 @@ class ArgoService:
         logger.info(f"Argo workflow '{workflow_name}' has been deleted")
         return result
 
+    def print_workflow_details(self, workflow_name: str) -> None:
+        """Print workflow details and namespace state for debugging failed workflows."""
+        try:
+            workflow_data = self._get_workflow_status_json(workflow_name)
+            logger.info(
+                f"Workflow {workflow_name} full status:\n{json.dumps(workflow_data.get('status', {}), indent=2)}")
+        except Exception as e:
+            logger.error(f"Failed to get workflow details: {e}")
+
+        # Print namespace resource summary
+        try:
+            logger.info(f"===== Namespace {self.namespace} resource summary =====")
+            summary_resources = "pods,services,deployments,statefulsets,workflows"
+            get_args = {"get": summary_resources, "--namespace": self.namespace}
+            self._run_kubectl_command(get_args)
+        except Exception as e:
+            logger.error(f"Failed to get namespace resources: {e}")
+
+    def save_namespace_diagnostics(self, output_dir: str) -> Optional[str]:
+        """Save detailed namespace diagnostics to a file for artifact collection."""
+        diagnostic_resources = "pods,services,deployments,statefulsets,workflows"
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            output_file = os.path.join(output_dir, f"namespace-{self.namespace}-diagnostics.txt")
+
+            with open(output_file, 'w') as f:
+                f.write(f"===== Namespace {self.namespace} Diagnostics =====\n\n")
+
+                # kubectl get resources
+                f.write(f"===== kubectl get {diagnostic_resources} =====\n")
+                try:
+                    result = CommandRunner("kubectl", {
+                        "get": diagnostic_resources,
+                        "--namespace": self.namespace,
+                        "-o": "wide"
+                    }).run()
+                    f.write(result + "\n\n")
+                except Exception as e:
+                    f.write(f"Error: {e}\n\n")
+
+                # kubectl describe resources
+                f.write(f"===== kubectl describe {diagnostic_resources} =====\n")
+                try:
+                    result = CommandRunner("kubectl", {
+                        "describe": diagnostic_resources,
+                        "--namespace": self.namespace
+                    }).run()
+                    f.write(result + "\n\n")
+                except Exception as e:
+                    f.write(f"Error: {e}\n\n")
+
+                # kubectl get events
+                f.write("===== kubectl get events =====\n")
+                try:
+                    result = CommandRunner("kubectl", {
+                        "get": "events",
+                        "--namespace": self.namespace,
+                        "--sort-by": ".lastTimestamp"
+                    }).run()
+                    f.write(result + "\n\n")
+                except Exception as e:
+                    f.write(f"Error: {e}\n\n")
+
+            logger.info(f"Saved namespace diagnostics to {output_file}")
+            return output_file
+        except Exception as e:
+            logger.error(f"Failed to save namespace diagnostics: {e}")
+            return None
+
     def get_workflow_status(self, workflow_name: str) -> CommandResult:
         workflow_data = self._get_workflow_status_json(workflow_name)
         phase = workflow_data.get("status", {}).get("phase", "")

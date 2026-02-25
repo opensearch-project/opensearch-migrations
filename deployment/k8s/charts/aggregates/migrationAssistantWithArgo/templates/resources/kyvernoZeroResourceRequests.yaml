@@ -15,75 +15,46 @@ data:
       name: zero-resource-requests
       annotations:
         policies.kyverno.io/title: Zero Resource Requests for Dev
-        policies.kyverno.io/description: >-
-          Sets resource requests to 0 for dev environments.
+        policies.kyverno.io/description: Zeros cpu/memory requests and limits for dev environments.
     spec:
       rules:
-        - name: zero-container-resources
+        - name: zero-resources
           match:
             any:
               - resources:
                   kinds:
                     - Pod
-                  selector:
-                    matchExpressions:
-                      - key: serviceAccountName
-                        operator: In
-                        values:
-                          - migration-console-access-role
-                          - argo-workflow-executor
-          mutate:
-            foreach:
-              - list: "request.object.spec.containers[]"
-                patchStrategicMerge:
-                  metadata:
-                    annotations:
-                      kyverno.io/mutated-by: "zero-resource-requests"
-                      kyverno.io/original-cpu-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.cpu || 'none' }}`}}"
-                      kyverno.io/original-memory-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.memory || 'none' }}`}}"
-                  spec:
-                    containers:
-                      - name: "{{`{{ element.name }}`}}"
-                        resources:
-                          requests:
-                            cpu: "0"
-                            memory: "0"
-                            ephemeral-storage: "0"
-        - name: zero-init-container-resources
-          match:
-            any:
-              - resources:
-                  kinds:
-                    - Pod
-                  selector:
-                    matchExpressions:
-                      - key: serviceAccountName
-                        operator: In
-                        values:
-                          - migration-console-access-role
-                          - argo-workflow-executor
           preconditions:
-            all:
-              - key: "{{`{{ request.object.spec.initContainers || '' | length(@) }}`}}"
-                operator: GreaterThan
-                value: 0
+            any:
+              - key: "{{`{{ request.object.spec.serviceAccountName || '' }}`}}"
+                operator: In
+                value:
+                  - migration-console-access-role
+                  - argo-workflow-executor
           mutate:
-            foreach:
-              - list: "request.object.spec.initContainers[]"
-                patchStrategicMerge:
-                  metadata:
-                    annotations:
-                      kyverno.io/mutated-by: "zero-resource-requests"
-                      kyverno.io/original-init-cpu-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.cpu || 'none' }}`}}"
-                      kyverno.io/original-init-memory-request-{{`{{ element.name }}`}}: "{{`{{ element.resources.requests.memory || 'none' }}`}}"
-                  spec:
-                    initContainers:
-                      - name: "{{`{{ element.name }}`}}"
-                        resources:
-                          requests:
-                            cpu: "0"
-                            memory: "0"
-                            ephemeral-storage: "0"
+            patchStrategicMerge:
+              metadata:
+                annotations:
+                  kyverno.io/mutated-by: "zero-resource-requests"
+              spec:
+                containers:
+                  - (name): "*"
+                    resources:
+                      requests:
+                        cpu: "0"
+                        memory: "0"
+                      limits:
+                        cpu: "0"
+                        memory: "0"
+                initContainers:
+                  - (name): "*"
+                    resources:
+                      requests:
+                        cpu: "0"
+                        memory: "0"
+                      limits:
+                        cpu: "0"
+                        memory: "0"
 ---
 apiVersion: batch/v1
 kind: Job
@@ -108,8 +79,11 @@ spec:
             - /bin/sh
             - -c
             - |
+              set -e
+              echo "Waiting for Kyverno CRD to be established..."
+              kubectl wait --for=condition=Established crd/clusterpolicies.kyverno.io --timeout=300s
               echo "Waiting for Kyverno admission controller to be ready..."
-              kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=admission-controller -n {{ .Release.Namespace }} --timeout=120s
+              kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=admission-controller -n {{ .Values.charts.kyverno.namespace }} --timeout=120s
               kubectl apply -f /policy/policy.yaml
           volumeMounts:
             - name: policy

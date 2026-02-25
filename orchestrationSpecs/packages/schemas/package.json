@@ -17,7 +17,7 @@
     "test": "jest"
   },
   "dependencies": {
-    "zod": "*",
+    "zod": "^4",
     "@asteasolutions/zod-to-openapi": "^8.1.0",
     "deepmerge": "^4.3.1"
   },

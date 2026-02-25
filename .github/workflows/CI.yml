@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 env:
@@ -14,7 +16,7 @@ env:
 # Prevent multiple simultaneous runs except on main repo
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ !(github.event_name == 'push' && github.repository == 'opensearch-project/opensearch-migrations') }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.repository == 'opensearch-project/opensearch-migrations' && github.ref == 'refs/heads/main') }}
 
 jobs:
   generate-cache-key:
@@ -42,8 +44,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
+        with:
+          gradle-cache-enabled: true
       - name: Run Gradle Build
-        run: gradle ${{matrix.tasks}}
+        run: ./gradlew ${{matrix.tasks}}
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
@@ -81,7 +85,7 @@ jobs:
       # Set up Kind cluster for workflow integration tests (only for console_link project)
       - name: Set up Kind cluster
         if: matrix.py-project == 'migrationConsole/lib/console_link'
-        uses: helm/kind-action@v1.13.0
+        uses: helm/kind-action@v1.14.0
         with:
           cluster_name: kind-test-cluster
 
@@ -107,7 +111,7 @@ jobs:
         run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT//\//-}" >> $GITHUB_ENV
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@96b38e9e60ee60a8c3911f4612407bba2f9195fb
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de
         with:
           fail_ci_if_error: true
           flags: python
@@ -139,6 +143,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
+        with:
+          gradle-cache-enabled: true
+          gradle-cache-read-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
       - name: Restore Docker Cache
         uses: AndreKurait/docker-cache@0.6.0
         with:
@@ -149,7 +156,7 @@ jobs:
       - name: Run Gradle tests with striping
         run: |
           MAX_WORKERS=$(( $(nproc) - 1 ))
-          gradle allTests mergeJacocoReports \
+          ./gradlew allTests mergeJacocoReports \
           --max-workers $MAX_WORKERS \
           -Dtest.striping.total=${{ env.gradle-test-parallelization }} \
           -Dtest.striping.index=${{ matrix.index }} \
@@ -167,7 +174,7 @@ jobs:
           fi
       - name: Upload memory dump
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           if-no-files-found: warn
           name: memory-dumps-gradle-tests-stripe-${{ matrix.index }}
@@ -175,7 +182,7 @@ jobs:
 
       - name: Upload test reports for stripe ${{ matrix.index }}
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           if-no-files-found: error
           name: test-reports-gradle-tests-stripe-${{ matrix.index }}
@@ -184,7 +191,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@96b38e9e60ee60a8c3911f4612407bba2f9195fb
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de
         with:
           fail_ci_if_error: true
           flags: gradle
@@ -204,6 +211,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-env
+        with:
+          gradle-cache-enabled: true
       - name: Cache Docker Images
         uses: AndreKurait/docker-cache@0.6.0
         with:
@@ -211,7 +220,7 @@ jobs:
           # Only save cache on push events
           read-only: ${{ github.event_name != 'push' }}
       - name: Start Docker Solution
-        run: gradle -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
+        run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
       - name: Run E2E test script
@@ -234,7 +243,7 @@ jobs:
           docker cp $(docker ps --filter "name=migration-console" -q):/shared-logs-output logs/shared_logs_output
       - name: Upload Logs
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           if-no-files-found: error
           name: e2e-test-logs
@@ -256,6 +265,11 @@ jobs:
           - ./deployment/cdk/opensearch-service-migration
           - ./deployment/migration-assistant-solution
           - ./frontend
+          # TODO - get these enabled
+#          - ./orchestrationSpecs/packages/argo-workflow-builders
+#          - ./orchestrationSpecs/packages/config-processor
+#          - ./orchestrationSpecs/packages/migration-workflow-templates
+#          - ./orchestrationSpecs/packages/schemas
     defaults:
       run:
         working-directory: ${{ matrix.npm-project }}
@@ -268,7 +282,7 @@ jobs:
         run: npm run test
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@96b38e9e60ee60a8c3911f4612407bba2f9195fb
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de
         with:
           fail_ci_if_error: true
           flags: node
@@ -288,6 +302,7 @@ jobs:
           args: --verbose --accept=200,403,429  "**/*.html" "**/*.md" "**/*.txt" "**/*.json"
             --offline
             --exclude "file:///github/workspace/*"
+            --exclude "file://.kiro/*"
             --exclude "http://localhost*"
             --exclude "https://localhost*"
             --exclude "http://capture-proxy*"

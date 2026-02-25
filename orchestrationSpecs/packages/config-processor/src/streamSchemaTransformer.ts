@@ -2,7 +2,7 @@ import {Readable} from 'stream';
 import {z, ZodError} from 'zod';
 import {parse} from "yaml";
 
-export class InputValidationElememnt {
+export class InputValidationElement {
     constructor(
         public readonly path: PropertyKey[],
         public readonly message: string
@@ -11,53 +11,32 @@ export class InputValidationElememnt {
 
 export class InputValidationError extends Error {
     constructor(
-        public readonly errors: InputValidationElememnt[]
+        public readonly errors: InputValidationElement[]
     ) {
-        super(`Found ${errors.length} errors`);
+        super();
         this.name = 'InputValidationError';
         Error.captureStackTrace?.(this, this.constructor);
     }
+
+    get message(): string {
+        return `Found ${this.errors.length} errors: ${formatInputValidationError(this, {singleLine: true})}`;
+    }
 }
 
-export function formatInputValidationError(e: InputValidationError): string {
+export function formatInputValidationError(
+    e: InputValidationError,
+    options?: { singleLine?: boolean }
+): string {
+    const singleLine = options?.singleLine ?? false;
+
     return e.errors
-        .map(i=> [i.message, i.path.map(pk=> pk.toString()).join(".")])
-        .map(([k,v],idx) => `${k}... at:\n  ${v}`).join("\n");
-}
-
-export function deepStrict<T extends z.ZodTypeAny>(schema: T): T {
-    if (schema instanceof z.ZodObject) {
-        const shape = schema.shape;
-        const strictShape: any = {};
-
-        for (const key in shape) {
-            strictShape[key] = deepStrict(shape[key]);
-        }
-
-        return z.object(strictShape).strict() as unknown as T;
-    }
-
-    if (schema instanceof z.ZodArray) {
-        const elementSchema = schema.element as z.ZodTypeAny;
-        return z.array(deepStrict(elementSchema)) as unknown as T;
-    }
-
-    if (schema instanceof z.ZodRecord) {
-        return z.record(
-            schema._def.keyType,  // Don't deepStrict the key
-            deepStrict(schema._def.valueType as z.ZodTypeAny)
-        ) as unknown as T;
-    }
-
-    if (schema instanceof z.ZodOptional) {
-        return deepStrict(schema.unwrap() as z.ZodTypeAny).optional() as unknown as T;
-    }
-
-    if (schema instanceof z.ZodNullable) {
-        return deepStrict(schema.unwrap() as z.ZodTypeAny).nullable() as unknown as T;
-    }
-
-    return schema;
+        .map(i => [i.message, i.path.map(pk => pk.toString()).join(".")])
+        .map(([k, v]) =>
+            singleLine
+                ? `${k} at: ${v}`
+                : `${k}... at:\n  ${v}`
+        )
+        .join(singleLine ? "; " : "\n");
 }
 
 export function stripComments<T>(obj: T): T {
@@ -105,17 +84,17 @@ export class StreamSchemaParser<TInput extends z.ZodSchema> {
      */
     validateInput(data: unknown): z.infer<TInput> {
         const strippedData = stripComments(data);
-        try {
-            return this.inputStrictSchema.parse(strippedData);
-        } catch (e) {
-            if (e instanceof ZodError) {
-                throw new InputValidationError(e.issues.map(errItem=>
-                    new InputValidationElememnt(errItem.path, errItem.message)));
-                // throw new InputValidationError([]);
-            } else {
-                throw e;
-            }
+        const result = this.inputStrictSchema.safeParse(strippedData);
+
+        if (!result.success) {
+            throw new InputValidationError(
+                result.error.issues.map(errItem =>
+                    new InputValidationElement(errItem.path, errItem.message)
+                )
+            );
         }
+
+        return result.data;
     }
 }
 

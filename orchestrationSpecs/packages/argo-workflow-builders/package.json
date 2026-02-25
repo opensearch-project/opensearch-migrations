@@ -14,7 +14,7 @@
     "test": "jest"
   },
   "dependencies": {
-    "zod": "*"
+    "zod": "^4"
   },
   "devDependencies": {
     "@types/jest": "*",

@@ -1,8 +1,8 @@
 conditionalPackageInstalls:
   kyverno: false
   # Migration infrastructure components
-  etcd: true                    # used by our Argo workflows for workflow coordination. May be used by strimzi clusters too
-  cert-manager: true            # needed by the otel operator
+  etcd-operator: true           # Aenix etcd operator for workflow coordination
+  cert-manager: true            # needed by etcd-operator and otel operator
   kube-prometheus-stack: true   # will be needed for auto-scaling
   argo-workflows: true          # orchestrates the steps of a migration
   strimzi-kafka-operator: true  # Required by capture and replay
@@ -25,6 +25,14 @@ conditionalPackageInstalls:
   gatekeeper: false
   grafana: false
   jaeger: true
+
+# etcd cluster configuration (managed by Aenix etcd-operator)
+etcdCluster:
+  replicas: 3
+  storageCapacity: 10Gi
+  storageClass: ""  # Use default storage class
+  cpu: 100m
+  memory: 256Mi
 
 # Kyverno policy toggles (requires conditionalPackageInstalls.kyverno: true)
 kyvernoPolicies:
@@ -53,12 +61,31 @@ images:
     repository: migrations/migration_console
     tag: latest
     pullPolicy: IfNotPresent
+  coordinatorCluster:
+    repository: docker.io/opensearchproject/opensearch
+    tag: "3.1.0"
+    pullPolicy: IfNotPresent
 
 # Default AWS values are dummy values for LocalStack usage
 aws:
   configureAwsEksResources: false
   region: us-east-2
   account: "123456789012"
+
+# EKS cluster configuration for Karpenter NodeClass
+cluster:
+  # Set to true for EKS clusters with Karpenter, false for other cluster types
+  dedicatedKarpenterNodePoolForMigrationConsole: false
+  useCustomKarpenterNodePool: false
+
+# Migrations NodePool configuration (EKS only)
+workloadsNodePool:
+  architectures: []  # Empty = no constraint (Karpenter picks). Set ["amd64"] or ["arm64"] to restrict.
+  # These limits are keep the entire aggregate compute size under these values.
+  # This is an arbiter on total cost that a deployment can consume per unit of time
+  limits:
+    cpu: "64000m"
+    memory: "128Gi"
 
 stageName: dev
 
@@ -177,54 +204,28 @@ otelConfiguration:
           exporters: [ debug ]
 
 charts:
-  # Coordinate workflows, maybe RFS, maybe more
-  etcd:
-    version: "1.1.2"
-    repository: "https://groundhog2k.github.io/helm-charts"
+  # Aenix etcd-operator - simple and reliable etcd management
+  # Handles node drain gracefully, automatic PDB management
+  # See: https://etcd.aenix.io/docs/v0.4/
+  etcd-operator:
+    version: "0.4.2"
+    repository: "oci://ghcr.io/aenix-io/charts/etcd-operator"
+    namespace: ma
+    dependsOn: cert-manager
+    waitForInstallation: true
     values:
-      preUpgrade:
-        enabled: false
-      replicaCount: 1
-      auth:
-        rbac:
-          rootPassword: password
-      resources:
-        requests:
-          cpu: 1
-          memory: 2Gi
-        limits:
-          cpu: 2
-          memory: 4Gi
-      persistence:
-        enabled: false
-      #    storageClass: "standard"
-      #    size: 10Gi
-      service:
-        type: ClusterIP
-      metrics:
-        enabled: true
-        serviceMonitor:
-          enabled: true
-      extraEnvVars:
-        - name: ETCD_AUTO_COMPACTION_RETENTION
-          value: "1"
-        - name: ETCD_QUOTA_BACKEND_BYTES
-          value: "8589934592" # 8GB
-        - name: ETCD_HEARTBEAT_INTERVAL
-          value: "100"
-        - name: ETCD_ELECTION_TIMEOUT
-          value: "1000"
-      startFromSnapshot:
-        enabled: false
-      serviceAccount:
-        create: true
-      podSecurityContext:
-        fsGroup: 1001
-        runAsUser: 1001
+      etcdOperator:
+        vpa:
+          enabled: false
+      kubeRbacProxy:
+        vpa:
+          enabled: false
+
 
   cert-manager:
     version: 1.17.2
     repository: https://charts.jetstack.io
+    waitForInstallation: true
     values:
       crds:
         enabled: true
@@ -292,13 +293,19 @@ charts:
           failureThreshold: 1
 
   argo-workflows:
-    version: "0.45.24"
+    version: "0.47.1"
     repository: "https://argoproj.github.io/argo-helm"
     values:
       fullnameOverride: "argo"
       images:
+        # Override appVersion v3.7.8 to v3.7.9 to incorporate retry delay overflow fix
+        # https://github.com/argoproj/argo-workflows/pull/15277
+        tag: v3.7.9
         pullPolicy: IfNotPresent
       controller:
+        pdb:
+          enabled: true
+          minAvailable: 1  # Ensures at least 1 pod always running
         containerSecurityContext:
           runAsNonRoot: true
           allowPrivilegeEscalation: false
@@ -308,6 +315,17 @@ charts:
           enabled: true
         resourceRateLimit: { "limit": 10.0, "burst": 25 }
         workflowWorkers: 16
+
+        replicas: 2
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: argo-workflows-controller
+                  topologyKey: kubernetes.io/hostname
       mainContainer:
         env:
           - name: RESOURCE_STATE_CHECK_INTERVAL
@@ -317,6 +335,21 @@ charts:
           - name: RESOURCE_STATE_CHECK_INTERVAL
             value: "1s"
       server:
+        replicas: 2
+        pdb:
+          enabled: true
+          minAvailable: 1  # Ensures at least 1 pod always running
+        livenessProbe:
+          enabled: true
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: argo-workflows-server
+                  topologyKey: kubernetes.io/hostname
         extraArgs:
           - --auth-mode=server
       serviceAccount:
@@ -592,14 +625,39 @@ charts:
         enabled: false
 
   kyverno:
+    uninstallTimeout: 120         # Timeout for helm uninstall (seconds), with force-cleanup fallback
+    preUninstallCleanup:
+      webhooks: true             # Delete mutating/validating webhook configs before uninstall
+    postUninstallCleanup:
+      crds: true                 # Delete CRDs after uninstall
     version: "3.5.2"
     repository: "https://kyverno.github.io/kyverno/"
+    namespace: kyverno-ma
     values:
       admissionController:
         replicas: 1
+        container:
+          resources:
+            requests: null
+            limits: null
+        initContainer:
+          resources:
+            requests: null
+            limits: null
       backgroundController:
         replicas: 1
+        resources:
+          requests: null
+          limits: null
       cleanupController:
         replicas: 1
+        resources:
+          requests: null
+          limits: null
       reportsController:
         replicas: 1
+        resources:
+          requests: null
+          limits: null
+      config:
+        excludeKyvernoNamespace: true

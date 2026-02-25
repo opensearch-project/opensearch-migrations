@@ -47,7 +47,9 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
             result: CallAPIResult = call_api(cluster=cluster, path=path, method=method, data=data, headers=headers,
                                              timeout=timeout, session=session, raise_error=False)
             if result.error_message:
-                logger.info("Exception occurred when using call_api on cluster: ", exc_info=True)
+                logger.info(f"Error from call_api: {result.error_message}")
+                time.sleep(delay)
+                continue
             response = result.http_response
             last_response = response
             if response.status_code == expected_status_code:
@@ -79,7 +81,7 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
     return last_response
 
 
-def wait_for_service_status(status_func, desired_status, max_attempts: int = 25, delay: float = 3.0):
+def wait_for_service_status(status_func, desired_status, max_attempts: int = 60, delay: float = 3.0):
     error_message = ""
     for attempt in range(1, max_attempts + 1):
         cmd_result = status_func()

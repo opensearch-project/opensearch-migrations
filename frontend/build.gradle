@@ -1,4 +1,5 @@
 plugins {
+    id 'base'
     id 'com.github.node-gradle.node' version '7.1.0'
     id 'com.bmuschko.docker-remote-api'
 }
@@ -34,7 +35,7 @@ def buildOutputs = [
 ]
 
 // Register copy version file task
-CommonUtils.copyVersionFileToDockerStaging(project, "frontend", "build/")
+CommonUtils.syncVersionFileToDockerStaging(project, "frontend", "build/version")
 
 def backendApiProject = project(':console_link')
 tasks.register('syncBackendClientDefinition', Sync) {
@@ -50,7 +51,7 @@ tasks.register('syncBackendClientDefinition', Sync) {
 tasks.register('generateBackendClient', NpmTask) {
     dependsOn 'npmInstall'
     dependsOn 'syncBackendClientDefinition'
-    dependsOn 'copyVersionFile_frontend'
+    dependsOn 'syncVersionFile_frontend'
     group = 'build'
     description = 'Generates the TypeScript API client from openapi.json'
 
@@ -105,7 +106,7 @@ tasks.register('cleanFrontend', Delete) {
 
 tasks.register('buildDockerImage', DockerBuildImage) {
     dependsOn 'buildFrontend'
-    dependsOn 'copyVersionFile_frontend'
+    dependsOn 'syncVersionFile_frontend'
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
     outputs.file(imageIdFile)
 

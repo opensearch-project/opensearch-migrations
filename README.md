@@ -1,5 +1,7 @@
 # OpenSearch Migration Assistant
 
+[![codecov](https://codecov.io/gh/opensearch-project/opensearch-migrations/graph/badge.svg)](https://codecov.io/gh/opensearch-project/opensearch-migrations)
+
 ## Table of Contents
 - [OpenSearch Migration Assistant](#opensearch-migration-assistant)
   - [Table of Contents](#table-of-contents)
@@ -43,24 +45,33 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 
 - **Flexible Deployment Options**:
   - **[AWS Deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/)**: Fully automated deployment to AWS.
-  - **[Local Docker Deployment](/TrafficCapture/dockerSolution/README.md)**: Run the solution locally in a container for testing and development.
+  - **[Local Docker Deployment](./TrafficCapture/dockerSolution/README.md)**: Run the solution locally in a container for testing and development.
   - Contribute to add more deployment options.
 
 ## Supported Migration Paths and Platforms
 
 ### Migration Paths
 
-| **Source Version** | **OpenSearch 1.3**                                                                     | **OpenSearch 2.19**                                                                    | **OpenSearch 3.0**                                                                     |
-|-------------------| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Elasticsearch 1.x | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
-| Elasticsearch 2.x | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
-| Elasticsearch 5.x | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
-| Elasticsearch 6.x | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
-| Elasticsearch 7.x | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
-| Elasticsearch 8.x |                                                                                        | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
-| OpenSearch 1.3    | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
-| OpenSearch 2.19   |                                                                                        | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
-| OpenSearch 3.x    |                                                                                        |                                                                                        | :soon: [link](https://github.com/orgs/opensearch-project/projects/229?pane=issue&itemId=117495207)                                                                     |
+<table>
+<tr>
+  <th rowspan="2">Source Cluster</th>
+  <th colspan="3">Target Cluster</th>
+</tr>
+<tr>
+  <th>OpenSearch 1.x</th>
+  <th>OpenSearch 2.x</th>
+  <th>OpenSearch 3.x</th>
+</tr>
+<tr><td>Elasticsearch 1.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>Elasticsearch 2.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>Elasticsearch 5.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>Elasticsearch 6.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>Elasticsearch 7.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>Elasticsearch 8.x</td><td></td><td>✅</td><td>✅</td></tr>
+<tr><td>OpenSearch 1.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>OpenSearch 2.x</td><td></td><td>✅</td><td>✅</td></tr>
+<tr><td>OpenSearch 3.x</td><td></td><td></td><td>🔜 <a href="https://github.com/orgs/opensearch-project/projects/229?pane=issue&itemId=117495207">link</a></td></tr>
+</table>
 
 Note that testing is done on specific minor versions, but any minor versions within a listed major version are expected to work.
 

@@ -1,0 +1,95 @@
+{{- if index .Values.conditionalPackageInstalls "etcd-operator" }}
+# Job to delete EtcdCluster before Aenix etcd-operator is uninstalled
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-delete-etcd-cluster
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      serviceAccountName: {{ .Values.installer.serviceAccount.name }}
+      restartPolicy: OnFailure
+      containers:
+      - name: delete-etcd
+        image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "Deleting EtcdCluster..."
+          kubectl delete etcdcluster etcd -n {{ .Release.Namespace }} --ignore-not-found=true
+          echo "EtcdCluster deleted"
+---
+# Job to create EtcdCluster after Aenix etcd-operator is installed
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-create-etcd-cluster
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      serviceAccountName: {{ .Values.installer.serviceAccount.name }}
+      restartPolicy: OnFailure
+      containers:
+      - name: create-etcd
+        image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          kubectl wait --for=condition=Established crd/etcdclusters.etcd.aenix.io --timeout=300s
+          kubectl wait --for=condition=available deployment/etcd-operator-controller-manager -n {{ .Release.Namespace }} --timeout=300s
+          
+          echo "Creating EtcdCluster..."
+          cat <<EOF | kubectl apply -f -
+          apiVersion: etcd.aenix.io/v1alpha1
+          kind: EtcdCluster
+          metadata:
+            name: etcd
+            namespace: {{ .Release.Namespace }}
+          spec:
+            replicas: {{ .Values.etcdCluster.replicas }}
+            storage:
+              volumeClaimTemplate:
+                spec:
+                  {{- if .Values.etcdCluster.storageClass }}
+                  storageClassName: {{ .Values.etcdCluster.storageClass }}
+                  {{- end }}
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: {{ .Values.etcdCluster.storageCapacity }}
+            podTemplate:
+              spec:
+                containers:
+                - name: etcd
+                  {{- if .Values.etcdCluster.image }}
+                  image: {{ .Values.etcdCluster.image }}
+                  {{- end }}
+                  resources:
+                    requests:
+                      cpu: {{ .Values.etcdCluster.cpu }}
+                      memory: {{ .Values.etcdCluster.memory }}
+                    limits:
+                      cpu: {{ .Values.etcdCluster.cpu }}
+                      memory: {{ .Values.etcdCluster.memory }}
+          EOF
+          
+          echo "EtcdCluster created successfully"
+{{- end }}

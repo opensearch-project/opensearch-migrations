@@ -64,7 +64,7 @@ application {
 }
 
 // Register copy version file task
-CommonUtils.copyVersionFileToDockerStaging(project, "reindexFromSnapshot", "docker/build")
+CommonUtils.syncVersionFileToDockerStaging(project, "reindexFromSnapshot", "docker/build/version")
 
 // Cleanup additional docker build directory
 def dockerBuildDir = file("./docker/build")
@@ -95,7 +95,7 @@ DockerServiceProps[] dockerServices = [
         new DockerServiceProps([projectName:"reindexFromSnapshot",
                                 dockerImageName:"reindex_from_snapshot",
                                 inputDir:"./docker",
-                                taskDependencies:["copyDockerRuntimeJars", "copyVersionFile_reindexFromSnapshot"]])
+                                taskDependencies:["copyDockerRuntimeJars", "syncVersionFile_reindexFromSnapshot"]])
 ] as DockerServiceProps[]
 
 for (dockerService in dockerServices) {

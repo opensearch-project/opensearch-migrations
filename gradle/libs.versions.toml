@@ -1,50 +1,51 @@
 [versions]
-aws-crt = "0.39.4"
+aws-crt = "0.43.4"
 aws-msk-iam-auth = "2.3.4"
-aws-sdk = "2.37.3"
-bouncycastle = "1.82"
+aws-sdk = "2.41.34"
+bouncycastle = "1.83"
 commons-collections = "4.5.0"
 commons-compress = "1.26.2"
 disruptor = "4.0.0"
-dockerapi = "3.6.0"
+dockerapi = "3.7.0"
 errorprone = "2.42.0"
 errorprone-slf4j = "0.1.29"
-graalvm = "25.0.1"
+graalvm = "25.0.2"
 groovy = "3.0.25"
 guava = "33.5.0-jre"
 hamcrest = "3.0"
-httpclient5 = "5.5.1"
-jackson = "2.20.1"
-jackson-annotations = "2.20"
+httpclient5 = "5.6"
+jackson = "2.21.1"
+jackson-annotations = "2.21"
 jcommander = "2.0"
 jenkins-pipeline-unit = "1.23"
 jmespath-core = "0.6.0"
 jmeter = "5.6.3"
 jmh-core = "1.37"
 jolt-core = "0.1.8"
-json = "20250517"
+json = "20251224"
 junit-platform = "1.14.0"
 junit-jupiter = "5.14.0"
-kafka-clients = "4.1.0"
-log4j = "2.25.2"
+kafka-clients = "4.2.0"
+log4j = "2.25.3"
 lombok = "1.18.42"
 lucene5 = '5.5.5'
 lucene6 = '6.6.6'
 lucene7 = '7.7.3'
 lucene9 = "9.12.1"
-mockito = "5.20.0"
-netty = "4.1.124.Final"
+mockito = "5.21.0"
+netty = "4.1.128.Final"
 opensearch-testcontainers = "2.0.1"
-opentelemetry = "1.55.0"
+opentelemetry = "1.59.0"
 opentelemetry-semconv = "1.23.1-alpha"
-protobuf = "4.33.0"
+protobuf = "4.33.5"
 reactor-netty = "1.2.11"
 reactor-test = "3.7.12"
 semver4j = "6.0.0"
 slf4j = "2.0.17"
-testcontainers = "1.21.3"
+testcontainers = "2.0.3"
+testcontainers-modules = "1.21.4"
 toxiproxy = "2.1.11"
-zstd-jni = "1.5.7-6"
+zstd-jni = "1.5.7-7"
 
 [libraries]
 aws-arns = { module = "software.amazon.awssdk:arns", version.ref = "aws-sdk" }
@@ -160,11 +161,10 @@ semver4j = { module = "org.semver4j:semver4j", version.ref = "semver4j" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 
 testcontainers = {module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
-testcontainers-junit-jupiter = {module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
-testcontainers-kafka = {module = "org.testcontainers:kafka", version.ref = "testcontainers" }
+testcontainers-junit-jupiter = {module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers-modules" }
+testcontainers-kafka = {module = "org.testcontainers:kafka", version.ref = "testcontainers-modules" }
 testcontainers-opensearch = {module = "org.opensearch:opensearch-testcontainers", version.ref = "opensearch-testcontainers" }
-testcontainers-toxiproxy = {module = "org.testcontainers:toxiproxy", version.ref = "testcontainers" }
-
+testcontainers-toxiproxy = {module = "org.testcontainers:toxiproxy", version.ref = "testcontainers-modules" }
 toxiproxy = {module = "eu.rekawek.toxiproxy:toxiproxy-java", version.ref = "toxiproxy" }
 
 zstd-jni = {module = "com.github.luben:zstd-jni", version.ref = "zstd-jni" }
@@ -179,13 +179,13 @@ boms-opentelemetry    = { module = "io.opentelemetry:opentelemetry-bom", version
 
 # Transitive dependencies to force based on CVEs
 transitive-apache-httpclient = { module = "org.apache.httpcomponents:httpclient",    version = "4.5.14"   }
-transitive-commons-lang3     = { module = "org.apache.commons:commons-lang3",        version = "3.19.0"   }
+transitive-commons-lang3     = { module = "org.apache.commons:commons-lang3",        version = "3.20.0"   }
 transitive-commons-net       = { module = "commons-net:commons-net",                 version = "3.12.0"   }
-transitive-dnsjava           = { module = "dnsjava:dnsjava",                         version = "3.6.3"    }
-transitive-jersey-common     = { module = "org.glassfish.jersey.core:jersey-common", version = "3.1.11"   }
-transitive-json-path         = { module = "com.jayway.jsonpath:json-path",           version = "2.10.0"    }
+transitive-dnsjava           = { module = "dnsjava:dnsjava",                         version = "3.6.4"    }
+transitive-jersey-common     = { module = "org.glassfish.jersey.core:jersey-common", version = "4.0.2"   }
+transitive-json-path         = { module = "com.jayway.jsonpath:json-path",           version = "3.0.0"    }
 transitive-json-smart        = { module = "net.minidev:json-smart",                  version = "2.6.0"    }
-transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.21.2"   }
+transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.22.1"   }
 transitive-snappy-java       = { module = "org.xerial.snappy:snappy-java",           version = "1.1.10.8" }
 transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.2.3"    }
 transitive-xalan             = { module = "xalan:xalan",                             version = "2.7.3"    }

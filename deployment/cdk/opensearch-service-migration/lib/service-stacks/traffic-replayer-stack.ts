@@ -33,6 +33,7 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly customKafkaGroupId?: string,
     readonly userAgentSuffix?: string,
     readonly extraArgs?: string,
+    readonly jvmArgs?: string,
     readonly otelCollectorEnabled: boolean,
     readonly maxUptime?: Duration
 }
@@ -126,12 +127,13 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             mountPoints: [sharedLogFileSystem.asMountPoint()],
             taskRolePolicies: servicePolicies,
             environment: {
-                "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/traffic-replayer-${deployId}`
+                "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/traffic-replayer-${deployId}`,
+                ...(props.jvmArgs ? { "JDK_JAVA_OPTIONS": props.jvmArgs } : {}),
             },
             secrets: secrets,
             cpuArchitecture: props.fargateCpuArch,
-            taskCpuUnits: 1024,
-            taskMemoryLimitMiB: 4096,
+            taskCpuUnits: 8192,
+            taskMemoryLimitMiB: 49152,
             ...props
         });
 

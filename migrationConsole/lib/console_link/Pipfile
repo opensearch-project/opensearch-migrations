@@ -4,6 +4,7 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+urllib3 = ">=2.6.0"
 requests = ">=2.32.3"
 kubernetes = ">=30.1.0"
 boto3 = "*"
@@ -16,8 +17,11 @@ pydantic = "==2.12.2"
 gunicorn = "*"
 uvicorn = {extras = ["standard"], version = "*"}
 tinydb = "*"
-fastapi = {extras = ["standard"], version = "==0.118.0"}
-rich = ">=14.0.0"
+fastapi = {extras = ["standard"], version = ">=0.124.0"}
+rich = "==14.2.0"
+textual = "==7.0.0"
+ijson = "*"
+psutil = "*"
 
 [dev-packages]
 pytest = "*"
@@ -27,6 +31,7 @@ coverage = "*"
 moto = "*"
 testcontainers = {extras = ["k3s"], version = "*"}
 httpx = "*"
+pytest-asyncio = "*"
 
 [requires]
 python_version = "3.11"

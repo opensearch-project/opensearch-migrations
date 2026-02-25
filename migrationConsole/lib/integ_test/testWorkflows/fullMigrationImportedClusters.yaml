@@ -1,0 +1,220 @@
+# Workflow template for migrations with pre-existing (imported) clusters.
+# Supports both:
+# - Standard migrations: Creates snapshot from source cluster
+# - BYOS migrations: Uses externally managed snapshot (externallyManagedSnapshot)
+#
+# For BYOS, pass snapshotConfig.snapshotNameConfig.externallyManagedSnapshot
+# instead of snapshotNamePrefix to skip snapshot creation.
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: full-migration-imported-clusters
+spec:
+  serviceAccountName: argo-workflow-executor
+  entrypoint: main
+  parallelism: 100
+
+  arguments:
+    parameters:
+      - name: s3-snapshot-configmap
+        value: "migrations-default-s3-config"
+      - name: migration-image-configmap
+        value: "migration-image-config"
+      - name: monitor-retry-limit
+        value: "33"  # Default ~30 min, use 900 for ~15 hours
+
+  templates:
+    - name: main
+      inputs:
+        parameters:
+          - name: source-configs
+            description: "Array of source cluster configs with snapshot-and-migration-configs"
+          - name: target-config
+            description: "Target cluster configuration JSON"
+          - name: imageMigrationConsoleLocation
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.migration-image-configmap}}"
+                key: migrationConsoleImage
+          - name: imageMigrationConsolePullPolicy
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.migration-image-configmap}}"
+                key: migrationConsolePullPolicy
+      steps:
+        - - name: generate-migration-configs
+            template: generate-migration-configs
+            arguments:
+              parameters:
+                - name: source-configs
+                  value: "{{inputs.parameters.source-configs}}"
+                - name: target-config
+                  value: "{{inputs.parameters.target-config}}"
+                - name: imageMigrationConsoleLocation
+                  value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                - name: imageMigrationConsolePullPolicy
+                  value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+
+        - - name: run-full-migration-with-workflow-cli
+            templateRef:
+              name: full-migration-with-workflow-cli
+              template: main
+            arguments:
+              parameters:
+                - name: migrationConfigBase64
+                  value: "{{steps.generate-migration-configs.outputs.parameters.migrationConfigBase64}}"
+                - name: imageMigrationConsoleLocation
+                  value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                - name: imageMigrationConsolePullPolicy
+                  value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+
+    - name: generate-migration-configs
+      inputs:
+        parameters:
+          - name: source-configs
+          - name: target-config
+          - name: imageMigrationConsoleLocation
+          - name: imageMigrationConsolePullPolicy
+          - name: s3Region
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: AWS_REGION
+          - name: s3Endpoint
+            default: ""
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: ENDPOINT
+                optional: true
+          - name: s3BucketName
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: BUCKET_NAME
+          - name: snapshotRoleArn
+            default: ""
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: SNAPSHOT_ROLE_ARN
+                optional: true
+      container:
+        image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+        imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+            
+            SOURCE_CONFIGS='{{inputs.parameters.source-configs}}'
+            TARGET_CONFIG='{{inputs.parameters.target-config}}'
+            S3_REGION='{{inputs.parameters.s3Region}}'
+            S3_ENDPOINT='{{inputs.parameters.s3Endpoint}}'
+            S3_BUCKET='{{inputs.parameters.s3BucketName}}'
+            SNAPSHOT_ROLE_ARN='{{inputs.parameters.snapshotRoleArn}}'
+            
+            SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+            
+            # Build snapshot repo config (includes s3RoleArn if provided)
+            SNAPSHOT_REPO=$(jq -n \
+              --arg region "$S3_REGION" \
+              --arg endpoint "$S3_ENDPOINT" \
+              --arg bucket "$S3_BUCKET" \
+              --arg suffix "$SUFFIX" \
+              --arg roleArn "$SNAPSHOT_ROLE_ARN" \
+              '{
+                "awsRegion": $region,
+                "endpoint": $endpoint,
+                "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
+              } + (if $roleArn != "" then {"s3RoleArn": $roleArn} else {} end)')
+            
+            # Function to transform cluster config to match workflow schema
+            # - version: ES_7.10 -> ES 7.10 (replace underscore with space)
+            # - allow_insecure -> allowInsecure
+            # - sigv4 at top level -> authConfig.sigv4
+            transform_cluster_config() {
+              echo "$1" | jq '
+                # Transform version format: ES_7.10 -> ES 7.10
+                .version = (.version | gsub("_"; " "))
+                # Rename allow_insecure to allowInsecure
+                | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+                # Move sigv4 under authConfig
+                | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+              '
+            }
+            
+            # Build sourceClusters map from source-configs array with schema transformation
+            SOURCE_CLUSTERS=$(echo "$SOURCE_CONFIGS" | jq --argjson repo "$SNAPSHOT_REPO" '
+              reduce to_entries[] as $e ({}; 
+                .["source\($e.key + 1)"] = (
+                  $e.value.source
+                  # Transform version format: ES_7.10 -> ES 7.10
+                  | .version = (.version | gsub("_"; " "))
+                  # Rename allow_insecure to allowInsecure
+                  | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+                  # Move sigv4 under authConfig
+                  | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+                  # Add snapshot repos with default key
+                  | . + {"snapshotRepos": {"default": $repo}}
+                )
+              )')
+            
+            # Transform target config to match schema
+            TARGET_TRANSFORMED=$(echo "$TARGET_CONFIG" | jq '
+              # Target cluster schema does not accept a version field
+              del(.version)
+              # Rename allow_insecure to allowInsecure
+              | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+              # Move sigv4 under authConfig
+              | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+              # Move basic_auth under authConfig.basic with secretName
+              | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
+            ')
+            
+            # Build snapshotExtractAndLoadConfigs from snapshot-and-migration-configs
+            SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '[
+              .[0]["snapshot-and-migration-configs"][] | {
+                "snapshotConfig": {
+                  "repoName": "default",
+                  "snapshotNameConfig": {
+                    "snapshotNamePrefix": "testsnapshot"
+                  }
+                },
+                "createSnapshotConfig": {},
+                "migrations": .migrations
+              }
+            ]')
+            
+            # Build the complete OVERALL_MIGRATION_CONFIG
+            MIGRATION_CONFIG=$(jq -n \
+              --argjson sources "$SOURCE_CLUSTERS" \
+              --argjson target "$TARGET_TRANSFORMED" \
+              --argjson snapshotConfigs "$SNAPSHOT_CONFIGS" \
+              '{
+                "skipApprovals": true,
+                "sourceClusters": $sources,
+                "targetClusters": {
+                  "target1": $target
+                },
+                "migrationConfigs": [{
+                  "fromSource": "source1",
+                  "toTarget": "target1",
+                  "snapshotExtractAndLoadConfigs": $snapshotConfigs,
+                  "replayerConfig": {
+                    "podReplicas": 0
+                  }
+                }]
+              }')
+            
+            MIGRATION_CONFIG_BASE64=$(echo "$MIGRATION_CONFIG" | base64 | tr -d '\n')
+            
+            echo "Generated migration config:"
+            echo "$MIGRATION_CONFIG" | jq .
+            
+            echo "$MIGRATION_CONFIG_BASE64" > /tmp/migration-config-base64
+      outputs:
+        parameters:
+          - name: migrationConfigBase64
+            valueFrom:
+              path: /tmp/migration-config-base64

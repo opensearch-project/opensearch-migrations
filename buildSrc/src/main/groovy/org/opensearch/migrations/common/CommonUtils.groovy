@@ -120,14 +120,10 @@ class CommonUtils {
         }
     }
 
-    static def copyVersionFileToDockerStaging(Project project, String destProjectName, String destDir) {
-        return project.tasks.register("copyVersionFile_${destProjectName}", Sync) {
+    static def syncVersionFileToDockerStaging(Project project, String destProjectName, String destDir) {
+        return project.tasks.register("syncVersionFile_${destProjectName}", Sync) {
             from(project.rootProject.layout.projectDirectory.file("VERSION"))
             into(project.layout.projectDirectory.dir(destDir))
-            
-            // Explicit inputs/outputs for incremental build support
-            inputs.file(project.rootProject.layout.projectDirectory.file("VERSION"))
-            outputs.dir(project.layout.projectDirectory.dir(destDir))
         }
     }
 
@@ -172,7 +168,8 @@ class CommonUtils {
             // constructed in the configuration phase and the classpath won't be realized until the
             // execution phase.  Therefore, we need to have docker run the command to resolve the classpath
             // and it's simplest to pack that up into a helper script.
-            runCommand("printf \"#!/bin/sh\\njava ${jvmParams} -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
+            // Application defaults are set via JAVA_TOOL_OPTIONS; users can override via JDK_JAVA_OPTIONS.
+            runCommand("printf \"#!/bin/sh\\nexport JAVA_TOOL_OPTIONS=\\\"\\\${JAVA_TOOL_OPTIONS:+\\\$JAVA_TOOL_OPTIONS }${jvmParams}\\\"\\njava -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
             runCommand("chmod +x /runJavaWithClasspath.sh")
             // container stay-alive
             defaultCommand('tail', '-f', '/dev/null')

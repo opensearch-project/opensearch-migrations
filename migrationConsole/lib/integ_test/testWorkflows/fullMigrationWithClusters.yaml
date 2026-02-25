@@ -21,7 +21,13 @@ spec:
           [{
             "migrations": [{
               "metadataMigrationConfig": {},
-              "documentBackfillConfig": {}
+              "documentBackfillConfig": {
+                "maxShardSizeBytes": 16000000,
+                "resources": {
+                  requests: { cpu: "25m",   memory: "1Gi", ephemeral-storage: "5Gi" },
+                  limits:   { cpu: "1000m", memory: "2Gi", ephemeral-storage: "5Gi" }
+                }
+              }
             }]
           }]
       - name: replayer-config
@@ -40,6 +46,8 @@ spec:
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
+      - name: monitor-retry-limit
+        value: "33"
       - name: otel-collector-endpoint
         value: "http://otel-collector:4317"
 
@@ -253,30 +261,73 @@ spec:
           - name: replayer-config
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
+          - name: s3Region
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: AWS_REGION
+          - name: s3Endpoint
+            default: ""
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: ENDPOINT
+                optional: true
+          - name: s3BucketName
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: BUCKET_NAME
+          - name: snapshotRoleArn
+            default: ""
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: SNAPSHOT_ROLE_ARN
+                optional: true
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
         imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
         command: [sh, -c]
         args:
           - |
-            # Parse inputs
+            set -e
+            
             SOURCE_CONFIG='{{inputs.parameters.source-config}}'
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
             SNAPSHOT_MIGRATION_CONFIGS='{{inputs.parameters.snapshot-and-migration-configs}}'
+            S3_REGION='{{inputs.parameters.s3Region}}'
+            S3_ENDPOINT='{{inputs.parameters.s3Endpoint}}'
+            S3_BUCKET='{{inputs.parameters.s3BucketName}}'
+            SNAPSHOT_ROLE_ARN='{{inputs.parameters.snapshotRoleArn}}'
             
-            # Add snapshot repo config to source cluster
-            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq '. + {
-              "snapshotRepo": {
-                "awsRegion": "us-east-2",
-                "endpoint": "localstack://localstack.ma.svc.cluster.local:4566",
-                "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2"
-              }
-            }')
+            SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
             
-            # Build snapshotExtractAndLoadConfigs from the test's snapshot-and-migration-configs
-            # Each item in the array becomes a snapshotExtractAndLoadConfig with snapshotConfig added
+            # Build snapshot repo config
+            SNAPSHOT_REPO=$(jq -n \
+              --arg region "$S3_REGION" \
+              --arg endpoint "$S3_ENDPOINT" \
+              --arg bucket "$S3_BUCKET" \
+              --arg suffix "$SUFFIX" \
+              '{
+                "awsRegion": $region,
+                "endpoint": $endpoint,
+                "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
+              }')
+            
+            # Add s3RoleArn only if provided
+            if [ -n "$SNAPSHOT_ROLE_ARN" ]; then
+              SNAPSHOT_REPO=$(echo "$SNAPSHOT_REPO" | jq --arg roleArn "$SNAPSHOT_ROLE_ARN" '. + {"s3RoleArn": $roleArn}')
+            fi
+            
+            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" '
+              # Add snapshot repos with default key
+              . + {"snapshotRepos": {"default": $repo}}
+            ')
+            
             SNAPSHOT_EXTRACT_CONFIGS=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '[.[] | {
               "snapshotConfig": {
+                "repoName": "default",
                 "snapshotNameConfig": {
                   "snapshotNamePrefix": "testsnapshot"
                 }
@@ -285,7 +336,6 @@ spec:
               "migrations": .migrations
             }]')
             
-            # Build the complete OVERALL_MIGRATION_CONFIG
             MIGRATION_CONFIG=$(jq -n \
               --argjson source "$SOURCE_WITH_REPO" \
               --argjson target "$TARGET_CONFIG" \
@@ -308,7 +358,6 @@ spec:
                 }]
               }')
             
-            # Encode as base64 (single line, no wrapping)
             MIGRATION_CONFIG_BASE64=$(echo "$MIGRATION_CONFIG" | base64 | tr -d '\n')
             
             echo "Generated migration config:"

@@ -159,8 +159,13 @@ exports[`test workflow template renderings capture-replay 1`] = `
         ],
       },
       {
+        "inputs": {
+          "parameters": [],
+        },
         "name": "getuserapproval",
-        "outputs": undefined,
+        "outputs": {
+          "parameters": [],
+        },
         "suspend": {},
       },
       {
@@ -516,7 +521,7 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
         "inputs": {
           "parameters": [
             {
-              "name": "sourceName",
+              "name": "sourceLabel",
             },
             {
               "name": "snapshotNameConfig",
@@ -532,7 +537,7 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
             {
               "name": "snapshotName",
               "valueFrom": {
-                "expression": "(('snapshotNamePrefix' in fromJSON(inputs.parameters.snapshotNameConfig)) ? (inputs.parameters.sourceName + '_' + fromJSON(inputs.parameters.snapshotNameConfig)['snapshotNamePrefix'] + '_' + inputs.parameters.uniqueRunNonce) : (fromJSON(inputs.parameters.snapshotNameConfig)['externallyManagedSnapshot']))",
+                "expression": "(('snapshotNamePrefix' in fromJSON(inputs.parameters.snapshotNameConfig)) ? (inputs.parameters.sourceLabel + '_' + fromJSON(inputs.parameters.snapshotNameConfig)['snapshotNamePrefix'] + '_' + inputs.parameters.uniqueRunNonce) : (fromJSON(inputs.parameters.snapshotNameConfig)['externallyManagedSnapshot']))",
               },
             },
             {
@@ -560,6 +565,9 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
               "name": "snapshotConfig",
             },
             {
+              "name": "targetLabel",
+            },
+            {
               "name": "uniqueRunNonce",
             },
             {
@@ -576,7 +584,7 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
             {
               "name": "snapshotConfig",
               "valueFrom": {
-                "expression": "toJSON(sprig.dict("snapshotName", steps.getSnapshotName.outputs.parameters.snapshotName, "repoConfig", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))",
+                "expression": "toJSON(sprig.dict("snapshotName", steps.getSnapshotName.outputs.parameters.snapshotName, "repoConfig", fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], "label", fromJSON(inputs.parameters.snapshotConfig)['label']))",
               },
             },
           ],
@@ -591,8 +599,8 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
                     "value": "{{inputs.parameters.uniqueRunNonce}}",
                   },
                   {
-                    "name": "sourceName",
-                    "value": "{{=fromJSON(inputs.parameters.sourceConfig)['name']}}",
+                    "name": "sourceLabel",
+                    "value": "{{=fromJSON(inputs.parameters.sourceConfig)['label']}}",
                   },
                   {
                     "name": "snapshotNameConfig",
@@ -614,11 +622,15 @@ exports[`test workflow template renderings create-or-get-snapshot 1`] = `
                   },
                   {
                     "name": "snapshotConfig",
-                    "value": "{{=toJSON(sprig.dict("repoConfig", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig'), "snapshotName", lower(steps.getSnapshotName.outputs.parameters.snapshotName)))}}",
+                    "value": "{{=toJSON(sprig.dict("repoConfig", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig'), "snapshotName", lower(steps.getSnapshotName.outputs.parameters.snapshotName), "label", jsonpath(inputs.parameters.snapshotConfig, '$.label')))}}",
                   },
                   {
                     "name": "createSnapshotConfig",
                     "value": "{{inputs.parameters.createSnapshotConfig}}",
+                  },
+                  {
+                    "name": "targetLabel",
+                    "value": "{{inputs.parameters.targetLabel}}",
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -689,7 +701,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
         "container": {
           "args": [
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceAwsServiceSigningName", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], "sourceAwsRegion", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceCaCert", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict("sourceHost", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : ({}))), sprig.dict("sourceInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.omit(fromJSON(inputs.parameters.createSnapshotConfig), 'loggingConfigurationOverrideConfigMap')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "snapshotRepoName", sprig.dig('repoConfig', 'repoName', 'migration_assistant_repo', fromJSON(inputs.parameters.snapshotConfig))), sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'])))))}}",
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceAwsServiceSigningName", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], "sourceAwsRegion", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict("sourceCaCert", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict("sourceHost", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : ({}))), sprig.dict("sourceInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.merge(sprig.omit(fromJSON(inputs.parameters.createSnapshotConfig), 'loggingConfigurationOverrideConfigMap', 'semaphoreConfigMapName', 'semaphoreKey', 'jvmArgs'), sprig.dict("noWait", true))), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "snapshotRepoName", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig.repoName')), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3RoleArn", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RoleArn'])))), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'])))))}}",
           ],
           "command": [
             "/root/createSnapshot/bin/CreateSnapshot",
@@ -715,17 +727,21 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                 },
               },
             },
+            {
+              "name": "JDK_JAVA_OPTIONS",
+              "value": "{{=sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.createSnapshotConfig))}}",
+            },
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
+              "cpu": "500m",
+              "memory": "1800Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
           },
         },
@@ -741,12 +757,33 @@ exports[`test workflow template renderings create-snapshot 1`] = `
               "name": "createSnapshotConfig",
             },
             {
+              "name": "sourceK8sLabel",
+            },
+            {
+              "name": "targetK8sLabel",
+            },
+            {
+              "name": "snapshotK8sLabel",
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": "snapshot",
+            },
+            {
               "name": "imageMigrationConsoleLocation",
             },
             {
               "name": "imageMigrationConsolePullPolicy",
             },
           ],
+        },
+        "metadata": {
+          "labels": {
+            "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
+            "migrations.opensearch.org/source": "{{inputs.parameters.sourceK8sLabel}}",
+            "migrations.opensearch.org/target": "{{inputs.parameters.targetK8sLabel}}",
+            "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}",
+          },
         },
         "name": "runcreatesnapshot",
         "outputs": {
@@ -760,6 +797,19 @@ exports[`test workflow template renderings create-snapshot 1`] = `
               "name": "configContents",
             },
             {
+              "name": "sourceK8sLabel",
+            },
+            {
+              "name": "targetK8sLabel",
+            },
+            {
+              "name": "snapshotK8sLabel",
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": "snapshotStatusCheck",
+            },
+            {
               "name": "imageMigrationConsoleLocation",
             },
             {
@@ -767,7 +817,7 @@ exports[`test workflow template renderings create-snapshot 1`] = `
             },
           ],
         },
-        "name": "checksnapshotstatus",
+        "name": "checksnapshotstatusinternal",
         "outputs": {
           "parameters": [],
         },
@@ -790,6 +840,22 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                     "value": "{{inputs.parameters.configContents}}",
                   },
                   {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}",
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetK8sLabel}}",
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{inputs.parameters.snapshotK8sLabel}}",
+                  },
+                  {
+                    "name": "taskK8sLabel",
+                    "value": "{{inputs.parameters.taskK8sLabel}}",
+                  },
+                  {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
                   },
@@ -799,15 +865,124 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                   },
                   {
                     "name": "command",
-                    "value": "set -e && [ "$(console --config-file=/config/migration_services.yaml snapshot status)" = "SUCCESS" ] && exit 0 || exit 1",
+                    "value": "set -e
+  touch /tmp/status-output.txt
+  touch /tmp/phase-output.txt
+  
+  # Quick status check - if SUCCESS, we're done
+  status=$(console --config-file=/config/migration_services.yaml snapshot status)
+  if [ "$status" = "SUCCESS" ]; then
+    echo "Snapshot completed successfully" > /tmp/status-output.txt
+    exit 0
+  fi
+  
+  # Deep check and save output in case there was a race condition
+  deep_output=$(console --config-file=/config/migration_services.yaml snapshot status --deep-check)
+  
+  # Check if deep check also returned SUCCESS (snapshot completed during execution)
+  if [ "$deep_output" = "SUCCESS" ]; then
+    echo "Snapshot completed successfully" > /tmp/status-output.txt
+    exit 0
+  fi
+  
+  # Process deep check output with awk for in-progress snapshots
+  echo "$deep_output" | awk '
+    /Total shards:/ { total = $3 }
+    /Successful shards:/ { successful = $3 }
+    /Data processed:/ { data = $3; unit = $4 }
+    /Estimated time to completion:/ { 
+      sub(/.*: /, "");
+      eta = $0
+    }
+    END {
+      if (total) {
+        output = "Shards: " successful "/" total " | Data: " data " " unit
+        if (eta != "0h 0m 0s") {
+          output = output " | ETA: " eta
+        }
+        print output
+      }
+    }
+  ' > /tmp/status-output.txt
+  echo Checked > /tmp/phase-output.txt
+  
+  exit 1",
                   },
                 ],
               },
               "name": "checkSnapshotCompletion",
               "templateRef": {
                 "name": "migration-console",
-                "template": "runmigrationcommand",
+                "template": "runmigrationcommandforstatus",
               },
+            },
+          ],
+        ],
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "configContents",
+            },
+            {
+              "name": "sourceK8sLabel",
+            },
+            {
+              "name": "targetK8sLabel",
+            },
+            {
+              "name": "snapshotK8sLabel",
+            },
+            {
+              "name": "groupName",
+              "value": "checks",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "checksnapshotstatus",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "configContents",
+                    "value": "{{inputs.parameters.configContents}}",
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}",
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetK8sLabel}}",
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{inputs.parameters.snapshotK8sLabel}}",
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                ],
+              },
+              "name": "runStatusChecks",
+              "template": "checksnapshotstatusinternal",
             },
           ],
         ],
@@ -823,6 +998,9 @@ exports[`test workflow template renderings create-snapshot 1`] = `
             },
             {
               "name": "createSnapshotConfig",
+            },
+            {
+              "name": "targetLabel",
             },
             {
               "name": "imageMigrationConsoleLocation",
@@ -868,6 +1046,18 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetLabel}}",
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}",
+                  },
                 ],
               },
               "name": "createSnapshot",
@@ -911,13 +1101,35 @@ exports[`test workflow template renderings create-snapshot 1`] = `
                     "name": "configContents",
                     "value": "{{steps.getConsoleConfig.outputs.parameters.configContents}}",
                   },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetLabel}}",
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}",
+                  },
                 ],
               },
-              "name": "checkSnapshotStatus",
+              "name": "waitForCompletion",
               "template": "checksnapshotstatus",
             },
           ],
         ],
+        "synchronization": {
+          "semaphores": [
+            {
+              "configMapKeyRef": {
+                "key": "{{=fromJSON(inputs.parameters.createSnapshotConfig)['semaphoreKey']}}",
+                "name": "{{=fromJSON(inputs.parameters.createSnapshotConfig)['semaphoreConfigMapName']}}",
+              },
+            },
+          ],
+        },
       },
     ],
   },
@@ -968,11 +1180,11 @@ exports[`test workflow template renderings document-bulk-load 1`] = `
         "inputs": {
           "parameters": [
             {
-              "name": "name",
+              "name": "sessionName",
             },
           ],
         },
-        "name": "deletereplicaset",
+        "name": "stophistoricalbackfill",
         "outputs": {
           "parameters": [],
         },
@@ -982,9 +1194,9 @@ exports[`test workflow template renderings document-bulk-load 1`] = `
             "--ignore-not-found",
           ],
           "manifest": "apiVersion: apps/v1
-kind: ReplicaSet
+kind: Deployment
 metadata:
-  name: "{{='bulk-loader-'+inputs.parameters.name}}"
+  name: "{{=inputs.parameters.sessionName+'-rfs'}}"
 ",
         },
       },
@@ -998,6 +1210,22 @@ metadata:
               "name": "sessionName",
             },
             {
+              "name": "sourceK8sLabel",
+            },
+            {
+              "name": "targetK8sLabel",
+            },
+            {
+              "name": "snapshotK8sLabel",
+            },
+            {
+              "name": "fromSnapshotMigrationK8sLabel",
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": "reindexFromSnapshotStatusCheck",
+            },
+            {
               "name": "imageMigrationConsoleLocation",
             },
             {
@@ -1005,7 +1233,7 @@ metadata:
             },
           ],
         },
-        "name": "waitforcompletion",
+        "name": "waitforcompletioninternal",
         "outputs": {
           "parameters": [],
         },
@@ -1028,6 +1256,26 @@ metadata:
                     "value": "{{inputs.parameters.configContents}}",
                   },
                   {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}",
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetK8sLabel}}",
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{inputs.parameters.snapshotK8sLabel}}",
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}",
+                  },
+                  {
+                    "name": "taskK8sLabel",
+                    "value": "{{inputs.parameters.taskK8sLabel}}",
+                  },
+                  {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
                   },
@@ -1038,28 +1286,137 @@ metadata:
                   {
                     "name": "command",
                     "value": "
-set -e && 
-python -c '
-import sys
-from lib.console_link.console_link.environment import Environment
-from lib.console_link.console_link.models.backfill_rfs import get_detailed_status_obj
-from lib.console_link.console_link.models.backfill_rfs import all_shards_finished_processing
+set -e -x
+touch /tmp/status-output.txt
+touch /tmp/phase-output.txt
 
-status = get_detailed_status_obj(Environment(config_file="/config/migration_services.yaml").target_cluster,
-                                 True,
-                                 "{{inputs.parameters.sessionName}}")
-print(status)
-all_finished = all_shards_finished_processing(Environment(config_file="/config/migration_services.yaml").target_cluster,
-                                              "{{inputs.parameters.sessionName}}")
-sys.exit(0 if all_finished else 1)'",
+status=$(console --config-file=/config/migration_services.yaml backfill status --deep-check)
+
+# Check if initializing
+if [[ "$status" == "Shards are initializing" ]]; then
+    echo "Shards are initializing" > /tmp/status-output.txt
+else
+    # Format detailed status
+    echo "$status" | awk '
+    /^Backfill status:/ { status = $3 }
+    /^Backfill percentage_completed:/ { pct = $3 }
+    /^Backfill eta_ms:/ { eta = $3 }
+    /^Backfill shard_total:/ { total = $3 }
+    /^Backfill shard_complete:/ { complete = $3 }
+    /^Backfill shard_in_progress:/ { progress = $3 }
+    /^Backfill shard_waiting:/ { waiting = $3 }
+
+    END {
+        gsub(/^[^.]+\\./, "", status)
+        eta_str = (eta == "" || eta == "None") ? "unknown" : int(eta/1000) "s"
+        printf "complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d\\n", 
+               pct, eta_str, progress, waiting, complete, total
+    }
+    ' > /tmp/status-output.txt
+fi
+
+# Check completion status - exit 0 only if complete, otherwise exit 1
+echo "$status" | awk '
+/^Backfill shard_total:/ {total=$3} 
+/^Backfill shard_complete:/ {complete=$3} 
+END {
+  if(total > 0 && total==complete) {
+    exit 0
+  } else {
+    exit 1
+  }
+}' || (echo Checked > /tmp/phase-output.txt && exit 1)
+",
                   },
                 ],
               },
-              "name": "checkRfsCompletion",
+              "name": "checkBackfillStatus",
               "templateRef": {
                 "name": "migration-console",
-                "template": "runmigrationcommand",
+                "template": "runmigrationcommandforstatus",
               },
+            },
+          ],
+        ],
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "configContents",
+            },
+            {
+              "name": "sessionName",
+            },
+            {
+              "name": "sourceK8sLabel",
+            },
+            {
+              "name": "targetK8sLabel",
+            },
+            {
+              "name": "snapshotK8sLabel",
+            },
+            {
+              "name": "fromSnapshotMigrationK8sLabel",
+            },
+            {
+              "name": "groupName",
+              "value": "checks",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+          ],
+        },
+        "name": "waitforcompletion",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "configContents",
+                    "value": "{{inputs.parameters.configContents}}",
+                  },
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}",
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}",
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetK8sLabel}}",
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{inputs.parameters.snapshotK8sLabel}}",
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}",
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                ],
+              },
+              "name": "runStatusChecks",
+              "template": "waitforcompletioninternal",
             },
           ],
         ],
@@ -1074,10 +1431,16 @@ sys.exit(0 if all_finished else 1)'",
               "name": "rfsJsonConfig",
             },
             {
-              "name": "basicCredsSecretNameOrEmpty",
+              "name": "targetBasicCredsSecretNameOrEmpty",
+            },
+            {
+              "name": "coordinatorBasicCredsSecretNameOrEmpty",
             },
             {
               "name": "podReplicas",
+            },
+            {
+              "name": "jvmArgs",
             },
             {
               "name": "loggingConfigurationOverrideConfigMap",
@@ -1090,6 +1453,22 @@ sys.exit(0 if all_finished else 1)'",
               "name": "resources",
             },
             {
+              "name": "sourceK8sLabel",
+            },
+            {
+              "name": "targetK8sLabel",
+            },
+            {
+              "name": "snapshotK8sLabel",
+            },
+            {
+              "name": "fromSnapshotMigrationK8sLabel",
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": "reindexFromSnapshot",
+            },
+            {
               "name": "imageReindexFromSnapshotLocation",
             },
             {
@@ -1097,28 +1476,45 @@ sys.exit(0 if all_finished else 1)'",
             },
           ],
         },
-        "name": "createreplicaset",
+        "name": "starthistoricalbackfill",
         "outputs": {
           "parameters": [],
         },
         "resource": {
           "action": "create",
           "manifest": "apiVersion: apps/v1
-kind: ReplicaSet
+kind: Deployment
 metadata:
-  name: "{{=inputs.parameters.sessionName+'-reindex-from-snapshot'}}"
+  name: "{{=inputs.parameters.sessionName+'-rfs'}}"
   labels:
     workflows.argoproj.io/workflow: "{{workflow.name}}"
+    migrations.opensearch.org/source: "{{inputs.parameters.sourceK8sLabel}}"
+    migrations.opensearch.org/target: "{{inputs.parameters.targetK8sLabel}}"
+    migrations.opensearch.org/snapshot: "{{inputs.parameters.snapshotK8sLabel}}"
+    migrations.opensearch.org/from-snapshot-migration: "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}"
+    migrations.opensearch.org/task: "{{inputs.parameters.taskK8sLabel}}"
 spec:
   replicas: {{=fromJSON(inputs.parameters.podReplicas)}}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
   selector:
     matchLabels:
       app: bulk-loader
+      deployment-name: "{{=inputs.parameters.sessionName+'-rfs'}}"
   template:
     metadata:
       labels:
         app: bulk-loader
+        deployment-name: "{{=inputs.parameters.sessionName+'-rfs'}}"
         workflows.argoproj.io/workflow: "{{workflow.name}}"
+        migrations.opensearch.org/source: "{{inputs.parameters.sourceK8sLabel}}"
+        migrations.opensearch.org/target: "{{inputs.parameters.targetK8sLabel}}"
+        migrations.opensearch.org/snapshot: "{{inputs.parameters.snapshotK8sLabel}}"
+        migrations.opensearch.org/from-snapshot-migration: "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}"
+        migrations.opensearch.org/task: "{{inputs.parameters.taskK8sLabel}}"
     spec:
       serviceAccountName: argo-workflow-executor
       containers:
@@ -1136,21 +1532,33 @@ spec:
             - name: TARGET_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: "{{=((0 == len(inputs.parameters.basicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.basicCredsSecretNameOrEmpty))}}"
+                  name: "{{=((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty))}}"
                   key: username
                   optional: true
             - name: TARGET_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "{{=((0 == len(inputs.parameters.basicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.basicCredsSecretNameOrEmpty))}}"
+                  name: "{{=((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty))}}"
+                  key: password
+                  optional: true
+            - name: COORDINATOR_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: "{{=((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty))}}"
+                  key: username
+                  optional: true
+            - name: COORDINATOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "{{=((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty))}}"
                   key: password
                   optional: true
             - name: FAILED_REQUESTS_LOGGER_LEVEL
               value: "OFF"
             - name: CONSOLE_LOG_FORMAT
               value: json
-            - name: JAVA_OPTS
-              value: "{{=' ' + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}"
+            - name: JDK_JAVA_OPTIONS
+              value: "{{=inputs.parameters.jvmArgs + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}"
             - name: AWS_SHARED_CREDENTIALS_FILE
               value: "{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('/config/credentials/configuration') : (''))}}"
           volumeMounts:
@@ -1183,13 +1591,22 @@ spec:
               "name": "sourceVersion",
             },
             {
+              "name": "sourceLabel",
+            },
+            {
               "name": "snapshotConfig",
             },
             {
               "name": "targetConfig",
             },
             {
+              "name": "rfsCoordinatorConfig",
+            },
+            {
               "name": "documentBackfillConfig",
+            },
+            {
+              "name": "migrationLabel",
             },
             {
               "name": "imageReindexFromSnapshotLocation",
@@ -1199,7 +1616,7 @@ spec:
             },
           ],
         },
-        "name": "createreplicasetfromconfig",
+        "name": "starthistoricalbackfillfromconfig",
         "outputs": {
           "parameters": [],
         },
@@ -1225,12 +1642,20 @@ spec:
                     "value": "{{=sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.documentBackfillConfig))}}",
                   },
                   {
-                    "name": "basicCredsSecretNameOrEmpty",
+                    "name": "targetBasicCredsSecretNameOrEmpty",
                     "value": "{{=sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig))}}",
+                  },
+                  {
+                    "name": "coordinatorBasicCredsSecretNameOrEmpty",
+                    "value": "{{=sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.rfsCoordinatorConfig))}}",
                   },
                   {
                     "name": "loggingConfigurationOverrideConfigMap",
                     "value": "{{=sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.documentBackfillConfig))}}",
+                  },
+                  {
+                    "name": "jvmArgs",
+                    "value": "{{=sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.documentBackfillConfig))}}",
                   },
                   {
                     "name": "useLocalStack",
@@ -1238,16 +1663,32 @@ spec:
                   },
                   {
                     "name": "rfsJsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp', "cleanLocalDirs", true), sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp')))))}}",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict("coordinatorAwsServiceSigningName", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['service'], "coordinatorAwsRegion", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict("coordinatorCaCert", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? (sprig.dict("coordinatorHost", fromJSON(inputs.parameters.rfsCoordinatorConfig)['endpoint'])) : ({}))), sprig.dict("coordinatorInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.rfsCoordinatorConfig))))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources', 'useTargetClusterForWorkCoordination', 'jvmArgs')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", inputs.parameters.sourceVersion, "sessionName", inputs.parameters.sessionName, "luceneDir", '/tmp', "cleanLocalDirs", true), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict("s3RoleArn", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict("s3RepoUri", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], "s3Region", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], "s3LocalDir", '/tmp')))))}}",
                   },
                   {
                     "name": "resources",
                     "value": "{{=toJSON(jsonpath(inputs.parameters.documentBackfillConfig, '$.resources'))}}",
                   },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}",
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.targetConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}",
+                  },
                 ],
               },
-              "name": "createReplicaset",
-              "template": "createreplicaset",
+              "name": "startHistoricalBackfill",
+              "template": "starthistoricalbackfill",
             },
           ],
         ],
@@ -1259,7 +1700,13 @@ spec:
               "name": "sourceVersion",
             },
             {
+              "name": "sourceLabel",
+            },
+            {
               "name": "targetConfig",
+            },
+            {
+              "name": "rfsCoordinatorConfig",
             },
             {
               "name": "snapshotConfig",
@@ -1273,6 +1720,9 @@ spec:
             },
             {
               "name": "documentBackfillConfig",
+            },
+            {
+              "name": "migrationLabel",
             },
             {
               "name": "imageReindexFromSnapshotLocation",
@@ -1306,6 +1756,10 @@ spec:
                     "value": "{{inputs.parameters.sourceVersion}}",
                   },
                   {
+                    "name": "sourceLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}",
+                  },
+                  {
                     "name": "snapshotConfig",
                     "value": "{{inputs.parameters.snapshotConfig}}",
                   },
@@ -1314,8 +1768,16 @@ spec:
                     "value": "{{inputs.parameters.targetConfig}}",
                   },
                   {
+                    "name": "rfsCoordinatorConfig",
+                    "value": "{{inputs.parameters.rfsCoordinatorConfig}}",
+                  },
+                  {
                     "name": "documentBackfillConfig",
                     "value": "{{inputs.parameters.documentBackfillConfig}}",
+                  },
+                  {
+                    "name": "migrationLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}",
                   },
                   {
                     "name": "imageReindexFromSnapshotLocation",
@@ -1327,8 +1789,8 @@ spec:
                   },
                 ],
               },
-              "name": "createReplicasetFromConfig",
-              "template": "createreplicasetfromconfig",
+              "name": "startHistoricalBackfillFromConfig",
+              "template": "starthistoricalbackfillfromconfig",
             },
           ],
           [
@@ -1336,12 +1798,16 @@ spec:
               "arguments": {
                 "parameters": [
                   {
-                    "name": "targetConfig",
-                    "value": "{{inputs.parameters.targetConfig}}",
-                  },
-                  {
                     "name": "snapshotConfig",
                     "value": "{{inputs.parameters.snapshotConfig}}",
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.rfsCoordinatorConfig}}",
+                  },
+                  {
+                    "name": "backfillSession",
+                    "value": "{{=toJSON(sprig.dict("sessionName", inputs.parameters.sessionName, "deploymentName", inputs.parameters.sessionName+'-rfs'))}}",
                   },
                 ],
               },
@@ -1372,6 +1838,22 @@ spec:
                     "name": "configContents",
                     "value": "{{steps.setupWaitForCompletion.outputs.parameters.configContents}}",
                   },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}",
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.targetConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}",
+                  },
                 ],
               },
               "name": "waitForCompletion",
@@ -1383,13 +1865,182 @@ spec:
               "arguments": {
                 "parameters": [
                   {
-                    "name": "name",
+                    "name": "sessionName",
                     "value": "{{inputs.parameters.sessionName}}",
                   },
                 ],
               },
-              "name": "deleteReplicaSet",
-              "template": "deletereplicaset",
+              "name": "stopHistoricalBackfill",
+              "template": "stophistoricalbackfill",
+            },
+          ],
+        ],
+      },
+      {
+        "inputs": {
+          "parameters": [],
+        },
+        "name": "donothing",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [],
+        ],
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceVersion",
+            },
+            {
+              "name": "sourceLabel",
+            },
+            {
+              "name": "targetConfig",
+            },
+            {
+              "name": "snapshotConfig",
+            },
+            {
+              "name": "sessionName",
+            },
+            {
+              "name": "indices",
+              "value": "[]",
+            },
+            {
+              "name": "documentBackfillConfig",
+            },
+            {
+              "name": "migrationLabel",
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation",
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy",
+            },
+            {
+              "name": "imageMigrationConsoleLocation",
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy",
+            },
+            {
+              "name": "imageCoordinatorClusterLocation",
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
+            },
+          ],
+        },
+        "name": "setupandrunbulkload",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}",
+                  },
+                  {
+                    "name": "coordinatorImage",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
+                  },
+                ],
+              },
+              "name": "createRfsCoordinator",
+              "templateRef": {
+                "name": "rfs-coordinator-cluster",
+                "template": "createrfscoordinator",
+              },
+              "when": "{{=!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])}}",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sourceVersion",
+                    "value": "{{inputs.parameters.sourceVersion}}",
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}",
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}",
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}",
+                  },
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}",
+                  },
+                  {
+                    "name": "indices",
+                    "value": "{{inputs.parameters.indices}}",
+                  },
+                  {
+                    "name": "documentBackfillConfig",
+                    "value": "{{inputs.parameters.documentBackfillConfig}}",
+                  },
+                  {
+                    "name": "migrationLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}",
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}",
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}",
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+                  },
+                  {
+                    "name": "rfsCoordinatorConfig",
+                    "value": "{{=((!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])) ? (toJSON(sprig.dict("endpoint", 'https://'+inputs.parameters.sessionName+'-rfs-coordinator'+':9200', "label", inputs.parameters.sessionName+'-rfs-coordinator', "allowInsecure", true, "authConfig", sprig.dict("basic", sprig.dict("secretName", inputs.parameters.sessionName+'-rfs-coordinator'+'-creds'))))) : (inputs.parameters.targetConfig))}}",
+                  },
+                ],
+              },
+              "name": "runBulkLoad",
+              "template": "runbulkload",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}",
+                  },
+                ],
+              },
+              "name": "cleanupRfsCoordinator",
+              "templateRef": {
+                "name": "rfs-coordinator-cluster",
+                "template": "deleterfscoordinator",
+              },
+              "when": "{{=!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])}}",
             },
           ],
         ],
@@ -1465,12 +2116,12 @@ exports[`test workflow template renderings full-migration 1`] = `
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
+              "cpu": "500m",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -1505,10 +2156,10 @@ exports[`test workflow template renderings full-migration 1`] = `
               "name": "snapshotConfig",
             },
             {
-              "name": "perSnapshotName",
+              "name": "migrationLabel",
             },
             {
-              "name": "name",
+              "name": "groupName",
             },
             {
               "name": "metadataMigrationConfig",
@@ -1546,9 +2197,15 @@ exports[`test workflow template renderings full-migration 1`] = `
             {
               "name": "imageMigrationConsolePullPolicy",
             },
+            {
+              "name": "imageCoordinatorClusterLocation",
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
+            },
           ],
         },
-        "name": "foreachsnapshotmigration",
+        "name": "migratefromsnapshot",
         "outputs": {
           "parameters": [],
         },
@@ -1583,20 +2240,16 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.targetConfig}}",
                   },
                   {
+                    "name": "migrationLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}",
+                  },
+                  {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}",
                   },
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-                  },
-                  {
-                    "name": "perSnapshotName",
-                    "value": "{{inputs.parameters.perSnapshotName}}",
-                  },
-                  {
-                    "name": "perMigrationName",
-                    "value": "{{inputs.parameters.name}}",
                   },
                 ],
               },
@@ -1625,6 +2278,10 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.documentBackfillConfig}}",
                   },
                   {
+                    "name": "migrationLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}",
+                  },
+                  {
                     "name": "imageReindexFromSnapshotLocation",
                     "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}",
                   },
@@ -1641,6 +2298,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}",
+                  },
+                  {
                     "name": "sessionName",
                     "value": "{{steps.idGenerator.id}}",
                   },
@@ -1648,12 +2313,16 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "name": "sourceVersion",
                     "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.version')}}",
                   },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')}}",
+                  },
                 ],
               },
               "name": "bulkLoadDocuments",
               "templateRef": {
                 "name": "document-bulk-load",
-                "template": "runbulkload",
+                "template": "setupandrunbulkload",
               },
               "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig))}}",
             },
@@ -1676,7 +2345,7 @@ exports[`test workflow template renderings full-migration 1`] = `
               "name": "migrations",
             },
             {
-              "name": "name",
+              "name": "groupName",
             },
             {
               "name": "createSnapshotConfig",
@@ -1709,9 +2378,15 @@ exports[`test workflow template renderings full-migration 1`] = `
             {
               "name": "imageMigrationConsolePullPolicy",
             },
+            {
+              "name": "imageCoordinatorClusterLocation",
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
+            },
           ],
         },
-        "name": "foreachsnapshotextraction",
+        "name": "getsnapshotthenmigratesnapshot",
         "outputs": {
           "parameters": [],
         },
@@ -1744,6 +2419,10 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
+                  {
+                    "name": "targetLabel",
+                    "value": "{{=jsonpath(inputs.parameters.targetConfig, '$.label')}}",
+                  },
                 ],
               },
               "name": "createOrGetSnapshot",
@@ -1764,10 +2443,6 @@ exports[`test workflow template renderings full-migration 1`] = `
                   {
                     "name": "targetConfig",
                     "value": "{{inputs.parameters.targetConfig}}",
-                  },
-                  {
-                    "name": "name",
-                    "value": "{{=jsonpath(toJSON(item), '$.name')}}",
                   },
                   {
                     "name": "uniqueRunNonce",
@@ -1806,6 +2481,18 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}",
+                  },
+                  {
+                    "name": "label",
+                    "value": "{{=jsonpath(toJSON(item), '$.label')}}",
+                  },
+                  {
                     "name": "metadataMigrationConfig",
                     "value": "{{=sprig.dig('metadataMigrationConfig', '', item)}}",
                   },
@@ -1818,13 +2505,17 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{steps.createOrGetSnapshot.outputs.parameters.snapshotConfig}}",
                   },
                   {
-                    "name": "perSnapshotName",
-                    "value": "{{inputs.parameters.name}}",
+                    "name": "migrationLabel",
+                    "value": "{{=item['label']}}",
+                  },
+                  {
+                    "name": "groupName",
+                    "value": "{{=item['label']}}",
                   },
                 ],
               },
-              "name": "foreachSnapshotMigration",
-              "template": "foreachsnapshotmigration",
+              "name": "migrateFromSnapshot",
+              "template": "migratefromsnapshot",
               "withParam": "{{inputs.parameters.migrations}}",
             },
           ],
@@ -1838,6 +2529,10 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
             {
               "name": "targetConfig",
+            },
+            {
+              "name": "groupName",
+              "value": "{{=fromJSON(inputs.parameters.sourceConfig)['label']+' to '+fromJSON(inputs.parameters.targetConfig)['label']}}",
             },
             {
               "name": "snapshotExtractAndLoadConfigArray",
@@ -1874,9 +2569,15 @@ exports[`test workflow template renderings full-migration 1`] = `
             {
               "name": "imageMigrationConsolePullPolicy",
             },
+            {
+              "name": "imageCoordinatorClusterLocation",
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
+            },
           ],
         },
-        "name": "foreachmigrationpair",
+        "name": "migration",
         "outputs": {
           "parameters": [],
         },
@@ -1930,25 +2631,37 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}",
+                  },
+                  {
                     "name": "createSnapshotConfig",
                     "value": "{{=sprig.dig('createSnapshotConfig', '', item)}}",
                   },
                   {
-                    "name": "name",
-                    "value": "{{=jsonpath(toJSON(item), '$.name')}}",
+                    "name": "migrations",
+                    "value": "{{=jsonpath(toJSON(item), '$.migrations')}}",
+                  },
+                  {
+                    "name": "label",
+                    "value": "{{=jsonpath(toJSON(item), '$.label')}}",
                   },
                   {
                     "name": "snapshotConfig",
                     "value": "{{=jsonpath(toJSON(item), '$.snapshotConfig')}}",
                   },
                   {
-                    "name": "migrations",
-                    "value": "{{=jsonpath(toJSON(item), '$.migrations')}}",
+                    "name": "groupName",
+                    "value": "{{=item['label']}}",
                   },
                 ],
               },
-              "name": "foreachSnapshotExtraction",
-              "template": "foreachsnapshotextraction",
+              "name": "getSnapshotThenMigrateSnapshot",
+              "template": "getsnapshotthenmigratesnapshot",
               "when": "{{=!(0 == len(inputs.parameters.snapshotExtractAndLoadConfigArray))}}",
               "withParam": "{{inputs.parameters.snapshotExtractAndLoadConfigArray}}",
             },
@@ -2045,6 +2758,26 @@ exports[`test workflow template renderings full-migration 1`] = `
                 },
               },
             },
+            {
+              "name": "imageCoordinatorClusterLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "key": "coordinatorClusterImage",
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "optional": undefined,
+                },
+              },
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "key": "coordinatorClusterPullPolicy",
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "optional": undefined,
+                },
+              },
+            },
           ],
         },
         "name": "main",
@@ -2093,6 +2826,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}",
+                  },
+                  {
                     "name": "sourceConfig",
                     "value": "{{=jsonpath(toJSON(item), '$.sourceConfig')}}",
                   },
@@ -2110,8 +2851,8 @@ exports[`test workflow template renderings full-migration 1`] = `
                   },
                 ],
               },
-              "name": "foreachMigrationPair",
-              "template": "foreachmigrationpair",
+              "name": "migration",
+              "template": "migration",
               "withParam": "{{inputs.parameters.migrationConfigs}}",
             },
           ],
@@ -2181,6 +2922,10 @@ exports[`test workflow template renderings full-migration-with-workflow-cli 1`] 
           "name": "approvalConfigMapName",
           "value": "approval-config",
         },
+        {
+          "name": "monitor-retry-limit",
+          "value": "33",
+        },
       ],
     },
     "entrypoint": "main",
@@ -2225,7 +2970,9 @@ cat /tmp/migration_config.json | workflow configure edit --stdin
 # Submit workflow
 echo "Submitting workflow..."
 WORKFLOW_OUTPUT=$(workflow submit 2>&1)
+EXIT_CODE=$?
 echo "Workflow submit output: $WORKFLOW_OUTPUT"
+[ $EXIT_CODE -eq 0 ] || exit $EXIT_CODE
 ",
           ],
           "command": [
@@ -2242,12 +2989,12 @@ echo "Workflow submit output: $WORKFLOW_OUTPUT"
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
+              "cpu": "500m",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -2293,9 +3040,16 @@ echo "Checking workflow status"
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
 
-STATUS_OUTPUT=$(workflow status migration-workflow 2>&1 || true)
+STATUS_OUTPUT=$(workflow status --workflow-name migration-workflow 2>&1)
+STATUS_EXIT_CODE=$?
 echo "Status output:"
 echo "$STATUS_OUTPUT"
+
+# If the command failed (e.g., connection error), retry
+if [ $STATUS_EXIT_CODE -ne 0 ]; then
+    echo "Failed to get workflow status (exit code: $STATUS_EXIT_CODE), will retry..."
+    exit 1
+fi
 
 # Check if workflow is running or pending - retry
 if echo "$STATUS_OUTPUT" | grep -q "Phase: Running\\|Phase: Pending"; then
@@ -2319,12 +3073,12 @@ exit 0
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
+              "cpu": "500m",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -2352,11 +3106,10 @@ exit 0
         },
         "retryStrategy": {
           "backoff": {
-            "cap": "60",
-            "duration": "5",
-            "factor": "2",
+            "duration": "60",
+            "factor": "1",
           },
-          "limit": "33",
+          "limit": "{{workflow.parameters.monitor-retry-limit}}",
           "retryPolicy": "Always",
         },
       },
@@ -2392,12 +3145,12 @@ fi
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
+              "cpu": "500m",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -2581,7 +3334,7 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           "args": [
             "{{inputs.parameters.commandMode}}",
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'loggingConfigurationOverrideConfigMap')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", fromJSON(inputs.parameters.sourceConfig)['version']), sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), sprig.dict("s3RepoUri", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], "s3Region", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'], "s3LocalDir", '/tmp')))))}}",
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'loggingConfigurationOverrideConfigMap', 'jvmArgs')), sprig.merge(sprig.dict("snapshotName", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], "sourceVersion", fromJSON(inputs.parameters.sourceConfig)['version']), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict("s3Endpoint", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict("s3RoleArn", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict("s3RepoUri", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], "s3Region", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], "s3LocalDir", '/tmp')))))}}",
           ],
           "command": [
             "/root/metadataMigration/bin/MetadataMigration",
@@ -2590,6 +3343,10 @@ exports[`test workflow template renderings metadata-migration 1`] = `
             {
               "name": "AWS_SHARED_CREDENTIALS_FILE",
               "value": "{{=((sprig.dig('repoConfig', 'useLocalStack', false, fromJSON(inputs.parameters.snapshotConfig))) ? ('/config/credentials/configuration') : (''))}}",
+            },
+            {
+              "name": "JDK_JAVA_OPTIONS",
+              "value": "{{=sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.metadataMigrationConfig))}}",
             },
             {
               "name": "TARGET_USERNAME",
@@ -2616,12 +3373,12 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
+              "cpu": "500m",
+              "memory": "1800Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
           },
           "volumeMounts": [
@@ -2638,14 +3395,16 @@ exports[`test workflow template renderings metadata-migration 1`] = `
               "name": "commandMode",
             },
             {
-              "description": "Snapshot storage details (region, endpoint, etc)",
-              "name": "snapshotConfig",
-            },
-            {
               "name": "sourceConfig",
             },
             {
               "name": "targetConfig",
+            },
+            {
+              "name": "snapshotConfig",
+            },
+            {
+              "name": "metadataMigrationConfig",
             },
             {
               "name": "imageMigrationConsoleLocation",
@@ -2654,9 +3413,31 @@ exports[`test workflow template renderings metadata-migration 1`] = `
               "name": "imageMigrationConsolePullPolicy",
             },
             {
-              "name": "metadataMigrationConfig",
+              "name": "sourceK8sLabel",
+            },
+            {
+              "name": "targetK8sLabel",
+            },
+            {
+              "name": "snapshotK8sLabel",
+            },
+            {
+              "name": "fromSnapshotMigrationK8sLabel",
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": "{{=((inputs.parameters.commandMode == 'evaluate') ? ('metadataEvaluate') : ('metadataMigrate'))}}",
             },
           ],
+        },
+        "metadata": {
+          "labels": {
+            "migrations.opensearch.org/from-snapshot-migration": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}",
+            "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
+            "migrations.opensearch.org/source": "{{inputs.parameters.sourceK8sLabel}}",
+            "migrations.opensearch.org/target": "{{inputs.parameters.targetK8sLabel}}",
+            "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}",
+          },
         },
         "name": "runmetadata",
         "outputs": {
@@ -2673,13 +3454,31 @@ exports[`test workflow template renderings metadata-migration 1`] = `
         ],
       },
       {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "name",
+            },
+          ],
+        },
         "name": "approveevaluate",
-        "outputs": undefined,
+        "outputs": {
+          "parameters": [],
+        },
         "suspend": {},
       },
       {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "name",
+            },
+          ],
+        },
         "name": "approvemigrate",
-        "outputs": undefined,
+        "outputs": {
+          "parameters": [],
+        },
         "suspend": {},
       },
       {
@@ -2699,16 +3498,13 @@ exports[`test workflow template renderings metadata-migration 1`] = `
               "name": "targetConfig",
             },
             {
+              "name": "migrationLabel",
+            },
+            {
               "name": "imageMigrationConsoleLocation",
             },
             {
               "name": "imageMigrationConsolePullPolicy",
-            },
-            {
-              "name": "perSnapshotName",
-            },
-            {
-              "name": "perMigrationName",
             },
             {
               "name": "skipApprovalMap",
@@ -2723,11 +3519,15 @@ exports[`test workflow template renderings metadata-migration 1`] = `
             },
             {
               "name": "skipEvaluateApproval",
-              "value": "{{=sprig.dig(fromJSON(inputs.parameters.sourceConfig)['name'], fromJSON(inputs.parameters.targetConfig)['name'], inputs.parameters.perSnapshotName, inputs.parameters.perMigrationName, 'evaluateMetadata', false, fromJSON(inputs.parameters.skipApprovalMap))}}",
+              "value": "{{=sprig.dig(fromJSON(inputs.parameters.sourceConfig)['label'], fromJSON(inputs.parameters.targetConfig)['label'], jsonpath(inputs.parameters.snapshotConfig, '$.label'), inputs.parameters.migrationLabel, 'evaluateMetadata', false, fromJSON(inputs.parameters.skipApprovalMap))}}",
             },
             {
               "name": "skipMigrateApproval",
-              "value": "{{=sprig.dig(fromJSON(inputs.parameters.sourceConfig)['name'], fromJSON(inputs.parameters.targetConfig)['name'], inputs.parameters.perSnapshotName, inputs.parameters.perMigrationName, 'migrateMetadata', false, fromJSON(inputs.parameters.skipApprovalMap))}}",
+              "value": "{{=sprig.dig(fromJSON(inputs.parameters.sourceConfig)['label'], fromJSON(inputs.parameters.targetConfig)['label'], jsonpath(inputs.parameters.snapshotConfig, '$.label'), inputs.parameters.migrationLabel, 'migrateMetadata', false, fromJSON(inputs.parameters.skipApprovalMap))}}",
+            },
+            {
+              "name": "approvalNamePrefix",
+              "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')+'.'+jsonpath(inputs.parameters.targetConfig, '$.label')+'.'+jsonpath(inputs.parameters.snapshotConfig, '$.label')+'.'+inputs.parameters.migrationLabel+'.'}}",
             },
           ],
         },
@@ -2741,16 +3541,20 @@ exports[`test workflow template renderings metadata-migration 1`] = `
               "arguments": {
                 "parameters": [
                   {
-                    "name": "snapshotConfig",
-                    "value": "{{inputs.parameters.snapshotConfig}}",
-                  },
-                  {
                     "name": "sourceConfig",
                     "value": "{{inputs.parameters.sourceConfig}}",
                   },
                   {
                     "name": "targetConfig",
                     "value": "{{inputs.parameters.targetConfig}}",
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}",
+                  },
+                  {
+                    "name": "metadataMigrationConfig",
+                    "value": "{{inputs.parameters.metadataMigrationConfig}}",
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -2761,12 +3565,24 @@ exports[`test workflow template renderings metadata-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
-                    "name": "metadataMigrationConfig",
-                    "value": "{{inputs.parameters.metadataMigrationConfig}}",
-                  },
-                  {
                     "name": "commandMode",
                     "value": "evaluate",
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.targetConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}",
                   },
                 ],
               },
@@ -2777,7 +3593,12 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           [
             {
               "arguments": {
-                "parameters": [],
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "{{=inputs.parameters.approvalNamePrefix+'evaluateMetadata'}}",
+                  },
+                ],
               },
               "name": "approveEvaluate",
               "template": "approveevaluate",
@@ -2789,16 +3610,20 @@ exports[`test workflow template renderings metadata-migration 1`] = `
               "arguments": {
                 "parameters": [
                   {
-                    "name": "snapshotConfig",
-                    "value": "{{inputs.parameters.snapshotConfig}}",
-                  },
-                  {
                     "name": "sourceConfig",
                     "value": "{{inputs.parameters.sourceConfig}}",
                   },
                   {
                     "name": "targetConfig",
                     "value": "{{inputs.parameters.targetConfig}}",
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}",
+                  },
+                  {
+                    "name": "metadataMigrationConfig",
+                    "value": "{{inputs.parameters.metadataMigrationConfig}}",
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -2809,12 +3634,24 @@ exports[`test workflow template renderings metadata-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
-                    "name": "metadataMigrationConfig",
-                    "value": "{{inputs.parameters.metadataMigrationConfig}}",
-                  },
-                  {
                     "name": "commandMode",
                     "value": "migrate",
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.targetConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}",
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}",
                   },
                 ],
               },
@@ -2825,7 +3662,12 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           [
             {
               "arguments": {
-                "parameters": [],
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "{{=inputs.parameters.approvalNamePrefix+'migrateMetadata'}}",
+                  },
+                ],
               },
               "name": "approveMigrate",
               "template": "approvemigrate",
@@ -2883,6 +3725,11 @@ exports[`test workflow template renderings migration-console 1`] = `
         "inputs": {
           "parameters": [
             {
+              "description": "The metadata about the deployment performing the RFS backfill",
+              "name": "backfillSession",
+              "value": "",
+            },
+            {
               "description": "Snapshot configuration information (JSON)",
               "name": "kafkaInfo",
               "value": "",
@@ -2893,13 +3740,13 @@ exports[`test workflow template renderings migration-console 1`] = `
               "value": "",
             },
             {
-              "description": "Target cluster configuration (JSON)",
-              "name": "targetConfig",
+              "description": "Snapshot configuration information (JSON)",
+              "name": "snapshotConfig",
               "value": "",
             },
             {
-              "description": "Snapshot configuration information (JSON)",
-              "name": "snapshotConfig",
+              "description": "Target cluster configuration (JSON)",
+              "name": "targetConfig",
               "value": "",
             },
           ],
@@ -2910,7 +3757,7 @@ exports[`test workflow template renderings migration-console 1`] = `
             {
               "name": "configContents",
               "valueFrom": {
-                "expression": "toJSON(sprig.merge(sprig.merge(((0 == len(inputs.parameters.kafkaInfo)) ? ({}) : (sprig.dict("kafka", fromJSON(inputs.parameters.kafkaInfo)))), ((0 == len(inputs.parameters.sourceConfig)) ? ({}) : (sprig.dict("source_cluster", fromJSON(inputs.parameters.sourceConfig))))), sprig.merge(((0 == len(inputs.parameters.targetConfig)) ? ({}) : (sprig.dict("target_cluster", fromJSON(inputs.parameters.targetConfig)))), ((0 == len(inputs.parameters.snapshotConfig)) ? ({}) : (sprig.dict("snapshot", fromJSON(inputs.parameters.snapshotConfig)))))))",
+                "expression": "toJSON(sprig.merge(sprig.merge(sprig.merge(((0 == len(inputs.parameters.kafkaInfo)) ? ({}) : (sprig.dict("kafka", fromJSON(inputs.parameters.kafkaInfo)))), ((0 == len(inputs.parameters.sourceConfig)) ? ({}) : (sprig.dict("source_cluster", fromJSON(inputs.parameters.sourceConfig))))), sprig.merge(((0 == len(inputs.parameters.targetConfig)) ? ({}) : (sprig.dict("target_cluster", fromJSON(inputs.parameters.targetConfig)))), ((0 == len(inputs.parameters.snapshotConfig)) ? ({}) : (sprig.dict("snapshot", fromJSON(inputs.parameters.snapshotConfig)))))), ((0 == len(inputs.parameters.backfillSession)) ? ({}) : (sprig.dict("backfill", sprig.dict("reindex_from_snapshot", sprig.dict("k8s", sprig.dict("namespace", "{{workflow.namespace}}", "deployment_name", fromJSON(inputs.parameters.backfillSession)['deploymentName']), "backfill_session_name", fromJSON(inputs.parameters.backfillSession)['sessionName'])))))))",
               },
             },
           ],
@@ -2935,82 +3782,7 @@ base64 -d > /config/migration_services.yaml_ << EOF
 EOF
 
 cat /config/migration_services.yaml_ |
-jq '
-# Normalize auth config for cluster objects (source_cluster, target_cluster)
-def normalizeClusterAuthConfig:
-  if has("authConfig") then
-    (if (.authConfig | has("basic")) then
-      .basic_auth = (.authConfig.basic |
-        if has("secretName") then
-          .k8s_secret_name = .secretName | del(.secretName)
-        else
-          .
-        end)
-    elif (.authConfig | has("sigv4")) then
-      .sigv4 = .authConfig.sigv4
-    elif (.authConfig | has("mtls")) then
-      .mtls_auth = .authConfig.mtls
-    else
-      .no_auth = {}
-    end)
-    | del(.authConfig)
-  else
-    .no_auth = {}
-  end
-  | del(.name, .proxy, .snapshotRepo);
-
-def normalizeAllowInsecure:
-  if has("allowInsecure") then
-    .allow_insecure = .allowInsecure | del(.allowInsecure)
-  else
-    .
-  end;
-
-def normalizeSnapshotName:
-  if has("snapshotName") then
-    .snapshot_name = .snapshotName | del(.snapshotName)
-  else
-    .
-  end;
-
-# Normalize S3 config inside snapshot
-def normalizeS3Config:
-  (if has("s3RepoPathUri") then
-    .repo_uri = .s3RepoPathUri | del(.s3RepoPathUri)
-  else
-    .
-  end)
-  | del(.repoName, .useLocalStack);
-
-def normalizeRepoConfig:
-  if has("repoConfig") then
-    .s3 = (.repoConfig | 
-      if has("awsRegion") then
-        .aws_region = .awsRegion | del(.awsRegion)
-      else
-        .
-      end
-      | normalizeS3Config)
-    | del(.repoConfig)
-  elif has("s3") then
-    .s3 |= normalizeS3Config
-  else
-    .
-  end;
-
-# Normalize cluster config (only for source_cluster and target_cluster)
-def normalizeCluster:
-  normalizeClusterAuthConfig | normalizeAllowInsecure;
-
-# Normalize snapshot config
-def normalizeSnapshot:
-  normalizeSnapshotName | normalizeRepoConfig;
-
-# Apply transformations to specific top-level keys
-(if has("source_cluster") then .source_cluster |= normalizeCluster else . end)
-| (if has("target_cluster") then .target_cluster |= normalizeCluster else . end)
-| (if has("snapshot") then .snapshot |= normalizeSnapshot else . end)
-' > /config/migration_services.yaml
+jq -f workflowConfigToServicesConfig.jq > /config/migration_services.yaml
 
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
@@ -3074,12 +3846,12 @@ echo ---
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
+              "cpu": "500m",
+              "memory": "1800Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
           },
         },
@@ -3092,6 +3864,26 @@ echo ---
               "name": "configContents",
             },
             {
+              "name": "sourceK8sLabel",
+              "value": "",
+            },
+            {
+              "name": "targetK8sLabel",
+              "value": "",
+            },
+            {
+              "name": "snapshotK8sLabel",
+              "value": "",
+            },
+            {
+              "name": "fromSnapshotMigrationK8sLabel",
+              "value": "",
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": "",
+            },
+            {
               "name": "imageMigrationConsoleLocation",
             },
             {
@@ -3099,9 +3891,31 @@ echo ---
             },
           ],
         },
-        "name": "runmigrationcommand",
+        "metadata": {
+          "labels": {
+            "migrations.opensearch.org/from-snapshot-migration": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}",
+            "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
+            "migrations.opensearch.org/source": "{{inputs.parameters.sourceK8sLabel}}",
+            "migrations.opensearch.org/target": "{{inputs.parameters.targetK8sLabel}}",
+            "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}",
+          },
+        },
+        "name": "runmigrationcommandforstatus",
         "outputs": {
-          "parameters": [],
+          "parameters": [
+            {
+              "name": "statusOutput",
+              "valueFrom": {
+                "path": "/tmp/status-output.txt",
+              },
+            },
+            {
+              "name": "overriddenPhase",
+              "valueFrom": {
+                "path": "/tmp/phase-output.txt",
+              },
+            },
+          ],
         },
       },
       {
@@ -3109,6 +3923,11 @@ echo ---
           "parameters": [
             {
               "name": "command",
+            },
+            {
+              "description": "The metadata about the deployment performing the RFS backfill",
+              "name": "backfillSession",
+              "value": "",
             },
             {
               "description": "Snapshot configuration information (JSON)",
@@ -3121,13 +3940,13 @@ echo ---
               "value": "",
             },
             {
-              "description": "Target cluster configuration (JSON)",
-              "name": "targetConfig",
+              "description": "Snapshot configuration information (JSON)",
+              "name": "snapshotConfig",
               "value": "",
             },
             {
-              "description": "Snapshot configuration information (JSON)",
-              "name": "snapshotConfig",
+              "description": "Target cluster configuration (JSON)",
+              "name": "targetConfig",
               "value": "",
             },
             {
@@ -3148,6 +3967,10 @@ echo ---
               "arguments": {
                 "parameters": [
                   {
+                    "name": "backfillSession",
+                    "value": "{{inputs.parameters.backfillSession}}",
+                  },
+                  {
                     "name": "kafkaInfo",
                     "value": "{{inputs.parameters.kafkaInfo}}",
                   },
@@ -3156,12 +3979,12 @@ echo ---
                     "value": "{{inputs.parameters.sourceConfig}}",
                   },
                   {
-                    "name": "targetConfig",
-                    "value": "{{inputs.parameters.targetConfig}}",
-                  },
-                  {
                     "name": "snapshotConfig",
                     "value": "{{inputs.parameters.snapshotConfig}}",
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}",
                   },
                 ],
               },
@@ -3192,7 +4015,7 @@ echo ---
                 ],
               },
               "name": "runConsoleWithConfig",
-              "template": "runmigrationcommand",
+              "template": "runmigrationcommandforstatus",
             },
           ],
         ],
@@ -3255,6 +4078,9 @@ exports[`test workflow template renderings replayer 1`] = `
               "name": "podReplicas",
             },
             {
+              "name": "jvmArgs",
+            },
+            {
               "name": "loggingConfigurationOverrideConfigMap",
             },
             {
@@ -3305,8 +4131,8 @@ spec:
             - "{{=toBase64(inputs.parameters.jsonConfig)}}"
           resources: {{=fromJSON(inputs.parameters.resources)}}
           env:
-            - name: JAVA_OPTS
-              value: "{{=' ' + ' ' + (('' == inputs.parameters.loggingConfigurationOverrideConfigMap) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}"
+            - name: JDK_JAVA_OPTIONS
+              value: "{{=inputs.parameters.jvmArgs + ' ' + (('' == inputs.parameters.loggingConfigurationOverrideConfigMap) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}"
           volumeMounts:
             - name: log4j-configuration
               mountPath: /config/logConfiguration
@@ -3400,6 +4226,10 @@ spec:
                     "value": "{{=jsonpath(toJSON(fromJSON(inputs.parameters.replayerConfig)), '$.authHeaderOverride')}}",
                   },
                   {
+                    "name": "jvmArgs",
+                    "value": "{{=jsonpath(toJSON(fromJSON(inputs.parameters.replayerConfig)), '$.jvmArgs')}}",
+                  },
+                  {
                     "name": "loggingConfigurationOverrideConfigMap",
                     "value": "{{=jsonpath(toJSON(fromJSON(inputs.parameters.replayerConfig)), '$.loggingConfigurationOverrideConfigMap')}}",
                   },
@@ -3413,12 +4243,415 @@ spec:
                   },
                   {
                     "name": "jsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.replayerConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources')), sprig.merge(sprig.dict(), sprig.dict())))}}",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetAwsServiceSigningName", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], "targetAwsRegion", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict("targetCaCert", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict("targetHost", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict("targetInsecure", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.replayerConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources', 'jvmArgs')), sprig.merge(sprig.dict(), sprig.dict())))}}",
                   },
                 ],
               },
               "name": "deployReplayer",
               "template": "createdeployment",
+            },
+          ],
+        ],
+      },
+    ],
+  },
+}
+`;
+
+exports[`test workflow template renderings rfs-coordinator-cluster 1`] = `
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "rfs-coordinator-cluster",
+  },
+  "spec": {
+    "arguments": {
+      "parameters": [
+        {
+          "name": "etcdEndpoints",
+          "value": "http://etcd.ma.svc.cluster.local:2379",
+        },
+        {
+          "name": "etcdUser",
+          "value": "root",
+        },
+        {
+          "name": "etcdPassword",
+          "value": "password",
+        },
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config",
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config",
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config",
+        },
+      ],
+    },
+    "entrypoint": undefined,
+    "parallelism": 100,
+    "serviceAccountName": "argo-workflow-executor",
+    "templates": [
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+          ],
+        },
+        "name": "createrfscoordinatorsecret",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "apply",
+          "manifest": "apiVersion: v1
+kind: Secret
+metadata:
+  name: "{{=inputs.parameters.clusterName+'-creds'}}"
+  labels:
+    app: "{{inputs.parameters.clusterName}}"
+type: Opaque
+stringData:
+  username: admin
+  password: myStrongPassword123!
+",
+          "setOwnerReference": true,
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+          ],
+        },
+        "name": "createrfscoordinatorservice",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "apply",
+          "manifest": "apiVersion: v1
+kind: Service
+metadata:
+  name: "{{inputs.parameters.clusterName}}"
+  labels:
+    app: "{{inputs.parameters.clusterName}}"
+spec:
+  clusterIP: None
+  selector:
+    app: "{{inputs.parameters.clusterName}}"
+  ports:
+    - name: https
+      port: 9200
+      targetPort: https
+",
+          "setOwnerReference": true,
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+            {
+              "name": "coordinatorImage",
+            },
+          ],
+        },
+        "name": "createrfscoordinatorstatefulset",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "apply",
+          "manifest": "apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: "{{inputs.parameters.clusterName}}"
+  labels:
+    app: "{{inputs.parameters.clusterName}}"
+    app.kubernetes.io/instance: "{{inputs.parameters.clusterName}}"
+spec:
+  serviceName: "{{inputs.parameters.clusterName}}"
+  replicas: 1
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Delete
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app: "{{inputs.parameters.clusterName}}"
+  template:
+    metadata:
+      labels:
+        app: "{{inputs.parameters.clusterName}}"
+        app.kubernetes.io/instance: "{{inputs.parameters.clusterName}}"
+    spec:
+      serviceAccountName: argo-workflow-executor
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: opensearch
+          image: "{{inputs.parameters.coordinatorImage}}"
+          ports:
+            - name: https
+              containerPort: 9200
+          env:
+            - name: cluster.name
+              value: "{{inputs.parameters.clusterName}}"
+            - name: discovery.type
+              value: single-node
+            - name: OPENSEARCH_INITIAL_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: "{{=inputs.parameters.clusterName+'-creds'}}"
+                  key: username
+                  optional: false
+            - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "{{=inputs.parameters.clusterName+'-creds'}}"
+                  key: password
+                  optional: false
+            - name: OPENSEARCH_JAVA_OPTS
+              value: -Xms1g -Xmx1g
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - curl -sk -u "\${OPENSEARCH_INITIAL_ADMIN_USERNAME}:\${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" "https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=10s"
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 15
+            failureThreshold: 20
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/opensearch/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+",
+          "setOwnerReference": true,
+          "successCondition": "status.readyReplicas > 0",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+            {
+              "name": "coordinatorImage",
+            },
+            {
+              "name": "groupName",
+              "value": "Start RFS OpenSearch cluster for worker coordination",
+            },
+          ],
+        },
+        "name": "createrfscoordinator",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
+                  },
+                ],
+              },
+              "name": "createSecret",
+              "template": "createrfscoordinatorsecret",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
+                  },
+                ],
+              },
+              "name": "createService",
+              "template": "createrfscoordinatorservice",
+            },
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
+                  },
+                  {
+                    "name": "coordinatorImage",
+                    "value": "{{inputs.parameters.coordinatorImage}}",
+                  },
+                ],
+              },
+              "name": "createStatefulSet",
+              "template": "createrfscoordinatorstatefulset",
+            },
+          ],
+        ],
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+          ],
+        },
+        "name": "deleterfscoordinatorstatefulset",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found",
+          ],
+          "manifest": "apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: "{{inputs.parameters.clusterName}}"
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+          ],
+        },
+        "name": "deleterfscoordinatorservice",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found",
+          ],
+          "manifest": "apiVersion: v1
+kind: Service
+metadata:
+  name: "{{inputs.parameters.clusterName}}"
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+          ],
+        },
+        "name": "deleterfscoordinatorsecret",
+        "outputs": {
+          "parameters": [],
+        },
+        "resource": {
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found",
+          ],
+          "manifest": "apiVersion: v1
+kind: Secret
+metadata:
+  name: "{{=inputs.parameters.clusterName+'-creds'}}"
+",
+        },
+      },
+      {
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName",
+            },
+            {
+              "name": "groupName",
+              "value": "Stop RFS OpenSearch cluster for worker coordination",
+            },
+          ],
+        },
+        "name": "deleterfscoordinator",
+        "outputs": {
+          "parameters": [],
+        },
+        "steps": [
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
+                  },
+                ],
+              },
+              "name": "deleteStatefulSet",
+              "template": "deleterfscoordinatorstatefulset",
+            },
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
+                  },
+                ],
+              },
+              "name": "deleteService",
+              "template": "deleterfscoordinatorservice",
+            },
+          ],
+          [
+            {
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}",
+                  },
+                ],
+              },
+              "name": "deleteSecret",
+              "template": "deleterfscoordinatorsecret",
             },
           ],
         ],
@@ -3482,7 +4715,7 @@ exports[`test workflow template renderings setup-kafka 1`] = `
             {
               "name": "brokers",
               "valueFrom": {
-                "path": "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
+                "jsonPath": "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
               },
             },
           ],
@@ -3574,7 +4807,7 @@ spec:
             {
               "name": "brokers",
               "valueFrom": {
-                "path": "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
+                "jsonPath": "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
               },
             },
           ],
@@ -3722,7 +4955,7 @@ spec:
             {
               "name": "topicName",
               "valueFrom": {
-                "path": "{.status.topicName}",
+                "jsonPath": "{.status.topicName}",
               },
             },
           ],
@@ -3794,60 +5027,166 @@ exports[`test workflow template renderings target-latch-helpers 1`] = `
       {
         "container": {
           "args": [
-            "set -x -e
-PROCESSOR_ID="$PROCESSOR_ID"
-TARGET_NAME="$TARGET_NAME"
-ETCD_ENDPOINT=$ETCD_ENDPOINTS
-PREFIX="$WORKFLOW_PREFIX"
+            "#!/bin/bash
+set -e
+
+# Import Library
+#!/bin/bash
+
+# Optional Parameters - 5 minute total retry window
+ETCD_RETRIES=\${ETCD_RETRIES:-30}
+ETCD_RETRY_DELAY=\${ETCD_RETRY_DELAY:-5}
+ETCD_DIAL_TIMEOUT=\${ETCD_DIAL_TIMEOUT:-"10s"}
+ETCD_CMD_TIMEOUT=\${ETCD_CMD_TIMEOUT:-"10s"}
+
+# Required Parameters
+if [ -z "$ETCD_ENDPOINTS" ]; then
+  echo "Error: ETCD_ENDPOINTS is not set." >&2
+  exit 1
+fi
+
+# Export the base command with timeouts so it fails fast rather than hanging
+export ETCDCTL_API=3
+export ETCD_CMD="etcdctl --endpoints=$ETCD_ENDPOINTS --user $ETCD_USER:$ETCD_PASSWORD --dial-timeout=$ETCD_DIAL_TIMEOUT --command-timeout=$ETCD_CMD_TIMEOUT"
+
+# Run an arbitrary command that doesn't need to return/handle stdout from etcdctl (like WRITE/DELETE)
+# Usage: etcd_safe_run put key value
+etcd_safe_run() {
+  local attempt=1
+  local cmd="$*"
+
+  while [ $attempt -le $ETCD_RETRIES ]; do
+    # We temporarily disable 'set -e' to catch the failure
+    set +e
+    $ETCD_CMD "$@" > /dev/null
+    local status=$?
+    set -e
+
+    if [ $status -eq 0 ]; then
+      return 0
+    fi
+
+    echo "[etcd_lib] Command failed (Attempt $attempt/$ETCD_RETRIES): $cmd" >&2
+    sleep $ETCD_RETRY_DELAY
+    attempt=$((attempt + 1))
+  done
+
+  echo "[etcd_lib] Critical: Max retries reached for operation." >&2
+  return 1
+}
+
+# Wrapper for getting values safely
+# This is separate from etcd_safe_run since the output for get needs to be captured
+# Usage: MY_VAR=$(etcd_safe_get "my/key")
+etcd_safe_get() {
+  local key="$1"
+  local attempt=1
+
+  while [ $attempt -le $ETCD_RETRIES ]; do
+    set +e
+    # Capture output and status separately, silence stderr
+    local output
+    output=$($ETCD_CMD get "$key" --print-value-only 2>/dev/null)
+    local status=$?
+    set -e
+
+    if [ $status -eq 0 ]; then
+      echo "$output"
+      return 0
+    fi
+
+    # Log to stderr so we don't pollute the captured variable
+    echo "[etcd_lib] Get failed (Attempt $attempt/$ETCD_RETRIES): $key" >&2
+    sleep $ETCD_RETRY_DELAY
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
+# Wrapper for getting just keys safely
+# Usage: MY_KEYS=$(etcd_safe_get_keys "my/prefix/")
+# Note: Automatically adds --prefix and --keys-only
+etcd_safe_get_keys() {
+  local prefix="$1"
+  local attempt=1
+
+  while [ $attempt -le $ETCD_RETRIES ]; do
+    set +e
+    local output
+    output=$($ETCD_CMD get "$prefix" --prefix --keys-only 2>/dev/null)
+    local status=$?
+    set -e
+
+    if [ $status -eq 0 ]; then
+      echo "$output"
+      return 0
+    fi
+
+    echo "[etcd_lib] Key list fetch failed (Attempt $attempt/$ETCD_RETRIES): $prefix" >&2
+    sleep $ETCD_RETRY_DELAY
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
+
+# PREFIX, PROCESSOR_ID, and TARGET_NAME env vars are set by the workflow template
 
 normalize_endpoint() {
   echo "$1" | base64
 }
 
 NORMALIZED_TARGET=$(normalize_endpoint "$TARGET_NAME")
-
-USERNAME=$ETCD_USER
-PASSWORD=$ETCD_PASSWORD
 LATCH_KEY_NAME=/$PREFIX/workflow/targets/$NORMALIZED_TARGET/latch
-
 FRIENDLY_NAME="\${NORMALIZED_TARGET}-\${PROCESSOR_ID}"
 
-export ETCDCTL_API=3
-
-# Run etcdctl with configured endpoints
-etcdctl_cmd="etcdctl --endpoints=$ETCD_ENDPOINT --user $USERNAME:$PASSWORD"
-
-# Record this processor as finished
-$etcdctl_cmd put /$PREFIX/workflow/targets/$NORMALIZED_TARGET/finishedSubFlows/$FRIENDLY_NAME "completed"
+# Record processor completion
+etcd_safe_run put "/$PREFIX/workflow/targets/$NORMALIZED_TARGET/finishedSubFlows/$FRIENDLY_NAME" "completed"
 
 execute_transaction() {
-local current_value="$1"
-local next_value="$2"
+  local current_value="$1"
+  local next_value="$2"
 
-echo "LATCH_KEY_NAME=$LATCH_KEY_NAME"
-echo "current_value=$current_value"
-echo "next_value=$next_value"
-echo "etcdctl_cmd=$etcdctl_cmd"
+  echo "Attempting Transaction (LATCH_KEY_NAME={$LATCH_KEY_NAME}): $current_value -> $next_value"
 
-# be very mindful of the empty lines in the file being sent to the transaction command!
-$etcdctl_cmd txn  --write-out=json << EOF | jq -e '.succeeded == true'
+  # We use raw $ETCD_CMD here because heredocs don't play nice with wrapper functions
+  set +e
+  $ETCD_CMD txn --write-out=json << EOF | jq -e '.succeeded == true' > /dev/null
 val("$LATCH_KEY_NAME") = "$current_value"
 
 put $LATCH_KEY_NAME "$next_value"
 
 
 EOF
+  local status=$?
+  set -e
+
+  return $status
 }
 
 # Transaction retry loop
 while true; do
-  CURRENT_COUNT=$($etcdctl_cmd get  $LATCH_KEY_NAME --print-value-only)
+  # retry for transient service errors is already built into safe get.
+  # Our loop deals with the content of the key OR (later) a transient error while running the transaction
+  CURRENT_COUNT=$(etcd_safe_get "$LATCH_KEY_NAME")
+
+  # Handle case where key doesn't exist yet (empty string)
+  if [ -z "$CURRENT_COUNT" ]; then
+    CURRENT_COUNT=0 # Or handle error depending on your logic
+  fi
+
   NEW_COUNT=$((CURRENT_COUNT - 1))
+
   if execute_transaction "$CURRENT_COUNT" "$NEW_COUNT"; then
     echo "Transaction succeeded"
     break
   else
-    echo "Transaction failed, retrying..."
+    # This catches both:
+    # A. Logical failure (value changed by someone else)
+    # B. Network failure (etcd command failed)
+    echo "Transaction failed (Network or compare-and-swap mismatch), retrying..."
     sleep 1
   fi
 done
@@ -3909,12 +5248,12 @@ echo $SHOULD_FINALIZE",
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
+              "cpu": "500m",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -3964,15 +5303,119 @@ echo $SHOULD_FINALIZE",
       {
         "container": {
           "args": [
-            "export ETCDCTL_API=3
-etcdctl_cmd="etcdctl --endpoints=$ETCD_ENDPOINTS --user $ETCD_USER:$ETCD_PASSWORD"
+            "#!/bin/bash
+set -e
 
-PREFIX="$WORKFLOW_PREFIX"
+# Import Library
+#!/bin/bash
+
+# Optional Parameters - 5 minute total retry window
+ETCD_RETRIES=\${ETCD_RETRIES:-30}
+ETCD_RETRY_DELAY=\${ETCD_RETRY_DELAY:-5}
+ETCD_DIAL_TIMEOUT=\${ETCD_DIAL_TIMEOUT:-"10s"}
+ETCD_CMD_TIMEOUT=\${ETCD_CMD_TIMEOUT:-"10s"}
+
+# Required Parameters
+if [ -z "$ETCD_ENDPOINTS" ]; then
+  echo "Error: ETCD_ENDPOINTS is not set." >&2
+  exit 1
+fi
+
+# Export the base command with timeouts so it fails fast rather than hanging
+export ETCDCTL_API=3
+export ETCD_CMD="etcdctl --endpoints=$ETCD_ENDPOINTS --user $ETCD_USER:$ETCD_PASSWORD --dial-timeout=$ETCD_DIAL_TIMEOUT --command-timeout=$ETCD_CMD_TIMEOUT"
+
+# Run an arbitrary command that doesn't need to return/handle stdout from etcdctl (like WRITE/DELETE)
+# Usage: etcd_safe_run put key value
+etcd_safe_run() {
+  local attempt=1
+  local cmd="$*"
+
+  while [ $attempt -le $ETCD_RETRIES ]; do
+    # We temporarily disable 'set -e' to catch the failure
+    set +e
+    $ETCD_CMD "$@" > /dev/null
+    local status=$?
+    set -e
+
+    if [ $status -eq 0 ]; then
+      return 0
+    fi
+
+    echo "[etcd_lib] Command failed (Attempt $attempt/$ETCD_RETRIES): $cmd" >&2
+    sleep $ETCD_RETRY_DELAY
+    attempt=$((attempt + 1))
+  done
+
+  echo "[etcd_lib] Critical: Max retries reached for operation." >&2
+  return 1
+}
+
+# Wrapper for getting values safely
+# This is separate from etcd_safe_run since the output for get needs to be captured
+# Usage: MY_VAR=$(etcd_safe_get "my/key")
+etcd_safe_get() {
+  local key="$1"
+  local attempt=1
+
+  while [ $attempt -le $ETCD_RETRIES ]; do
+    set +e
+    # Capture output and status separately, silence stderr
+    local output
+    output=$($ETCD_CMD get "$key" --print-value-only 2>/dev/null)
+    local status=$?
+    set -e
+
+    if [ $status -eq 0 ]; then
+      echo "$output"
+      return 0
+    fi
+
+    # Log to stderr so we don't pollute the captured variable
+    echo "[etcd_lib] Get failed (Attempt $attempt/$ETCD_RETRIES): $key" >&2
+    sleep $ETCD_RETRY_DELAY
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
+# Wrapper for getting just keys safely
+# Usage: MY_KEYS=$(etcd_safe_get_keys "my/prefix/")
+# Note: Automatically adds --prefix and --keys-only
+etcd_safe_get_keys() {
+  local prefix="$1"
+  local attempt=1
+
+  while [ $attempt -le $ETCD_RETRIES ]; do
+    set +e
+    local output
+    output=$($ETCD_CMD get "$prefix" --prefix --keys-only 2>/dev/null)
+    local status=$?
+    set -e
+
+    if [ $status -eq 0 ]; then
+      echo "$output"
+      return 0
+    fi
+
+    echo "[etcd_lib] Key list fetch failed (Attempt $attempt/$ETCD_RETRIES): $prefix" >&2
+    sleep $ETCD_RETRY_DELAY
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
+
+# PREFIX env var is set by the workflow template
 echo "===== CLEANING UP ETCD KEYS FOR PREFIX $PREFIX ====="
 
 # Record workflow completion time
-$etcdctl_cmd put /$PREFIX/workflow/info/completed "$(date +%s)"
-STARTED=$($etcdctl_cmd get /$PREFIX/workflow/info/started --print-value-only)
+etcd_safe_run put "/$PREFIX/workflow/info/completed" "$(date +%s)"
+
+STARTED=$(etcd_safe_get "/$PREFIX/workflow/info/started")
+if [ -z "$STARTED" ]; then STARTED=$(date +%s); fi
 COMPLETED=$(date +%s)
 DURATION=$((COMPLETED - STARTED))
 
@@ -3985,34 +5428,42 @@ echo "Workflow completion stats:"
 STATS_KEY="workflow-stats/runs/$PREFIX"
 
 # Save summarized workflow stats to a persistent key
-$etcdctl_cmd put /$STATS_KEY/started "$STARTED"
-$etcdctl_cmd put /$STATS_KEY/completed "$COMPLETED"
-$etcdctl_cmd put /$STATS_KEY/duration "$DURATION"
+etcd_safe_run put "/$STATS_KEY/started" "$STARTED"
+etcd_safe_run put "/$STATS_KEY/completed" "$COMPLETED"
+etcd_safe_run put "/$STATS_KEY/duration" "$DURATION"
 
 # For each target, save its finalized status and completed processors
-for TARGET_KEY in $($etcdctl_cmd get /$PREFIX/workflow/targets/ --prefix --keys-only | grep "/latch$" | sort); do
+TARGET_KEYS=$(etcd_safe_get_keys "/$PREFIX/workflow/targets/" | grep "/latch$" | sort)
+for TARGET_KEY in $TARGET_KEYS; do
   TARGET_PATH=$(echo "$TARGET_KEY" | sed "s|/$PREFIX/workflow/targets/||" | sed "s|/latch$||")
-  TARGET_ENDPOINT=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET_PATH/endpoint --print-value-only)
-  LATCH_VALUE=$($etcdctl_cmd get $TARGET_KEY --print-value-only)
+  TARGET_ENDPOINT=$(etcd_safe_get "/$PREFIX/workflow/targets/$TARGET_PATH/endpoint")
+  LATCH_VALUE=$(etcd_safe_get "$TARGET_KEY")
 
-  # Save the target stats
-  $etcdctl_cmd put /$STATS_KEY/targets/$TARGET_PATH/endpoint "$TARGET_ENDPOINT"
-  $etcdctl_cmd put /$STATS_KEY/targets/$TARGET_PATH/final_latch_value "$LATCH_VALUE"
+  # Save target stats
+  etcd_safe_run put "/$STATS_KEY/targets/$TARGET_PATH/endpoint" "$TARGET_ENDPOINT"
+  etcd_safe_run put "/$STATS_KEY/targets/$TARGET_PATH/final_latch_value" "$LATCH_VALUE"
 
   # Save the list of completed processor chains
-  COMPLETED_PROCESSORS=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET_PATH/finishedSubFlows/ --prefix --keys-only | wc -l)
-  $etcdctl_cmd put /$STATS_KEY/targets/$TARGET_PATH/completed_processors "$COMPLETED_PROCESSORS"
+  RAW_PROCESSOR_KEYS=$(etcd_safe_get_keys "/$PREFIX/workflow/targets/$TARGET_PATH/finishedSubFlows/")
 
-  # Save the list of processor chain names
-  PROCESSOR_CHAINS=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET_PATH/finishedSubFlows/ --prefix --keys-only | sort | tr '\\n' ',' | sed 's/,$//')
-  $etcdctl_cmd put /$STATS_KEY/targets/$TARGET_PATH/processor_chains "$PROCESSOR_CHAINS"
+  # Count Processors
+  if [ -z "$RAW_PROCESSOR_KEYS" ]; then
+    COMPLETED_PROCESSORS_COUNT=0
+    PROCESSOR_CHAINS=""
+  else
+    COMPLETED_PROCESSORS_COUNT=$(echo "$RAW_PROCESSOR_KEYS" | wc -l)
+    PROCESSOR_CHAINS=$(echo "$RAW_PROCESSOR_KEYS" | sort | tr '\\n' ',' | sed 's/,$//')
+  fi
 
-  echo "- Target $TARGET_ENDPOINT: Latch=$LATCH_VALUE, Completed Processors=$COMPLETED_PROCESSORS"
+  etcd_safe_run put "/$STATS_KEY/targets/$TARGET_PATH/completed_processors" "$COMPLETED_PROCESSORS_COUNT"
+  etcd_safe_run put "/$STATS_KEY/targets/$TARGET_PATH/processor_chains" "$PROCESSOR_CHAINS"
+
+  echo "- Target $TARGET_ENDPOINT: Latch=$LATCH_VALUE, Completed Processors=$COMPLETED_PROCESSORS_COUNT"
 done
 
 # Delete all workflow keys for this run (but keep the stats)
 echo "Deleting all workflow keys with prefix: /$PREFIX/workflow/"
-$etcdctl_cmd del /$PREFIX/workflow/ --prefix
+etcd_safe_run del "/$PREFIX/workflow/" --prefix
 
 echo "Cleanup complete. Workflow stats preserved under /$STATS_KEY/"",
           ],
@@ -4050,12 +5501,12 @@ echo "Cleanup complete. Workflow stats preserved under /$STATS_KEY/"",
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "resources": {
             "limits": {
-              "cpu": "1000m",
-              "memory": "2000Mi",
+              "cpu": "500m",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },

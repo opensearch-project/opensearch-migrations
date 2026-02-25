@@ -198,6 +198,15 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
+            names = { "--quiescent-period-ms", "--quiescentPeriodMs" },
+            arity = 1,
+            description = "Milliseconds to delay the first request on a resumed connection (one that was " +
+                "mid-flight when a Kafka partition was reassigned). Allows the previous replayer's " +
+                "in-flight requests to complete before the new replayer sends. Default: 5000ms.")
+        long quiescentPeriodMs = 5000;
+
+        @Parameter(
+            required = false,
             names = { "--kafka-traffic-brokers", "--kafkaTrafficBrokers" },
             arity = 1,
             description = "Comma-separated list of host and port pairs that are the addresses of the Kafka brokers " +
@@ -321,7 +330,7 @@ public class TrafficReplayer {
             jCommander.parse(args);
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
-            System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_TARGET_ARGS)));
+            System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
             jCommander.usage();
             System.exit(2);
             return null;
@@ -330,7 +339,7 @@ public class TrafficReplayer {
     }
 
     public static void main(String[] args) throws Exception {
-        System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_TARGET_ARGS)));
+        System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
         final var workerId = ProcessHelpers.getNodeInstanceName();
         log.info("Starting Traffic Replayer with id=" + workerId);
 
@@ -443,7 +452,8 @@ public class TrafficReplayer {
                 serverTimeout,
                 blockingTrafficSource,
                 timeShifter,
-                tupleWriter
+                tupleWriter,
+                Duration.ofMillis(params.quiescentPeriodMs)
             );
             log.info("Done processing TrafficStreams");
         } finally {

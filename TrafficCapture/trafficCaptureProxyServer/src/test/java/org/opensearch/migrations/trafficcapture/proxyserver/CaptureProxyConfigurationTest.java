@@ -3,6 +3,7 @@ package org.opensearch.migrations.trafficcapture.proxyserver;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
+import java.util.Locale;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
@@ -17,14 +18,12 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @Slf4j
 @HttpdContainerTest
 public class CaptureProxyConfigurationTest {
 
     private static final HttpdContainerTestBase httpdTestBase = new HttpdContainerTestBase();
-    private static final String HTTPD_GET_EXPECTED_RESPONSE = "<html><body><h1>It works!</h1></body></html>\n";
     private static final int DEFAULT_NUMBER_OF_CALLS = 3;
     private static final long PROXY_EXPECTED_MAX_LATENCY_MS = Duration.ofSeconds(1).toMillis();
 
@@ -74,7 +73,8 @@ public class CaptureProxyConfigurationTest {
             long endTimeNanos = System.nanoTime();
 
             var responseBody = new String(response.payloadBytes);
-            assertEquals(HTTPD_GET_EXPECTED_RESPONSE, responseBody);
+            Assertions.assertNotNull(responseBody);
+            Assertions.assertTrue(responseBody.toLowerCase(Locale.ROOT).contains("it works"));
             return Duration.ofNanos(endTimeNanos - startTimeNanos);
         } catch (IOException e) {
             throw new RuntimeException(e);

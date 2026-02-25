@@ -3,6 +3,7 @@ import {MigrationInitializer} from "./migrationInitializer";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {parse} from "yaml";
 import {Console} from "console";
+import {formatInputValidationError, InputValidationError} from "./streamSchemaTransformer";
 
 global.console = new Console({
     stdout: process.stderr,
@@ -15,7 +16,6 @@ Usage: initialize-workflow [options] [input-file]
 Initialize migration workflow in etcd.  
 When the configuration is provided in the user-schema with the --user-config option, 
 that configuration will first be validated and transformed before doing the initialization.
-The transformed user configuration will also be output to stdout.  
 
 Arguments:
   --user-config <file>         (stdin: '-') User-specified YAML/JSON configuration file ('-' for stdin)
@@ -24,10 +24,10 @@ Arguments:
   --unique-run-nonce <string>  Value to disambiguate workflow instances for snapshot names, keys, etc (env: UNIQUE_RUN_NONCE)
   --etcd-user <user>           Username for etcd authentication (env: ETCD_USER)
   --etcd-password <pass>       Password for etcd authentication (env: ETCD_PASSWORD)
+  --output-dir <dir>           Directory to write output files (workflowMigration.config.yaml, approvalConfigMaps.yaml, concurrencyConfigMaps.yaml)
 
 Options:
   --skip-initialize            Only do transformation of user-config. Does no processing if passed a transformed config.            
-  --silent                     Suppress outputting the workflow configuration to stdout            
   
   -h, --help               Show this help message
 `;
@@ -62,8 +62,8 @@ export async function main() {
     let uniqueRunNonce = process.env.UNIQUE_RUN_NONCE;
     let userConfigFile = process.env.USER_WORKFLOW_CONFIGURATION;
     let workflowConfigFile = process.env.TRANSFORMED_WORKFLOW_CONFIGURATION;
+    let outputDir: string | undefined;
     let skipInitialize = false;
-    let silent = false;
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
@@ -80,10 +80,10 @@ export async function main() {
             userConfigFile = args[++i];
         } else if (arg === '--transformed-config' && i + 1 < args.length) {
             workflowConfigFile = args[++i];
+        } else if (arg === '--output-dir' && i + 1 < args.length) {
+            outputDir = args[++i];
         } else if (arg === '--skip-initialize') {
             skipInitialize = true;
-        } else if (arg === '--silent') {
-            silent = true;
         }
     }
 
@@ -135,6 +135,22 @@ export async function main() {
             }
         }) ();
 
+        // Generate output files
+        if (outputDir) {
+            const initializer = new MigrationInitializer({
+                endpoints: [etcdEndpoints as string],
+                ...(!etcdUser || !etcdPassword ? {} : {
+                    auth: {
+                        username: etcdUser as string,
+                        password: etcdPassword as string
+                    }
+                })
+            }, uniqueRunNonce as string);
+
+            await initializer.generateOutputFiles(workflows, outputDir, userConfigFile ? await parseInput(userConfigFile) : null);
+            await initializer.close();
+        }
+
         if (!skipInitialize) {
             const initializer = new MigrationInitializer({
                     endpoints: [etcdEndpoints as string],
@@ -155,12 +171,16 @@ export async function main() {
             }
         }
 
-        // PRINT THE TRANSFORMED RESULTS SO THAT THE WORKFLOW CAN BE CREATED FROM THEM!
-        if (!silent) {
+        // Output transformed workflow to stdout if no output directory specified - ignoring auxiliary configmap values
+        if (!outputDir) {
             process.stdout.write(JSON.stringify(workflows, null, 2));
         }
     } catch (error) {
-        if (error instanceof SyntaxError) {
+        if (error instanceof InputValidationError) {
+            console.error('Validation error:');
+            console.error(formatInputValidationError(error));
+            process.exit(1);
+        } else if (error instanceof SyntaxError) {
             console.error('JSON parsing error:', error.message);
             process.exit(1);
         } else if (error instanceof Error) {

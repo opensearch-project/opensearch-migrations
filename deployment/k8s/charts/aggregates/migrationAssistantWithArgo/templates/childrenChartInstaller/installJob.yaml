@@ -33,6 +33,17 @@ spec:
               #!/bin/sh
               set -e
 
+      {{- if .Values.ecrAuth }}
+              echo "Authenticating with ECR for OCI chart pulls..."
+      {{- if .Values.ecrAuth.token }}
+              echo "{{ .Values.ecrAuth.token }}" | helm registry login --username AWS --password-stdin {{ .Values.ecrAuth.registry }}
+      {{- else }}
+              /.venv/bin/aws ecr get-login-password --region "${AWS_DEFAULT_REGION}" 2>/dev/null | \
+                helm registry login --username AWS --password-stdin {{ .Values.ecrAuth.registry }} || \
+                echo "WARNING: Could not authenticate with ECR. OCI chart pulls may fail."
+      {{- end }}
+      {{- end }}
+
       {{- if (and (get $.Values.conditionalPackageInstalls "otel-collector-daemonset")
                   (get $.Values.conditionalPackageInstalls "opentelemetry-operator")) }}
               echo "'otel-collector-daemonset' and 'opentelemetry-operator' are mutually exclusive. " \
@@ -53,7 +64,7 @@ spec:
       {{- end }}
 
       {{- if .Values.charts }}
-              time helm repo update
+              time helm repo update || echo "No traditional helm repos to update (OCI repos don't need it)"
       {{- end }}
 
               # Helper function.  Charts that define "dependsOn" will check a dependency with this.
@@ -77,9 +88,31 @@ spec:
                 return 1
               }
 
-              # Install charts
+              # Install Kyverno first and wait for it to be fully ready before other charts
+              # This prevents race conditions where Kyverno's webhook intercepts other chart
+              # installations before Kyverno's admission controller is ready
+      {{- if (index $.Values.conditionalPackageInstalls "kyverno") }}
+        {{- $kyvernoChart := index .Values.charts "kyverno" }}
+        {{- if $kyvernoChart }}
+              echo "Installing Kyverno first (must be ready before other charts)..."
+              {{- include "migration.installChart" (dict "name" "kyverno" "chart" $kyvernoChart "root" $ "forceWait" true) | nindent 14 }}
+              echo "Kyverno installed and ready"
+
+              # Set ownerReference on kyverno namespace so it gets cascade-deleted with the release namespace
+              {{- if ne ($kyvernoChart.namespace | default $.Release.Namespace) $.Release.Namespace }}
+              echo "Setting {{ $kyvernoChart.namespace }} namespace ownership to {{ $.Release.Namespace }}..."
+              PARENT_NS_UID=$(kubectl get namespace {{ $.Release.Namespace }} -o jsonpath='{.metadata.uid}')
+              kubectl patch namespace {{ $kyvernoChart.namespace }} --type=merge -p \
+                "{\"metadata\":{\"ownerReferences\":[{\"apiVersion\":\"v1\",\"kind\":\"Namespace\",\"name\":\"{{ $.Release.Namespace }}\",\"uid\":\"$PARENT_NS_UID\"}]}}"
+              {{- end }}
+        {{- end }}
+      {{- end }}
+
+              # Install remaining charts in parallel
       {{- range $name, $chart := .Values.charts }}
-        {{- if (not (index $.Values.conditionalPackageInstalls $name)) }}
+        {{- if eq $name "kyverno" }}
+              echo "Skipping kyverno in main loop (already installed)"
+        {{- else if (not (index $.Values.conditionalPackageInstalls $name)) }}
               echo "Skipping install for: {{ $name }} because conditionalPackageInstalls.{{ $name }} disabled it."
         {{- else }}
               echo "Preparing chart: {{ $name }}"

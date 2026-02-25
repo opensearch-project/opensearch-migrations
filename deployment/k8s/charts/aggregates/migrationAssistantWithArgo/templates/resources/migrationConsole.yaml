@@ -11,13 +11,13 @@ metadata:
   name: migration-console-access-role
 rules:
   - apiGroups: [ "" ]
-    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log", "secrets", "services"]
+    resources: ["configmaps", "events", "persistentvolumeclaims", "pods", "pods/log", "secrets", "services"]
     verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
   - apiGroups: [""]
     resources: ["pods/attach"]
     verbs: ["create", "get"]
   - apiGroups: [ "apps" ]
-    resources: ["deployments", "deployments/scale"]
+    resources: ["deployments", "deployments/scale", "statefulsets"]
     verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
   - apiGroups: ["argoproj.io"]
     resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]
@@ -35,8 +35,52 @@ roleRef:
   kind: Role
   name: migration-console-access-role
   apiGroup: rbac.authorization.k8s.io
-
 ---
+{{- if .Values.cluster.dedicatedKarpenterNodePoolForMigrationConsole }}
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: dedicated-small-instance-migration-console-pool
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  # Limits on the TOTAL aggregate size of the pool.
+  # The Migration Console is intended only to be a very small control-plane
+  limits:
+    cpu: 4000m
+    memory: 4Gi
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 5m  # No reason to wait long if the console exits
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: default
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: node.kubernetes.io/instance-category
+          # This pool is for a control plane with few network calls at low bandwidth
+          # and shouldn't require much compute.  If we do find that users would like
+          # to run heavier log dives, validations, comparison jobs, or significant
+          # Kafka work, we should offload those tasks to pods that run with higher
+          # specifications in the general pool
+          operator: In
+          values: ["t"]
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+      taints:
+        - key: "migration-console" # Taint to ensure only migration console pods land here
+          value: "dedicated"
+          effect: NoSchedule
+---
+{{- end }}
 {{ $sharedLogsVolumeEnabled := .Values.logs.sharedLogsVolume.enabled }}
 apiVersion: apps/v1
 kind: StatefulSet
@@ -55,10 +99,55 @@ spec:
         env: v1
     spec:
       serviceAccountName: migration-console-access-role
+      {{- if .Values.cluster.dedicatedKarpenterNodePoolForMigrationConsole }}
+      tolerations: # Set the metadata so that the dedicated nodepool will let this pod schedule to it
+        - key: "migration-console"
+          operator: "Equal"
+          value: "dedicated"
+          effect: "NoSchedule"
+      # Prefer dedicated small nodes, but allow fallback to any node
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100  # Highest preference
+              preference:
+                matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: In
+                    values: ["dedicated-small-instance-migration-console-pool"]
+            - weight: 50   # Lower preference fallback
+              preference:
+                matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: In
+                    values: ["general-purpose"]
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: In
+                    values:  # REQUIRED: Must be one of these pools
+                      - "dedicated-small-instance-migration-console-pool"
+                      - "general-purpose"
+      {{- end }}
       containers:
         - name: console
           image: {{ .Values.images.migrationConsole.repository}}:{{ .Values.images.migrationConsole.tag }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
+          # Since the console may be used interactively, try to keep the migration
+          # console on the same node so that it can be stable.  Keep the requests
+          # and limits values the same to have k8s treat the pod as "Guranteed",
+          # which will make it the least likely to pod to face eviction.
+          #
+          # See https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#guaranteed
+          resources:
+            requests:
+              cpu: 1500m
+              memory: 2.5Gi
+            limits:
+              cpu: 1500m
+              memory:
+                2.5Gi
           env:
             - name: MIGRATIONS_CLI_CONSOLE_DISABLE_LEGACY_COMMANDS
               value: "true"

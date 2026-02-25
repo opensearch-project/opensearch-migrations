@@ -19,9 +19,16 @@ echo "Checking workflow status"
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate
 
-STATUS_OUTPUT=$(workflow status migration-workflow 2>&1 || true)
+STATUS_OUTPUT=$(workflow status --workflow-name migration-workflow 2>&1)
+STATUS_EXIT_CODE=$?
 echo "Status output:"
 echo "$STATUS_OUTPUT"
+
+# If the command failed (e.g., connection error), retry
+if [ $STATUS_EXIT_CODE -ne 0 ]; then
+    echo "Failed to get workflow status (exit code: $STATUS_EXIT_CODE), will retry..."
+    exit 1
+fi
 
 # Check if workflow is running or pending - retry
 if echo "$STATUS_OUTPUT" | grep -q "Phase: Running\|Phase: Pending"; then

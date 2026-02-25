@@ -4,6 +4,8 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+# urllib3 is a transitive dependency, pinned here for CVE management (CVE-2025-66471, CVE-2025-66418)
+urllib3 = ">=2.6.0"
 console-link = {editable = true, path = "../lib/console_link"}
 cluster_tools = {editable = true, path = "."}
 argparse = "*"

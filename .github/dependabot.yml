@@ -8,6 +8,19 @@ updates:
       migration-assistant-npm:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "eslint"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@eslint/*"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@types/eslint__js"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "typescript-eslint"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "npm"
     directory: "/deployment/cdk/opensearch-service-migration"
@@ -17,6 +30,16 @@ updates:
       opensearch-cdk-npm:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "eslint"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@eslint/*"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "typescript-eslint"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "gradle"
     directory: "/"
@@ -29,6 +52,8 @@ updates:
     ignore:
       - dependency-name: "com.avast.gradle.docker-compose"
       - dependency-name: "io.netty:*"
+      - dependency-name: "io.projectreactor.netty:*" # reactor-netty 1.3+ requires Netty 4.2
+      - dependency-name: "io.projectreactor:reactor-test" # reactor-test 3.8+ requires Netty 4.2
       - dependency-name: "io.opentelemetry.semconv:*"
       - dependency-name: "org.apache.commons:commons-compress"
       - dependency-name: "org.apache.lucene:*"
@@ -40,6 +65,7 @@ updates:
           - "version-update:semver-major"
           - "version-update:semver-minor"
       - dependency-name: "errorprone"
+      - dependency-name: "software.amazon.msk:aws-msk-iam-auth" # > 2.3.4 requires java 17
       - dependency-name: "org.junit:junit-bom"
       - dependency-name: "org.junit.platform:*"
       - dependency-name: "org.junit.jupiter:*"
@@ -52,5 +78,77 @@ updates:
       interval: "weekly"
     groups:
       github-actions-all:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/migrationConsole/lib/console_link"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-console-link:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/migrationConsole/cluster_tools"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-cluster-tools:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/migrationConsole/lib/integ_test"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-integ-test:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/libraries/testAutomation"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-test-automation:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/test/cleanupDeployment"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-cleanup-deployment:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-es-test-console:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/TrafficCapture/dockerSolution/src/main/docker/k8sConfigMapUtilScripts"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-k8s-configmap-utils:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/TrafficCapture/dockerSolution/otelConfigs"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-otel-configs:
         patterns:
           - "*"

@@ -12,6 +12,7 @@ from .test_cases.ma_argo_test_base import ClusterVersionCombinationUnsupported, 
 from .test_cases.basic_tests import *
 from .test_cases.multi_type_tests import *
 from .test_cases.backfill_tests import *
+from .test_cases.snapshot_only_tests import *
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +76,20 @@ def pytest_generate_tests(metafunc):
 
 
 def _filter_test_cases(test_ids_list: List[str]) -> List:
+    """
+    Filter test cases based on test_ids_list.
+    
+    - If test_ids_list is empty: return all tests EXCEPT those with requires_explicit_selection=True
+    - If test_ids_list is provided: return only tests matching the IDs (including explicit-only tests)
+    """
     if not test_ids_list:
-        return ALL_TEST_CASES
+        # Default run: exclude tests that require explicit selection
+        return [case for case in ALL_TEST_CASES if not getattr(case, 'requires_explicit_selection', False)]
+    
+    # Explicit selection: include matching tests regardless of requires_explicit_selection
     filtered_cases = []
     for case in ALL_TEST_CASES:
-        if test_ids_list and any(tid in str(case) for tid in test_ids_list):
+        if any(tid in str(case) for tid in test_ids_list):
             filtered_cases.append(case)
     return filtered_cases
 
@@ -106,6 +116,8 @@ def pytest_runtest_makereport(item, call):
     # Hook invoked after each test phase, used to update test success/failure data
     outcome = yield
     rep = outcome.get_result()
+    # Store report on item for access in teardown
+    setattr(item, f"rep_{rep.when}", rep)
     if rep.when == "call":
         # Retrieve any custom data attached during the test, if available.
         test_data = getattr(item, "test_data", {})

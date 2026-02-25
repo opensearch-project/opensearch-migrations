@@ -7,6 +7,15 @@ aws:
   region: ""
   account: ""
 
+cluster:
+  dedicatedKarpenterNodePoolForMigrationConsole: true
+  # set this to true and disable the general-purpose pool to put a hard limit resource usage
+  useCustomKarpenterNodePool: false
+
+# Enable multi-arch for EKS
+workloadsNodePool:
+  architectures: ["amd64", "arm64"]
+
 defaultBucketConfiguration:
   useLocalStack: false
   deleteOnUninstall: true
@@ -147,3 +156,9 @@ charts:
         - name: lua-scripts
           mountPath: /fluentbit/scripts
           readOnly: true
+
+
+# Higher resources for EKS production
+etcdCluster:
+  cpu: 500m
+  memory: 1Gi
