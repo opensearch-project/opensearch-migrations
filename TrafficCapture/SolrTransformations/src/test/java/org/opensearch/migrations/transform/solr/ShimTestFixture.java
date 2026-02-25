@@ -30,7 +30,7 @@ import org.testcontainers.utility.DockerImageName;
  * <p>
  * Usage:
  * <pre>{@code
- * try (var fixture = new ShimTestFixture("solr:8", "opensearchproject/opensearch:3.0.0", transforms)) {
+ * try (var fixture = new ShimTestFixture("mirror.gcr.io/library/solr:8", "mirror.gcr.io/opensearchproject/opensearch:3.3.0", transforms)) {
  *     fixture.start();
  *     // fixture.getSolrBaseUrl(), fixture.getOpenSearchBaseUrl(), fixture.getProxyBaseUrl()
  *     // fixture.httpGet(...), fixture.httpPost(...), fixture.httpPut(...)
@@ -169,7 +169,11 @@ public class ShimTestFixture implements AutoCloseable {
 
     @SuppressWarnings("resource")
     private static GenericContainer<?> createSolrContainer(String image) {
-        return new GenericContainer<>(DockerImageName.parse(image))
+        var imageName = DockerImageName.parse(image);
+        if (!image.startsWith("solr")) {
+            imageName = imageName.asCompatibleSubstituteFor("solr");
+        }
+        return new GenericContainer<>(imageName)
             .withExposedPorts(8983)
             .waitingFor(Wait.forHttp("/solr/admin/info/system")
                 .forPort(8983).forStatusCode(200)
@@ -178,7 +182,11 @@ public class ShimTestFixture implements AutoCloseable {
 
     @SuppressWarnings("resource")
     private static OpensearchContainer<?> createOpenSearchContainer(String image) {
-        return new OpensearchContainer<>(DockerImageName.parse(image))
+        var imageName = DockerImageName.parse(image);
+        if (!image.startsWith("opensearchproject/opensearch")) {
+            imageName = imageName.asCompatibleSubstituteFor("opensearchproject/opensearch");
+        }
+        return new OpensearchContainer<>(imageName)
             .withExposedPorts(9200)
             .withEnv("discovery.type", "single-node")
             .withEnv("DISABLE_SECURITY_PLUGIN", "true")

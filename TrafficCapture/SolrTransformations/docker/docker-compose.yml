@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   opensearch:
-    image: opensearchproject/opensearch:3.0.0
+    image: mirror.gcr.io/opensearchproject/opensearch:3.3.0
     environment:
       - discovery.type=single-node
       - DISABLE_SECURITY_PLUGIN=true
@@ -16,7 +16,7 @@ services:
       retries: 30
 
   solr:
-    image: solr:8
+    image: mirror.gcr.io/library/solr:8
     ports:
       - "8983:8983"
     healthcheck:

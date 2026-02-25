@@ -6,8 +6,8 @@
  */
 export const matrixConfig = {
   /** Default Solr Docker image tags. Every test case runs against each of these. */
-  defaultSolrVersions: ['solr:8', 'solr:9'],
+  defaultSolrVersions: ['mirror.gcr.io/library/solr:8', 'mirror.gcr.io/library/solr:9'],
 
   /** Default OpenSearch image for the backend. */
-  defaultOpenSearchImage: 'opensearchproject/opensearch:3.0.0',
+  defaultOpenSearchImage: 'mirror.gcr.io/opensearchproject/opensearch:3.3.0',
 };

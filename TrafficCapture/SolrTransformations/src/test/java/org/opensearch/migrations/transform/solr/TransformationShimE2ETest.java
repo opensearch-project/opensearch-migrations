@@ -183,7 +183,7 @@ class TransformationShimE2ETest {
         try (var stream = TransformationShimE2ETest.class.getResourceAsStream("/transforms/matrix.config.json")) {
             if (stream == null) {
                 log.warn("No matrix.config.json found, using defaults");
-                return new MatrixConfig(List.of("solr:8"), "opensearchproject/opensearch:3.0.0");
+                return new MatrixConfig(List.of("mirror.gcr.io/library/solr:8"), "mirror.gcr.io/opensearchproject/opensearch:3.3.0");
             }
             return MAPPER.readValue(stream, MatrixConfig.class);
         }
