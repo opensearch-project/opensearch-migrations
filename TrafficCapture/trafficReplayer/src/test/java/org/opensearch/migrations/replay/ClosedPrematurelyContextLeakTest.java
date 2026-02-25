@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.bugfixes;
+package org.opensearch.migrations.replay;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -8,10 +8,6 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import org.opensearch.migrations.replay.AccumulationCallbacks;
-import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
-import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
-import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
@@ -75,7 +71,8 @@ public class ClosedPrematurelyContextLeakTest extends InstrumentationTest {
                 @Override
                 public Consumer<RequestResponsePacketPair> onRequestReceived(
                     @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                    @NonNull HttpMessageAndTimestamp request
+                    @NonNull HttpMessageAndTimestamp request,
+                    boolean isResumedConnection
                 ) {
                     return pair -> {};
                 }
