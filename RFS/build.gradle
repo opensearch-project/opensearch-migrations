@@ -186,6 +186,7 @@ dependencies {
     testFixturesImplementation libs.hamcrest
     testFixturesImplementation libs.guava
     testFixturesImplementation libs.slf4j.api
+    testFixturesImplementation libs.junit.jupiter.api
 }
 
 jmh {

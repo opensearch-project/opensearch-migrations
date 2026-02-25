@@ -1,0 +1,43 @@
+[
+  {
+    "version": "1.7.6",
+    "major": 1,
+    "custom": { "startup_ms": 6477, "memory_mb": 196.6, "image_size_mb": 267.2 },
+    "public": { "startup_ms": 6477, "memory_mb": 245.9, "image_size_mb": 330.2 }
+  }
+,
+  {
+    "version": "2.4.6",
+    "major": 2,
+    "custom": { "startup_ms": 5472, "memory_mb": 194, "image_size_mb": 268.4 },
+    "public": { "startup_ms": 5476, "memory_mb": 246.8, "image_size_mb": 456.6 }
+  }
+,
+  {
+    "version": "5.6.16",
+    "major": 5,
+    "custom": { "startup_ms": 3467, "memory_mb": 678.4, "image_size_mb": 281.8 },
+    "public": { "startup_ms": 4528, "memory_mb": 750.6, "image_size_mb": 504.7 }
+  }
+,
+  {
+    "version": "6.8.23",
+    "major": 6,
+    "custom": { "startup_ms": 5504, "memory_mb": 785.9, "image_size_mb": 720.7 },
+    "public": { "startup_ms": 5457, "memory_mb": 766.4, "image_size_mb": 918.7 }
+  }
+,
+  {
+    "version": "7.17.29",
+    "major": 7,
+    "custom": { "startup_ms": 8487, "memory_mb": 821, "image_size_mb": 813.6 },
+    "public": { "startup_ms": 9483, "memory_mb": 840.7, "image_size_mb": 624.2 }
+  }
+,
+  {
+    "version": "8.19.11",
+    "major": 8,
+    "custom": { "startup_ms": 13547, "memory_mb": 995.3, "image_size_mb": 1048.4 },
+    "public": { "startup_ms": 12567, "memory_mb": 997.1, "image_size_mb": 1333.3 }
+  }
+]

@@ -1,4 +1,7 @@
 from collections import namedtuple
+import logging
+import subprocess
+from pathlib import Path
 
 import requests
 from requests.exceptions import ConnectionError as RequestsConnectionError
@@ -19,9 +22,9 @@ Version = namedtuple("version", ["flavor", "major_version", "minor_version", "pa
 VersionAndImage = namedtuple("version_and_image", ["version", "image"])
 
 IMAGE_MAPPINGS = {
-    Version(elastic, 5, 6, 16): "docker.elastic.co/elasticsearch/elasticsearch:5.6.16",
-    Version(elastic, 6, 8, 23): "docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23",
-    Version(elastic, 7, 10, 2): "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
+    Version(elastic, 5, 6, 16): "custom-elasticsearch:5.6.16",
+    Version(elastic, 6, 8, 23): "custom-elasticsearch:6.8.23",
+    Version(elastic, 7, 10, 2): "custom-elasticsearch:7.10.2",
     Version(opensearch, 1, 3, 16): "opensearchproject/opensearch:1.3.16",
     Version(opensearch, 2, 19, 1): "opensearchproject/opensearch:2.19.1"
 }
@@ -33,6 +36,38 @@ class UnknownSearchContainerVersionException(Exception):
 
 class Non200StatusCodeException(Exception):
     pass
+
+
+logger = logging.getLogger(__name__)
+
+
+def _ensure_custom_image_available(image: str) -> None:
+    """Build a custom-elasticsearch image on demand via Gradle if not available locally."""
+    if not image.startswith("custom-elasticsearch:"):
+        return
+    result = subprocess.run(["docker", "image", "inspect", image],
+                            capture_output=True)
+    if result.returncode == 0:
+        return
+    tag = image.split(":")[1]  # e.g. "7.10.2"
+    parts = tag.split(".")
+    task_name = f"buildImage_{parts[0]}_{parts[1]}"
+
+    gradlew = None
+    d = Path.cwd()
+    while d != d.parent:
+        if (d / "gradlew").exists():
+            gradlew = d / "gradlew"
+            break
+        d = d.parent
+
+    if gradlew is None:
+        raise RuntimeError(f"Cannot find gradlew to build {image}")
+
+    logger.info("Building Docker image on-demand: %s (task: :custom-es-images:%s)", image, task_name)
+    result = subprocess.run([str(gradlew), f":custom-es-images:{task_name}"], cwd=str(gradlew.parent))
+    if result.returncode != 0:
+        raise RuntimeError(f"Gradle build failed for image: {image}")
 
 
 def _environment_by_version(version: Version) -> dict[str, str]:
@@ -71,6 +106,7 @@ class SearchContainer(DockerContainer):
             raise UnknownSearchContainerVersionException(f"Unknown version provided: {version}")
         self.version = version
         image = IMAGE_MAPPINGS[version]
+        _ensure_custom_image_available(image)
         super().__init__(image, **kwargs)
         self.port = port
         self.with_exposed_ports(self.port)

@@ -35,6 +35,9 @@ spec:
           {"batchSize": 1000, "concurrency": 4}
       - name: skip-cleanup
         value: "false"
+      # Registry prefix for custom ES images (e.g. "localhost:5000/" for minikube)
+      - name: image-registry-prefix
+        value: ""
       # Any references to workflow.parameters must come from top level workflow
       - name: etcd-endpoints
         value: "http://etcd.ma.svc.cluster.local:2379"
@@ -80,6 +83,8 @@ spec:
                   value: "{{steps.generate-cluster-names.outputs.parameters.source-cluster-name}}"
                 - name: namespace
                   value: "{{workflow.parameters.cluster-namespace}}"
+                - name: image-registry-prefix
+                  value: "{{workflow.parameters.image-registry-prefix}}"
 
           - name: create-target-cluster
             templateRef:
@@ -91,6 +96,8 @@ spec:
                   value: "{{steps.generate-cluster-names.outputs.parameters.target-cluster-name}}"
                 - name: namespace
                   value: "{{workflow.parameters.cluster-namespace}}"
+                - name: image-registry-prefix
+                  value: "{{workflow.parameters.image-registry-prefix}}"
 
         - - name: wait-for-source-cluster
             template: wait-for-cluster

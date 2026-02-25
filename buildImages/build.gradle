@@ -99,11 +99,83 @@ def buildKitProjects = [
                         "buildKit_migrationConsoleBase" // All buildKit projects are configured at the root
                 ]
         ],
-        // Not required for main MA operations, but has been helpful for creating test scenarios
+        // Custom Elasticsearch images for k8s integration tests
+        [
+                serviceName: "customElasticsearch152",
+                contextDir: "custom-es-images/dockerfiles",
+                imageName:  "custom-elasticsearch",
+                imageTag:   "1.5.2",
+                buildArgs: [
+                        CORRETTO_VERSION: "8",
+                        BASE_IMAGE: "amazoncorretto:8-alpine",
+                        JAVA_HOME_PATH: "/usr/lib/jvm/java-8-amazon-corretto",
+                        ES_VERSION: "1.5.2",
+                        TARBALL_URL: "https://download.elastic.co/elasticsearch/elasticsearch/elasticsearch-1.5.2.tar.gz"
+                ]
+        ],
+        [
+                serviceName: "customElasticsearch246",
+                contextDir: "custom-es-images/dockerfiles",
+                imageName:  "custom-elasticsearch",
+                imageTag:   "2.4.6",
+                buildArgs: [
+                        CORRETTO_VERSION: "8",
+                        BASE_IMAGE: "amazoncorretto:8-alpine",
+                        JAVA_HOME_PATH: "/usr/lib/jvm/java-8-amazon-corretto",
+                        ES_VERSION: "2.4.6",
+                        TARBALL_URL: "https://download.elastic.co/elasticsearch/release/org/elasticsearch/distribution/tar/elasticsearch/2.4.6/elasticsearch-2.4.6.tar.gz"
+                ]
+        ],
+        [
+                serviceName: "customElasticsearch5616",
+                contextDir: "custom-es-images/dockerfiles",
+                imageName:  "custom-elasticsearch",
+                imageTag:   "5.6.16",
+                buildArgs: [
+                        CORRETTO_VERSION: "8",
+                        BASE_IMAGE: "amazoncorretto:8-alpine",
+                        JAVA_HOME_PATH: "/usr/lib/jvm/java-8-amazon-corretto",
+                        ES_VERSION: "5.6.16",
+                        TARBALL_URL: "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-5.6.16.tar.gz"
+                ]
+        ],
+        [
+                serviceName: "customElasticsearch6823",
+                contextDir: "custom-es-images/dockerfiles",
+                imageName:  "custom-elasticsearch",
+                imageTag:   "6.8.23",
+                buildArgs: [
+                        CORRETTO_VERSION: "11",
+                        BASE_IMAGE: "amazoncorretto:11-al2023-headless",
+                        JAVA_HOME_PATH: "/usr/lib/jvm/java-11-amazon-corretto",
+                        ES_VERSION: "6.8.23",
+                        TARBALL_URL: "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-6.8.23.tar.gz"
+                ]
+        ],
+        [
+                serviceName: "customElasticsearch710",
+                contextDir: "custom-es-images/dockerfiles",
+                imageName:  "custom-elasticsearch",
+                imageTag:   "7.10.2",
+                buildArgs: [
+                        CORRETTO_VERSION: "11",
+                        BASE_IMAGE: "amazoncorretto:11-al2023-headless",
+                        JAVA_HOME_PATH: "/usr/lib/jvm/java-11-amazon-corretto",
+                        ES_VERSION: "7.10.2",
+                        TARBALL_URL: "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.10.2-linux-ARCH.tar.gz"
+                ]
+        ],
         [
                 serviceName: "elasticsearchWithSearchGuard",
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard",
-                imageName:  "elasticsearch_searchguard"
+                imageName:  "elasticsearch_searchguard",
+                buildArgs: [
+                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImage(
+                                intermediateRegistry, "migrations", "custom-elasticsearch", "7.10.2")
+                ],
+                requiredDependencies: [
+                        "buildKit_customElasticsearch710"
+                ]
         ]
 ]
 
