@@ -1,0 +1,15 @@
+{
+  "name": "@transformation-shim/transforms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Type-safe transformation definitions for the TransformationShim proxy",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "node build.mjs",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "esbuild": "^0.24.0"
+  }
+}

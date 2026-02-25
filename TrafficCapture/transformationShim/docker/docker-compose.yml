@@ -30,16 +30,16 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./transforms:/transforms:ro
+      - ../transforms/dist:/transforms:ro
     command:
       - --listenPort
       - "8080"
       - --backendUri
       - http://opensearch:9200
       - --requestTransformScript
-      - /transforms/solr-request-transform.js
+      - /transforms/solr-to-opensearch-request.js
       - --responseTransformScript
-      - /transforms/solr-response-transform.js
+      - /transforms/solr-to-opensearch-response.js
     depends_on:
       opensearch:
         condition: service_healthy

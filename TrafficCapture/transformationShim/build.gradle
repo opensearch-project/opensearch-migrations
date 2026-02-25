@@ -1,8 +1,44 @@
+import com.github.gradle.node.npm.task.NpmTask
+
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
     id 'io.freefair.lombok'
     id 'com.google.cloud.tools.jib'
+    id 'com.github.node-gradle.node' version '7.1.0'
 }
+
+node {
+    download = false
+    nodeProjectDir = file("${projectDir}/transforms")
+}
+
+tasks.register('installTransformDeps', NpmTask) {
+    description = 'Install TypeScript transform dependencies'
+    args = ['install']
+}
+
+tasks.register('typecheckTransforms', NpmTask) {
+    description = 'Type-check TypeScript transforms'
+    args = ['run', 'typecheck']
+    dependsOn installTransformDeps
+}
+
+tasks.register('buildTransforms', NpmTask) {
+    description = 'Build TypeScript transforms to GraalVM-compatible JS'
+    args = ['run', 'build']
+    dependsOn installTransformDeps
+    inputs.dir("${projectDir}/transforms/src")
+    outputs.dir("${projectDir}/transforms/dist")
+}
+
+tasks.register('copyTransforms', Copy) {
+    description = 'Copy built JS transforms to test resources'
+    from "${projectDir}/transforms/dist"
+    into "${buildDir}/resources/test/transforms"
+    dependsOn buildTransforms
+}
+
+processTestResources.dependsOn copyTransforms
 
 dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')

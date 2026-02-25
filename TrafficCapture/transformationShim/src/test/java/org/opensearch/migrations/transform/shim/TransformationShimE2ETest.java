@@ -7,6 +7,8 @@
  */
 package org.opensearch.migrations.transform.shim;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -26,59 +28,30 @@ class TransformationShimE2ETest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    // --- Transformation library: register named transforms ---
-
-    /** Rewrites Solr /select URI → OpenSearch /_search POST */
-    private static final String SOLR_URI_REWRITE_REQ_JS =
-        "(function(bindings) {\n" +
-        "  return function(msg) {\n" +
-        "    var match = msg.URI.match(/\\/solr\\/([^\\/]+)\\/select/);\n" +
-        "    if (match) {\n" +
-        "      msg.URI = '/' + match[1] + '/_search';\n" +
-        "      msg.method = 'POST';\n" +
-        "      msg.payload = { inlinedTextBody: JSON.stringify({query:{match_all:{}}}) };\n" +
-        "      if (!msg.headers) msg.headers = {};\n" +
-        "      msg.headers['content-type'] = 'application/json';\n" +
-        "    }\n" +
-        "    return msg;\n" +
-        "  };\n" +
-        "})";
-
-    /** Converts OpenSearch hits response → Solr response format */
-    private static final String SOLR_RESPONSE_FORMAT_RESP_JS =
-        "(function(bindings) {\n" +
-        "  return function(msg) {\n" +
-        "    var payload = msg.payload;\n" +
-        "    if (payload && payload.inlinedTextBody) {\n" +
-        "      var osResp = JSON.parse(payload.inlinedTextBody);\n" +
-        "      if (osResp.hits) {\n" +
-        "        var docs = [];\n" +
-        "        for (var i = 0; i < osResp.hits.hits.length; i++) {\n" +
-        "          docs.push(osResp.hits.hits[i]._source);\n" +
-        "        }\n" +
-        "        payload.inlinedTextBody = JSON.stringify({\n" +
-        "          responseHeader: { status: 0, QTime: 0 },\n" +
-        "          response: { numFound: osResp.hits.total.value, start: 0, docs: docs }\n" +
-        "        });\n" +
-        "      }\n" +
-        "    }\n" +
-        "    return msg;\n" +
-        "  };\n" +
-        "})";
-
     /** Identity transform — passes through unchanged */
     private static final String IDENTITY_JS =
         "(function(bindings) { return function(msg) { return msg; }; })";
 
-    private static TransformationLibrary buildSolrToOpenSearchLibrary() {
+    /** Load a transpiled JS transform from the classpath (built from TypeScript). */
+    private static String loadTransformJs(String name) throws IOException {
+        var path = "/transforms/" + name;
+        try (var stream = TransformationShimE2ETest.class.getResourceAsStream(path)) {
+            if (stream == null) {
+                throw new IOException("Transform not found on classpath: " + path);
+            }
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private static TransformationLibrary buildSolrToOpenSearchLibrary() throws IOException {
         var bindings = Map.of();
         return new TransformationLibrary()
             .register("solr-uri-rewrite",
-                new JavascriptTransformer(SOLR_URI_REWRITE_REQ_JS, bindings),
+                new JavascriptTransformer(loadTransformJs("solr-to-opensearch-request.js"), bindings),
                 new JavascriptTransformer(IDENTITY_JS, bindings))
             .register("solr-response-format",
                 new JavascriptTransformer(IDENTITY_JS, bindings),
-                new JavascriptTransformer(SOLR_RESPONSE_FORMAT_RESP_JS, bindings));
+                new JavascriptTransformer(loadTransformJs("solr-to-opensearch-response.js"), bindings));
     }
 
     @Test
