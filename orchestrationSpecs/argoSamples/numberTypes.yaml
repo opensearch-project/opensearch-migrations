@@ -24,7 +24,7 @@ spec:
             value: "{{inputs.parameters.num}}-{{inputs.parameters.obj}}"
       container:
         name: main
-        image: argoproj/argosay:v2
+        image: mirror.gcr.io/argoproj/argosay:v2
         command:
           - /argosay
         args:

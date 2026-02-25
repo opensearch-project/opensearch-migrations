@@ -1,5 +1,5 @@
 # ---------- 1) Builder ----------
-FROM amazonlinux:2023 AS builder
+FROM mirror.gcr.io/library/amazonlinux:2023 AS builder
 
 # Build deps (toolchain + headers)
 RUN dnf install -y \
@@ -36,7 +36,7 @@ COPY Pipfile Pipfile.lock ./
 RUN pipenv install --deploy
 
 # ---------- 2) Runtime ----------
-FROM amazonlinux:2023
+FROM mirror.gcr.io/library/amazonlinux:2023
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ENV LANG=C.UTF-8
