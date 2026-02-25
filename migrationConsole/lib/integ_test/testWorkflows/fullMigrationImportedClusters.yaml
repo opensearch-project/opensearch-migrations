@@ -162,10 +162,8 @@ spec:
             
             # Transform target config to match schema
             TARGET_TRANSFORMED=$(echo "$TARGET_CONFIG" | jq '
-              # Target cluster schema does not accept a version field
-              del(.version)
               # Rename allow_insecure to allowInsecure
-              | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+              if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
               # Move sigv4 under authConfig
               | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
               # Move basic_auth under authConfig.basic with secretName
