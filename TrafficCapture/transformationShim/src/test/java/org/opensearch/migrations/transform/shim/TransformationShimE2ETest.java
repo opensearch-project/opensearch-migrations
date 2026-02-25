@@ -129,6 +129,11 @@ class TransformationShimE2ETest {
         }
 
         if (seedOpenSearch) {
+            if (tc.opensearchMapping() != null && !tc.opensearchMapping().isEmpty()) {
+                fixture.httpPut(
+                    fixture.getOpenSearchBaseUrl() + "/" + tc.collection(),
+                    MAPPER.writeValueAsString(Map.of("mappings", tc.opensearchMapping())));
+            }
             for (var doc : tc.documents()) {
                 var id = String.valueOf(doc.get("id"));
                 fixture.httpPut(

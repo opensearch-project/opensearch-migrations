@@ -33,6 +33,7 @@ record TestCaseDefinition(
     String assertResponseFormat,
     Boolean compareWithSolr,
     List<String> ignorePaths,
+    Map<String, Object> opensearchMapping,
     List<String> solrVersions,
     List<String> plugins
 ) {}

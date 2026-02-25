@@ -30,4 +30,24 @@ export const testCases: TestCase[] = [
     compareWithSolr: false,
     assertResponseFormat: 'opensearch',
   }),
+
+  // TODO: Enable once request transform handles fq (filter query) params.
+  // This test will FAIL with compareWithSolr because the proxy ignores fq,
+  // so Solr returns 2 docs (category:animal) while the proxy returns all 3.
+  // That diff is exactly what proves the framework catches transform gaps.
+  //
+  // solrTest('filter-query-fq', {
+  //   documents: [
+  //     { id: '1', title: 'cat', category: 'animal' },
+  //     { id: '2', title: 'dog', category: 'animal' },
+  //     { id: '3', title: 'car', category: 'vehicle' },
+  //   ],
+  //   opensearchMapping: {
+  //     properties: {
+  //       title: { type: 'text' },
+  //       category: { type: 'keyword' },
+  //     },
+  //   },
+  //   requestPath: '/solr/testcollection/select?q=*:*&fq=category:animal&wt=json',
+  // }),
 ];

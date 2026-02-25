@@ -21,6 +21,8 @@ export interface TestCase {
   assertResponseFormat?: 'solr' | 'opensearch';
   compareWithSolr?: boolean;
   ignorePaths?: string[];
+  /** Explicit OpenSearch index mapping. If set, the index is created with this mapping before seeding. */
+  opensearchMapping?: Record<string, unknown>;
   solrVersions?: string[];
   plugins?: string[];
 }
