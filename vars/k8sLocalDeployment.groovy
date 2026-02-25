@@ -92,6 +92,7 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
+                            sh "kubectl config unset current-context || true"
                             sh "helm --kube-context=minikube uninstall buildkit -n buildkit 2>/dev/null || true"
                             sh "USE_LOCAL_REGISTRY=true KUBE_CONTEXT=minikube BUILDKIT_HELM_ARGS='--set buildkitd.maxParallelism=16 --set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0' ./buildImages/setUpK8sImageBuildServices.sh"
                             sh "./gradlew :buildImages:buildImagesToRegistry_amd64 -x test --info --stacktrace --profile --scan"
@@ -106,6 +107,7 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 3, unit: 'MINUTES') {
                         script {
+                            sh "kubectl config unset current-context || true"
                             sh """
                                 # Attempt clean helm uninstall first (triggers hook-based cleanup)
                                 helm --kube-context=minikube uninstall ma -n ma || true
@@ -138,6 +140,7 @@ def call(Map config = [:]) {
                                 }
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
+                                sh "kubectl config unset current-context || true"
                                 def registryIp = sh(script: "kubectl --context=minikube get svc -n buildkit docker-registry -o jsonpath='{.spec.clusterIP}'", returnStdout: true).trim()
                                 sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='${registryIp}:5000/' --kube-context=minikube"
                             }
@@ -152,6 +155,7 @@ def call(Map config = [:]) {
                     dir('libraries/testAutomation') {
                         script {
                             sh "pipenv install --deploy"
+                            sh "kubectl config unset current-context || true"
                             archiveArtifacts artifacts: 'logs/**, reports/**', fingerprint: true, onlyIfSuccessful: false
                             sh "rm -rf ./reports"
                             sh "pipenv run app --delete-only --kube-context=minikube"
