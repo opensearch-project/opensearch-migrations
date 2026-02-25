@@ -282,6 +282,8 @@ public class SourceTestBase {
                         + "Presuming that work was complete and that all worker processes should terminate"
                 );
                 throw new ExpectedMigrationWorkTerminationException(e, runNumber);
+            } catch (ExpectedMigrationWorkTerminationException e) {
+                throw e;
             } catch (Exception e) {
                 log.atError().setCause(e).setMessage("Caught an exception, " +
                     "but just going to run again with this worker to simulate task/container recycling").log();
