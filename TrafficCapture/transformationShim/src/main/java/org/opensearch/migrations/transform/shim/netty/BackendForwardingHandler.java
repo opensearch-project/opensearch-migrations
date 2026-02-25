@@ -30,6 +30,8 @@ import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import lombok.extern.slf4j.Slf4j;
 
+import static org.opensearch.migrations.transform.shim.TransformationShimProxy.HTTPS_SCHEME;
+
 /**
  * Pipeline handler that forwards transformed requests to the backend via a Netty client channel,
  * receives the response, applies the response transform, and sends it back to the frontend.
@@ -74,8 +76,9 @@ public class BackendForwardingHandler extends SimpleChannelInboundHandler<FullHt
         activeRequests.incrementAndGet();
 
         final Channel frontsideChannel = ctx.channel();
-        int port = backendUri.getPort() != -1 ? backendUri.getPort()
-            : "https".equalsIgnoreCase(backendUri.getScheme()) ? 443 : 80;
+        int port = backendUri.getPort() != -1
+            ? backendUri.getPort()
+            : resolveDefaultPort(backendUri);
 
         // Set the Host header for the backend
         request.headers().set(HttpHeaderNames.HOST,
@@ -120,6 +123,10 @@ public class BackendForwardingHandler extends SimpleChannelInboundHandler<FullHt
                 sendError(ctx, HttpResponseStatus.BAD_GATEWAY, "Backend connection failed");
             }
         });
+    }
+
+    private static int resolveDefaultPort(URI uri) {
+        return HTTPS_SCHEME.equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
     }
 
     private void releaseResources(FullHttpRequest request) {

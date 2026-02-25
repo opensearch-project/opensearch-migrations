@@ -41,8 +41,11 @@ export function transform(msg: HttpResponseMessage): HttpResponseMessage {
 function wrapMultiValued(doc: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(doc)) {
-    // id stays scalar; strings become single-element arrays (Solr default)
-    result[key] = key === 'id' ? val : typeof val === 'string' ? [val] : val;
+    if (key === 'id') {
+      result[key] = val;
+    } else {
+      result[key] = typeof val === 'string' ? [val] : val;
+    }
   }
   return result;
 }

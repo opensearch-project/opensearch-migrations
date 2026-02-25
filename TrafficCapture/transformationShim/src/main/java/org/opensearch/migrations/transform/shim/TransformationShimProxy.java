@@ -56,6 +56,7 @@ import lombok.extern.slf4j.Slf4j;
 public class TransformationShimProxy {
     public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(150);
     public static final int DEFAULT_MAX_CONCURRENT_REQUESTS = 100;
+    public static final String HTTPS_SCHEME = "https";
     private static final int MAX_CONTENT_LENGTH = 10 * 1024 * 1024;
 
     /**
@@ -125,7 +126,7 @@ public class TransformationShimProxy {
     }
 
     private SslContext buildBackendSslContext(boolean allowInsecure) {
-        if (!"https".equalsIgnoreCase(backendUri.getScheme())) return null;
+        if (!HTTPS_SCHEME.equalsIgnoreCase(backendUri.getScheme())) return null;
         try {
             var builder = SslContextBuilder.forClient();
             if (allowInsecure) {
@@ -159,7 +160,7 @@ public class TransformationShimProxy {
                     + "maxConcurrent={}, frontTLS={}, backTLS={}, auth={}",
                 port, backendUri, timeout.getSeconds(), maxConcurrentRequests,
                 sslEngineSupplier != null,
-                "https".equalsIgnoreCase(backendUri.getScheme()),
+                HTTPS_SCHEME.equalsIgnoreCase(backendUri.getScheme()),
                 authHandlerSupplier != null);
         } catch (Exception e) {
             shutdownEventLoopGroups();

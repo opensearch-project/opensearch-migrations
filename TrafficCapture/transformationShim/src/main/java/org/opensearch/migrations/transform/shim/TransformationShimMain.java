@@ -24,6 +24,8 @@ import io.netty.channel.ChannelHandler;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
+import static org.opensearch.migrations.transform.shim.TransformationShimProxy.HTTPS_SCHEME;
+
 @Slf4j
 public class TransformationShimMain {
 
@@ -276,7 +278,7 @@ public class TransformationShimMain {
             String region = parts[1].trim();
             var credentials = DefaultCredentialsProvider.create();
             log.info("SigV4 signing enabled: service={}, region={}", service, region);
-            return () -> new SigV4SigningHandler(credentials, service, region, "https");
+            return () -> new SigV4SigningHandler(credentials, service, region, HTTPS_SCHEME);
         } else if (params.removeAuthHeader) {
             log.info("Auth header removal enabled");
             return () -> new BasicAuthSigningHandler(null);
