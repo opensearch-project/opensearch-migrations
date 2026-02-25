@@ -1,41 +1,8 @@
-import com.github.gradle.node.npm.task.NpmTask
-
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
     id 'io.freefair.lombok'
     id 'com.google.cloud.tools.jib'
-    id 'com.github.node-gradle.node' version '7.1.0'
 }
-
-node {
-    version = '22.14.0'
-    download = true
-    nodeProjectDir = file("${projectDir}/transforms")
-    workDir = file("${project.buildDir}/nodejs")
-    npmWorkDir = file("${project.buildDir}/npm")
-}
-
-tasks.register('installTransformDeps', NpmTask) {
-    description = 'Install TypeScript transform dependencies'
-    args = ['install']
-}
-
-tasks.register('buildTransforms', NpmTask) {
-    description = 'Build TypeScript transforms to GraalVM-compatible JS'
-    args = ['run', 'build']
-    dependsOn installTransformDeps
-    inputs.dir("${projectDir}/transforms/src")
-    outputs.dir("${projectDir}/transforms/dist")
-}
-
-tasks.register('copyTransforms', Copy) {
-    description = 'Copy built JS transforms to test resources'
-    from "${projectDir}/transforms/dist"
-    into "${buildDir}/resources/test/transforms"
-    dependsOn buildTransforms
-}
-
-processTestResources.dependsOn copyTransforms
 
 dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
@@ -56,10 +23,6 @@ dependencies {
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformerProvider')
 
     testImplementation libs.junit.jupiter.api
-    testImplementation libs.junit.jupiter.params
-    testImplementation libs.testcontainers
-    testImplementation libs.testcontainers.junit.jupiter
-    testImplementation libs.testcontainers.opensearch
     testRuntimeOnly libs.junit.jupiter.engine
 }
 

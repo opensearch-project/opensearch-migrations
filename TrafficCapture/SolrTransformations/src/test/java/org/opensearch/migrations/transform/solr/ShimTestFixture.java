@@ -5,7 +5,7 @@
  * this file be licensed under the Apache-2.0 license or a
  * compatible open source license.
  */
-package org.opensearch.migrations.transform.shim;
+package org.opensearch.migrations.transform.solr;
 
 import java.net.ServerSocket;
 import java.net.URI;
@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.util.List;
 
 import org.opensearch.migrations.transform.shim.TransformationLibrary.TransformationPair;
+import org.opensearch.migrations.transform.shim.TransformationShimProxy;
 import org.opensearch.testcontainers.OpensearchContainer;
 
 import lombok.Getter;

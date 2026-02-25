@@ -5,7 +5,7 @@
  * this file be licensed under the Apache-2.0 license or a
  * compatible open source license.
  */
-package org.opensearch.migrations.transform.shim;
+package org.opensearch.migrations.transform.solr;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
