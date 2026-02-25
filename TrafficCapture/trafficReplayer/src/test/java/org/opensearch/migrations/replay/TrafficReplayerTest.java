@@ -211,8 +211,9 @@ class TrafficReplayerTest extends InstrumentationTest {
                         @Override
                         public Consumer<RequestResponsePacketPair> onRequestReceived(
                             @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                            @NonNull HttpMessageAndTimestamp request
-                        ) {
+                            @NonNull HttpMessageAndTimestamp request,
+                    boolean isResumedConnection
+                ) {
                             var bytesList = request.stream().collect(Collectors.toList());
                             byteArrays.add(bytesList);
                             Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));
@@ -287,8 +288,9 @@ class TrafficReplayerTest extends InstrumentationTest {
                         @Override
                         public Consumer<RequestResponsePacketPair> onRequestReceived(
                             @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-                            @NonNull HttpMessageAndTimestamp request
-                        ) {
+                            @NonNull HttpMessageAndTimestamp request,
+                    boolean isResumedConnection
+                ) {
                             var bytesList = request.stream().collect(Collectors.toList());
                             byteArrays.add(bytesList);
                             Assertions.assertEquals(FAKE_READ_PACKET_DATA, collectBytesToUtf8String(bytesList));

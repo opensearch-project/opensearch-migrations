@@ -1,10 +1,7 @@
-package org.opensearch.migrations.replay.bugfixes;
+package org.opensearch.migrations.replay;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-
-import org.opensearch.migrations.replay.HttpByteBufFormatter;
-import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
