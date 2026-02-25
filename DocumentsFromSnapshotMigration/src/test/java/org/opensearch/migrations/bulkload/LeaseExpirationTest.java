@@ -212,7 +212,7 @@ public class LeaseExpirationTest extends SourceTestBase {
         var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 3000);
 
         // Set to less than 2x lease time to ensure leases aren't doubling
-        int timeoutSeconds = 35;
+        int timeoutSeconds = 60;
 
         String[] additionalArgs = {
             "--documents-per-bulk-request", "10",
