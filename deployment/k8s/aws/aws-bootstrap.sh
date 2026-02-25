@@ -616,6 +616,31 @@ if [[ "$deploy_cfn" == "true" ]]; then
   fi
 
   echo "Deploying CloudFormation stack: $cfn_stack_name"
+
+  # Helper: dump recent CFN events on failure for debugging
+  dump_cfn_events() {
+    echo "--- CloudFormation stack events (last 20) ---"
+    aws cloudformation describe-stack-events \
+      --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+      --query 'StackEvents[:20].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
+      --output table 2>/dev/null || echo "(unable to retrieve events)"
+    echo "--- end events ---"
+  }
+
+  # Handle stacks in terminal failed states (ROLLBACK_COMPLETE, DELETE_FAILED)
+  if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
+    stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+      --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
+    if [[ "$stack_status" == "ROLLBACK_COMPLETE" || "$stack_status" == "DELETE_FAILED" ]]; then
+      echo "Stack $cfn_stack_name is in $stack_status state. Deleting before re-creating..."
+      dump_cfn_events
+      aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"}
+      aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+        || { echo "Failed to delete $stack_status stack: $cfn_stack_name"; exit 1; }
+      echo "Deleted $stack_status stack: $cfn_stack_name"
+    fi
+  fi
+
   # create-stack/update-stack to support both --template-file and --template-url
   if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
     update_output=$(aws cloudformation update-stack \
@@ -628,7 +653,7 @@ if [[ "$deploy_cfn" == "true" ]]; then
       echo "Waiting for stack update to complete..."
       aws cloudformation wait stack-update-complete \
         --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-        || { echo "CloudFormation stack update failed for: $cfn_stack_name"; exit 1; }
+        || { dump_cfn_events; echo "CloudFormation stack update failed for: $cfn_stack_name"; exit 1; }
     elif echo "$update_output" | grep -q "No updates are to be performed"; then
       echo "No updates needed for stack: $cfn_stack_name"
     else
@@ -646,7 +671,7 @@ if [[ "$deploy_cfn" == "true" ]]; then
     echo "Waiting for stack creation to complete..."
     aws cloudformation wait stack-create-complete \
       --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-      || { echo "CloudFormation stack creation failed for: $cfn_stack_name"; exit 1; }
+      || { dump_cfn_events; echo "CloudFormation stack creation failed for: $cfn_stack_name"; exit 1; }
   fi
 
   echo "CloudFormation stack deployed successfully: $cfn_stack_name"

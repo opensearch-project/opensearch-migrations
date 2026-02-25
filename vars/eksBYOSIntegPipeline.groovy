@@ -339,33 +339,38 @@ ENVEOF
             always {
                 timeout(time: 75, unit: 'MINUTES') {
                     script {
-                        if (env.clusterDetailsJson) {
-                            def clusterDetails = readJSON text: env.clusterDetailsJson
-                            def targetCluster = clusterDetails.target
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 4500, roleSessionName: 'jenkins-session') {
+                        withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 4500, roleSessionName: 'jenkins-session') {
+                                if (env.clusterDetailsJson) {
+                                    def clusterDetails = readJSON text: env.clusterDetailsJson
+                                    def targetCluster = clusterDetails.target
                                     sh "kubectl -n ma get pods || true"
                                     sh "kubectl delete namespace ma --ignore-not-found --timeout=60s || true"
                                     // Remove added security group rule
-                                    sh """
-                                      if aws ec2 describe-security-groups --group-ids $targetCluster.securityGroupId >/dev/null 2>&1; then
-                                        exists=\$(aws ec2 describe-security-groups \
-                                          --group-ids $targetCluster.securityGroupId \
-                                          --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
-                                          --output json)
-                                        if [ "\$exists" != "[]" ]; then
-                                          echo "Revoking ingress rule..."
-                                          aws ec2 revoke-security-group-ingress \
-                                            --group-id $targetCluster.securityGroupId \
-                                            --protocol -1 \
-                                            --port -1 \
-                                            --source-group $env.clusterSecurityGroup
-                                        fi
-                                      fi
-                                    """
+                                    if (env.clusterSecurityGroup) {
+                                        sh """
+                                          if aws ec2 describe-security-groups --group-ids $targetCluster.securityGroupId >/dev/null 2>&1; then
+                                            exists=\$(aws ec2 describe-security-groups \
+                                              --group-ids $targetCluster.securityGroupId \
+                                              --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
+                                              --output json)
+                                            if [ "\$exists" != "[]" ]; then
+                                              echo "Revoking ingress rule..."
+                                              aws ec2 revoke-security-group-ingress \
+                                                --group-id $targetCluster.securityGroupId \
+                                                --protocol -1 \
+                                                --port -1 \
+                                                --source-group $env.clusterSecurityGroup
+                                            fi
+                                          fi
+                                        """
+                                    }
                                     // Teardown order: CDK first (clusters only), then EKS CFN (EKS + VPC)
                                     sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json || true"
-                                    sh "aws cloudformation delete-stack --stack-name ${env.STACK_NAME} --region ${params.REGION}"
+                                }
+                                // Always attempt to delete the CFN stack (handles early deploy failures)
+                                if (env.STACK_NAME) {
+                                    sh "aws cloudformation delete-stack --stack-name ${env.STACK_NAME} --region ${params.REGION} || true"
                                     sh "aws cloudformation wait stack-delete-complete --stack-name ${env.STACK_NAME} --region ${params.REGION} || true"
                                 }
                             }
