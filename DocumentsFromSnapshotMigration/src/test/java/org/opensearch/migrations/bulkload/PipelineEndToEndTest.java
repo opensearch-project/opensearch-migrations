@@ -173,8 +173,10 @@ public class PipelineEndToEndTest {
             boolean supportsCompletion = !UnboundVersionMatchers.isBelowES_2_X.test(srcVersion);
             boolean isEs5SingleType = VersionMatchers.isES_5_X.test(srcVersion);
 
-            // Verify main index: 2 large + 4 regular + 1 remaining - 1 deleted (if soft deletes)
-            int expectedDocs = supportsSoftDeletes ? 7 : 8;
+            // Verify main index: 2 large + 4 regular + 1 remaining - 1 deleted = 7
+            // Deleted docs are excluded regardless of soft delete support (hard delete
+            // removes from segments, soft delete marks as tombstone — both filtered by reader)
+            int expectedDocs = 7;
             verifyDocCount(targetCluster, COMPLEX_INDEX, expectedDocs);
 
             // Verify routing

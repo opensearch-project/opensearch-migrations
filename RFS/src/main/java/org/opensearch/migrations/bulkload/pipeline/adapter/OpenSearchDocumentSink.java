@@ -26,6 +26,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * Real {@link DocumentSink} adapter that writes documents to an OpenSearch cluster
@@ -96,6 +97,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
     @Override
     public Mono<Void> createIndex(IndexMetadataSnapshot metadata) {
         return Mono.fromRunnable(() -> OpenSearchIndexCreator.createIndex(client, metadata, OBJECT_MAPPER))
+            .subscribeOn(Schedulers.boundedElastic())
             .then();
     }
 

@@ -213,7 +213,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
     @SneakyThrows
     private static ProcessBuilder setupProcessWithSlowProxy(RunData d) {
         var tp = d.proxyContainer.getProxy();
-        tp.toxics().latency("latency-toxic", ToxicDirection.DOWNSTREAM, 250);
+        tp.toxics().latency("latency-toxic", ToxicDirection.DOWNSTREAM, 500);
         return setupProcess(
                 d.tempDirSnapshot,
                 d.tempDirLucene,
