@@ -49,6 +49,31 @@ export interface OpenSearchMapping {
 /** HTTP methods supported by the test framework. */
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'HEAD';
 
+/** Assertion rule types for controlling how diffs are handled per JSON path. */
+export type AssertionRuleType =
+  | 'ignore'       // Skip this path entirely
+  | 'loose-order'  // Compare arrays as sets (ignore ordering)
+  | 'loose-type'   // Allow numeric type coercion (1 == 1.0)
+  | 'expect-diff'  // Known difference — test passes, diff logged as info
+  | 'regex';       // Match actual value against a regex pattern
+
+/**
+ * A per-path assertion rule that controls how differences are handled.
+ *
+ * Every test always compares with real Solr. Rules let you be explicit
+ * about which differences are expected and why.
+ */
+export interface AssertionRule {
+  /** JSONPath to match (e.g. '$.responseHeader.QTime'). Supports [*] for array wildcards. */
+  path: string;
+  /** How to handle differences at this path. */
+  rule: AssertionRuleType;
+  /** For 'regex' rule: the pattern to match against the actual value. */
+  expected?: string;
+  /** Documentation: WHY this rule exists. Shows up in diff reports. */
+  reason?: string;
+}
+
 /** A single test case definition. */
 export interface TestCase {
   name: string;
@@ -64,11 +89,8 @@ export interface TestCase {
   /** Request body (for POST/PUT/DELETE). JSON-serializable. */
   requestBody?: string;
   requestPath: string;
-  expectedDocs?: TestDocument[];
-  expectedFields?: string[];
-  assertResponseFormat?: 'solr' | 'opensearch';
-  compareWithSolr?: boolean;
-  ignorePaths?: string[];
+  /** Per-path assertion rules controlling how diffs are handled. */
+  assertionRules?: AssertionRule[];
   /** Explicit OpenSearch index mapping. If set, the index is created with this mapping before seeding. */
   opensearchMapping?: OpenSearchMapping;
   solrVersions?: string[];
@@ -76,23 +98,25 @@ export interface TestCase {
 }
 
 /** Solr-internal fields that OpenSearch doesn't have — always safe to ignore. */
-export const SOLR_INTERNAL_IGNORE = [
-  '$.responseHeader.QTime',
-  '$.responseHeader.params',
-  '$.response.docs[*]._version_',
-  '$.response.docs[*]._root_',
+export const SOLR_INTERNAL_RULES: AssertionRule[] = [
+  { path: '$.responseHeader.QTime', rule: 'ignore', reason: 'Timing varies per request' },
+  { path: '$.responseHeader.params', rule: 'ignore', reason: 'Solr echoes params, proxy does not' },
+  { path: '$.response.docs[*]._version_', rule: 'ignore', reason: 'Solr-internal optimistic concurrency field' },
+  { path: '$.response.docs[*]._root_', rule: 'ignore', reason: 'Solr-internal nested doc root field' },
 ];
 
 /**
  * Create a Solr→OpenSearch E2E test case with sensible defaults.
+ *
+ * Every test always compares with real Solr. Use assertionRules to
+ * declare expected differences per path.
  *
  * Defaults:
  * - method: 'GET'
  * - requestTransforms: ['solr-to-opensearch-request']
  * - responseTransforms: ['solr-to-opensearch-response']
  * - collection: 'testcollection'
- * - compareWithSolr: true
- * - ignorePaths: SOLR_INTERNAL_IGNORE
+ * - assertionRules: SOLR_INTERNAL_RULES
  *
  * Example — minimal test case:
  * ```
@@ -111,8 +135,7 @@ export function solrTest(
     requestTransforms: ['solr-to-opensearch-request'],
     responseTransforms: ['solr-to-opensearch-response'],
     collection: 'testcollection',
-    compareWithSolr: true,
-    ignorePaths: SOLR_INTERNAL_IGNORE,
+    assertionRules: SOLR_INTERNAL_RULES,
     ...overrides,
   };
 }

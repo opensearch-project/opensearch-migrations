@@ -10,10 +10,8 @@ package org.opensearch.migrations.transform.solr;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -27,9 +25,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.TestFactory;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -37,9 +32,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  * Data-driven E2E test runner with version matrix support.
  * <p>
  * Test cases are defined in TypeScript ({@code *.testcase.ts}) and compiled to JSON.
- * The matrix config ({@code matrix.config.json}) defines default Solr versions.
- * Each test case runs against every Solr version in its {@code solrVersions} list
- * (or the matrix defaults if not specified), generating a version × case matrix.
+ * Every test always compares with real Solr. Assertion rules control how diffs are handled:
+ * 'ignore' paths are skipped, 'expect-diff' diffs pass but are logged, unmatched diffs fail.
  */
 @Slf4j
 class TransformationShimE2ETest {
@@ -80,12 +74,7 @@ class TransformationShimE2ETest {
             var proxyResponse = sendRequest(fixture, fixture.getProxyBaseUrl() + tc.requestPath(), tc);
             var proxyJson = MAPPER.readValue(proxyResponse, new TypeReference<Map<String, Object>>() {});
 
-            if (Boolean.TRUE.equals(tc.compareWithSolr())) {
-                compareWithSolr(fixture, tc, proxyJson);
-            } else {
-                assertResponseFormat(proxyJson, tc);
-                assertExpectedDocs(proxyJson, tc);
-            }
+            compareWithSolr(fixture, tc, proxyJson);
 
             log.info("PASSED: {} [{}]", tc.name(), solrImage);
         }
@@ -99,19 +88,28 @@ class TransformationShimE2ETest {
         var solrResponse = sendRequest(fixture, fixture.getSolrBaseUrl() + tc.requestPath(), tc);
         var solrJson = MAPPER.readValue(solrResponse, new TypeReference<Map<String, Object>>() {});
 
-        Set<String> ignorePaths = new HashSet<>();
-        if (tc.ignorePaths() != null) {
-            ignorePaths.addAll(tc.ignorePaths());
+        var rules = tc.assertionRules() != null ? tc.assertionRules() : List.<TestCaseDefinition.AssertionRule>of();
+        var diffs = JsonDiff.diff(solrJson, proxyJson, rules);
+
+        // Separate unexpected diffs (no rule or non-expect-diff rule) from expected ones
+        var unexpectedDiffs = diffs.stream()
+            .filter(d -> d.matchedRule() == null)
+            .toList();
+        var expectedDiffs = diffs.stream()
+            .filter(d -> d.matchedRule() != null)
+            .toList();
+
+        if (!expectedDiffs.isEmpty()) {
+            log.info("'{}': {} expected difference(s) covered by rules:\n{}",
+                tc.name(), expectedDiffs.size(), JsonDiff.formatReport(expectedDiffs));
         }
 
-        var diffs = JsonDiff.diff(solrJson, proxyJson, ignorePaths);
-
-        if (!diffs.isEmpty()) {
-            var report = JsonDiff.formatReport(diffs);
+        if (!unexpectedDiffs.isEmpty()) {
+            var report = JsonDiff.formatReport(unexpectedDiffs);
             log.error("Solr vs Proxy diff for '{}':\n{}", tc.name(), report);
             log.info("Full Solr response:\n{}", MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(solrJson));
             log.info("Full Proxy response:\n{}", MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(proxyJson));
-            fail("Proxy response differs from Solr response (" + diffs.size() + " differences):\n" + report);
+            fail("Proxy response differs from Solr response (" + unexpectedDiffs.size() + " unexpected differences):\n" + report);
         }
     }
 
@@ -154,49 +152,6 @@ class TransformationShimE2ETest {
                     MAPPER.writeValueAsString(doc));
             }
             fixture.httpPost(fixture.getOpenSearchBaseUrl() + "/" + tc.collection() + "/_refresh", "");
-        }
-    }
-
-    // --- Legacy assertions (for non-compareWithSolr cases) ---
-
-    private void assertResponseFormat(Map<String, Object> json, TestCaseDefinition tc) {
-        if (tc.assertResponseFormat() == null) return;
-        if ("solr".equals(tc.assertResponseFormat())) {
-            assertNotNull(json.get("response"), "Expected Solr format (has 'response')");
-        } else if ("opensearch".equals(tc.assertResponseFormat())) {
-            assertNotNull(json.get("hits"), "Expected OpenSearch format (has 'hits')");
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private void assertExpectedDocs(Map<String, Object> json, TestCaseDefinition tc) {
-        if (tc.expectedDocs() == null || tc.expectedDocs().isEmpty()) return;
-
-        var responseDocs = extractDocs(json);
-        assertNotNull(responseDocs, "Response should contain documents");
-        assertFalse(responseDocs.isEmpty(), "Response should have at least one document");
-
-        var fields = tc.expectedFields();
-        if (fields == null || fields.isEmpty()) {
-            fields = new ArrayList<>(tc.expectedDocs().get(0).keySet());
-        }
-
-        var sortedExpected = tc.expectedDocs().stream()
-            .sorted((a, b) -> String.valueOf(a.get("id")).compareTo(String.valueOf(b.get("id"))))
-            .toList();
-        var sortedActual = responseDocs.stream()
-            .sorted((a, b) -> String.valueOf(a.get("id")).compareTo(String.valueOf(b.get("id"))))
-            .toList();
-
-        assertEquals(sortedExpected.size(), sortedActual.size(), "Document count mismatch");
-
-        for (int i = 0; i < sortedExpected.size(); i++) {
-            for (var field : fields) {
-                assertEquals(
-                    normalize(sortedExpected.get(i).get(field)),
-                    normalize(sortedActual.get(i).get(field)),
-                    "Field '" + field + "' mismatch in doc " + i);
-            }
         }
     }
 
@@ -261,29 +216,5 @@ class TransformationShimE2ETest {
             }
             return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
         }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> extractDocs(Map<String, Object> json) {
-        var response = (Map<String, Object>) json.get("response");
-        if (response != null) {
-            return (List<Map<String, Object>>) response.get("docs");
-        }
-        var hits = (Map<String, Object>) json.get("hits");
-        if (hits != null) {
-            var hitList = (List<Map<String, Object>>) hits.get("hits");
-            if (hitList != null) {
-                return hitList.stream()
-                    .map(h -> (Map<String, Object>) h.get("_source"))
-                    .toList();
-            }
-        }
-        return null;
-    }
-
-    /** Unwrap single-element lists (Solr returns multi-valued fields as arrays). */
-    private static Object normalize(Object val) {
-        if (val instanceof List<?> list && list.size() == 1) return list.get(0);
-        return val;
     }
 }

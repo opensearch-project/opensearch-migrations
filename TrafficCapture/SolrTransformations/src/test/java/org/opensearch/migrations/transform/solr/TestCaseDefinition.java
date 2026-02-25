@@ -15,7 +15,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 /**
  * A declarative test case definition, deserialized from TypeScript-generated JSON.
  * <p>
- * Defines transforms to apply, data to seed, request to send, and expected results.
+ * Defines transforms to apply, data to seed, request to send, and assertion rules.
+ * Every test always compares with real Solr — assertion rules control how diffs are handled.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 record TestCaseDefinition(
@@ -30,12 +31,12 @@ record TestCaseDefinition(
     String method,
     String requestBody,
     String requestPath,
-    List<Map<String, Object>> expectedDocs,
-    List<String> expectedFields,
-    String assertResponseFormat,
-    Boolean compareWithSolr,
-    List<String> ignorePaths,
+    List<AssertionRule> assertionRules,
     Map<String, Object> opensearchMapping,
     List<String> solrVersions,
     List<String> plugins
-) {}
+) {
+    /** A per-path assertion rule controlling how diffs are handled. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record AssertionRule(String path, String rule, String expected, String reason) {}
+}

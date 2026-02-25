@@ -8,37 +8,43 @@
 package org.opensearch.migrations.transform.solr;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+
+import org.opensearch.migrations.transform.solr.TestCaseDefinition.AssertionRule;
 
 /**
- * Deep recursive JSON comparison with path-based ignore support.
+ * Deep recursive JSON comparison with per-path assertion rule support.
  * Produces human-readable diffs showing exactly what differs between two JSON structures.
  */
 final class JsonDiff {
 
-    record Difference(String path, Object expected, Object actual) {
+    record Difference(String path, Object expected, Object actual, AssertionRule matchedRule) {
         @Override
         public String toString() {
-            return String.format("  %-40s expected: %s%n  %-40s actual:   %s", path, expected, "", actual);
+            var ruleInfo = matchedRule != null
+                ? String.format(" [%s: %s]", matchedRule.rule(),
+                    matchedRule.reason() != null ? matchedRule.reason() : "no reason")
+                : "";
+            return String.format("  %-40s expected: %s%n  %-40s actual:   %s%s",
+                path, expected, "", actual, ruleInfo);
         }
     }
 
     private JsonDiff() {}
 
     /**
-     * Compare two parsed JSON objects and return all differences, ignoring specified paths.
-     *
-     * @param expected    the reference JSON (e.g. real Solr response)
-     * @param actual      the JSON to check (e.g. proxy response)
-     * @param ignorePaths dot-separated paths to skip (e.g. "responseHeader.QTime")
-     * @return list of differences; empty if the structures match
+     * Compare two parsed JSON objects and return all differences, applying assertion rules.
+     * <p>
+     * Rules with type 'ignore' cause paths to be skipped entirely.
+     * All other diffs are returned tagged with their matching rule (if any).
      */
-    static List<Difference> diff(Object expected, Object actual, Set<String> ignorePaths) {
+    static List<Difference> diff(Object expected, Object actual, List<AssertionRule> rules) {
         var diffs = new ArrayList<Difference>();
-        compare(expected, actual, "", ignorePaths, diffs);
+        var ruleList = rules != null ? rules : List.<AssertionRule>of();
+        compare(expected, actual, "", ruleList, diffs);
         return diffs;
     }
 
@@ -46,65 +52,111 @@ final class JsonDiff {
     static String formatReport(List<Difference> diffs) {
         if (diffs.isEmpty()) return "No differences found.";
         var sb = new StringBuilder();
-        sb.append(diffs.size()).append(" difference(s) found:\n\n");
-        for (var d : diffs) {
-            sb.append(d).append("\n\n");
+        var failures = diffs.stream().filter(d -> d.matchedRule() == null).toList();
+        var expected = diffs.stream().filter(d -> d.matchedRule() != null).toList();
+
+        if (!failures.isEmpty()) {
+            sb.append(failures.size()).append(" unexpected difference(s):\n\n");
+            for (var d : failures) {
+                sb.append(d).append("\n\n");
+            }
+        }
+        if (!expected.isEmpty()) {
+            sb.append(expected.size()).append(" expected difference(s) (covered by rules):\n\n");
+            for (var d : expected) {
+                sb.append(d).append("\n\n");
+            }
         }
         return sb.toString();
     }
 
     @SuppressWarnings("unchecked")
     private static void compare(
-        Object expected, Object actual, String path, Set<String> ignorePaths, List<Difference> diffs
+        Object expected, Object actual, String path, List<AssertionRule> rules, List<Difference> diffs
     ) {
         String currentPath = path.isEmpty() ? "$" : path;
-        if (shouldIgnore(currentPath, ignorePaths)) return;
+        var rule = findMatchingRule(currentPath, rules);
+
+        if (rule != null && "ignore".equals(rule.rule())) return;
 
         if (expected == null && actual == null) return;
         if (expected == null || actual == null) {
-            diffs.add(new Difference(currentPath, expected, actual));
+            diffs.add(new Difference(currentPath, expected, actual, rule));
+            return;
+        }
+
+        if (rule != null && "regex".equals(rule.rule())) {
+            if (rule.expected() != null && !String.valueOf(actual).matches(rule.expected())) {
+                diffs.add(new Difference(currentPath, "regex:" + rule.expected(), actual, rule));
+            }
             return;
         }
 
         if (expected instanceof Map && actual instanceof Map) {
-            compareMaps((Map<String, Object>) expected, (Map<String, Object>) actual, currentPath, ignorePaths, diffs);
+            compareMaps((Map<String, Object>) expected, (Map<String, Object>) actual, currentPath, rules, diffs, rule);
         } else if (expected instanceof List && actual instanceof List) {
-            compareLists((List<Object>) expected, (List<Object>) actual, currentPath, ignorePaths, diffs);
+            compareLists((List<Object>) expected, (List<Object>) actual, currentPath, rules, diffs, rule);
         } else if (!normalizeNumber(expected).equals(normalizeNumber(actual))) {
-            diffs.add(new Difference(currentPath, expected, actual));
+            if (rule != null && "loose-type".equals(rule.rule())) {
+                // loose-type: compare as strings
+                if (!String.valueOf(expected).equals(String.valueOf(actual))) {
+                    diffs.add(new Difference(currentPath, expected, actual, rule));
+                }
+            } else {
+                diffs.add(new Difference(currentPath, expected, actual, rule));
+            }
         }
     }
 
     private static void compareMaps(
         Map<String, Object> expected, Map<String, Object> actual,
-        String path, Set<String> ignorePaths, List<Difference> diffs
+        String path, List<AssertionRule> rules, List<Difference> diffs, AssertionRule parentRule
     ) {
         var allKeys = new LinkedHashSet<>(expected.keySet());
         allKeys.addAll(actual.keySet());
         for (var key : allKeys) {
             String childPath = path + "." + key;
-            if (shouldIgnore(childPath, ignorePaths)) continue;
+            var childRule = findMatchingRule(childPath, rules);
+            if (childRule != null && "ignore".equals(childRule.rule())) continue;
             if (!actual.containsKey(key)) {
-                diffs.add(new Difference(childPath, expected.get(key), "<missing>"));
+                diffs.add(new Difference(childPath, expected.get(key), "<missing>",
+                    childRule != null ? childRule : parentRule));
             } else if (!expected.containsKey(key)) {
-                diffs.add(new Difference(childPath, "<missing>", actual.get(key)));
+                diffs.add(new Difference(childPath, "<missing>", actual.get(key),
+                    childRule != null ? childRule : parentRule));
             } else {
-                compare(expected.get(key), actual.get(key), childPath, ignorePaths, diffs);
+                compare(expected.get(key), actual.get(key), childPath, rules, diffs);
             }
         }
     }
 
+    @SuppressWarnings("unchecked")
     private static void compareLists(
         List<Object> expected, List<Object> actual,
-        String path, Set<String> ignorePaths, List<Difference> diffs
+        String path, List<AssertionRule> rules, List<Difference> diffs, AssertionRule parentRule
     ) {
-        int maxLen = Math.max(expected.size(), actual.size());
-        if (expected.size() != actual.size()) {
-            diffs.add(new Difference(path + ".length", expected.size(), actual.size()));
+        var rule = parentRule != null ? parentRule : findMatchingRule(path, rules);
+
+        List<Object> exp = expected;
+        List<Object> act = actual;
+        if (rule != null && "loose-order".equals(rule.rule())) {
+            exp = sortForComparison(expected);
+            act = sortForComparison(actual);
         }
-        for (int i = 0; i < Math.min(expected.size(), actual.size()); i++) {
-            compare(expected.get(i), actual.get(i), path + "[" + i + "]", ignorePaths, diffs);
+
+        if (exp.size() != act.size()) {
+            diffs.add(new Difference(path + ".length", exp.size(), act.size(), rule));
         }
+        for (int i = 0; i < Math.min(exp.size(), act.size()); i++) {
+            compare(exp.get(i), act.get(i), path + "[" + i + "]", rules, diffs);
+        }
+    }
+
+    /** Sort a list for loose-order comparison. Objects sorted by JSON string representation. */
+    private static List<Object> sortForComparison(List<Object> list) {
+        var sorted = new ArrayList<>(list);
+        sorted.sort((a, b) -> String.valueOf(a).compareTo(String.valueOf(b)));
+        return sorted;
     }
 
     /** Normalize numeric types so that 1 (int) equals 1.0 (double) equals 1 (long). */
@@ -119,16 +171,15 @@ final class JsonDiff {
         return val;
     }
 
-    /** Check if a path matches any ignore pattern. Supports [*] wildcards for array indices. */
-    private static boolean shouldIgnore(String path, Set<String> ignorePaths) {
-        if (ignorePaths.contains(path)) return true;
-        for (var pattern : ignorePaths) {
-            if (pattern.contains("[*]")) {
-                // Pattern.quote wraps in \Q...\E; break out around [*] to insert \d+ regex
-                var regex = java.util.regex.Pattern.quote(pattern).replace("[*]", "\\E\\[\\d+\\]\\Q");
-                if (path.matches(regex)) return true;
+    /** Find the first assertion rule matching the given path. Supports [*] wildcards. */
+    private static AssertionRule findMatchingRule(String path, List<AssertionRule> rules) {
+        for (var rule : rules) {
+            if (rule.path().equals(path)) return rule;
+            if (rule.path().contains("[*]")) {
+                var regex = java.util.regex.Pattern.quote(rule.path()).replace("[*]", "\\E\\[\\d+\\]\\Q");
+                if (path.matches(regex)) return rule;
             }
         }
-        return false;
+        return null;
     }
 }

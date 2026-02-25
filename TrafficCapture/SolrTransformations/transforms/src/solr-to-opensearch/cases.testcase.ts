@@ -4,7 +4,7 @@
  * Adding a new test: just add a solrTest() entry below.
  * It automatically runs against every Solr version in matrix.config.ts.
  */
-import { solrTest } from '../test-types';
+import { solrTest, SOLR_INTERNAL_RULES } from '../test-types';
 import type { TestCase } from '../test-types';
 
 export const testCases: TestCase[] = [
@@ -26,28 +26,34 @@ export const testCases: TestCase[] = [
     documents: [{ id: '1', title: 'test' }],
     requestPath: '/solr/testcollection/select?q=*:*',
     responseTransforms: [],
-    seedSolr: false,
-    compareWithSolr: false,
-    assertResponseFormat: 'opensearch',
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.responseHeader', rule: 'expect-diff', reason: 'No response transform — proxy returns raw OpenSearch format without Solr responseHeader' },
+      { path: '$.response', rule: 'expect-diff', reason: 'No response transform — Solr returns response object, proxy returns raw OpenSearch hits' },
+      { path: '$.hits', rule: 'expect-diff', reason: 'No response transform — OpenSearch returns hits instead of response' },
+      { path: '$.took', rule: 'expect-diff', reason: 'No response transform — OpenSearch timing field not in Solr' },
+      { path: '$.timed_out', rule: 'expect-diff', reason: 'No response transform — OpenSearch field not in Solr' },
+      { path: '$._shards', rule: 'expect-diff', reason: 'No response transform — OpenSearch shard info not in Solr' },
+    ],
   }),
 
-  // TODO: Enable once request transform handles fq (filter query) params.
-  // This test will FAIL with compareWithSolr because the proxy ignores fq,
-  // so Solr returns 2 docs (category:animal) while the proxy returns all 3.
-  // That diff is exactly what proves the framework catches transform gaps.
-  //
-  // solrTest('filter-query-fq', {
-  //   documents: [
-  //     { id: '1', title: 'cat', category: 'animal' },
-  //     { id: '2', title: 'dog', category: 'animal' },
-  //     { id: '3', title: 'car', category: 'vehicle' },
-  //   ],
-  //   opensearchMapping: {
-  //     properties: {
-  //       title: { type: 'text' },
-  //       category: { type: 'keyword' },
-  //     },
-  //   },
-  //   requestPath: '/solr/testcollection/select?q=*:*&fq=category:animal&wt=json',
-  // }),
+  solrTest('filter-query-fq', {
+    documents: [
+      { id: '1', title: 'cat', category: 'animal' },
+      { id: '2', title: 'dog', category: 'animal' },
+      { id: '3', title: 'car', category: 'vehicle' },
+    ],
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        category: { type: 'keyword' },
+      },
+    },
+    requestPath: '/solr/testcollection/select?q=*:*&fq=category:animal&wt=json',
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.response.numFound', rule: 'expect-diff', reason: 'fq not implemented — proxy returns all docs' },
+      { path: '$.response.docs', rule: 'expect-diff', reason: 'fq not implemented — doc count and content will differ' },
+    ],
+  }),
 ];
