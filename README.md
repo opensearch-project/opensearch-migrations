@@ -45,7 +45,7 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 
 - **Flexible Deployment Options**:
   - **[AWS Deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/)**: Fully automated deployment to AWS.
-  - **[Local Docker Deployment](/TrafficCapture/dockerSolution/README.md)**: Run the solution locally in a container for testing and development.
+  - **[Local Docker Deployment](TrafficCapture/dockerSolution/README.md)**: Run the solution locally in a container for testing and development.
   - Contribute to add more deployment options.
 
 ## Supported Migration Paths and Platforms
