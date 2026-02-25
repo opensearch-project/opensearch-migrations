@@ -2,20 +2,26 @@ package org.opensearch.migrations.transform.shim;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchKey;
 import java.time.Duration;
+import java.util.Base64;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.transform.JavascriptTransformer;
+import org.opensearch.migrations.transform.shim.netty.BasicAuthSigningHandler;
+import org.opensearch.migrations.transform.shim.netty.SigV4SigningHandler;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import io.netty.channel.ChannelHandler;
 import lombok.extern.slf4j.Slf4j;
-import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
 @Slf4j
@@ -79,6 +85,30 @@ public class TransformationShimMain {
         )
         public String sigV4ServiceRegion;
 
+        @Parameter(
+            names = {"--target-username"},
+            description = "Username for basic auth on the target backend."
+        )
+        public String targetUsername;
+
+        @Parameter(
+            names = {"--target-password"},
+            description = "Password for basic auth on the target backend."
+        )
+        public String targetPassword;
+
+        @Parameter(
+            names = {"--auth-header-value"},
+            description = "Static Authorization header value to set on every request."
+        )
+        public String authHeaderValue;
+
+        @Parameter(
+            names = {"--remove-auth-header"},
+            description = "Remove the Authorization header from every request (no-auth mode)."
+        )
+        public boolean removeAuthHeader;
+
         @Parameter(names = {"--help", "-h"}, help = true, description = "Show usage.")
         public boolean help;
     }
@@ -107,21 +137,8 @@ public class TransformationShimMain {
         ReloadableTransformer respTransformer = new ReloadableTransformer(
             () -> new JavascriptTransformer(respScript, null));
 
-        // Parse SigV4 config
-        AwsCredentialsProvider sigV4Credentials = null;
-        String sigV4Service = null;
-        String sigV4Region = null;
-        if (params.sigV4ServiceRegion != null) {
-            var parts = params.sigV4ServiceRegion.split(",", 2);
-            if (parts.length != 2) {
-                System.err.println("--sigv4-service-region must be 'service,region' (e.g. 'es,us-east-1')");
-                System.exit(1);
-            }
-            sigV4Service = parts[0].trim();
-            sigV4Region = parts[1].trim();
-            sigV4Credentials = DefaultCredentialsProvider.create();
-            log.info("SigV4 signing enabled: service={}, region={}", sigV4Service, sigV4Region);
-        }
+        // Build auth handler based on CLI args (same pattern as replayer's buildAuthTransformerFactory)
+        Supplier<ChannelHandler> authHandlerSupplier = buildAuthHandler(params);
 
         var proxy = new TransformationShimProxy(
             params.listenPort,
@@ -132,9 +149,7 @@ public class TransformationShimMain {
             params.insecureBackend,
             Duration.ofSeconds(params.timeoutSeconds),
             params.maxConcurrentRequests,
-            sigV4Credentials,
-            sigV4Service,
-            sigV4Region
+            authHandlerSupplier
         );
 
         if (params.watchTransforms) {
@@ -211,6 +226,63 @@ public class TransformationShimMain {
             log.info("Reloaded {} transform from {}", label, scriptPath);
         } catch (IOException e) {
             log.error("Failed to reload {} transform from {}", label, scriptPath, e);
+        }
+    }
+
+    /**
+     * Build the auth handler supplier based on CLI args.
+     * Same pattern as the replayer's buildAuthTransformerFactory in TrafficReplayer.java.
+     * Returns null for no-auth (no handler added to pipeline).
+     */
+    static Supplier<ChannelHandler> buildAuthHandler(Parameters params) {
+        long authOptionsSpecified = Stream.of(
+            params.removeAuthHeader,
+            params.authHeaderValue != null,
+            params.sigV4ServiceRegion != null,
+            params.targetUsername != null || params.targetPassword != null
+        ).filter(b -> b).count();
+
+        if (authOptionsSpecified > 1) {
+            throw new ParameterException(
+                "Cannot specify more than one auth option: "
+                    + "--sigv4-service-region, --target-username/--target-password, "
+                    + "--auth-header-value, --remove-auth-header"
+            );
+        }
+
+        String authHeader = params.authHeaderValue;
+        if (params.targetUsername != null || params.targetPassword != null) {
+            if (params.targetUsername == null || params.targetPassword == null) {
+                throw new ParameterException(
+                    "Both --target-username and --target-password must be specified"
+                );
+            }
+            authHeader = "Basic " + Base64.getEncoder().encodeToString(
+                (params.targetUsername + ":" + params.targetPassword).getBytes(StandardCharsets.UTF_8));
+        }
+
+        if (authHeader != null) {
+            String headerValue = authHeader;
+            log.info("Basic/static auth enabled");
+            return () -> new BasicAuthSigningHandler(headerValue);
+        } else if (params.sigV4ServiceRegion != null) {
+            var parts = params.sigV4ServiceRegion.split(",", 2);
+            if (parts.length != 2) {
+                throw new ParameterException(
+                    "--sigv4-service-region must be 'service,region' (e.g. 'es,us-east-1')"
+                );
+            }
+            String service = parts[0].trim();
+            String region = parts[1].trim();
+            var credentials = DefaultCredentialsProvider.create();
+            log.info("SigV4 signing enabled: service={}, region={}", service, region);
+            return () -> new SigV4SigningHandler(credentials, service, region, "https");
+        } else if (params.removeAuthHeader) {
+            log.info("Auth header removal enabled");
+            return () -> new BasicAuthSigningHandler(null);
+        } else {
+            // No auth — no handler in pipeline (default)
+            return null;
         }
     }
 

@@ -13,10 +13,10 @@ import java.util.function.Supplier;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.shim.netty.BackendForwardingHandler;
 import org.opensearch.migrations.transform.shim.netty.RequestTransformHandler;
-import org.opensearch.migrations.transform.shim.netty.SigV4SigningHandler;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
@@ -34,7 +34,6 @@ import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 
 /**
  * A transforming proxy that accepts HTTP requests, transforms them via IJsonTransformer,
@@ -49,7 +48,7 @@ import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
  * [B] HttpServerCodec
  * [C] HttpObjectAggregator
  * [D] RequestTransformHandler — applies IJsonTransformer to the request
- * [E] SigV4SigningHandler (optional) — signs the request
+ * [E] Auth handler (optional) — SigV4, basic auth, or custom
  * [F] BackendForwardingHandler — forwards to backend via Netty, transforms response
  * </pre>
  */
@@ -75,9 +74,7 @@ public class TransformationShimProxy {
     private final SslContext backendSslContext;
     private final Duration timeout;
     private final int maxConcurrentRequests;
-    private final AwsCredentialsProvider sigV4CredentialsProvider;
-    private final String sigV4Service;
-    private final String sigV4Region;
+    private final Supplier<ChannelHandler> authHandlerSupplier;
 
     private Channel serverChannel;
     private NioEventLoopGroup bossGroup;
@@ -97,9 +94,7 @@ public class TransformationShimProxy {
         boolean allowInsecureBackend,
         Duration timeout,
         int maxConcurrentRequests,
-        AwsCredentialsProvider sigV4CredentialsProvider,
-        String sigV4Service,
-        String sigV4Region
+        Supplier<ChannelHandler> authHandlerSupplier
     ) {
         this.port = port;
         this.backendUri = backendUri;
@@ -110,12 +105,10 @@ public class TransformationShimProxy {
         this.maxConcurrentRequests = maxConcurrentRequests > 0 ? maxConcurrentRequests : DEFAULT_MAX_CONCURRENT_REQUESTS;
         this.concurrencySemaphore = new Semaphore(this.maxConcurrentRequests);
         this.backendSslContext = buildBackendSslContext(allowInsecureBackend);
-        this.sigV4CredentialsProvider = sigV4CredentialsProvider;
-        this.sigV4Service = sigV4Service;
-        this.sigV4Region = sigV4Region;
+        this.authHandlerSupplier = authHandlerSupplier;
     }
 
-    /** Convenience constructor for testing — no TLS, no SigV4, default timeout. */
+    /** Convenience constructor for testing — no TLS, no auth, default timeout. */
     public TransformationShimProxy(int port, URI backendUri,
                                    IJsonTransformer requestTransformer,
                                    IJsonTransformer responseTransformer) {
@@ -128,9 +121,7 @@ public class TransformationShimProxy {
         this.maxConcurrentRequests = DEFAULT_MAX_CONCURRENT_REQUESTS;
         this.concurrencySemaphore = new Semaphore(this.maxConcurrentRequests);
         this.backendSslContext = buildBackendSslContext(false);
-        this.sigV4CredentialsProvider = null;
-        this.sigV4Service = null;
-        this.sigV4Region = null;
+        this.authHandlerSupplier = null;
     }
 
     private SslContext buildBackendSslContext(boolean allowInsecure) {
@@ -165,11 +156,11 @@ public class TransformationShimProxy {
         try {
             serverChannel = bootstrap.bind(port).sync().channel();
             log.info("TransformationShimProxy started on port {}, backend={}, timeout={}s, "
-                    + "maxConcurrent={}, frontTLS={}, backTLS={}, sigV4={}",
+                    + "maxConcurrent={}, frontTLS={}, backTLS={}, auth={}",
                 port, backendUri, timeout.getSeconds(), maxConcurrentRequests,
                 sslEngineSupplier != null,
                 "https".equalsIgnoreCase(backendUri.getScheme()),
-                sigV4CredentialsProvider != null);
+                authHandlerSupplier != null);
         } catch (Exception e) {
             shutdownEventLoopGroups();
             if (e instanceof InterruptedException) {
@@ -202,11 +193,9 @@ public class TransformationShimProxy {
         pipeline.addLast("requestTransform", new RequestTransformHandler(requestTransformer));
         addLoggingHandler(pipeline, "D");
 
-        // [E] Optional SigV4 signing
-        if (sigV4CredentialsProvider != null) {
-            String protocol = "https".equalsIgnoreCase(backendUri.getScheme()) ? "https" : "http";
-            pipeline.addLast("authSigner",
-                new SigV4SigningHandler(sigV4CredentialsProvider, sigV4Service, sigV4Region, protocol));
+        // [E] Optional auth signing (SigV4, basic auth, or custom)
+        if (authHandlerSupplier != null) {
+            pipeline.addLast("authSigner", authHandlerSupplier.get());
             addLoggingHandler(pipeline, "E");
         }
 
