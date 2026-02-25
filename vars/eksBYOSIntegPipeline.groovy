@@ -356,6 +356,7 @@ ENVEOF
                                     def clusterDetails = readJSON text: env.clusterDetailsJson
                                     def targetCluster = clusterDetails.target
                                     sh "kubectl -n ma get pods || true"
+                                    sh "helm uninstall ma -n ma || true"
                                     sh "kubectl delete namespace ma --ignore-not-found --timeout=60s || true"
                                     // Remove added security group rule
                                     if (env.clusterSecurityGroup) {
