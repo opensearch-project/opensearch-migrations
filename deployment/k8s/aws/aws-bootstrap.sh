@@ -962,7 +962,7 @@ if [[ "$build_images" == "true" ]]; then
     | docker login --username AWS --password-stdin "$ecr_domain" \
     || { echo "ECR login failed"; exit 1; }
 
-  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
+  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test --no-configuration-cache || exit
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."
   docker buildx rm local-remote-builder 2>/dev/null || true
