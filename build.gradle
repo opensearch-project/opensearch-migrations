@@ -53,7 +53,7 @@ gradle.taskGraph.whenReady {
 // Define version properties
 ext {
     // support -Dbuild.version, but include default
-    buildVersion = System.getProperty("build.version", "0.1.0")
+    buildVersion = System.getProperty("build.version", "0.1.1")
     // support -Dbuild.snapshot=false, but default to true
     buildSnapshot = System.getProperty("build.snapshot", "true") == "true"
     finalVersion = buildSnapshot ? "${buildVersion}-SNAPSHOT" : buildVersion
