@@ -198,6 +198,15 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
+            names = { "--quiescent-period-ms", "--quiescentPeriodMs" },
+            arity = 1,
+            description = "Milliseconds to delay the first request on a resumed connection (one that was " +
+                "mid-flight when a Kafka partition was reassigned). Allows the previous replayer's " +
+                "in-flight requests to complete before the new replayer sends. Default: 5000ms.")
+        long quiescentPeriodMs = 5000;
+
+        @Parameter(
+            required = false,
             names = { "--kafka-traffic-brokers", "--kafkaTrafficBrokers" },
             arity = 1,
             description = "Comma-separated list of host and port pairs that are the addresses of the Kafka brokers " +
@@ -443,7 +452,8 @@ public class TrafficReplayer {
                 serverTimeout,
                 blockingTrafficSource,
                 timeShifter,
-                tupleWriter
+                tupleWriter,
+                Duration.ofMillis(params.quiescentPeriodMs)
             );
             log.info("Done processing TrafficStreams");
         } finally {

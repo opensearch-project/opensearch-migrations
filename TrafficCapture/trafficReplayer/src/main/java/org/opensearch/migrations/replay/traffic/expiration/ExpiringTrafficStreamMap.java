@@ -156,6 +156,10 @@ public class ExpiringTrafficStreamMap {
         );
     }
 
+    public Accumulation getIfPresent(ITrafficStreamKey trafficStreamKey) {
+        return connectionAccumulationMap.get(makeKey(trafficStreamKey));
+    }
+
     public Accumulation getOrCreateWithoutExpiration(
         ITrafficStreamKey trafficStreamKey,
         Function<ITrafficStreamKey, Accumulation> accumulationGenerator

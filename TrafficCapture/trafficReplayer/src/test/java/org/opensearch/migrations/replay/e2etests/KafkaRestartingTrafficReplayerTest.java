@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay.e2etests;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import java.util.Random;
@@ -36,7 +37,9 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -82,6 +85,58 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
                     throw new TrafficReplayerRunner.FabricatedErrorToKillTheReplayer(false);
                 }
             };
+        }
+    }
+
+    /**
+     * Bisection test: runs a specific slice of the exhaustive seed list to isolate failures.
+     * Adjust seedStart/seedEnd to narrow down which patterns cause hangs.
+     */
+    @Test
+    @Disabled
+    @Tag("isolatedTest")
+    @ResourceLock("TrafficReplayerRunner")
+    public void bisectExhaustiveSeeds() throws Throwable {
+        var bisectStart = System.getProperty("bisect.start");
+        var bisectEnd = System.getProperty("bisect.end");
+        org.junit.jupiter.api.Assumptions.assumeTrue(bisectStart != null && bisectEnd != null,
+            "bisect.start and bisect.end system properties not set — skipping bisection test");
+        int seedStart = Integer.parseInt(bisectStart);
+        int seedEnd = Integer.parseInt(bisectEnd);        var allSeeds = ExhaustiveTrafficStreamGenerator.RANDOM_GENERATOR_SEEDS_FOR_SUFFICIENT_TRAFFIC_VARIANCE;
+        var seeds = allSeeds.subList(seedStart, Math.min(seedEnd, allSeeds.size()));
+        log.atInfo().setMessage("bisectExhaustiveSeeds: running seeds {} to {} = {}")
+            .addArgument(seedStart).addArgument(seedEnd).addArgument(seeds).log();
+
+        var random = new Random(1);
+        try (var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(2),
+                response -> TestHttpServerContext.makeResponse(random, response))) {
+            var streamAndConsumer = ExhaustiveTrafficStreamGenerator.generateStreamAndSumOfItsTransactions(
+                TestContext.noOtelTracking(),
+                seeds.stream().mapToInt(i -> i).sum(), // use sum as a proxy seed count — not ideal
+                false
+            );
+            // Better: generate directly from the seed slice
+            var generatedCases = ExhaustiveTrafficStreamGenerator.generateRandomTrafficStreamsAndSizes(
+                TestContext.noOtelTracking(),
+                seeds.stream().mapToInt(i -> i)
+            ).toArray(ExhaustiveTrafficStreamGenerator.RandomTrafficStreamAndTransactionSizes[]::new);
+            var trafficStreams = Arrays.stream(generatedCases)
+                .flatMap(c -> Arrays.stream(c.trafficStreams))
+                .collect(Collectors.toList());
+            int numExpected = Arrays.stream(generatedCases)
+                .mapToInt(c -> c.requestByteSizes.length).sum();
+
+            loadStreamsToKafka(buildKafkaConsumer(),
+                Streams.concat(trafficStreams.stream(), Stream.of(SENTINEL_TRAFFIC_STREAM)));
+            TrafficReplayerRunner.runReplayer(
+                numExpected,
+                httpServer.localhostEndpoint(),
+                new CounterLimitedReceiverFactory(),
+                () -> TestContext.noOtelTracking(),
+                rootContext -> new SentinelSensingTrafficSource(
+                    new KafkaTrafficCaptureSource(rootContext, buildKafkaConsumer(), TEST_TOPIC_NAME,
+                        Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS)))
+            );
         }
     }
 
