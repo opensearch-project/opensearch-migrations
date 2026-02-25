@@ -13,8 +13,8 @@
  *   node build.mjs --watch   # Watch mode — rebuilds on file changes
  */
 import { build, context } from 'esbuild';
-import { writeFileSync, mkdirSync, readdirSync, statSync } from 'fs';
-import { dirname, join, relative } from 'path';
+import { writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 
 const SRC_DIR = 'src';
 const DIST_DIR = 'dist';
@@ -43,7 +43,7 @@ function graalvmWrapPlugin() {
         if (result.errors.length > 0) return;
         for (const file of result.outputFiles || []) {
           let code = file.text
-            .replace(/^export\s*\{[^}]*\};\s*$/gm, '')
+            .replaceAll(/^export\s*\{[^}]*\};\s*$/gm, '')
             .trim();
           const wrapped = `(function(bindings) {\n${code}\nreturn transform;\n})`;
           mkdirSync(dirname(file.path), { recursive: true });
@@ -64,7 +64,7 @@ function testCaseExtractPlugin() {
         for (const file of result.outputFiles || []) {
           // The bundled output defines testCases as a var. Evaluate it.
           let code = file.text
-            .replace(/^export\s*\{[^}]*\};\s*$/gm, '')
+            .replaceAll(/^export\s*\{[^}]*\};\s*$/gm, '')
             .trim();
           // Wrap in a function to extract the testCases variable
           const fn = new Function(code + '\nreturn testCases;');
@@ -82,7 +82,7 @@ const transforms = findFiles(SRC_DIR, '.transform.ts');
 for (const entry of transforms) {
   const rel = relative(SRC_DIR, entry)
     .replace(/\.transform\.ts$/, '.js')
-    .replace(/\//g, '-');
+    .replaceAll('/', '-');
   const outPath = join(DIST_DIR, rel);
 
   const opts = {
@@ -111,7 +111,7 @@ const testCaseFiles = findFiles(SRC_DIR, '.testcase.ts');
 for (const entry of testCaseFiles) {
   const rel = relative(SRC_DIR, entry)
     .replace(/\.testcase\.ts$/, '.testcases.json')
-    .replace(/\//g, '-');
+    .replaceAll('/', '-');
   const outPath = join(DIST_DIR, rel);
 
   const opts = {

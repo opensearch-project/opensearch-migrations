@@ -7,7 +7,7 @@
 import type { HttpRequestMessage } from '../types';
 
 export function transform(msg: HttpRequestMessage): HttpRequestMessage {
-  const match = msg.URI.match(/\/solr\/([^/]+)\/select/);
+  const match = /\/solr\/([^/]+)\/select/.exec(msg.URI);
   if (match) {
     msg.URI = '/' + match[1] + '/_search';
     msg.method = 'POST';

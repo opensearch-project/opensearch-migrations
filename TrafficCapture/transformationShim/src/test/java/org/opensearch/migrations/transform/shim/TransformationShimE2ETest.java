@@ -10,8 +10,10 @@ package org.opensearch.migrations.transform.shim;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -29,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Data-driven E2E test runner. Test cases are defined in TypeScript
@@ -59,13 +62,41 @@ class TransformationShimE2ETest {
 
             seedData(fixture, tc);
 
-            var response = fixture.httpGet(fixture.getProxyBaseUrl() + tc.requestPath());
-            var json = MAPPER.readValue(response, new TypeReference<Map<String, Object>>() {});
+            var proxyResponse = fixture.httpGet(fixture.getProxyBaseUrl() + tc.requestPath());
+            var proxyJson = MAPPER.readValue(proxyResponse, new TypeReference<Map<String, Object>>() {});
 
-            assertResponseFormat(json, tc);
-            assertExpectedDocs(json, tc);
+            if (Boolean.TRUE.equals(tc.compareWithSolr())) {
+                compareWithSolr(fixture, tc, proxyJson);
+            } else {
+                assertResponseFormat(proxyJson, tc);
+                assertExpectedDocs(proxyJson, tc);
+            }
 
             log.info("PASSED: {}", tc.name());
+        }
+    }
+
+    // --- Compare with real Solr ---
+
+    private void compareWithSolr(
+        ShimTestFixture fixture, TestCaseDefinition tc, Map<String, Object> proxyJson
+    ) throws Exception {
+        var solrResponse = fixture.httpGet(fixture.getSolrBaseUrl() + tc.requestPath());
+        var solrJson = MAPPER.readValue(solrResponse, new TypeReference<Map<String, Object>>() {});
+
+        Set<String> ignorePaths = new HashSet<>();
+        if (tc.ignorePaths() != null) {
+            ignorePaths.addAll(tc.ignorePaths());
+        }
+
+        var diffs = JsonDiff.diff(solrJson, proxyJson, ignorePaths);
+
+        if (!diffs.isEmpty()) {
+            var report = JsonDiff.formatReport(diffs);
+            log.error("Solr vs Proxy diff for '{}':\n{}", tc.name(), report);
+            log.info("Full Solr response:\n{}", MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(solrJson));
+            log.info("Full Proxy response:\n{}", MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(proxyJson));
+            fail("Proxy response differs from Solr response (" + diffs.size() + " differences):\n" + report);
         }
     }
 
@@ -93,7 +124,7 @@ class TransformationShimE2ETest {
         }
     }
 
-    // --- Assertions ---
+    // --- Legacy assertions (for non-compareWithSolr cases) ---
 
     private void assertResponseFormat(Map<String, Object> json, TestCaseDefinition tc) {
         if (tc.assertResponseFormat() == null) return;

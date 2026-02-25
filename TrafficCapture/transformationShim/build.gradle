@@ -8,8 +8,11 @@ plugins {
 }
 
 node {
-    download = false
+    version = '22.14.0'
+    download = true
     nodeProjectDir = file("${projectDir}/transforms")
+    workDir = file("${project.buildDir}/nodejs")
+    npmWorkDir = file("${project.buildDir}/npm")
 }
 
 tasks.register('installTransformDeps', NpmTask) {

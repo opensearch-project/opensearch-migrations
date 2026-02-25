@@ -5,8 +5,8 @@ import type { TestCase } from '../test-types';
 
 export const testCases: TestCase[] = [
   {
-    name: 'basic-select-all-transforms',
-    description: 'Full Solr→OpenSearch transform: URI rewrite + response format conversion',
+    name: 'basic-select-compare-with-solr',
+    description: 'Full Solr→OpenSearch transform: compare proxy response against real Solr',
     requestTransforms: ['solr-to-opensearch-request'],
     responseTransforms: ['solr-to-opensearch-response'],
     collection: 'testcollection',
@@ -14,14 +14,15 @@ export const testCases: TestCase[] = [
       { id: '1', title: 'test document', content: 'hello world' },
     ],
     requestPath: '/solr/testcollection/select?q=*:*&wt=json',
-    expectedDocs: [
-      { id: '1', title: 'test document', content: 'hello world' },
+    compareWithSolr: true,
+    ignorePaths: [
+      '$.responseHeader.QTime',
+      '$.responseHeader.params',
     ],
-    assertResponseFormat: 'solr',
   },
   {
-    name: 'multiple-documents',
-    description: 'Verify multiple documents are returned and transformed correctly',
+    name: 'multiple-documents-compare-with-solr',
+    description: 'Multiple documents: compare proxy response against real Solr',
     requestTransforms: ['solr-to-opensearch-request'],
     responseTransforms: ['solr-to-opensearch-response'],
     collection: 'testcollection',
@@ -31,13 +32,11 @@ export const testCases: TestCase[] = [
       { id: '3', title: 'third doc', content: 'gamma' },
     ],
     requestPath: '/solr/testcollection/select?q=*:*&wt=json',
-    expectedDocs: [
-      { id: '1', title: 'first doc', content: 'alpha' },
-      { id: '2', title: 'second doc', content: 'beta' },
-      { id: '3', title: 'third doc', content: 'gamma' },
+    compareWithSolr: true,
+    ignorePaths: [
+      '$.responseHeader.QTime',
+      '$.responseHeader.params',
     ],
-    expectedFields: ['id', 'title', 'content'],
-    assertResponseFormat: 'solr',
   },
   {
     name: 'uri-rewrite-only-opensearch-format',

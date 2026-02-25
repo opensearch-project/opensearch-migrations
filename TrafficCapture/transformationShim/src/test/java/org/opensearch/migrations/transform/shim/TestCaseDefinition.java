@@ -30,5 +30,7 @@ record TestCaseDefinition(
     String requestPath,
     List<Map<String, Object>> expectedDocs,
     List<String> expectedFields,
-    String assertResponseFormat
+    String assertResponseFormat,
+    Boolean compareWithSolr,
+    List<String> ignorePaths
 ) {}

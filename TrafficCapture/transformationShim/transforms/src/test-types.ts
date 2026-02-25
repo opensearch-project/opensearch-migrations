@@ -42,4 +42,10 @@ export interface TestCase {
 
   /** Assert the response structure format. */
   assertResponseFormat?: 'solr' | 'opensearch';
+
+  /** If true, query real Solr and compare full response against proxy response. */
+  compareWithSolr?: boolean;
+
+  /** Dot-separated JSON paths to ignore in compareWithSolr diff (e.g. "$.responseHeader.QTime"). */
+  ignorePaths?: string[];
 }
