@@ -150,7 +150,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
-        Consumer<SourceTargetCaptureTuple> resultTupleConsumer
+        Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
+        Duration quiescentDuration
     ) throws InterruptedException, ExecutionException {
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
@@ -172,7 +173,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 observedPacketConnectionTimeout,
                 "(see command line option " + TrafficReplayer.PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
                 new TrafficReplayerAccumulationCallbacks(replayEngine, resultTupleConsumer, trafficSource,
-                    java.time.Duration.ofSeconds(5)) // TODO: wire from --quiescent-period-ms CLI option
+                    quiescentDuration)
             );
         try {
             pullCaptureFromSourceToAccumulator(trafficSource, trafficToHttpTransactionAccumulator);
@@ -248,7 +249,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
-        Consumer<SourceTargetCaptureTuple> resultTupleConsumer
+        Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
+        Duration quiescentDuration
     ) throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
         try {
             setupRunAndWaitForReplayToFinish(
@@ -256,7 +258,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 targetServerResponseTimeout,
                 trafficSource,
                 timeShifter,
-                resultTupleConsumer
+                resultTupleConsumer,
+                quiescentDuration
             );
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
