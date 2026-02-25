@@ -56,6 +56,21 @@ write_cluster_outputs() {
     cluster_endpoint=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterEndpoint")) | .OutputValue')
     cluster_endpoint="https://$cluster_endpoint"
     cluster_sg=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterAccessSecurityGroupId")) | .OutputValue')
+    # Fallback: look up security group from the OpenSearch domain's VPC config
+    if [[ -z "$cluster_sg" ]]; then
+      domain_name=$(aws cloudformation list-stack-resources --stack-name "$stack" \
+        --query "StackResourceSummaries[?ResourceType=='AWS::OpenSearchService::Domain'].PhysicalResourceId | [0]" \
+        --output text 2>/dev/null || true)
+      if [[ -n "$domain_name" && "$domain_name" != "None" ]]; then
+        cluster_sg=$(aws opensearch describe-domain --domain-name "$domain_name" \
+          --query 'DomainStatus.VPCOptions.SecurityGroupIds[0]' --output text 2>/dev/null || true)
+        if [[ -n "$cluster_sg" && "$cluster_sg" != "None" ]]; then
+          echo "Looked up security group from domain $domain_name: $cluster_sg"
+        else
+          cluster_sg=""
+        fi
+      fi
+    fi
     cluster_subnets=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterSubnets")) | .OutputValue')
 
     jq --arg id "$cluster_id" \
