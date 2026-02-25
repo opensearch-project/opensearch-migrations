@@ -23,6 +23,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.DynamicTest;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.TestFactory;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -36,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * 'ignore' paths are skipped, 'expect-diff' diffs pass but are logged, unmatched diffs fail.
  */
 @Slf4j
+@Tag("isolatedTest")
 class TransformationShimE2ETest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
