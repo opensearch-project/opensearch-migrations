@@ -5,6 +5,47 @@
  * specify what's unique about each test.
  */
 
+/** Allowed field value types in test documents (matches Solr/OpenSearch field types). */
+export type FieldValue = string | number | boolean | null | FieldValue[];
+
+/** A test document to seed into Solr/OpenSearch. Must have an `id` field. */
+export interface TestDocument {
+  id: string;
+  [field: string]: FieldValue;
+}
+
+/** OpenSearch field type names. */
+export type OpenSearchFieldType =
+  | 'text' | 'keyword' | 'constant_keyword' | 'wildcard'
+  | 'long' | 'integer' | 'short' | 'byte' | 'double' | 'float' | 'half_float' | 'scaled_float'
+  | 'date' | 'boolean' | 'binary' | 'ip'
+  | 'object' | 'nested' | 'flattened'
+  | 'geo_point' | 'geo_shape' | 'point' | 'shape'
+  | 'completion' | 'search_as_you_type' | 'token_count'
+  | 'dense_vector' | 'sparse_vector' | 'rank_feature' | 'rank_features'
+  | 'alias' | 'join' | 'percolator' | 'knn_vector';
+
+/** A single field mapping in an OpenSearch index. */
+export interface OpenSearchFieldMapping {
+  type?: OpenSearchFieldType;
+  analyzer?: string;
+  search_analyzer?: string;
+  normalizer?: string;
+  index?: boolean;
+  store?: boolean;
+  doc_values?: boolean;
+  /** Sub-fields (e.g. keyword sub-field on a text field). */
+  fields?: Record<string, OpenSearchFieldMapping>;
+  /** Nested object properties. */
+  properties?: Record<string, OpenSearchFieldMapping>;
+}
+
+/** OpenSearch index mapping definition. */
+export interface OpenSearchMapping {
+  properties: Record<string, OpenSearchFieldMapping>;
+  dynamic?: boolean | 'strict' | 'runtime';
+}
+
 /** A single test case definition. */
 export interface TestCase {
   name: string;
@@ -12,17 +53,17 @@ export interface TestCase {
   requestTransforms: string[];
   responseTransforms: string[];
   collection: string;
-  documents: Record<string, unknown>[];
+  documents: TestDocument[];
   seedSolr?: boolean;
   seedOpenSearch?: boolean;
   requestPath: string;
-  expectedDocs?: Record<string, unknown>[];
+  expectedDocs?: TestDocument[];
   expectedFields?: string[];
   assertResponseFormat?: 'solr' | 'opensearch';
   compareWithSolr?: boolean;
   ignorePaths?: string[];
   /** Explicit OpenSearch index mapping. If set, the index is created with this mapping before seeding. */
-  opensearchMapping?: Record<string, unknown>;
+  opensearchMapping?: OpenSearchMapping;
   solrVersions?: string[];
   plugins?: string[];
 }
