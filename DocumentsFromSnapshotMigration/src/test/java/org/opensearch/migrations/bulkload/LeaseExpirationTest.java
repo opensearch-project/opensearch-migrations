@@ -28,6 +28,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -36,6 +37,7 @@ import org.testcontainers.containers.Network;
 import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
 
 @Tag("isolatedTest")
+@Timeout(value = 10, unit = TimeUnit.MINUTES)
 @Slf4j
 public class LeaseExpirationTest extends SourceTestBase {
 
@@ -209,15 +211,17 @@ public class LeaseExpirationTest extends SourceTestBase {
     ) {
         String targetAddress = proxyContainer.getProxyUriAsString();
         var tp = proxyContainer.getProxy();
-        var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 3000);
+        var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 500);
 
-        // Set to less than 2x lease time to ensure leases aren't doubling
+        // With concatMap (sequential batches), 500ms latency, 1 connection, 10 docs/batch:
+        // throughput ~20 docs/sec. With PT20s lease, ~300 docs per run (after work coordination
+        // overhead). 1640 docs needs ~6 runs per shard.
         int timeoutSeconds = 60;
 
         String[] additionalArgs = {
             "--documents-per-bulk-request", "10",
             "--max-connections", "1",
-            "--initial-lease-duration", "PT10s",
+            "--initial-lease-duration", "PT20s",
             "--source-version", sourceClusterVersion.getVersion().toString()
         };
 
