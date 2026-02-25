@@ -15,3 +15,5 @@ data:
   reindexFromSnapshotPullPolicy: "{{ .Values.images.reindexFromSnapshot.pullPolicy }}"
   migrationConsoleImage: "{{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}"
   migrationConsolePullPolicy: "{{ .Values.images.migrationConsole.pullPolicy }}"
+  coordinatorClusterImage: "{{ .Values.images.coordinatorCluster.repository }}:{{ .Values.images.coordinatorCluster.tag }}"
+  coordinatorClusterPullPolicy: "{{ .Values.images.coordinatorCluster.pullPolicy }}"

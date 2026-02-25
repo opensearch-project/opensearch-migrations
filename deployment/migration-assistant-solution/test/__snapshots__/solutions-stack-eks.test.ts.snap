@@ -3,6 +3,124 @@
 exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = `
 {
   "AWSTemplateFormatVersion": "2010-09-09",
+  "Conditions": {
+    "AnyEndpointCondition": {
+      "Fn::Or": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "CreateS3Endpoint",
+            },
+            "true",
+          ],
+        },
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "CreateECREndpoint",
+            },
+            "true",
+          ],
+        },
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "CreateECRDockerEndpoint",
+            },
+            "true",
+          ],
+        },
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "CreateCloudWatchLogsEndpoint",
+            },
+            "true",
+          ],
+        },
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "CreateEFSEndpoint",
+            },
+            "true",
+          ],
+        },
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "CreateSTSEndpoint",
+            },
+            "true",
+          ],
+        },
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "CreateEKSAuthEndpoint",
+            },
+            "true",
+          ],
+        },
+      ],
+    },
+    "CreateCloudWatchLogsEndpointCondition": {
+      "Fn::Equals": [
+        {
+          "Ref": "CreateCloudWatchLogsEndpoint",
+        },
+        "true",
+      ],
+    },
+    "CreateECRDockerEndpointCondition": {
+      "Fn::Equals": [
+        {
+          "Ref": "CreateECRDockerEndpoint",
+        },
+        "true",
+      ],
+    },
+    "CreateECREndpointCondition": {
+      "Fn::Equals": [
+        {
+          "Ref": "CreateECREndpoint",
+        },
+        "true",
+      ],
+    },
+    "CreateEFSEndpointCondition": {
+      "Fn::Equals": [
+        {
+          "Ref": "CreateEFSEndpoint",
+        },
+        "true",
+      ],
+    },
+    "CreateEKSAuthEndpointCondition": {
+      "Fn::Equals": [
+        {
+          "Ref": "CreateEKSAuthEndpoint",
+        },
+        "true",
+      ],
+    },
+    "CreateS3EndpointCondition": {
+      "Fn::Equals": [
+        {
+          "Ref": "CreateS3Endpoint",
+        },
+        "true",
+      ],
+    },
+    "CreateSTSEndpointCondition": {
+      "Fn::Equals": [
+        {
+          "Ref": "CreateSTSEndpoint",
+        },
+        "true",
+      ],
+    },
+  },
   "Description": "(SO0290) - Migration Assistant for Amazon OpenSearch Service - EKS VPC Import Template v2.0.0",
   "Mappings": {
     "Solution": {
@@ -25,6 +143,14 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
           "Parameters": [
             "VPCId",
             "VPCSubnetIds",
+            "CreateS3Endpoint",
+            "CreateECREndpoint",
+            "CreateECRDockerEndpoint",
+            "CreateCloudWatchLogsEndpoint",
+            "CreateEFSEndpoint",
+            "CreateSTSEndpoint",
+            "CreateEKSAuthEndpoint",
+            "S3EndpointRouteTableIds",
           ],
         },
         {
@@ -37,6 +163,30 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
         },
       ],
       "ParameterLabels": {
+        "CreateCloudWatchLogsEndpoint": {
+          "default": "Create CloudWatch Logs VPC Endpoint",
+        },
+        "CreateECRDockerEndpoint": {
+          "default": "Create ECR Docker VPC Endpoint",
+        },
+        "CreateECREndpoint": {
+          "default": "Create ECR API VPC Endpoint",
+        },
+        "CreateEFSEndpoint": {
+          "default": "Create EFS VPC Endpoint",
+        },
+        "CreateEKSAuthEndpoint": {
+          "default": "Create EKS Auth VPC Endpoint",
+        },
+        "CreateS3Endpoint": {
+          "default": "Create S3 VPC Endpoint",
+        },
+        "CreateSTSEndpoint": {
+          "default": "Create STS VPC Endpoint",
+        },
+        "S3EndpointRouteTableIds": {
+          "default": "S3 Endpoint Route Table IDs",
+        },
         "VPCId": {
           "default": "VPC",
         },
@@ -164,6 +314,74 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "CreateCloudWatchLogsEndpoint": {
+      "AllowedValues": [
+        "true",
+        "false",
+      ],
+      "Default": "false",
+      "Description": "Create a CloudWatch Logs interface VPC endpoint.",
+      "Type": "String",
+    },
+    "CreateECRDockerEndpoint": {
+      "AllowedValues": [
+        "true",
+        "false",
+      ],
+      "Default": "false",
+      "Description": "Create an ECR Docker interface VPC endpoint (required for private ECR image pulls).",
+      "Type": "String",
+    },
+    "CreateECREndpoint": {
+      "AllowedValues": [
+        "true",
+        "false",
+      ],
+      "Default": "false",
+      "Description": "Create an ECR API interface VPC endpoint (required for private ECR image pulls).",
+      "Type": "String",
+    },
+    "CreateEFSEndpoint": {
+      "AllowedValues": [
+        "true",
+        "false",
+      ],
+      "Default": "false",
+      "Description": "Create an EFS interface VPC endpoint.",
+      "Type": "String",
+    },
+    "CreateEKSAuthEndpoint": {
+      "AllowedValues": [
+        "true",
+        "false",
+      ],
+      "Default": "false",
+      "Description": "Create an EKS Auth interface VPC endpoint (required for pod identity on isolated subnets).",
+      "Type": "String",
+    },
+    "CreateS3Endpoint": {
+      "AllowedValues": [
+        "true",
+        "false",
+      ],
+      "Default": "false",
+      "Description": "Create an S3 gateway VPC endpoint (required for ECR image layer pulls in private subnets).",
+      "Type": "String",
+    },
+    "CreateSTSEndpoint": {
+      "AllowedValues": [
+        "true",
+        "false",
+      ],
+      "Default": "false",
+      "Description": "Create an STS interface VPC endpoint (required for pod identity on isolated subnets).",
+      "Type": "String",
+    },
+    "S3EndpointRouteTableIds": {
+      "Default": "",
+      "Description": "Route table IDs for S3 gateway endpoint association (resolved from subnet IDs by the bootstrap script).",
+      "Type": "CommaDelimitedList",
+    },
     "Stage": {
       "Default": "dev",
       "Description": "Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1",
@@ -234,6 +452,26 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
       },
       "Type": "AWS::ServiceCatalogAppRegistry::ResourceAssociation",
     },
+    "CloudWatchLogsVpcEndpoint": {
+      "Condition": "CreateCloudWatchLogsEndpointCondition",
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Ref": "VpcEndpointSecurityGroup",
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.logs",
+        "SubnetIds": {
+          "Ref": "VPCSubnetIds",
+        },
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "VPCId",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
     "DefaultApplicationAttributesApplicationAttributeGroupAssociation5303e42e4390C82F1F85": {
       "Properties": {
         "Application": {
@@ -287,6 +525,86 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
         },
       },
       "Type": "AWS::ServiceCatalogAppRegistry::AttributeGroup",
+    },
+    "ECRDockerVpcEndpoint": {
+      "Condition": "CreateECRDockerEndpointCondition",
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Ref": "VpcEndpointSecurityGroup",
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.ecr.dkr",
+        "SubnetIds": {
+          "Ref": "VPCSubnetIds",
+        },
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "VPCId",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "ECRVpcEndpoint": {
+      "Condition": "CreateECREndpointCondition",
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Ref": "VpcEndpointSecurityGroup",
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.ecr.api",
+        "SubnetIds": {
+          "Ref": "VPCSubnetIds",
+        },
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "VPCId",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "EFSVpcEndpoint": {
+      "Condition": "CreateEFSEndpointCondition",
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Ref": "VpcEndpointSecurityGroup",
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.elasticfilesystem",
+        "SubnetIds": {
+          "Ref": "VPCSubnetIds",
+        },
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "VPCId",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "EKSAuthVpcEndpoint": {
+      "Condition": "CreateEKSAuthEndpointCondition",
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Ref": "VpcEndpointSecurityGroup",
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.eks-auth",
+        "SubnetIds": {
+          "Ref": "VPCSubnetIds",
+        },
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "VPCId",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
     },
     "EKSInfraArgoWorkflowPodIdentityAssociation9EBD0AE8": {
       "DependsOn": [
@@ -865,6 +1183,40 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
       },
       "Type": "AWS::EKS::PodIdentityAssociation",
     },
+    "S3VpcEndpoint": {
+      "Condition": "CreateS3EndpointCondition",
+      "Properties": {
+        "RouteTableIds": {
+          "Ref": "S3EndpointRouteTableIds",
+        },
+        "ServiceName": "com.amazonaws.us-west-1.s3",
+        "VpcEndpointType": "Gateway",
+        "VpcId": {
+          "Ref": "VPCId",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "STSVpcEndpoint": {
+      "Condition": "CreateSTSEndpointCondition",
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Ref": "VpcEndpointSecurityGroup",
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.sts",
+        "SubnetIds": {
+          "Ref": "VPCSubnetIds",
+        },
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "VPCId",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
     "SnapshotRole53D7C789": {
       "Properties": {
         "AssumeRolePolicyDocument": {
@@ -928,6 +1280,25 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
         ],
       },
       "Type": "AWS::IAM::Policy",
+    },
+    "VpcEndpointSecurityGroup": {
+      "Condition": "AnyEndpointCondition",
+      "Properties": {
+        "GroupDescription": "Allow HTTPS from VPC CIDR for VPC endpoints",
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "HTTPS for VPC endpoints",
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "VpcId": {
+          "Ref": "VPCId",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
     },
   },
   "Rules": {
@@ -1814,12 +2185,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           },
           {
             "Ref": "VpcPrivateSubnet2RouteTableA678073B",
-          },
-          {
-            "Ref": "VpcPublicSubnet1RouteTable6C95E38E",
-          },
-          {
-            "Ref": "VpcPublicSubnet2RouteTable94F7E489",
           },
         ],
         "ServiceName": {
