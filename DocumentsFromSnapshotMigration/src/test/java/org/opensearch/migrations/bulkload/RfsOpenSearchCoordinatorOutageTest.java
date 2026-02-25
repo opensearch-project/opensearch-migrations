@@ -157,12 +157,13 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
 
             // === ACTION : Ingest data on SOURCE cluster and take a snapshot
             var sourceClusterOperations = new ClusterOperations(esSourceContainer);
+            var targetClusterOperations = new ClusterOperations(osTargetContainer);
             setupAndSnapshotSourceCluster(
                 sourceClusterOperations, esSourceContainer, SHARDS, INDEX_NAME, TOTAL_DOCS,
                 tempDirSnapshot, testSnapshotContext);
 
             // ASSERT source snapshot has expected number of docs
-            var expectedDocs = getDocCountFromCluster(esSourceContainer.getUrl(), INDEX_NAME, true);
+            var expectedDocs = sourceClusterOperations.getDocCount(INDEX_NAME);
             Assertions.assertEquals(TOTAL_DOCS, expectedDocs, "Expected source doc count to match configured TOTAL_DOCS");
 
             // Schedule coordinator outage injection, tracking timestamps with nanoTime for monotonic ordering
@@ -210,7 +211,7 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                     "Outage should have been injected before RFS finished");
 
                 // ASSERT all docs migrated to target
-                var finalDocs = getDocCountFromCluster(osTargetContainer.getUrl(), INDEX_NAME, false);
+                var finalDocs = targetClusterOperations.getDocCount(INDEX_NAME);
                 Assertions.assertEquals(expectedDocs, finalDocs, "All docs should be on target");
 
                 // ASSERT coordinator work items reflect outcome (query coordinator directly, bypassing proxy)
@@ -357,21 +358,6 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                 return;
             }
             Assertions.fail("Expected " + clusterLabel + " cluster to be reachable: " + e.getMessage(), e);
-        }
-    }
-
-    private static long getDocCountFromCluster(String host, String index, boolean failIfMissing) {
-        var client = new RestClient(ConnectionContextTestParams.builder().host(host).build().toConnectionContext());
-        var refresh = client.get(index + "/_refresh", null);
-        if (refresh.statusCode == 404 && !failIfMissing) return 0;
-        Assertions.assertEquals(200, refresh.statusCode, "Refresh failed for " + index);
-        var count = client.get(index + "/_count", null);
-        if (count.statusCode == 404 && !failIfMissing) return 0;
-        Assertions.assertEquals(200, count.statusCode, "Count failed for " + index);
-        try {
-            return OBJECT_MAPPER.readTree(count.body).path("count").asLong();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed parsing count response", e);
         }
     }
 
