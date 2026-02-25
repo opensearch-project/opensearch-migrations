@@ -177,7 +177,7 @@ def call(Map config = [:]) {
                                           --base-dir "\$(pwd)" \
                                           --skip-console-exec \
                                           --region ${params.REGION} \
-                                          2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; exit \${PIPESTATUS[0]}
+                                          2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
                                     """
 
                                     // Parse exports from the EKS CFN stack
