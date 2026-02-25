@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.bugfixes;
+package org.opensearch.migrations.replay.kafka;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -6,11 +6,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.kafka.PojoKafkaCommitOffsetData;
-import org.opensearch.migrations.replay.kafka.TrackingKafkaConsumer;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
 import lombok.SneakyThrows;
@@ -49,7 +48,7 @@ public class KafkaRecordsReadyToCommitTest extends InstrumentationTest {
     private Object getOffsetTracker(TrackingKafkaConsumer consumer, int partition) {
         Field f = TrackingKafkaConsumer.class.getDeclaredField("partitionToOffsetLifecycleTrackerMap");
         f.setAccessible(true);
-        var map = (java.util.Map<Integer, ?>) f.get(consumer);
+        var map = (Map<Integer, ?>) f.get(consumer);
         return map.get(partition);
     }
 
@@ -65,7 +64,7 @@ public class KafkaRecordsReadyToCommitTest extends InstrumentationTest {
                                       PojoKafkaCommitOffsetData offsetData) {
         Method m = TrackingKafkaConsumer.class.getDeclaredMethod("commitKafkaKey",
             ITrafficStreamKey.class,
-            org.opensearch.migrations.replay.kafka.KafkaCommitOffsetData.class);
+            KafkaCommitOffsetData.class);
         m.setAccessible(true);
         return m.invoke(consumer, streamKey, offsetData);
     }
