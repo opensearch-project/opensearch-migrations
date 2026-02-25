@@ -50,12 +50,9 @@ export class EKSInfra extends Construct {
 
         let vpcSubnets;
         if (props.vpcSubnetIds && props.vpcSubnetIds.length > 0) {
-            const importedSubnets = props.vpcSubnetIds.map((subnetId, i) => {
-                const subnet = Subnet.fromSubnetId(this, `ImportedSubnet${i}`, subnetId);
-                Tags.of(subnet).add(`kubernetes.io/cluster/${props.clusterName}`, 'shared');
-                Tags.of(subnet).add('kubernetes.io/role/internal-elb', '1');
-                return subnet;
-            });
+            const importedSubnets = props.vpcSubnetIds.map((subnetId, i) =>
+                Subnet.fromSubnetId(this, `ImportedSubnet${i}`, subnetId)
+            );
             vpcSubnets = [{ subnets: importedSubnets }];
         } else {
             for (const subnet of props.vpc.privateSubnets) {
