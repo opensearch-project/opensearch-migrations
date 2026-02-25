@@ -63,7 +63,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         self.s3_region = os.environ.get('BYOS_S3_REGION', 'us-west-2')
         self.s3_endpoint = os.environ.get('BYOS_S3_ENDPOINT', '')
         self.pod_replicas = int(os.environ.get('BYOS_POD_REPLICAS', '1'))
-        # Monitor retry limit: exponential backoff (2s start, factor 2, cap 15s)
+        # Monitor retry limit: number of 60-second workflow monitor intervals (default 900 ≈ 15 hours)
         self.monitor_retry_limit = int(os.environ.get('BYOS_MONITOR_RETRY_LIMIT', '900'))
 
     def import_existing_clusters(self):
@@ -135,9 +135,31 @@ class Test0010ExternalSnapshotMigration(MATestBase):
     def verify_clusters(self):
         """Verify target cluster has indices with documents after migration."""
         target_response = cat_indices(cluster=self.target_cluster, refresh=True).decode("utf-8")
-        lines = [line for line in target_response.strip().split('\n')
-                 if line.strip() and not line.split()[2].startswith('.')]
-        assert len(lines) > 0, "No user indices found on target cluster after migration"
-        total_docs = sum(int(line.split()[6]) for line in lines)
-        assert total_docs > 0, f"Target cluster has {len(lines)} indices but 0 documents"
-        logger.info(f"Verified: {len(lines)} indices with {total_docs} total documents on target")
+        raw_lines = target_response.strip().split('\n')
+        user_index_lines = []
+        for line in raw_lines:
+            if not line.strip():
+                continue
+            parts = line.split()
+            if len(parts) < 3:
+                logger.debug("Skipping malformed cat_indices line: %r", line)
+                continue
+            if parts[2].startswith('.'):
+                continue
+            user_index_lines.append(parts)
+
+        assert len(user_index_lines) > 0, "No user indices found on target cluster after migration"
+
+        total_docs = 0
+        for parts in user_index_lines:
+            if len(parts) < 7:
+                logger.debug("Skipping cat_indices line without doc count column: %r", " ".join(parts))
+                continue
+            try:
+                total_docs += int(parts[6])
+            except ValueError:
+                logger.debug("Non-integer doc count %r in: %r", parts[6], " ".join(parts))
+                continue
+
+        assert total_docs > 0, f"Target cluster has {len(user_index_lines)} indices but 0 documents"
+        logger.info(f"Verified: {len(user_index_lines)} indices with {total_docs} total documents on target")

@@ -65,7 +65,7 @@ def call(Map config = [:]) {
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment and snapshot bucket')
             string(name: 'SNAPSHOT_NAME', defaultValue: 'large-snapshot', description: 'Name of the snapshot')
             string(name: 'TEST_IDS', defaultValue: '0010', description: 'Test IDs to execute (comma separated, e.g., "0010" or "0010,0011")')
-            string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '900', description: 'Max retries for workflow monitoring (exponential backoff: 2s start, factor 2, cap 15s)')
+            string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '900', description: 'Max retries for workflow monitoring (fixed 60-second interval between retries)')
             choice(
                 name: 'SOURCE_VERSION',
                 choices: ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10', 'ES_8.19', 'OS_1.3', 'OS_2.19'],
@@ -106,6 +106,19 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
+                }
+            }
+
+            stage('Validate Parameters') {
+                steps {
+                    script {
+                        if (!(params.REGION ==~ /^[a-z0-9-]+$/)) {
+                            error("Invalid AWS region '${params.REGION}'")
+                        }
+                        if (!(params.STAGE ==~ /^[A-Za-z0-9-]+$/)) {
+                            error("Invalid STAGE '${params.STAGE}'")
+                        }
+                    }
                 }
             }
 
@@ -188,6 +201,9 @@ def call(Map config = [:]) {
                                         """,
                                         returnStdout: true
                                     ).trim()
+                                    if (!rawOutput) {
+                                        error("CloudFormation stack output is empty — stack may not have deployed correctly.")
+                                    }
                                     def exportsMap = rawOutput.split(';')
                                             .collect { it.trim().replaceFirst(/^export\s+/, '') }
                                             .findAll { it.contains('=') }
@@ -319,7 +335,7 @@ ENVEOF
             always {
                 timeout(time: 75, unit: 'MINUTES') {
                     script {
-                        if (env.eksClusterName) {
+                        if (env.clusterDetailsJson) {
                             def clusterDetails = readJSON text: env.clusterDetailsJson
                             def targetCluster = clusterDetails.target
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
