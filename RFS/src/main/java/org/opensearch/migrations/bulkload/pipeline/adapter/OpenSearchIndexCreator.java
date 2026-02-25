@@ -19,12 +19,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 final class OpenSearchIndexCreator {
 
-    // Flat dotted keys (for flat settings from ES 1.7/2.4 where keys are literal strings like "index.creation_date").
-    private static final String[] FLAT_SETTINGS = {
-        "index.creation_date", "index.provided_name", "index.uuid", "index.version.created",
-        "index.mapping.single_type", "index.mapper.dynamic"
-    };
-
     private OpenSearchIndexCreator() {}
 
     static void createIndex(OpenSearchClient client, IndexMetadataSnapshot metadata, ObjectMapper mapper) {
@@ -44,17 +38,29 @@ final class OpenSearchIndexCreator {
     }
 
     private static void stripInternalSettings(ObjectNode settings) {
-        // Handle tree-structured settings (nested under "index" sub-object)
+        // After IndexMetadataConverter normalization, the "index." prefix is removed.
+        // Handle both normalized (no prefix) and non-normalized (with prefix) settings.
+        settings.remove("creation_date");
+        settings.remove("provided_name");
+        settings.remove("uuid");
+        settings.remove("version");
+        settings.remove("mapping");
+        settings.remove("mapper");
+
+        // Non-normalized: nested under "index" sub-object
         ObjectNodeUtils.removeFieldsByPath(settings, "index.creation_date");
         ObjectNodeUtils.removeFieldsByPath(settings, "index.provided_name");
         ObjectNodeUtils.removeFieldsByPath(settings, "index.uuid");
         ObjectNodeUtils.removeFieldsByPath(settings, "index.version");
-        ObjectNodeUtils.removeFieldsByPath(settings, "index.mapping.single_type");
-        ObjectNodeUtils.removeFieldsByPath(settings, "index.mapper.dynamic");
+        ObjectNodeUtils.removeFieldsByPath(settings, "index.mapping");
+        ObjectNodeUtils.removeFieldsByPath(settings, "index.mapper");
 
-        // Handle flat dotted keys (e.g. ES 1.7/2.4 where the key is literally "index.creation_date")
-        for (var key : FLAT_SETTINGS) {
-            settings.remove(key);
-        }
+        // Flat dotted keys (ES 1.7/2.4)
+        settings.remove("index.creation_date");
+        settings.remove("index.provided_name");
+        settings.remove("index.uuid");
+        settings.remove("index.version.created");
+        settings.remove("index.mapping.single_type");
+        settings.remove("index.mapper.dynamic");
     }
 }
