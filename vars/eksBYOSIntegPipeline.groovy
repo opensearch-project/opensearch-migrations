@@ -154,6 +154,17 @@ def call(Map config = [:]) {
 
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                    // Delete old Import-VPC stack if it exists (shares the same CFN export name)
+                                    def oldStackName = "Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}"
+                                    sh """
+                                      if aws cloudformation describe-stacks --stack-name '${oldStackName}' --region ${params.REGION} >/dev/null 2>&1; then
+                                        echo "Deleting old Import-VPC stack: ${oldStackName}"
+                                        aws cloudformation delete-stack --stack-name '${oldStackName}' --region ${params.REGION}
+                                        aws cloudformation wait stack-delete-complete --stack-name '${oldStackName}' --region ${params.REGION}
+                                        echo "Deleted old Import-VPC stack"
+                                      fi
+                                    """
+
                                     sh """
                                         ./deployment/k8s/aws/aws-bootstrap.sh \
                                           --deploy-create-vpc-cfn \
