@@ -227,14 +227,14 @@ public class ProcessLifecycleTest extends SourceTestBase {
         testProcess(RECEIVED_SIGTERM_EXIT_CODE, d -> {
             // The geonames shards are each 195 documents, and we need to guarantee that we're in the middle
             // of a shard when the sigterm is sent.
-            // The slow proxy operates with up to 4 bulk requests per second, with 4 documents each, for a total
-            // rate of 16 docs/second, meaning it can finish at most 160 documents in 10 seconds (it will be less
-            // because it also has to acquire a lease and download the shard).
+            // The slow proxy adds 500ms downstream latency with 4 docs/batch and 1 connection,
+            // giving ~8 docs/sec throughput. Work coordination + index creation overhead takes
+            // several seconds, so we wait 15 seconds to ensure batches have been processed.
             var processBuilder = setupProcessWithSlowProxy(d);
             Process process = null;
             try {
                 process = runAndMonitorProcess(processBuilder);
-                process.waitFor(10, TimeUnit.SECONDS);
+                process.waitFor(15, TimeUnit.SECONDS);
                 process.destroy();
                 // Give it 30 seconds and then force kill if it hasn't stopped yet.
                 process.waitFor(30, TimeUnit.SECONDS);

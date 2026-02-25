@@ -209,14 +209,14 @@ public class LeaseExpirationTest extends SourceTestBase {
     ) {
         String targetAddress = proxyContainer.getProxyUriAsString();
         var tp = proxyContainer.getProxy();
-        var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 1500);
+        var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 3000);
 
         // Set to less than 2x lease time to ensure leases aren't doubling
         int timeoutSeconds = 35;
 
         String[] additionalArgs = {
             "--documents-per-bulk-request", "10",
-            "--max-connections", "2",
+            "--max-connections", "1",
             "--initial-lease-duration", "PT10s",
             "--source-version", sourceClusterVersion.getVersion().toString()
         };
