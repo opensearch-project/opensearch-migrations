@@ -20,12 +20,6 @@ tasks.register('installTransformDeps', NpmTask) {
     args = ['install']
 }
 
-tasks.register('typecheckTransforms', NpmTask) {
-    description = 'Type-check TypeScript transforms'
-    args = ['run', 'typecheck']
-    dependsOn installTransformDeps
-}
-
 tasks.register('buildTransforms', NpmTask) {
     description = 'Build TypeScript transforms to GraalVM-compatible JS'
     args = ['run', 'build']

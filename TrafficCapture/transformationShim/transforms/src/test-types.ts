@@ -1,57 +1,67 @@
 /**
- * Type definitions for declarative test cases.
+ * Test case type definitions and helpers.
  *
- * Each test case defines: which transforms to apply, what data to seed,
- * what request to send, and what to assert about the response.
+ * Use `solrTest()` to create test cases with sensible defaults — you only
+ * specify what's unique about each test.
  */
 
 /** A single test case definition. */
 export interface TestCase {
-  /** Unique test name (used as JUnit display name). */
   name: string;
-
-  /** Optional description. */
   description?: string;
-
-  /** Request transform JS filenames to compose (e.g., ["solr-to-opensearch-request"]). */
   requestTransforms: string[];
-
-  /** Response transform JS filenames to compose (e.g., ["solr-to-opensearch-response"]). */
   responseTransforms: string[];
-
-  /** Collection name — used as both Solr core and OpenSearch index. */
   collection: string;
-
-  /** Documents to seed. */
   documents: Record<string, unknown>[];
-
-  /** Seed documents to Solr? Default: true. */
   seedSolr?: boolean;
-
-  /** Seed documents to OpenSearch? Default: true. */
   seedOpenSearch?: boolean;
-
-  /** Solr-format request path to send through the proxy. */
   requestPath: string;
-
-  /** Expected documents in the response (field values to assert). */
   expectedDocs?: Record<string, unknown>[];
-
-  /** Which fields to compare. Default: all keys in expectedDocs[0]. */
   expectedFields?: string[];
-
-  /** Assert the response structure format. */
   assertResponseFormat?: 'solr' | 'opensearch';
-
-  /** If true, query real Solr and compare full response against proxy response. */
   compareWithSolr?: boolean;
-
-  /** Dot-separated JSON paths to ignore in compareWithSolr diff (e.g. "$.responseHeader.QTime"). */
   ignorePaths?: string[];
-
-  /** Solr Docker image tags to test against (e.g. ["solr:8", "solr:9"]). Inherits from matrix config if omitted. */
   solrVersions?: string[];
-
-  /** Solr plugins required for this test case (e.g. ["analysis-icu"]). */
   plugins?: string[];
+}
+
+/** Solr-internal fields that OpenSearch doesn't have — always safe to ignore. */
+export const SOLR_INTERNAL_IGNORE = [
+  '$.responseHeader.QTime',
+  '$.responseHeader.params',
+  '$.response.docs[*]._version_',
+  '$.response.docs[*]._root_',
+];
+
+/**
+ * Create a Solr→OpenSearch E2E test case with sensible defaults.
+ *
+ * Defaults:
+ * - requestTransforms: ['solr-to-opensearch-request']
+ * - responseTransforms: ['solr-to-opensearch-response']
+ * - collection: 'testcollection'
+ * - compareWithSolr: true
+ * - ignorePaths: SOLR_INTERNAL_IGNORE
+ *
+ * Example — minimal test case:
+ * ```
+ * solrTest('basic-select', {
+ *   documents: [{ id: '1', title: 'hello' }],
+ *   requestPath: '/solr/testcollection/select?q=*:*&wt=json',
+ * })
+ * ```
+ */
+export function solrTest(
+  name: string,
+  overrides: Partial<TestCase> & Pick<TestCase, 'documents' | 'requestPath'>
+): TestCase {
+  return {
+    name,
+    requestTransforms: ['solr-to-opensearch-request'],
+    responseTransforms: ['solr-to-opensearch-response'],
+    collection: 'testcollection',
+    compareWithSolr: true,
+    ignorePaths: SOLR_INTERNAL_IGNORE,
+    ...overrides,
+  };
 }

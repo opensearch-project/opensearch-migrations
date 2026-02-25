@@ -2,16 +2,13 @@
   "name": "@transformation-shim/transforms",
   "version": "1.0.0",
   "private": true,
-  "description": "Type-safe transformation definitions for the TransformationShim proxy",
+  "description": "Transformation definitions for the TransformationShim proxy",
   "scripts": {
-    "typecheck": "tsgo --noEmit",
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
     "clean": "rm -rf dist"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
-    "esbuild": "^0.24.0",
-    "@typescript/native-preview": "^7.0.0-dev"
+    "esbuild": "^0.24.0"
   }
 }
