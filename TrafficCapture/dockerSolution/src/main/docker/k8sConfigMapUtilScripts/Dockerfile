@@ -1,7 +1,7 @@
 FROM amazonlinux:2023
 
-ENV PIP_ROOT_USER_ACTION ignore
-ENV LANG C.UTF-8
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV LANG=C.UTF-8
 
 RUN dnf install -y \
         jq \
