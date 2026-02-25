@@ -67,6 +67,10 @@ public class LeaseExpireTrigger implements AutoCloseable {
         }
     }
 
+    /**
+     * This will remove the item from the map, meaning that even after the event fires, it will be ignored/swallowed.
+     * @param workItemId
+     */
     public void markWorkAsCompleted(String workItemId) {
         workItemToLeaseMap.remove(workItemId);
     }

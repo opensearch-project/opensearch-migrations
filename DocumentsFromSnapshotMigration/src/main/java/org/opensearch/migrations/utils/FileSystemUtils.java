@@ -23,6 +23,10 @@ public class FileSystemUtils {
         }
     }
 
+    public static void deleteTree(@NonNull Path path) throws IOException {
+        deleteTree(path, true);
+    }
+
     /**
      * Recursively deletes a directory tree.
      * 

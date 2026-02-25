@@ -72,7 +72,7 @@ public class LeaseExpirationTest extends SourceTestBase {
         int continueExitCode = 2;
         int finalExitCodePerShard = 0;
         runTestProcessWithCheckpoint(continueExitCode, (migrationProcessesPerShard - 1) * shards,
-                finalExitCodePerShard, shards, shards, indexDocCount, forceMoreSegments,
+                finalExitCodePerShard, shards, shards, indexDocCount, false, forceMoreSegments,
                 sourceClusterVersion,
                 targetClusterVersion,
                 d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer,
@@ -82,7 +82,7 @@ public class LeaseExpirationTest extends SourceTestBase {
     @SneakyThrows
     private void runTestProcessWithCheckpoint(int expectedInitialExitCode, int expectedInitialExitCodeCount,
                                               int expectedEventualExitCode, int expectedEventualExitCodeCount,
-                                              int shards, int indexDocCount,
+                                              int shards, int indexDocCount, boolean continuousMode,
                                               boolean forceMoreSegments,
                                               SearchClusterContainer.ContainerVersion sourceClusterVersion,
                                               SearchClusterContainer.ContainerVersion targetClusterVersion,
