@@ -4,7 +4,12 @@
  * This pipeline tests migration from an existing S3 snapshot to a target OpenSearch cluster.
  * No source cluster is deployed - only a target cluster in Amazon OpenSearch Service.
  *
- * Modeled after eksIntegPipeline.groovy — uses aws-bootstrap.sh for EKS/MA deployment.
+ * Architecture (CreateVPC mode):
+ *   Deploy:    EKS CFN (VPC + EKS) → CDK target cluster (imports VPC)
+ *   Teardown:  CDK destroy (clusters) → delete EKS CFN stack (EKS + VPC)
+ *
+ * The EKS CFN stack owns the VPC, so CloudFormation handles the ENI cleanup
+ * internally — no retry loops or orphaned SG cleanup needed.
  *
  * Required parameters:
  * - S3_REPO_URI: Full S3 URI to snapshot repository (example: s3://bucket/folder/)
@@ -103,6 +108,19 @@ def call(Map config = [:]) {
             )
         }
         stages {
+            stage('Validate Parameters') {
+                steps {
+                    script {
+                        if (!(params.REGION ==~ /^[a-z0-9-]+$/)) {
+                            error("Invalid REGION '${params.REGION}': must match [a-z0-9-]+")
+                        }
+                        if (!(params.STAGE ==~ /^[A-Za-z0-9-]+$/)) {
+                            error("Invalid STAGE '${params.STAGE}': must match [A-Za-z0-9-]+")
+                        }
+                    }
+                }
+            }
+
             stage('Checkout') {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
@@ -140,6 +158,62 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Deploy EKS & Bootstrap MA') {
+                steps {
+                    timeout(time: 150, unit: 'MINUTES') {
+                        script {
+                            env.STACK_NAME_SUFFIX = "${maStageName}-${params.REGION}"
+                            env.STACK_NAME = "Migration-Assistant-Infra-Create-VPC-eks-${env.STACK_NAME_SUFFIX}"
+
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                    sh """
+                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                          --deploy-create-vpc-cfn \
+                                          --build-cfn \
+                                          --stack-name "${env.STACK_NAME}" \
+                                          --stage "${maStageName}" \
+                                          --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
+                                          --build-images \
+                                          --build-chart-and-dashboards \
+                                          --base-dir "\$(pwd)" \
+                                          --skip-console-exec \
+                                          --region ${params.REGION} \
+                                          2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; exit \${PIPESTATUS[0]}
+                                    """
+
+                                    // Parse exports from the EKS CFN stack
+                                    def rawOutput = sh(
+                                        script: """
+                                          aws cloudformation describe-stacks \
+                                          --stack-name ${env.STACK_NAME} \
+                                          --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
+                                          --output text
+                                        """,
+                                        returnStdout: true
+                                    ).trim()
+                                    if (!rawOutput) {
+                                        error("MigrationsExportString output is empty for stack ${env.STACK_NAME}")
+                                    }
+                                    def exportsMap = rawOutput.split(';')
+                                            .collect { it.trim().replaceFirst(/^export\s+/, '') }
+                                            .findAll { it.contains('=') }
+                                            .collectEntries {
+                                                def (key, value) = it.split('=', 2)
+                                                [(key): value]
+                                            }
+                                    env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']
+                                    env.eksClusterName = exportsMap['MIGRATIONS_EKS_CLUSTER_NAME']
+                                    env.clusterSecurityGroup = exportsMap['EKS_CLUSTER_SECURITY_GROUP']
+                                    env.eksVpcId = exportsMap['VPC_ID']
+                                    echo "EKS deployed: cluster=${env.eksClusterName}, vpc=${env.eksVpcId}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             stage('Deploy AOS Target Cluster') {
                 steps {
                     timeout(time: 45, unit: 'MINUTES') {
@@ -154,7 +228,8 @@ def call(Map config = [:]) {
                                     stage: "${maStageName}",
                                     clusterContextFilePath: "${clusterContextFilePath}",
                                     targetVer: env.targetVer,
-                                    sizeConfig: sizeConfig
+                                    sizeConfig: sizeConfig,
+                                    vpcId: env.eksVpcId
                                 )
                             }
                         }
@@ -162,64 +237,6 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Deploy & Bootstrap MA') {
-                steps {
-                    timeout(time: 150, unit: 'MINUTES') {
-                        script {
-                            env.STACK_NAME_SUFFIX = "${maStageName}-${params.REGION}"
-                            def clusterDetails = readJSON text: env.clusterDetailsJson
-                            def targetCluster = clusterDetails.target
-                            def vpcId = targetCluster.vpcId
-                            def subnetIds = "${targetCluster.subnetIds}"
-
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                    sh """
-                                        ./deployment/k8s/aws/aws-bootstrap.sh \
-                                          --deploy-import-vpc-cfn \
-                                          --build-cfn \
-                                          --stack-name "Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}" \
-                                          --vpc-id "${vpcId}" \
-                                          --subnet-ids "${subnetIds}" \
-                                          --stage "${maStageName}" \
-                                          --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
-                                          --build-images \
-                                          --build-chart-and-dashboards \
-                                          --base-dir "\$(pwd)" \
-                                          --skip-console-exec \
-                                          --region ${params.REGION} \
-                                          2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; exit \${PIPESTATUS[0]}
-                                    """
-
-                                    // Capture env vars for later stages and cleanup
-                                    def rawOutput = sh(
-                                        script: """
-                                          aws cloudformation describe-stacks \
-                                          --stack-name Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} \
-                                          --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
-                                          --output text
-                                        """,
-                                        returnStdout: true
-                                    ).trim()
-                                    if (!rawOutput) {
-                                        error("CloudFormation stack output is empty — stack may not have deployed correctly.")
-                                    }
-                                    def exportsMap = rawOutput.split(';')
-                                            .collect { it.trim().replaceFirst(/^export\s+/, '') }
-                                            .findAll { it.contains('=') }
-                                            .collectEntries {
-                                                def (key, value) = it.split('=', 2)
-                                                [(key): value]
-                                            }
-                                    env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']
-                                    env.eksClusterName = exportsMap['MIGRATIONS_EKS_CLUSTER_NAME']
-                                    env.clusterSecurityGroup = exportsMap['EKS_CLUSTER_SECURITY_GROUP']
-                                }
-                            }
-                        }
-                    }
-                }
-            }
 
             stage('Post-Cluster Setup') {
                 steps {
@@ -342,36 +359,27 @@ ENVEOF
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 4500, roleSessionName: 'jenkins-session') {
                                     sh "kubectl -n ma get pods || true"
                                     sh "kubectl delete namespace ma --ignore-not-found --timeout=60s || true"
-                                    // Remove added security group rule to allow proper cleanup of stacks
+                                    // Remove added security group rule
                                     sh """
-                                      echo "Checking if target security group $targetCluster.securityGroupId exists..."
-
-                                      if ! aws ec2 describe-security-groups --group-ids $targetCluster.securityGroupId >/dev/null 2>&1; then
-                                        echo "Security group $targetCluster.securityGroupId does not exist. Skipping cleanup."
-                                        exit 0
-                                      fi
-
-                                      echo "Checking for existing ingress rule to remove..."
-
-                                      exists=\$(aws ec2 describe-security-groups \
-                                        --group-ids $targetCluster.securityGroupId \
-                                        --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
-                                        --output json)
-
-                                      if [ "\$exists" != "[]" ]; then
-                                        echo "Ingress rule found. Revoking..."
-                                        aws ec2 revoke-security-group-ingress \
-                                          --group-id $targetCluster.securityGroupId \
-                                          --protocol -1 \
-                                          --port -1 \
-                                          --source-group $env.clusterSecurityGroup
-                                      else
-                                        echo "No ingress rule to revoke."
+                                      if aws ec2 describe-security-groups --group-ids $targetCluster.securityGroupId >/dev/null 2>&1; then
+                                        exists=\$(aws ec2 describe-security-groups \
+                                          --group-ids $targetCluster.securityGroupId \
+                                          --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
+                                          --output json)
+                                        if [ "\$exists" != "[]" ]; then
+                                          echo "Revoking ingress rule..."
+                                          aws ec2 revoke-security-group-ingress \
+                                            --group-id $targetCluster.securityGroupId \
+                                            --protocol -1 \
+                                            --port -1 \
+                                            --source-group $env.clusterSecurityGroup
+                                        fi
                                       fi
                                     """
-                                    sh "aws cloudformation delete-stack --stack-name Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} --region ${params.REGION}"
-                                    sh "aws cloudformation wait stack-delete-complete --stack-name Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} --region ${params.REGION} || true"
-                                    sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json"
+                                    // Teardown order: CDK first (clusters only), then EKS CFN (EKS + VPC)
+                                    sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json || true"
+                                    sh "aws cloudformation delete-stack --stack-name ${env.STACK_NAME} --region ${params.REGION}"
+                                    sh "aws cloudformation wait stack-delete-complete --stack-name ${env.STACK_NAME} --region ${params.REGION} || true"
                                 }
                             }
                         }
@@ -383,12 +391,12 @@ ENVEOF
 }
 
 /**
- * Deploy only the target cluster (no source cluster for BYOS scenario)
+ * Deploy only the target cluster (no source cluster for BYOS scenario).
+ * When vpcId is provided, the CDK imports the existing VPC instead of creating one.
  */
 def deployTargetClusterOnly(Map config) {
     def clusterContextValues = [
         stage: "${config.stage}",
-        vpcAZCount: 2,
         clusters: [[
             clusterId: "target",
             clusterVersion: "${config.targetVer}",
@@ -405,12 +413,19 @@ def deployTargetClusterOnly(Map config) {
         ]]
     ]
 
+    if (config.vpcId) {
+        clusterContextValues.vpcId = config.vpcId
+    } else {
+        clusterContextValues.vpcAZCount = 2
+    }
+
     def contextJsonStr = JsonOutput.prettyPrint(JsonOutput.toJson(clusterContextValues))
     writeFile(file: config.clusterContextFilePath, text: contextJsonStr)
     sh "echo 'Using cluster context file options:' && cat ${config.clusterContextFilePath}"
     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
         withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-            sh "./awsDeployCluster.sh --stage ${config.stage} --context-file ${config.clusterContextFilePath}"
+            def vpcArg = config.vpcId ? "--vpc-id ${config.vpcId}" : ""
+            sh "./awsDeployCluster.sh --stage ${config.stage} --context-file ${config.clusterContextFilePath} ${vpcArg}"
         }
     }
 

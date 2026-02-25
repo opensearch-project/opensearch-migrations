@@ -10,6 +10,7 @@ CLUSTER_STACK_TYPE_REGEX="(OpenSearchDomain|OpenSearchServerless|SelfManagedEC2)
 write_cluster_outputs() {
   local stage="$1"
   local outfile="$2"
+  local provided_vpc_id="${3:-}"
 
   stacks=$(aws cloudformation list-stacks \
     --query "StackSummaries[?StackStatus!='DELETE_COMPLETE' && StackStatus!='DELETE_IN_PROGRESS'].StackName" \
@@ -20,11 +21,17 @@ write_cluster_outputs() {
     return 1
   fi
 
-  network_stack_name=$(echo "$stacks" | grep "NetworkInfra-${stage}" | head -n 1)
-  vpc_id=$(aws cloudformation describe-stacks \
-    --stack-name "$network_stack_name" \
-    --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue" \
-    --output text)
+  local vpc_id
+  if [[ -n "$provided_vpc_id" ]]; then
+    vpc_id="$provided_vpc_id"
+    echo "Using provided VPC ID: $vpc_id"
+  else
+    network_stack_name=$(echo "$stacks" | grep "NetworkInfra-${stage}" | head -n 1)
+    vpc_id=$(aws cloudformation describe-stacks \
+      --stack-name "$network_stack_name" \
+      --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue" \
+      --output text)
+  fi
 
   cluster_stack_names=$(echo "$stacks" | grep -E "^$CLUSTER_STACK_TYPE_REGEX-.*-${stage}-")
   if [[ -z "$cluster_stack_names" ]]; then
@@ -75,6 +82,7 @@ CLUSTER_CDK_CONTEXT_FILE_PATH="$CLUSTER_CDK_PATH/cdk.context.json"
 # Defaults
 STAGE="aws-integ"
 PROVIDED_CONTEXT_FILE_PATH=""
+VPC_ID=""
 
 # Argument parser
 while [[ $# -gt 0 ]]; do
@@ -87,11 +95,16 @@ while [[ $# -gt 0 ]]; do
       PROVIDED_CONTEXT_FILE_PATH="$2"
       shift 2
       ;;
+    --vpc-id)
+      VPC_ID="$2"
+      shift 2
+      ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo "Options:"
       echo "  -s, --stage <val>              Stage name (default: $STAGE)"
       echo "  -c, --context-file <path>      Path to context file (REQUIRED)"
+      echo "  --vpc-id <id>                  VPC ID to use in cluster outputs (skips NetworkInfra stack lookup)"
       exit 0
       ;;
     *)
@@ -123,4 +136,4 @@ cd amazon-opensearch-service-sample-cdk
 cdk deploy "*" --require-approval never --concurrency 3
 
 CLUSTER_DETAILS_OUTPUT_FILE_PATH="$ROOT_REPO_PATH/test/tmp/cluster-details-${STAGE}.json"
-write_cluster_outputs "$STAGE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH"
+write_cluster_outputs "$STAGE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH" "$VPC_ID"
