@@ -258,8 +258,20 @@ public class ClusterOperations {
      */
     @SneakyThrows
     public long getDocCount(String indexName) {
-        refresh(indexName);
+        return getDocCount(indexName, true);
+    }
+
+    /**
+     * Refreshes the given index and returns its document count.
+     * If failIfMissing is false, returns 0 when the index does not exist.
+     */
+    @SneakyThrows
+    public long getDocCount(String indexName, boolean failIfMissing) {
+        var refreshResult = get("/" + indexName + "/_refresh");
+        if (refreshResult.getKey() == 404 && !failIfMissing) return 0;
+        assertThat("Refresh failed for " + indexName, refreshResult.getKey(), equalTo(200));
         var count = get("/" + indexName + "/_count");
+        if (count.getKey() == 404 && !failIfMissing) return 0;
         assertThat("Count failed for " + indexName, count.getKey(), equalTo(200));
         return new com.fasterxml.jackson.databind.ObjectMapper()
             .readTree(count.getValue()).path("count").asLong();

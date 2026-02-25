@@ -132,12 +132,11 @@ public class UpgradeTest extends SourceTestBase {
 
             // Assert single_type index for versions that support it
             if (hasEs5SingleTypeIndex) {
-                var countResponse = targetOperations.get("/" + testData.singleTypeIndexName + "/_count");
                 var expectedCount = 2; // createEs5SingleTypeIndexWithDocs creates 2 documents
                 assertThat(
                         "Single-type index doc count should match after ES 5.x upgraded and migrated to OS",
-                        countResponse.getValue(),
-                        containsString("\"count\":" + expectedCount)
+                        targetOperations.getDocCount(testData.singleTypeIndexName),
+                        equalTo((long) expectedCount)
                 );
             }
         }
