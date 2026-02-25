@@ -140,6 +140,25 @@ public class ShimTestFixture implements AutoCloseable {
         return resp.body();
     }
 
+    public String httpDelete(String url) throws Exception {
+        var resp = HTTP.send(
+            HttpRequest.newBuilder().uri(URI.create(url)).DELETE().build(),
+            HttpResponse.BodyHandlers.ofString()
+        );
+        log.info("DELETE {} → {}", url, resp.statusCode());
+        return resp.body();
+    }
+
+    public int httpHead(String url) throws Exception {
+        var resp = HTTP.send(
+            HttpRequest.newBuilder().uri(URI.create(url))
+                .method("HEAD", HttpRequest.BodyPublishers.noBody()).build(),
+            HttpResponse.BodyHandlers.discarding()
+        );
+        log.info("HEAD {} → {}", url, resp.statusCode());
+        return resp.statusCode();
+    }
+
     @Override
     public void close() throws Exception {
         if (proxy != null) proxy.stop();

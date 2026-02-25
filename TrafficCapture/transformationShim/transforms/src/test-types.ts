@@ -46,6 +46,9 @@ export interface OpenSearchMapping {
   dynamic?: boolean | 'strict' | 'runtime';
 }
 
+/** HTTP methods supported by the test framework. */
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'HEAD';
+
 /** A single test case definition. */
 export interface TestCase {
   name: string;
@@ -56,6 +59,10 @@ export interface TestCase {
   documents: TestDocument[];
   seedSolr?: boolean;
   seedOpenSearch?: boolean;
+  /** HTTP method for the test request. Defaults to 'GET'. */
+  method?: HttpMethod;
+  /** Request body (for POST/PUT/DELETE). JSON-serializable. */
+  requestBody?: string;
   requestPath: string;
   expectedDocs?: TestDocument[];
   expectedFields?: string[];
@@ -80,6 +87,7 @@ export const SOLR_INTERNAL_IGNORE = [
  * Create a Solr→OpenSearch E2E test case with sensible defaults.
  *
  * Defaults:
+ * - method: 'GET'
  * - requestTransforms: ['solr-to-opensearch-request']
  * - responseTransforms: ['solr-to-opensearch-response']
  * - collection: 'testcollection'

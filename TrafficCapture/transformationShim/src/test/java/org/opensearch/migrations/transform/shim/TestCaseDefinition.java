@@ -27,6 +27,8 @@ record TestCaseDefinition(
     List<Map<String, Object>> documents,
     Boolean seedSolr,
     Boolean seedOpenSearch,
+    String method,
+    String requestBody,
     String requestPath,
     List<Map<String, Object>> expectedDocs,
     List<String> expectedFields,

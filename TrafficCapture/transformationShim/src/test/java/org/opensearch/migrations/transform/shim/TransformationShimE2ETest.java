@@ -77,7 +77,7 @@ class TransformationShimE2ETest {
 
             seedData(fixture, tc);
 
-            var proxyResponse = fixture.httpGet(fixture.getProxyBaseUrl() + tc.requestPath());
+            var proxyResponse = sendRequest(fixture, fixture.getProxyBaseUrl() + tc.requestPath(), tc);
             var proxyJson = MAPPER.readValue(proxyResponse, new TypeReference<Map<String, Object>>() {});
 
             if (Boolean.TRUE.equals(tc.compareWithSolr())) {
@@ -96,7 +96,7 @@ class TransformationShimE2ETest {
     private void compareWithSolr(
         ShimTestFixture fixture, TestCaseDefinition tc, Map<String, Object> proxyJson
     ) throws Exception {
-        var solrResponse = fixture.httpGet(fixture.getSolrBaseUrl() + tc.requestPath());
+        var solrResponse = sendRequest(fixture, fixture.getSolrBaseUrl() + tc.requestPath(), tc);
         var solrJson = MAPPER.readValue(solrResponse, new TypeReference<Map<String, Object>>() {});
 
         Set<String> ignorePaths = new HashSet<>();
@@ -113,6 +113,19 @@ class TransformationShimE2ETest {
             log.info("Full Proxy response:\n{}", MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(proxyJson));
             fail("Proxy response differs from Solr response (" + diffs.size() + " differences):\n" + report);
         }
+    }
+
+    // --- Request dispatch by method ---
+
+    private String sendRequest(ShimTestFixture fixture, String url, TestCaseDefinition tc) throws Exception {
+        var method = tc.method() != null ? tc.method().toUpperCase() : "GET";
+        return switch (method) {
+            case "POST" -> fixture.httpPost(url, tc.requestBody() != null ? tc.requestBody() : "");
+            case "PUT" -> fixture.httpPut(url, tc.requestBody() != null ? tc.requestBody() : "");
+            case "DELETE" -> fixture.httpDelete(url);
+            case "HEAD" -> String.valueOf(fixture.httpHead(url));
+            default -> fixture.httpGet(url);
+        };
     }
 
     // --- Data seeding ---
