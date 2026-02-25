@@ -189,7 +189,7 @@ To complete the migration, users should proceed with metadata migration (`consol
 
 This workflow does not interfere with live traffic capture and replay, allowing users to seamlessly integrate dashboard migration into their existing workflow.
 
-![Design Diagram](diagrams/dashboardsmigrationflow.svg)
+![Design Diagram](./diagrams/dashboardsmigrationflow.svg)
 
 ---
 

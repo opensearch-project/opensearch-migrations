@@ -316,4 +316,49 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
         startOffsets.put(tp, 0L);
         mockConsumer.updateBeginningOffsets(startOffsets);
     }
+
+    // -------------------------------------------------------------------------
+    // Phase 3: Active connection tracking
+    // -------------------------------------------------------------------------
+
+    /**
+     * After consuming records for N connections on partition 0, all N connection IDs
+     * must appear in partitionToActiveConnections.get(0).
+     * Before fix: partitionToActiveConnections is never populated.
+     */
+    @Test
+    public void activeConnectionsTrackedPerPartition() throws Exception {
+        MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
+        try (var source = new KafkaTrafficCaptureSource(rootContext, mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1))) {
+            initializeMockConsumerTopic(mockConsumer);
+            mockConsumer.schedulePollTask(() -> {
+                mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
+                // 3 distinct connections
+                for (int i = 0; i < 3; i++) {
+                    var ts = TrafficStream.newBuilder()
+                        .setNodeId("node1").setConnectionId("conn" + i).setNumberOfThisLastChunk(0)
+                        .addSubStream(TrafficObservation.newBuilder()
+                            .setTs(com.google.protobuf.Timestamp.newBuilder().setSeconds(1).build())
+                            .setRead(ReadObservation.newBuilder()
+                                .setData(com.google.protobuf.ByteString.copyFromUtf8("GET / HTTP/1.1\r\n\r\n"))
+                                .build())
+                            .build())
+                        .build();
+                    try (var baos = new ByteArrayOutputStream()) {
+                        ts.writeTo(baos);
+                        mockConsumer.addRecord(new ConsumerRecord<>(TEST_TOPIC_NAME, 0, i,
+                            Instant.now().toString(), baos.toByteArray()));
+                    } catch (Exception e) { throw new RuntimeException(e); }
+                }
+            });
+
+            // Consume the records
+            source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+
+            var active = source.partitionToActiveConnections.get(0);
+            Assertions.assertNotNull(active, "partitionToActiveConnections must have an entry for partition 0");
+            Assertions.assertEquals(3, active.size(),
+                "all 3 connections must be tracked in partitionToActiveConnections");
+        }
+    }
 }
