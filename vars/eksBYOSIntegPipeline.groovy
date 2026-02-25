@@ -127,19 +127,6 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Validate Parameters') {
-                steps {
-                    script {
-                        if (!(params.REGION ==~ /^[a-z0-9-]+$/)) {
-                            error("Invalid AWS region '${params.REGION}'")
-                        }
-                        if (!(params.STAGE ==~ /^[A-Za-z0-9-]+$/)) {
-                            error("Invalid STAGE '${params.STAGE}'")
-                        }
-                    }
-                }
-            }
-
             stage('Test Caller Identity') {
                 steps {
                     script {
