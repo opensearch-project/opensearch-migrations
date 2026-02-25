@@ -427,6 +427,19 @@ def deployTargetClusterOnly(Map config) {
     sh "echo 'Using cluster context file options:' && cat ${config.clusterContextFilePath}"
     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
         withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+            // Delete any existing CDK stacks for this stage (avoids VPC mismatch on update)
+            sh """
+              for stack in \$(aws cloudformation list-stacks \
+                --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE UPDATE_ROLLBACK_COMPLETE ROLLBACK_COMPLETE \
+                --query "StackSummaries[?contains(StackName, '${config.stage}')].StackName" \
+                --output text --region ${params.REGION}); do
+                if echo "\$stack" | grep -qE '^(OpenSearchDomain|OpenSearchServerless|SelfManagedEC2)-'; then
+                  echo "Deleting old CDK stack: \$stack"
+                  aws cloudformation delete-stack --stack-name "\$stack" --region ${params.REGION}
+                  aws cloudformation wait stack-delete-complete --stack-name "\$stack" --region ${params.REGION} || true
+                fi
+              done
+            """
             def vpcArg = config.vpcId ? "--vpc-id ${config.vpcId}" : ""
             sh "./awsDeployCluster.sh --stage ${config.stage} --context-file ${config.clusterContextFilePath} ${vpcArg}"
         }
