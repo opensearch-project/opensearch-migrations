@@ -1,6 +1,7 @@
 import {Construct} from 'constructs';
-import {CfnCluster, CfnPodIdentityAssociation} from 'aws-cdk-lib/aws-eks';
-import {IVpc} from 'aws-cdk-lib/aws-ec2';
+import {CfnPodIdentityAssociation} from 'aws-cdk-lib/aws-eks';
+import * as eks from 'aws-cdk-lib/aws-eks-v2';
+import {IVpc, Subnet} from 'aws-cdk-lib/aws-ec2';
 import {
     Effect,
     ManagedPolicy, Policy,
@@ -8,7 +9,7 @@ import {
     Role,
     ServicePrincipal,
 } from "aws-cdk-lib/aws-iam";
-import {RemovalPolicy, Stack, Tags} from "aws-cdk-lib";
+import {Aws, RemovalPolicy, Stack, Tags} from "aws-cdk-lib";
 import {Repository} from "aws-cdk-lib/aws-ecr";
 
 
@@ -27,7 +28,7 @@ export interface EKSInfraProps {
 }
 
 export class EKSInfra extends Construct {
-    public readonly cluster: CfnCluster;
+    public readonly cluster: eks.Cluster;
     public readonly ecrRepo: Repository;
     public readonly snapshotRole: Role;
 
@@ -47,75 +48,34 @@ export class EKSInfra extends Construct {
             emptyOnDelete: true
         });
 
-        const clusterRole = new Role(this, 'MigrationsEKSClusterRole', {
-            assumedBy: new ServicePrincipal('eks.amazonaws.com'),
-            managedPolicies: [
-                ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSClusterPolicy'),
-                ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSBlockStoragePolicy'),
-                ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSComputePolicy'),
-                ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSLoadBalancingPolicy'),
-                ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSNetworkingPolicy'),
-            ],
-        });
-        clusterRole.assumeRolePolicy?.addStatements(
-            new PolicyStatement({
-                effect: Effect.ALLOW,
-                principals: [new ServicePrincipal('eks.amazonaws.com')],
-                actions: ['sts:AssumeRole', 'sts:TagSession']
-            }),
-        );
-
-        const ec2NodeRole = new Role(this, 'MigrationsEKSEC2NodeRole', {
-            assumedBy: new ServicePrincipal('ec2.amazonaws.com'),
-            managedPolicies: [
-                ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSWorkerNodePolicy'),
-                ManagedPolicy.fromAwsManagedPolicyName('AmazonEC2ContainerRegistryReadOnly'),
-                ManagedPolicy.fromAwsManagedPolicyName('AmazonEKS_CNI_Policy'),
-            ],
-        });
-
-        let subnetIds
+        let vpcSubnets;
         if (props.vpcSubnetIds && props.vpcSubnetIds.length > 0) {
-            subnetIds = props.vpcSubnetIds
+            const importedSubnets = props.vpcSubnetIds.map((subnetId, i) =>
+                Subnet.fromSubnetId(this, `ImportedSubnet${i}`, subnetId)
+            );
+            vpcSubnets = [{ subnets: importedSubnets }];
         } else {
-            subnetIds = []
             for (const subnet of props.vpc.privateSubnets) {
                 Tags.of(subnet).add(`kubernetes.io/cluster/${props.clusterName}`, 'shared');
                 Tags.of(subnet).add('kubernetes.io/role/internal-elb', '1');
-                subnetIds.push(subnet.subnetId)
             }
+            vpcSubnets = [{ subnets: props.vpc.privateSubnets }];
         }
-        this.cluster = new CfnCluster(this, 'MigrationsEKSCluster', {
-            name: props.clusterName,
-            version: '1.32',
-            upgradePolicy: {
-                supportType: 'STANDARD'
-            },
-            roleArn: clusterRole.roleArn,
-            resourcesVpcConfig: {
-                subnetIds: subnetIds,
-                endpointPrivateAccess: true,
-                endpointPublicAccess: true,
-            },
-            accessConfig: {
-                authenticationMode: 'API',
-            },
-            computeConfig: {
-                enabled: true,
-                nodeRoleArn: ec2NodeRole.roleArn,
-                nodePools: ["general-purpose", "system"]
-            },
-            storageConfig: {
-                blockStorage: {
-                    enabled: true
-                }
-            },
-            kubernetesNetworkConfig: {
-                elasticLoadBalancing: {
-                    enabled: true
-                }
-            }
+
+        this.cluster = new eks.Cluster(this, 'MigrationsEKSCluster', {
+            clusterName: props.clusterName,
+            version: eks.KubernetesVersion.of('1.35'),
+            vpc: props.vpc,
+            vpcSubnets,
         });
+
+        // Grant EKS readonly access to all IAM principals in the account
+        this.cluster.grantAccess('AccountReadonlyAccess',
+            `arn:${Aws.PARTITION}:iam::${Stack.of(this).account}:root`,
+            [eks.AccessPolicy.fromAccessPolicyName('AmazonEKSViewPolicy', {
+                accessScopeType: eks.AccessScopeType.CLUSTER,
+            })],
+        );
 
         const podIdentityRole = this.createDefaultPodIdentityRole(props.clusterName)
         this.snapshotRole = new Role(scope, `SnapshotRole`, {
@@ -126,12 +86,12 @@ export class EKSInfra extends Construct {
         this.snapshotRole.addToPolicy(new PolicyStatement({
             effect: Effect.ALLOW,
             actions: ['s3:ListBucket'],
-            resources: ['arn:aws:s3:::migrations-*'],
+            resources: [`arn:${Aws.PARTITION}:s3:::migrations-*`],
         }));
         this.snapshotRole.addToPolicy(new PolicyStatement({
             effect: Effect.ALLOW,
             actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
-            resources: ['arn:aws:s3:::migrations-*/*'],
+            resources: [`arn:${Aws.PARTITION}:s3:::migrations-*/*`],
         }));
         this.snapshotRole.grantPassRole(podIdentityRole);
 
@@ -272,7 +232,7 @@ export class EKSInfra extends Construct {
             new PolicyStatement({
                 effect: Effect.ALLOW,
                 actions: ['iam:PassRole'],
-                resources: [`arn:aws:iam::${Stack.of(this).account}:role/*`]
+                resources: [`arn:${Aws.PARTITION}:iam::${Stack.of(this).account}:role/*`]
             })
         );
         return podIdentityRole
