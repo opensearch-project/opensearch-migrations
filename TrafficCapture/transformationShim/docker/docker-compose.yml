@@ -25,12 +25,24 @@ services:
       timeout: 5s
       retries: 30
 
+  # Watches TypeScript transform sources and rebuilds JS on change
+  transform-watcher:
+    image: node:20-slim
+    working_dir: /transforms
+    volumes:
+      - ../transforms/src:/transforms/src:ro
+      - ../transforms/build.mjs:/transforms/build.mjs:ro
+      - ../transforms/package.json:/transforms/package.json:ro
+      - ../transforms/tsconfig.json:/transforms/tsconfig.json:ro
+      - transform-dist:/transforms/dist
+    command: ["sh", "-c", "npm install && npm run build && npm run watch"]
+
   transformation-shim:
     image: migrations/transformation_shim
     ports:
       - "8080:8080"
     volumes:
-      - ../transforms/dist:/transforms:ro
+      - transform-dist:/transforms:ro
     command:
       - --listenPort
       - "8080"
@@ -40,6 +52,12 @@ services:
       - /transforms/solr-to-opensearch-request.js
       - --responseTransformScript
       - /transforms/solr-to-opensearch-response.js
+      - --watchTransforms
     depends_on:
       opensearch:
         condition: service_healthy
+      transform-watcher:
+        condition: service_started
+
+volumes:
+  transform-dist:

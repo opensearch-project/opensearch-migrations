@@ -2,9 +2,11 @@ package org.opensearch.migrations.transform.shim;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
+import java.nio.file.StandardWatchEventKinds;
+import java.nio.file.WatchKey;
 
 import org.opensearch.migrations.transform.JavascriptTransformer;
 
@@ -61,6 +63,12 @@ public class TransformationShimMain {
         )
         public int maxConcurrentRequests = 100;
 
+        @Parameter(
+            names = {"--watchTransforms"},
+            description = "Watch transform script files for changes and hot-reload."
+        )
+        public boolean watchTransforms;
+
         @Parameter(names = {"--help", "-h"}, help = true, description = "Show usage.")
         public boolean help;
     }
@@ -84,17 +92,21 @@ public class TransformationShimMain {
         var reqScript = loadScript(params.requestTransformScript);
         var respScript = loadScript(params.responseTransformScript);
 
+        ReloadableTransformer reqTransformer = new ReloadableTransformer(
+            () -> new JavascriptTransformer(reqScript, null));
+        ReloadableTransformer respTransformer = new ReloadableTransformer(
+            () -> new JavascriptTransformer(respScript, null));
+
         var proxy = new TransformationShimProxy(
             params.listenPort,
             URI.create(params.backendUri),
-            () -> new JavascriptTransformer(reqScript, null),
-            () -> new JavascriptTransformer(respScript, null),
-            null,
-            null,
-            params.insecureBackend,
-            Duration.ofSeconds(params.timeoutSeconds),
-            params.maxConcurrentRequests
+            reqTransformer,
+            respTransformer
         );
+
+        if (params.watchTransforms) {
+            startFileWatcher(params, reqTransformer, respTransformer);
+        }
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
@@ -108,6 +120,66 @@ public class TransformationShimMain {
         proxy.start();
         log.info("TransformationShim running on port {}", params.listenPort);
         proxy.waitForClose();
+    }
+
+    private static void startFileWatcher(
+        Parameters params,
+        ReloadableTransformer reqTransformer,
+        ReloadableTransformer respTransformer
+    ) throws IOException {
+        var watchService = FileSystems.getDefault().newWatchService();
+
+        // Register parent directories of both script files
+        Path reqPath = params.requestTransformScript != null
+            ? Path.of(params.requestTransformScript) : null;
+        Path respPath = params.responseTransformScript != null
+            ? Path.of(params.responseTransformScript) : null;
+
+        if (reqPath != null) {
+            reqPath.toAbsolutePath().getParent().register(
+                watchService, StandardWatchEventKinds.ENTRY_MODIFY);
+        }
+        if (respPath != null && (reqPath == null
+            || !respPath.toAbsolutePath().getParent().equals(reqPath.toAbsolutePath().getParent()))) {
+            respPath.toAbsolutePath().getParent().register(
+                watchService, StandardWatchEventKinds.ENTRY_MODIFY);
+        }
+
+        Thread watchThread = new Thread(() -> {
+            log.info("Watching transform scripts for changes...");
+            while (!Thread.currentThread().isInterrupted()) {
+                WatchKey key;
+                try {
+                    key = watchService.take();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                for (var event : key.pollEvents()) {
+                    var changed = (Path) event.context();
+                    reloadIfMatch(changed, reqPath, reqTransformer, "request");
+                    reloadIfMatch(changed, respPath, respTransformer, "response");
+                }
+                key.reset();
+            }
+        }, "transform-watcher");
+        watchThread.setDaemon(true);
+        watchThread.start();
+    }
+
+    private static void reloadIfMatch(
+        Path changed, Path scriptPath, ReloadableTransformer transformer, String label
+    ) {
+        if (scriptPath == null || !changed.toString().equals(scriptPath.getFileName().toString())) {
+            return;
+        }
+        try {
+            var newScript = Files.readString(scriptPath);
+            transformer.reload(() -> new JavascriptTransformer(newScript, null));
+            log.info("Reloaded {} transform from {}", label, scriptPath);
+        } catch (IOException e) {
+            log.error("Failed to reload {} transform from {}", label, scriptPath, e);
+        }
     }
 
     private static String loadScript(String path) throws IOException {
