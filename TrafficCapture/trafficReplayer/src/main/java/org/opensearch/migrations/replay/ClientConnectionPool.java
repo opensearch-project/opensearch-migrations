@@ -138,6 +138,8 @@ public class ClientConnectionPool {
 
     /**
      * Immediately cancels a connection: marks the session cancelled (prevents reconnection),
+     * completes all pending scheduleFuture entries exceptionally so the OnlineRadixSorter
+     * drains fast (releasing requestWorkTracker entries and TrafficStreamLimiter slots),
      * then closes the channel and invalidates the cache.
      */
     public TrackedFuture<String, Void> cancelConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
@@ -145,6 +147,10 @@ public class ClientConnectionPool {
         var session = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
         if (session != null) {
             session.cancelled = true;
+            // Cancel all pending sorter slots on the event loop thread so they drain immediately.
+            // This prevents orphaned scheduleFuture entries from leaving requestWorkTracker
+            // entries and TrafficStreamLimiter slots unreleased.
+            session.eventLoop.submit(() -> session.scheduleSequencer.cancelAllWork());
             closeConnection(ctx, sessionNumber);
         }
         return TextTrackedFuture.completedFuture(null, () -> "cancelled");

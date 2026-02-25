@@ -189,7 +189,7 @@ flowchart TD
 
     ACC -->|"onConnectionClose TRAFFIC_SOURCE_READER_INTERRUPTED\n→ replayEngine.cancelConnection()\n(bypasses sorter + time-shift, sets cancelled flag)"| RE
     RE -->|scheduleClose| CCP
-    CCP -->|"close channel\ncascades failures through OnlineRadixSorter"| Target
+    CCP -->|"cancelAllWork() drains sorter\nchannel.close()"| Target
     CCP -.->|"onClose callback on every session close [NEW]\npendingTrafficSourceReaderInterruptedCloses.remove → decrement OSC"| OSC
 
     ACC -->|onRequestReceived| RE
@@ -211,8 +211,17 @@ To block new Kafka Traffic from being propagated before all of the previously
 assigned partitions' connections have drained, it returns empty batches while waiting.
 The Netty event loop processes completions freely. `finishedAccumulatingResponseFuture` is
 completed by `fireAccumulationsCallbacksAndClose` before the channel close, so in-flight requests
-drain fast. The `OnlineRadixSorter` cascades failures through remaining slots when the channel
-closes, so the close slot runs quickly.
+drain fast.
+
+**Fast sorter drain via `cancelAllWork()`**: `ClientConnectionPool.cancelConnection()` calls
+`session.scheduleSequencer.cancelAllWork()` on the event loop thread before closing the channel.
+This sets `cancelled=true` on the `OnlineRadixSorter` (making `addFutureForWork` return a failed
+future for any new work) and completes all existing `signalWorkCompletedFuture` entries with
+`null`. Since each slot's `signalingToStartFuture` is derived from the previous slot's
+`signalWorkCompletedFuture` via `thenAccept`, completing them cascades through the entire chain
+immediately — all pending slots fire, fail fast on the closed channel, and drain in one event
+loop pass. This releases `requestWorkTracker` entries and `TrafficStreamLimiter` slots that
+would otherwise be orphaned by `schedule.clear()` leaving `scheduleFuture` futures uncompleted.
 
 **`TrafficStreamLimiter` is not involved**: Traffic-source-reader-interrupted closes and the empty-batch drain period
 do not go through the limiter. The limiter only gates `onRequestReceived`.
@@ -225,7 +234,7 @@ Key changes summarized:
 | 2 | Traffic-source-reader-interrupted close events (`TrafficSourceReaderInterruptedClose`, `ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED`) drained before real records | `KafkaTrafficCaptureSource`, `Accumulator`, `TrafficReplayerAccumulationCallbacks` |
 | 3 | `outstandingTrafficSourceReaderInterruptedCloseSessions` counter + empty-batch drain in `readNextTrafficStreamSynchronously` | `KafkaTrafficCaptureSource` |
 | 4 | `fireAccumulationsCallbacksAndClose` on existing accumulation when traffic-source-reader-interrupted close fires (completes `finishedAccumulatingResponseFuture`) | `CapturedTrafficToHttpTransactionAccumulator` |
-| 5 | `onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED)` calls `replayEngine.cancelConnection()` — bypasses `OnlineRadixSorter` and time-shifting, marks `ConnectionReplaySession.cancelled=true` to prevent reconnection, closes channel immediately | `TrafficReplayerAccumulationCallbacks`, `ReplayEngine`, `RequestSenderOrchestrator`, `ClientConnectionPool`, `ConnectionReplaySession` |
+| 5 | `onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED)` calls `replayEngine.cancelConnection()` — bypasses `OnlineRadixSorter` and time-shifting, marks `ConnectionReplaySession.cancelled=true` to prevent reconnection, calls `scheduleSequencer.cancelAllWork()` to drain all pending sorter slots immediately (releasing `requestWorkTracker` + `TrafficStreamLimiter`), then closes channel | `TrafficReplayerAccumulationCallbacks`, `ReplayEngine`, `RequestSenderOrchestrator`, `ClientConnectionPool`, `ConnectionReplaySession`, `OnlineRadixSorter` |
 | 6 | Universal `onClose` callback on every `ConnectionReplaySession`; coordinator uses `pendingTrafficSourceReaderInterruptedCloses.remove(connKey_with_gen)` to decrement `outstandingTrafficSourceReaderInterruptedCloseSessions` exactly once per registered traffic-source-reader-interrupted close | `ClientConnectionPool`, `ConnectionReplaySession`, coordinator in `TrafficReplayerTopLevel` |
 | 7 | `ConnectionReplaySession.generation` field; generation threaded from `ITrafficStreamKey` through `scheduleRequest` to `getCachedSession` | `ConnectionReplaySession`, `RequestSenderOrchestrator` |
 | 8 | Quiescent metadata tagged on resumed streams; `ReplayEngine` delays first request to `max(timeShiftedStart, quiescentUntil)` | `KafkaTrafficCaptureSource`, `ITrafficStreamWithKey`, `Accumulation`, `ReplayEngine` |
@@ -517,7 +526,7 @@ flowchart TD
     subgraph mainThread["main thread"]
         SYNTH[readNextTrafficStreamChunk\nreturn traffic-source-reader-interrupted closes first]
         ACC2[Accumulator.accept\nTrafficSourceReaderInterruptedClose\n→ onConnectionClose TRAFFIC_SOURCE_READER_INTERRUPTED]
-        CANCEL[ConnectionReplaySession\ncomplete scheduleFutures exceptionally\nclose Netty channel]
+        CANCEL["ConnectionReplaySession\nscheduleSequencer.cancelAllWork()\n→ completes all signalWorkCompletedFutures\n→ cascades through sorter chain\n→ channel.close()"]
     end
 
     REV -->|pendingCleanupPartitions| ASN
@@ -525,7 +534,7 @@ flowchart TD
     LOST -->|immediately| SYNTH
     SYNTH -->|TrafficSourceReaderInterruptedClose| ACC2
     ACC2 -->|"replayEngine.cancelConnection()\n(bypasses sorter+time-shift)"| CANCEL
-    CANCEL -->|"ClientConnectionPool.cancelConnection()\nsession.cancelled=true + channel.close()"| Target[(Target Cluster)]
+    CANCEL -->|"ClientConnectionPool.cancelConnection()\nsession.cancelled=true\nscheduleSequencer.cancelAllWork()\nchannel.close()"| Target[(Target Cluster)]
 ```
 
 ### Generation-Based Stale State Fix (implemented)
