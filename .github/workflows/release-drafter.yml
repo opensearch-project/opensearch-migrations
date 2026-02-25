@@ -113,7 +113,6 @@ jobs:
             -Dbuild.snapshot=false \
             -Dbuild.version=0.${{ steps.get_data.outputs.version }} \
             --no-build-cache \
-            --no-configuration-cache \
             --no-daemon \
             --no-continue \
             --info
