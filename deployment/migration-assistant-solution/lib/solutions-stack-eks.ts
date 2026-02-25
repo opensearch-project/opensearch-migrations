@@ -314,7 +314,7 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             "AWS_ACCOUNT": this.account,
             "AWS_CFN_REGION": this.region,
             "VPC_ID": vpc.vpcId,
-            "EKS_CLUSTER_SECURITY_GROUP": eksInfra.cluster.attrClusterSecurityGroupId.toString(),
+            "EKS_CLUSTER_SECURITY_GROUP": eksInfra.cluster.clusterSecurityGroupId,
             "SNAPSHOT_ROLE": eksInfra.snapshotRole.roleArn.toString(),
             "STAGE": stageParameter.valueAsString
         })

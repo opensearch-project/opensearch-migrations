@@ -625,6 +625,14 @@ if [[ "$deploy_cfn" == "true" ]]; then
   fi
 
   echo "Deploying CloudFormation stack: $cfn_stack_name"
+  # Clean up DELETE_FAILED stacks so they can be recreated
+  if stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} --query 'Stacks[0].StackStatus' --output text 2>/dev/null) \
+      && [[ "$stack_status" == "DELETE_FAILED" ]]; then
+    echo "Stack $cfn_stack_name is in DELETE_FAILED state. Deleting before recreating..."
+    aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"}
+    aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+      || { echo "Failed to delete DELETE_FAILED stack: $cfn_stack_name"; exit 1; }
+  fi
   # create-stack/update-stack to support both --template-file and --template-url
   if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
     update_output=$(aws cloudformation update-stack \
