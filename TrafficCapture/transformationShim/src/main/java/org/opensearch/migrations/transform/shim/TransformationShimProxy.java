@@ -1,51 +1,57 @@
-/*
- * SPDX-License-Identifier: Apache-2.0
- *
- * The OpenSearch Contributors require contributions made to
- * this file be licensed under the Apache-2.0 license or a
- * compatible open source license.
- */
 package org.opensearch.migrations.transform.shim;
 
-import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
 
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.security.GeneralSecurityException;
-import java.security.SecureRandom;
-import java.security.cert.X509Certificate;
 import java.time.Duration;
+import java.util.Optional;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.transform.IJsonTransformer;
-import org.opensearch.migrations.transform.ThreadSafeTransformerWrapper;
+import org.opensearch.migrations.transform.shim.netty.BackendForwardingHandler;
+import org.opensearch.migrations.transform.shim.netty.RequestTransformHandler;
+import org.opensearch.migrations.transform.shim.netty.SigV4SigningHandler;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.ChannelPipeline;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.logging.LogLevel;
+import io.netty.handler.logging.LoggingHandler;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.SslHandler;
+import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 
 /**
- * A production-ready HTTP proxy that transforms requests and responses using {@link IJsonTransformer}.
- * <p>
- * Supports: TLS (frontside via {@code Supplier<SSLEngine>}, backside via {@code SSLContext}),
- * async backend calls, configurable timeouts, HTTP keep-alive, backpressure, graceful shutdown,
- * and thread-safe transformers.
+ * A transforming proxy that accepts HTTP requests, transforms them via IJsonTransformer,
+ * optionally signs them with SigV4, forwards to a backend via Netty, transforms the response,
+ * and returns it to the client.
+ *
+ * <p>Pipeline structure follows the same alphabetical logging convention as the replayer's
+ * RequestPipelineOrchestrator and the proxy's ProxyChannelInitializer:</p>
+ *
+ * <pre>
+ * [A] SslHandler (optional, frontend TLS)
+ * [B] HttpServerCodec
+ * [C] HttpObjectAggregator
+ * [D] RequestTransformHandler — applies IJsonTransformer to the request
+ * [E] SigV4SigningHandler (optional) — signs the request
+ * [F] BackendForwardingHandler — forwards to backend via Netty, transforms response
+ * </pre>
  */
 @Slf4j
 public class TransformationShimProxy {
@@ -53,20 +59,31 @@ public class TransformationShimProxy {
     public static final int DEFAULT_MAX_CONCURRENT_REQUESTS = 100;
     private static final int MAX_CONTENT_LENGTH = 10 * 1024 * 1024;
 
+    /**
+     * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
+     * Set this to Optional.empty() to disable intra-handler logging.
+     * Same pattern as RequestPipelineOrchestrator.PIPELINE_LOGGING_OPTIONAL.
+     */
+    private static final Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
+
     @Getter
     private final int port;
     private final URI backendUri;
     private final IJsonTransformer requestTransformer;
     private final IJsonTransformer responseTransformer;
     private final Supplier<SSLEngine> sslEngineSupplier;
-    private final HttpClient httpClient;
+    private final SslContext backendSslContext;
     private final Duration timeout;
     private final int maxConcurrentRequests;
+    private final AwsCredentialsProvider sigV4CredentialsProvider;
+    private final String sigV4Service;
+    private final String sigV4Region;
 
     private Channel serverChannel;
-    private EventLoopGroup bossGroup;
-    private EventLoopGroup workerGroup;
+    private NioEventLoopGroup bossGroup;
+    private NioEventLoopGroup workerGroup;
     private final AtomicInteger activeRequests = new AtomicInteger(0);
+    private final Semaphore concurrencySemaphore;
 
     /**
      * Full constructor with all production options.
@@ -74,25 +91,31 @@ public class TransformationShimProxy {
     public TransformationShimProxy(
         int port,
         URI backendUri,
-        Supplier<IJsonTransformer> requestTransformerSupplier,
-        Supplier<IJsonTransformer> responseTransformerSupplier,
+        IJsonTransformer requestTransformer,
+        IJsonTransformer responseTransformer,
         Supplier<SSLEngine> sslEngineSupplier,
-        SSLContext backendSslContext,
         boolean allowInsecureBackend,
         Duration timeout,
-        int maxConcurrentRequests
+        int maxConcurrentRequests,
+        AwsCredentialsProvider sigV4CredentialsProvider,
+        String sigV4Service,
+        String sigV4Region
     ) {
         this.port = port;
         this.backendUri = backendUri;
-        this.requestTransformer = new ThreadSafeTransformerWrapper(requestTransformerSupplier);
-        this.responseTransformer = new ThreadSafeTransformerWrapper(responseTransformerSupplier);
+        this.requestTransformer = requestTransformer;
+        this.responseTransformer = responseTransformer;
         this.sslEngineSupplier = sslEngineSupplier;
         this.timeout = timeout != null ? timeout : DEFAULT_TIMEOUT;
         this.maxConcurrentRequests = maxConcurrentRequests > 0 ? maxConcurrentRequests : DEFAULT_MAX_CONCURRENT_REQUESTS;
-        this.httpClient = buildHttpClient(backendSslContext, allowInsecureBackend, this.timeout);
+        this.concurrencySemaphore = new Semaphore(this.maxConcurrentRequests);
+        this.backendSslContext = buildBackendSslContext(allowInsecureBackend);
+        this.sigV4CredentialsProvider = sigV4CredentialsProvider;
+        this.sigV4Service = sigV4Service;
+        this.sigV4Region = sigV4Region;
     }
 
-    /** Convenience constructor for testing — no TLS, default timeout, default concurrency. */
+    /** Convenience constructor for testing — no TLS, no SigV4, default timeout. */
     public TransformationShimProxy(int port, URI backendUri,
                                    IJsonTransformer requestTransformer,
                                    IJsonTransformer responseTransformer) {
@@ -103,38 +126,23 @@ public class TransformationShimProxy {
         this.sslEngineSupplier = null;
         this.timeout = DEFAULT_TIMEOUT;
         this.maxConcurrentRequests = DEFAULT_MAX_CONCURRENT_REQUESTS;
-        this.httpClient = buildHttpClient(null, false, this.timeout);
+        this.concurrencySemaphore = new Semaphore(this.maxConcurrentRequests);
+        this.backendSslContext = buildBackendSslContext(false);
+        this.sigV4CredentialsProvider = null;
+        this.sigV4Service = null;
+        this.sigV4Region = null;
     }
 
-    private static HttpClient buildHttpClient(SSLContext backendSslContext, boolean allowInsecure, Duration timeout) {
-        var builder = HttpClient.newBuilder()
-            .connectTimeout(timeout)
-            .version(HttpClient.Version.HTTP_1_1);
-        var sslCtx = resolveBackendSslContext(backendSslContext, allowInsecure);
-        if (sslCtx != null) {
-            builder.sslContext(sslCtx);
-        }
-        return builder.build();
-    }
-
-    @SuppressWarnings("java:S4830") // Intentionally trust-all for --insecureDestination mode
-    private static SSLContext resolveBackendSslContext(SSLContext provided, boolean allowInsecure) {
-        if (provided != null) return provided;
-        if (!allowInsecure) return null;
+    private SslContext buildBackendSslContext(boolean allowInsecure) {
+        if (!"https".equalsIgnoreCase(backendUri.getScheme())) return null;
         try {
-            var ctx = SSLContext.getInstance("TLS");
-            ctx.init(null, new TrustManager[]{new X509TrustManager() {
-                public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-                public void checkClientTrusted(X509Certificate[] certs, String t) {
-                    // Intentionally empty — insecure mode trusts all certificates
-                }
-                public void checkServerTrusted(X509Certificate[] certs, String t) {
-                    // Intentionally empty — insecure mode trusts all certificates
-                }
-            }}, new SecureRandom());
-            return ctx;
-        } catch (GeneralSecurityException e) {
-            throw new IllegalStateException("Failed to create insecure SSLContext", e);
+            var builder = SslContextBuilder.forClient();
+            if (allowInsecure) {
+                builder.trustManager(InsecureTrustManagerFactory.INSTANCE);
+            }
+            return builder.build();
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to create backend SSL context", e);
         }
     }
 
@@ -148,22 +156,7 @@ public class TransformationShimProxy {
             .childHandler(new ChannelInitializer<SocketChannel>() {
                 @Override
                 protected void initChannel(SocketChannel ch) {
-                    if (sslEngineSupplier != null) {
-                        ch.pipeline().addLast(new SslHandler(sslEngineSupplier.get()));
-                    }
-                    ch.pipeline().addLast(
-                        new HttpServerCodec(),
-                        new HttpObjectAggregator(MAX_CONTENT_LENGTH),
-                        new TransformingProxyHandler(
-                            backendUri,
-                            requestTransformer,
-                            responseTransformer,
-                            httpClient,
-                            timeout,
-                            maxConcurrentRequests,
-                            activeRequests
-                        )
-                    );
+                    initFrontendPipeline(ch.pipeline());
                 }
             })
             .childOption(ChannelOption.AUTO_READ, true)
@@ -171,9 +164,12 @@ public class TransformationShimProxy {
 
         try {
             serverChannel = bootstrap.bind(port).sync().channel();
-            log.info("TransformationShimProxy started on port {}, backend={}, timeout={}s, maxConcurrent={}, frontTLS={}, backTLS={}",
+            log.info("TransformationShimProxy started on port {}, backend={}, timeout={}s, "
+                    + "maxConcurrent={}, frontTLS={}, backTLS={}, sigV4={}",
                 port, backendUri, timeout.getSeconds(), maxConcurrentRequests,
-                sslEngineSupplier != null, "https".equalsIgnoreCase(backendUri.getScheme()));
+                sslEngineSupplier != null,
+                "https".equalsIgnoreCase(backendUri.getScheme()),
+                sigV4CredentialsProvider != null);
         } catch (Exception e) {
             shutdownEventLoopGroups();
             if (e instanceof InterruptedException) {
@@ -181,6 +177,54 @@ public class TransformationShimProxy {
             }
             throw e;
         }
+    }
+
+    /**
+     * Initialize the frontend pipeline with alphabetical logging handlers between stages.
+     * Follows the same convention as RequestPipelineOrchestrator and NettyPacketToHttpConsumer.
+     */
+    void initFrontendPipeline(ChannelPipeline pipeline) {
+        // [A] Optional TLS termination
+        if (sslEngineSupplier != null) {
+            pipeline.addLast("ssl", new SslHandler(sslEngineSupplier.get()));
+        }
+        addLoggingHandler(pipeline, "A");
+
+        // [B] HTTP codec — decodes inbound HTTP requests
+        pipeline.addLast("httpCodec", new HttpServerCodec());
+        addLoggingHandler(pipeline, "B");
+
+        // [C] Aggregator — assembles FullHttpRequest from codec output
+        pipeline.addLast("httpAggregator", new HttpObjectAggregator(MAX_CONTENT_LENGTH));
+        addLoggingHandler(pipeline, "C");
+
+        // [D] Request transform — applies IJsonTransformer to the request
+        pipeline.addLast("requestTransform", new RequestTransformHandler(requestTransformer));
+        addLoggingHandler(pipeline, "D");
+
+        // [E] Optional SigV4 signing
+        if (sigV4CredentialsProvider != null) {
+            String protocol = "https".equalsIgnoreCase(backendUri.getScheme()) ? "https" : "http";
+            pipeline.addLast("authSigner",
+                new SigV4SigningHandler(sigV4CredentialsProvider, sigV4Service, sigV4Region, protocol));
+            addLoggingHandler(pipeline, "E");
+        }
+
+        // [F] Backend forwarding — connects to backend via Netty, transforms response, relays back
+        pipeline.addLast("backendForwarder", new BackendForwardingHandler(
+            backendUri, responseTransformer, backendSslContext, timeout,
+            concurrencySemaphore, activeRequests));
+        addLoggingHandler(pipeline, "F");
+    }
+
+    /**
+     * Add an alphabetical logging handler between pipeline stages.
+     * Same pattern as RequestPipelineOrchestrator.addLoggingHandler and
+     * NettyPacketToHttpConsumer.addLoggingHandlerLast.
+     */
+    private static void addLoggingHandler(ChannelPipeline pipeline, String name) {
+        PIPELINE_LOGGING_OPTIONAL.ifPresent(
+            logLevel -> pipeline.addLast(new LoggingHandler("s" + name, logLevel)));
     }
 
     private void shutdownEventLoopGroups() {

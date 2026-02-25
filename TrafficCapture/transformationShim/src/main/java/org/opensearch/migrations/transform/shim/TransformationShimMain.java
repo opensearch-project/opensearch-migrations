@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchKey;
+import java.time.Duration;
 
 import org.opensearch.migrations.transform.JavascriptTransformer;
 
@@ -14,6 +15,8 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import lombok.extern.slf4j.Slf4j;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
 @Slf4j
 public class TransformationShimMain {
@@ -69,6 +72,13 @@ public class TransformationShimMain {
         )
         public boolean watchTransforms;
 
+        @Parameter(
+            names = {"--sigv4-service-region"},
+            description = "Enable SigV4 signing with the given service and region (format: 'service,region', "
+                + "e.g. 'es,us-east-1'). Uses the default AWS credential chain."
+        )
+        public String sigV4ServiceRegion;
+
         @Parameter(names = {"--help", "-h"}, help = true, description = "Show usage.")
         public boolean help;
     }
@@ -97,11 +107,34 @@ public class TransformationShimMain {
         ReloadableTransformer respTransformer = new ReloadableTransformer(
             () -> new JavascriptTransformer(respScript, null));
 
+        // Parse SigV4 config
+        AwsCredentialsProvider sigV4Credentials = null;
+        String sigV4Service = null;
+        String sigV4Region = null;
+        if (params.sigV4ServiceRegion != null) {
+            var parts = params.sigV4ServiceRegion.split(",", 2);
+            if (parts.length != 2) {
+                System.err.println("--sigv4-service-region must be 'service,region' (e.g. 'es,us-east-1')");
+                System.exit(1);
+            }
+            sigV4Service = parts[0].trim();
+            sigV4Region = parts[1].trim();
+            sigV4Credentials = DefaultCredentialsProvider.create();
+            log.info("SigV4 signing enabled: service={}, region={}", sigV4Service, sigV4Region);
+        }
+
         var proxy = new TransformationShimProxy(
             params.listenPort,
             URI.create(params.backendUri),
             reqTransformer,
-            respTransformer
+            respTransformer,
+            null, // no frontend TLS
+            params.insecureBackend,
+            Duration.ofSeconds(params.timeoutSeconds),
+            params.maxConcurrentRequests,
+            sigV4Credentials,
+            sigV4Service,
+            sigV4Region
         );
 
         if (params.watchTransforms) {
@@ -129,7 +162,6 @@ public class TransformationShimMain {
     ) throws IOException {
         var watchService = FileSystems.getDefault().newWatchService();
 
-        // Register parent directories of both script files
         Path reqPath = params.requestTransformScript != null
             ? Path.of(params.requestTransformScript) : null;
         Path respPath = params.responseTransformScript != null

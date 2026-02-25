@@ -41,6 +41,7 @@ dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformer')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
+    implementation project(':awsUtilities')
 
     implementation libs.netty.all
     implementation libs.jackson.databind
@@ -49,6 +50,8 @@ dependencies {
     implementation libs.log4j.api
     implementation libs.log4j.core
     implementation libs.log4j.slf4j2.impl
+    implementation libs.aws.auth
+    implementation libs.aws.sdk.core
 
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformerProvider')
 
