@@ -58,7 +58,7 @@ final class JsonDiff {
         Object expected, Object actual, String path, Set<String> ignorePaths, List<Difference> diffs
     ) {
         String currentPath = path.isEmpty() ? "$" : path;
-        if (ignorePaths.contains(currentPath)) return;
+        if (shouldIgnore(currentPath, ignorePaths)) return;
 
         if (expected == null && actual == null) return;
         if (expected == null || actual == null) {
@@ -83,7 +83,7 @@ final class JsonDiff {
         allKeys.addAll(actual.keySet());
         for (var key : allKeys) {
             String childPath = path + "." + key;
-            if (ignorePaths.contains(childPath)) continue;
+            if (shouldIgnore(childPath, ignorePaths)) continue;
             if (!actual.containsKey(key)) {
                 diffs.add(new Difference(childPath, expected.get(key), "<missing>"));
             } else if (!expected.containsKey(key)) {
@@ -117,5 +117,18 @@ final class JsonDiff {
             return d;
         }
         return val;
+    }
+
+    /** Check if a path matches any ignore pattern. Supports [*] wildcards for array indices. */
+    private static boolean shouldIgnore(String path, Set<String> ignorePaths) {
+        if (ignorePaths.contains(path)) return true;
+        for (var pattern : ignorePaths) {
+            if (pattern.contains("[*]")) {
+                // Pattern.quote wraps in \Q...\E; break out around [*] to insert \d+ regex
+                var regex = java.util.regex.Pattern.quote(pattern).replace("[*]", "\\E\\[\\d+\\]\\Q");
+                if (path.matches(regex)) return true;
+            }
+        }
+        return false;
     }
 }

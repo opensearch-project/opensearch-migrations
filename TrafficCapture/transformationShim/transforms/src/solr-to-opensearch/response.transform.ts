@@ -22,12 +22,27 @@ export function transform(msg: HttpResponseMessage): HttpResponseMessage {
   if (payload?.inlinedTextBody) {
     const osResp: OpenSearchResponse = JSON.parse(payload.inlinedTextBody);
     if (osResp.hits) {
-      const docs = osResp.hits.hits.map((hit) => hit._source);
+      const docs = osResp.hits.hits.map((hit) => wrapMultiValued(hit._source));
       payload.inlinedTextBody = JSON.stringify({
         responseHeader: { status: 0, QTime: 0 },
-        response: { numFound: osResp.hits.total.value, start: 0, docs },
+        response: {
+          numFound: osResp.hits.total.value,
+          start: 0,
+          numFoundExact: true,
+          docs,
+        },
       });
     }
   }
   return msg;
+}
+
+/** Wrap scalar string values in arrays to match Solr's multi-valued field format. */
+function wrapMultiValued(doc: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(doc)) {
+    // id stays scalar; strings become single-element arrays (Solr default)
+    result[key] = key === 'id' ? val : typeof val === 'string' ? [val] : val;
+  }
+  return result;
 }

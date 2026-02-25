@@ -34,8 +34,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * Data-driven E2E test runner. Test cases are defined in TypeScript
- * ({@code *.testcase.ts}) and compiled to JSON on the classpath.
+ * Data-driven E2E test runner with version matrix support.
+ * <p>
+ * Test cases are defined in TypeScript ({@code *.testcase.ts}) and compiled to JSON.
+ * The matrix config ({@code matrix.config.json}) defines default Solr versions.
+ * Each test case runs against every Solr version in its {@code solrVersions} list
+ * (or the matrix defaults if not specified), generating a version × case matrix.
  */
 @Slf4j
 class TransformationShimE2ETest {
@@ -47,18 +51,29 @@ class TransformationShimE2ETest {
 
     @TestFactory
     Stream<DynamicTest> runTestCases() throws Exception {
+        var config = loadMatrixConfig();
         var testCases = loadAllTestCases();
-        return testCases.stream().map(tc ->
-            DynamicTest.dynamicTest(tc.name(), () -> executeTestCase(tc))
-        );
+
+        return testCases.stream().flatMap(tc -> {
+            var versions = tc.solrVersions() != null && !tc.solrVersions().isEmpty()
+                ? tc.solrVersions()
+                : config.defaultSolrVersions();
+            return versions.stream().map(solrVersion ->
+                DynamicTest.dynamicTest(
+                    tc.name() + " [" + solrVersion + "]",
+                    () -> executeTestCase(tc, solrVersion, config.defaultOpenSearchImage())
+                )
+            );
+        });
     }
 
-    private void executeTestCase(TestCaseDefinition tc) throws Exception {
+    private void executeTestCase(
+            TestCaseDefinition tc, String solrImage, String openSearchImage) throws Exception {
         var transforms = buildTransforms(tc.requestTransforms(), tc.responseTransforms());
+        var plugins = tc.plugins() != null ? tc.plugins() : List.<String>of();
 
-        try (var fixture = new ShimTestFixture(
-                "solr:8", "opensearchproject/opensearch:3.0.0", transforms)) {
-            fixture.start();
+        try (var fixture = new ShimTestFixture(solrImage, openSearchImage, transforms)) {
+            fixture.start(plugins);
 
             seedData(fixture, tc);
 
@@ -72,7 +87,7 @@ class TransformationShimE2ETest {
                 assertExpectedDocs(proxyJson, tc);
             }
 
-            log.info("PASSED: {}", tc.name());
+            log.info("PASSED: {} [{}]", tc.name(), solrImage);
         }
     }
 
@@ -148,7 +163,6 @@ class TransformationShimE2ETest {
             fields = new ArrayList<>(tc.expectedDocs().get(0).keySet());
         }
 
-        // Sort both lists by id for stable comparison
         var sortedExpected = tc.expectedDocs().stream()
             .sorted((a, b) -> String.valueOf(a.get("id")).compareTo(String.valueOf(b.get("id"))))
             .toList();
@@ -156,8 +170,7 @@ class TransformationShimE2ETest {
             .sorted((a, b) -> String.valueOf(a.get("id")).compareTo(String.valueOf(b.get("id"))))
             .toList();
 
-        assertEquals(sortedExpected.size(), sortedActual.size(),
-            "Document count mismatch");
+        assertEquals(sortedExpected.size(), sortedActual.size(), "Document count mismatch");
 
         for (int i = 0; i < sortedExpected.size(); i++) {
             for (var field : fields) {
@@ -189,11 +202,20 @@ class TransformationShimE2ETest {
         return transformers.length == 1 ? transformers[0] : new JsonCompositeTransformer(transformers);
     }
 
-    // --- Helpers ---
+    // --- Config & test case loading ---
+
+    private static MatrixConfig loadMatrixConfig() throws IOException {
+        try (var stream = TransformationShimE2ETest.class.getResourceAsStream("/transforms/matrix.config.json")) {
+            if (stream == null) {
+                log.warn("No matrix.config.json found, using defaults");
+                return new MatrixConfig(List.of("solr:8"), "opensearchproject/opensearch:3.0.0");
+            }
+            return MAPPER.readValue(stream, MatrixConfig.class);
+        }
+    }
 
     private static List<TestCaseDefinition> loadAllTestCases() throws IOException {
         var all = new ArrayList<TestCaseDefinition>();
-        // Scan classpath for all *.testcases.json files
         var classLoader = TransformationShimE2ETest.class.getClassLoader();
         var resources = classLoader.getResources("transforms");
         while (resources.hasMoreElements()) {
@@ -211,6 +233,8 @@ class TransformationShimE2ETest {
         return all;
     }
 
+    // --- Helpers ---
+
     private static String loadTransformJs(String name) throws IOException {
         var path = "/transforms/" + name;
         try (var stream = TransformationShimE2ETest.class.getResourceAsStream(path)) {
@@ -223,12 +247,10 @@ class TransformationShimE2ETest {
 
     @SuppressWarnings("unchecked")
     private static List<Map<String, Object>> extractDocs(Map<String, Object> json) {
-        // Try Solr format first
         var response = (Map<String, Object>) json.get("response");
         if (response != null) {
             return (List<Map<String, Object>>) response.get("docs");
         }
-        // Try OpenSearch format
         var hits = (Map<String, Object>) json.get("hits");
         if (hits != null) {
             var hitList = (List<Map<String, Object>>) hits.get("hits");

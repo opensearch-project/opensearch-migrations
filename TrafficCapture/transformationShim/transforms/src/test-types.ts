@@ -48,4 +48,10 @@ export interface TestCase {
 
   /** Dot-separated JSON paths to ignore in compareWithSolr diff (e.g. "$.responseHeader.QTime"). */
   ignorePaths?: string[];
+
+  /** Solr Docker image tags to test against (e.g. ["solr:8", "solr:9"]). Inherits from matrix config if omitted. */
+  solrVersions?: string[];
+
+  /** Solr plugins required for this test case (e.g. ["analysis-icu"]). */
+  plugins?: string[];
 }

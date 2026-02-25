@@ -1,7 +1,18 @@
 /**
  * Test cases for the Solr → OpenSearch transformation.
+ *
+ * Adding a new test: just add an entry below. It automatically runs against
+ * every Solr version in matrix.config.ts (or override with solrVersions).
  */
 import type { TestCase } from '../test-types';
+
+/** Solr-internal fields that OpenSearch doesn't have — always safe to ignore. */
+const SOLR_INTERNAL_IGNORE = [
+  '$.responseHeader.QTime',
+  '$.responseHeader.params',
+  '$.response.docs[*]._version_',
+  '$.response.docs[*]._root_',
+];
 
 export const testCases: TestCase[] = [
   {
@@ -15,10 +26,7 @@ export const testCases: TestCase[] = [
     ],
     requestPath: '/solr/testcollection/select?q=*:*&wt=json',
     compareWithSolr: true,
-    ignorePaths: [
-      '$.responseHeader.QTime',
-      '$.responseHeader.params',
-    ],
+    ignorePaths: SOLR_INTERNAL_IGNORE,
   },
   {
     name: 'multiple-documents-compare-with-solr',
@@ -33,10 +41,7 @@ export const testCases: TestCase[] = [
     ],
     requestPath: '/solr/testcollection/select?q=*:*&wt=json',
     compareWithSolr: true,
-    ignorePaths: [
-      '$.responseHeader.QTime',
-      '$.responseHeader.params',
-    ],
+    ignorePaths: SOLR_INTERNAL_IGNORE,
   },
   {
     name: 'uri-rewrite-only-opensearch-format',

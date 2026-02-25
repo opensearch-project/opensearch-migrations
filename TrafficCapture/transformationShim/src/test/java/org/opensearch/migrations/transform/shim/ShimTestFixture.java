@@ -13,6 +13,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 
 import org.opensearch.migrations.transform.shim.TransformationLibrary.TransformationPair;
 import org.opensearch.testcontainers.OpensearchContainer;
@@ -58,8 +59,19 @@ public class ShimTestFixture implements AutoCloseable {
 
     /** Start containers and proxy. */
     public void start() throws Exception {
+        start(List.of());
+    }
+
+    /** Start containers and proxy, installing the given Solr plugins first. */
+    public void start(List<String> plugins) throws Exception {
         solr.start();
         opensearch.start();
+
+        if (plugins != null) {
+            for (var plugin : plugins) {
+                installSolrPlugin(plugin);
+            }
+        }
 
         solrBaseUrl = "http://" + solr.getHost() + ":" + solr.getMappedPort(8983);
         openSearchBaseUrl = "http://" + opensearch.getHost() + ":" + opensearch.getMappedPort(9200);
@@ -70,6 +82,15 @@ public class ShimTestFixture implements AutoCloseable {
             transforms.request(), transforms.response());
         proxy.start();
         proxyBaseUrl = "http://localhost:" + proxyPort;
+    }
+
+    /** Install a Solr plugin by name (e.g. "analysis-icu"). */
+    private void installSolrPlugin(String pluginName) throws Exception {
+        var result = solr.execInContainer("bin/solr", "plugin", "install", pluginName);
+        log.info("install plugin {} → exit={}, stdout={}", pluginName, result.getExitCode(), result.getStdout());
+        if (result.getExitCode() != 0) {
+            log.warn("Plugin install stderr: {}", result.getStderr());
+        }
     }
 
     /** Create a Solr core and wait for it to be ready. */

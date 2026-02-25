@@ -135,5 +135,48 @@ for (const entry of testCaseFiles) {
   }
 }
 
-const total = transforms.length + testCaseFiles.length;
+// Build config files → JSON
+const configFiles = findFiles(SRC_DIR, '.config.ts');
+for (const entry of configFiles) {
+  const rel = relative(SRC_DIR, entry)
+    .replace(/\.config\.ts$/, '.config.json')
+    .replaceAll('/', '-');
+  const outPath = join(DIST_DIR, rel);
+
+  const opts = {
+    entryPoints: [entry],
+    bundle: true,
+    write: false,
+    format: 'esm',
+    target: 'es2020',
+    treeShaking: true,
+    outfile: outPath,
+    plugins: [{
+      name: 'config-extract',
+      setup(build) {
+        build.onEnd((result) => {
+          if (result.errors.length > 0) return;
+          for (const file of result.outputFiles || []) {
+            let code = file.text.replaceAll(/^export\s*\{[^}]*\};\s*$/gm, '').trim();
+            const fn = new Function(code + '\nreturn matrixConfig;');
+            const config = fn();
+            mkdirSync(dirname(file.path), { recursive: true });
+            writeFileSync(file.path, JSON.stringify(config, null, 2));
+          }
+        });
+      },
+    }],
+  };
+
+  if (watchMode) {
+    const ctx = await context(opts);
+    await ctx.watch();
+    console.log(`  Watching ${entry} → ${outPath}`);
+  } else {
+    await build(opts);
+    console.log(`  ${entry} → ${outPath}`);
+  }
+}
+
+const total = transforms.length + testCaseFiles.length + configFiles.length;
 console.log(watchMode ? `Watching ${total} file(s) for changes...` : 'Done.');

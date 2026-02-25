@@ -32,5 +32,7 @@ record TestCaseDefinition(
     List<String> expectedFields,
     String assertResponseFormat,
     Boolean compareWithSolr,
-    List<String> ignorePaths
+    List<String> ignorePaths,
+    List<String> solrVersions,
+    List<String> plugins
 ) {}
