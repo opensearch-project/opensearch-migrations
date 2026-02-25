@@ -119,7 +119,7 @@ public class UpgradeTest extends SourceTestBase {
             assertThat("Expected workers should spin up", result.numRuns, equalTo(expectedWorkers));
 
             var targetOperations = new ClusterOperations(targetCluster);
-            targetOperations.get("/_refresh");
+            targetOperations.refresh();
             var allDocs = targetOperations.get("/" + testData.indexName + "*/_search");
             var searchResponseBody = allDocs.getValue();
 

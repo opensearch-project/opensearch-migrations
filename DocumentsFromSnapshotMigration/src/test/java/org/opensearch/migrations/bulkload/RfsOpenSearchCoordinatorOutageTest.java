@@ -318,7 +318,7 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
             sourceClusterOperations.createDocument(indexName, String.valueOf(i),
                 "{\"name\":\"doc-" + i + "\",\"score\":" + i + "}");
         }
-        sourceClusterOperations.post("/_refresh", null);
+        sourceClusterOperations.refresh();
 
         var snapshotArgs = new CreateSnapshot.Args();
         snapshotArgs.snapshotName = SNAPSHOT_NAME;

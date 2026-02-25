@@ -13,7 +13,6 @@ import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
-import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
@@ -322,7 +321,7 @@ public class LeaseExpirationTest extends SourceTestBase {
                 sourceClusterOperations.createDocument("geonames", String.valueOf(i),
                     "{\"name\":\"doc-" + i + "\",\"score\":" + i + "}");
             }
-            sourceClusterOperations.post("/_refresh", null);
+            sourceClusterOperations.refresh();
 
             // Create snapshot
             createSnapshot(esSourceContainer, SNAPSHOT_NAME, testSnapshotContext);
@@ -352,19 +351,13 @@ public class LeaseExpirationTest extends SourceTestBase {
             var runs = new java.util.ArrayList<RunObservation>();
             try {
                 int exitCode;
-                var targetClient = new RestClient(ConnectionContextTestParams.builder()
-                    .host(osTargetContainer.getUrl()).build().toConnectionContext());
+                var targetOps = new ClusterOperations(osTargetContainer);
                 do {
                     var runStart = System.nanoTime();
                     exitCode = runProcessWithCoordinator(
                         tempDirSnapshot, tempDirLucene, targetProxy, coordinatorProxy);
                     var runEnd = System.nanoTime();
-                    targetClient.get("geonames/_refresh", null);
-                    var countResp = targetClient.get("geonames/_count", null);
-                    long docCount = countResp.statusCode == 200
-                        ? new com.fasterxml.jackson.databind.ObjectMapper()
-                            .readTree(countResp.body).path("count").asLong()
-                        : -1;
+                    long docCount = targetOps.getDocCount("geonames");
                     runs.add(new RunObservation(runStart, runEnd, exitCode, docCount));
                     log.atInfo().setMessage("Run {}: exit code {}, target doc count: {}")
                         .addArgument(runs.size()).addArgument(exitCode)
@@ -411,26 +404,18 @@ public class LeaseExpirationTest extends SourceTestBase {
                         + runs.stream().map(RunObservation::exitCode).toList());
 
                 // ASSERT: all docs migrated to target (query target directly, bypassing proxy)
-                Assertions.assertEquals(200, targetClient.get("geonames/_refresh", null).statusCode);
-                var countResponse = targetClient.get("geonames/_count", null);
-                Assertions.assertEquals(200, countResponse.statusCode);
-                var actualDocs = new com.fasterxml.jackson.databind.ObjectMapper()
-                    .readTree(countResponse.body).path("count").asLong();
-                Assertions.assertEquals(TOTAL_DOCS, actualDocs,
+                Assertions.assertEquals(TOTAL_DOCS, targetOps.getDocCount("geonames"),
                     "All " + TOTAL_DOCS + " docs should be on target after lease reclamation");
 
                 // ASSERT: coordinator has no incomplete work items (all work reclaimed and completed)
-                var coordinatorClient = new RestClient(ConnectionContextTestParams.builder()
-                    .host(osCoordinatorContainer.getUrl()).build().toConnectionContext());
+                var coordinatorOps = new ClusterOperations(osCoordinatorContainer);
                 var coordinatorIndexName = OpenSearchWorkCoordinator.getFinalIndexName(DEFAULT_COORDINATOR_INDEX_SUFFIX);
-                Assertions.assertEquals(200,
-                    coordinatorClient.get(coordinatorIndexName + "/_refresh", null).statusCode,
-                    "Failed to refresh coordinator index");
+                coordinatorOps.refresh(coordinatorIndexName);
                 var incompleteQuery = "{\"query\":{\"bool\":{\"must_not\":{\"exists\":{\"field\":\"completedAt\"}}}}}";
-                var incompleteResponse = coordinatorClient.post(coordinatorIndexName + "/_count", incompleteQuery, null);
-                Assertions.assertEquals(200, incompleteResponse.statusCode, "Failed to query coordinator index");
+                var incompleteResponse = coordinatorOps.post("/" + coordinatorIndexName + "/_count", incompleteQuery);
+                Assertions.assertEquals(200, incompleteResponse.getKey(), "Failed to query coordinator index");
                 var incompleteCount = new com.fasterxml.jackson.databind.ObjectMapper()
-                    .readTree(incompleteResponse.body).path("count").asLong();
+                    .readTree(incompleteResponse.getValue()).path("count").asLong();
                 Assertions.assertEquals(0, incompleteCount,
                     "All coordinator work items should be completed after recovery, found " + incompleteCount + " incomplete");
             } finally {

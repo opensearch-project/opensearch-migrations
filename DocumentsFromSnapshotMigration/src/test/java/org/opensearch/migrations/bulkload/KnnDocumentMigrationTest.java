@@ -141,7 +141,7 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
             sourceOps.createIndex(cfg.name, cfg.body);
             sourceOps.createDocument(cfg.name, "1", cfg.doc);
         }
-        sourceOps.post("/_refresh", null);
+        sourceOps.refresh();
 
         // Snapshot and migrate
         var snapshotName = "knn_snap";

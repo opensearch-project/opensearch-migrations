@@ -108,7 +108,7 @@ public class EndToEndCompressionTest extends SourceTestBase {
             targetClusterOperations.createIndex(indexName, body);
 
             sourceClusterOperations.createDocument(indexName, "222", "{\"score\": 42}");
-            sourceClusterOperations.get("/_refresh");
+            sourceClusterOperations.refresh();
 
             // === ACTION: Take a snapshot ===
             var snapshotName = "my_snap";

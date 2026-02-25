@@ -237,6 +237,34 @@ public class ClusterOperations {
         }
     }
 
+    /**
+     * Refreshes all indices on the cluster.
+     */
+    public void refresh() {
+        var response = post("/_refresh", null);
+        assertThat("Refresh all indices failed", response.getKey(), anyOf(equalTo(200), equalTo(201)));
+    }
+
+    /**
+     * Refreshes a specific index.
+     */
+    public void refresh(String indexName) {
+        var response = post("/" + indexName + "/_refresh", null);
+        assertThat("Refresh failed for " + indexName, response.getKey(), anyOf(equalTo(200), equalTo(201)));
+    }
+
+    /**
+     * Refreshes the given index and returns its document count.
+     */
+    @SneakyThrows
+    public long getDocCount(String indexName) {
+        refresh(indexName);
+        var count = get("/" + indexName + "/_count");
+        assertThat("Count failed for " + indexName, count.getKey(), equalTo(200));
+        return new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(count.getValue()).path("count").asLong();
+    }
+
     @SneakyThrows
     public Map.Entry<Integer, String> delete(final String path) {
         final var request = new HttpDelete(clusterUrl + path);
@@ -494,7 +522,7 @@ public class ClusterOperations {
         createDocument(indexName, "1", "{\"title\":\"Doc One\",\"flag\":true}", null, docType);
         createDocument(indexName, "2", "{\"title\":\"Doc Two\",\"flag\":false}", null, docType);
 
-        post("/" + indexName + "/_refresh", null);
+        refresh(indexName);
     }
 
     public String defaultDocType() {
