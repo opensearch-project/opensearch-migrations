@@ -241,11 +241,10 @@ def call(Map config = [:]) {
                         }
                         echo "CloudFormation cleanup completed"
 
-                        // TODO (MIGRATIONS-2777): Run kubectl with an isolated KUBECONFIG per pipeline run
-                        // For now, do best effort cleanup of the migration EKS context created by aws-bootstrap.sh.
+                        // Clean up the kubeconfig context entry created by aws-bootstrap.sh
                         sh """
                             if command -v kubectl >/dev/null 2>&1; then
-                                kubectl config get-contexts 2>/dev/null | grep migration-eks-cluster-${stage}-${params.REGION} | awk '{print \$2}' | xargs -r kubectl config delete-context || echo "No kubectl context to clean up"
+                                kubectl config delete-context migration-eks-cluster-${stage}-${params.REGION} 2>/dev/null || echo "No kubectl context to clean up"
                             else
                                 echo "kubectl not found on agent; skipping context cleanup"
                             fi

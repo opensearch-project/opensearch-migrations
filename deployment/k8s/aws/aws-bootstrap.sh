@@ -60,6 +60,7 @@ create_vpc_endpoints=""
 ignore_checks=false
 push_images_to_ecr=false
 ma_images_source=""
+skip_setting_k8s_context=false
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -95,6 +96,7 @@ while [[ $# -gt 0 ]]; do
     --ignore-checks) ignore_checks=true; shift 1 ;;
     --push-all-images-to-private-ecr) push_images_to_ecr=true; shift 1 ;;
     --ma-images-source) ma_images_source="$2"; shift 2 ;;
+    --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo ""
@@ -146,6 +148,11 @@ while [[ $# -gt 0 ]]; do
       echo "  --stage <val>                             Stage name for CFN exports filter and CFN Stage parameter (default: dev)"
       echo "  --region <val>                            AWS region"
       echo "  --skip-console-exec                       Don't exec into console pod (default: $skip_console_exec)"
+      echo "  --skip-setting-k8s-context                Don't set the kubectl current-context to the EKS cluster."
+      echo "                                            The kubeconfig entry is still created, but the active context"
+      echo "                                            is left unchanged. Use this on hosts that manage multiple K8s"
+      echo "                                            deployments. You will need to pass --context=<context-name>"
+      echo "                                            to every kubectl/helm command, or set the context yourself."
       echo ""
       echo "Build options:"
       echo "  --base-dir <path>                         opensearch-migrations directory"
@@ -518,8 +525,10 @@ deploy_dashboard() {
 check_existing_ma_release() {
   local release_name="$1"
   local release_namespace="$2"
+  local helm_ctx=()
+  [[ -n "${KUBE_CONTEXT:-}" ]] && helm_ctx=("--kube-context=${KUBE_CONTEXT}")
 
-  if helm status "$release_name" -n "$release_namespace" >/dev/null 2>&1; then
+  if helm "${helm_ctx[@]}" status "$release_name" -n "$release_namespace" >/dev/null 2>&1; then
     echo
     echo "A Migration Assistant Helm release named '$release_name' already exists in namespace '$release_namespace'."
     echo "This usually means Migration Assistant is already installed on this cluster."
@@ -707,7 +716,16 @@ else
 fi
 echo ""
 
-aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
+aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --alias "${MIGRATIONS_EKS_CLUSTER_NAME}"
+KUBE_CONTEXT="${MIGRATIONS_EKS_CLUSTER_NAME}"
+export KUBE_CONTEXT
+
+if [[ "$skip_setting_k8s_context" == "true" ]]; then
+  echo "Skipping setting kubectl current-context (--skip-setting-k8s-context)."
+  echo "Use --context=${KUBE_CONTEXT} with kubectl or --kube-context=${KUBE_CONTEXT} with helm."
+else
+  kubectl config use-context "${KUBE_CONTEXT}" >/dev/null 2>&1
+fi
 
 # --- EKS access entry (optional) ---
 if [[ -n "$eks_access_principal_arn" ]]; then
@@ -855,8 +873,8 @@ if [[ "$ignore_checks" != "true" && -n "${VPC_ID:-}" ]]; then
   fi
 fi
 
-kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace "$namespace"
-kubectl config set-context --current --namespace="$namespace" >/dev/null 2>&1
+kubectl --context="${KUBE_CONTEXT}" get namespace "$namespace" >/dev/null 2>&1 || kubectl --context="${KUBE_CONTEXT}" create namespace "$namespace"
+kubectl config set-context "${KUBE_CONTEXT}" --namespace="$namespace" >/dev/null 2>&1
 
 
 # --- mirror public images to private ECR (optional) ---
@@ -1012,6 +1030,7 @@ check_existing_ma_release "$namespace" "$namespace"
 
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
 helm install "$namespace" "${ma_chart_dir}" \
+  --kube-context="${KUBE_CONTEXT}" \
   --namespace $namespace \
   --timeout 10m \
   $HELM_VALUES_FLAGS \
@@ -1044,8 +1063,8 @@ if [[ "$disable_general_purpose_pool" == "true" ]]; then
 fi
 
 if [[ "$skip_console_exec" == "false" ]]; then
-  kubectl -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s
-  cmd="kubectl -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
+  kubectl --context="${KUBE_CONTEXT}" -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s
+  cmd="kubectl --context=${KUBE_CONTEXT} -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
   echo "Accessing migration console with command: $cmd"
   eval "$cmd"
 fi

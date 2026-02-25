@@ -92,12 +92,11 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
-                            sh "kubectl config use-context minikube"
-                            sh "helm uninstall buildkit -n buildkit 2>/dev/null || true"
-                            sh "USE_LOCAL_REGISTRY=true BUILDKIT_HELM_ARGS='--set buildkitd.maxParallelism=16 --set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0' ./buildImages/setUpK8sImageBuildServices.sh"
-                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 -x test --no-configuration-cache --info --stacktrace --profile --scan"
+                            sh "helm --kube-context=minikube uninstall buildkit -n buildkit 2>/dev/null || true"
+                            sh "USE_LOCAL_REGISTRY=true KUBE_CONTEXT=minikube BUILDKIT_HELM_ARGS='--set buildkitd.maxParallelism=16 --set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0' ./buildImages/setUpK8sImageBuildServices.sh"
+                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 -x test --info --stacktrace --profile --scan"
                             sh "docker buildx rm local-remote-builder 2>/dev/null || true"
-                            sh "helm uninstall buildkit -n buildkit 2>/dev/null || true"
+                            sh "helm --kube-context=minikube uninstall buildkit -n buildkit 2>/dev/null || true"
                         }
                     }
                 }
@@ -107,18 +106,17 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 3, unit: 'MINUTES') {
                         script {
-                            sh "kubectl config use-context minikube"
                             sh """
                                 # Attempt clean helm uninstall first (triggers hook-based cleanup)
-                                helm uninstall ma -n ma || true
+                                helm --kube-context=minikube uninstall ma -n ma || true
 
                                 # Delete kyverno webhooks in case helm uninstall didn't run cleanly
-                                kubectl delete mutatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found || true
-                                kubectl delete validatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found || true
+                                kubectl --context=minikube delete mutatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found || true
+                                kubectl --context=minikube delete validatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found || true
 
                                 # Force-delete namespaces if they still exist
-                                kubectl delete namespace kyverno-ma --ignore-not-found --grace-period=0 || true
-                                kubectl delete namespace ma --ignore-not-found --grace-period=0 --force || true
+                                kubectl --context=minikube delete namespace kyverno-ma --ignore-not-found --grace-period=0 || true
+                                kubectl --context=minikube delete namespace ma --ignore-not-found --grace-period=0 --force || true
                             """
                         }
                     }
@@ -140,9 +138,8 @@ def call(Map config = [:]) {
                                 }
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
-                                sh "kubectl config use-context minikube"
-                                def registryIp = sh(script: "kubectl get svc -n buildkit docker-registry -o jsonpath='{.spec.clusterIP}'", returnStdout: true).trim()
-                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='${registryIp}:5000/'"
+                                def registryIp = sh(script: "kubectl --context=minikube get svc -n buildkit docker-registry -o jsonpath='{.spec.clusterIP}'", returnStdout: true).trim()
+                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='${registryIp}:5000/' --kube-context=minikube"
                             }
                         }
                     }
@@ -155,10 +152,9 @@ def call(Map config = [:]) {
                     dir('libraries/testAutomation') {
                         script {
                             sh "pipenv install --deploy"
-                            sh "kubectl config use-context minikube"
                             archiveArtifacts artifacts: 'logs/**, reports/**', fingerprint: true, onlyIfSuccessful: false
                             sh "rm -rf ./reports"
-                            sh "pipenv run app --delete-only"
+                            sh "pipenv run app --delete-only --kube-context=minikube"
                         }
                     }
                 }

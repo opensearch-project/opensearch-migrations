@@ -146,6 +146,7 @@ def call(Map config = [:]) {
                                           --build-chart-and-dashboards \
                                           --base-dir "\$(pwd)" \
                                           --skip-console-exec \
+                                          --skip-setting-k8s-context \
                                           --region us-east-1 \
                                           2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; exit \${PIPESTATUS[0]}
                                     """
@@ -170,6 +171,7 @@ def call(Map config = [:]) {
                                     env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']
                                     env.eksClusterName = exportsMap['MIGRATIONS_EKS_CLUSTER_NAME']
                                     env.clusterSecurityGroup = exportsMap['EKS_CLUSTER_SECURITY_GROUP']
+                                    env.eksKubeContext = "migration-eks-cluster-${maStageName}-us-east-1"
                                 }
                             }
                         }
@@ -200,11 +202,11 @@ def call(Map config = [:]) {
                                             version: env.sourceVer
                                     ]
                                     sh """
-                                      kubectl create configmap source-${sourceVersionExpanded}-migration-config \
+                                      kubectl --context=${env.eksKubeContext} create configmap source-${sourceVersionExpanded}-migration-config \
                                         --from-file=cluster-config=/tmp/source-cluster-config.json \
-                                        --namespace ma --dry-run=client -o yaml | kubectl apply -f -
+                                        --namespace ma --dry-run=client -o yaml | kubectl --context=${env.eksKubeContext} apply -f -
 
-                                      kubectl -n ma get configmap source-${sourceVersionExpanded}-migration-config -o yaml
+                                      kubectl --context=${env.eksKubeContext} -n ma get configmap source-${sourceVersionExpanded}-migration-config -o yaml
                                     """
 
                                     // Target configmap
@@ -218,11 +220,11 @@ def call(Map config = [:]) {
                                             version: env.targetVer
                                     ]
                                     sh """
-                                      kubectl create configmap target-${targetVersionExpanded}-migration-config \
+                                      kubectl --context=${env.eksKubeContext} create configmap target-${targetVersionExpanded}-migration-config \
                                         --from-file=cluster-config=/tmp/target-cluster-config.json \
-                                        --namespace ma --dry-run=client -o yaml | kubectl apply -f -
+                                        --namespace ma --dry-run=client -o yaml | kubectl --context=${env.eksKubeContext} apply -f -
 
-                                      kubectl -n ma get configmap target-${targetVersionExpanded}-migration-config -o yaml
+                                      kubectl --context=${env.eksKubeContext} -n ma get configmap target-${targetVersionExpanded}-migration-config -o yaml
                                     """
 
                                     // Modify source/target security group to allow EKS cluster security group
@@ -263,7 +265,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --reuse-clusters --skip-delete --skip-install"
+                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
                                     }
                                 }
                             }
@@ -283,11 +285,11 @@ def call(Map config = [:]) {
                                 def targetCluster = clusterDetails.target
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 4500, roleSessionName: 'jenkins-session') {
-                                        sh "kubectl -n ma get pods || true"
-                                        sh "pipenv run app --delete-only"
+                                        sh "kubectl --context=${env.eksKubeContext} -n ma get pods || true"
+                                        sh "pipenv run app --delete-only --kube-context=${env.eksKubeContext}"
                                         echo "List resources not removed by helm uninstall:"
-                                        sh "kubectl get all,pvc,configmap,secret,workflow -n ma -o wide --ignore-not-found || true"
-                                        sh "kubectl delete namespace ma --ignore-not-found --timeout=60s || true"
+                                        sh "kubectl --context=${env.eksKubeContext} get all,pvc,configmap,secret,workflow -n ma -o wide --ignore-not-found || true"
+                                        sh "kubectl --context=${env.eksKubeContext} delete namespace ma --ignore-not-found --timeout=60s || true"
                                         // Remove added security group rule to allow proper cleanup of stacks
                                         sh """
                                           echo "Checking if source/target security group $targetCluster.securityGroupId exists..."
