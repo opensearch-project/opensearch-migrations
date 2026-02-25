@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -18,7 +19,6 @@ import io.netty.buffer.Unpooled;
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import java.time.Duration;
 
 @Slf4j
 @AllArgsConstructor

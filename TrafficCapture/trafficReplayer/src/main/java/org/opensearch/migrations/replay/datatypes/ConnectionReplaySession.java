@@ -11,6 +11,7 @@ import org.opensearch.migrations.utils.TrackedFuture;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
 import lombok.Getter;
+import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -47,7 +48,8 @@ public class ConnectionReplaySession {
      * {@link #getChannelFutureInActiveState} will return a failed future rather than reconnecting,
      * preventing self-healing reconnects after a partition reassignment cancel.
      */
-    public volatile boolean cancelled = false;
+    @Setter
+    private volatile boolean cancelled = false;
 
     @SneakyThrows
     public ConnectionReplaySession(

@@ -11,8 +11,8 @@ import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 
 import io.netty.buffer.Unpooled;
-import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;

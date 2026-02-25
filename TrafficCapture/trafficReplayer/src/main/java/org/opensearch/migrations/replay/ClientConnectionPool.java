@@ -146,7 +146,7 @@ public class ClientConnectionPool {
         var connId = ctx.getConnectionId();
         var session = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
         if (session != null) {
-            session.cancelled = true;
+            session.setCancelled(true);
             // Cancel all pending sorter slots on the event loop thread so they drain immediately.
             // This prevents orphaned scheduleFuture entries from leaving requestWorkTracker
             // entries and TrafficStreamLimiter slots unreleased.
