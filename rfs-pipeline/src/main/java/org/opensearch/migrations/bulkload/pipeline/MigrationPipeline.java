@@ -92,7 +92,7 @@ public class MigrationPipeline {
         final int[] cumulativeOffset = { startingDocOffset };
         return source.readDocuments(shardId, startingDocOffset)
             .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
-            .flatMapSequential(batch -> sink.writeBatch(shardId, indexName, batch)
+            .concatMap(batch -> sink.writeBatch(shardId, indexName, batch)
                 .map(cursor -> {
                     cumulativeOffset[0] += (int) cursor.docsInBatch();
                     return new ProgressCursor(
