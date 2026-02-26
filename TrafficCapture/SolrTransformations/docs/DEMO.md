@@ -220,7 +220,7 @@ All 4 shim modes accept the same Solr URL. The difference is which backend serve
 Proxies directly to Solr. No transforms, no validation. Useful as a baseline.
 
 ```bash
-curl -sD- "http://localhost:8081/solr/demo/select?q=*:*&wt=json" | head -20
+curl -sD- "http://localhost:8081/solr/demo/select?q=*:*&wt=json"
 ```
 
 Look for these headers:
@@ -235,7 +235,7 @@ X-Target-solr-StatusCode: 200
 Transforms the Solr request → OpenSearch `_search`, transforms the response back to Solr format.
 
 ```bash
-curl -sD- "http://localhost:8082/solr/demo/select?q=*:*&wt=json" | head -20
+curl -sD- "http://localhost:8082/solr/demo/select?q=*:*&wt=json"
 ```
 
 Headers:
