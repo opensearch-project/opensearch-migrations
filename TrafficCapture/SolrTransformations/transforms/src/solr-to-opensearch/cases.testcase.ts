@@ -21,13 +21,13 @@ export const testCases: TestCase[] = [
     requestPath: '/solr/testcollection/select?q=*:*&wt=json',
     solrSchema: {
       fields: {
-        title:   { type: 'text_general' },
+        title: { type: 'text_general' },
         content: { type: 'text_general' },
       },
     },
     opensearchMapping: {
       properties: {
-        title:   { type: 'text' },
+        title: { type: 'text' },
         content: { type: 'text' },
       },
     },
@@ -60,13 +60,13 @@ export const testCases: TestCase[] = [
     requestPath: '/solr/testcollection/select?q=*:*&wt=json',
     solrSchema: {
       fields: {
-        title:   { type: 'text_general' },
+        title: { type: 'text_general' },
         content: { type: 'text_general' },
       },
     },
     opensearchMapping: {
       properties: {
-        title:   { type: 'text' },
+        title: { type: 'text' },
         content: { type: 'text' },
       },
     },

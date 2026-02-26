@@ -16,14 +16,40 @@ export interface TestDocument {
 
 /** OpenSearch field type names. */
 export type OpenSearchFieldType =
-  | 'text' | 'keyword' | 'constant_keyword' | 'wildcard'
-  | 'long' | 'integer' | 'short' | 'byte' | 'double' | 'float' | 'half_float' | 'scaled_float'
-  | 'date' | 'boolean' | 'binary' | 'ip'
-  | 'object' | 'nested' | 'flattened'
-  | 'geo_point' | 'geo_shape' | 'point' | 'shape'
-  | 'completion' | 'search_as_you_type' | 'token_count'
-  | 'dense_vector' | 'sparse_vector' | 'rank_feature' | 'rank_features'
-  | 'alias' | 'join' | 'percolator' | 'knn_vector';
+  | 'text'
+  | 'keyword'
+  | 'constant_keyword'
+  | 'wildcard'
+  | 'long'
+  | 'integer'
+  | 'short'
+  | 'byte'
+  | 'double'
+  | 'float'
+  | 'half_float'
+  | 'scaled_float'
+  | 'date'
+  | 'boolean'
+  | 'binary'
+  | 'ip'
+  | 'object'
+  | 'nested'
+  | 'flattened'
+  | 'geo_point'
+  | 'geo_shape'
+  | 'point'
+  | 'shape'
+  | 'completion'
+  | 'search_as_you_type'
+  | 'token_count'
+  | 'dense_vector'
+  | 'sparse_vector'
+  | 'rank_feature'
+  | 'rank_features'
+  | 'alias'
+  | 'join'
+  | 'percolator'
+  | 'knn_vector';
 
 /** A single field mapping in an OpenSearch index. */
 export interface OpenSearchFieldMapping {
@@ -48,17 +74,37 @@ export interface OpenSearchMapping {
 
 /** Solr field type names (common built-in types). */
 export type SolrFieldType =
-  | 'text_general' | 'text_en' | 'text_ws' | 'text_en_splitting'
-  | 'string' | 'strings'
-  | 'pint' | 'plong' | 'pfloat' | 'pdouble'
-  | 'pints' | 'plongs' | 'pfloats' | 'pdoubles'
-  | 'boolean' | 'booleans'
-  | 'pdate' | 'pdates'
+  | 'text_general'
+  | 'text_en'
+  | 'text_ws'
+  | 'text_en_splitting'
+  | 'string'
+  | 'strings'
+  | 'pint'
+  | 'plong'
+  | 'pfloat'
+  | 'pdouble'
+  | 'pints'
+  | 'plongs'
+  | 'pfloats'
+  | 'pdoubles'
+  | 'boolean'
+  | 'booleans'
+  | 'pdate'
+  | 'pdates'
   | 'binary'
-  | 'text_general_rev' | 'alphaOnlySort' | 'phonetic' | 'payloads'
-  | 'lowercase' | 'descendent_path' | 'ancestor_path'
-  | 'point' | 'location' | 'location_rpt'
-  | 'currency' | 'rank';
+  | 'text_general_rev'
+  | 'alphaOnlySort'
+  | 'phonetic'
+  | 'payloads'
+  | 'lowercase'
+  | 'descendent_path'
+  | 'ancestor_path'
+  | 'point'
+  | 'location'
+  | 'location_rpt'
+  | 'currency'
+  | 'rank';
 
 /** A single field definition in a Solr schema. */
 export interface SolrFieldDefinition {
@@ -104,11 +150,11 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'HEAD';
 
 /** Assertion rule types for controlling how diffs are handled per JSON path. */
 export type AssertionRuleType =
-  | 'ignore'       // Skip this path entirely
-  | 'loose-order'  // Compare arrays as sets (ignore ordering)
-  | 'loose-type'   // Allow numeric type coercion (1 == 1.0)
-  | 'expect-diff'  // Known difference — test passes, diff logged as info
-  | 'regex';       // Match actual value against a regex pattern
+  | 'ignore' // Skip this path entirely
+  | 'loose-order' // Compare arrays as sets (ignore ordering)
+  | 'loose-type' // Allow numeric type coercion (1 == 1.0)
+  | 'expect-diff' // Known difference — test passes, diff logged as info
+  | 'regex'; // Match actual value against a regex pattern
 
 /**
  * A per-path assertion rule that controls how differences are handled.
@@ -162,8 +208,16 @@ export interface TestCase {
 export const SOLR_INTERNAL_RULES: AssertionRule[] = [
   { path: '$.responseHeader.QTime', rule: 'ignore', reason: 'Timing varies per request' },
   { path: '$.responseHeader.params', rule: 'ignore', reason: 'Solr echoes params, proxy does not' },
-  { path: '$.response.docs[*]._version_', rule: 'ignore', reason: 'Solr-internal optimistic concurrency field' },
-  { path: '$.response.docs[*]._root_', rule: 'ignore', reason: 'Solr-internal nested doc root field' },
+  {
+    path: '$.response.docs[*]._version_',
+    rule: 'ignore',
+    reason: 'Solr-internal optimistic concurrency field',
+  },
+  {
+    path: '$.response.docs[*]._root_',
+    rule: 'ignore',
+    reason: 'Solr-internal nested doc root field',
+  },
 ];
 
 /**
@@ -189,7 +243,7 @@ export const SOLR_INTERNAL_RULES: AssertionRule[] = [
  */
 export function solrTest(
   name: string,
-  overrides: Partial<TestCase> & Pick<TestCase, 'documents' | 'requestPath'>
+  overrides: Partial<TestCase> & Pick<TestCase, 'documents' | 'requestPath'>,
 ): TestCase {
   return {
     name,

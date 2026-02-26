@@ -128,7 +128,7 @@ export interface HttpResponseMessage {
  */
 export interface TupleRequest {
   'Request-URI': string;
-  'Method': string;
+  Method: string;
   'HTTP-Version': string;
   payload?: Payload;
   /** Headers flattened as "header-1", "header-2", etc. */

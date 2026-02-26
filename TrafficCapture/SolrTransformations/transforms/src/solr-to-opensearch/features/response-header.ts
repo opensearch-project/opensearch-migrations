@@ -11,6 +11,13 @@ export const response: MicroTransform<ResponseContext> = {
   apply: (ctx) => {
     const params = new Map<string, string>();
     ctx.requestParams.forEach((v, k) => params.set(k, v));
-    ctx.responseBody.set('responseHeader', new Map([['status', 0], ['QTime', 0], ['params', params]]));
+    ctx.responseBody.set(
+      'responseHeader',
+      new Map<string, unknown>([
+        ['status', 0],
+        ['QTime', 0],
+        ['params', params],
+      ]),
+    );
   },
 };

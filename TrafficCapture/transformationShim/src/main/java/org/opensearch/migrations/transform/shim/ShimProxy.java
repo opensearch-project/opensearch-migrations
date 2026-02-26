@@ -9,22 +9,32 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.transform.shim.netty.MultiTargetRoutingHandler;
 import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.migrations.transform.shim.validation.ValidationRule;
 
 import io.netty.bootstrap.ServerBootstrap;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.handler.codec.http.DefaultFullHttpResponse;
+import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.HttpUtil;
+import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
@@ -46,9 +56,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ShimProxy {
     public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
-    private static final int MAX_CONTENT_LENGTH = 10 * 1024 * 1024;
+    public static final int DEFAULT_MAX_CONTENT_LENGTH = 10 * 1024 * 1024;
     private static final String HTTPS_SCHEME = "https";
     private static final Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
+    private static final Duration DRAIN_TIMEOUT = Duration.ofSeconds(10);
 
     @Getter
     private final int port;
@@ -59,10 +70,13 @@ public class ShimProxy {
     private final java.util.function.Supplier<SSLEngine> sslEngineSupplier;
     private final SslContext backendSslContext;
     private final Duration secondaryTimeout;
+    private final int maxContentLength;
 
     private Channel serverChannel;
+    private Channel healthChannel;
     private NioEventLoopGroup bossGroup;
     private NioEventLoopGroup workerGroup;
+    private final AtomicInteger activeRequests = new AtomicInteger(0);
 
     public ShimProxy(
         int port,
@@ -72,7 +86,8 @@ public class ShimProxy {
         List<ValidationRule> validators,
         java.util.function.Supplier<SSLEngine> sslEngineSupplier,
         boolean allowInsecureBackend,
-        Duration secondaryTimeout
+        Duration secondaryTimeout,
+        int maxContentLength
     ) {
         this.port = port;
         this.targets = new LinkedHashMap<>(targets);
@@ -81,6 +96,7 @@ public class ShimProxy {
         this.validators = validators != null ? validators : List.of();
         this.sslEngineSupplier = sslEngineSupplier;
         this.secondaryTimeout = secondaryTimeout != null ? secondaryTimeout : DEFAULT_TIMEOUT;
+        this.maxContentLength = maxContentLength > 0 ? maxContentLength : DEFAULT_MAX_CONTENT_LENGTH;
         this.backendSslContext = buildBackendSslContext(allowInsecureBackend);
 
         if (!this.targets.containsKey(primaryTarget)) {
@@ -91,14 +107,29 @@ public class ShimProxy {
         }
     }
 
-    /** Convenience constructor for testing — no TLS, default timeout. */
+    /** Convenience constructor for testing — no TLS, default timeout, default max content length. */
     public ShimProxy(
         int port,
         Map<String, Target> targets,
         String primaryTarget,
         List<ValidationRule> validators
     ) {
-        this(port, targets, primaryTarget, null, validators, null, false, null);
+        this(port, targets, primaryTarget, null, validators, null, false, null, DEFAULT_MAX_CONTENT_LENGTH);
+    }
+
+    /** Convenience constructor — no max content length override. */
+    public ShimProxy(
+        int port,
+        Map<String, Target> targets,
+        String primaryTarget,
+        Set<String> activeTargets,
+        List<ValidationRule> validators,
+        java.util.function.Supplier<SSLEngine> sslEngineSupplier,
+        boolean allowInsecureBackend,
+        Duration secondaryTimeout
+    ) {
+        this(port, targets, primaryTarget, activeTargets, validators, sslEngineSupplier,
+            allowInsecureBackend, secondaryTimeout, DEFAULT_MAX_CONTENT_LENGTH);
     }
 
     private SslContext buildBackendSslContext(boolean allowInsecure) {
@@ -132,13 +163,31 @@ public class ShimProxy {
 
         try {
             serverChannel = bootstrap.bind(port).sync().channel();
-            log.info("ShimProxy started on port {}, primary={}, targets={}, validators={}",
-                port, primaryTarget, activeTargets, validators.size());
+            log.info("ShimProxy started on port {}, primary={}, targets={}, validators={}, maxContentLength={}",
+                port, primaryTarget, activeTargets, validators.size(), maxContentLength);
         } catch (Exception e) {
             shutdownEventLoopGroups();
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             throw e;
         }
+    }
+
+    /** Start a health check HTTP server on a separate port. Returns 200 for GET /health. */
+    public void startHealthServer(int healthPort) throws InterruptedException {
+        var bootstrap = new ServerBootstrap()
+            .group(bossGroup, workerGroup)
+            .channel(NioServerSocketChannel.class)
+            .childHandler(new ChannelInitializer<SocketChannel>() {
+                @Override
+                protected void initChannel(SocketChannel ch) {
+                    ch.pipeline()
+                        .addLast("httpCodec", new HttpServerCodec())
+                        .addLast("httpAggregator", new HttpObjectAggregator(1024))
+                        .addLast("healthHandler", new HealthCheckHandler());
+                }
+            });
+        healthChannel = bootstrap.bind(healthPort).sync().channel();
+        log.info("Health check server started on port {}", healthPort);
     }
 
     void initPipeline(ChannelPipeline pipeline) {
@@ -150,7 +199,7 @@ public class ShimProxy {
         pipeline.addLast("httpCodec", new HttpServerCodec());
         addLoggingHandler(pipeline, "B");
 
-        pipeline.addLast("httpAggregator", new HttpObjectAggregator(MAX_CONTENT_LENGTH));
+        pipeline.addLast("httpAggregator", new HttpObjectAggregator(maxContentLength));
         addLoggingHandler(pipeline, "C");
 
         // Keep-alive detection
@@ -168,7 +217,8 @@ public class ShimProxy {
         addLoggingHandler(pipeline, "D");
 
         pipeline.addLast("multiTargetRouter", new MultiTargetRoutingHandler(
-            targets, primaryTarget, activeTargets, validators, secondaryTimeout, backendSslContext));
+            targets, primaryTarget, activeTargets, validators, secondaryTimeout,
+            backendSslContext, maxContentLength, activeRequests));
         addLoggingHandler(pipeline, "E");
     }
 
@@ -182,8 +232,25 @@ public class ShimProxy {
         if (bossGroup != null) bossGroup.shutdownGracefully();
     }
 
+    /**
+     * Graceful shutdown: stop accepting new connections, drain in-flight requests,
+     * then shut down event loops.
+     */
     public void stop() throws InterruptedException {
+        // Stop accepting new connections
+        if (healthChannel != null) healthChannel.close().sync();
         if (serverChannel != null) serverChannel.close().sync();
+
+        // Drain in-flight requests
+        long drainDeadline = System.nanoTime() + DRAIN_TIMEOUT.toNanos();
+        while (activeRequests.get() > 0 && System.nanoTime() < drainDeadline) {
+            log.info("Draining {} in-flight requests...", activeRequests.get());
+            Thread.sleep(100);
+        }
+        if (activeRequests.get() > 0) {
+            log.warn("Drain timeout reached with {} in-flight requests, forcing shutdown", activeRequests.get());
+        }
+
         if (workerGroup != null) workerGroup.shutdownGracefully(0, 5, TimeUnit.SECONDS).sync();
         if (bossGroup != null) bossGroup.shutdownGracefully(0, 5, TimeUnit.SECONDS).sync();
         log.info("ShimProxy stopped");
@@ -191,5 +258,18 @@ public class ShimProxy {
 
     public void waitForClose() throws InterruptedException {
         serverChannel.closeFuture().sync();
+    }
+
+    /** Simple health check handler — returns 200 OK for any request. */
+    static class HealthCheckHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
+        @Override
+        protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest request) {
+            byte[] body = "{\"status\":\"ok\"}".getBytes();
+            var response = new DefaultFullHttpResponse(
+                HttpVersion.HTTP_1_1, HttpResponseStatus.OK, Unpooled.wrappedBuffer(body));
+            response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
+            response.headers().set(HttpHeaderNames.CONTENT_LENGTH, body.length);
+            ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+        }
     }
 }

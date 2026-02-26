@@ -12,9 +12,17 @@ export type SolrEndpoint = 'select' | 'update' | 'admin' | 'schema' | 'config' |
 
 /**
  * A Java Map passed through GraalVM polyglot with allowMapAccess(true).
- * Supports .get(), .set(), .has(), .delete(), .keys(), .entries(), .size, etc.
+ * Supports the JS Map protocol: .get(), .set(), .has(), .delete(), .keys(), .entries(), .size.
  */
-export type JavaMap = any;
+export interface JavaMap {
+  get(key: string): any;
+  set(key: string, value: any): void;
+  has(key: string): boolean;
+  delete(key: string): boolean;
+  keys(): Iterable<string>;
+  entries(): Iterable<[string, any]>;
+  size: number;
+}
 
 /** Parsed once from the raw request. Shared across all request micro-transforms. */
 export interface RequestContext {
@@ -77,10 +85,7 @@ export function buildRequestContext(msg: JavaMap): RequestContext {
   };
 }
 
-export function buildResponseContext(
-  request: JavaMap,
-  response: JavaMap,
-): ResponseContext {
+export function buildResponseContext(request: JavaMap, response: JavaMap): ResponseContext {
   const uri: string = request.get('URI') || '';
   return {
     request,

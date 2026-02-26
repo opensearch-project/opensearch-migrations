@@ -27,12 +27,21 @@ export function runPipeline<Ctx extends { endpoint: SolrEndpoint }>(
   ctx: Ctx,
 ): void {
   for (const t of registry.global) {
-    if (!t.match || t.match(ctx)) t.apply(ctx);
+    applyTransform(t, ctx);
   }
   const group = registry.byEndpoint[ctx.endpoint];
   if (group) {
     for (const t of group) {
-      if (!t.match || t.match(ctx)) t.apply(ctx);
+      applyTransform(t, ctx);
     }
+  }
+}
+
+function applyTransform<Ctx>(t: MicroTransform<Ctx>, ctx: Ctx): void {
+  try {
+    if (!t.match || t.match(ctx)) t.apply(ctx);
+  } catch (e) {
+    // Log but don't kill the pipeline — partial transform is better than no transform
+    console.error(`Transform '${t.name}' failed:`, e);
   }
 }

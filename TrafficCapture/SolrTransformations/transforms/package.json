@@ -7,15 +7,23 @@
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
     "typecheck": "tsgo --noEmit",
+    "lint": "eslint src/",
+    "format": "prettier --check src/",
+    "format:fix": "prettier --write src/",
     "clean": "rm -rf dist"
   },
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "@typescript/native-preview": "7.0.0-dev.20251210.1",
     "esbuild": "^0.24.0",
-    "@typescript/native-preview": "7.0.0-dev.20251210.1"
+    "eslint": "^10.0.2",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.1"
   },
   "optionalDependencies": {
-    "@typescript/native-preview-linux-x64": "7.0.0-dev.20251210.1",
     "@typescript/native-preview-darwin-arm64": "7.0.0-dev.20251210.1",
-    "@typescript/native-preview-darwin-x64": "7.0.0-dev.20251210.1"
+    "@typescript/native-preview-darwin-x64": "7.0.0-dev.20251210.1",
+    "@typescript/native-preview-linux-x64": "7.0.0-dev.20251210.1"
   }
 }

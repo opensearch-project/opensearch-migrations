@@ -102,6 +102,14 @@ public class ShimMain {
             description = "Secondary target timeout in milliseconds.")
         public long timeoutMs = 30000;
 
+        @Parameter(names = {"--maxContentLength"},
+            description = "Maximum HTTP content length in bytes (default 10MB).")
+        public int maxContentLength = 10 * 1024 * 1024;
+
+        @Parameter(names = {"--healthPort"},
+            description = "Port for the health check endpoint. If not set, no health server is started.")
+        public int healthPort = -1;
+
         @Parameter(names = {"--watchTransforms"},
             description = "Watch transform JS files for changes and hot-reload them.")
         public boolean watchTransforms;
@@ -133,7 +141,7 @@ public class ShimMain {
 
         var proxy = new ShimProxy(
             params.listenPort, targets, params.primary, activeTargets, validators,
-            null, params.insecureBackend, Duration.ofMillis(params.timeoutMs));
+            null, params.insecureBackend, Duration.ofMillis(params.timeoutMs), params.maxContentLength);
 
         TransformFileWatcher watcher = null;
         if (params.watchTransforms && !watchedTransforms.isEmpty()) {
@@ -155,6 +163,9 @@ public class ShimMain {
         }));
 
         proxy.start();
+        if (params.healthPort > 0) {
+            proxy.startHealthServer(params.healthPort);
+        }
         log.info("Shim running on port {}", params.listenPort);
         proxy.waitForClose();
     }

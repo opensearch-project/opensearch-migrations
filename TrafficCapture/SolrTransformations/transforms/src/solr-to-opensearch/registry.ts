@@ -18,8 +18,8 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
   global: [],
   byEndpoint: {
     select: [
-      selectUri.request,       // URI rewrite — must be first
-      queryQ.request,          // q=... → query DSL
+      selectUri.request, // URI rewrite — must be first
+      queryQ.request, // q=... → query DSL
     ],
   },
 };
@@ -28,8 +28,8 @@ export const responseRegistry: TransformRegistry<ResponseContext> = {
   global: [],
   byEndpoint: {
     select: [
-      hitsToDocs.response,       // hits.hits → response.docs
-      responseHeader.response,   // synthesize responseHeader
+      hitsToDocs.response, // hits.hits → response.docs
+      responseHeader.response, // synthesize responseHeader
     ],
   },
 };
