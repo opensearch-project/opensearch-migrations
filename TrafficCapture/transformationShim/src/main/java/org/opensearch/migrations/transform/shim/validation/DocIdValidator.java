@@ -3,6 +3,7 @@ package org.opensearch.migrations.transform.shim.validation;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -42,50 +43,54 @@ public class DocIdValidator implements ResponseValidator {
             return new ValidationResult(name, false, "one or both responses not parseable as JSON");
         }
 
-        List<String> idsA = extractIds(a.parsedBody());
-        List<String> idsB = extractIds(b.parsedBody());
-        if (idsA == null || idsB == null) {
+        Optional<List<String>> idsA = extractIds(a.parsedBody());
+        Optional<List<String>> idsB = extractIds(b.parsedBody());
+        if (idsA.isEmpty() || idsB.isEmpty()) {
             return new ValidationResult(name, false,
                 "could not extract doc IDs at '" + docsPath + "." + idField + "'");
         }
 
+        return compareIds(name, idsA.get(), idsB.get());
+    }
+
+    private ValidationResult compareIds(String name, List<String> idsA, List<String> idsB) {
         if (orderMatters) {
             boolean passed = idsA.equals(idsB);
             return new ValidationResult(name, passed,
                 passed ? null : targetA + "=" + idsA + " vs " + targetB + "=" + idsB);
-        } else {
-            Set<String> setA = new LinkedHashSet<>(idsA);
-            Set<String> setB = new LinkedHashSet<>(idsB);
-            boolean passed = setA.equals(setB);
-            if (passed) return new ValidationResult(name, true, null);
-
-            Set<String> onlyA = new LinkedHashSet<>(setA);
-            onlyA.removeAll(setB);
-            Set<String> onlyB = new LinkedHashSet<>(setB);
-            onlyB.removeAll(setA);
-            return new ValidationResult(name, false,
-                "only in " + targetA + "=" + onlyA + ", only in " + targetB + "=" + onlyB);
         }
+        Set<String> setA = new LinkedHashSet<>(idsA);
+        Set<String> setB = new LinkedHashSet<>(idsB);
+        boolean passed = setA.equals(setB);
+        if (passed) return new ValidationResult(name, true, null);
+
+        Set<String> onlyA = new LinkedHashSet<>(setA);
+        onlyA.removeAll(setB);
+        Set<String> onlyB = new LinkedHashSet<>(setB);
+        onlyB.removeAll(setA);
+        return new ValidationResult(name, false,
+            "only in " + targetA + "=" + onlyA + ", only in " + targetB + "=" + onlyB);
     }
 
     @SuppressWarnings("unchecked")
-    private List<String> extractIds(Map<String, Object> body) {
+    private Optional<List<String>> extractIds(Map<String, Object> body) {
         String[] parts = docsPath.split("\\.");
         Object current = body;
         for (String part : parts) {
             if (current instanceof Map) {
                 current = ((Map<String, Object>) current).get(part);
             } else {
-                return null;
+                return Optional.empty();
             }
         }
-        if (!(current instanceof List)) return null;
-        return ((List<?>) current).stream()
-            .filter(doc -> doc instanceof Map)
+        if (!(current instanceof List)) return Optional.empty();
+        List<String> ids = ((List<?>) current).stream()
+            .filter(Map.class::isInstance)
             .map(doc -> {
                 Object id = ((Map<String, Object>) doc).get(idField);
                 return id != null ? id.toString() : null;
             })
             .collect(Collectors.toList());
+        return Optional.of(ids);
     }
 }

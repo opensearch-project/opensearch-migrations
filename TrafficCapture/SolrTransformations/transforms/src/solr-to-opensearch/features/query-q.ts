@@ -15,7 +15,7 @@ function parseSolrQuery(q: string): Record<string, unknown> {
   if (!q || q === '*:*') return { match_all: {} };
 
   // field:value → term query
-  const fieldMatch = q.match(/^([^:]+):(.+)$/);
+  const fieldMatch = /^([^:]+):(.+)$/.exec(q);
   if (fieldMatch) {
     const [, field, value] = fieldMatch;
     if (field === '*' && value === '*') return { match_all: {} };

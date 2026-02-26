@@ -13,13 +13,16 @@ import { buildResponseContext } from './context';
 import { runPipeline } from './pipeline';
 import { responseRegistry } from './registry';
 
-export function transform(msg: unknown): unknown {
-  const input = msg as { request: HttpRequestMessage; response: HttpResponseMessage };
-  // If the shim hasn't bundled request context, pass through unchanged
-  if (!input.request || !input.response) return msg;
+function applyTransform(input: { request: HttpRequestMessage; response: HttpResponseMessage }): void {
   const ctx = buildResponseContext(input.request, input.response);
-  if (ctx.endpoint === 'unknown') return msg;
+  if (ctx.endpoint === 'unknown') return;
   runPipeline(responseRegistry, ctx);
   input.response.payload = { inlinedTextBody: JSON.stringify(ctx.responseBody) };
-  return msg;
+}
+
+export function transform(msg: unknown): unknown {
+  const input = msg as { request: HttpRequestMessage; response: HttpResponseMessage };
+  if (!input.request || !input.response) return msg;
+  applyTransform(input);
+  return input;
 }

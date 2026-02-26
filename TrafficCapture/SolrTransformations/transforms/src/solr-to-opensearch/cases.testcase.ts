@@ -11,7 +11,7 @@
  * - requestPath: the Solr query to test
  * - assertionRules: how to handle expected differences
  */
-import { solrTest, SOLR_INTERNAL_RULES } from '../test-types';
+import { solrTest } from '../test-types';
 import type { TestCase } from '../test-types';
 
 export const testCases: TestCase[] = [

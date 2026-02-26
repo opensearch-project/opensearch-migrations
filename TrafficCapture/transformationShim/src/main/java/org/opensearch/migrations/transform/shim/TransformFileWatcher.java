@@ -46,31 +46,39 @@ public class TransformFileWatcher implements Runnable, AutoCloseable {
     public void run() {
         log.info("Transform file watcher started, watching {} files", watchedFiles.size());
         while (running) {
-            WatchKey key;
-            try {
-                key = watchService.take();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
+            WatchKey key = takeKey();
+            if (key == null) break;
+            processKey(key);
+        }
+    }
 
-            Path dir = keyToDirMap.get(key);
-            if (dir == null) {
-                key.reset();
-                continue;
-            }
+    private WatchKey takeKey() {
+        try {
+            return watchService.take();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
 
+    private void processKey(WatchKey key) {
+        Path dir = keyToDirMap.get(key);
+        if (dir != null) {
             for (WatchEvent<?> event : key.pollEvents()) {
-                if (event.kind() == StandardWatchEventKinds.OVERFLOW) continue;
-
-                @SuppressWarnings("unchecked")
-                Path changed = dir.resolve(((WatchEvent<Path>) event.context()).context());
-                ReloadableTransformer transformer = watchedFiles.get(changed);
-                if (transformer != null) {
-                    reloadTransformer(changed, transformer);
+                if (event.kind() != StandardWatchEventKinds.OVERFLOW) {
+                    processEvent(dir, event);
                 }
             }
-            key.reset();
+        }
+        key.reset();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void processEvent(Path dir, WatchEvent<?> event) {
+        Path changed = dir.resolve(((WatchEvent<Path>) event.context()).context());
+        ReloadableTransformer transformer = watchedFiles.get(changed);
+        if (transformer != null) {
+            reloadTransformer(changed, transformer);
         }
     }
 
