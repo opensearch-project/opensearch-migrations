@@ -76,8 +76,8 @@ spec:
               export BUILDKIT_NAMESPACE={{ .Values.namespace }}
               ./buildImages/setupK8sBuilders.sh
 
-              # Build without configuration cache since this will be run once on a new container
-              GRADLE_CMD="./gradlew buildImagesToRegistry -PregistryEndpoint='{{ .Values.registryEndpoint }}' -x test --no-configuration-cache --no-build-cache --no-daemon"
+              # Build without build cache since this will be run once on a new container
+              GRADLE_CMD="./gradlew buildImagesToRegistry -PregistryEndpoint='{{ .Values.registryEndpoint }}' -x test --no-build-cache --no-daemon"
               echo "Running Gradle build with:"
               echo "$GRADLE_CMD"
               eval "$GRADLE_CMD"

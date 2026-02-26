@@ -157,6 +157,7 @@ export class SolutionsInfrastructureStack extends Stack {
             new GatewayVpcEndpoint(this, 'S3VpcEndpoint', {
                 service: GatewayVpcEndpointAwsService.S3,
                 vpc: vpc,
+                subnets: [{ subnets: vpc.privateSubnets }],
             });
 
             const serviceEndpoints = [

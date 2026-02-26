@@ -275,51 +275,63 @@ def call(Map config = [:]) {
         post {
             always {
                 timeout(time: 75, unit: 'MINUTES') {
-                    dir('libraries/testAutomation') {
-                        script {
-                            sh "pipenv install --deploy"
-                            if (env.eksClusterName) {
-                                def clusterDetails = readJSON text: env.clusterDetailsJson
-                                def targetCluster = clusterDetails.target
-                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 4500, roleSessionName: 'jenkins-session') {
+                    script {
+                        def region = "us-east-1"
+                        def maStackName = "Migration-Assistant-Infra-Import-VPC-eks-${maStageName}-${region}"
+                        def sourceDomainStackName = "OpenSearchDomain-source-${maStageName}-${region}"
+                        def targetDomainStackName = "OpenSearchDomain-target-${maStageName}-${region}"
+                        def networkStackName = "NetworkInfra-${maStageName}-${region}"
+
+                        withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: region, duration: 4500, roleSessionName: 'jenkins-session') {
+                                // EKS/k8s cleanup (only if EKS was deployed)
+                                if (env.eksClusterName) {
+                                    dir('libraries/testAutomation') {
+                                        sh "pipenv install --deploy"
                                         sh "kubectl -n ma get pods || true"
                                         sh "pipenv run app --delete-only"
                                         echo "List resources not removed by helm uninstall:"
                                         sh "kubectl get all,pvc,configmap,secret,workflow -n ma -o wide --ignore-not-found || true"
                                         sh "kubectl delete namespace ma --ignore-not-found --timeout=60s || true"
-                                        // Remove added security group rule to allow proper cleanup of stacks
+                                    }
+
+                                    // Revoke security group rule added during setup
+                                    if (env.clusterDetailsJson && env.clusterSecurityGroup) {
+                                        def clusterDetails = readJSON text: env.clusterDetailsJson
+                                        def targetCluster = clusterDetails.target
                                         sh """
-                                          echo "Checking if source/target security group $targetCluster.securityGroupId exists..."
-                                        
-                                          if ! aws ec2 describe-security-groups --group-ids $targetCluster.securityGroupId >/dev/null 2>&1; then
-                                            echo "Security group $targetCluster.securityGroupId does not exist. Skipping cleanup."
-                                            exit 0
-                                          fi
-                                        
-                                          echo "Checking for existing ingress rule to remove..."
-                                        
-                                          exists=\$(aws ec2 describe-security-groups \
-                                            --group-ids $targetCluster.securityGroupId \
-                                            --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
-                                            --output json)
-                                        
-                                          if [ "\$exists" != "[]" ]; then
-                                            echo "Ingress rule found. Revoking..."
-                                            aws ec2 revoke-security-group-ingress \
-                                              --group-id $targetCluster.securityGroupId \
-                                              --protocol -1 \
-                                              --port -1 \
-                                              --source-group $env.clusterSecurityGroup
-                                          else
-                                            echo "No ingress rule to revoke."
+                                          if aws ec2 describe-security-groups --group-ids $targetCluster.securityGroupId >/dev/null 2>&1; then
+                                            exists=\$(aws ec2 describe-security-groups \
+                                              --group-ids $targetCluster.securityGroupId \
+                                              --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
+                                              --output json)
+                                            if [ "\$exists" != "[]" ]; then
+                                              echo "CLEANUP: Revoking EKS SG ingress rule"
+                                              aws ec2 revoke-security-group-ingress \
+                                                --group-id $targetCluster.securityGroupId \
+                                                --protocol -1 --port -1 \
+                                                --source-group $env.clusterSecurityGroup || true
+                                            fi
                                           fi
                                         """
-                                        sh "aws cloudformation delete-stack --stack-name Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} --region us-east-1"
-                                        sh "aws cloudformation wait stack-delete-complete --stack-name Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} --region us-east-1 || true"
-                                        sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json"
                                     }
                                 }
+
+                                // Delete all deployed CloudFormation stacks
+                                // Order: MA stack first, then domain stacks, then network stack (VPC dependencies)
+                                echo "CLEANUP: Deleting MA stack ${maStackName}"
+                                sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
+                                sh "aws cloudformation wait stack-delete-complete --stack-name ${maStackName} --region ${region} || true"
+
+                                echo "CLEANUP: Deleting domain stacks"
+                                sh "aws cloudformation delete-stack --stack-name ${sourceDomainStackName} --region ${region} || true"
+                                sh "aws cloudformation delete-stack --stack-name ${targetDomainStackName} --region ${region} || true"
+                                sh "aws cloudformation wait stack-delete-complete --stack-name ${sourceDomainStackName} --region ${region} || true"
+                                sh "aws cloudformation wait stack-delete-complete --stack-name ${targetDomainStackName} --region ${region} || true"
+
+                                echo "CLEANUP: Deleting network stack ${networkStackName}"
+                                sh "aws cloudformation delete-stack --stack-name ${networkStackName} --region ${region} || true"
+                                sh "aws cloudformation wait stack-delete-complete --stack-name ${networkStackName} --region ${region} || true"
                             }
                         }
                     }

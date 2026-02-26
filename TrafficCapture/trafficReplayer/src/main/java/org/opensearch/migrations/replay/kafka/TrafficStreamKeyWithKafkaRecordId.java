@@ -48,4 +48,9 @@ class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKeyAndContext i
             .add("offset=" + offset)
             .toString();
     }
+
+    @Override
+    public int getSourceGeneration() {
+        return generation;
+    }
 }

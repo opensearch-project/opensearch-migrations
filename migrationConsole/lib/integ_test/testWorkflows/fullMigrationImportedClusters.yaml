@@ -1,3 +1,10 @@
+# Workflow template for migrations with pre-existing (imported) clusters.
+# Supports both:
+# - Standard migrations: Creates snapshot from source cluster
+# - BYOS migrations: Uses externally managed snapshot (externallyManagedSnapshot)
+#
+# For BYOS, pass snapshotConfig.snapshotNameConfig.externallyManagedSnapshot
+# instead of snapshotNamePrefix to skip snapshot creation.
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
@@ -13,6 +20,8 @@ spec:
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
+      - name: monitor-retry-limit
+        value: "33"  # Default ~30 min, use 900 for ~15 hours
 
   templates:
     - name: main
@@ -159,6 +168,8 @@ spec:
               | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
               # Move sigv4 under authConfig
               | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+              # Move basic_auth under authConfig.basic with secretName
+              | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
             ')
             
             # Build snapshotExtractAndLoadConfigs from snapshot-and-migration-configs

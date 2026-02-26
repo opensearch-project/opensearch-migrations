@@ -47,6 +47,16 @@ public class TimeToResponseFulfillmentFutureMap {
         timeToRunnableMap.clear();
     }
 
+    /**
+     * Completes all pending scheduleFuture entries exceptionally, then clears the map.
+     * This allows the OnlineRadixSorter to drain immediately rather than stalling on
+     * orphaned futures when a session is cancelled.
+     */
+    public void drainWithCancellation(java.util.concurrent.CancellationException cause) {
+        timeToRunnableMap.forEach(fwp -> fwp.scheduleFuture.future.completeExceptionally(cause));
+        timeToRunnableMap.clear();
+    }
+
     public boolean hasPendingTransmissions() {
         if (timeToRunnableMap.isEmpty()) {
             return false;

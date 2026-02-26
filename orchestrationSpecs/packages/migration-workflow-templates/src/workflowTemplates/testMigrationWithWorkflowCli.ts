@@ -1,4 +1,5 @@
 import {
+    defineParam,
     expr,
     INTERNAL,
     selectInputsForRegister,
@@ -20,6 +21,12 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
 })
 
     .addParams(CommonWorkflowParameters)
+
+    .addParams({
+        // Max retries for monitoring workflow (fixed 60s interval between retries)
+        // Default 33 (~33 min), use 900 for ~15 hours
+        "monitor-retry-limit": defineParam({expression: "33"})
+    })
 
     .addTemplate("configureAndSubmitWorkflow", t => t
         // TODO: Remove base64 encoding to maintain strong typing throughout workflows
@@ -56,12 +63,11 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             )
         )
         .addRetryParameters({
-            limit: "100",
+            limit: "{{workflow.parameters.monitor-retry-limit}}",
             retryPolicy: "Always",
             backoff: {
-                duration: "2",     // Start at 2 seconds
-                factor: "2",       // Exponential backoff  
-                cap: "15"          // Cap at 15 seconds
+                duration: "60",    // Fixed 60 second interval
+                factor: "1"        // No exponential increase
             }
         })
     )
