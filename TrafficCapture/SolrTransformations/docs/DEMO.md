@@ -36,23 +36,14 @@ The [opensearch-migrations](https://github.com/opensearch-project/opensearch-mig
 
 The **Transformation Shim** is a Netty-based HTTP proxy that sits between your Solr clients and OpenSearch. It solves the "live traffic" problem for Solr migrations:
 
-```
-                                    ┌──────────────┐
-                                    │   Solr 8     │
-                                    │  (:8983)     │
-                                    └──────┬───────┘
-                                           │
-┌──────────┐     ┌─────────────────┐       │
-│  Solr    │────▶│  Shim Proxy     │───────┤
-│  Client  │     │  (:8080)        │       │
-└──────────┘     └─────────────────┘       │
-                   │ request transform     │
-                   │ response transform    │
-                   ▼                       │
-                 ┌──────────────┐          │
-                 │ OpenSearch   │──────────┘
-                 │  (:9200)     │  (optional: validate
-                 └──────────────┘   responses match)
+```mermaid
+graph LR
+    Client["Solr Client"] -->|"Solr HTTP request"| Shim["Shim Proxy (:8080)"]
+    Shim -->|"original request"| Solr["Solr (:8983)"]
+    Solr -->|"Solr response"| Shim
+    Shim -->|"transformed request"| OS["OpenSearch (:9200)"]
+    OS -->|"OS response"| Shim
+    Shim -->|"primary response +\nvalidation headers"| Client
 ```
 
 Your application keeps speaking Solr HTTP. The shim translates requests to OpenSearch's `_search` API and converts responses back to Solr format. In dual-target mode, it sends to both backends in parallel and validates that responses match — giving you confidence before cutting over.
