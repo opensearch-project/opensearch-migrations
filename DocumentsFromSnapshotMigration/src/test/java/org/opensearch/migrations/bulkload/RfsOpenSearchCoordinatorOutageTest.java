@@ -39,7 +39,6 @@ import eu.rekawek.toxiproxy.model.ToxicDirection;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -78,10 +77,10 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     //   t=0s   : RFS starts (lease acquisition, shard setup, doc migration begins)
     //   t=30s  : Coordinator disabled — mid-migration, ~30 docs already sent
     //   t=60s  : All 60 docs reach target, RFS tries to finalize on coordinator (fails)
-    //   t=150s : (test 2 only) Coordinator re-enabled after 120s restart window
+    //   t=115s : (test 2) Coordinator re-enabled after 85s, during retry 6's backoff sleep (expecting success on last retry)
     //   Test 1 uses COORDINATOR_NEVER_REENABLE_SECONDS so coordinator stays down permanently
     private static final int COORDINATOR_DISABLE_AFTER_SECONDS = 30;
-    private static final int COORDINATOR_REENABLE_AFTER_SECONDS = 120;
+    private static final int COORDINATOR_REENABLE_AFTER_SECONDS = 85;
     private static final int COORDINATOR_NEVER_REENABLE_SECONDS = 3600; // effectively never within test lifetime
 
     @TempDir
@@ -99,7 +98,6 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     }
 
     @Test
-    @Disabled("Known limitation: current coordinator retry window is shorter than long restart duration")
     @SneakyThrows
     void allDocsMigratedButCoordinatorLongRestartsAtCompletion() {
         runCoordinatorOutageScenario(COORDINATOR_REENABLE_AFTER_SECONDS, r -> {

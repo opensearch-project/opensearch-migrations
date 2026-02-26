@@ -150,18 +150,30 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
-        Consumer<SourceTargetCaptureTuple> resultTupleConsumer
+        Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
+        Duration quiescentDuration
     ) throws InterruptedException, ExecutionException {
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
             (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout)
         );
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
+        // Wire session close callback so KafkaTrafficCaptureSource can track synthetic close drain
+        clientConnectionPool.setGlobalOnSessionClose(session ->
+            trafficSource.onNetworkConnectionClosed(
+                session.getChannelKeyContext().getConnectionId(),
+                // sessionNumber is the key used in the pool — derive from the session's context
+                // For now use 0 as a placeholder; full GenerationalSessionKey wiring is Phase A4
+                0,
+                session.generation
+            )
+        );
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
             new CapturedTrafficToHttpTransactionAccumulator(
                 observedPacketConnectionTimeout,
                 "(see command line option " + TrafficReplayer.PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
-                new TrafficReplayerAccumulationCallbacks(replayEngine, resultTupleConsumer, trafficSource)
+                new TrafficReplayerAccumulationCallbacks(replayEngine, resultTupleConsumer, trafficSource,
+                    quiescentDuration)
             );
         try {
             pullCaptureFromSourceToAccumulator(trafficSource, trafficToHttpTransactionAccumulator);
@@ -237,7 +249,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
-        Consumer<SourceTargetCaptureTuple> resultTupleConsumer
+        Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
+        Duration quiescentDuration
     ) throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
         try {
             setupRunAndWaitForReplayToFinish(
@@ -245,7 +258,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 targetServerResponseTimeout,
                 trafficSource,
                 timeShifter,
-                resultTupleConsumer
+                resultTupleConsumer,
+                quiescentDuration
             );
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

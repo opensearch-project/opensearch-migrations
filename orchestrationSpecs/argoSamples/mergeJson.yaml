@@ -22,7 +22,7 @@ spec:
           - name: merged
             value: "{{= toJSON(sprig.merge(sprig.dict(\"inner\", fromJSON('{\"a\":\"b\"}')), fromJSON(inputs.parameters.ib))) }}"
       container:
-        image: alpine
+        image: mirror.gcr.io/library/alpine
         command: [echo]
         args:
           - |
