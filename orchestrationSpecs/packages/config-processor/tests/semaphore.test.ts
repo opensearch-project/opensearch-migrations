@@ -43,7 +43,6 @@ describe('semaphore configuration', () => {
                     snapshotExtractAndLoadConfigs: [
                         {
                             snapshotConfig: {
-                                repoName: "default",
                                 snapshotNameConfig: {
                                     snapshotNamePrefix: "snap1"
                                 }
@@ -60,7 +59,6 @@ describe('semaphore configuration', () => {
                         },
                         {
                             snapshotConfig: {
-                                repoName: "default", 
                                 snapshotNameConfig: {
                                     snapshotNamePrefix: "snap2"
                                 }
@@ -128,7 +126,6 @@ describe('semaphore configuration', () => {
                     snapshotExtractAndLoadConfigs: [
                         {
                             snapshotConfig: {
-                                repoName: "default",
                                 snapshotNameConfig: {
                                     snapshotNamePrefix: "snap1"
                                 }
@@ -145,7 +142,6 @@ describe('semaphore configuration', () => {
                         },
                         {
                             snapshotConfig: {
-                                repoName: "default",
                                 snapshotNameConfig: {
                                     snapshotNamePrefix: "snap2"
                                 }
@@ -230,7 +226,6 @@ describe('semaphore configuration', () => {
                     snapshotExtractAndLoadConfigs: [
                         {
                             snapshotConfig: {
-                                repoName: "default",
                                 snapshotNameConfig: {
                                     snapshotNamePrefix: "snap1"
                                 }
@@ -253,7 +248,6 @@ describe('semaphore configuration', () => {
                     snapshotExtractAndLoadConfigs: [
                         {
                             snapshotConfig: {
-                                repoName: "default",
                                 snapshotNameConfig: {
                                     snapshotNamePrefix: "snap2"
                                 }
