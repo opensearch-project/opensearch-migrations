@@ -97,7 +97,7 @@ def call(Map config = [:]) {
                             def buildImagesArg = params.BUILD_IMAGES ? "--build-images" : ""
 
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 7200, roleSessionName: 'jenkins-session') {
                                     sh """
                                         set -euo pipefail
                                         ./deployment/k8s/aws/aws-bootstrap.sh \
@@ -119,7 +119,7 @@ def call(Map config = [:]) {
 
             stage('Validate EKS Deployment') {
                 steps {
-                    timeout(time: 10, unit: 'MINUTES') {
+                    timeout(time: 15, unit: 'MINUTES') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
