@@ -315,15 +315,34 @@ public class ShimMain {
         throw new ParameterException("Unknown auth type: " + authSpec);
     }
 
+    private static final String JS_POLYFILL =
+        "if (typeof URLSearchParams === 'undefined') {\n" +
+        "  globalThis.URLSearchParams = function(qs) {\n" +
+        "    this._map = {};\n" +
+        "    if (!qs) return;\n" +
+        "    qs.split('&').forEach(function(pair) {\n" +
+        "      var idx = pair.indexOf('=');\n" +
+        "      if (idx < 0) return;\n" +
+        "      var k = decodeURIComponent(pair.slice(0, idx));\n" +
+        "      var v = decodeURIComponent(pair.slice(idx + 1));\n" +
+        "      if (!this._map[k]) this._map[k] = [];\n" +
+        "      this._map[k].push(v);\n" +
+        "    }.bind(this));\n" +
+        "  };\n" +
+        "  URLSearchParams.prototype.get = function(k) { return this._map[k] ? this._map[k][0] : null; };\n" +
+        "  URLSearchParams.prototype.has = function(k) { return k in this._map; };\n" +
+        "  URLSearchParams.prototype.getAll = function(k) { return this._map[k] || []; };\n" +
+        "}\n";
+
     private static IJsonTransformer loadTransformer(String pathStr, boolean watch,
             Map<Path, ReloadableTransformer> watchedTransforms) throws IOException {
         Path path = Path.of(pathStr).toAbsolutePath();
-        String script = Files.readString(path);
+        String script = JS_POLYFILL + Files.readString(path);
         if (watch) {
-            var reloadable = new ReloadableTransformer(() -> new JavascriptTransformer(script, null));
+            var reloadable = new ReloadableTransformer(() -> new JavascriptTransformer(script, new java.util.LinkedHashMap<>()));
             watchedTransforms.put(path, reloadable);
             return reloadable;
         }
-        return new JavascriptTransformer(script, null);
+        return new JavascriptTransformer(script, new java.util.LinkedHashMap<>());
     }
 }

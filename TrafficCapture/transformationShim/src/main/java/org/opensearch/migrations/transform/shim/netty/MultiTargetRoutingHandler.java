@@ -83,12 +83,18 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         boolean keepAlive = Boolean.TRUE.equals(
             ctx.channel().attr(ShimChannelAttributes.KEEP_ALIVE).get());
 
+        // Convert to map once, then create independent requests per target
+        var requestMap = HttpMessageUtil.requestToMap(request);
+        request.release();
+
         Map<String, CompletableFuture<TargetResponse>> futures = new LinkedHashMap<>();
         for (String name : activeTargets) {
             Target target = targets.get(name);
-            futures.put(name, dispatchToTarget(ctx.channel().eventLoop().parent(), target, request));
+            // Deep-copy the map for targets with transforms (transform modifies in place)
+            Map<String, Object> targetRequestMap = target.requestTransform() != null
+                ? deepCopyMap(requestMap) : requestMap;
+            futures.put(name, dispatchToTarget(ctx.channel().eventLoop().parent(), target, targetRequestMap, requestMap));
         }
-        request.release();
 
         // When primary completes, collect secondaries (with timeout), validate, respond
         futures.get(primaryTarget).whenComplete((primaryResp, primaryEx) -> {
@@ -112,15 +118,16 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     }
 
     private CompletableFuture<TargetResponse> dispatchToTarget(
-        io.netty.channel.EventLoopGroup group, Target target, FullHttpRequest originalRequest
+        io.netty.channel.EventLoopGroup group, Target target, Map<String, Object> requestMap,
+        Map<String, Object> originalRequestMap
     ) {
         CompletableFuture<TargetResponse> future = new CompletableFuture<>();
         long startNanos = System.nanoTime();
 
         try {
-            // Copy request for this target (independent copy, no shared refcount)
-            FullHttpRequest targetRequest = originalRequest.copy();
-            targetRequest = applyRequestTransform(target, targetRequest);
+            // Apply request transform if configured, then build a fresh Netty request
+            Map<String, Object> targetMap = applyRequestTransform(target, requestMap);
+            FullHttpRequest targetRequest = HttpMessageUtil.mapToRequest(targetMap);
             targetRequest = applyAuth(target, targetRequest);
 
             // Set Host header for this target
@@ -149,7 +156,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                         p.addLast("readTimeout", new ReadTimeoutHandler(
                             secondaryTimeout.toSeconds(), TimeUnit.SECONDS));
                         p.addLast("responseHandler", new TargetResponseHandler(
-                            target, future, startNanos));
+                            target, future, startNanos, originalRequestMap));
                     }
                 });
 
@@ -170,22 +177,41 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                 }
             });
         } catch (Exception e) {
+            log.error("Error dispatching to target {}", target.name(), e);
             future.complete(TargetResponse.error(target.name(), elapsed(startNanos), e));
         }
         return future;
     }
 
     @SuppressWarnings("unchecked")
-    private FullHttpRequest applyRequestTransform(Target target, FullHttpRequest request) {
-        if (target.requestTransform() == null) return request;
+    private Map<String, Object> applyRequestTransform(Target target, Map<String, Object> requestMap) {
+        if (target.requestTransform() == null) return requestMap;
+        Object result = target.requestTransform().transformJson(requestMap);
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
         try {
-            var requestMap = HttpMessageUtil.requestToMap(request);
-            var transformedMap = (Map<String, Object>) target.requestTransform().transformJson(requestMap);
-            request.release();
-            return HttpMessageUtil.mapToRequest(transformedMap);
+            if (result instanceof String) {
+                return mapper.readValue((String) result,
+                    new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+            } else if (result instanceof Map) {
+                Map<String, Object> resultMap = (Map<String, Object>) result;
+                if (!resultMap.isEmpty()) return resultMap;
+            }
         } catch (Exception e) {
-            request.release();
+            log.error("Request transform failed for target {}", target.name(), e);
             throw new RuntimeException("Request transform failed for target " + target.name(), e);
+        }
+        return requestMap;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> deepCopyMap(Map<String, Object> original) {
+        try {
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            byte[] bytes = mapper.writeValueAsBytes(original);
+            return mapper.readValue(bytes,
+                new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to deep-copy request map", e);
         }
     }
 
@@ -326,11 +352,14 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         private final Target target;
         private final CompletableFuture<TargetResponse> future;
         private final long startNanos;
+        private final Map<String, Object> originalRequestMap;
 
-        TargetResponseHandler(Target target, CompletableFuture<TargetResponse> future, long startNanos) {
+        TargetResponseHandler(Target target, CompletableFuture<TargetResponse> future, long startNanos,
+                Map<String, Object> originalRequestMap) {
             this.target = target;
             this.future = future;
             this.startNanos = startNanos;
+            this.originalRequestMap = originalRequestMap;
         }
 
         @Override
@@ -343,18 +372,36 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
                 Map<String, Object> parsedBody = null;
                 if (target.responseTransform() != null) {
-                    // Re-create a response for the transform
+                    // Bundle {request, response} for the response transform — the new transform
+                    // format expects both so it can use request context (URI, params) to drive
+                    // response conversion.
                     var responseMap = HttpMessageUtil.responseToMap(backendResponse.replace(
                         Unpooled.wrappedBuffer(rawBody)));
-                    var transformedMap = (Map<String, Object>) target.responseTransform()
-                        .transformJson(responseMap);
-                    // Extract transformed body
-                    String bodyStr = HttpMessageUtil.extractBodyString(transformedMap);
-                    if (bodyStr != null) {
-                        rawBody = bodyStr.getBytes(StandardCharsets.UTF_8);
+                    var bundled = new LinkedHashMap<String, Object>();
+                    bundled.put("request", originalRequestMap);
+                    bundled.put("response", responseMap);
+                    Object transformResult = target.responseTransform().transformJson(bundled);
+                    // Handle JSON string result (from JS JSON.stringify wrapper) or Map
+                    Map<String, Object> transformedMap = null;
+                    if (transformResult instanceof String) {
+                        transformedMap = new com.fasterxml.jackson.databind.ObjectMapper().readValue(
+                            (String) transformResult,
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+                    } else if (transformResult instanceof Map) {
+                        transformedMap = (Map<String, Object>) transformResult;
                     }
-                    Object sc = transformedMap.get("statusCode");
-                    if (sc instanceof Number) statusCode = ((Number) sc).intValue();
+                    if (transformedMap != null) {
+                        // Extract the response from the bundled result
+                        Map<String, Object> responseResult = (Map<String, Object>) transformedMap.get("response");
+                        if (responseResult == null) responseResult = transformedMap;
+                        String bodyStr = HttpMessageUtil.extractBodyString(responseResult);
+                        if (bodyStr != null) {
+                            rawBody = bodyStr.getBytes(StandardCharsets.UTF_8);
+                        }
+                        Object sc = responseResult.get("statusCode");
+                        if (sc == null) sc = responseResult.get("code");
+                        if (sc instanceof Number) statusCode = ((Number) sc).intValue();
+                    }
                 }
 
                 // Parse body as JSON for validators

@@ -1,0 +1,164 @@
+package org.opensearch.migrations.transform.shim.bugfixes;
+
+import java.net.ServerSocket;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.opensearch.migrations.transform.JavascriptTransformer;
+import org.opensearch.migrations.transform.shim.ShimProxy;
+import org.opensearch.migrations.transform.shim.validation.Target;
+
+import io.netty.bootstrap.ServerBootstrap;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.handler.codec.http.DefaultFullHttpResponse;
+import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.HttpVersion;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Verifies that transforms using {@code URLSearchParams} work in GraalVM with the polyfill.
+ *
+ * <p><b>Bug:</b> GraalVM's JavaScript engine does not provide the {@code URLSearchParams} Web API.
+ * Transform scripts that use it throw {@code ReferenceError: URLSearchParams is not defined}.
+ *
+ * <p><b>Fix:</b> Prepend a minimal polyfill implementing {@code get()}, {@code has()}, and
+ * {@code getAll()} before the transform script.
+ */
+class URLSearchParamsPolyfillTest {
+
+    private static final HttpClient HTTP = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(5)).build();
+
+    /** Minimal URLSearchParams polyfill — same as ShimMain.JS_POLYFILL. */
+    private static final String POLYFILL =
+        "if (typeof URLSearchParams === 'undefined') {\n" +
+        "  globalThis.URLSearchParams = function(qs) {\n" +
+        "    this._map = {};\n" +
+        "    if (!qs) return;\n" +
+        "    qs.split('&').forEach(function(pair) {\n" +
+        "      var idx = pair.indexOf('=');\n" +
+        "      if (idx < 0) return;\n" +
+        "      var k = decodeURIComponent(pair.slice(0, idx));\n" +
+        "      var v = decodeURIComponent(pair.slice(idx + 1));\n" +
+        "      if (!this._map[k]) this._map[k] = [];\n" +
+        "      this._map[k].push(v);\n" +
+        "    }.bind(this));\n" +
+        "  };\n" +
+        "  URLSearchParams.prototype.get = function(k) { return this._map[k] ? this._map[k][0] : null; };\n" +
+        "  URLSearchParams.prototype.has = function(k) { return k in this._map; };\n" +
+        "  URLSearchParams.prototype.getAll = function(k) { return this._map[k] || []; };\n" +
+        "}\n";
+
+    /** Transform that parses query params with URLSearchParams and puts the result in the body. */
+    private static final String TRANSFORM = POLYFILL +
+        "(function(bindings) {\n" +
+        "  return function(request) {\n" +
+        "    var uri = request.URI;\n" +
+        "    var qIdx = uri.indexOf('?');\n" +
+        "    if (qIdx >= 0) {\n" +
+        "      var params = new URLSearchParams(uri.substring(qIdx + 1));\n" +
+        "      request.URI = '/parsed';\n" +
+        "      request.method = 'POST';\n" +
+        "      request.payload = { inlinedTextBody: JSON.stringify({ q: params.get('q'), hasQ: params.has('q') }) };\n" +
+        "    }\n" +
+        "    return request;\n" +
+        "  };\n" +
+        "})";
+
+    private NioEventLoopGroup backendGroup;
+    private Channel backendChannel;
+    private ShimProxy proxy;
+
+    @AfterEach
+    void tearDown() throws Exception {
+        if (proxy != null) proxy.stop();
+        if (backendChannel != null) backendChannel.close().sync();
+        if (backendGroup != null) backendGroup.shutdownGracefully().sync();
+    }
+
+    @Test
+    void urlSearchParams_parsesQueryString() throws Exception {
+        int backendPort = findFreePort();
+        int proxyPort = findFreePort();
+
+        startEchoBackend(backendPort);
+
+        var transform = new JavascriptTransformer(TRANSFORM, new LinkedHashMap<>());
+        var targets = Map.of("backend",
+            new Target("backend", URI.create("http://localhost:" + backendPort), transform, null, null));
+        proxy = new ShimProxy(proxyPort, targets, "backend", List.of());
+        proxy.start();
+
+        var resp = HTTP.send(
+            HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + proxyPort + "/search?q=hello&rows=10"))
+                .GET().build(),
+            HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, resp.statusCode());
+        // The echo backend returns the body it received — should contain the parsed query params
+        assertTrue(resp.body().contains("\"q\":\"hello\""),
+            "Expected parsed q=hello from URLSearchParams, got: " + resp.body());
+        assertTrue(resp.body().contains("\"hasQ\":true"),
+            "Expected has('q') to return true, got: " + resp.body());
+    }
+
+    private void startEchoBackend(int port) throws InterruptedException {
+        backendGroup = new NioEventLoopGroup(1);
+        backendChannel = new ServerBootstrap()
+            .group(backendGroup)
+            .channel(NioServerSocketChannel.class)
+            .childHandler(new ChannelInitializer<SocketChannel>() {
+                @Override
+                protected void initChannel(SocketChannel ch) {
+                    ch.pipeline()
+                        .addLast(new HttpServerCodec())
+                        .addLast(new HttpObjectAggregator(1024 * 1024))
+                        .addLast(new EchoBodyHandler());
+                }
+            })
+            .bind(port).sync().channel();
+    }
+
+    /** Returns the received request body as the response. */
+    static class EchoBodyHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
+        @Override
+        protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest request) {
+            byte[] body = new byte[request.content().readableBytes()];
+            request.content().readBytes(body);
+            if (body.length == 0) body = "{}".getBytes(StandardCharsets.UTF_8);
+            var response = new DefaultFullHttpResponse(
+                HttpVersion.HTTP_1_1, HttpResponseStatus.OK, Unpooled.wrappedBuffer(body));
+            response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
+            response.headers().set(HttpHeaderNames.CONTENT_LENGTH, body.length);
+            response.headers().set(HttpHeaderNames.CONNECTION, "close");
+            ctx.writeAndFlush(response);
+        }
+    }
+
+    private static int findFreePort() throws Exception {
+        try (var socket = new ServerSocket(0)) { return socket.getLocalPort(); }
+    }
+}

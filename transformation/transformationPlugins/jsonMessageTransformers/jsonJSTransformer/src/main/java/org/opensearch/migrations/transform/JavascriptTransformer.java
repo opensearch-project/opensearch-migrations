@@ -128,6 +128,28 @@ public class JavascriptTransformer implements IJsonTransformer {
     private Value runScript(Value jsCallableObject, Object... args) {
         var convertedArgs = Arrays.stream(args)
                 .map(o -> convertObject(o, this.polyglotContext)).toArray();
+        // Wrap the call: convert input to native JS via JSON, call transform, stringify result
+        // This avoids GraalVM polyglot Map interop issues where Java Maps passed to JS
+        // don't properly reflect property assignments back to the Java Map.
+        Value wrapperFn = this.polyglotContext.eval("js",
+            "(function(fn, arg) { " +
+            "  var input = (typeof arg === 'string') ? JSON.parse(arg) : arg; " +
+            "  var result = fn(input); " +
+            "  return JSON.stringify(result); " +
+            "})");
+        // Serialize the first arg to JSON string if it's a Map
+        Object firstArg = args.length > 0 ? args[0] : null;
+        if (firstArg instanceof java.util.Map || firstArg instanceof java.util.List) {
+            try {
+                var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                String jsonArg = mapper.writeValueAsString(firstArg);
+                var rval = wrapperFn.execute(jsCallableObject, jsonArg);
+                log.atTrace().setMessage("rval={}").addArgument(rval).log();
+                return rval;
+            } catch (Exception e) {
+                log.warn("JSON wrapper failed, falling back to direct call", e);
+            }
+        }
         var rval = jsCallableObject.execute(convertedArgs);
         log.atTrace().setMessage("rval={}").addArgument(rval).log();
         return rval;
@@ -167,8 +189,46 @@ public class JavascriptTransformer implements IJsonTransformer {
         return future;
     }
 
-    private static Object jsValueToJavaObject(Value val) {
-        if (val.isHostObject()) {
+    private Object jsValueToJavaObject(Value val) {
+        if (val.isNull()) {
+            return null;
+        } else if (val.isString()) {
+            return val.asString();
+        } else if (val.isNumber()) {
+            if (val.fitsInInt()) return val.asInt();
+            if (val.fitsInLong()) return val.asLong();
+            return val.asDouble();
+        } else if (val.isBoolean()) {
+            return val.asBoolean();
+        } else if (val.hasArrayElements()) {
+            var list = new java.util.ArrayList<>();
+            for (long i = 0; i < val.getArraySize(); i++) {
+                list.add(jsValueToJavaObject(val.getArrayElement(i)));
+            }
+            return list;
+        } else if (val.hasMembers()) {
+            // JS object — try JSON.stringify to capture all properties
+            try {
+                Value jsonStringify = polyglotContext.eval("js", "(function(o) { return JSON.stringify(o); })");
+                Value jsonResult = jsonStringify.execute(val);
+                if (!jsonResult.isNull()) {
+                    String json = jsonResult.asString();
+                    if (json != null && !json.equals("{}") && !json.equals("null")) {
+                        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                        return mapper.readValue(json, Object.class);
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("JSON.stringify failed, falling back to member extraction", e);
+            }
+            // Fallback: extract members manually
+            var map = new java.util.LinkedHashMap<String, Object>();
+            for (String key : val.getMemberKeys()) {
+                Value member = val.getMember(key);
+                map.put(key, jsValueToJavaObject(member));
+            }
+            return map;
+        } else if (val.isHostObject()) {
             return val.asHostObject();
         } else if (val.isProxyObject()) {
             return val.asProxyObject();

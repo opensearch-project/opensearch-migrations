@@ -31,7 +31,6 @@ public class JavascriptValidator implements ResponseValidator, AutoCloseable {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public ValidationResult validate(Map<String, TargetResponse> responses) {
         Map<String, Object> jsResponses = new LinkedHashMap<>();
         for (var entry : responses.entrySet()) {
@@ -45,7 +44,16 @@ public class JavascriptValidator implements ResponseValidator, AutoCloseable {
         }
 
         try {
-            var result = (Map<String, Object>) transformer.transformJson(jsResponses);
+            Object raw = transformer.transformJson(jsResponses);
+            Map<String, Object> result;
+            if (raw instanceof String) {
+                result = new com.fasterxml.jackson.databind.ObjectMapper().readValue(
+                    (String) raw, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+            } else {
+                @SuppressWarnings("unchecked")
+                var m = (Map<String, Object>) raw;
+                result = m;
+            }
             boolean passed = Boolean.TRUE.equals(result.get("passed"));
             Object detail = result.get("detail");
             return new ValidationResult(name, passed, detail != null ? detail.toString() : null);
