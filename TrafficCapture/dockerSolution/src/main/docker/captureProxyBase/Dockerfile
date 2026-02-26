@@ -21,7 +21,7 @@ RUN mkdir -p /certs && \
 # =======================
 # Stage 2: Final Image
 # =======================
-FROM mirror.gcr.io/library/amazoncorretto:11-al2023-headless
+FROM amazoncorretto:11-al2023-headless
 
 # Set environment variables
 ENV CONFIG_HOME=/usr/share/captureProxy/config
