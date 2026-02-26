@@ -52,8 +52,8 @@ class JsonRoundTripPropertyModificationTest {
         .connectTimeout(Duration.ofSeconds(5)).build();
 
     /**
-     * Transform that modifies properties using map access pattern (.get/.put).
-     * This avoids the GraalVM shadow property issue and eliminates serialization overhead.
+     * Transform that modifies properties using map access pattern (.get/.set).
+     * Uses inlinedJsonBody (Map) instead of inlinedTextBody (JSON string) for zero serialization.
      */
     private static final String TRANSFORM =
         "(function(bindings) {\n" +
@@ -61,7 +61,10 @@ class JsonRoundTripPropertyModificationTest {
         "    request.set('URI', '/modified');\n" +
         "    request.set('method', 'POST');\n" +
         "    var payload = new Map();\n" +
-        "    payload.set('inlinedTextBody', JSON.stringify({ added: true, method: request.get('method') }));\n" +
+        "    var body = new Map();\n" +
+        "    body.set('added', true);\n" +
+        "    body.set('method', request.get('method'));\n" +
+        "    payload.set('inlinedJsonBody', body);\n" +
         "    request.set('payload', payload);\n" +
         "    return request;\n" +
         "  };\n" +

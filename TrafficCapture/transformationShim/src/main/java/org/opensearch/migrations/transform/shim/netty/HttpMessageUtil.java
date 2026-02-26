@@ -9,6 +9,10 @@ import java.util.Set;
 
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -26,6 +30,9 @@ import io.netty.handler.codec.http.HttpVersion;
  * representation used by IJsonTransformer. Shared across pipeline handlers.
  */
 public final class HttpMessageUtil {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final TypeReference<LinkedHashMap<String, Object>> MAP_TYPE_REF = new TypeReference<>() {};
 
     private static final Set<String> RESTRICTED_REQUEST_HEADERS = Set.of(
         "host", "content-length", "transfer-encoding", "connection",
@@ -52,7 +59,7 @@ public final class HttpMessageUtil {
         var body = request.content().toString(StandardCharsets.UTF_8);
         if (!body.isEmpty()) {
             var payload = new LinkedHashMap<String, Object>();
-            payload.put(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY, body);
+            payload.put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, parseJsonOrText(body));
             map.put(JsonKeysForHttpMessage.PAYLOAD_KEY, payload);
         }
         return map;
@@ -101,7 +108,7 @@ public final class HttpMessageUtil {
         var body = response.content().toString(StandardCharsets.UTF_8);
         if (!body.isEmpty()) {
             var payload = new LinkedHashMap<String, Object>();
-            payload.put(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY, body);
+            payload.put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, parseJsonOrText(body));
             map.put(JsonKeysForHttpMessage.PAYLOAD_KEY, payload);
         }
         return map;
@@ -147,9 +154,33 @@ public final class HttpMessageUtil {
     @SuppressWarnings("unchecked")
     static String extractBodyString(Map<String, Object> map) {
         var payload = (Map<String, Object>) map.get(JsonKeysForHttpMessage.PAYLOAD_KEY);
-        return payload != null
-            ? (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY)
-            : null;
+        if (payload == null) return null;
+        // Prefer inlinedJsonBody — may be a Map (serialize with Jackson) or a String (passthrough)
+        var jsonBody = payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY);
+        if (jsonBody != null) {
+            if (jsonBody instanceof String) return (String) jsonBody;
+            try {
+                return MAPPER.writeValueAsString(jsonBody);
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException("Failed to serialize inlinedJsonBody", e);
+            }
+        }
+        // Fallback to inlinedTextBody (String)
+        return (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY);
+    }
+
+    /**
+     * Parse a JSON string into a LinkedHashMap if valid JSON object, otherwise return the raw string.
+     * This allows transforms to work with Maps (fast .get()/.set()) instead of parsing JSON in JS.
+     * Only parses JSON objects (starting with '{') — arrays and other types stay as strings.
+     */
+    private static Object parseJsonOrText(String body) {
+        if (body.isEmpty() || body.charAt(0) != '{') return body;
+        try {
+            return MAPPER.readValue(body, MAP_TYPE_REF);
+        } catch (JsonProcessingException ignored) {
+            return body;
+        }
     }
 
     /** Write a response, handling keep-alive semantics. */

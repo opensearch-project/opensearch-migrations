@@ -82,7 +82,10 @@ class URLSearchParamsPolyfillTest {
         "      request.set('URI', '/parsed');\n" +
         "      request.set('method', 'POST');\n" +
         "      var payload = new Map();\n" +
-        "      payload.set('inlinedTextBody', JSON.stringify({ q: params.get('q'), hasQ: params.has('q') }));\n" +
+        "      var body = new Map();\n" +
+        "      body.set('q', params.get('q'));\n" +
+        "      body.set('hasQ', params.has('q'));\n" +
+        "      payload.set('inlinedJsonBody', body);\n" +
         "      request.set('payload', payload);\n" +
         "    }\n" +
         "    return request;\n" +

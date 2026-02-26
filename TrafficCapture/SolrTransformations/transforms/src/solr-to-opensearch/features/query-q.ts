@@ -6,30 +6,28 @@
  *   - field:value → term query
  *   - Anything else → query_string passthrough (lets OpenSearch parse it)
  *
- * Request-only.
+ * Request-only. All output is Maps for zero-serialization GraalVM interop.
  */
 import type { MicroTransform } from '../pipeline';
-import type { RequestContext } from '../context';
+import type { RequestContext, JavaMap } from '../context';
 
-function parseSolrQuery(q: string): Record<string, unknown> {
-  if (!q || q === '*:*') return { match_all: {} };
+function parseSolrQuery(q: string): JavaMap {
+  if (!q || q === '*:*') return new Map([['match_all', new Map()]]);
 
-  // field:value → term query
   const fieldMatch = /^([^:]+):(.+)$/.exec(q);
   if (fieldMatch) {
     const [, field, value] = fieldMatch;
-    if (field === '*' && value === '*') return { match_all: {} };
-    return { term: { [field]: value } };
+    if (field === '*' && value === '*') return new Map([['match_all', new Map()]]);
+    return new Map([['term', new Map([[field, value]])]]);
   }
 
-  // Fallback: let OpenSearch parse it
-  return { query_string: { query: q } };
+  return new Map([['query_string', new Map([['query', q]])]]);
 }
 
 export const request: MicroTransform<RequestContext> = {
   name: 'query-q',
   apply: (ctx) => {
     const q = ctx.params.get('q') || '*:*';
-    ctx.body.query = parseSolrQuery(q);
+    ctx.body.set('query', parseSolrQuery(q));
   },
 };
