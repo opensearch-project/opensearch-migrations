@@ -152,7 +152,6 @@ public class ClientConnectionPool {
      * then closes the channel and invalidates the cache.
      */
     public TrackedFuture<String, Void> cancelConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
-        var connId = ctx.getConnectionId();
         var session = connectionId2ChannelCache.getIfPresent(getKey(ctx, sessionNumber));
         if (session != null) {
             session.setCancelled(true);
