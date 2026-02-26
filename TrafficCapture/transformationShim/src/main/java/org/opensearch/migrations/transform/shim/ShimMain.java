@@ -333,6 +333,11 @@ public class ShimMain {
         "  URLSearchParams.prototype.has = function(k) { return k in this._map; };\n" +
         "  URLSearchParams.prototype.getAll = function(k) { return this._map[k] || []; };\n" +
         "  URLSearchParams.prototype.forEach = function(cb) { for (var k in this._map) { this._map[k].forEach(function(v) { cb(v, k); }); } };\n" +
+        "  URLSearchParams.prototype.keys = function() { return Object.keys(this._map); };\n" +
+        "  URLSearchParams.prototype.values = function() { var r = []; for (var k in this._map) { this._map[k].forEach(function(v) { r.push(v); }); } return r; };\n" +
+        "  URLSearchParams.prototype.entries = function() { var r = []; for (var k in this._map) { this._map[k].forEach(function(v) { r.push([k, v]); }); } return r; };\n" +
+        "  URLSearchParams.prototype.delete = function(k) { delete this._map[k]; };\n" +
+        "  URLSearchParams.prototype.toString = function() { var r = []; for (var k in this._map) { this._map[k].forEach(function(v) { r.push(encodeURIComponent(k) + '=' + encodeURIComponent(v)); }); } return r.join('&'); };\n" +
         "}\n";
 
     private static IJsonTransformer loadTransformer(String pathStr, boolean watch,

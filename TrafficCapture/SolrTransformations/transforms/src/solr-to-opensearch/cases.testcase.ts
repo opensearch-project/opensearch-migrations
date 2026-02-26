@@ -32,9 +32,22 @@ export const testCases: TestCase[] = [
       },
     },
     responseAssertions: [
+      // Response structure
       { path: '$.response.numFound', equals: 1 },
+      { path: '$.response.start', equals: 0 },
+      { path: '$.response.numFoundExact', equals: true },
       { path: '$.response.docs', count: 1 },
+      // Doc fields — would fail if transform drops fields
       { path: '$.response.docs[0].id', equals: '1' },
+      { path: '$.response.docs[0].title', exists: true },
+      { path: '$.response.docs[0].content', exists: true },
+      // _version_ — would have caught the missing _version_ bug
+      { path: '$.response.docs[0]._version_', exists: true },
+      // responseHeader — would have caught missing responseHeader.params
+      { path: '$.responseHeader.status', equals: 0 },
+      { path: '$.responseHeader.params', exists: true },
+      { path: '$.responseHeader.params.q', equals: '*:*' },
+      { path: '$.responseHeader.params.wt', equals: 'json' },
     ],
   }),
 
@@ -58,8 +71,20 @@ export const testCases: TestCase[] = [
       },
     },
     responseAssertions: [
+      // Response structure
       { path: '$.response.numFound', equals: 3 },
+      { path: '$.response.start', equals: 0 },
+      { path: '$.response.numFoundExact', equals: true },
       { path: '$.response.docs', count: 3 },
+      // _version_ on every doc — would have caught the missing _version_ bug
+      { path: '$.response.docs[0]._version_', exists: true },
+      { path: '$.response.docs[1]._version_', exists: true },
+      { path: '$.response.docs[2]._version_', exists: true },
+      // responseHeader — would have caught missing responseHeader.params
+      { path: '$.responseHeader.status', equals: 0 },
+      { path: '$.responseHeader.params', exists: true },
+      { path: '$.responseHeader.params.q', equals: '*:*' },
+      { path: '$.responseHeader.params.wt', equals: 'json' },
     ],
   }),
 ];

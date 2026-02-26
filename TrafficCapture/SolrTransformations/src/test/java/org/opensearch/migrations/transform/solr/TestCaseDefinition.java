@@ -44,5 +44,5 @@ record TestCaseDefinition(
 
     /** A response content assertion — verifies the proxy response is correct. */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record ResponseAssertion(String path, Object equals, Integer count) {}
+    record ResponseAssertion(String path, Object equals, Integer count, Boolean exists) {}
 }

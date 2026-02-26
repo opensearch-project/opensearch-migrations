@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.transform.JavascriptTransformer;
+import org.opensearch.migrations.transform.shim.ShimMain;
 import org.opensearch.migrations.transform.shim.ShimProxy;
 import org.opensearch.migrations.transform.shim.validation.Target;
 
@@ -51,29 +52,10 @@ class URLSearchParamsPolyfillTest {
     private static final HttpClient HTTP = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(5)).build();
 
-    /** Minimal URLSearchParams polyfill — same as ShimMain.JS_POLYFILL. */
-    private static final String POLYFILL =
-        "if (typeof URLSearchParams === 'undefined') {\n" +
-        "  globalThis.URLSearchParams = function(qs) {\n" +
-        "    this._map = {};\n" +
-        "    if (!qs) return;\n" +
-        "    qs.split('&').forEach(function(pair) {\n" +
-        "      var idx = pair.indexOf('=');\n" +
-        "      if (idx < 0) return;\n" +
-        "      var k = decodeURIComponent(pair.slice(0, idx));\n" +
-        "      var v = decodeURIComponent(pair.slice(idx + 1));\n" +
-        "      if (!this._map[k]) this._map[k] = [];\n" +
-        "      this._map[k].push(v);\n" +
-        "    }.bind(this));\n" +
-        "  };\n" +
-        "  URLSearchParams.prototype.get = function(k) { return this._map[k] ? this._map[k][0] : null; };\n" +
-        "  URLSearchParams.prototype.has = function(k) { return k in this._map; };\n" +
-        "  URLSearchParams.prototype.getAll = function(k) { return this._map[k] || []; };\n" +
-        "  URLSearchParams.prototype.forEach = function(cb) { for (var k in this._map) { this._map[k].forEach(function(v) { cb(v, k); }); } };\n" +
-        "}\n";
+    /** Minimal URLSearchParams polyfill — uses the production polyfill from ShimMain. */
 
-    /** Transform that parses query params with URLSearchParams and sets the result using map access. */
-    private static final String TRANSFORM = POLYFILL +
+    /** Transform that parses query params with URLSearchParams and exercises all polyfill methods. */
+    private static final String TRANSFORM = ShimMain.JS_POLYFILL +
         "(function(bindings) {\n" +
         "  return function(request) {\n" +
         "    var uri = request.get('URI');\n" +
@@ -84,8 +66,27 @@ class URLSearchParamsPolyfillTest {
         "      request.set('method', 'POST');\n" +
         "      var payload = new Map();\n" +
         "      var body = new Map();\n" +
+        "      // get + has\n" +
         "      body.set('q', params.get('q'));\n" +
         "      body.set('hasQ', params.has('q'));\n" +
+        "      body.set('missingKey', params.get('nope'));\n" +
+        "      body.set('hasMissing', params.has('nope'));\n" +
+        "      // getAll\n" +
+        "      body.set('allTags', JSON.stringify(params.getAll('tag')));\n" +
+        "      // forEach\n" +
+        "      var forEachPairs = [];\n" +
+        "      params.forEach(function(v, k) { forEachPairs.push(k + '=' + v); });\n" +
+        "      body.set('forEachResult', forEachPairs.join(','));\n" +
+        "      // keys, values, entries\n" +
+        "      body.set('keys', JSON.stringify(params.keys()));\n" +
+        "      body.set('values', JSON.stringify(params.values()));\n" +
+        "      body.set('entries', JSON.stringify(params.entries()));\n" +
+        "      // toString\n" +
+        "      body.set('toString', params.toString());\n" +
+        "      // delete\n" +
+        "      body.set('hasRowsBefore', params.has('rows'));\n" +
+        "      params.delete('rows');\n" +
+        "      body.set('hasRowsAfter', params.has('rows'));\n" +
         "      payload.set('inlinedJsonBody', body);\n" +
         "      request.set('payload', payload);\n" +
         "    }\n" +
@@ -105,7 +106,7 @@ class URLSearchParamsPolyfillTest {
     }
 
     @Test
-    void urlSearchParams_parsesQueryString() throws Exception {
+    void urlSearchParams_allPolyfillMethods() throws Exception {
         int backendPort = findFreePort();
         int proxyPort = findFreePort();
 
@@ -117,18 +118,44 @@ class URLSearchParamsPolyfillTest {
         proxy = new ShimProxy(proxyPort, targets, "backend", List.of());
         proxy.start();
 
+        // Multi-value 'tag' param exercises getAll; 'rows' exercises delete
         var resp = HTTP.send(
             HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:" + proxyPort + "/search?q=hello&rows=10"))
+                .uri(URI.create("http://localhost:" + proxyPort + "/search?q=hello&rows=10&tag=a&tag=b"))
                 .GET().build(),
             HttpResponse.BodyHandlers.ofString());
 
         assertEquals(200, resp.statusCode());
-        // The echo backend returns the body it received — should contain the parsed query params
-        assertTrue(resp.body().contains("\"q\":\"hello\""),
-            "Expected parsed q=hello from URLSearchParams, got: " + resp.body());
-        assertTrue(resp.body().contains("\"hasQ\":true"),
-            "Expected has('q') to return true, got: " + resp.body());
+        var body = resp.body();
+
+        // get + has
+        assertTrue(body.contains("\"q\":\"hello\""), "get('q') should return 'hello': " + body);
+        assertTrue(body.contains("\"hasQ\":true"), "has('q') should be true: " + body);
+        assertTrue(body.contains("\"missingKey\":null"), "get('nope') should return null: " + body);
+        assertTrue(body.contains("\"hasMissing\":false"), "has('nope') should be false: " + body);
+
+        // getAll
+        assertTrue(body.contains("\"allTags\":\"[\\\"a\\\",\\\"b\\\"]\""), "getAll('tag') should return [a,b]: " + body);
+
+        // forEach
+        assertTrue(body.contains("\"forEachResult\":\""), "forEach should produce pairs: " + body);
+        assertTrue(body.contains("q=hello"), "forEach should include q=hello: " + body);
+
+        // keys
+        assertTrue(body.contains("\"keys\":\""), "keys() should return array: " + body);
+
+        // values
+        assertTrue(body.contains("\"values\":\""), "values() should return array: " + body);
+
+        // entries
+        assertTrue(body.contains("\"entries\":\""), "entries() should return array: " + body);
+
+        // toString
+        assertTrue(body.contains("\"toString\":\""), "toString() should return query string: " + body);
+
+        // delete
+        assertTrue(body.contains("\"hasRowsBefore\":true"), "has('rows') should be true before delete: " + body);
+        assertTrue(body.contains("\"hasRowsAfter\":false"), "has('rows') should be false after delete: " + body);
     }
 
     private void startEchoBackend(int port) throws InterruptedException {

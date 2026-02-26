@@ -95,6 +95,8 @@ export interface ResponseAssertion {
   equals?: FieldValue | Record<string, unknown>;
   /** Assert the array at path has this many elements. */
   count?: number;
+  /** Assert the value at path exists (is not null/undefined). */
+  exists?: boolean;
 }
 
 /** HTTP methods supported by the test framework. */

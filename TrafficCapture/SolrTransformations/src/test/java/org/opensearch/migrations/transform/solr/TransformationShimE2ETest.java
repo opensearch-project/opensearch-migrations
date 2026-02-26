@@ -129,6 +129,11 @@ class TransformationShimE2ETest {
         for (var assertion : assertions) {
             var actual = resolveJsonPath(proxyJson, assertion.path());
 
+            if (Boolean.TRUE.equals(assertion.exists())) {
+                if (actual == null) {
+                    failures.add(String.format("  %s: expected to exist but was null/missing", assertion.path()));
+                }
+            }
             if (assertion.equals() != null) {
                 var expected = normalizeNumber(assertion.equals());
                 var normalizedActual = normalizeNumber(actual);
