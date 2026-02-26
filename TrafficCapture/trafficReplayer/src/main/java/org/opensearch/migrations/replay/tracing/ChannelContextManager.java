@@ -4,6 +4,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
 
 import lombok.Getter;
 
@@ -52,7 +53,7 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IRepla
     public IReplayContexts.IChannelKeyContext retainOrCreateContext(ITrafficStreamKey tsk) {
         var incomingGeneration = tsk.getSourceGeneration();
         return connectionToChannelContextMap.compute(
-            tsk.getConnectionId(),
+            TrafficChannelKeyFormatter.format(tsk.getNodeId(), tsk.getConnectionId()),
             (k, existing) -> {
                 if (existing != null && existing.generation < incomingGeneration) {
                     // Stale context from a previous partition assignment — force-close it.
@@ -71,13 +72,13 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IRepla
     }
 
     public IReplayContexts.IChannelKeyContext releaseContextFor(IReplayContexts.IChannelKeyContext ctx) {
-        var connId = ctx.getConnectionId();
-        var refCountedCtx = connectionToChannelContextMap.get(connId);
+        var mapKey = TrafficChannelKeyFormatter.format(ctx.getNodeId(), ctx.getConnectionId());
+        var refCountedCtx = connectionToChannelContextMap.get(mapKey);
         assert ctx == refCountedCtx.context : "consistency mismatch";
         var finalRelease = refCountedCtx.release();
         if (finalRelease) {
             ctx.close();
-            connectionToChannelContextMap.remove(connId);
+            connectionToChannelContextMap.remove(mapKey);
         }
         return ctx;
     }

@@ -8,6 +8,7 @@ import java.util.function.Consumer;
 import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
 
@@ -41,12 +42,19 @@ public class ClientConnectionPool {
     @EqualsAndHashCode
     @AllArgsConstructor
     private static class Key {
-        private final String connectionId;
+        private final String sourceChannelKey;
         private final int sessionNumber;
     }
 
-    private Key getKey(String connectionId, int sessionNumber) {
-        return new Key(connectionId, sessionNumber);
+    private Key getKey(IReplayContexts.IChannelKeyContext channelKeyCtx, int sessionNumber) {
+        return new Key(
+            TrafficChannelKeyFormatter.format(channelKeyCtx.getNodeId(), channelKeyCtx.getConnectionId()),
+            sessionNumber
+        );
+    }
+
+    private Key getKey(String nodeId, String connectionId, int sessionNumber) {
+        return new Key(TrafficChannelKeyFormatter.format(nodeId, connectionId), sessionNumber);
     }
 
     public ClientConnectionPool(
@@ -100,7 +108,7 @@ public class ClientConnectionPool {
         int sessionNumber,
         int generation
     ) {
-        var key = getKey(channelKeyCtx.getConnectionId(), sessionNumber);
+        var key = getKey(channelKeyCtx, sessionNumber);
         var crs = connectionId2ChannelCache.get(
             key,
             () -> buildConnectionReplaySession(channelKeyCtx, generation)
@@ -118,10 +126,11 @@ public class ClientConnectionPool {
     public void closeConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
         var connId = ctx.getConnectionId();
         log.atTrace().setMessage("closing connection for {}").addArgument(connId).log();
-        var connectionReplaySession = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
+        var key = getKey(ctx, sessionNumber);
+        var connectionReplaySession = connectionId2ChannelCache.getIfPresent(key);
         if (connectionReplaySession != null) {
             closeClientConnectionChannel(connectionReplaySession);
-            connectionId2ChannelCache.invalidate(getKey(connId, sessionNumber));
+            connectionId2ChannelCache.invalidate(key);
         } else {
             log.atTrace()
                 .setMessage("No ChannelFuture for {} in closeConnection.  " +
@@ -144,7 +153,7 @@ public class ClientConnectionPool {
      */
     public TrackedFuture<String, Void> cancelConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
         var connId = ctx.getConnectionId();
-        var session = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
+        var session = connectionId2ChannelCache.getIfPresent(getKey(ctx, sessionNumber));
         if (session != null) {
             session.setCancelled(true);
             // Cancel all pending sorter slots on the event loop thread so they drain immediately.
@@ -156,8 +165,8 @@ public class ClientConnectionPool {
         return TextTrackedFuture.completedFuture(null, () -> "cancelled");
     }
 
-    public void invalidateSession(String connectionId, int sessionNumber) {
-        connectionId2ChannelCache.invalidate(getKey(connectionId, sessionNumber));
+    public void invalidateSession(String nodeId, String connectionId, int sessionNumber) {
+        connectionId2ChannelCache.invalidate(getKey(nodeId, connectionId, sessionNumber));
     }
 
     public CompletableFuture<Void> shutdownNow() {

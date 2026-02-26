@@ -48,7 +48,7 @@ public interface ITrafficCaptureSource extends AutoCloseable {
      * Note: {@code onConnectionAccumulationComplete} fires first (accumulator-level), then this fires later
      * (after the Netty close completes). Both may fire for the same logical connection.
      */
-    default void onNetworkConnectionClosed(String connectionId, int sessionNumber, int generation) {}
+    default void onNetworkConnectionClosed(String nodeId, String connectionId, int sessionNumber, int generation) {}
 
     default void close() throws Exception {}
 

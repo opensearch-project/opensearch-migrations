@@ -36,6 +36,7 @@ import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -152,7 +153,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     return channelContextManager.getGlobalContext()
                         .createTrafficStreamContextForKafkaSource(channelKeyCtx, "", 0);
                 }, ts, new PojoKafkaCommitOffsetData(trackingKafkaConsumer.getConsumerConnectionGeneration(), partition, -1));
-                var sessionKey = connKey.connectionId + ":" + 0 + ":" + trackingKafkaConsumer.getConsumerConnectionGeneration();
+                var sessionKey = TrafficChannelKeyFormatter.format(connKey.nodeId, connKey.connectionId) + ":" + 0 + ":" + trackingKafkaConsumer.getConsumerConnectionGeneration();
                 if (pendingTrafficSourceReaderInterruptedCloses.putIfAbsent(sessionKey, Boolean.TRUE) == null) {
                     outstandingTrafficSourceReaderInterruptedCloseSessions.incrementAndGet();
                     batch.add(new TrafficSourceReaderInterruptedClose(key));
@@ -165,12 +166,12 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public void onNetworkConnectionClosed(String connectionId, int sessionNumber, int generation) {
-        var sessionKey = connectionId + ":" + sessionNumber + ":" + generation;
+    public void onNetworkConnectionClosed(String nodeId, String connectionId, int sessionNumber, int generation) {
+        var sessionKey = TrafficChannelKeyFormatter.format(nodeId, connectionId) + ":" + sessionNumber + ":" + generation;
         if (pendingTrafficSourceReaderInterruptedCloses.remove(sessionKey) != null) {
             outstandingTrafficSourceReaderInterruptedCloseSessions.decrementAndGet();
-            log.atDebug().setMessage("Synthetic close confirmed for {}:{} gen={}, outstanding={}").
-                addArgument(connectionId).addArgument(sessionNumber).addArgument(generation)
+            log.atDebug().setMessage("Synthetic close confirmed for {}.{}:{} gen={}, outstanding={}").
+                addArgument(nodeId).addArgument(connectionId).addArgument(sessionNumber).addArgument(generation)
                 .addArgument(outstandingTrafficSourceReaderInterruptedCloseSessions::get).log();
         }
     }

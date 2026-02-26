@@ -183,7 +183,7 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
                     // Drain synthetic closes and decrement the counter so real records can resume
                     var key = ts.getKey();
                     log.atInfo().setMessage("Draining synthetic close for {}").addArgument(key).log();
-                    kafkaSource.onNetworkConnectionClosed(key.getConnectionId(), 0, key.getSourceGeneration());
+                    kafkaSource.onNetworkConnectionClosed(key.getNodeId(), key.getConnectionId(), 0, key.getSourceGeneration());
                     continue;
                 }
                 var tsk = ts.getKey();

@@ -147,7 +147,7 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
 
             // After the synthetic close path invalidates the cache, a new session
             // created via getCachedSession with generation 2 carries generation 2
-            pool.invalidateSession(channelKeyCtx.getConnectionId(), 0);
+            pool.invalidateSession(channelKeyCtx.getNodeId(), channelKeyCtx.getConnectionId(), 0);
             var session2 = pool.getCachedSession(channelKeyCtx, 0, 2);
             Assertions.assertEquals(2, session2.generation,
                 "new session created after cache invalidation must carry the new generation");
@@ -200,6 +200,124 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
             var session1 = pool.getCachedSession(channelKeyCtx, 0, 1);
             var session2 = pool.getCachedSession(channelKeyCtx, 0, 1);
             Assertions.assertSame(session1, session2, "same generation must reuse the existing session");
+        } finally {
+            pool.shutdownNow().get();
+        }
+    }
+
+    /**
+     * Two different source nodes with the same connectionId must get separate cache entries.
+     * Before fix: Key only uses connectionId, so node-B silently reuses node-A's session.
+     */
+    @Test
+    @SneakyThrows
+    void differentNodesSameConnectionId_getSeparateSessions() {
+        var pool = new ClientConnectionPool(
+            (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
+            "test-pool", 1
+        );
+        try {
+            var ctxNodeA = rootContext.getTestConnectionRequestContext("node-A", "conn-1", 0)
+                .getChannelKeyContext();
+            var ctxNodeB = rootContext.getTestConnectionRequestContext("node-B", "conn-1", 0)
+                .getChannelKeyContext();
+
+            var sessionA = pool.getCachedSession(ctxNodeA, 0);
+            var sessionB = pool.getCachedSession(ctxNodeB, 0);
+
+            Assertions.assertNotSame(sessionA, sessionB,
+                "Different source nodes with the same connectionId must get separate sessions");
+            Assertions.assertEquals(2, getCache(pool).size(),
+                "Cache must have 2 entries for 2 different nodes");
+        } finally {
+            pool.shutdownNow().get();
+        }
+    }
+
+    /**
+     * closeConnection for node-A must not affect node-B's session even when connectionId matches.
+     */
+    @Test
+    @SneakyThrows
+    void closeConnection_doesNotAffectOtherNode() {
+        var pool = new ClientConnectionPool(
+            (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
+            "test-pool", 1
+        );
+        try {
+            var ctxNodeA = rootContext.getTestConnectionRequestContext("node-A", "conn-1", 0)
+                .getChannelKeyContext();
+            var ctxNodeB = rootContext.getTestConnectionRequestContext("node-B", "conn-1", 0)
+                .getChannelKeyContext();
+
+            pool.getCachedSession(ctxNodeA, 0);
+            pool.getCachedSession(ctxNodeB, 0);
+            Assertions.assertEquals(2, getCache(pool).size());
+
+            pool.closeConnection(ctxNodeA, 0);
+
+            Assertions.assertEquals(1, getCache(pool).size(),
+                "Only node-A's entry should be evicted");
+            // node-B's session must still be present
+            var sessionB = pool.getCachedSession(ctxNodeB, 0);
+            Assertions.assertNotNull(sessionB, "node-B's session must survive node-A's close");
+        } finally {
+            pool.shutdownNow().get();
+        }
+    }
+
+    /**
+     * cancelConnection for node-A must not cancel node-B's session.
+     */
+    @Test
+    @SneakyThrows
+    void cancelConnection_doesNotAffectOtherNode() {
+        var pool = new ClientConnectionPool(
+            (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
+            "test-pool", 1
+        );
+        try {
+            var ctxNodeA = rootContext.getTestConnectionRequestContext("node-A", "conn-1", 0)
+                .getChannelKeyContext();
+            var ctxNodeB = rootContext.getTestConnectionRequestContext("node-B", "conn-1", 0)
+                .getChannelKeyContext();
+
+            pool.getCachedSession(ctxNodeA, 0);
+            pool.getCachedSession(ctxNodeB, 0);
+
+            pool.cancelConnection(ctxNodeA, 0);
+
+            Assertions.assertEquals(1, getCache(pool).size(),
+                "Only node-A's entry should be evicted after cancel");
+        } finally {
+            pool.shutdownNow().get();
+        }
+    }
+
+    /**
+     * invalidateSession for one node must not affect another node's session with the same connectionId.
+     */
+    @Test
+    @SneakyThrows
+    void invalidateSession_doesNotAffectOtherNode() {
+        var pool = new ClientConnectionPool(
+            (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
+            "test-pool", 1
+        );
+        try {
+            var ctxNodeA = rootContext.getTestConnectionRequestContext("node-A", "conn-1", 0)
+                .getChannelKeyContext();
+            var ctxNodeB = rootContext.getTestConnectionRequestContext("node-B", "conn-1", 0)
+                .getChannelKeyContext();
+
+            pool.getCachedSession(ctxNodeA, 0);
+            pool.getCachedSession(ctxNodeB, 0);
+            Assertions.assertEquals(2, getCache(pool).size());
+
+            pool.invalidateSession(ctxNodeA.getNodeId(), ctxNodeA.getConnectionId(), 0);
+
+            Assertions.assertEquals(1, getCache(pool).size(),
+                "Only node-A's entry should be invalidated");
         } finally {
             pool.shutdownNow().get();
         }

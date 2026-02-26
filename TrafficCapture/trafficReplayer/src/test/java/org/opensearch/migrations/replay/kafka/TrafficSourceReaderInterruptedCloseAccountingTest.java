@@ -39,11 +39,11 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
             // Manually register a synthetic close with sessionNumber=2
-            var sessionKey = "conn1:2:5";
+            var sessionKey = "n.conn1:2:5";
             source.pendingTrafficSourceReaderInterruptedCloses.put(sessionKey, Boolean.TRUE);
             source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
 
-            source.onNetworkConnectionClosed("conn1", 2, 5);
+            source.onNetworkConnectionClosed("n", "conn1", 2, 5);
 
             Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
                 "onNetworkConnectionClosed must decrement counter for non-zero sessionNumber");
@@ -61,17 +61,17 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
-            var sessionKey = "conn1:0:3";
+            var sessionKey = "n.conn1:0:3";
             source.pendingTrafficSourceReaderInterruptedCloses.put(sessionKey, Boolean.TRUE);
             source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
 
             // Regular close fires first (same key)
-            source.onNetworkConnectionClosed("conn1", 0, 3);
+            source.onNetworkConnectionClosed("n", "conn1", 0, 3);
             Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
                 "First onNetworkConnectionClosed must decrement counter to 0");
 
             // Synthetic close fires second — must NOT double-decrement
-            source.onNetworkConnectionClosed("conn1", 0, 3);
+            source.onNetworkConnectionClosed("n", "conn1", 0, 3);
             Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
                 "Second onNetworkConnectionClosed must not double-decrement (counter stays at 0)");
         }
@@ -87,17 +87,17 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
-            var sessionKey = "conn1:0:3";
+            var sessionKey = "n.conn1:0:3";
             source.pendingTrafficSourceReaderInterruptedCloses.put(sessionKey, Boolean.TRUE);
             source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
 
             // Synthetic close fires first
-            source.onNetworkConnectionClosed("conn1", 0, 3);
+            source.onNetworkConnectionClosed("n", "conn1", 0, 3);
             Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
                 "First onNetworkConnectionClosed (synthetic path) must decrement counter to 0");
 
             // Regular close fires second — must NOT double-decrement
-            source.onNetworkConnectionClosed("conn1", 0, 3);
+            source.onNetworkConnectionClosed("n", "conn1", 0, 3);
             Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
                 "Second onNetworkConnectionClosed (regular path) must not double-decrement");
         }
@@ -117,7 +117,7 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
             int N = 3;
             // Register N synthetic closes
             for (int i = 0; i < N; i++) {
-                source.pendingTrafficSourceReaderInterruptedCloses.put("conn" + i + ":0:1", Boolean.TRUE);
+                source.pendingTrafficSourceReaderInterruptedCloses.put("n.conn" + i + ":0:1", Boolean.TRUE);
             }
             source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(N);
 
@@ -132,7 +132,7 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
 
             // Close all sessions
             for (int i = 0; i < N; i++) {
-                source.onNetworkConnectionClosed("conn" + i, 0, 1);
+                source.onNetworkConnectionClosed("n", "conn" + i, 0, 1);
             }
             Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
                 "Counter must reach 0 after all sessions close");
