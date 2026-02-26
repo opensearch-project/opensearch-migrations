@@ -528,9 +528,11 @@ X-Target-solr-StatusCode: 200
 X-Target-solr-Latency: 12
 X-Target-opensearch-StatusCode: 200
 X-Target-opensearch-Latency: 45
-X-Validation-Status: PASS
-X-Validation-Details: field-equality(solr,opensearch):PASS, doc-count(solr,opensearch):PASS
+X-Validation-Status: FAIL
+X-Validation-Details: field-equality(solr,opensearch):FAIL[responseHeader.params: missing in opensearch; response.docs[0]._version_: missing in opensearch; ...], doc-count(solr,opensearch):PASS
 ```
+
+The `field-equality` validator reports FAIL because Solr includes `responseHeader.params` and `_version_` fields that the OpenSearch response transform doesn't produce. The `doc-count` validator passes — both return 3 docs. To make `field-equality` pass, add those paths to the `ignore` list in the docker-compose validator config.
 
 ### Built-in Validators
 
