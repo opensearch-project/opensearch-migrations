@@ -16,8 +16,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
+import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.shim.ShimProxy;
-import org.opensearch.migrations.transform.shim.TransformationLibrary.TransformationPair;
 import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.testcontainers.OpensearchContainer;
 
@@ -49,17 +49,20 @@ public class ShimTestFixture implements AutoCloseable {
 
     private final GenericContainer<?> solr;
     private final OpensearchContainer<?> opensearch;
-    private final TransformationPair transforms;
+    private final IJsonTransformer requestTransform;
+    private final IJsonTransformer responseTransform;
     private ShimProxy proxy;
 
     @Getter private String solrBaseUrl;
     @Getter private String openSearchBaseUrl;
     @Getter private String proxyBaseUrl;
 
-    public ShimTestFixture(String solrImage, String opensearchImage, TransformationPair transforms) {
+    public ShimTestFixture(String solrImage, String opensearchImage,
+                           IJsonTransformer requestTransform, IJsonTransformer responseTransform) {
         this.solr = createSolrContainer(solrImage);
         this.opensearch = createOpenSearchContainer(opensearchImage);
-        this.transforms = transforms;
+        this.requestTransform = requestTransform;
+        this.responseTransform = responseTransform;
     }
 
     /** Start containers and proxy. */
@@ -83,7 +86,7 @@ public class ShimTestFixture implements AutoCloseable {
 
         int proxyPort = findFreePort();
         var target = new Target("opensearch", URI.create(openSearchBaseUrl),
-            transforms.request(), transforms.response(), null);
+            requestTransform, responseTransform, null);
         proxy = new ShimProxy(
             proxyPort, Map.of("opensearch", target), "opensearch", List.of());
         proxy.start();

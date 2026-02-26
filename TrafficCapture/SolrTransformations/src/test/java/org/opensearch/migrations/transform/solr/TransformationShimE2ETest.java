@@ -17,7 +17,6 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JavascriptTransformer;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
-import org.opensearch.migrations.transform.shim.TransformationLibrary.TransformationPair;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -65,10 +64,11 @@ class TransformationShimE2ETest {
 
     private void executeTestCase(
             TestCaseDefinition tc, String solrImage, String openSearchImage) throws Exception {
-        var transforms = buildTransforms(tc.requestTransforms(), tc.responseTransforms());
+        var requestTransform = composeTransforms(tc.requestTransforms());
+        var responseTransform = composeTransforms(tc.responseTransforms());
         var plugins = tc.plugins() != null ? tc.plugins() : List.<String>of();
 
-        try (var fixture = new ShimTestFixture(solrImage, openSearchImage, transforms)) {
+        try (var fixture = new ShimTestFixture(solrImage, openSearchImage, requestTransform, responseTransform)) {
             fixture.start(plugins);
 
             seedData(fixture, tc);
@@ -158,13 +158,6 @@ class TransformationShimE2ETest {
     }
 
     // --- Transform loading ---
-
-    private static TransformationPair buildTransforms(
-            List<String> requestTransforms, List<String> responseTransforms) throws IOException {
-        return new TransformationPair(
-            composeTransforms(requestTransforms),
-            composeTransforms(responseTransforms));
-    }
 
     private static IJsonTransformer composeTransforms(List<String> names) throws IOException {
         if (names == null || names.isEmpty()) {
