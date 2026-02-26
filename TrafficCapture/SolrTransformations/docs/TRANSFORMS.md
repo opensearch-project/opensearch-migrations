@@ -156,25 +156,14 @@ graph LR
 
     subgraph Transform["response.transform.ts"]
         B["Extract hits.hits[]._source"]
-        C["Wrap string values in arrays<br/>(Solr multi-valued format)"]
-        D["Build responseHeader + response"]
+        C["Build responseHeader + response"]
     end
 
     subgraph Output["Solr Response"]
-        E["{ responseHeader: { status: 0, QTime: 0 },<br/>  response: {<br/>    numFound: 3, start: 0,<br/>    docs: [<br/>      { id: '1', title: ['foo'] },<br/>      ...<br/>    ]<br/>}}"]
+        E["{ responseHeader: { status: 0, QTime: 0 },<br/>  response: {<br/>    numFound: 3, start: 0,<br/>    docs: [<br/>      { id: '1', title: 'foo' },<br/>      ...<br/>    ]<br/>}}"]
     end
 
-    A --> B --> C --> D --> E
-```
-
-### Multi-Valued Field Wrapping
-
-Solr returns string fields as arrays by default. The transform wraps scalar strings in arrays to match:
-
-```
-OpenSearch: { "title": "foo" }     →  Solr: { "title": ["foo"] }
-OpenSearch: { "id": "1" }          →  Solr: { "id": "1" }        (id field preserved as scalar)
-OpenSearch: { "count": 42 }        →  Solr: { "count": 42 }      (non-strings preserved)
+    A --> B --> C --> E
 ```
 
 ---

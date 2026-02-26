@@ -216,7 +216,7 @@ OpenSearch response format:
 }
 ```
 
-**Key difference:** Solr uses `response.docs[]` with multi-valued string arrays. OpenSearch uses `hits.hits[]._source` with scalar values. The shim transforms bridge this gap.
+**Key difference:** Solr uses `response.docs[]` format. OpenSearch uses `hits.hits[]._source`. The shim transforms bridge this gap.
 
 ---
 
@@ -332,18 +332,11 @@ TrafficCapture/
     │   │       ├── pipeline.ts             # Micro-transform runner
     │   │       ├── registry.ts             # Feature registration
     │   │       ├── cases.testcase.ts       # E2E test case definitions
-    │   │       └── features/               # 11 micro-transforms
+    │   │       └── features/               # 4 micro-transforms
     │   │           ├── select-uri.ts       # /solr/{col}/select → /{col}/_search
     │   │           ├── query-q.ts          # q=... → query DSL
-    │   │           ├── filter-query.ts     # fq=... → bool filter
-    │   │           ├── field-list.ts       # fl=... → _source
-    │   │           ├── sort.ts             # sort=... → sort clause
-    │   │           ├── pagination.ts       # start/rows → from/size
-    │   │           ├── facets.ts           # facet params → aggregations
     │   │           ├── hits-to-docs.ts     # hits.hits → response.docs
-    │   │           ├── multi-valued.ts     # scalar → array wrapping
-    │   │           ├── response-header.ts  # synthesize responseHeader
-    │   │           └── response-writer.ts  # set content-type for wt
+    │   │           └── response-header.ts  # synthesize responseHeader
     │   └── build.mjs                       # esbuild: TS → GraalVM closures
     ├── src/test/java/
     │   └── TransformationShimE2ETest.java  # Data-driven E2E runner
@@ -378,11 +371,6 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
     select: [
       selectUri.request,       // URI rewrite — must be first
       queryQ.request,          // q=... → query DSL
-      filterQuery.request,     // fq=... → bool filter
-      fieldList.request,       // fl=... → _source
-      sort.request,            // sort=... → sort clause
-      pagination.request,      // start/rows → from/size
-      facets.request,          // facet params → aggregations
     ],
   },
 };
@@ -470,35 +458,21 @@ This:
 Test cases live in `transforms/src/solr-to-opensearch/cases.testcase.ts`:
 
 ```typescript
-solrTest('filter-query-fq', {
-  documents: [
-    { id: '1', title: 'cat', category: 'animal' },
-    { id: '2', title: 'dog', category: 'animal' },
-    { id: '3', title: 'car', category: 'vehicle' },
-  ],
+solrTest('basic-select-compare-with-solr', {
+  documents: [{ id: '1', title: 'test document', content: 'hello world' }],
+  requestPath: '/solr/testcollection/select?q=*:*&wt=json',
   solrSchema: {
     fields: {
-      title:    { type: 'text_general' },
-      category: { type: 'string' },       // Solr 'string' = exact match
+      title:   { type: 'text_general' },
+      content: { type: 'text_general' },
     },
   },
-  opensearchMapping: {
-    properties: {
-      title:    { type: 'text' },
-      category: { type: 'keyword' },       // OpenSearch 'keyword' = exact match
-    },
-  },
-  requestPath: '/solr/testcollection/select?q=*:*&fq=category:animal&wt=json',
-  assertionRules: [
-    ...SOLR_INTERNAL_RULES,
-    { path: '$.response.numFound', rule: 'expect-diff', reason: 'fq not fully implemented yet' },
-  ],
 });
 ```
 
 Each test case defines:
 - `solrSchema` — Solr field types (applied via Schema API)
-- `opensearchMapping` — corresponding OpenSearch mapping
+- `opensearchMapping` — corresponding OpenSearch mapping (optional)
 - `documents` — data seeded into both backends
 - `requestPath` — the Solr query to test
 - `assertionRules` — how to handle expected differences

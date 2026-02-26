@@ -11,15 +11,8 @@ import type { RequestContext, ResponseContext } from './context';
 
 import * as selectUri from './features/select-uri';
 import * as queryQ from './features/query-q';
-import * as filterQuery from './features/filter-query';
-import * as fieldList from './features/field-list';
-import * as sort from './features/sort';
-import * as pagination from './features/pagination';
-import * as facets from './features/facets';
 import * as hitsToDocs from './features/hits-to-docs';
-import * as multiValued from './features/multi-valued';
 import * as responseHeader from './features/response-header';
-import * as responseWriter from './features/response-writer';
 
 export const requestRegistry: TransformRegistry<RequestContext> = {
   global: [],
@@ -27,11 +20,6 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
     select: [
       selectUri.request,       // URI rewrite — must be first
       queryQ.request,          // q=... → query DSL
-      filterQuery.request,     // fq=... → bool filter (runs after query-q)
-      fieldList.request,       // fl=... → _source
-      sort.request,            // sort=... → sort clause
-      pagination.request,      // start/rows → from/size
-      facets.request,          // facet params → aggregations
     ],
   },
 };
@@ -40,13 +28,8 @@ export const responseRegistry: TransformRegistry<ResponseContext> = {
   global: [],
   byEndpoint: {
     select: [
-      hitsToDocs.response,       // hits.hits → response.docs (must be first)
-      multiValued.response,      // scalar → array wrapping
-      fieldList.response,        // filter docs to fl fields
-      pagination.response,       // set response.start
-      facets.response,           // aggregations → facet_counts
+      hitsToDocs.response,       // hits.hits → response.docs
       responseHeader.response,   // synthesize responseHeader
-      responseWriter.response,   // set content-type for wt
     ],
   },
 };
