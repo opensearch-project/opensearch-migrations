@@ -948,8 +948,10 @@ if [[ "$build_images" == "true" ]]; then
   # When mirroring, buildkit still pulls from public registries — building on
   # isolated clusters is not supported. Use --ma-images-source instead.
 
-  if timeout 120 docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
-    echo "Buildkit already configured and healthy, skipping setup"
+  if docker buildx inspect local-remote-builder 2>/dev/null | grep -q "Status: running"; then
+    echo "Buildkit already running, skipping setup"
+  elif timeout 120 docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
+    echo "Buildkit bootstrapped successfully, skipping setup"
   else
     echo "Setting up buildkit for local builds..."
     docker buildx rm local-remote-builder 2>/dev/null || true
