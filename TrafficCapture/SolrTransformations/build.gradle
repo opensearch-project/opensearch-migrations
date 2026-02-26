@@ -8,7 +8,7 @@ plugins {
 
 node {
     version = '22.14.0'
-    download = true
+    download = false
     nodeProjectDir = file("${projectDir}/transforms")
     workDir = file("${project.buildDir}/nodejs")
     npmWorkDir = file("${project.buildDir}/npm")

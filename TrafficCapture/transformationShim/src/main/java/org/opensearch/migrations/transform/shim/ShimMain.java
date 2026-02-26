@@ -332,6 +332,7 @@ public class ShimMain {
         "  URLSearchParams.prototype.get = function(k) { return this._map[k] ? this._map[k][0] : null; };\n" +
         "  URLSearchParams.prototype.has = function(k) { return k in this._map; };\n" +
         "  URLSearchParams.prototype.getAll = function(k) { return this._map[k] || []; };\n" +
+        "  URLSearchParams.prototype.forEach = function(cb) { for (var k in this._map) { this._map[k].forEach(function(v) { cb(v, k); }); } };\n" +
         "}\n";
 
     private static IJsonTransformer loadTransformer(String pathStr, boolean watch,
