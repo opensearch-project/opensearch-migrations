@@ -235,20 +235,11 @@ public class LeaseExpirationTest extends SourceTestBase {
         );
 
         var process = runAndMonitorProcess(processBuilder);
-        boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
-        if (!finished) {
-            log.atError().setMessage("Process timed out, attempting to kill it...").log();
-            process.destroy(); // Try to be nice about things first...
-            if (!process.waitFor(10, TimeUnit.SECONDS)) {
-                log.atError().setMessage("Process still running, attempting to force kill it...").log();
-                process.destroyForcibly();
-            }
-            Assertions.fail("The process did not finish within the timeout period (" + timeoutSeconds + " seconds).");
-        }
+        int exitCode = waitForProcessExit(process, timeoutSeconds);
 
         latency.remove();
 
-        return process.exitValue();
+        return exitCode;
     }
 
     /**
@@ -420,19 +411,8 @@ public class LeaseExpirationTest extends SourceTestBase {
             tempDirSnapshot, tempDirLucene, targetAddress, additionalArgs);
 
         var process = runAndMonitorProcess(processBuilder);
-        boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
-        if (!finished) {
-            log.atError().setMessage("Process timed out, attempting to kill it...").log();
-            process.destroy();
-            if (!process.waitFor(10, TimeUnit.SECONDS)) {
-                log.atError().setMessage("Process still running, force killing...").log();
-                process.destroyForcibly();
-            }
-            Assertions.fail("Process did not finish within " + timeoutSeconds + " seconds.");
-        }
-
+        int exitCode = waitForProcessExit(process, timeoutSeconds);
         latency.remove();
-        return process.exitValue();
+        return exitCode;
     }
-
 }
