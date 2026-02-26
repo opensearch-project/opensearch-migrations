@@ -1,4 +1,4 @@
-FROM nginx:stable-alpine3.21-slim
+FROM mirror.gcr.io/library/nginx:stable-alpine3.21-slim
 
 # copy exported static site
 COPY out /usr/share/nginx/html
