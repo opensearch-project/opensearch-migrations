@@ -315,7 +315,7 @@ public class ShimMain {
         throw new ParameterException("Unknown auth type: " + authSpec);
     }
 
-    static final String JS_POLYFILL =
+    public static final String JS_POLYFILL =
         "if (typeof URLSearchParams === 'undefined') {\n" +
         "  globalThis.URLSearchParams = function(qs) {\n" +
         "    this._map = {};\n" +

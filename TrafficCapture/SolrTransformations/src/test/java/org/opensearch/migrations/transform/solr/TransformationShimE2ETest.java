@@ -17,6 +17,8 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JavascriptTransformer;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
+import org.opensearch.migrations.transform.shim.JsonBridgingTransformer;
+import org.opensearch.migrations.transform.shim.ShimMain;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -64,8 +66,8 @@ class TransformationShimE2ETest {
 
     private void executeTestCase(
             TestCaseDefinition tc, String solrImage, String openSearchImage) throws Exception {
-        var requestTransform = composeTransforms(tc.requestTransforms());
-        var responseTransform = composeTransforms(tc.responseTransforms());
+        var requestTransform = new JsonBridgingTransformer(composeTransforms(tc.requestTransforms()));
+        var responseTransform = new JsonBridgingTransformer(composeTransforms(tc.responseTransforms()));
         var plugins = tc.plugins() != null ? tc.plugins() : List.<String>of();
 
         try (var fixture = new ShimTestFixture(solrImage, openSearchImage, requestTransform, responseTransform)) {
@@ -165,7 +167,8 @@ class TransformationShimE2ETest {
         }
         var transformers = new IJsonTransformer[names.size()];
         for (int i = 0; i < names.size(); i++) {
-            transformers[i] = new JavascriptTransformer(loadTransformJs(names.get(i) + ".js"), EMPTY_BINDINGS);
+            transformers[i] = new JavascriptTransformer(
+                ShimMain.JS_POLYFILL + loadTransformJs(names.get(i) + ".js"), EMPTY_BINDINGS);
         }
         return transformers.length == 1 ? transformers[0] : new JsonCompositeTransformer(transformers);
     }
