@@ -79,7 +79,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
                         .addArgument(indexName)
                         .addArgument(snapshotName)
                         .log();
-                    result.add(new SimpleIndex(indexName, snapshotName));
+                    result.add(new SimpleIndex(indexName));
                 }
                 return result;
             }
@@ -129,7 +129,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
     public static class SimpleIndex implements SnapshotRepo.Index {
         private final String name;
 
-        public SimpleIndex(String name, String snapshotName) {
+        public SimpleIndex(String name) {
             this.name = name;
         }
 
