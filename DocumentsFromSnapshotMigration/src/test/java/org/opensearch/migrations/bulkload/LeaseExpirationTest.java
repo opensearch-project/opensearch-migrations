@@ -252,7 +252,6 @@ public class LeaseExpirationTest extends SourceTestBase {
      * Probe window: polls every 200ms from t=55s to t=59s for {@code successor_items}.
      * Worker exits PROCESS_TIMED_OUT (2) via the lease-timeout handoff path.
      */
-    @Disabled("MIGRATIONS-2864: expected to pass after pre-expiry checkpointing is implemented")
     @Test
     @SneakyThrows
     public void testEarlyCheckpointPersistedBeforeLeaseExpiry() {
