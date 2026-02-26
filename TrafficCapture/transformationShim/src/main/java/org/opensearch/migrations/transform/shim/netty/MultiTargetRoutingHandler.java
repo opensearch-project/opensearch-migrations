@@ -363,8 +363,11 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     }
 
     private static String formatValidationResult(ValidationResult r) {
-        String suffix = r.passed() ? "PASS" : "FAIL" + (r.detail() != null ? "[" + r.detail() + "]" : "");
-        return r.ruleName() + ":" + suffix;
+        if (r.passed()) {
+            return r.ruleName() + ":PASS";
+        }
+        String detail = r.detail() != null ? "[" + r.detail() + "]" : "";
+        return r.ruleName() + ":FAIL" + detail;
     }
 
     private static int resolveDefaultPort(URI uri) {
@@ -405,11 +408,18 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
             try {
                 int statusCode = backendResponse.status().code();
                 byte[] rawBody = readBody(backendResponse);
-                ResponseTransformResult transformed = applyResponseTransform(backendResponse, rawBody, statusCode);
-                Map<String, Object> parsedBody = tryParseJson(transformed.body);
+                byte[] finalBody = rawBody;
+                int finalStatusCode = statusCode;
 
+                if (target.responseTransform() != null) {
+                    Object[] transformed = applyResponseTransform(backendResponse, rawBody, statusCode);
+                    finalBody = (byte[]) transformed[0];
+                    finalStatusCode = (int) transformed[1];
+                }
+
+                Map<String, Object> parsedBody = tryParseJson(finalBody);
                 future.complete(new TargetResponse(
-                    target.name(), transformed.statusCode, transformed.body, parsedBody,
+                    target.name(), finalStatusCode, finalBody, parsedBody,
                     elapsed(startNanos), null));
             } catch (Exception e) {
                 log.error("Error processing response from target {}", target.name(), e);
@@ -425,13 +435,13 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
             return body;
         }
 
+        /**
+         * Applies the response transform and returns {body, statusCode} as an Object array.
+         */
         @SuppressWarnings("unchecked")
-        private ResponseTransformResult applyResponseTransform(
+        private Object[] applyResponseTransform(
             FullHttpResponse backendResponse, byte[] rawBody, int statusCode
         ) {
-            if (target.responseTransform() == null) {
-                return new ResponseTransformResult(rawBody, statusCode);
-            }
             var responseMap = HttpMessageUtil.responseToMap(
                 backendResponse.replace(Unpooled.wrappedBuffer(rawBody)));
             var bundled = new LinkedHashMap<String, Object>();
@@ -441,7 +451,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
             Map<String, Object> transformedMap = parseTransformResult(transformResult);
             if (transformedMap == null) {
-                return new ResponseTransformResult(rawBody, statusCode);
+                return new Object[]{rawBody, statusCode};
             }
 
             Map<String, Object> responseResult = (Map<String, Object>) transformedMap.get("response");
@@ -449,7 +459,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
             byte[] body = extractBody(responseResult, rawBody);
             int code = extractStatusCode(responseResult, statusCode);
-            return new ResponseTransformResult(body, code);
+            return new Object[]{body, code};
         }
 
         @SuppressWarnings("unchecked")
@@ -496,7 +506,5 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         private static Duration elapsed(long startNanos) {
             return Duration.ofNanos(System.nanoTime() - startNanos);
         }
-
-        private record ResponseTransformResult(byte[] body, int statusCode) {}
     }
 }
