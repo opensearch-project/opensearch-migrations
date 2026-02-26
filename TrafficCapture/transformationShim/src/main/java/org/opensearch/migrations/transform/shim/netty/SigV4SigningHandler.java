@@ -62,7 +62,7 @@ public class SigV4SigningHandler extends SimpleChannelInboundHandler<FullHttpReq
         } catch (RuntimeException e) {
             request.release();
             log.error("SigV4 signing failed", e);
-            RequestTransformHandler.sendError(ctx,
+            HttpMessageUtil.sendError(ctx,
                 io.netty.handler.codec.http.HttpResponseStatus.INTERNAL_SERVER_ERROR,
                 "SigV4 signing failed",
                 Boolean.TRUE.equals(ctx.channel().attr(ShimChannelAttributes.KEEP_ALIVE).get()));

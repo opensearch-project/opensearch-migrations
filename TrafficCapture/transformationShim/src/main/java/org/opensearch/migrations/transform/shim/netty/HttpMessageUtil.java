@@ -9,6 +9,8 @@ import java.util.Set;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.DefaultFullHttpRequest;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.FullHttpRequest;
@@ -147,6 +149,23 @@ public final class HttpMessageUtil {
         return payload != null
             ? (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY)
             : null;
+    }
+
+    /** Write a response, handling keep-alive semantics. */
+    public static void writeResponse(ChannelHandlerContext ctx, FullHttpResponse response, boolean keepAlive) {
+        if (keepAlive) {
+            response.headers().set(HttpHeaderNames.CONNECTION, "keep-alive");
+            ctx.writeAndFlush(response);
+        } else {
+            response.headers().set(HttpHeaderNames.CONNECTION, "close");
+            ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+        }
+    }
+
+    /** Send an error response. */
+    public static void sendError(ChannelHandlerContext ctx, HttpResponseStatus status,
+                                  String message, boolean keepAlive) {
+        writeResponse(ctx, errorResponse(status, message), keepAlive);
     }
 
     private static void addHeaderValues(String name, Object value,

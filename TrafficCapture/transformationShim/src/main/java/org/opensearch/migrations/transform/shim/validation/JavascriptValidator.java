@@ -3,6 +3,8 @@ package org.opensearch.migrations.transform.shim.validation;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.opensearch.migrations.transform.JavascriptTransformer;
 
 /**
@@ -22,6 +24,8 @@ import org.opensearch.migrations.transform.JavascriptTransformer;
  * <p>Not thread-safe — each thread should use its own instance.
  */
 public class JavascriptValidator implements ResponseValidator, AutoCloseable {
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final TypeReference<Map<String, Object>> MAP_TYPE_REF = new TypeReference<>() {};
     private final String name;
     private final JavascriptTransformer transformer;
 
@@ -47,8 +51,7 @@ public class JavascriptValidator implements ResponseValidator, AutoCloseable {
             Object raw = transformer.transformJson(jsResponses);
             Map<String, Object> result;
             if (raw instanceof String) {
-                result = new com.fasterxml.jackson.databind.ObjectMapper().readValue(
-                    (String) raw, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+                result = MAPPER.readValue((String) raw, MAP_TYPE_REF);
             } else {
                 @SuppressWarnings("unchecked")
                 var m = (Map<String, Object>) raw;

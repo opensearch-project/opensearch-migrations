@@ -14,7 +14,8 @@ import java.util.stream.Collectors;
 
 import javax.net.ssl.SSLEngine;
 
-import org.opensearch.migrations.transform.shim.validation.ResponseValidator;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.migrations.transform.shim.validation.TargetResponse;
 import org.opensearch.migrations.transform.shim.validation.ValidationResult;
@@ -52,6 +53,8 @@ import lombok.extern.slf4j.Slf4j;
 public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     private static final int MAX_CONTENT_LENGTH = 10 * 1024 * 1024;
     private static final String HTTPS_SCHEME = "https";
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final TypeReference<Map<String, Object>> MAP_TYPE_REF = new TypeReference<>() {};
 
     private final Map<String, Target> targets;
     private final String primaryTarget;
@@ -107,10 +110,10 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                     Map<String, TargetResponse> allResponses = collectResponses(futures);
                     List<ValidationResult> results = runValidators(allResponses);
                     FullHttpResponse response = buildFinalResponse(primary, allResponses, results);
-                    writeResponse(ctx, response, keepAlive);
+                    HttpMessageUtil.writeResponse(ctx, response, keepAlive);
                 } catch (Exception e) {
                     log.error("Error building validation response", e);
-                    writeResponse(ctx, HttpMessageUtil.errorResponse(
+                    HttpMessageUtil.writeResponse(ctx, HttpMessageUtil.errorResponse(
                         HttpResponseStatus.INTERNAL_SERVER_ERROR, "Validation shim error"), keepAlive);
                 }
             });
@@ -187,11 +190,9 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     private Map<String, Object> applyRequestTransform(Target target, Map<String, Object> requestMap) {
         if (target.requestTransform() == null) return requestMap;
         Object result = target.requestTransform().transformJson(requestMap);
-        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
         try {
             if (result instanceof String) {
-                return mapper.readValue((String) result,
-                    new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+                return MAPPER.readValue((String) result, MAP_TYPE_REF);
             } else if (result instanceof Map) {
                 Map<String, Object> resultMap = (Map<String, Object>) result;
                 if (!resultMap.isEmpty()) return resultMap;
@@ -206,10 +207,8 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     @SuppressWarnings("unchecked")
     private static Map<String, Object> deepCopyMap(Map<String, Object> original) {
         try {
-            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            byte[] bytes = mapper.writeValueAsBytes(original);
-            return mapper.readValue(bytes,
-                new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+            byte[] bytes = MAPPER.writeValueAsBytes(original);
+            return MAPPER.readValue(bytes, MAP_TYPE_REF);
         } catch (Exception e) {
             throw new RuntimeException("Failed to deep-copy request map", e);
         }
@@ -319,16 +318,6 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         return response;
     }
 
-    private static void writeResponse(ChannelHandlerContext ctx, FullHttpResponse response, boolean keepAlive) {
-        if (keepAlive) {
-            response.headers().set(HttpHeaderNames.CONNECTION, "keep-alive");
-            ctx.writeAndFlush(response);
-        } else {
-            response.headers().set(HttpHeaderNames.CONNECTION, "close");
-            ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
-        }
-    }
-
     private static int resolveDefaultPort(URI uri) {
         return HTTPS_SCHEME.equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
     }
@@ -384,9 +373,8 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                     // Handle JSON string result (from JS JSON.stringify wrapper) or Map
                     Map<String, Object> transformedMap = null;
                     if (transformResult instanceof String) {
-                        transformedMap = new com.fasterxml.jackson.databind.ObjectMapper().readValue(
-                            (String) transformResult,
-                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+                        transformedMap = MAPPER.readValue(
+                            (String) transformResult, MAP_TYPE_REF);
                     } else if (transformResult instanceof Map) {
                         transformedMap = (Map<String, Object>) transformResult;
                     }
@@ -406,8 +394,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
                 // Parse body as JSON for validators
                 try {
-                    parsedBody = new com.fasterxml.jackson.databind.ObjectMapper()
-                        .readValue(rawBody, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+                    parsedBody = MAPPER.readValue(rawBody, MAP_TYPE_REF);
                 } catch (Exception ignored) {
                     // Not JSON — leave parsedBody null
                 }

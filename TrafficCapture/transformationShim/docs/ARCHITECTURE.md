@@ -227,11 +227,9 @@ transformationShim/
 │   ├── ShimProxy.java                   # Netty server bootstrap
 │   ├── ReloadableTransformer.java       # Hot-swap transformer wrapper
 │   ├── TransformFileWatcher.java        # File watcher for --watchTransforms
-│   ├── TransformationLibrary.java       # Named transform registry
 │   ├── netty/
 │   │   ├── MultiTargetRoutingHandler.java  # Core: parallel dispatch + validation
-│   │   ├── HttpMessageUtil.java            # Netty ↔ Map conversion
-│   │   ├── RequestTransformHandler.java    # Legacy single-target handler
+│   │   ├── HttpMessageUtil.java            # Netty ↔ Map conversion + response utilities
 │   │   ├── SigV4SigningHandler.java        # AWS SigV4 auth
 │   │   ├── BasicAuthSigningHandler.java    # Basic/header auth
 │   │   └── ShimChannelAttributes.java      # Channel attributes

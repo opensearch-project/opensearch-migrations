@@ -154,7 +154,7 @@ public class ShimProxy {
         pipeline.addLast("httpAggregator", new HttpObjectAggregator(MAX_CONTENT_LENGTH));
         addLoggingHandler(pipeline, "C");
 
-        // Keep-alive detection (same as RequestTransformHandler stores it)
+        // Keep-alive detection
         pipeline.addLast("keepAliveDetect", new io.netty.channel.ChannelInboundHandlerAdapter() {
             @Override
             public void channelRead(io.netty.channel.ChannelHandlerContext ctx, Object msg) {
