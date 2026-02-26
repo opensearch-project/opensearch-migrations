@@ -327,7 +327,6 @@ spec:
             
             SNAPSHOT_EXTRACT_CONFIGS=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '[.[] | {
               "snapshotConfig": {
-                "repoName": "default",
                 "snapshotNameConfig": {
                   "snapshotNamePrefix": "testsnapshot"
                 }
