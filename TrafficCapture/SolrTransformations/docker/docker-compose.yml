@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   opensearch:
     image: mirror.gcr.io/opensearchproject/opensearch:3.3.0

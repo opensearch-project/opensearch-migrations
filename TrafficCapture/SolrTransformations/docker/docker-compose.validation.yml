@@ -1,5 +1,3 @@
-version: "3.8"
-
 # Validation Shim multi-mode demo.
 # Runs Solr 8, OpenSearch 3.3, and 4 validation shim instances:
 #   :8081 — solr-only passthrough

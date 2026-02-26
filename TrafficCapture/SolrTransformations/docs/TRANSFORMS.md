@@ -19,12 +19,14 @@ TypeScript-based request/response transforms that convert between Solr and OpenS
 ```mermaid
 graph LR
     subgraph SolrTransformations["SolrTransformations/transforms/"]
-        subgraph Source["src/"]
-            Types["types.ts"]
-            ReqTS["solr-to-opensearch/<br/>request.transform.ts"]
-            RespTS["solr-to-opensearch/<br/>response.transform.ts"]
-            Cases["solr-to-opensearch/<br/>cases.testcase.ts"]
-            Config["matrix.config.ts"]
+        subgraph Source["src/solr-to-opensearch/"]
+            Context["context.ts<br/><i>parse once</i>"]
+            Pipeline["pipeline.ts<br/><i>MicroTransform runner</i>"]
+            Registry["registry.ts<br/><i>feature registration</i>"]
+            Features["features/<br/>select-uri.ts, query-q.ts,<br/>hits-to-docs.ts, response-header.ts"]
+            ReqTS["request.transform.ts<br/><i>thin entry point</i>"]
+            RespTS["response.transform.ts<br/><i>thin entry point</i>"]
+            Cases["cases.testcase.ts"]
         end
 
         subgraph BuildTool["build.mjs"]
@@ -41,10 +43,13 @@ graph LR
         end
     end
 
+    Features --> Registry
+    Context --> ReqTS
+    Pipeline --> ReqTS
+    Registry --> ReqTS
     ReqTS --> ESBuild --> GraalWrap --> ReqJS
     RespTS --> ESBuild --> GraalWrap --> RespJS
     Cases --> ESBuild --> TestExtract --> TestJSON
-    Config --> ESBuild --> ConfigJSON
 ```
 
 ---
