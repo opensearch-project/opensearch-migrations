@@ -65,7 +65,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
                 return Collections.emptyList();
             }
             for (JsonNode indexNode : indicesArray) {
-                result.add(new SimpleIndex(indexNode.asText(), snapshotName));
+                result.add(new SimpleIndex(indexNode.asText()));
             }
         } catch (IOException e) {
             throw new IllegalStateException("Failed to read snap metadata for snapshot=" + snapshotName, e);
@@ -120,7 +120,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
     public static class SimpleIndex implements SnapshotRepo.Index {
         private final String name;
 
-        public SimpleIndex(String name, String snapshotName) {
+        public SimpleIndex(String name) {
             this.name = name;
         }
 
