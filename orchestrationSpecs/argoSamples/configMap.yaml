@@ -9,7 +9,7 @@ spec:
   templates:
     - name: configmap-demo
       container:
-        image: busybox:1.35
+        image: mirror.gcr.io/library/busybox:1.35
         command: [sh, -c]
         args:
           - |

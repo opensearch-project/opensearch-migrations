@@ -79,6 +79,9 @@ spec:
               spec:
                 containers:
                 - name: etcd
+                  {{- if .Values.etcdCluster.image }}
+                  image: {{ .Values.etcdCluster.image }}
+                  {{- end }}
                   resources:
                     requests:
                       cpu: {{ .Values.etcdCluster.cpu }}

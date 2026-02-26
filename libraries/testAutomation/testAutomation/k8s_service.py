@@ -356,20 +356,12 @@ class K8sService:
             logger.error(f"Failed to list ConfigMaps in namespace '{target_namespace}': {e.stderr}")
             raise subprocess.CalledProcessError(e.returncode, e.cmd, e.stderr)
 
-    def delete_configmap(self, configmap_name: str) -> CompletedProcess | bool:
+    def delete_configmap(self, configmap_name: str) -> CompletedProcess:
         target_namespace = self.namespace
-
-        # Check if ConfigMap exists first
-        check_command = ["kubectl", "get", "configmap", configmap_name, "-n", target_namespace, "--ignore-not-found"]
-        check_result = self.run_command(check_command, ignore_errors=True)
-
-        if not check_result or not check_result.stdout.strip():
-            logger.info(f"ConfigMap '{configmap_name}' doesn't exist in namespace '{target_namespace}', "
-                        f"skipping delete")
-            return True
-
         logger.info(f"Deleting ConfigMap '{configmap_name}' from namespace '{target_namespace}'...")
-        delete_command = ["kubectl", "delete", "configmap", configmap_name, "-n", target_namespace]
+        delete_command = [
+            "kubectl", "delete", "configmap", configmap_name, "-n", target_namespace, "--ignore-not-found"
+        ]
         return self.run_command(delete_command)
 
     def delete_all_argo_templates(self) -> None:
