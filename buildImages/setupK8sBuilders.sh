@@ -3,10 +3,16 @@ set -euo pipefail
 
 BUILDER_NAME="local-remote-builder"
 
-# Check if builder already exists and is healthy (timeout prevents indefinite hang
+# Check if builder already exists and is healthy
+# Fast path: inspect without --bootstrap returns instantly
+if docker buildx inspect "$BUILDER_NAME" 2>/dev/null | grep -q "Status: running"; then
+  echo "Builder '$BUILDER_NAME' already running, skipping bootstrap"
+  docker buildx use "$BUILDER_NAME"
+  exit 0
+# Slow path: --bootstrap tries to start buildkit pods (timeout prevents indefinite hang
 # when a stale builder config exists but pods can't be scheduled on EKS Auto Mode)
-if timeout 120 docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
-  echo "Builder '$BUILDER_NAME' already configured and healthy"
+elif timeout 120 docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
+  echo "Builder '$BUILDER_NAME' bootstrapped successfully"
   docker buildx use "$BUILDER_NAME"
   exit 0
 fi
