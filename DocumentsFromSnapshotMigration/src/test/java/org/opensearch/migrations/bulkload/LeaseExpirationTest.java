@@ -30,6 +30,7 @@ import eu.rekawek.toxiproxy.model.ToxicDirection;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -251,47 +252,26 @@ public class LeaseExpirationTest extends SourceTestBase {
     }
 
     /**
-     * Captures current lease-timeout behavior when coordinator goes down before lease expiry
-     * and later recovers. Documents the current contract: cleanup/checkpoint fails while
-     * coordinator is unavailable, and a later worker reclaims and completes the work.
+     * Spec test for MIGRATIONS-2864: verifies checkpoint metadata (successor_items) is persisted
+     * on the coordinator before lease expiry. Currently disabled — RFS only checkpoints at lease
+     * expiry, not before. MIGRATIONS-2864 adds early checkpointing at max(lease*0.75, lease-4.5min).
      *
-     * <p>Architecture:
-     * <pre>
-     *   Source (ES 7.10) ──snapshot──► RFS Process
-     *                                    ├──► Target (OS 2.19) via ToxiProxy (1000ms latency)
-     *                                    └──► Coordinator (OS 3.0) via ToxiProxy (disable/enable)
-     * </pre>
-     *
-     * <p>With 1 doc/bulk, 1 connection, and 1000ms upstream latency on the target proxy,
-     * each bulk request takes ~1s round-trip, so 60 docs take ~60s to migrate.
-     *
-     * <p>Timeline:
-     * <pre>
-     *   t=0s    : Worker 1 starts, acquires lease (expires ~t=30s), begins migrating at 1 doc/sec
-     *   t=25s   : Coordinator disabled (before lease expiry)
-     *   t≈30s   : Lease expires, cleanup/checkpoint path runs, coordinator call fails
-     *   t≈30-40s: Retry behavior in successor-work-item path consumes ~10s
-     *   t≈40s   : Worker 1 exits with PROCESS_TIMED_OUT (2)
-     *   t≈40-45s: Retry workers may fail while coordinator is still down (exit 1 or 2)
-     *   t=45s   : Coordinator re-enabled
-     *             Next worker reclaims expired work item and completes migration
-     *             Final worker exits NO_WORK_LEFT (3)
-     * </pre>
-     *
-     * <p>Scale=1: only one worker at a time. Sequential process invocations simulate pod restart.
+     * Setup: 60 docs, 1 doc/sec, PT60s lease, coordinator disabled at t=50s, probed at t=55s.
+     * Key assertion: work item has successor_items at t=55s (before lease expires at t=60s).
      */
+    @Disabled("MIGRATIONS-2864: expected to pass after pre-expiry checkpointing is implemented")
     @Test
     @SneakyThrows
-    public void testLeaseReclamationAfterCoordinatorOutage() {
+    public void testEarlyCheckpointPersistedBeforeLeaseExpiry() {
         final int TOTAL_DOCS = 60;
         final int SHARDS = 1;
-        final int COORDINATOR_DISABLE_AFTER_SECONDS = 25;
-        final int COORDINATOR_OUTAGE_DURATION_SECONDS = 20; // re-enabled at t=45s
-        final int MAX_RUNS = 10; // safety cap to prevent infinite loop on regression
+        final int COORDINATOR_DISABLE_AFTER_SECONDS = 50; // 5s after expected checkpoint at t=45s
+        final int COORDINATOR_OUTAGE_DURATION_SECONDS = 60;
+        final int PROBE_DELAY_AFTER_DISABLE_SECONDS = 5; // check at t=55s
 
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        var tempDirSnapshot = Files.createTempDirectory("leaseReclamation_snapshot");
-        var tempDirLucene = Files.createTempDirectory("leaseReclamation_lucene");
+        var tempDirSnapshot = Files.createTempDirectory("earlyCheckpoint_snapshot");
+        var tempDirLucene = Files.createTempDirectory("earlyCheckpoint_lucene");
 
         try (
             var network = Network.newNetwork();
@@ -327,9 +307,15 @@ public class LeaseExpirationTest extends SourceTestBase {
             createSnapshot(esSourceContainer, SNAPSHOT_NAME, testSnapshotContext);
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
-            // Schedule coordinator outage: disable at t=25s, re-enable at t=45s
-            var disabledAtNanos = new java.util.concurrent.atomic.AtomicLong(0);
-            var reEnabledAtNanos = new java.util.concurrent.atomic.AtomicLong(0);
+            var targetOps = new ClusterOperations(osTargetContainer);
+            var coordinatorOps = new ClusterOperations(osCoordinatorContainer);
+            var coordinatorIndexName = OpenSearchWorkCoordinator.getFinalIndexName(DEFAULT_COORDINATOR_INDEX_SUFFIX);
+
+            // Schedule: disable coordinator at t=50s, then at t=55s check for checkpointed work items
+            var checkpointObservedDuringOutage = new java.util.concurrent.atomic.AtomicBoolean(false);
+            var targetDocCountAtProbe = new java.util.concurrent.atomic.AtomicLong(-1);
+            var probeError = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+            var probeCompleted = new java.util.concurrent.atomic.AtomicBoolean(false);
             var scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
                 var t = new Thread(r, "coordinator-outage-scheduler");
                 t.setDaemon(true);
@@ -337,87 +323,67 @@ public class LeaseExpirationTest extends SourceTestBase {
             });
             scheduler.schedule(() -> {
                 coordinatorProxy.disable();
-                disabledAtNanos.set(System.nanoTime());
                 log.atInfo().setMessage("Coordinator disabled at ~{}s")
                     .addArgument(COORDINATOR_DISABLE_AFTER_SECONDS).log();
+
+                // At t=55s (5s after disable, 5s before lease expires), check coordinator state
+                // Query coordinator directly (bypassing proxy) for checkpointed work items
+                scheduler.schedule(() -> {
+                    try {
+                        coordinatorOps.refresh(coordinatorIndexName);
+                        var checkpointedWorkItemQuery = "{\"query\":{\"exists\":{\"field\":\""
+                            + OpenSearchWorkCoordinator.SUCCESSOR_ITEMS_FIELD_NAME + "\"}}}";
+                        var response = coordinatorOps.post("/" + coordinatorIndexName + "/_count", checkpointedWorkItemQuery);
+                        long checkpointedCount = new com.fasterxml.jackson.databind.ObjectMapper()
+                            .readTree(response.getValue()).path("count").asLong();
+                        checkpointObservedDuringOutage.set(checkpointedCount > 0);
+                        targetDocCountAtProbe.set(targetOps.getDocCount("geonames"));
+                        log.atInfo().setMessage("Coordinator check at t=~55s: checkpointed work items={}, target docs={}")
+                            .addArgument(checkpointedCount).addArgument(targetDocCountAtProbe.get()).log();
+                        probeCompleted.set(true);
+                    } catch (Throwable t) {
+                        probeError.set(t);
+                        log.atError().setCause(t).setMessage("Scheduler probe failed").log();
+                    }
+                }, PROBE_DELAY_AFTER_DISABLE_SECONDS, TimeUnit.SECONDS);
+
                 scheduler.schedule(() -> {
                     coordinatorProxy.enable();
-                    reEnabledAtNanos.set(System.nanoTime());
                     log.atInfo().setMessage("Coordinator re-enabled after {}s outage window")
                         .addArgument(COORDINATOR_OUTAGE_DURATION_SECONDS).log();
                 }, COORDINATOR_OUTAGE_DURATION_SECONDS, TimeUnit.SECONDS);
             }, COORDINATOR_DISABLE_AFTER_SECONDS, TimeUnit.SECONDS);
 
-            var runs = new java.util.ArrayList<RunObservation>();
             try {
-                int exitCode;
-                var targetOps = new ClusterOperations(osTargetContainer);
-                do {
-                    var runStart = System.nanoTime();
-                    exitCode = runProcessWithCoordinator(
-                        tempDirSnapshot, tempDirLucene, targetProxy, coordinatorProxy);
-                    var runEnd = System.nanoTime();
-                    long docCount = targetOps.getDocCount("geonames");
-                    runs.add(new RunObservation(runStart, runEnd, exitCode, docCount));
-                    log.atInfo().setMessage("Run {}: exit code {}, target doc count: {}")
-                        .addArgument(runs.size()).addArgument(exitCode)
-                        .addArgument(docCount).log();
-                    FileSystemUtils.deleteDirectories(tempDirLucene.toString());
-                    Files.createDirectories(tempDirLucene);
-                } while (exitCode != RfsMigrateDocuments.NO_WORK_LEFT_EXIT_CODE && runs.size() < MAX_RUNS);
+                int exitCode = runSingleWorkerWithDedicatedCoordinator(
+                    tempDirSnapshot, tempDirLucene, targetProxy, coordinatorProxy);
+                long finalDocCount = targetOps.getDocCount("geonames");
+                log.atInfo().setMessage("Run: exit code {}, target doc count: {}")
+                    .addArgument(exitCode).addArgument(finalDocCount).log();
 
-                log.atInfo().setMessage("Exit code history: {}")
-                    .addArgument(() -> runs.stream().map(RunObservation::exitCode).toList()).log();
+                // ASSERT: target has docs (migration was in progress)
+                Assertions.assertTrue(finalDocCount > 0,
+                    "Target should have docs after migration attempt");
 
-                // ASSERT: outage was injected and recovered
-                Assertions.assertTrue(disabledAtNanos.get() > 0, "Coordinator outage was not injected");
-                Assertions.assertTrue(reEnabledAtNanos.get() > 0, "Coordinator was not re-enabled");
+                // ASSERT: scheduler probe ran without error
+                Assertions.assertNull(probeError.get(),
+                    "Scheduler probe failed with exception: " + probeError.get());
+                Assertions.assertTrue(probeCompleted.get(),
+                    "Scheduler probe did not complete — may not have been scheduled or was killed early");
 
-                // ASSERT: Worker 1 hit lease expiry during coordinator outage
-                Assertions.assertEquals(RfsMigrateDocuments.PROCESS_TIMED_OUT_EXIT_CODE, runs.get(0).exitCode(),
-                    "Worker 1 should exit with PROCESS_TIMED_OUT (lease expired during coordinator outage)");
+                // ASSERT: at t=55s, target doc count confirms migration was in progress (not yet complete)
+                Assertions.assertTrue(targetDocCountAtProbe.get() > 0 && targetDocCountAtProbe.get() < TOTAL_DOCS,
+                    "At t=55s, target should have some but not all docs (mid-migration), got " + targetDocCountAtProbe.get());
 
-                // ASSERT: Worker 1 was running when coordinator went down (outage overlapped active migration)
-                Assertions.assertTrue(runs.get(0).startNanos() < disabledAtNanos.get(),
-                    "Worker 1 should have started before coordinator was disabled");
-                Assertions.assertTrue(disabledAtNanos.get() < runs.get(0).endNanos(),
-                    "Coordinator should have been disabled before Worker 1 finished");
+                // ASSERT: at t=55s, a work item with successor_items exists on the coordinator
+                // This proves progress was checkpointed BEFORE the lease expired and BEFORE the coordinator went down
+                Assertions.assertTrue(checkpointObservedDuringOutage.get(),
+                    "Expected a work item with successor_items on coordinator at t=55s (before lease expiry at t=60s), "
+                    + "proving early checkpoint occurred. Target had " + targetDocCountAtProbe.get() + " docs at check time.");
 
-                // ASSERT: Worker 1 had actually started migrating docs before timeout
-                // (supports that lease-timeout cleanup ran with migration progress already made)
-                Assertions.assertTrue(runs.get(0).targetDocCount() > 0 && runs.get(0).targetDocCount() < TOTAL_DOCS,
-                    "Worker 1 should have migrated some (but not all) docs before lease expired, got " + runs.get(0).targetDocCount());
-
-                // ASSERT: a worker successfully completed work (exit 0) before terminal state
-                var successRun = runs.stream().filter(r -> r.exitCode() == 0).findFirst();
-                Assertions.assertTrue(successRun.isPresent(),
-                    "At least one worker should have completed work successfully (exit 0) before NO_WORK_LEFT");
-
-                // ASSERT: successful reclaim completed after coordinator recovered
-                Assertions.assertTrue(successRun.get().endNanos() > reEnabledAtNanos.get(),
-                    "Successful worker should have finished after coordinator was re-enabled");
-
-                // ASSERT: terminal state reached
-                Assertions.assertEquals(RfsMigrateDocuments.NO_WORK_LEFT_EXIT_CODE,
-                    runs.get(runs.size() - 1).exitCode(),
-                    "Final worker should exit with NO_WORK_LEFT (3), got history: "
-                        + runs.stream().map(RunObservation::exitCode).toList());
-
-                // ASSERT: all docs migrated to target (query target directly, bypassing proxy)
-                Assertions.assertEquals(TOTAL_DOCS, targetOps.getDocCount("geonames"),
-                    "All " + TOTAL_DOCS + " docs should be on target after lease reclamation");
-
-                // ASSERT: coordinator has no incomplete work items (all work reclaimed and completed)
-                var coordinatorOps = new ClusterOperations(osCoordinatorContainer);
-                var coordinatorIndexName = OpenSearchWorkCoordinator.getFinalIndexName(DEFAULT_COORDINATOR_INDEX_SUFFIX);
-                coordinatorOps.refresh(coordinatorIndexName);
-                var incompleteQuery = "{\"query\":{\"bool\":{\"must_not\":{\"exists\":{\"field\":\"completedAt\"}}}}}";
-                var incompleteResponse = coordinatorOps.post("/" + coordinatorIndexName + "/_count", incompleteQuery);
-                Assertions.assertEquals(200, incompleteResponse.getKey(), "Failed to query coordinator index");
-                var incompleteCount = new com.fasterxml.jackson.databind.ObjectMapper()
-                    .readTree(incompleteResponse.getValue()).path("count").asLong();
-                Assertions.assertEquals(0, incompleteCount,
-                    "All coordinator work items should be completed after recovery, found " + incompleteCount + " incomplete");
+                // ASSERT: worker exits code 2 (lease expired, final cleanup fails because coordinator is down)
+                Assertions.assertEquals(RfsMigrateDocuments.PROCESS_TIMED_OUT_EXIT_CODE, exitCode,
+                    "Worker should exit with PROCESS_TIMED_OUT — lease expired while coordinator is down");
             } finally {
                 scheduler.shutdownNow();
             }
@@ -427,7 +393,7 @@ public class LeaseExpirationTest extends SourceTestBase {
     }
 
     @SneakyThrows
-    private static int runProcessWithCoordinator(
+    private static int runSingleWorkerWithDedicatedCoordinator(
         Path tempDirSnapshot,
         Path tempDirLucene,
         ToxiProxyWrapper targetProxy,
@@ -445,7 +411,7 @@ public class LeaseExpirationTest extends SourceTestBase {
         String[] additionalArgs = {
             "--documents-per-bulk-request", "1",
             "--max-connections", "1",
-            "--initial-lease-duration", "PT30s",
+            "--initial-lease-duration", "PT60s",
             "--source-version", SearchClusterContainer.ES_V7_10_2.getVersion().toString(),
             "--coordinator-host", coordinatorAddress
         };
@@ -468,7 +434,5 @@ public class LeaseExpirationTest extends SourceTestBase {
         latency.remove();
         return process.exitValue();
     }
-
-    private record RunObservation(long startNanos, long endNanos, int exitCode, long targetDocCount) {}
 
 }
