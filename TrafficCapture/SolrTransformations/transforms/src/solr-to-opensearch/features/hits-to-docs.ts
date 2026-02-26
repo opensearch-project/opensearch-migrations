@@ -24,6 +24,8 @@ export const response: MicroTransform<ResponseContext> = {
         // Solr wraps multi-valued field values in arrays; id is single-valued
         doc.set(key, key === 'id' || Array.isArray(value) ? value : [value]);
       }
+      // Solr adds _version_ (optimistic concurrency) to every doc
+      doc.set('_version_', hit.has('_version') ? hit.get('_version') : 0);
       docs.push(doc);
     }
 
