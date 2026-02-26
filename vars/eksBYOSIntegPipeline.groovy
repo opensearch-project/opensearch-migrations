@@ -66,14 +66,14 @@ def call(Map config = [:]) {
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             string(name: 'RFS_WORKERS', defaultValue: '1', description: 'Number of RFS worker pods for document backfill (podReplicas)')
             // Snapshot configuration
-            string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es5x/', description: 'Full S3 URI to snapshot repository (e.g., s3://bucket/folder/)')
+            string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es7x/', description: 'Full S3 URI to snapshot repository (e.g., s3://bucket/folder/)')
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment and snapshot bucket')
             string(name: 'SNAPSHOT_NAME', defaultValue: 'large-snapshot', description: 'Name of the snapshot')
             string(name: 'TEST_IDS', defaultValue: '0010', description: 'Test IDs to execute (comma separated, e.g., "0010" or "0010,0011")')
             string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '900', description: 'Max retries for workflow monitoring (fixed 60-second interval between retries)')
             choice(
                 name: 'SOURCE_VERSION',
-                choices: ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10', 'ES_8.19', 'OS_1.3', 'OS_2.19'],
+                choices: ['ES_7.10', 'ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_8.19', 'OS_1.3', 'OS_2.19'],
                 description: 'Version of the cluster that created the snapshot'
             )
             // Target cluster configuration
