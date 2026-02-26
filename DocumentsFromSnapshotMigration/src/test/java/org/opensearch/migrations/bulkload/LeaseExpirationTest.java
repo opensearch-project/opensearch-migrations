@@ -44,6 +44,7 @@ import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNA
 @Slf4j
 public class LeaseExpirationTest extends SourceTestBase {
 
+    public static final String COORDINATOR_DOCKER_HOSTNAME = "coordinator";
     public static final String TARGET_DOCKER_HOSTNAME = "target";
     private static final String DEFAULT_COORDINATOR_INDEX_SUFFIX = "";
 
@@ -243,12 +244,12 @@ public class LeaseExpirationTest extends SourceTestBase {
     }
 
     /**
-     * Spec test for MIGRATIONS-2864: verifies checkpoint metadata (successor_items) is persisted
-     * on the coordinator before lease expiry. Currently disabled — RFS only checkpoints at lease
-     * expiry, not before. MIGRATIONS-2864 adds early checkpointing at max(lease*0.75, lease-4.5min).
+     * Verifies that RFS persists checkpoint metadata (successor_items) on the coordinator
+     * before the lease expires, ensuring a successor worker can resume from the checkpoint rather
+     * than redoing all work when the coordinator is unavailable at lease expiry.
      *
      * Setup: 60 docs, 1 doc/sec, PT60s lease, coordinator disabled at t=50s, probed at t=55s.
-     * Key assertion: work item has successor_items at t=55s (before lease expires at t=60s).
+     * Key assertion: work item has {successor_items} at t=55s (before lease expires at t=60s).
      */
     @Disabled("MIGRATIONS-2864: expected to pass after pre-expiry checkpointing is implemented")
     @Test
@@ -271,7 +272,7 @@ public class LeaseExpirationTest extends SourceTestBase {
             var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
                 .withAccessToHost(true).withNetwork(network).withNetworkAliases(TARGET_DOCKER_HOSTNAME);
             var osCoordinatorContainer = new SearchClusterContainer(SearchClusterContainer.OS_V3_0_0)
-                .withAccessToHost(true).withNetwork(network).withNetworkAliases("coordinator");
+                .withAccessToHost(true).withNetwork(network).withNetworkAliases(COORDINATOR_DOCKER_HOSTNAME);
             var targetProxy = new ToxiProxyWrapper(network);
             var coordinatorProxy = new ToxiProxyWrapper(network)
         ) {
@@ -282,7 +283,7 @@ public class LeaseExpirationTest extends SourceTestBase {
             ).join();
 
             targetProxy.start(TARGET_DOCKER_HOSTNAME, 9200);
-            coordinatorProxy.start("coordinator", 9200);
+            coordinatorProxy.start(COORDINATOR_DOCKER_HOSTNAME, 9200);
 
             // Populate source cluster
             var sourceClusterOperations = new ClusterOperations(esSourceContainer);
