@@ -35,7 +35,8 @@ public class TransformFileWatcher implements Runnable, AutoCloseable {
         for (Path file : watchedFiles.keySet()) {
             Path dir = file.getParent();
             if (!keyToDirMap.containsValue(dir)) {
-                WatchKey key = dir.register(watchService, StandardWatchEventKinds.ENTRY_MODIFY);
+                WatchKey key = dir.register(watchService,
+                    StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_CREATE);
                 keyToDirMap.put(key, dir);
                 log.info("Watching directory {} for transform changes", dir);
             }
@@ -66,7 +67,11 @@ public class TransformFileWatcher implements Runnable, AutoCloseable {
         if (dir != null) {
             for (WatchEvent<?> event : key.pollEvents()) {
                 if (event.kind() != StandardWatchEventKinds.OVERFLOW) {
-                    processEvent(dir, event);
+                    try {
+                        processEvent(dir, event);
+                    } catch (Exception e) {
+                        log.error("Error processing file watch event", e);
+                    }
                 }
             }
         }
@@ -75,7 +80,7 @@ public class TransformFileWatcher implements Runnable, AutoCloseable {
 
     @SuppressWarnings("unchecked")
     private void processEvent(Path dir, WatchEvent<?> event) {
-        Path changed = dir.resolve(((WatchEvent<Path>) event.context()).context());
+        Path changed = dir.resolve(((WatchEvent<Path>) event).context());
         ReloadableTransformer transformer = watchedFiles.get(changed);
         if (transformer != null) {
             reloadTransformer(changed, transformer);
