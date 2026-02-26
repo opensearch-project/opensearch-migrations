@@ -8,7 +8,6 @@ graph TD
         IR["IR Types<br/><i>DocumentChange, IndexMetadataSnapshot,<br/>GlobalMetadataSnapshot, ShardId, ProgressCursor</i>"]
         PORTS["Port Interfaces<br/><i>DocumentSource, DocumentSink,<br/>MetadataSource, MetadataSink</i>"]
         PIPES["Pipelines<br/><i>MigrationPipeline, MetadataMigrationPipeline</i>"]
-        TD["Test Doubles<br/><i>SyntheticDocumentSource, CollectingDocumentSink,<br/>SyntheticMetadataSource, CollectingMetadataSink</i>"]
     end
 
     subgraph "Source Adapters — SnapshotReader"
@@ -26,7 +25,7 @@ graph TD
 
     subgraph "Wiring — DocumentsFromSnapshotMigration"
         PR["PipelineRunner"]
-        MAIN["RfsMigrateDocuments<br/><i>--use-pipeline flag</i>"]
+        MAIN["RfsMigrateDocuments"]
     end
 
     LSS --> PORTS
@@ -41,7 +40,6 @@ graph TD
     style IR fill:#fff9c4,stroke:#f9a825
     style PORTS fill:#e1f5fe,stroke:#0288d1
     style PIPES fill:#e1f5fe,stroke:#0288d1
-    style TD fill:#e1f5fe,stroke:#0288d1
     style LSS fill:#fff3e0,stroke:#f57c00
     style SMS fill:#fff3e0,stroke:#f57c00
     style ODS fill:#e8f5e9,stroke:#388e3c
@@ -57,7 +55,7 @@ Key constraint: **RFS does not depend on SnapshotReader** and vice versa. They o
 
 | Module | Responsibility | Dependencies |
 |---|---|---|
-| `rfs-pipeline` | IR types, port interfaces, pipeline orchestration, test doubles | None (zero external deps) |
+| `rfs-pipeline` | IR types, port interfaces, pipeline orchestration | None (zero external deps) |
 | `SnapshotReader` | Source adapters (`LuceneSnapshotSource`, `SnapshotMetadataSource`) | `rfs-pipeline`, Lucene |
 | `RFS` | Sink adapters (`OpenSearchDocumentSink`, `OpenSearchMetadataSink`), work coordination | `rfs-pipeline`, OpenSearch client |
-| `DocumentsFromSnapshotMigration` | Top-level wiring (`PipelineRunner`, CLI flag) | All of the above |
+| `DocumentsFromSnapshotMigration` | Top-level wiring (`PipelineRunner`, CLI entry point) | All of the above |
