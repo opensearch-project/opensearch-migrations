@@ -66,9 +66,9 @@ def call(Map config = [:]) {
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             string(name: 'RFS_WORKERS', defaultValue: '1', description: 'Number of RFS worker pods for document backfill (podReplicas)')
             // Snapshot configuration
-            string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es7x/', description: 'Full S3 URI to snapshot repository (e.g., s3://bucket/folder/)')
+            string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-east-1/ma_osb_data/es7x-osb-data/', description: 'Full S3 URI to snapshot repository (e.g., s3://bucket/folder/)')
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment and snapshot bucket')
-            string(name: 'SNAPSHOT_NAME', defaultValue: 'large-snapshot', description: 'Name of the snapshot')
+            string(name: 'SNAPSHOT_NAME', defaultValue: 'es7x-osb-data', description: 'Name of the snapshot')
             string(name: 'TEST_IDS', defaultValue: '0010', description: 'Test IDs to execute (comma separated, e.g., "0010" or "0010,0011")')
             string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '900', description: 'Max retries for workflow monitoring (fixed 60-second interval between retries)')
             choice(
