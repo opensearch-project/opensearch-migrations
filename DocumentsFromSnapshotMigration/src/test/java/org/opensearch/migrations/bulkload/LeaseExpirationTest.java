@@ -244,12 +244,13 @@ public class LeaseExpirationTest extends SourceTestBase {
     }
 
     /**
-     * Verifies that RFS persists checkpoint metadata (successor_items) on the coordinator
-     * before the lease expires, ensuring a successor worker can resume from the checkpoint rather
-     * than redoing all work when the coordinator is unavailable at lease expiry.
+     * Verifies that RFS persists checkpoint metadata ({@code successor_items}) before the lease
+     * expires, even when the coordinator is temporarily unavailable at the checkpoint trigger.
      *
-     * Setup: 60 docs, 1 doc/sec, PT60s lease, coordinator disabled at t=50s, probed at t=55s.
-     * Key assertion: work item has {successor_items} at t=55s (before lease expires at t=60s).
+     * <p>Setup: 60 docs, 1 doc/sec, PT60s lease. Coordinator disabled at t=40s (before
+     * checkpoint trigger at t=45s), re-enabled at t=55s (within retry window, before lease expires).
+     * Probe window: polls every 200ms from t=55s to t=59s for {@code successor_items}.
+     * Worker exits PROCESS_TIMED_OUT (2) via the lease-timeout handoff path.
      */
     @Disabled("MIGRATIONS-2864: expected to pass after pre-expiry checkpointing is implemented")
     @Test
@@ -257,9 +258,10 @@ public class LeaseExpirationTest extends SourceTestBase {
     public void testEarlyCheckpointPersistedBeforeLeaseExpiry() {
         final int TOTAL_DOCS = 60;
         final int SHARDS = 1;
-        final int COORDINATOR_DISABLE_AFTER_SECONDS = 50; // 5s after expected checkpoint at t=45s
-        final int COORDINATOR_OUTAGE_DURATION_SECONDS = 60;
-        final int PROBE_DELAY_AFTER_DISABLE_SECONDS = 5; // check at t=55s
+        final int COORDINATOR_DISABLE_AFTER_SECONDS = 40; // 5s before expected checkpoint at t=45s
+        final int COORDINATOR_REENABLE_AFTER_SECONDS = 15; // re-enabled at t=55s, within retry window
+        final int PROBE_WINDOW_SECONDS = 4; // poll from t=55s to t=59s
+        final int PROBE_INTERVAL_MS = 200;
 
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
         var tempDirSnapshot = Files.createTempDirectory("earlyCheckpoint_snapshot");
@@ -303,11 +305,12 @@ public class LeaseExpirationTest extends SourceTestBase {
             var coordinatorOps = new ClusterOperations(osCoordinatorContainer);
             var coordinatorIndexName = OpenSearchWorkCoordinator.getFinalIndexName(DEFAULT_COORDINATOR_INDEX_SUFFIX);
 
-            // Schedule: disable coordinator at t=50s, then at t=55s check for checkpointed work items
-            var checkpointObservedDuringOutage = new java.util.concurrent.atomic.AtomicBoolean(false);
+            // Two scheduled events: disable at t=40s, re-enable at t=55s
+            // Probe window: poll every 200ms from t=55s until t=59s for successor_items
+            var probeDone = new java.util.concurrent.CountDownLatch(1);
+            var probeError = new java.util.concurrent.atomic.AtomicReference<Exception>();
+            var firstCheckpointSeenAtNanos = new java.util.concurrent.atomic.AtomicLong(0);
             var targetDocCountAtProbe = new java.util.concurrent.atomic.AtomicLong(-1);
-            var probeError = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-            var probeCompleted = new java.util.concurrent.atomic.AtomicBoolean(false);
             var scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
                 var t = new Thread(r, "coordinator-outage-scheduler");
                 t.setDaemon(true);
@@ -315,67 +318,91 @@ public class LeaseExpirationTest extends SourceTestBase {
             });
             scheduler.schedule(() -> {
                 coordinatorProxy.disable();
-                log.atInfo().setMessage("Coordinator disabled at ~{}s")
-                    .addArgument(COORDINATOR_DISABLE_AFTER_SECONDS).log();
+                log.atInfo()
+                    .setMessage("Coordinator disabled at ~{}s")
+                    .addArgument(COORDINATOR_DISABLE_AFTER_SECONDS)
+                    .log();
+            }, COORDINATOR_DISABLE_AFTER_SECONDS, TimeUnit.SECONDS);
 
-                // At t=55s (5s after disable, 5s before lease expires), check coordinator state
-                // Query coordinator directly (bypassing proxy) for checkpointed work items
-                scheduler.schedule(() -> {
+            scheduler.schedule(() -> {
+                coordinatorProxy.enable();
+                log.atInfo()
+                    .setMessage("Coordinator re-enabled at t=~{}s")
+                    .addArgument(COORDINATOR_DISABLE_AFTER_SECONDS + COORDINATOR_REENABLE_AFTER_SECONDS)
+                    .log();
+
+                // Poll every 200ms until successor_items observed or probe window exhausts
+                var pollDeadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(PROBE_WINDOW_SECONDS);
+                var checkpointedWorkItemQuery = "{\"query\":{\"exists\":{\"field\":\""
+                    + OpenSearchWorkCoordinator.SUCCESSOR_ITEMS_FIELD_NAME + "\"}}}";
+                while (System.nanoTime() < pollDeadlineNanos) {
                     try {
                         coordinatorOps.refresh(coordinatorIndexName);
-                        var checkpointedWorkItemQuery = "{\"query\":{\"exists\":{\"field\":\""
-                            + OpenSearchWorkCoordinator.SUCCESSOR_ITEMS_FIELD_NAME + "\"}}}";
                         var response = coordinatorOps.post("/" + coordinatorIndexName + "/_count", checkpointedWorkItemQuery);
-                        long checkpointedCount = new com.fasterxml.jackson.databind.ObjectMapper()
+                        long count = new com.fasterxml.jackson.databind.ObjectMapper()
                             .readTree(response.getValue()).path("count").asLong();
-                        checkpointObservedDuringOutage.set(checkpointedCount > 0);
-                        targetDocCountAtProbe.set(targetOps.getDocCount("geonames"));
-                        log.atInfo().setMessage("Coordinator check at t=~55s: checkpointed work items={}, target docs={}")
-                            .addArgument(checkpointedCount).addArgument(targetDocCountAtProbe.get()).log();
-                        probeCompleted.set(true);
-                    } catch (Throwable t) {
-                        probeError.set(t);
-                        log.atError().setCause(t).setMessage("Scheduler probe failed").log();
+                        if (count > 0) {
+                            firstCheckpointSeenAtNanos.set(System.nanoTime());
+                            targetDocCountAtProbe.set(targetOps.getDocCount("geonames"));
+                            log.atInfo()
+                                .setMessage("Checkpoint observed: work items with successor_items={}, target docs={}")
+                                .addArgument(count)
+                                .addArgument(targetDocCountAtProbe.get())
+                                .log();
+                            probeDone.countDown();
+                            return;
+                        }
+                        Thread.sleep(PROBE_INTERVAL_MS);
+                    } catch (Exception | AssertionError e) {
+                        probeError.set(e instanceof Exception ? (Exception) e : new RuntimeException(e));
+                        log.atError()
+                            .setCause(e)
+                            .setMessage("Probe poll failed")
+                            .log();
+                        probeDone.countDown();
+                        return;
                     }
-                }, PROBE_DELAY_AFTER_DISABLE_SECONDS, TimeUnit.SECONDS);
-
-                scheduler.schedule(() -> {
-                    coordinatorProxy.enable();
-                    log.atInfo().setMessage("Coordinator re-enabled after {}s outage window")
-                        .addArgument(COORDINATOR_OUTAGE_DURATION_SECONDS).log();
-                }, COORDINATOR_OUTAGE_DURATION_SECONDS, TimeUnit.SECONDS);
-            }, COORDINATOR_DISABLE_AFTER_SECONDS, TimeUnit.SECONDS);
+                }
+                log.atWarn()
+                    .setMessage("Probe window exhausted without observing checkpoint")
+                    .log();
+                probeDone.countDown();
+            }, COORDINATOR_DISABLE_AFTER_SECONDS + COORDINATOR_REENABLE_AFTER_SECONDS, TimeUnit.SECONDS);
 
             try {
                 int exitCode = runSingleWorkerWithDedicatedCoordinator(
                     tempDirSnapshot, tempDirLucene, targetProxy, coordinatorProxy);
                 long finalDocCount = targetOps.getDocCount("geonames");
-                log.atInfo().setMessage("Run: exit code {}, target doc count: {}")
-                    .addArgument(exitCode).addArgument(finalDocCount).log();
+                log.atInfo()
+                    .setMessage("Run: exit code {}, target doc count: {}")
+                    .addArgument(exitCode)
+                    .addArgument(finalDocCount)
+                    .log();
 
                 // ASSERT: target has docs (migration was in progress)
                 Assertions.assertTrue(finalDocCount > 0,
                     "Target should have docs after migration attempt");
 
-                // ASSERT: scheduler probe ran without error
+                // ASSERT: probe completed and ran without error
+                Assertions.assertTrue(probeDone.await(70, TimeUnit.SECONDS),
+                    "Probe window did not complete within timeout or scheduler may not have run");
                 Assertions.assertNull(probeError.get(),
-                    "Scheduler probe failed with exception: " + probeError.get());
-                Assertions.assertTrue(probeCompleted.get(),
-                    "Scheduler probe did not complete — may not have been scheduled or was killed early");
+                    "Probe poll failed with exception: " + probeError.get());
 
-                // ASSERT: at t=55s, target doc count confirms migration was in progress (not yet complete)
+                // ASSERT: checkpoint was observed during probe window (before lease expires at t=60s)
+                Assertions.assertTrue(firstCheckpointSeenAtNanos.get() > 0,
+                    "Expected successor_items on coordinator within probe window (t="
+                    + (COORDINATOR_DISABLE_AFTER_SECONDS + COORDINATOR_REENABLE_AFTER_SECONDS) + "s to t="
+                    + (COORDINATOR_DISABLE_AFTER_SECONDS + COORDINATOR_REENABLE_AFTER_SECONDS + PROBE_WINDOW_SECONDS) + "s). "
+                    + "Target had " + targetDocCountAtProbe.get() + " docs when probe exhausted.");
+
+                // ASSERT: target doc count at checkpoint time confirms migration was in progress
                 Assertions.assertTrue(targetDocCountAtProbe.get() > 0 && targetDocCountAtProbe.get() < TOTAL_DOCS,
-                    "At t=55s, target should have some but not all docs (mid-migration), got " + targetDocCountAtProbe.get());
+                    "At checkpoint observation time, target should have some but not all docs, got " + targetDocCountAtProbe.get());
 
-                // ASSERT: at t=55s, a work item with successor_items exists on the coordinator
-                // This proves progress was checkpointed BEFORE the lease expired and BEFORE the coordinator went down
-                Assertions.assertTrue(checkpointObservedDuringOutage.get(),
-                    "Expected a work item with successor_items on coordinator at t=55s (before lease expiry at t=60s), "
-                    + "proving early checkpoint occurred. Target had " + targetDocCountAtProbe.get() + " docs at check time.");
-
-                // ASSERT: worker exits code 2 (lease expired, final cleanup fails because coordinator is down)
+                // ASSERT: worker exits with PROCESS_TIMED_OUT - early checkpoint triggered, work handed off via lease-timeout path
                 Assertions.assertEquals(RfsMigrateDocuments.PROCESS_TIMED_OUT_EXIT_CODE, exitCode,
-                    "Worker should exit with PROCESS_TIMED_OUT — lease expired while coordinator is down");
+                    "Worker should exit with PROCESS_TIMED_OUT (2). Early checkpoint triggered and handed off, lease-timeout path still exits 2");
             } finally {
                 scheduler.shutdownNow();
             }
