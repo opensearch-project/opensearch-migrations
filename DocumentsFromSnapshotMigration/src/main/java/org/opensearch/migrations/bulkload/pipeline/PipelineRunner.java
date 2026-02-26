@@ -12,9 +12,6 @@ import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
-import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchMetadataSink;
-import org.opensearch.migrations.bulkload.pipeline.adapter.SnapshotMetadataSource;
-import org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
@@ -24,24 +21,11 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 
 import lombok.Builder;
 import lombok.extern.slf4j.Slf4j;
-import reactor.core.publisher.Flux;
 
 /**
  * Top-level wiring for the clean pipeline approach. Connects all adapters and provides
- * both standalone and work-coordinated execution modes.
+ * work-coordinated execution for horizontal scaling.
  *
- * <h3>Standalone mode</h3>
- * <pre>
- * var runner = PipelineRunner.builder()
- *     .extractor(snapshotExtractor)
- *     .targetClient(openSearchClient)
- *     .snapshotName("my-snapshot")
- *     .workDir(Paths.get("/tmp/lucene"))
- *     .build();
- * runner.migrateDocuments().blockLast();
- * </pre>
- *
- * <h3>Work-coordinated mode</h3>
  * <pre>
  * var runner = PipelineRunner.builder()
  *     .extractor(snapshotExtractor)
@@ -70,8 +54,6 @@ public class PipelineRunner {
     private final int maxDocsPerBatch = 1000;
     @Builder.Default
     private final long maxBytesPerBatch = 10_000_000L;
-    @Builder.Default
-    private final int shardConcurrency = 1;
 
     // Optional: document transformation
     @Builder.Default
@@ -98,35 +80,6 @@ public class PipelineRunner {
     private final Consumer<WorkItemCursor> cursorConsumer = cursor -> {};
     @Builder.Default
     private final Consumer<Runnable> cancellationTriggerConsumer = runnable -> {};
-
-    /**
-     * Migrate all documents from the snapshot to the target cluster (standalone mode).
-     */
-    public Flux<ProgressCursor> migrateDocuments() {
-        var source = createDocumentSource();
-        var sink = createDocumentSink();
-        var pipeline = new MigrationPipeline(source, sink, maxDocsPerBatch, maxBytesPerBatch, shardConcurrency);
-
-        log.info("Starting pipeline migration: snapshot={}, concurrency={}", snapshotName, shardConcurrency);
-        return pipeline.migrateAll()
-            .doFinally(signal -> {
-                log.info("Pipeline migration finished (signal={})", signal);
-                closeQuietly(source);
-                closeQuietly(sink);
-            });
-    }
-
-    /**
-     * Migrate metadata (global templates + index creation) from the snapshot to the target cluster.
-     */
-    public Flux<String> migrateMetadata() {
-        var source = new SnapshotMetadataSource(extractor, snapshotName);
-        var sink = new OpenSearchMetadataSink(targetClient);
-        var pipeline = new MetadataMigrationPipeline(source, sink);
-
-        log.info("Starting metadata migration: snapshot={}", snapshotName);
-        return pipeline.migrateAll();
-    }
 
     /**
      * Acquire the next available shard via work coordination and migrate it (coordinated mode).
@@ -183,10 +136,6 @@ public class PipelineRunner {
             );
         }
         return new LuceneSnapshotSource(extractor, snapshotName, workDir);
-    }
-
-    private OpenSearchDocumentSink createDocumentSink() {
-        return new OpenSearchDocumentSink(targetClient, transformerSupplier, allowServerGeneratedIds, allowlist);
     }
 
     private static void closeQuietly(AutoCloseable closeable) {

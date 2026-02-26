@@ -13,7 +13,7 @@ import reactor.core.publisher.Flux;
  *
  * <p>This is the key abstraction enabling N+M testing:
  * <ul>
- *   <li>Source-side tests: real snapshot → {@code CollectingDocumentSink} → assert IR correctness</li>
+ *   <li>Source-side tests: real snapshot → assert IR correctness</li>
  *   <li>Sink-side tests: {@code SyntheticDocumentSource} → real target → assert cluster state</li>
  * </ul>
  *

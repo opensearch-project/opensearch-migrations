@@ -8,7 +8,7 @@ Multiple RFS workers each call `migrateNextShard()` in a loop. A shared `IWorkCo
 
 ```mermaid
 flowchart TD
-    MAIN["RfsMigrateDocuments<br/><i>--use-pipeline</i>"] --> PREP["prepareWorkCoordination()"]
+    MAIN["RfsMigrateDocuments"] --> PREP["prepareWorkCoordination()"]
     PREP --> SWC["ScopedWorkCoordinator"]
     SWC --> PDR["PipelineDocumentsRunner"]
     PDR -->|"acquire shard"| WC["WorkCoordinator<br/><i>lease-based</i>"]
@@ -33,7 +33,7 @@ flowchart TD
 
 ## Standalone Mode (Testing / Small Migrations)
 
-`migrateAll()` processes everything in a single process with no coordination.
+`MigrationPipeline.migrateAll()` processes everything in a single process with no coordination.
 
 ```mermaid
 flowchart TD
@@ -65,4 +65,4 @@ flowchart TD
 | Scaling | Single process, parallel shards on one machine | Multiple workers, one shard per worker |
 | Coordination | None | Lease-based via `IWorkCoordinator` |
 | Resume | No | Yes, via `startingDocId` successor work items |
-| Used by | `PipelineRunner.migrateDocuments()` | `runWithPipeline()` in `main()` |
+| Used by | Tests (e.g. `PipelineEndToEndTest`) | `runWithPipeline()` in `RfsMigrateDocuments.main()` |

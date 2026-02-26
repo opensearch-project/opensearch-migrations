@@ -10,8 +10,8 @@ flowchart TB
         direction LR
         RS[Real Snapshot<br/><i>ES 1.7 / 2.4 / 5.6 / 6.8 / 7.10 / 8.x</i>]
         LSS2[LuceneSnapshotSource]
-        CDS[CollectingDocumentSink<br/><i>test double</i>]
-        RS --> LSS2 -->|"Flux<DocumentChange>"| CDS
+        ASSERT1[Assert IR correctness]
+        RS --> LSS2 -->|"Flux&lt;DocumentChange&gt;"| ASSERT1
     end
 
     subgraph SinkTests["Sink-Side Tests (M tests, one per target version)"]
@@ -19,7 +19,7 @@ flowchart TB
         SDS[SyntheticDocumentSource<br/><i>test double</i>]
         ODS2[OpenSearchDocumentSink]
         TC[(Real Target<br/><i>OS 1.3 / 2.x / 3.x</i>)]
-        SDS -->|"Flux<DocumentChange>"| ODS2 --> TC
+        SDS -->|"Flux&lt;DocumentChange&gt;"| ODS2 --> TC
     end
 
     subgraph E2ETests["Full Pipeline E2E (smoke pairs)"]

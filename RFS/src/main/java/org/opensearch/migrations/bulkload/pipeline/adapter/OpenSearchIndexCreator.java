@@ -80,27 +80,38 @@ final class OpenSearchIndexCreator {
     }
 
     private static void stripInternalSettings(ObjectNode settings) {
-        // After IndexMetadataConverter normalization, the "index." prefix is removed.
-        // Handle both normalized (no prefix) and non-normalized (with prefix) settings.
-        settings.remove("creation_date");
-        settings.remove("provided_name");
-        settings.remove("uuid");
-        settings.remove("version");
-        settings.remove("mapping");
-        settings.remove("mapper");
+        // Strip settings that are internal to the source cluster and should not be
+        // applied to the target. Uses a broad strip list rather than an allowlist to
+        // avoid silently dropping user-configured settings.
 
-        // Non-normalized: nested under "index" sub-object
-        ObjectNodeUtils.removeFieldsByPath(settings, "index.creation_date");
-        ObjectNodeUtils.removeFieldsByPath(settings, "index.provided_name");
-        ObjectNodeUtils.removeFieldsByPath(settings, "index.uuid");
-        ObjectNodeUtils.removeFieldsByPath(settings, "index.version");
-        ObjectNodeUtils.removeFieldsByPath(settings, "index.mapping");
-        ObjectNodeUtils.removeFieldsByPath(settings, "index.mapper");
+        // Internal metadata (always set by the cluster, never by users)
+        String[] internalSettings = {
+            "creation_date", "provided_name", "uuid", "version", "mapping", "mapper",
+            "history.uuid", "verified_before_close",
+            // Resize/split/shrink metadata
+            "resize.source.name", "resize.source.uuid",
+            // Routing allocation (node-specific, won't match target topology)
+            "routing.allocation.include._tier_preference",
+            "routing.allocation.include._name",
+            "routing.allocation.include._id",
+            "routing.allocation.require._name",
+            "routing.allocation.require._id",
+            "routing.allocation.exclude._name",
+            "routing.allocation.exclude._id",
+            // Blocks from source cluster state
+            "blocks.write", "blocks.read_only", "blocks.read_only_allow_delete", "blocks.read", "blocks.metadata",
+        };
 
-        // Flat dotted keys (ES 1.7/2.4)
-        settings.remove("index.creation_date");
-        settings.remove("index.provided_name");
-        settings.remove("index.uuid");
+        for (String setting : internalSettings) {
+            // Normalized (no prefix) — after IndexMetadataConverter strips "index."
+            settings.remove(setting);
+            // Non-normalized: nested under "index" sub-object
+            ObjectNodeUtils.removeFieldsByPath(settings, "index." + setting);
+            // Flat dotted keys (ES 1.7/2.4)
+            settings.remove("index." + setting);
+        }
+
+        // Version sub-keys that use dotted paths
         settings.remove("index.version.created");
         settings.remove("index.mapping.single_type");
         settings.remove("index.mapper.dynamic");
