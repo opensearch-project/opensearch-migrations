@@ -36,6 +36,12 @@ jib {
     }
     from {
         image = 'amazoncorretto:17-al2023-headless'
+        platforms {
+            platform {
+                architecture = System.getProperty("os.arch") in ["aarch64", "arm64"] ? "arm64" : "amd64"
+                os = "linux"
+            }
+        }
     }
 }
 

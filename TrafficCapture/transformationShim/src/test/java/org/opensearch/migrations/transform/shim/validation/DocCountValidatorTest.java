@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DocCountValidatorTest {
 
     private static TargetResponse resp(String name, Map<String, Object> body) {
-        return new TargetResponse(name, 200, null, body, Duration.ofMillis(10), null);
+        return new TargetResponse(name, 200, null, body, Duration.ofMillis(10), Duration.ZERO, Duration.ZERO, null);
     }
 
     @Test

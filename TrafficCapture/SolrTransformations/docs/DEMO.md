@@ -69,7 +69,7 @@ cd TrafficCapture
 ../gradlew :TrafficCapture:transformationShim:jibDockerBuild
 ```
 
-This builds the `migrations/transformation_shim` Docker image using [Jib](https://github.com/GoogleContainerTools/jib) (no Dockerfile needed).
+This builds the `migrations/transformation_shim` Docker image using [Jib](https://github.com/GoogleContainerTools/jib) (no Dockerfile needed). The build auto-detects your CPU architecture — on Apple Silicon (ARM) it builds a native `linux/arm64` image, on Intel it builds `linux/amd64`.
 
 ### Build the TypeScript transforms
 
@@ -261,15 +261,23 @@ X-Shim-Primary: solr
 X-Shim-Targets: solr,opensearch
 X-Target-solr-StatusCode: 200
 X-Target-solr-Latency: 12
+X-Target-solr-ClusterLatency: 12
+X-Target-solr-RequestTransformLatency: 0
+X-Target-solr-ResponseTransformLatency: 0
 X-Target-opensearch-StatusCode: 200
 X-Target-opensearch-Latency: 45
+X-Target-opensearch-ClusterLatency: 38
+X-Target-opensearch-RequestTransformLatency: 3
+X-Target-opensearch-ResponseTransformLatency: 4
 X-Validation-Status: FAIL
 X-Validation-Details: field-equality(solr,opensearch):FAIL[responseHeader.params: missing in opensearch; response.docs[0]._version_: missing in opensearch; ...], doc-count(solr,opensearch):PASS
 ```
 
-The `field-equality` validator reports FAIL because Solr includes `responseHeader.params` and `_version_` fields that the OpenSearch response transform doesn't produce. The `doc-count` validator passes — both return 3 docs. To make `field-equality` pass, add those paths to the `ignore` list in the docker-compose validator config.
-
-### Mode 4: Dual-Target, OpenSearch Primary (`:8084`)
+Latency headers break down where time is spent per target:
+- `Latency` — total round-trip time (ms)
+- `ClusterLatency` — time the backend cluster took to respond (ms)
+- `RequestTransformLatency` — time spent transforming the request (ms, 0 for passthrough targets)
+- `ResponseTransformLatency` — time spent transforming the response (ms, 0 for passthrough targets)
 
 Same dual-target setup, but returns the OpenSearch (transformed) response. Solr runs as the safety net.
 
@@ -430,7 +438,7 @@ Runs 28 tests:
 
 ```bash
 # From repo root — requires Docker (uses Testcontainers)
-./gradlew :TrafficCapture:SolrTransformations:test
+./gradlew :TrafficCapture:SolrTransformations:isolatedTest
 ```
 
 This:
@@ -491,8 +499,14 @@ X-Shim-Primary: solr
 X-Shim-Targets: solr,opensearch
 X-Target-solr-StatusCode: 200
 X-Target-solr-Latency: 12
+X-Target-solr-ClusterLatency: 12
+X-Target-solr-RequestTransformLatency: 0
+X-Target-solr-ResponseTransformLatency: 0
 X-Target-opensearch-StatusCode: 200
 X-Target-opensearch-Latency: 45
+X-Target-opensearch-ClusterLatency: 38
+X-Target-opensearch-RequestTransformLatency: 3
+X-Target-opensearch-ResponseTransformLatency: 4
 X-Validation-Status: FAIL
 X-Validation-Details: field-equality(solr,opensearch):FAIL[responseHeader.params: missing in opensearch; response.docs[0]._version_: missing in opensearch; ...], doc-count(solr,opensearch):PASS
 ```
@@ -555,7 +569,7 @@ docker compose -f docker/docker-compose.validation.yml down -v
 | Start single-mode stack | `docker compose -f docker/docker-compose.yml up -d` |
 | Start validation stack | `docker compose -f docker/docker-compose.validation.yml up -d` |
 | Run shim unit tests | `./gradlew :TrafficCapture:transformationShim:test` |
-| Run E2E tests | `./gradlew :TrafficCapture:SolrTransformations:test` |
+| Run E2E tests | `./gradlew :TrafficCapture:SolrTransformations:isolatedTest` |
 | Run full demo | `./demo-validation.sh --no-teardown` |
 | Teardown | `docker compose -f docker/docker-compose.validation.yml down -v` |
 

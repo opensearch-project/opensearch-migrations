@@ -19,7 +19,7 @@ class JavascriptValidatorTest {
     }
 
     private static TargetResponse resp(String name, int statusCode, Map<String, Object> body) {
-        return new TargetResponse(name, statusCode, null, body, Duration.ofMillis(10), null);
+        return new TargetResponse(name, statusCode, null, body, Duration.ofMillis(10), Duration.ZERO, Duration.ZERO, null);
     }
 
     @Test

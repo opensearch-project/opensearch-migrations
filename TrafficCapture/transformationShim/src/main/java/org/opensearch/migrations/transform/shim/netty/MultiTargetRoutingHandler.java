@@ -137,13 +137,16 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         long startNanos = System.nanoTime();
 
         try {
+            long reqTransformStart = System.nanoTime();
             Map<String, Object> targetMap = applyRequestTransform(target, requestMap);
+            Duration reqTransformDuration = Duration.ofNanos(System.nanoTime() - reqTransformStart);
+
             FullHttpRequest targetRequest = applyAuth(target, HttpMessageUtil.mapToRequest(targetMap));
             URI uri = target.uri();
             targetRequest.headers().set(HttpHeaderNames.HOST,
                 uri.getHost() + (uri.getPort() != -1 ? ":" + uri.getPort() : ""));
 
-            connectAndSend(group, target, uri, targetRequest, future, startNanos, originalRequestMap);
+            connectAndSend(group, target, uri, targetRequest, future, startNanos, originalRequestMap, reqTransformDuration);
         } catch (Exception e) {
             log.error("Error dispatching to target {}", target.name(), e);
             future.complete(TargetResponse.error(target.name(), elapsed(startNanos), e));
@@ -154,7 +157,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     private void connectAndSend(
         io.netty.channel.EventLoopGroup group, Target target, URI uri,
         FullHttpRequest reqToSend, CompletableFuture<TargetResponse> future,
-        long startNanos, Map<String, Object> originalRequestMap
+        long startNanos, Map<String, Object> originalRequestMap, Duration reqTransformDuration
     ) {
         int port = uri.getPort() != -1 ? uri.getPort() : resolveDefaultPort(uri);
         boolean needsSsl = HTTPS_SCHEME.equalsIgnoreCase(uri.getScheme());
@@ -176,7 +179,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                     p.addLast("readTimeout", new ReadTimeoutHandler(
                         secondaryTimeout.toSeconds(), TimeUnit.SECONDS));
                     p.addLast("responseHandler", new TargetResponseHandler(
-                        target, future, startNanos, originalRequestMap));
+                        target, future, startNanos, originalRequestMap, reqTransformDuration));
                 }
             });
 
@@ -333,6 +336,9 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
             if (tr.isSuccess()) {
                 response.headers().set(TARGET_HEADER_PREFIX + name + "-StatusCode", tr.statusCode());
                 response.headers().set(TARGET_HEADER_PREFIX + name + "-Latency", tr.latency().toMillis());
+                response.headers().set(TARGET_HEADER_PREFIX + name + "-ClusterLatency", tr.clusterLatency().toMillis());
+                response.headers().set(TARGET_HEADER_PREFIX + name + "-RequestTransformLatency", tr.requestTransformLatency().toMillis());
+                response.headers().set(TARGET_HEADER_PREFIX + name + "-ResponseTransformLatency", tr.responseTransformLatency().toMillis());
             } else {
                 String errorMsg = tr.error().getMessage();
                 response.headers().set(TARGET_HEADER_PREFIX + name + "-Error",
@@ -394,13 +400,15 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         private final CompletableFuture<TargetResponse> future;
         private final long startNanos;
         private final Map<String, Object> originalRequestMap;
+        private final Duration reqTransformDuration;
 
         TargetResponseHandler(Target target, CompletableFuture<TargetResponse> future, long startNanos,
-                Map<String, Object> originalRequestMap) {
+                Map<String, Object> originalRequestMap, Duration reqTransformDuration) {
             this.target = target;
             this.future = future;
             this.startNanos = startNanos;
             this.originalRequestMap = originalRequestMap;
+            this.reqTransformDuration = reqTransformDuration;
         }
 
         @Override
@@ -410,9 +418,12 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                 byte[] rawBody = readBody(backendResponse);
                 byte[] finalBody = rawBody;
                 int finalStatusCode = statusCode;
+                Duration respTransformDuration = Duration.ZERO;
 
                 if (target.responseTransform() != null) {
+                    long respTransformStart = System.nanoTime();
                     Object[] transformed = applyResponseTransform(backendResponse, rawBody, statusCode);
+                    respTransformDuration = Duration.ofNanos(System.nanoTime() - respTransformStart);
                     finalBody = (byte[]) transformed[0];
                     finalStatusCode = (int) transformed[1];
                 }
@@ -420,7 +431,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                 Map<String, Object> parsedBody = tryParseJson(finalBody);
                 future.complete(new TargetResponse(
                     target.name(), finalStatusCode, finalBody, parsedBody,
-                    elapsed(startNanos), null));
+                    elapsed(startNanos), reqTransformDuration, respTransformDuration, null));
             } catch (Exception e) {
                 log.error("Error processing response from target {}", target.name(), e);
                 future.complete(TargetResponse.error(target.name(), elapsed(startNanos), e));
