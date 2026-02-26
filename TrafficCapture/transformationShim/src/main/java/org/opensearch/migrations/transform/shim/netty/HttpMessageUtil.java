@@ -1,5 +1,6 @@
 package org.opensearch.migrations.transform.shim.netty;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -180,19 +181,22 @@ public final class HttpMessageUtil {
     }
 
     /**
-     * Ensure the URI is a relative path. Rejects absolute URIs to prevent SSRF
-     * since the target host is configured separately at startup.
+     * Sanitize the URI by parsing and reconstructing only the path and query components.
+     * Rejects absolute URIs to prevent SSRF since the target host is configured at startup.
      */
     static String sanitizeUri(String uri) {
         if (uri == null || uri.isEmpty()) {
             return "/";
         }
-        if (uri.contains("://")) {
+        var parsed = URI.create(uri);
+        if (parsed.getHost() != null) {
             throw new IllegalArgumentException("Absolute URIs are not allowed: " + uri);
         }
-        if (!uri.startsWith("/")) {
-            return "/" + uri;
+        var path = parsed.getRawPath();
+        var query = parsed.getRawQuery();
+        if (path == null || path.isEmpty()) {
+            path = "/";
         }
-        return uri;
+        return query != null ? path + "?" + query : path;
     }
 }
