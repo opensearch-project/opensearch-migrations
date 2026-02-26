@@ -46,6 +46,42 @@ export interface OpenSearchMapping {
   dynamic?: boolean | 'strict' | 'runtime';
 }
 
+/** Solr field type names (common built-in types). */
+export type SolrFieldType =
+  | 'text_general' | 'text_en' | 'text_ws' | 'text_en_splitting'
+  | 'string' | 'strings'
+  | 'pint' | 'plong' | 'pfloat' | 'pdouble'
+  | 'pints' | 'plongs' | 'pfloats' | 'pdoubles'
+  | 'boolean' | 'booleans'
+  | 'pdate' | 'pdates'
+  | 'binary'
+  | 'text_general_rev' | 'alphaOnlySort' | 'phonetic' | 'payloads'
+  | 'lowercase' | 'descendent_path' | 'ancestor_path'
+  | 'point' | 'location' | 'location_rpt'
+  | 'currency' | 'rank';
+
+/** A single field definition in a Solr schema. */
+export interface SolrFieldDefinition {
+  type: SolrFieldType;
+  multiValued?: boolean;
+  indexed?: boolean;
+  stored?: boolean;
+  required?: boolean;
+  docValues?: boolean;
+}
+
+/**
+ * Solr collection schema definition.
+ *
+ * Defines the explicit field types for a Solr collection. When set on a test case,
+ * the Java harness applies these via the Solr Schema API after creating the core.
+ * This makes it clear what Solr field types are in play, so you can reason about
+ * the corresponding OpenSearch mapping.
+ */
+export interface SolrSchema {
+  fields: Record<string, SolrFieldDefinition>;
+}
+
 /** HTTP methods supported by the test framework. */
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'HEAD';
 
@@ -91,6 +127,12 @@ export interface TestCase {
   requestPath: string;
   /** Per-path assertion rules controlling how diffs are handled. */
   assertionRules?: AssertionRule[];
+  /**
+   * Solr collection schema — defines the field types for this test's Solr collection.
+   * When set, the Java harness applies these via the Solr Schema API after creating the core.
+   * Makes it explicit what Solr field types are in play for each test case.
+   */
+  solrSchema?: SolrSchema;
   /** Explicit OpenSearch index mapping. If set, the index is created with this mapping before seeding. */
   opensearchMapping?: OpenSearchMapping;
   solrVersions?: string[];

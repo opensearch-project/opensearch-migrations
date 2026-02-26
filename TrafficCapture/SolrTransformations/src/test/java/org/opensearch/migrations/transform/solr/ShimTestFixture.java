@@ -21,6 +21,8 @@ import org.opensearch.migrations.transform.shim.ShimProxy;
 import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.testcontainers.OpensearchContainer;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.testcontainers.containers.GenericContainer;
@@ -44,6 +46,7 @@ public class ShimTestFixture implements AutoCloseable {
 
     private static final HttpClient HTTP = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10)).build();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final GenericContainer<?> solr;
     private final OpensearchContainer<?> opensearch;
@@ -99,6 +102,11 @@ public class ShimTestFixture implements AutoCloseable {
 
     /** Create a Solr core and wait for it to be ready. */
     public void createSolrCore(String coreName) throws Exception {
+        createSolrCore(coreName, null);
+    }
+
+    /** Create a Solr core, apply schema if provided, and wait for it to be ready. */
+    public void createSolrCore(String coreName, Map<String, Object> solrSchema) throws Exception {
         var result = solr.execInContainer("solr", "create_core", "-c", coreName);
         log.info("create_core {} → exit={}, stdout={}", coreName, result.getExitCode(), result.getStdout());
         // Poll until core is ready instead of sleeping
@@ -108,11 +116,35 @@ public class ShimTestFixture implements AutoCloseable {
                 var resp = HTTP.send(
                     HttpRequest.newBuilder().uri(URI.create(coreStatusUrl)).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
-                if (resp.statusCode() == 200) return;
+                if (resp.statusCode() == 200) break;
             } catch (Exception ignored) {}
             Thread.sleep(500);
         }
-        throw new RuntimeException("Solr core '" + coreName + "' not ready after 15s");
+
+        if (solrSchema != null) {
+            applySolrSchema(coreName, solrSchema);
+        }
+    }
+
+    /** Apply field definitions to a Solr core via the Schema API. */
+    @SuppressWarnings("unchecked")
+    private void applySolrSchema(String coreName, Map<String, Object> solrSchema) throws Exception {
+        var fields = (Map<String, Map<String, Object>>) solrSchema.get("fields");
+        if (fields == null || fields.isEmpty()) return;
+
+        var addFields = new java.util.ArrayList<Map<String, Object>>();
+        for (var entry : fields.entrySet()) {
+            var fieldDef = new java.util.LinkedHashMap<String, Object>();
+            fieldDef.put("name", entry.getKey());
+            fieldDef.putAll(entry.getValue());
+            addFields.add(fieldDef);
+        }
+
+        var schemaUrl = solrBaseUrl + "/solr/" + coreName + "/schema";
+        var body = MAPPER.writeValueAsString(Map.of("add-field", addFields));
+        log.info("Applying Solr schema to {}: {}", coreName, body);
+        var resp = httpPost(schemaUrl, body);
+        log.info("Schema API response: {}", resp);
     }
 
     public String httpGet(String url) throws Exception {

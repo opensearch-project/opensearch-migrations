@@ -32,6 +32,7 @@ record TestCaseDefinition(
     String requestBody,
     String requestPath,
     List<AssertionRule> assertionRules,
+    Map<String, Object> solrSchema,
     Map<String, Object> opensearchMapping,
     List<String> solrVersions,
     List<String> plugins

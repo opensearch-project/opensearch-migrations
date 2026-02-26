@@ -135,7 +135,7 @@ class TransformationShimE2ETest {
         boolean seedOpenSearch = tc.seedOpenSearch() == null || tc.seedOpenSearch();
 
         if (seedSolr) {
-            fixture.createSolrCore(tc.collection());
+            fixture.createSolrCore(tc.collection(), tc.solrSchema());
             fixture.httpPost(
                 fixture.getSolrBaseUrl() + "/solr/" + tc.collection() + "/update/json/docs?commit=true",
                 MAPPER.writeValueAsString(tc.documents()));
