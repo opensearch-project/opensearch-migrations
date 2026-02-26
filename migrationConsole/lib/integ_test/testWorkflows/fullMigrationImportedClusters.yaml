@@ -155,9 +155,8 @@ spec:
                   | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
                   # Move sigv4 under authConfig
                   | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
-                  # Add snapshot repos with default key and remove original snapshotRepo
-                  | . + {"snapshotRepos": {"default": $repo}}
-                  | del(.snapshotRepo)
+                  # Add snapshot repos with default key if not already provided
+                  | if has("snapshotRepos") then . else . + {"snapshotRepos": {"default": $repo}} end
                 )
               )')
             
