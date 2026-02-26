@@ -77,7 +77,8 @@ public class TransformFileWatcher implements Runnable, AutoCloseable {
     private void reloadTransformer(Path path, ReloadableTransformer transformer) {
         try {
             String script = ShimMain.JS_POLYFILL + Files.readString(path);
-            transformer.reload(() -> new JavascriptTransformer(script, new LinkedHashMap<>()));
+            transformer.reload(
+                () -> new JsonBridgingTransformer(new JavascriptTransformer(script, new LinkedHashMap<>())));
             log.info("Hot-reloaded transform: {}", path);
         } catch (Exception e) {
             log.error("Failed to reload transform {}, keeping previous version", path, e);
