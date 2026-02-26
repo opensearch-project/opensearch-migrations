@@ -1,15 +1,14 @@
 package org.opensearch.migrations.transform.shim;
 
+import javax.net.ssl.SSLEngine;
+
 import java.time.Duration;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-
-import javax.net.ssl.SSLEngine;
 
 import org.opensearch.migrations.transform.shim.netty.MultiTargetRoutingHandler;
 import org.opensearch.migrations.transform.shim.validation.Target;

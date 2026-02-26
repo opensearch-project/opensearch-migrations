@@ -3,9 +3,10 @@ package org.opensearch.migrations.transform.shim.validation;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import org.opensearch.migrations.transform.JavascriptTransformer;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.opensearch.migrations.transform.JavascriptTransformer;
 
 /**
  * Custom JavaScript validator using GraalVM (via {@link JavascriptTransformer}).

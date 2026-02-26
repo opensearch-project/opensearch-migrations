@@ -61,7 +61,7 @@ public final class HttpMessageUtil {
     @SuppressWarnings("unchecked")
     public static FullHttpRequest mapToRequest(Map<String, Object> requestMap) {
         var method = (String) requestMap.get(JsonKeysForHttpMessage.METHOD_KEY);
-        var uri = (String) requestMap.get(JsonKeysForHttpMessage.URI_KEY);
+        var uri = sanitizeUri((String) requestMap.get(JsonKeysForHttpMessage.URI_KEY));
         var body = extractBodyString(requestMap);
         var bodyBytes = body != null ? body.getBytes(StandardCharsets.UTF_8) : new byte[0];
 
@@ -177,5 +177,22 @@ public final class HttpMessageUtil {
         } else {
             adder.accept(name, value.toString());
         }
+    }
+
+    /**
+     * Ensure the URI is a relative path. Rejects absolute URIs to prevent SSRF
+     * since the target host is configured separately at startup.
+     */
+    static String sanitizeUri(String uri) {
+        if (uri == null || uri.isEmpty()) {
+            return "/";
+        }
+        if (uri.contains("://")) {
+            throw new IllegalArgumentException("Absolute URIs are not allowed: " + uri);
+        }
+        if (!uri.startsWith("/")) {
+            return "/" + uri;
+        }
+        return uri;
     }
 }
