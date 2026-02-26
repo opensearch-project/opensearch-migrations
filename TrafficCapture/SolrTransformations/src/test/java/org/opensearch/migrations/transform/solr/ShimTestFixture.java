@@ -14,9 +14,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 import org.opensearch.migrations.transform.shim.TransformationLibrary.TransformationPair;
-import org.opensearch.migrations.transform.shim.TransformationShimProxy;
+import org.opensearch.migrations.transform.shim.ShimProxy;
+import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.testcontainers.OpensearchContainer;
 
 import lombok.Getter;
@@ -26,7 +28,7 @@ import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * Test fixture that manages Solr + OpenSearch containers and a TransformationShimProxy.
+ * Test fixture that manages Solr + OpenSearch containers and a ShimProxy.
  * <p>
  * Usage:
  * <pre>{@code
@@ -46,7 +48,7 @@ public class ShimTestFixture implements AutoCloseable {
     private final GenericContainer<?> solr;
     private final OpensearchContainer<?> opensearch;
     private final TransformationPair transforms;
-    private TransformationShimProxy proxy;
+    private ShimProxy proxy;
 
     @Getter private String solrBaseUrl;
     @Getter private String openSearchBaseUrl;
@@ -78,9 +80,10 @@ public class ShimTestFixture implements AutoCloseable {
         openSearchBaseUrl = "http://" + opensearch.getHost() + ":" + opensearch.getMappedPort(9200);
 
         int proxyPort = findFreePort();
-        proxy = new TransformationShimProxy(
-            proxyPort, URI.create(openSearchBaseUrl),
-            transforms.request(), transforms.response());
+        var target = new Target("opensearch", URI.create(openSearchBaseUrl),
+            transforms.request(), transforms.response(), null);
+        proxy = new ShimProxy(
+            proxyPort, Map.of("opensearch", target), "opensearch", List.of());
         proxy.start();
         proxyBaseUrl = "http://localhost:" + proxyPort;
     }

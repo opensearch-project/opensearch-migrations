@@ -27,7 +27,7 @@ dependencies {
 }
 
 application {
-    mainClass = 'org.opensearch.migrations.transform.shim.TransformationShimMain'
+    mainClass = 'org.opensearch.migrations.transform.shim.ShimMain'
 }
 
 jib {

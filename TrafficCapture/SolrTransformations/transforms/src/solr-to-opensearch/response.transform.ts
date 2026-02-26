@@ -1,51 +1,25 @@
 /**
  * OpenSearch → Solr response transform.
  *
- * Converts OpenSearch `hits.hits[]._source` response format into
- * Solr's `response.docs[]` format with responseHeader.
+ * Thin entry point — parses context once, runs the pipeline, serializes output.
+ *
+ * The Java shim bundles {request, response} into a single map before calling
+ * transformJson(), following the same pattern as the replayer's tuple transforms.
+ * This transform unpacks both, runs the response pipeline with full request
+ * context, then serializes the transformed response body back.
  */
-import type { HttpResponseMessage } from '../types';
+import type { HttpRequestMessage, HttpResponseMessage } from '../types';
+import { buildResponseContext } from './context';
+import { runPipeline } from './pipeline';
+import { responseRegistry } from './registry';
 
-interface OpenSearchHit {
-  _source: Record<string, unknown>;
-}
-
-interface OpenSearchResponse {
-  hits?: {
-    total: { value: number };
-    hits: OpenSearchHit[];
-  };
-}
-
-export function transform(msg: HttpResponseMessage): HttpResponseMessage {
-  const payload = msg.payload;
-  if (payload?.inlinedTextBody) {
-    const osResp: OpenSearchResponse = JSON.parse(payload.inlinedTextBody);
-    if (osResp.hits) {
-      const docs = osResp.hits.hits.map((hit) => wrapMultiValued(hit._source));
-      payload.inlinedTextBody = JSON.stringify({
-        responseHeader: { status: 0, QTime: 0 },
-        response: {
-          numFound: osResp.hits.total.value,
-          start: 0,
-          numFoundExact: true,
-          docs,
-        },
-      });
-    }
-  }
+export function transform(msg: unknown): unknown {
+  const input = msg as { request: HttpRequestMessage; response: HttpResponseMessage };
+  // If the shim hasn't bundled request context, pass through unchanged
+  if (!input.request || !input.response) return msg;
+  const ctx = buildResponseContext(input.request, input.response);
+  if (ctx.endpoint === 'unknown') return msg;
+  runPipeline(responseRegistry, ctx);
+  input.response.payload = { inlinedTextBody: JSON.stringify(ctx.responseBody) };
   return msg;
-}
-
-/** Wrap scalar string values in arrays to match Solr's multi-valued field format. */
-function wrapMultiValued(doc: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(doc)) {
-    if (key === 'id') {
-      result[key] = val;
-    } else {
-      result[key] = typeof val === 'string' ? [val] : val;
-    }
-  }
-  return result;
 }

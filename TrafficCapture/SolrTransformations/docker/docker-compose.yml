@@ -46,12 +46,12 @@ services:
     command:
       - --listenPort
       - "8080"
-      - --backendUri
-      - http://opensearch:9200
-      - --requestTransformScript
-      - /transforms/solr-to-opensearch-request.js
-      - --responseTransformScript
-      - /transforms/solr-to-opensearch-response.js
+      - --target
+      - opensearch=http://opensearch:9200
+      - --primary
+      - opensearch
+      - --targetTransform
+      - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
       - --watchTransforms
     depends_on:
       opensearch:

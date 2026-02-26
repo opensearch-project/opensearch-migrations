@@ -19,8 +19,6 @@ import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
  * Pipeline handler that applies SigV4 signing to outbound requests.
  * Uses SigV4Signer from awsUtilities — the same signing implementation
  * used by the replayer's NettyJsonContentAuthSigner + SigV4AuthTransformerFactory.
- *
- * Pipeline position: after RequestTransformHandler, before BackendForwardingHandler.
  */
 @Slf4j
 public class SigV4SigningHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
