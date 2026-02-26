@@ -317,6 +317,9 @@ graph LR
         H4["X-Target-solr-Latency: 12"]
         H5["X-Target-opensearch-StatusCode: 200"]
         H6["X-Target-opensearch-Latency: 45"]
+        H7a["X-Target-opensearch-ClusterLatency: 38"]
+        H7b["X-Target-opensearch-RequestTransformLatency: 3"]
+        H7c["X-Target-opensearch-ResponseTransformLatency: 4"]
     end
 
     subgraph Val["Validation (multi-target only)"]
@@ -330,7 +333,10 @@ graph LR
 | `X-Shim-Primary` | Always | `solr` |
 | `X-Shim-Targets` | Always | `solr,opensearch` |
 | `X-Target-{name}-StatusCode` | Per target (success) | `200` |
-| `X-Target-{name}-Latency` | Per target (success) | `45` (ms) |
+| `X-Target-{name}-Latency` | Per target (success) | `45` (ms, total round-trip) |
+| `X-Target-{name}-ClusterLatency` | Per target (success) | `38` (ms, backend cluster time) |
+| `X-Target-{name}-RequestTransformLatency` | Per target (success) | `3` (ms, 0 for passthrough) |
+| `X-Target-{name}-ResponseTransformLatency` | Per target (success) | `4` (ms, 0 for passthrough) |
 | `X-Target-{name}-Error` | Per target (failure) | `Connection refused` |
 | `X-Validation-Status` | Multi-target + validators | `PASS` / `FAIL` / `ERROR` |
 | `X-Validation-Details` | Multi-target + validators | `field-equality:PASS, doc-count:FAIL[...]` |
@@ -357,7 +363,10 @@ classDiagram
         +byte[] rawBody
         +Map parsedBody
         +Duration latency
+        +Duration requestTransformLatency
+        +Duration responseTransformLatency
         +Throwable error
+        +clusterLatency() Duration
         +isSuccess() boolean
         +error(name, latency, error)$ TargetResponse
     }
@@ -527,14 +536,15 @@ sequenceDiagram
 
 ### Transform Contract
 
-Transforms implement the `IJsonTransformer` interface via JavaScript:
+Transforms implement the `IJsonTransformer` interface via JavaScript. The Java shim passes `LinkedHashMap` objects directly to GraalVM JS via `allowMapAccess(true)` — zero serialization overhead. Transforms use `.get()`/`.set()` to read and write map entries:
 
 ```
-Input (request):  { method, URI, protocol, headers, payload: { inlinedTextBody } }
-Output (request): { method, URI, protocol, headers, payload: { inlinedTextBody } }
+Input (request):  Java Map { method, URI, protocol, headers, payload: { inlinedTextBody } }
+                  Access via: msg.get('URI'), msg.set('method', 'POST'), etc.
 
-Input (response):  { statusCode, protocol, headers, payload: { inlinedTextBody } }
-Output (response): { statusCode, protocol, headers, payload: { inlinedTextBody } }
+Input (response): Java Map { request: {...}, response: { statusCode, headers, payload } }
+                  Bundled as {request, response} — same pattern as replayer tuple transforms.
+                  Access via: msg.get('request'), msg.get('response'), etc.
 ```
 
 The Solr→OpenSearch request transform rewrites:

@@ -17,7 +17,6 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JavascriptTransformer;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
-import org.opensearch.migrations.transform.shim.JsonBridgingTransformer;
 import org.opensearch.migrations.transform.shim.ShimMain;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -66,8 +65,8 @@ class TransformationShimE2ETest {
 
     private void executeTestCase(
             TestCaseDefinition tc, String solrImage, String openSearchImage) throws Exception {
-        var requestTransform = new JsonBridgingTransformer(composeTransforms(tc.requestTransforms()));
-        var responseTransform = new JsonBridgingTransformer(composeTransforms(tc.responseTransforms()));
+        var requestTransform = composeTransforms(tc.requestTransforms());
+        var responseTransform = composeTransforms(tc.responseTransforms());
         var plugins = tc.plugins() != null ? tc.plugins() : List.<String>of();
 
         try (var fixture = new ShimTestFixture(solrImage, openSearchImage, requestTransform, responseTransform)) {

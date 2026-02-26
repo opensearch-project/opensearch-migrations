@@ -4,14 +4,23 @@
  * Expensive operations (URL parsing, body deserialization, endpoint detection)
  * happen exactly once per message. Every micro-transform receives the
  * pre-parsed context instead of the raw message.
+ *
+ * The Java shim passes LinkedHashMap objects directly to GraalVM JS via
+ * allowMapAccess(true). All reads use .get() and writes use .put() to
+ * operate directly on the underlying Java Map — zero serialization overhead.
  */
-import type { HttpRequestMessage, HttpResponseMessage, Payload } from '../types';
 
 export type SolrEndpoint = 'select' | 'update' | 'admin' | 'schema' | 'config' | 'unknown';
 
+/**
+ * A Java Map passed through GraalVM polyglot with allowMapAccess(true).
+ * Supports .get(), .put(), .containsKey(), .remove(), .size(), .keySet(), etc.
+ */
+export type JavaMap = any;
+
 /** Parsed once from the raw request. Shared across all request micro-transforms. */
 export interface RequestContext {
-  msg: HttpRequestMessage;
+  msg: JavaMap;
   endpoint: SolrEndpoint;
   collection: string | undefined;
   params: URLSearchParams;
@@ -20,8 +29,8 @@ export interface RequestContext {
 
 /** Parsed once from the bundled {request, response}. Shared across all response micro-transforms. */
 export interface ResponseContext {
-  request: HttpRequestMessage;
-  response: HttpResponseMessage;
+  request: JavaMap;
+  response: JavaMap;
   endpoint: SolrEndpoint;
   collection: string | undefined;
   requestParams: URLSearchParams;
@@ -48,32 +57,42 @@ function parseParams(uri: string): URLSearchParams {
   return new URLSearchParams(q >= 0 ? uri.slice(q + 1) : '');
 }
 
-function parseBody(payload?: Payload): Record<string, unknown> {
-  if (payload?.inlinedTextBody) return JSON.parse(payload.inlinedTextBody);
-  if (payload?.inlinedJsonBody) return payload.inlinedJsonBody as Record<string, unknown>;
+/** Parse body from a Java Map payload (uses .get() for map access). */
+function parseBody(payload: JavaMap): Record<string, unknown> {
+  if (!payload) return {};
+  const textBody = typeof payload.get === 'function'
+    ? payload.get('inlinedTextBody')
+    : payload?.inlinedTextBody;
+  if (textBody) return JSON.parse(textBody);
+  const jsonBody = typeof payload.get === 'function'
+    ? payload.get('inlinedJsonBody')
+    : payload?.inlinedJsonBody;
+  if (jsonBody) return jsonBody as Record<string, unknown>;
   return {};
 }
 
-export function buildRequestContext(msg: HttpRequestMessage): RequestContext {
+export function buildRequestContext(msg: JavaMap): RequestContext {
+  const uri: string = msg.get('URI') || '';
   return {
     msg,
-    endpoint: detectEndpoint(msg.URI),
-    collection: /\/solr\/([^/]+)\//.exec(msg.URI)?.[1],
-    params: parseParams(msg.URI),
-    body: parseBody(msg.payload),
+    endpoint: detectEndpoint(uri),
+    collection: /\/solr\/([^/]+)\//.exec(uri)?.[1],
+    params: parseParams(uri),
+    body: parseBody(msg.get('payload')),
   };
 }
 
 export function buildResponseContext(
-  request: HttpRequestMessage,
-  response: HttpResponseMessage,
+  request: JavaMap,
+  response: JavaMap,
 ): ResponseContext {
+  const uri: string = request.get('URI') || '';
   return {
     request,
     response,
-    endpoint: detectEndpoint(request.URI),
-    collection: /\/solr\/([^/]+)\//.exec(request.URI)?.[1],
-    requestParams: parseParams(request.URI),
-    responseBody: parseBody(response.payload),
+    endpoint: detectEndpoint(uri),
+    collection: /\/solr\/([^/]+)\//.exec(uri)?.[1],
+    requestParams: parseParams(uri),
+    responseBody: parseBody(response.get('payload')),
   };
 }

@@ -92,16 +92,22 @@ sequenceDiagram
     participant Dev as Developer
     participant FS as Filesystem
     participant Watcher as transform-watcher
+    participant FW as TransformFileWatcher
     participant Shim as ShimProxy
 
     Dev->>FS: Edit request.transform.ts
     Watcher->>FS: Detect change
     Watcher->>FS: esbuild → dist/solr-to-opensearch-request.js
-    Note over Shim: Reads .js at startup<br/>(no hot-reload yet)
+    Note over Shim: Initial load at startup
     Shim->>FS: Files.readString(path)
     Shim->>Shim: new JavascriptTransformer(script)
     Shim->>Shim: GraalVM evaluates closure
     Note over Shim: Transform ready for requests
+    Note over FW: With --watchTransforms:
+    FS->>FW: ENTRY_MODIFY event
+    FW->>FW: Files.readString(path)
+    FW->>Shim: ReloadableTransformer.reload()
+    Note over Shim: Next request uses new transform
 ```
 
 ---
@@ -132,12 +138,14 @@ graph LR
 
 ### Logic
 
+Java Maps are passed directly to GraalVM JS via `allowMapAccess(true)`. Transforms use `.get()`/`.set()` for zero-serialization interop:
+
 ```
 IF URI matches /solr/{collection}/select:
-  1. URI = /{collection}/_search
-  2. method = POST
-  3. payload = { inlinedTextBody: '{"query":{"match_all":{}}}' }
-  4. headers.content-type = application/json
+  1. msg.set('URI', '/{collection}/_search')
+  2. msg.set('method', 'POST')
+  3. payload.set('inlinedTextBody', '{"query":{"match_all":{}}}')
+  4. headers.set('content-type', 'application/json')
 ELSE:
   passthrough (no modification)
 ```

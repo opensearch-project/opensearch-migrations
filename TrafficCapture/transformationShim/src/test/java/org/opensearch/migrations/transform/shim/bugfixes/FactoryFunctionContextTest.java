@@ -54,11 +54,11 @@ class FactoryFunctionContextTest {
     private static final HttpClient HTTP = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(5)).build();
 
-    /** Factory function that rewrites the URI — only works if the outer function is invoked with context. */
+    /** Factory function that rewrites the URI using map access — only works if the outer function is invoked with context. */
     private static final String FACTORY_TRANSFORM =
         "(function(bindings) {\n" +
         "  return function(request) {\n" +
-        "    request.URI = '/factory-applied';\n" +
+        "    request.set('URI', '/factory-applied');\n" +
         "    return request;\n" +
         "  };\n" +
         "})";

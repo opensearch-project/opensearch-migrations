@@ -234,12 +234,23 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> deepCopyMap(Map<String, Object> original) {
-        try {
-            byte[] bytes = MAPPER.writeValueAsBytes(original);
-            return MAPPER.readValue(bytes, MAP_TYPE_REF);
-        } catch (Exception e) {
-            throw new TransformException("Failed to deep-copy request map", e);
+        var copy = new LinkedHashMap<String, Object>();
+        for (var entry : original.entrySet()) {
+            copy.put(entry.getKey(), deepCopyValue(entry.getValue()));
         }
+        return copy;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object deepCopyValue(Object value) {
+        if (value instanceof Map) {
+            return deepCopyMap((Map<String, Object>) value);
+        } else if (value instanceof List) {
+            return ((List<?>) value).stream()
+                .map(MultiTargetRoutingHandler::deepCopyValue)
+                .collect(Collectors.toCollection(ArrayList::new));
+        }
+        return value;
     }
 
     private FullHttpRequest applyAuth(Target target, FullHttpRequest request) {

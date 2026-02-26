@@ -350,12 +350,16 @@ Each feature is a small, focused **micro-transform**. Here's `select-uri.ts`:
 
 ```typescript
 // features/select-uri.ts — rewrites /solr/{collection}/select → /{collection}/_search
+// Uses Java Map .get()/.set() for zero-serialization GraalVM interop.
 export const request: MicroTransform<RequestContext> = {
   name: 'select-uri',
   apply: (ctx) => {
-    ctx.msg.URI = `/${ctx.collection}/_search`;
-    ctx.msg.method = 'POST';
-    ctx.msg.headers = { ...ctx.msg.headers, 'content-type': 'application/json' };
+    ctx.msg.set('URI', `/${ctx.collection}/_search`);
+    ctx.msg.set('method', 'POST');
+    const headers = ctx.msg.get('headers');
+    if (headers) {
+      headers.set('content-type', 'application/json');
+    }
   },
 };
 ```

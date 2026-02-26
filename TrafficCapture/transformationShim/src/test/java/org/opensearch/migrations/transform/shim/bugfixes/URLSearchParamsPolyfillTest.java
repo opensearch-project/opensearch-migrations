@@ -71,17 +71,19 @@ class URLSearchParamsPolyfillTest {
         "  URLSearchParams.prototype.getAll = function(k) { return this._map[k] || []; };\n" +
         "}\n";
 
-    /** Transform that parses query params with URLSearchParams and puts the result in the body. */
+    /** Transform that parses query params with URLSearchParams and sets the result using map access. */
     private static final String TRANSFORM = POLYFILL +
         "(function(bindings) {\n" +
         "  return function(request) {\n" +
-        "    var uri = request.URI;\n" +
+        "    var uri = request.get('URI');\n" +
         "    var qIdx = uri.indexOf('?');\n" +
         "    if (qIdx >= 0) {\n" +
         "      var params = new URLSearchParams(uri.substring(qIdx + 1));\n" +
-        "      request.URI = '/parsed';\n" +
-        "      request.method = 'POST';\n" +
-        "      request.payload = { inlinedTextBody: JSON.stringify({ q: params.get('q'), hasQ: params.has('q') }) };\n" +
+        "      request.set('URI', '/parsed');\n" +
+        "      request.set('method', 'POST');\n" +
+        "      var payload = new Map();\n" +
+        "      payload.set('inlinedTextBody', JSON.stringify({ q: params.get('q'), hasQ: params.has('q') }));\n" +
+        "      request.set('payload', payload);\n" +
         "    }\n" +
         "    return request;\n" +
         "  };\n" +

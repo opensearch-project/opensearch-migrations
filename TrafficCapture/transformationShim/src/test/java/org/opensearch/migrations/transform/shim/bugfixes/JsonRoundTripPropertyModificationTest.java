@@ -38,18 +38,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Verifies that JavaScript transforms can add new properties to the input object and have
- * those changes reflected in the output sent to the backend.
+ * Verifies that JavaScript transforms can modify properties on Java Map objects using
+ * the map access pattern (.get()/.put()) and have those changes reflected in the output.
  *
- * <p><b>Bug:</b> GraalVM polyglot interop creates shadow properties when JavaScript code assigns
- * new properties on a Java {@code Map} proxy (e.g. {@code request.newKey = 'value'}). The
- * assignment succeeds in JS but does not call {@code Map.put()} on the underlying Java Map,
- * so the new property is invisible to Java code.
- *
- * <p><b>Fix:</b> {@code JavascriptTransformer.runScript()} wraps the call with a JSON round-trip:
- * serialize the input Map to a JSON string, {@code JSON.parse} it in JS to create a native JS
- * object, call the transform, {@code JSON.stringify} the result, and parse back in Java. This
- * ensures all property modifications are captured.
+ * <p><b>Pattern:</b> GraalVM polyglot with {@code allowMapAccess(true)} exposes Java Maps
+ * to JavaScript. Transforms use {@code map.get("key")} and {@code map.put("key", value)}
+ * instead of dot notation to ensure changes are applied directly to the underlying Java Map
+ * without any JSON serialization/deserialization overhead.
  */
 class JsonRoundTripPropertyModificationTest {
 
@@ -57,15 +52,17 @@ class JsonRoundTripPropertyModificationTest {
         .connectTimeout(Duration.ofSeconds(5)).build();
 
     /**
-     * Transform that adds a new property and modifies the body.
-     * Without the JSON round-trip fix, the new 'payload' property would be invisible to Java.
+     * Transform that modifies properties using map access pattern (.get/.put).
+     * This avoids the GraalVM shadow property issue and eliminates serialization overhead.
      */
     private static final String TRANSFORM =
         "(function(bindings) {\n" +
         "  return function(request) {\n" +
-        "    request.URI = '/modified';\n" +
-        "    request.method = 'POST';\n" +
-        "    request.payload = { inlinedTextBody: JSON.stringify({ added: true, method: request.method }) };\n" +
+        "    request.set('URI', '/modified');\n" +
+        "    request.set('method', 'POST');\n" +
+        "    var payload = new Map();\n" +
+        "    payload.set('inlinedTextBody', JSON.stringify({ added: true, method: request.get('method') }));\n" +
+        "    request.set('payload', payload);\n" +
         "    return request;\n" +
         "  };\n" +
         "})";

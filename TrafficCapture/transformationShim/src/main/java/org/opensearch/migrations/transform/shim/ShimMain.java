@@ -340,10 +340,10 @@ public class ShimMain {
         String script = JS_POLYFILL + Files.readString(path);
         if (watch) {
             var reloadable = new ReloadableTransformer(
-                () -> new JsonBridgingTransformer(new JavascriptTransformer(script, new java.util.LinkedHashMap<>())));
+                () -> new JavascriptTransformer(script, new java.util.LinkedHashMap<>()));
             watchedTransforms.put(path, reloadable);
             return reloadable;
         }
-        return new JsonBridgingTransformer(new JavascriptTransformer(script, new java.util.LinkedHashMap<>()));
+        return new JavascriptTransformer(script, new java.util.LinkedHashMap<>());
     }
 }
