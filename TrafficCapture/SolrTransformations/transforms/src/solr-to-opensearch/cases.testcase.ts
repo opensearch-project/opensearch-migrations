@@ -84,6 +84,7 @@ export const testCases: TestCase[] = [
       ...SOLR_INTERNAL_RULES,
       { path: '$.response.numFound', rule: 'expect-diff', reason: 'fq not implemented — proxy returns all docs' },
       { path: '$.response.docs', rule: 'expect-diff', reason: 'fq not implemented — doc count and content will differ' },
+      { path: '$.response.docs[*].category', rule: 'expect-diff', reason: 'OpenSearch returns keyword fields as arrays' },
     ],
   }),
 ];
