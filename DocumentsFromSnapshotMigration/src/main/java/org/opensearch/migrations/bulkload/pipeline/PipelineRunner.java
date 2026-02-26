@@ -109,9 +109,10 @@ public class PipelineRunner {
 
         log.info("Starting pipeline migration: snapshot={}, concurrency={}", snapshotName, shardConcurrency);
         return pipeline.migrateAll()
-            .doOnComplete(() -> {
-                log.info("Pipeline migration complete");
+            .doFinally(signal -> {
+                log.info("Pipeline migration finished (signal={})", signal);
                 closeQuietly(source);
+                closeQuietly(sink);
             });
     }
 
@@ -150,22 +151,27 @@ public class PipelineRunner {
                 return ctx != null ? ctx.createBulkRequest() : null;
             }
         );
-        var runner = new PipelineDocumentsRunner(
-            workCoordinator,
-            maxInitialLeaseDuration,
-            source,
-            sink,
-            maxDocsPerBatch,
-            maxBytesPerBatch,
-            snapshotName,
-            cursorConsumer,
-            cancellationTriggerConsumer
-        );
-        return runner.migrateNextShard(() -> {
-            var ctx = contextSupplier.get();
-            contextRef.set(ctx);
-            return ctx;
-        });
+        try {
+            var runner = new PipelineDocumentsRunner(
+                workCoordinator,
+                maxInitialLeaseDuration,
+                source,
+                sink,
+                maxDocsPerBatch,
+                maxBytesPerBatch,
+                snapshotName,
+                cursorConsumer,
+                cancellationTriggerConsumer
+            );
+            return runner.migrateNextShard(() -> {
+                var ctx = contextSupplier.get();
+                contextRef.set(ctx);
+                return ctx;
+            });
+        } finally {
+            closeQuietly(source);
+            closeQuietly(sink);
+        }
     }
 
     private LuceneSnapshotSource createDocumentSource() {

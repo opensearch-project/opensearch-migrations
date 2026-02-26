@@ -8,9 +8,6 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
-import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
-import org.opensearch.migrations.bulkload.common.DocumentReaderEngine.DocumentChangeset;
-import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
@@ -20,6 +17,8 @@ import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.pipeline.MigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
+import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
+import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
 import org.opensearch.migrations.bulkload.pipeline.source.SyntheticDocumentSource;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
@@ -31,7 +30,6 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import reactor.core.publisher.Flux;
 
 /**
  * Target-only tests: validates the writing pipeline against each target version
@@ -209,7 +207,7 @@ public class TargetWriteEndToEndTest {
         reindexChangeset(cluster, indexName, List.of(), docs, context);
     }
 
-    /** Reindex a changeset with explicit deletions and additions */
+    /** Write a changeset (deletions then additions) via OpenSearchDocumentSink */
     @SneakyThrows
     private void reindexChangeset(
         SearchClusterContainer cluster,
@@ -220,19 +218,28 @@ public class TargetWriteEndToEndTest {
     ) {
         var connectionContext = ConnectionContextTestParams.builder()
             .host(cluster.getUrl()).build().toConnectionContext();
-        var reindexer = new DocumentReindexer(
-            new OpenSearchClientFactory(connectionContext).determineVersionAndCreate(),
-            1000, Long.MAX_VALUE, 1, null, false, DocumentExceptionAllowlist.empty()
+        var sink = new OpenSearchDocumentSink(
+            new OpenSearchClientFactory(connectionContext).determineVersionAndCreate()
         );
+        var shardId = new ShardId("test", indexName, 0);
 
-        var changeset = new DocumentChangeset(
-            Flux.fromIterable(deletions),
-            Flux.fromIterable(additions),
-            () -> {}
-        );
+        if (!deletions.isEmpty()) {
+            sink.writeBatch(shardId, indexName, toIrDocs(deletions)).block();
+        }
+        if (!additions.isEmpty()) {
+            sink.writeBatch(shardId, indexName, toIrDocs(additions)).block();
+        }
+    }
 
-        reindexer.reindex(indexName, changeset, context.createReindexContext())
-            .blockLast();
+    private static List<DocumentChange> toIrDocs(List<LuceneDocumentChange> docs) {
+        return docs.stream()
+            .map(d -> new DocumentChange(
+                d.getId(), d.getType(), d.getSource(), d.getRouting(),
+                d.getOperation() == DocumentChangeType.DELETE
+                    ? DocumentChange.ChangeType.DELETE
+                    : DocumentChange.ChangeType.INDEX
+            ))
+            .toList();
     }
 
     private RestClient createRestClient(SearchClusterContainer cluster) {

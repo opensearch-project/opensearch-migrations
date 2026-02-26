@@ -149,7 +149,7 @@ public class SnapshotExtractor {
 
     /**
      * Reads delta documents between a previous and current shard. Returns deletions first,
-     * then additions — matching the ordering used by {@code DocumentReindexer}.
+     * then additions — matching the ordering used by {@code MigrationPipeline}.
      *
      * @param currentShard        the current snapshot's shard entry
      * @param previousShard       the previous snapshot's shard entry
