@@ -82,6 +82,21 @@ export interface SolrSchema {
   fields: Record<string, SolrFieldDefinition>;
 }
 
+/**
+ * A response assertion — verifies the proxy response content is correct.
+ *
+ * Use these to assert on the actual response (not just compare with Solr).
+ * Evaluated against the proxy response JSON after the Solr comparison.
+ */
+export interface ResponseAssertion {
+  /** JSONPath to evaluate (e.g. '$.response.numFound', '$.response.docs'). */
+  path: string;
+  /** Assert the value at path equals this exactly. */
+  equals?: FieldValue | Record<string, unknown>;
+  /** Assert the array at path has this many elements. */
+  count?: number;
+}
+
 /** HTTP methods supported by the test framework. */
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'HEAD';
 
@@ -135,6 +150,8 @@ export interface TestCase {
   solrSchema?: SolrSchema;
   /** Explicit OpenSearch index mapping. If set, the index is created with this mapping before seeding. */
   opensearchMapping?: OpenSearchMapping;
+  /** Assertions about the proxy response content (evaluated after Solr comparison). */
+  responseAssertions?: ResponseAssertion[];
   solrVersions?: string[];
   plugins?: string[];
 }
