@@ -106,7 +106,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
             "endpoint": "",
             "version": f"{self.source_version.cluster_type} "
                        f"{self.source_version.major_version}.{self.source_version.minor_version}",
-            "snapshotRepo": snapshot_repo
+            "snapshotRepos": {"default": snapshot_repo}
         }
 
         self.workflow_template = "full-migration-imported-clusters"
