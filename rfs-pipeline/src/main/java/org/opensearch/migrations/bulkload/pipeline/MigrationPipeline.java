@@ -153,6 +153,9 @@ public class MigrationPipeline {
      * Batching predicate that groups documents by count and byte size.
      * Stateful — tracks current batch metrics and resets on batch boundary.
      *
+     * <p>Not thread-safe — relies on single-threaded execution via {@code concatMap} in
+     * {@link #migrateShard}. Do not use with concurrent operators (e.g. flatMap).
+     *
      * <p>Used with {@link Flux#bufferUntil} to create batches that respect both
      * document count and byte size limits.
      */
