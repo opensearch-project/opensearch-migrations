@@ -124,15 +124,7 @@ def call(Map config = [:]) {
 
             stage('Checkout') {
                 steps {
-                    script {
-                        sh 'sudo chown -R $(whoami) .'
-                        sh 'sudo chmod -R u+w .'
-                        if (sh(script: 'git rev-parse --git-dir > /dev/null 2>&1', returnStatus: true) == 0) {
-                            sh 'git reset --hard'
-                            sh 'git clean -fd'
-                        }
-                        checkout scm
-                    }
+                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
                 }
             }
 
