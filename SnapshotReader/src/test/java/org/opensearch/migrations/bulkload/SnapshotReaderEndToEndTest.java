@@ -9,12 +9,12 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
+import org.opensearch.migrations.bulkload.common.SourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
@@ -154,7 +154,7 @@ public class SnapshotReaderEndToEndTest {
         String indexName,
         int shardId
     ) {
-        var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
+        var repoAccessor = new SourceRepoAccessor(sourceRepo);
         var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, luceneDir);
         var readerFactory = new LuceneIndexReader.Factory(snapshotReader);
 

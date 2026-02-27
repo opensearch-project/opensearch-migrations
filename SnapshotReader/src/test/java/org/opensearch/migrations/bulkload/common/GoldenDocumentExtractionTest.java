@@ -78,7 +78,7 @@ public class GoldenDocumentExtractionTest {
         var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
         var repo = new FileSystemRepo(snapshot.dir, fileFinder);
         var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(version, repo, false);
-        var repoAccessor = new DefaultSourceRepoAccessor(repo);
+        var repoAccessor = new SourceRepoAccessor(repo);
 
         var shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, indexName, 0);
 
