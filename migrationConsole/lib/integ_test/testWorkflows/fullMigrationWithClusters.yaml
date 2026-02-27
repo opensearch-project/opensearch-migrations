@@ -350,10 +350,7 @@ spec:
                 "migrationConfigs": [{
                   "fromSource": "source1",
                   "toTarget": "target1",
-                  "snapshotExtractAndLoadConfigs": $snapshotConfigs,
-                  "replayerConfig": {
-                    "podReplicas": 0
-                  }
+                  "snapshotExtractAndLoadConfigs": $snapshotConfigs
                 }]
               }')
             
