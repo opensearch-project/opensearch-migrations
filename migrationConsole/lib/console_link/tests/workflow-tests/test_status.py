@@ -75,42 +75,37 @@ def capture_output(func):
 class TestWorkflowDataFetcherArchive:
     """Tests for WorkflowDataFetcher archive fallback methods."""
 
-    @patch('console_link.workflow.services.workflow_service.requests.get')
     @patch('console_link.workflow.commands.status.requests.get')
-    def test_get_workflow_data_falls_back_to_archive(self, mock_status_get, mock_svc_get):
+    def test_get_workflow_data_falls_back_to_archive(self, mock_get):
         """Test get_workflow_data falls back to archive when live API returns 404."""
         service = WorkflowService()
         fetcher = WorkflowDataFetcher(service, token='test-token')
 
         live_response = Mock()
         live_response.status_code = 404
-        mock_status_get.return_value = live_response
 
         archive_response = Mock()
         archive_response.status_code = 200
         archive_response.json.return_value = {
             'items': [{'metadata': {'name': 'wf-1'}, 'status': {'phase': 'Succeeded'}}]
         }
-        mock_svc_get.return_value = archive_response
+
+        mock_get.side_effect = [live_response, archive_response]
 
         result = fetcher.get_workflow_data('wf-1', 'http://argo:2746', 'ma', False)
 
         assert result['metadata']['name'] == 'wf-1'
+        assert mock_get.call_count == 2
 
-    @patch('console_link.workflow.services.workflow_service.requests.get')
     @patch('console_link.workflow.commands.status.requests.get')
-    def test_get_workflow_data_returns_empty_when_both_fail(self, mock_status_get, mock_svc_get):
+    def test_get_workflow_data_returns_empty_when_both_fail(self, mock_get):
         """Test get_workflow_data returns empty dict when live and archive both fail."""
         service = WorkflowService()
         fetcher = WorkflowDataFetcher(service)
 
-        live_response = Mock()
-        live_response.status_code = 404
-        mock_status_get.return_value = live_response
-
-        archive_response = Mock()
-        archive_response.status_code = 404
-        mock_svc_get.return_value = archive_response
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_get.return_value = mock_response
 
         result = fetcher.get_workflow_data('missing', 'http://argo:2746', 'ma', False)
 

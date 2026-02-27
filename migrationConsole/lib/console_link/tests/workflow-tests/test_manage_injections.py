@@ -402,7 +402,7 @@ class TestArgoServiceFiltering:
         assert "node-1" in slim_data["status"]["nodes"]
         node = slim_data["status"]["nodes"]["node-1"]
         assert node["phase"] == "Succeeded"
-        assert node["displayName"] == "step-one"
+        assert node["displayName"] == "Step-one"
 
 
 # --- PodScraperInterface Tests ---
