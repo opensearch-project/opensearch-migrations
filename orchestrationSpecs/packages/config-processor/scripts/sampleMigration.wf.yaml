@@ -79,10 +79,7 @@
             }
           ]
         }
-      ],
-      "replayerConfig": {
-        "podReplicas": 0
-      }
+      ]
     }
   ]
 }
