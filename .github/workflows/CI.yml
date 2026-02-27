@@ -311,7 +311,7 @@ jobs:
           cfn-lint "/tmp/cdk.out/*.template.json" --format json --non-zero-exit-code none > /tmp/cfn-lint-output.json
 
           ISSUE_COUNT=$(jq 'length' /tmp/cfn-lint-output.json)
-          BASELINE_ISSUE_COUNT=999  # TODO: set to actual count after first CI run
+          BASELINE_ISSUE_COUNT=6
 
           {
             echo "## cfn-lint: $ISSUE_COUNT findings (baseline: $BASELINE_ISSUE_COUNT)"
