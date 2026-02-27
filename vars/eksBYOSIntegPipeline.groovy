@@ -174,6 +174,7 @@ def call(Map config = [:]) {
                                           --stage "${maStageName}" \
                                           --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
                                           --build-images \
+                                          --push-all-images-to-private-ecr \
                                           --build-chart-and-dashboards \
                                           --base-dir "\$(pwd)" \
                                           --skip-console-exec \
