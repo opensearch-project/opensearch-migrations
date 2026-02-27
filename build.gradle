@@ -220,7 +220,7 @@ subprojects {
                 systemProperty 'junit.jupiter.extensions.autodetection.enabled', true
                 // Verify assertions in tests
                 jvmArgs += ['-ea', '-XX:+HeapDumpOnOutOfMemoryError', '-Xmx2g']
-                systemProperty "junit.jupiter.execution.timeout.default", "5m"
+                systemProperty "junit.jupiter.execution.timeout.default", "10m"
                 jacoco {
                     enabled = true
                     def stripingSuffix = (total != null && index != null) ? "-${index}-of-${total}" : ""

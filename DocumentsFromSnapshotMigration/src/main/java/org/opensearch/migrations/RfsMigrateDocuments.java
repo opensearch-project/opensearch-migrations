@@ -860,7 +860,7 @@ public class RfsMigrateDocuments {
 
         var shardMetadataSupplier = shardMetadataSupplierFactory.apply(snapshotName);
         var strategy = (previousSnapshotName == null)
-            ? new RegularDocumentReaderEngine(shardMetadataSupplier)
+            ? new RegularDocumentReaderEngine(shardMetadataSupplier, indexMetadataFactory, snapshotName)
             : new DeltaDocumentReaderEngine(
                 shardMetadataSupplierFactory.apply(previousSnapshotName), shardMetadataSupplier, deltaMode);
 
