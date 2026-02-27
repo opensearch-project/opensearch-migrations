@@ -158,58 +158,61 @@ class TestWorkflowCLICommands:
         mock_service = Mock()
         mock_service_class.return_value = mock_service
 
-        mock_service.list_workflows.return_value = {
-            'success': True,
-            'workflows': ['workflow-1', 'workflow-2'],
-            'count': 2,
-            'error': None
+        wf1_data = {
+            'metadata': {'name': 'workflow-1', 'namespace': 'ma'},
+            'status': {
+                'phase': 'Running',
+                'startedAt': '2024-01-01T10:00:00Z',
+                'finishedAt': None,
+                'nodes': {
+                    'workflow-1': {
+                        'id': 'workflow-1',
+                        'displayName': 'workflow-1',
+                        'type': 'Steps',
+                        'phase': 'Running'
+                    }
+                }
+            }
+        }
+        wf2_data = {
+            'metadata': {'name': 'workflow-2', 'namespace': 'ma'},
+            'status': {
+                'phase': 'Succeeded',
+                'startedAt': '2024-01-01T09:00:00Z',
+                'finishedAt': '2024-01-01T09:05:00Z',
+                'nodes': {
+                    'workflow-2': {
+                        'id': 'workflow-2',
+                        'displayName': 'workflow-2',
+                        'type': 'Steps',
+                        'phase': 'Succeeded'
+                    }
+                }
+            }
         }
 
-        # Mock requests.get to return workflow data for each workflow
+        # Mock requests.get to return list response and individual workflow data
         def mock_get_response(*args, **kwargs):
             url = args[0]
             mock_response = Mock()
             mock_response.status_code = 200
-            
+
             if 'workflow-1' in url:
-                mock_response.json.return_value = {
-                    'metadata': {'name': 'workflow-1', 'namespace': 'ma'},
-                    'status': {
-                        'phase': 'Running',
-                        'startedAt': '2024-01-01T10:00:00Z',
-                        'finishedAt': None,
-                        'nodes': {
-                            'workflow-1': {
-                                'id': 'workflow-1',
-                                'displayName': 'workflow-1',
-                                'type': 'Steps',
-                                'phase': 'Running'
-                            }
-                        }
-                    }
-                }
+                mock_response.json.return_value = wf1_data
             elif 'workflow-2' in url:
+                mock_response.json.return_value = wf2_data
+            elif 'archived-workflows' in url:
+                mock_response.json.return_value = {'items': []}
+            else:
+                # List endpoint: /api/v1/workflows/ma
                 mock_response.json.return_value = {
-                    'metadata': {'name': 'workflow-2', 'namespace': 'ma'},
-                    'status': {
-                        'phase': 'Succeeded',
-                        'startedAt': '2024-01-01T09:00:00Z',
-                        'finishedAt': '2024-01-01T09:05:00Z',
-                        'nodes': {
-                            'workflow-2': {
-                                'id': 'workflow-2',
-                                'displayName': 'workflow-2',
-                                'type': 'Steps',
-                                'phase': 'Succeeded'
-                            }
-                        }
-                    }
+                    'items': [wf1_data, wf2_data]
                 }
             return mock_response
-        
+
         mock_requests_get.side_effect = mock_get_response
 
-        result = runner.invoke(workflow_cli, ['status', '--all-workflows'])
+        result = runner.invoke(workflow_cli, ['status', '--all-workflows', '--all'])
 
         assert result.exit_code == 0
         assert 'Found 2 workflow(s)' in result.output
