@@ -201,7 +201,7 @@ class WorkflowDataFetcher:
         return workflows
 
     def _list_archived_workflows(self, argo_server: str, namespace: str,
-                                  insecure: bool, limit: int = 50) -> List[Dict[str, Any]]:
+                                 insecure: bool, limit: int = 50) -> List[Dict[str, Any]]:
         """List workflows from the Argo archive."""
         try:
             headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
