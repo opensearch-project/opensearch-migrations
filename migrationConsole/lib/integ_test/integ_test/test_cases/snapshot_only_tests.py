@@ -128,7 +128,8 @@ class Test0010ExternalSnapshotMigration(MATestBase):
 
     def display_final_cluster_state(self):
         """Display target cluster indices."""
-        target_response = cat_indices(cluster=self.target_cluster, refresh=True).decode("utf-8")
+        response = cat_indices(cluster=self.target_cluster, refresh=True)
+        target_response = response.decode("utf-8") if isinstance(response, bytes) else response
         logger.info("Target cluster indices after migration:")
         logger.info("TARGET CLUSTER")
         logger.info(target_response)

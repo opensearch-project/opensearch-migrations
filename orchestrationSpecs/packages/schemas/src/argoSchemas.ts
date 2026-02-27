@@ -128,7 +128,7 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG =
 export const SNAPSHOT_MIGRATION_CONFIG =
     makeOptionalDefaultedFieldsRequired(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG
         .omit({createSnapshotConfig: true, migrations: true, label: true, snapshotConfig: true}).extend({
-            createSnapshotConfig: ARGO_CREATE_SNAPSHOT_OPTIONS,
+            createSnapshotConfig: ARGO_CREATE_SNAPSHOT_OPTIONS.optional(),
             migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1),
             label: z.string(),
             snapshotConfig: DYNAMIC_SNAPSHOT_CONFIG
