@@ -130,31 +130,34 @@ class TestWorkflowServiceMonitoring:
         """Test successful workflow completion monitoring."""
         service = WorkflowService()
 
-        # First call: workflow running, second call: workflow succeeded
-        running_response = Mock()
-        running_response.status_code = 200
-        running_response.json.return_value = {
-            'status': {'phase': 'Running', 'nodes': {}}
-        }
+        call_count = [0]
 
-        succeeded_response = Mock()
-        succeeded_response.status_code = 200
-        succeeded_response.json.return_value = {
-            'status': {
-                'phase': 'Succeeded',
-                'nodes': {
-                    'node-1': {
-                        'outputs': {
-                            'parameters': [
-                                {'name': 'message', 'value': 'Hello World'}
-                            ]
+        def mock_get_fn(*args, **kwargs):
+            call_count[0] += 1
+            resp = Mock()
+            resp.status_code = 200
+            if call_count[0] == 1:
+                resp.json.return_value = {
+                    'status': {'phase': 'Running', 'nodes': {}}
+                }
+            else:
+                resp.json.return_value = {
+                    'status': {
+                        'phase': 'Succeeded',
+                        'nodes': {
+                            'node-1': {
+                                'outputs': {
+                                    'parameters': [
+                                        {'name': 'message', 'value': 'Hello World'}
+                                    ]
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
+            return resp
 
-        mock_get.side_effect = [running_response, succeeded_response]
+        mock_get.side_effect = mock_get_fn
 
         phase, output = service.wait_for_workflow_completion(
             namespace='argo',
