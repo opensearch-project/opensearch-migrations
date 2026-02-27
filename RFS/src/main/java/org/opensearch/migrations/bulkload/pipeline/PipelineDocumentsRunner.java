@@ -137,8 +137,12 @@ public class PipelineDocumentsRunner {
 
                         var error = migrationError.get();
                         if (error != null) {
+                            context.recordPipelineError();
                             throw new RuntimeException("Shard migration failed for " + wi, error);
                         }
+                        context.recordShardDuration(durationMs);
+                        context.recordDocsMigrated(totalDocsMigrated.get());
+                        context.recordBytesMigrated(totalBytesMigrated.get());
                         return CompletionStatus.WORK_COMPLETED;
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
