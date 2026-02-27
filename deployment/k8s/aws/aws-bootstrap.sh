@@ -553,8 +553,6 @@ fi
 # --- CFN deployment (optional) ---
 if [[ "$deploy_cfn" == "true" ]]; then
   # Determine template source
-  cfn_template_flag=""
-  cfn_template_value=""
   if [[ "$build_cfn" == "true" ]]; then
     echo "Building CloudFormation templates from source..."
     # Clear STACK_NAME_SUFFIX so CDK produces predictable template filenames.
@@ -564,11 +562,10 @@ if [[ "$deploy_cfn" == "true" ]]; then
     # the CDK has safe defaults when they're unset.
     STACK_NAME_SUFFIX="" \
       "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified
-    cfn_template_flag="--template-body"
     if [[ "$deploy_create_vpc" == "true" ]]; then
-      cfn_template_value="file://$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
+      cfn_template_file="$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
     else
-      cfn_template_value="file://$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Import-VPC-eks.template.json"
+      cfn_template_file="$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Import-VPC-eks.template.json"
     fi
   else
     if [[ "$deploy_create_vpc" == "true" ]]; then
@@ -581,22 +578,20 @@ if [[ "$deploy_cfn" == "true" ]]; then
     curl -fL -o "$cfn_template_file" \
       "https://github.com/opensearch-project/opensearch-migrations/releases/download/${RELEASE_VERSION}/${cfn_template_name}" \
       || { echo "Failed to download CFN template for version ${RELEASE_VERSION}"; rm -f "$cfn_template_file"; exit 1; }
-    cfn_template_flag="--template-body"
-    cfn_template_value="file://${cfn_template_file}"
   fi
 
-  # Build parameter overrides (use separate array to handle comma-separated subnet IDs)
-  cfn_params=("ParameterKey=Stage,ParameterValue=${stage_filter}")
+  # Build parameter overrides for `aws cloudformation deploy`
+  cfn_params=("Stage=${stage_filter}")
   if [[ "$deploy_import_vpc" == "true" ]]; then
-    cfn_params+=("ParameterKey=VPCId,ParameterValue=${vpc_id}")
-    cfn_params+=("ParameterKey=VPCSubnetIds,ParameterValue=\"${subnet_ids}\"")
+    cfn_params+=("VPCId=${vpc_id}")
+    cfn_params+=("VPCSubnetIds=${subnet_ids}")
     # Add VPC endpoint creation parameters
     if [[ -n "$create_vpc_endpoints" ]]; then
       IFS=',' read -ra ep_arr <<< "$create_vpc_endpoints"
       for ep in "${ep_arr[@]}"; do
         case "$ep" in
           s3)
-            cfn_params+=("ParameterKey=CreateS3Endpoint,ParameterValue=true")
+            cfn_params+=("CreateS3Endpoint=true")
             # Resolve route tables for the subnets so the S3 gateway endpoint gets associated
             s3_route_table_ids=$(aws ec2 describe-route-tables \
               --filters "Name=association.subnet-id,Values=${subnet_ids}" \
@@ -607,14 +602,14 @@ if [[ "$deploy_cfn" == "true" ]]; then
                 --filters "Name=vpc-id,Values=${vpc_id}" "Name=association.main,Values=true" \
                 --query 'RouteTables[0].RouteTableId' --output text ${region:+--region "$region"})
             fi
-            cfn_params+=("ParameterKey=S3EndpointRouteTableIds,ParameterValue=\"${s3_route_table_ids}\"")
+            cfn_params+=("S3EndpointRouteTableIds=${s3_route_table_ids}")
             ;;
-          ecr)             cfn_params+=("ParameterKey=CreateECREndpoint,ParameterValue=true") ;;
-          ecrDocker)       cfn_params+=("ParameterKey=CreateECRDockerEndpoint,ParameterValue=true") ;;
-          cloudwatchLogs)  cfn_params+=("ParameterKey=CreateCloudWatchLogsEndpoint,ParameterValue=true") ;;
-          efs)             cfn_params+=("ParameterKey=CreateEFSEndpoint,ParameterValue=true") ;;
-          sts)             cfn_params+=("ParameterKey=CreateSTSEndpoint,ParameterValue=true") ;;
-          eksAuth)         cfn_params+=("ParameterKey=CreateEKSAuthEndpoint,ParameterValue=true") ;;
+          ecr)             cfn_params+=("CreateECREndpoint=true") ;;
+          ecrDocker)       cfn_params+=("CreateECRDockerEndpoint=true") ;;
+          cloudwatchLogs)  cfn_params+=("CreateCloudWatchLogsEndpoint=true") ;;
+          efs)             cfn_params+=("CreateEFSEndpoint=true") ;;
+          sts)             cfn_params+=("CreateSTSEndpoint=true") ;;
+          eksAuth)         cfn_params+=("CreateEKSAuthEndpoint=true") ;;
           *) echo "Warning: Unknown VPC endpoint type: $ep (valid: s3,ecr,ecrDocker,cloudwatchLogs,efs)" >&2 ;;
         esac
       done
@@ -623,23 +618,12 @@ if [[ "$deploy_cfn" == "true" ]]; then
 
   echo "Deploying CloudFormation stack: $cfn_stack_name"
 
-  # Helper: dump recent CFN events on failure for debugging
-  dump_cfn_events() {
-    echo "--- CloudFormation stack events (last 20) ---"
-    aws cloudformation describe-stack-events \
-      --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-      --query 'StackEvents[:20].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
-      --output table 2>/dev/null || echo "(unable to retrieve events)"
-    echo "--- end events ---"
-  }
-
-  # Handle stacks in terminal failed states (ROLLBACK_COMPLETE, DELETE_FAILED)
+  # Handle stacks in terminal failed states (ROLLBACK_COMPLETE, UPDATE_ROLLBACK_COMPLETE, DELETE_FAILED)
   if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
     stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
       --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
-    if [[ "$stack_status" == "ROLLBACK_COMPLETE" || "$stack_status" == "DELETE_FAILED" ]]; then
+    if [[ "$stack_status" == "ROLLBACK_COMPLETE" || "$stack_status" == "UPDATE_ROLLBACK_COMPLETE" || "$stack_status" == "DELETE_FAILED" ]]; then
       echo "Stack $cfn_stack_name is in $stack_status state. Deleting before re-creating..."
-      dump_cfn_events
       aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"}
       aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
         || { echo "Failed to delete $stack_status stack: $cfn_stack_name"; exit 1; }
@@ -647,38 +631,14 @@ if [[ "$deploy_cfn" == "true" ]]; then
     fi
   fi
 
-  # create-stack/update-stack to support both --template-file and --template-url
-  if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
-    update_output=$(aws cloudformation update-stack \
-      "$cfn_template_flag" "$cfn_template_value" \
-      --stack-name "$cfn_stack_name" \
-      --parameters "${cfn_params[@]}" \
-      --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-      ${region:+--region "$region"} 2>&1) && update_started=true || update_started=false
-    if [[ "$update_started" == "true" ]]; then
-      echo "Waiting for stack update to complete..."
-      aws cloudformation wait stack-update-complete \
-        --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-        || { dump_cfn_events; echo "CloudFormation stack update failed for: $cfn_stack_name"; exit 1; }
-    elif echo "$update_output" | grep -q "No updates are to be performed"; then
-      echo "No updates needed for stack: $cfn_stack_name"
-    else
-      echo "CloudFormation update-stack failed: $update_output" >&2
-      exit 1
-    fi
-  else
-    aws cloudformation create-stack \
-      "$cfn_template_flag" "$cfn_template_value" \
-      --stack-name "$cfn_stack_name" \
-      --parameters "${cfn_params[@]}" \
-      --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-      ${region:+--region "$region"} \
-      || { echo "CloudFormation deployment failed for stack: $cfn_stack_name"; exit 1; }
-    echo "Waiting for stack creation to complete..."
-    aws cloudformation wait stack-create-complete \
-      --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-      || { dump_cfn_events; echo "CloudFormation stack creation failed for: $cfn_stack_name"; exit 1; }
-  fi
+  aws cloudformation deploy \
+    --template-file "$cfn_template_file" \
+    --stack-name "$cfn_stack_name" \
+    --parameter-overrides "${cfn_params[@]}" \
+    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+    --no-fail-on-empty-changeset \
+    ${region:+--region "$region"} \
+    || { echo "CloudFormation deployment failed for: $cfn_stack_name"; exit 1; }
 
   echo "CloudFormation stack deployed successfully: $cfn_stack_name"
 fi
