@@ -80,7 +80,7 @@ describe('semaphore configuration', () => {
 
         const result = await transformer.processFromObject(config);
         const semaphoreKeys = result[0].snapshotExtractAndLoadConfigArray!.map(
-            config => config.createSnapshotConfig.semaphoreKey
+            config => config.createSnapshotConfig!.semaphoreKey
         );
         const uniqueKeys = new Set(semaphoreKeys);
         
@@ -163,7 +163,7 @@ describe('semaphore configuration', () => {
 
         const result = await transformer.processFromObject(config);
         const semaphoreKeys = result[0].snapshotExtractAndLoadConfigArray!.map(
-            config => config.createSnapshotConfig.semaphoreKey
+            config => config.createSnapshotConfig!.semaphoreKey
         );
         const uniqueKeys = new Set(semaphoreKeys);
         
@@ -287,7 +287,7 @@ describe('semaphore configuration', () => {
         const workflowSemaphoreKeys = new Set();
         bundle.workflows.forEach(migration => {
             migration.snapshotExtractAndLoadConfigArray?.forEach(snapConfig => {
-                workflowSemaphoreKeys.add(snapConfig.createSnapshotConfig.semaphoreKey);
+                workflowSemaphoreKeys.add(snapConfig.createSnapshotConfig!.semaphoreKey);
             });
         });
         
