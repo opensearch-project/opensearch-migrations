@@ -81,9 +81,26 @@ Lease timing is deterministic as a function of 1/ the "initial lease time" param
 
 Claiming a lease involves a clock-check (rejecting the lease if the worker's clock is too far off from the CMS's clock), after which the RFS workers monitor the time remaining until the lease expires. When it expires without the work being completed, they (in most cases) create a successor work item including a progress cursor of the current progress through the shard, mark the original work item as completed, and kill the worker process. If shard setup (downloading, unpacking, and beginning to read the shard) takes too little (<2.5%) or too much (>10%) of the lease time, the lease time is considered wrong-sized and is adjusted for the successor item. This adjustment is done by setting the number of attempt field when creating the successor item. If the lease was too short (setup took too large a percent of the time), the number of attempts on the successor item will be the number of attempts on the original item plus one. In the opposite case, it will be initialized as the attempts on the original item minus one. And if the lease was "right-sized", the successor item will get the same number of attempts value as the original currently has.
 
+#### Planned lease-timeout checkpoint timing (MIGRATIONS-2864)
+
+This section documents intended behavior for `MIGRATIONS-2864`. Until that change is released, lease-timeout checkpointing is only initiated at lease expiry.
+
+Planned trigger time for cancellation/checkpoint:
+- `trigger = max(leaseDuration * 0.75, leaseDuration - PT4M30S)`
+
+At this trigger, the worker:
+1. Cancels in-flight document migration for the current shard.
+2. Captures the most recent progress cursor.
+3. Runs `createSuccessorWorkItemsAndMarkComplete` to persist handoff metadata.
+4. Exits so the next worker can reclaim and continue.
+
+This is meant to preserve progress during transient coordinator outages that happen shortly before lease expiry, giving coordinator retry/backoff logic additional time to persist successor metadata.
+
 ### One work lease at a time
 
 An RFS Worker retains no more than a single work lease at a time.  If the work item associated with that lease has multiple steps or components, the work lease covers the completion of all of them as a combined unit.  As a specific example, the RFS Worker that wins the lease to migrate an Elasticsearch shard is responsible for migrating every document in that shard starting at the given doc num (or at the beginning if not specified). After completing a lease, the worker process exits.
+
+In lease-timeout handoff scenarios, the process exits after checkpoint/handoff work is attempted so that a subsequent worker can reclaim remaining documents.
 
 ### Work lease backoff
 
@@ -105,6 +122,11 @@ A successor item is created when a worker does not complete the shard referenced
 If this process fails at any point before step 4 is successful, another worker will acquire the lease for the original work item. However, before beginning work, the worker checks whether the `successorWorkItems` field was set. If so, it knows that a previous worker completed up to the point indicated by the successor work item id, and it picks up the work of steps 3 and 4 (creating the successor work item, if it doesn't exist, and marking the original as complete).
 
 If this process fails before the `successorWorkItems` field is updated, a new worker will acquire the lease, but it won't be clear to that worker that this work was already started, so it will begin from the progress cursor in the original work item. While this means that excess document processing and reindexing work is being done, it does not put the CMS in an inconsistent state. Additionally, as detailed below, reindexing documents is idempotent by ID, so re-writing a document does not cause duplicate copies on the target cluster.
+
+Coordinator outage contract around the planned early-checkpoint trigger:
+- If coordinator is unavailable at trigger time, worker retries coordinator operations using existing retry/backoff policies.
+- If retries succeed before retry budget exhaustion, handoff metadata is persisted and successor work can be reclaimed.
+- If retries are exhausted, worker exits and later workers may need to re-drive work from the last persisted cursor.
 
 ```mermaid
 sequenceDiagram
