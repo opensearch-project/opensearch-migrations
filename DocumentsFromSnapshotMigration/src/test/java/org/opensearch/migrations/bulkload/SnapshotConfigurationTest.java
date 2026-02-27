@@ -133,7 +133,7 @@ public class SnapshotConfigurationTest extends SourceTestBase {
             sourceClusterOperations.createDocument(indexName, "doc5", "{\"field\": \"value5\", \"number\": 100}");
 
             // Refresh to ensure documents are searchable
-            sourceClusterOperations.post("/" + indexName + "/_refresh", null);
+            sourceClusterOperations.refresh(indexName);
 
             // === ACTION: Take a snapshot with specific configuration ===
             var snapshotName = "test_snapshot";
