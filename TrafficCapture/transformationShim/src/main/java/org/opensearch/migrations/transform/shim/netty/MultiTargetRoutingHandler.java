@@ -138,7 +138,8 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest request) {
-        long shimStartNanos = System.nanoTime();
+        // TODO: enable if latency headers matter
+        // long shimStartNanos = System.nanoTime();
         activeRequests.incrementAndGet();
         boolean keepAlive = Boolean.TRUE.equals(
             ctx.channel().attr(ShimChannelAttributes.KEEP_ALIVE).get());
@@ -148,7 +149,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
         long requestId = requestCounter.getAndIncrement();
         var futures = dispatchAll(requestMap);
-        handlePrimaryCompletion(ctx, futures, keepAlive, requestMap, requestId, shimStartNanos);
+        handlePrimaryCompletion(ctx, futures, keepAlive, requestMap, requestId);
     }
 
     private Map<String, CompletableFuture<TargetResponse>> dispatchAll(
@@ -169,8 +170,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         Map<String, CompletableFuture<TargetResponse>> futures,
         boolean keepAlive,
         Map<String, Object> requestMap,
-        long requestId,
-        long shimStartNanos
+        long requestId
     ) {
         futures.get(primaryTarget).whenComplete((primaryResp, primaryEx) ->
             ctx.channel().eventLoop().execute(() -> {
