@@ -110,6 +110,10 @@ These arguments should be carefully considered before setting, can include exper
 
 These settings apply to coordinator work-item completion retries only and do not change target bulk indexing retry behavior. They are intended for transient coordinator outages such as pod restarts or evictions.
 
+The coordinator can be:
+- The target cluster (default behavior).
+- A dedicated cluster via `--coordinator-host` (plus optional coordinator auth/TLS/SigV4 flags).
+
 When RFS finishes migrating documents for a shard, it marks the work item as completed on the coordinator cluster. If the coordinator is temporarily unavailable during this step, RFS retries with exponential backoff (2x multiplier). With defaults (7 retries = 8 total executions, 1000ms initial delay, 64s max delay), the backoff sleep sequence is: 1s, 2s, 4s, 8s, 16s, 32s, 64s (~127s total sleep). Actual elapsed time can be longer due to request timeouts and latency.
 
 - **Happy path**: No retries needed, completion succeeds immediately with zero added latency.
@@ -117,6 +121,43 @@ When RFS finishes migrating documents for a shard, it marks the work item as com
 - **Non-retryable errors**: Fail immediately without retrying.
 
 **Tuning**: Increase `--coordinator-retry-max-retries` or `--coordinator-retry-initial-delay-ms` for environments with longer coordinator restart times. Decrease for faster failure detection. Longer settings trade off resilience for slower failure detection and Argo retry.
+
+#### Early Checkpoint Before Lease Expiry
+
+Until `MIGRATIONS-2864` change is released, workers checkpoint only in the lease-expiry path.
+
+Planned lease-timeout trigger:
+- `checkpointTriggerTime = max(leaseDuration * 0.75, leaseDuration - PT4M30S)`
+
+Planned behavior at trigger time:
+- Cancel active shard migration work in the current process.
+- Capture the latest progress cursor.
+- Persist handoff metadata on the coordinator (`successor_items` + successor work item creation + parent completion).
+- Exit the worker so another worker can reclaim and continue remaining work.
+
+Why this exists:
+- Reduces the risk of losing in-memory progress when coordinator connectivity drops near lease expiry.
+- Provides extra time for coordinator retry/backoff to succeed before the hard lease boundary.
+
+Dedicated coordinator outage example (PT60S lease):
+- `t=0s`: worker starts migrating shard docs
+- `t=40s`: coordinator becomes unavailable
+- `t=45s`: early checkpoint/cancel trigger fires (`max(60s*0.75, 60s-270s)=45s`)
+- `t=45s+`: coordinator retry logic attempts to persist handoff metadata
+- `t=48s`: coordinator recovers; retry can succeed and persist `successor_items`
+- Next worker reclaims successor work item and continues remaining docs
+
+### Exit Code Contract
+
+Common RFS worker outcomes:
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Worker completed its current unit of work and exited normally. |
+| `2` | Worker exited from lease-timeout/handoff flow (`PROCESS_TIMED_OUT_EXIT_CODE`). This is expected in lease handoff scenarios. |
+| `3` | No work left (`NO_WORK_LEFT_EXIT_CODE`). |
+
+In orchestrated runs (Argo/ECS/K8s), treat `2` as a recoverable handoff signal rather than terminal data-loss failure.
 
 ### Example: Handling Target Conflicts
 
