@@ -22,6 +22,7 @@ defaultBucketConfiguration:
   emptyBeforeDelete: true
   endpoint: ""
   snapshotRoleArn: ""
+  bucketOperationImagePullPolicy: "Always"
 
 # Always pull to avoid stale cached images when using mutable tags (e.g. *_latest)
 images:
@@ -34,6 +35,8 @@ images:
   migrationConsole:
     pullPolicy: Always
   installer:
+    pullPolicy: Always
+  coordinatorCluster:
     pullPolicy: Always
 
 # For OTEL Daemonset
