@@ -71,3 +71,12 @@ etcdCluster:
 cnpgCluster:
   instances: 1
   storageSize: "1Gi"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "100m"
+      memory: "256Mi"
+  podAntiAffinityType: "preferred"        # Soft anti-affinity for single-node local dev
+  topologyKey: "kubernetes.io/hostname"   # No AZ topology on local

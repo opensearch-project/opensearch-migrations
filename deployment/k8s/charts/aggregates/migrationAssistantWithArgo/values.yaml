@@ -42,8 +42,18 @@ cnpgCluster:
   owner: "argo"
   storageSize: "10Gi"
   storageClass: ""  # Use default storage class
-  cpu: "100m"
-  memory: "256Mi"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  # EKS robustness: prevent both instances from being disrupted simultaneously
+  primaryUpdateStrategy: "unsupervised"  # Automatic failover during updates
+  primaryUpdateMethod: "switchover"      # Graceful switchover (not restart)
+  podAntiAffinityType: "required"        # Hard anti-affinity: instances MUST be on different nodes
+  topologyKey: "topology.kubernetes.io/zone"  # Spread across AZs for zone failure resilience
 
 # Kyverno policy toggles (requires conditionalPackageInstalls.kyverno: true)
 kyvernoPolicies:
@@ -243,7 +253,7 @@ charts:
 
   # CloudNativePG operator - manages PostgreSQL clusters for Argo archive
   cloudnative-pg:
-    version: "0.23.0"
+    version: "0.27.1"
     repository: "https://cloudnative-pg.github.io/charts"
     dependsOn: cert-manager
     waitForInstallation: true
@@ -333,6 +343,11 @@ charts:
           enabled: true
         resourceRateLimit: { "limit": 10.0, "burst": 25 }
         workflowWorkers: 16
+        # GC completed workflows from K8s after brief delay for archiving
+        workflowDefaults: |
+          spec:
+            ttlStrategy:
+              secondsAfterCompletion: 10
         persistence:
           connectionPool:
             maxIdleConns: 100
@@ -345,6 +360,8 @@ charts:
             port: 5432
             database: argo
             tableName: argo_workflows
+            ssl: true
+            sslMode: require
             userNameSecret:
               name: argo-postgres-app
               key: username

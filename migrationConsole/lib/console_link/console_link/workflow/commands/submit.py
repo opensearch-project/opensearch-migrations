@@ -20,16 +20,22 @@ def _handle_workflow_wait(
         service: WorkflowService,
         namespace: str,
         workflow_name: str,
+        argo_server: str,
         timeout: int,
-        wait_interval: int):
+        wait_interval: int,
+        token: str = None,
+        insecure: bool = False):
     """Handle waiting for workflow completion.
 
     Args:
         service: WorkflowService instance
         namespace: Kubernetes namespace
         workflow_name: Name of workflow
+        argo_server: Argo Server URL
         timeout: Timeout in seconds
         wait_interval: Interval between checks
+        token: Optional bearer token for authentication
+        insecure: Whether to skip TLS verification
     """
     click.echo(f"\nWaiting for workflow to complete (timeout: {timeout}s)...")
 
@@ -37,6 +43,9 @@ def _handle_workflow_wait(
         phase, output_message = service.wait_for_workflow_completion(
             namespace=namespace,
             workflow_name=workflow_name,
+            argo_server=argo_server,
+            token=token,
+            insecure=insecure,
             timeout=timeout,
             interval=wait_interval
         )
@@ -78,12 +87,20 @@ def _handle_workflow_wait(
     help='Interval in seconds between status checks (only used with --wait, default: 2)'
 )
 @click.option(
+    '--argo-server',
+    default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
+            f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
+    help='Argo Server URL (default: ARGO_SERVER_SERVICE_HOST:ARGO_SERVER_SERVICE_PORT)'
+)
+@click.option('--insecure', is_flag=True, default=False, help='Skip TLS verification')
+@click.option('--token', default=None, help='Bearer token for Argo Server authentication')
+@click.option(
     '--session',
     default='default',
     help='Configuration session name to load parameters from (default: default)'
 )
 @click.pass_context
-def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
+def submit_command(ctx, namespace, wait, timeout, wait_interval, argo_server, insecure, token, session):
     """Submit a migration workflow using the config processor.
 
     This command submits a migration workflow by:
@@ -150,7 +167,8 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
             # Wait for workflow completion if requested
             if wait:
                 service = WorkflowService()
-                _handle_workflow_wait(service, namespace, workflow_name, timeout, wait_interval)
+                _handle_workflow_wait(service, namespace, workflow_name, argo_server,
+                                     timeout, wait_interval, token, insecure)
 
         except FileNotFoundError as e:
             click.echo(f"Error: {str(e)}", err=True)

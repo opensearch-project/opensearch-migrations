@@ -150,30 +150,73 @@ class WorkflowDataFetcher:
 
     def get_workflow_data(self, workflow_name: str, argo_server: str, namespace: str,
                           insecure: bool) -> Dict[str, Any]:
-        """Get workflow data from Argo API (single network call)."""
+        """Get workflow data from Argo API, falling back to archive if not found."""
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
         url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
 
-        response = requests.get(url, headers=headers, verify=not insecure)
-        return response.json() if response.status_code == 200 else {}
+        response = requests.get(url, headers=headers, verify=not insecure, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+
+        # Fall back to archive API
+        archived = self.service._fetch_archived_workflow(
+            workflow_name, namespace, argo_server, self.token, insecure)
+        return archived or {}
 
     def list_workflows(self, argo_server: str, namespace: str,
                        insecure: bool, exclude_completed: bool) -> List[Dict[str, Any]]:
-        """List workflows and get their full data (one call per workflow)."""
-        list_result = self.service.list_workflows(
-            namespace=namespace, argo_server=argo_server, token=self.token,
-            insecure=insecure, exclude_completed=exclude_completed)
-
-        if not list_result['success'] or list_result['count'] == 0:
-            return []
+        """List workflows with full data. Uses list API response directly to avoid N+1 calls."""
+        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+        url = f"{argo_server}/api/v1/workflows/{namespace}"
 
         workflows = []
-        for wf_name in list_result['workflows']:
-            workflow_data = self.get_workflow_data(wf_name, argo_server, namespace, insecure)
-            if workflow_data:
-                workflows.append(workflow_data)
+        seen_names = set()
+
+        try:
+            response = requests.get(url, headers=headers, verify=not insecure, timeout=30)
+            if response.status_code == 200:
+                items = response.json().get("items") or []
+                for item in items:
+                    name = item.get("metadata", {}).get("name", "")
+                    if not name:
+                        continue
+                    phase = item.get("status", {}).get("phase", "Unknown")
+                    if exclude_completed and phase in ("Succeeded", "Failed", "Error", "Stopped", "Terminated"):
+                        continue
+                    workflows.append(item)
+                    seen_names.add(name)
+        except Exception as e:
+            logger.error(f"Failed to list workflows: {e}")
+            return []
+
+        # Include archived workflows when showing completed
+        if not exclude_completed:
+            archived = self._list_archived_workflows(argo_server, namespace, insecure)
+            for wf in archived:
+                name = wf.get('metadata', {}).get('name', '')
+                if name and name not in seen_names:
+                    workflows.append(wf)
+                    seen_names.add(name)
 
         return workflows
+
+    def _list_archived_workflows(self, argo_server: str, namespace: str,
+                                  insecure: bool, limit: int = 50) -> List[Dict[str, Any]]:
+        """List workflows from the Argo archive."""
+        try:
+            headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+            url = f"{argo_server}/api/v1/archived-workflows"
+            params = {
+                "listOptions.fieldSelector": f"metadata.namespace={namespace}",
+                "listOptions.limit": str(limit)
+            }
+            response = requests.get(url, headers=headers, params=params,
+                                    verify=not insecure, timeout=30)
+            if response.status_code == 200:
+                return response.json().get("items") or []
+        except Exception as e:
+            logger.warning(f"Failed to list archived workflows: {e}")
+        return []
 
 
 class WorkflowSorter:
