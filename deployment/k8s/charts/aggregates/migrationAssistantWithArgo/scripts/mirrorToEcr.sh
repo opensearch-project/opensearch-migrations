@@ -83,10 +83,18 @@ echo "$IMAGES" | while IFS= read -r image; do
 
   echo "  Copying $image → ${ECR_HOST}/${ecr_repo}:${tag}"
   aws ecr create-repository --repository-name "$ecr_repo" --region "$REGION" 2>/dev/null || true
-  if crane copy "$image" "${ECR_HOST}/${ecr_repo}:${tag}" 2>&1; then
-    echo "  ✅ $image"
-  else
-    echo "  ❌ FAILED: $image" >&2
+  copied=false
+  for attempt in 1 2 3; do
+    if crane copy "$image" "${ECR_HOST}/${ecr_repo}:${tag}" 2>&1; then
+      echo "  ✅ $image"
+      copied=true
+      break
+    fi
+    echo "  ⚠️  Attempt $attempt failed for $image, retrying in 5s..." >&2
+    sleep 5
+  done
+  if [ "$copied" = false ]; then
+    echo "  ❌ FAILED after 3 attempts: $image" >&2
     failed_images="$failed_images $image"
   fi
 done
