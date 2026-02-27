@@ -138,6 +138,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest request) {
+        long shimStartNanos = System.nanoTime();
         activeRequests.incrementAndGet();
         boolean keepAlive = Boolean.TRUE.equals(
             ctx.channel().attr(ShimChannelAttributes.KEEP_ALIVE).get());
@@ -147,7 +148,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
         long requestId = requestCounter.getAndIncrement();
         var futures = dispatchAll(requestMap);
-        handlePrimaryCompletion(ctx, futures, keepAlive, requestMap, requestId);
+        handlePrimaryCompletion(ctx, futures, keepAlive, requestMap, requestId, shimStartNanos);
     }
 
     private Map<String, CompletableFuture<TargetResponse>> dispatchAll(
@@ -168,7 +169,8 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         Map<String, CompletableFuture<TargetResponse>> futures,
         boolean keepAlive,
         Map<String, Object> requestMap,
-        long requestId
+        long requestId,
+        long shimStartNanos
     ) {
         futures.get(primaryTarget).whenComplete((primaryResp, primaryEx) ->
             ctx.channel().eventLoop().execute(() -> {
@@ -179,6 +181,9 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                     Map<String, TargetResponse> allResponses = collectResponses(futures);
                     List<ValidationResult> results = runValidators(allResponses);
                     FullHttpResponse response = buildFinalResponse(primary, allResponses, results);
+                    // TODO: enable if latency headers matter
+                    // response.headers().set("X-Shim-Latency",
+                    //     Duration.ofNanos(System.nanoTime() - shimStartNanos).toMillis());
                     HttpMessageUtil.writeResponse(ctx, response, keepAlive);
 
                     logTuple(requestId, requestMap, allResponses, results);
@@ -439,10 +444,11 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
             TargetResponse tr = entry.getValue();
             if (tr.isSuccess()) {
                 response.headers().set(TARGET_HEADER_PREFIX + name + "-StatusCode", tr.statusCode());
-                response.headers().set(TARGET_HEADER_PREFIX + name + "-Latency", tr.latency().toMillis());
-                response.headers().set(TARGET_HEADER_PREFIX + name + "-ClusterLatency", tr.clusterLatency().toMillis());
-                response.headers().set(TARGET_HEADER_PREFIX + name + "-RequestTransformLatency", tr.requestTransformLatency().toMillis());
-                response.headers().set(TARGET_HEADER_PREFIX + name + "-ResponseTransformLatency", tr.responseTransformLatency().toMillis());
+                // TODO: enable if latency headers matter
+                // response.headers().set(TARGET_HEADER_PREFIX + name + "-Latency", tr.latency().toMillis());
+                // response.headers().set(TARGET_HEADER_PREFIX + name + "-ClusterLatency", tr.clusterLatency().toMillis());
+                // response.headers().set(TARGET_HEADER_PREFIX + name + "-RequestTransformLatency", tr.requestTransformLatency().toMillis());
+                // response.headers().set(TARGET_HEADER_PREFIX + name + "-ResponseTransformLatency", tr.responseTransformLatency().toMillis());
             } else {
                 String errorMsg = tr.error().getMessage();
                 response.headers().set(TARGET_HEADER_PREFIX + name + "-Error",

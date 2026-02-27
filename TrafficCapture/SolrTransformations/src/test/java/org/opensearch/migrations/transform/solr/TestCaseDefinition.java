@@ -34,15 +34,10 @@ record TestCaseDefinition(
     List<AssertionRule> assertionRules,
     Map<String, Object> solrSchema,
     Map<String, Object> opensearchMapping,
-    List<ResponseAssertion> responseAssertions,
     List<String> solrVersions,
     List<String> plugins
 ) {
     /** A per-path assertion rule controlling how diffs are handled. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     record AssertionRule(String path, String rule, String expected, String reason) {}
-
-    /** A response content assertion — verifies the proxy response is correct. */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record ResponseAssertion(String path, Object equals, Integer count, Boolean exists) {}
 }

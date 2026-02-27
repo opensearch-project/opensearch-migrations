@@ -128,23 +128,6 @@ export interface SolrSchema {
   fields: Record<string, SolrFieldDefinition>;
 }
 
-/**
- * A response assertion — verifies the proxy response content is correct.
- *
- * Use these to assert on the actual response (not just compare with Solr).
- * Evaluated against the proxy response JSON after the Solr comparison.
- */
-export interface ResponseAssertion {
-  /** JSONPath to evaluate (e.g. '$.response.numFound', '$.response.docs'). */
-  path: string;
-  /** Assert the value at path equals this exactly. */
-  equals?: FieldValue | Record<string, unknown>;
-  /** Assert the array at path has this many elements. */
-  count?: number;
-  /** Assert the value at path exists (is not null/undefined). */
-  exists?: boolean;
-}
-
 /** HTTP methods supported by the test framework. */
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'HEAD';
 
@@ -198,8 +181,6 @@ export interface TestCase {
   solrSchema?: SolrSchema;
   /** Explicit OpenSearch index mapping. If set, the index is created with this mapping before seeding. */
   opensearchMapping?: OpenSearchMapping;
-  /** Assertions about the proxy response content (evaluated after Solr comparison). */
-  responseAssertions?: ResponseAssertion[];
   solrVersions?: string[];
   plugins?: string[];
 }
@@ -223,8 +204,9 @@ export const SOLR_INTERNAL_RULES: AssertionRule[] = [
 /**
  * Create a Solr→OpenSearch E2E test case with sensible defaults.
  *
- * Every test always compares with real Solr. Use assertionRules to
- * declare expected differences per path.
+ * Every test compares the proxy response with real Solr for full equality.
+ * Use assertionRules to declare expected differences per path — everything
+ * else must match exactly.
  *
  * Defaults:
  * - method: 'GET'

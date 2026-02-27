@@ -33,8 +33,9 @@ import static org.junit.jupiter.api.Assertions.fail;
  * Data-driven E2E test runner with version matrix support.
  * <p>
  * Test cases are defined in TypeScript ({@code *.testcase.ts}) and compiled to JSON.
- * Every test always compares with real Solr. Assertion rules control how diffs are handled:
- * 'ignore' paths are skipped, 'expect-diff' diffs pass but are logged, unmatched diffs fail.
+ * Every test compares the proxy response with real Solr for full equality.
+ * Assertion rules control expected differences: 'ignore' paths are skipped,
+ * 'expect-diff' diffs pass but are logged, unmatched diffs fail.
  */
 @Slf4j
 @Tag("isolatedTest")
@@ -78,7 +79,6 @@ class TransformationShimE2ETest {
             var proxyJson = MAPPER.readValue(proxyResponse, new TypeReference<Map<String, Object>>() {});
 
             compareWithSolr(fixture, tc, proxyJson);
-            checkResponseAssertions(tc, proxyJson);
 
             log.info("PASSED: {} [{}]", tc.name(), solrImage);
         }
@@ -115,90 +115,6 @@ class TransformationShimE2ETest {
             log.info("Full Proxy response:\n{}", MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(proxyJson));
             fail("Proxy response differs from Solr response (" + unexpectedDiffs.size() + " unexpected differences):\n" + report);
         }
-    }
-
-    // --- Response assertions ---
-
-    private void checkResponseAssertions(
-        TestCaseDefinition tc, Map<String, Object> proxyJson
-    ) {
-        var assertions = tc.responseAssertions();
-        if (assertions == null || assertions.isEmpty()) return;
-
-        var failures = new ArrayList<String>();
-        for (var assertion : assertions) {
-            var actual = resolveJsonPath(proxyJson, assertion.path());
-
-            if (Boolean.TRUE.equals(assertion.exists())) {
-                if (actual == null) {
-                    failures.add(String.format("  %s: expected to exist but was null/missing", assertion.path()));
-                }
-            }
-            if (assertion.equals() != null) {
-                var expected = normalizeNumber(assertion.equals());
-                var normalizedActual = normalizeNumber(actual);
-                if (!expected.equals(normalizedActual)) {
-                    failures.add(String.format("  %s: expected %s but got %s", assertion.path(), expected, actual));
-                }
-            }
-            if (assertion.count() != null) {
-                if (actual instanceof List<?> list) {
-                    if (list.size() != assertion.count()) {
-                        failures.add(String.format("  %s: expected count %d but got %d", assertion.path(), assertion.count(), list.size()));
-                    }
-                } else {
-                    failures.add(String.format("  %s: expected a list for count assertion but got %s", assertion.path(), actual == null ? "null" : actual.getClass().getSimpleName()));
-                }
-            }
-        }
-
-        if (!failures.isEmpty()) {
-            fail("Response assertion failures for '" + tc.name() + "':\n" + String.join("\n", failures));
-        }
-    }
-
-    /** Resolve a simple JSONPath ($.a.b[0].c) against a parsed JSON map. */
-    @SuppressWarnings("unchecked")
-    private static Object resolveJsonPath(Object root, String path) {
-        // Strip leading "$."
-        var stripped = path.startsWith("$.") ? path.substring(2) : path;
-        Object current = root;
-        // Split on dots, but keep array indices attached: "docs[0]" stays together
-        for (var segment : stripped.split("\\.")) {
-            if (current == null) return null;
-            var bracketIdx = segment.indexOf('[');
-            if (bracketIdx >= 0) {
-                var key = segment.substring(0, bracketIdx);
-                if (!key.isEmpty() && current instanceof Map) {
-                    current = ((Map<String, Object>) current).get(key);
-                }
-                // Handle array index
-                var idxStr = segment.substring(bracketIdx + 1, segment.indexOf(']'));
-                if (current instanceof List<?> list) {
-                    var idx = Integer.parseInt(idxStr);
-                    current = idx < list.size() ? list.get(idx) : null;
-                } else {
-                    return null;
-                }
-            } else if (current instanceof Map) {
-                current = ((Map<String, Object>) current).get(segment);
-            } else {
-                return null;
-            }
-        }
-        return current;
-    }
-
-    /** Normalize numeric types so 1 (int) equals 1 (long). */
-    private static Object normalizeNumber(Object val) {
-        if (val instanceof Number n) {
-            double d = n.doubleValue();
-            if (d == Math.floor(d) && !Double.isInfinite(d)) {
-                return (long) d;
-            }
-            return d;
-        }
-        return val;
     }
 
     // --- Request dispatch by method ---
