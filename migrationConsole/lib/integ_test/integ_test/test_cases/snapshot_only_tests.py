@@ -88,7 +88,8 @@ class Test0010ExternalSnapshotMigration(MATestBase):
             "snapshotConfig": {
                 "snapshotNameConfig": {
                     "externallyManagedSnapshot": self.snapshot_name
-                }
+                },
+                "repoName": "default"
             },
             "migrations": [{
                 "metadataMigrationConfig": {},
