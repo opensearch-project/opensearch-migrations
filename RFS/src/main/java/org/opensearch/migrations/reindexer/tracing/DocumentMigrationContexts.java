@@ -177,7 +177,7 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
         }
 
         @Override
-        public IWorkCoordinationContexts.ICompleteWorkItemContext createCloseContet() {
+        public IWorkCoordinationContexts.ICompleteWorkItemContext createCloseContext() {
             return getWorkCoordinationRootContext().createCompleteWorkContext();
         }
 

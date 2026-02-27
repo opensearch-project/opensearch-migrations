@@ -150,7 +150,7 @@ public class PipelineDocumentsRunner {
                 public CompletionStatus onNoAvailableWorkToBeDone() {
                     return CompletionStatus.NOTHING_DONE;
                 }
-            }, context::createCloseContet);
+            }, context::createCloseContext);
         }
     }
 }
