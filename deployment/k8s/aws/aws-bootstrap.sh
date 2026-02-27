@@ -618,27 +618,45 @@ if [[ "$deploy_cfn" == "true" ]]; then
 
   echo "Deploying CloudFormation stack: $cfn_stack_name"
 
-  # Handle stacks in terminal failed states (ROLLBACK_COMPLETE, UPDATE_ROLLBACK_COMPLETE, DELETE_FAILED)
-  if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
-    stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-      --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
-    if [[ "$stack_status" == "ROLLBACK_COMPLETE" || "$stack_status" == "UPDATE_ROLLBACK_COMPLETE" || "$stack_status" == "DELETE_FAILED" ]]; then
-      echo "Stack $cfn_stack_name is in $stack_status state. Deleting before re-creating..."
-      aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"}
-      aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-        || { echo "Failed to delete $stack_status stack: $cfn_stack_name"; exit 1; }
-      echo "Deleted $stack_status stack: $cfn_stack_name"
+  # Delete stack if it's in a terminal failed state
+  delete_stuck_stack() {
+    if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
+      local status
+      status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+        --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
+      echo "Current stack status: $status"
+      if [[ "$status" == "ROLLBACK_COMPLETE" || "$status" == "UPDATE_ROLLBACK_COMPLETE" || "$status" == "DELETE_FAILED" ]]; then
+        echo "Stack $cfn_stack_name is in $status state. Deleting before re-creating..."
+        aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"}
+        aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+          || { echo "Failed to delete $status stack: $cfn_stack_name"; exit 1; }
+        echo "Deleted $status stack: $cfn_stack_name"
+      fi
     fi
-  fi
+  }
 
-  aws cloudformation deploy \
-    --template-file "$cfn_template_file" \
-    --stack-name "$cfn_stack_name" \
-    --parameter-overrides "${cfn_params[@]}" \
-    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-    --no-fail-on-empty-changeset \
-    ${region:+--region "$region"} \
-    || { echo "CloudFormation deployment failed for: $cfn_stack_name"; exit 1; }
+  run_cfn_deploy() {
+    aws cloudformation deploy \
+      --template-file "$cfn_template_file" \
+      --stack-name "$cfn_stack_name" \
+      --parameter-overrides "${cfn_params[@]}" \
+      --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+      --no-fail-on-empty-changeset \
+      ${region:+--region "$region"}
+  }
+
+  delete_stuck_stack
+
+  # Run deploy; if changeset fails ResourceExistenceCheck, delete the stack and retry.
+  # This hook validates resources during changeset creation and can fail when a previous
+  # deployment left the stack in an inconsistent state.
+  if ! run_cfn_deploy; then
+    echo "Deploy failed. Attempting recovery — deleting stack and retrying..."
+    aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"} 2>/dev/null || true
+    aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} 2>/dev/null || true
+    run_cfn_deploy \
+      || { echo "CloudFormation deployment failed for: $cfn_stack_name"; exit 1; }
+  fi
 
   echo "CloudFormation stack deployed successfully: $cfn_stack_name"
 fi
