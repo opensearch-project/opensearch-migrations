@@ -4,5 +4,5 @@ import lombok.Value;
 
 @Value
 public class WorkItemCursor {
-    int progressCheckpointNum;
+    long progressCheckpointNum;
 }

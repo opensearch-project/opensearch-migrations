@@ -200,9 +200,9 @@ public interface IWorkCoordinator extends AutoCloseable {
             private static final String SEPARATOR = "__";
             String indexName;
             Integer shardNumber;
-            Integer startingDocId;
+            Long startingDocId;
 
-            public WorkItem(String indexName, Integer shardNumber, Integer startingDocId) {
+            public WorkItem(String indexName, Integer shardNumber, Long startingDocId) {
                 if (indexName.contains(SEPARATOR)) {
                     throw new IllegalArgumentException(
                             "Illegal work item name: '" + indexName + "'.  " + "Work item names cannot contain '" + SEPARATOR + "'"
@@ -233,7 +233,7 @@ public interface IWorkCoordinator extends AutoCloseable {
                 if (components.length != 3) {
                     throw new IllegalArgumentException("Illegal work item: '" + input + "'");
                 }
-                return new WorkItem(components[0], Integer.parseInt(components[1]), Integer.parseInt(components[2]));
+                return new WorkItem(components[0], Integer.parseInt(components[1]), Long.parseLong(components[2]));
             }
         }
     }

@@ -16,6 +16,11 @@ public interface IDocumentMigrationContexts {
 
     class MetricNames {
         private MetricNames() {}
+
+        public static final String SHARD_DURATION = "pipelineShardDuration";
+        public static final String DOCS_MIGRATED = "pipelineDocsMigrated";
+        public static final String BYTES_MIGRATED = "pipelineBytesMigrated";
+        public static final String PIPELINE_ERRORS = "pipelineErrors";
     }
 
     interface IShardSetupAttemptContext extends IScopedInstrumentationAttributes {
@@ -46,6 +51,14 @@ public interface IDocumentMigrationContexts {
         IRfsContexts.IRequestContext createRefreshContext();
 
         IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext createSuccessorWorkItemsContext();
+
+        void recordShardDuration(long durationMs);
+
+        void recordDocsMigrated(long count);
+
+        void recordBytesMigrated(long count);
+
+        void recordPipelineError();
 
     }
 }

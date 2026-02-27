@@ -19,7 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * This class adds workitemes (leasable mutexes) via the WorkCoordinator so that future
- * runs of the DocumentsRunner can pick one of those items and migrate the documents for
+ * runs of the PipelineDocumentsRunner can pick one of those items and migrate the documents for
  * that section of work.
  */
 @Slf4j
@@ -135,7 +135,7 @@ public class ShardWorkPreparer {
                         .log();
                     try (var shardSetupContext = context.createShardWorkItemContext()) {
                         workCoordinator.createUnassignedWorkItem(
-                            new IWorkCoordinator.WorkItemAndDuration.WorkItem(indexMetadata.getName(), shardId, Integer.MIN_VALUE).toString(),
+                            new IWorkCoordinator.WorkItemAndDuration.WorkItem(indexMetadata.getName(), shardId, 0L).toString(),
                             shardSetupContext::createUnassignedWorkItemContext
                         );
                     } catch (IOException e) {

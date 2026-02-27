@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.framework;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -9,14 +10,18 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 
+import com.github.dockerjava.api.command.PullImageResultCallback;
+import com.github.dockerjava.api.exception.NotFoundException;
 import com.google.common.collect.ImmutableMap;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.ExecConfig;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -35,7 +40,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
      * Verified via test: removing these lines causes container startup or snapshot repo registration to fail.
      */
     private static final List<String> ES_5_COMMON_CONFIG_LINES = List.of(
-        "network.host: 0.0.0.0",
+        "http.host: 0.0.0.0",
         "http.port: 9200",
         "transport.tcp.port: 9300",
         "discovery.zen.ping.unicast.hosts: []",
@@ -209,7 +214,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         ELASTICSEARCH_5(
             overrideAndRemoveEnv(
                 BASE.getEnvVariables(),
-                Map.of("ES_JAVA_OPTS", "-Xms1g -Xmx1g"),
+                Map.of("ES_JAVA_OPTS", "-Xms1g -Xmx1g -Des.cgroups.hierarchy.override=/"),
                 Set.of(
                     "discovery.type",
                     "ES_JAVA_OPTS",
@@ -292,6 +297,10 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             builder = builder.withCopyToContainer(Transferable.of(overrideFile.getContents()), overrideFile.getFilePath());
         }
 
+        if (version instanceof Elasticsearch5Version && needsCgroupV2Patch(version)) {
+            applyCgroupV2Patch(builder, version);
+        }
+
         builder.withEnv(version.getInitializationType().getEnvVariables())
             .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
 
@@ -367,9 +376,39 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     }
 
 
+    private static final int IMAGE_PULL_TIMEOUT_MINUTES = 10;
+
     public void start() {
         log.info("Starting container version:" + containerVersion.version);
+        ensureImagePulled(containerVersion.getImageName());
         super.start();
+    }
+
+    /**
+     * Pre-pull the Docker image with a generous timeout to avoid testcontainers'
+     * default 2-minute pull timeout, which is too short for large ES images (~1.3GB)
+     * on CI runners without a Docker cache.
+     */
+    private static void ensureImagePulled(String fullImageName) {
+        try {
+            var dockerClient = DockerClientFactory.instance().client();
+            try {
+                dockerClient.inspectImageCmd(fullImageName).exec();
+                log.info("Image already available locally: {}", fullImageName);
+                return;
+            } catch (NotFoundException e) {
+                // Image not found locally, need to pull
+            }
+            log.info("Pulling image (up to {} min): {}", IMAGE_PULL_TIMEOUT_MINUTES, fullImageName);
+            var parts = fullImageName.split(":");
+            dockerClient.pullImageCmd(parts[0])
+                .withTag(parts.length > 1 ? parts[1] : "latest")
+                .exec(new PullImageResultCallback())
+                .awaitCompletion(IMAGE_PULL_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+            log.info("Image pulled successfully: {}", fullImageName);
+        } catch (Exception e) {
+            log.warn("Pre-pull failed for {}, falling back to testcontainers default pull", fullImageName, e);
+        }
     }
 
     public String getUrl() {
@@ -383,6 +422,54 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         log.info("Stopping container version:" + containerVersion.version);
         log.debug("Instance logs:\n" + this.getLogs());
         this.stop();
+    }
+
+    /**
+     * ES 5.1 and 5.2 have a bug in OsProbe.getControlGroups() that fails to parse
+     * cgroups v2 lines (0::/) in /proc/self/cgroup. Fixed in ES 5.3+ via the
+     * es.cgroups.hierarchy.override system property. For 5.1/5.2, we patch the
+     * OsProbe class at container startup using the fixed version from ES 5.3.
+     */
+    private static boolean needsCgroupV2Patch(ContainerVersion version) {
+        var v = version.getVersion();
+        return v.getMajor() == 5 && (v.getMinor() == 1 || v.getMinor() == 2);
+    }
+
+    private static void applyCgroupV2Patch(GenericContainer<?> builder, ContainerVersion version) {
+        String tag = version.getImageName().substring(version.getImageName().lastIndexOf(':') + 1);
+        String jarName = "elasticsearch-" + tag + ".jar";
+
+        // Wrapper script: unzip jar, replace OsProbe with patched version, adjust classpath
+        String wrapperScript = "#!/bin/bash\n"
+            + "set -e\n"
+            + "mkdir -p /tmp/es_classes\n"
+            + "cd /tmp/es_classes\n"
+            + "unzip -q -o /usr/share/elasticsearch/lib/" + jarName + "\n"
+            + "cp /tmp/es_patch/OsProbe.class /tmp/es_classes/org/elasticsearch/monitor/os/OsProbe.class\n"
+            + "cp '/tmp/es_patch/OsProbe$OsProbeHolder.class' '/tmp/es_classes/org/elasticsearch/monitor/os/OsProbe$OsProbeHolder.class'\n"
+            + "rm /usr/share/elasticsearch/lib/" + jarName + "\n"
+            + "sed -i 's|ES_CLASSPATH=\"$ES_HOME/lib/" + jarName + ":$ES_HOME/lib/\\*\"|"
+            + "ES_CLASSPATH=\"/tmp/es_classes:$ES_HOME/lib/*\"|' /usr/share/elasticsearch/bin/elasticsearch.in.sh\n"
+            + "chown -R elasticsearch:elasticsearch /usr/share/elasticsearch/data /usr/share/elasticsearch/logs\n"
+            + "exec gosu elasticsearch /usr/share/elasticsearch/bin/elasticsearch\n";
+
+        builder.withCopyToContainer(Transferable.of(wrapperScript, 0755), "/tmp/es_wrapper.sh");
+        builder.withCopyToContainer(Transferable.of(readResource("es5-cgroup-patch/org/elasticsearch/monitor/os/OsProbe.class")),
+            "/tmp/es_patch/OsProbe.class");
+        builder.withCopyToContainer(Transferable.of(readResource("es5-cgroup-patch/org/elasticsearch/monitor/os/OsProbe$OsProbeHolder.class")),
+            "/tmp/es_patch/OsProbe$OsProbeHolder.class");
+        builder.withCommand("/bin/bash", "/tmp/es_wrapper.sh");
+    }
+
+    private static byte[] readResource(String path) {
+        try (InputStream is = SearchClusterContainer.class.getClassLoader().getResourceAsStream(path)) {
+            if (is == null) {
+                throw new IllegalStateException("Resource not found: " + path);
+            }
+            return is.readAllBytes();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read resource: " + path, e);
+        }
     }
 
     @EqualsAndHashCode

@@ -13,7 +13,7 @@ import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
@@ -149,7 +149,7 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
         sourceCluster.copySnapshotData(localDirectory.toString());
 
         var sourceRepo = new FileSystemRepo(localDirectory.toPath(),
-            ClusterProviderRegistry.getSnapshotFileFinder(sourceVersion, true));
+            SnapshotReaderRegistry.getSnapshotFileFinder(sourceVersion, true));
         var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
 
         var result = waitForRfsCompletion(() -> migrateDocumentsSequentially(

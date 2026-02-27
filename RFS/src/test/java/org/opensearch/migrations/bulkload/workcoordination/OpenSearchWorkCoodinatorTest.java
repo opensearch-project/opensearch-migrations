@@ -128,7 +128,7 @@ class OpenSearchWorkCoodinatorTest {
     }
 
     static Stream<Arguments> makeConsumers() {
-        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", 0, 0).toString();
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", 0, 0L).toString();
 
 
         var functions = List.<Function<IWorkCoordinator, Exception>>of(

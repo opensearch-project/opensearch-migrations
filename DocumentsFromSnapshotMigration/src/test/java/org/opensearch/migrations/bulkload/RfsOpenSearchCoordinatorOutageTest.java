@@ -15,23 +15,19 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
-import org.opensearch.migrations.bulkload.common.DocumentReindexer;
+import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
-import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
-import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
-import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
@@ -251,12 +247,10 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                         DocumentMigrationTestContext testContext)
         throws RfsMigrateDocuments.NoWorkLeftException
     {
-        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(SOURCE_VERSION, true);
+        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(SOURCE_VERSION, true);
         var sourceRepo = new FileSystemRepo(snapshotDir, fileFinder);
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(SOURCE_VERSION, sourceRepo, false);
-        var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
-        var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, luceneDir);
-        var readerFactory = new LuceneIndexReader.Factory(sourceResourceProvider);
+        var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(SOURCE_VERSION, sourceRepo, false);
+        var extractor = SnapshotExtractor.create(SOURCE_VERSION, sourceResourceProvider, sourceRepo);
 
         var docTransformer = new TransformationLoader().getTransformerFactoryLoader(
             RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
@@ -265,9 +259,6 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
         var targetConnectionContext = ConnectionContextTestParams.builder()
             .host(targetAddress).build().toConnectionContext();
         var clientFactory = new OpenSearchClientFactory(targetConnectionContext);
-        var reindexer = new DocumentReindexer(
-            clientFactory.determineVersionAndCreate(), 1, Long.MAX_VALUE, 1,
-            () -> docTransformer, false);
 
         // Coordinator connection (separate from target)
         var coordinatorConnectionContext = ConnectionContextTestParams.builder()
@@ -283,24 +274,26 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
             workItemRef::set
         )) {
             var progressCursor = new AtomicReference<WorkItemCursor>();
-            RfsMigrateDocuments.run(
-                readerFactory,
-                reindexer,
+            RfsMigrateDocuments.runWithPipeline(
+                extractor,
+                clientFactory.determineVersionAndCreate(),
+                SNAPSHOT_NAME,
+                luceneDir,
+                () -> docTransformer,
+                false,
+                DocumentExceptionAllowlist.empty(),
+                1,              // 1 doc per bulk to slow migration (matches test timing assumptions)
+                Long.MAX_VALUE,
                 progressCursor,
                 workCoordinator,
                 Duration.ofMinutes(99),
                 new org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger(workItemId -> {}),
                 sourceResourceProvider.getIndexMetadata(),
-                SNAPSHOT_NAME,
-                null,
-                null,
                 List.of(INDEX_NAME),
-                sourceResourceProvider.getShardMetadata(),
-                unpackerFactory,
-                MAX_SHARD_SIZE_BYTES,
                 testContext,
                 new AtomicReference<>(),
-                new WorkItemTimeProvider());
+                null,
+                null);
         }
     }
 
