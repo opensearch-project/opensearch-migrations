@@ -81,7 +81,7 @@ public class PipelineDocumentsRunner {
                     log.info("Pipeline acquired work item: {}", wi);
 
                     var shardId = new ShardId(snapshotName, wi.getIndexName(), wi.getShardNumber());
-                    int startingOffset = wi.getStartingDocId() != null && wi.getStartingDocId() >= 0
+                    long startingOffset = wi.getStartingDocId() != null && wi.getStartingDocId() >= 0
                         ? wi.getStartingDocId() : 0;
 
                     var pipeline = new MigrationPipeline(source, sink, maxDocsPerBatch, maxBytesPerBatch);

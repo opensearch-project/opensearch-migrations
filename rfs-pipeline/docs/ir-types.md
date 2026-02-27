@@ -50,7 +50,7 @@ classDiagram
     class ProgressCursor {
         <<record>>
         +ShardId shardId
-        +int lastDocProcessed
+        +long lastDocProcessed
         +long docsInBatch
         +long bytesInBatch
     }

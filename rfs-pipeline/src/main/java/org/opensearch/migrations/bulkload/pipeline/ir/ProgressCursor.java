@@ -17,7 +17,7 @@ import java.util.Objects;
  */
 public record ProgressCursor(
     ShardId shardId,
-    int lastDocProcessed,
+    long lastDocProcessed,
     long docsInBatch,
     long bytesInBatch
 ) {

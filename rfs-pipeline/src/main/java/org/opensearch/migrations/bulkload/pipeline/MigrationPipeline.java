@@ -87,14 +87,14 @@ public class MigrationPipeline {
      * @param startingDocOffset the document offset to resume from (0 for start)
      * @return a Flux of progress cursors, one per batch written
      */
-    public Flux<ProgressCursor> migrateShard(ShardId shardId, String indexName, int startingDocOffset) {
+    public Flux<ProgressCursor> migrateShard(ShardId shardId, String indexName, long startingDocOffset) {
         log.info("Starting shard migration: {} from offset {}", shardId, startingDocOffset);
-        final int[] cumulativeOffset = { startingDocOffset };
+        final long[] cumulativeOffset = { startingDocOffset };
         return source.readDocuments(shardId, startingDocOffset)
             .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
             .concatMap(batch -> sink.writeBatch(shardId, indexName, batch)
                 .map(cursor -> {
-                    cumulativeOffset[0] += (int) cursor.docsInBatch();
+                    cumulativeOffset[0] += cursor.docsInBatch();
                     return new ProgressCursor(
                         shardId,
                         cumulativeOffset[0],

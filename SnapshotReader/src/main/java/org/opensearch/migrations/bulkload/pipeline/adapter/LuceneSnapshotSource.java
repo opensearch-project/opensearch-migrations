@@ -110,7 +110,7 @@ public class LuceneSnapshotSource implements DocumentSource {
     }
 
     @Override
-    public Flux<DocumentChange> readDocuments(ShardId shardId, int startingDocOffset) {
+    public Flux<DocumentChange> readDocuments(ShardId shardId, long startingDocOffset) {
         var entry = resolveShardEntry(shardId, shardEntryCache);
         if (entry == null) {
             return Flux.error(new IllegalArgumentException("Shard not found: " + shardId));
@@ -132,7 +132,7 @@ public class LuceneSnapshotSource implements DocumentSource {
     }
 
     private Flux<DocumentChange> readRegularDocuments(
-        SnapshotExtractor.ShardEntry entry, ShardId shardId, int startingDocOffset
+        SnapshotExtractor.ShardEntry entry, ShardId shardId, long startingDocOffset
     ) {
         log.info("Reading documents from {} starting at offset {}", shardId, startingDocOffset);
         return extractor.readDocuments(entry, workDir)
