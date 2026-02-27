@@ -290,6 +290,56 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
+  cfn-lint:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: ./deployment/migration-assistant-solution
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-env
+      - name: Install cfn-lint
+        run: pip install cfn-lint==1.45.0
+      - name: Install NPM dependencies
+        run: npm ci
+      - name: Synthesize CDK stacks
+        run: npx cdk synth '*' --output /tmp/cdk.out --quiet
+      - name: Run cfn-lint
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cfn-lint "/tmp/cdk.out/*.template.json" --config-file "$GITHUB_WORKSPACE/.cfnlintrc.yaml" --format json --non-zero-exit-code none > /tmp/cfn-lint-output.json
+
+          ISSUE_COUNT=$(jq 'length' /tmp/cfn-lint-output.json)
+          BASELINE_ISSUE_COUNT=6
+
+          {
+            echo "## cfn-lint: $ISSUE_COUNT findings (baseline: $BASELINE_ISSUE_COUNT)"
+            echo ""
+            if [ "$ISSUE_COUNT" -gt 0 ]; then
+              echo "| Level | Rule | File | Line | Message |"
+              echo "|-------|------|------|------|---------|"
+              jq -r '.[] | "| \(.Level) | \(.Rule.Id) | \(.Filename | split("/") | last) | \(.Location.Start.LineNumber) | \(.Message | gsub("\n"; " ")) |"' /tmp/cfn-lint-output.json
+            else
+              echo "✅ No findings."
+            fi
+          } | tee /tmp/cfn-lint-report.md >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" \
+              --edit-last --body "$(cat /tmp/cfn-lint-report.md)" \
+              --repo "${{ github.repository }}" 2>/dev/null || \
+            gh pr comment "${{ github.event.pull_request.number }}" \
+              --body "$(cat /tmp/cfn-lint-report.md)" \
+              --repo "${{ github.repository }}" || true
+          fi
+
+          if [ "$ISSUE_COUNT" -gt "$BASELINE_ISSUE_COUNT" ]; then
+            echo "❌ cfn-lint: $ISSUE_COUNT findings exceeds baseline of $BASELINE_ISSUE_COUNT"
+            exit 1
+          fi
+          echo "✅ cfn-lint: $ISSUE_COUNT findings (baseline: $BASELINE_ISSUE_COUNT)"
+
   link-checker:
     runs-on: ubuntu-22.04
 
@@ -322,6 +372,7 @@ jobs:
       - python-e2e-tests
       - python-lint
       - gradle-extended-check
+      - cfn-lint
     if: always()
     runs-on: ubuntu-22.04
     steps:

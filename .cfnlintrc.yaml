@@ -1,0 +1,17 @@
+regions:
+  - us-east-1
+  - us-gov-west-1
+  - us-gov-east-1
+include_checks:
+  - W
+  - I
+ignore_templates:
+  - "**/tree.json"
+  - "**/manifest.json"
+  - "**/asset.*"
+configure_rules:
+  I3042:
+    # Check for hardcoded partition (arn:aws: instead of arn:${AWS::Partition}:)
+    partition: true
+    # Check for hardcoded region in ARNs
+    region: true
