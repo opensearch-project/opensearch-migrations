@@ -103,6 +103,31 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Install S3 CSI Driver') {
+                steps {
+                    timeout(time: 3, unit: 'MINUTES') {
+                        script {
+                            sh """
+                                kubectl config use-context minikube
+                                helm repo add aws-mountpoint-s3-csi-driver https://awslabs.github.io/mountpoint-s3-csi-driver 2>/dev/null || true
+                                helm repo update aws-mountpoint-s3-csi-driver
+                                kubectl create secret generic aws-secret \
+                                    --namespace kube-system \
+                                    --from-literal=key_id=test \
+                                    --from-literal=access_key=test \
+                                    --dry-run=client -o yaml | kubectl apply -f -
+                                helm upgrade --install aws-mountpoint-s3-csi-driver aws-mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver \
+                                    --namespace kube-system \
+                                    --set node.tolerateAllTaints=true
+                                # Restart the CSI driver DaemonSet to ensure it picks up the aws-secret
+                                kubectl rollout restart daemonset -n kube-system s3-csi-node
+                                kubectl rollout status daemonset -n kube-system s3-csi-node --timeout=60s
+                            """
+                        }
+                    }
+                }
+            }
+
             stage('Cleanup Previous MA Deployment') {
                 steps {
                     timeout(time: 3, unit: 'MINUTES') {

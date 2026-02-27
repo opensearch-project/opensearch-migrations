@@ -23,6 +23,9 @@ images:
   migrationConsole:
     repository: localhost:5000/migrations/migration_console
     pullPolicy: Always
+  snapshotFuse:
+    repository: localhost:5000/migrations/snapshot_fuse
+    pullPolicy: Always
   installer:
     repository: localhost:5000/migrations/migration_console
     pullPolicy: Always

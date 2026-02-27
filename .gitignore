@@ -46,3 +46,9 @@ orchestrationSpecs/packages/argo-workflow-builders/src/generated
 orchestrationSpecs/packages/config-processor/bundled
 orchestrationSpecs/packages/migration-workflow-templates/workflowTemplates
 orchestrationSpecs/packages/argo-workflow-builders/k8sSchemas
+
+# Kiro IDE settings
+.kiro/
+
+# Test automation reports
+libraries/testAutomation/reports/

@@ -2,6 +2,7 @@ import {
     BaseExpression,
     Container,
     expr,
+    IMAGE_PULL_POLICY,
     makeDirectTypeProxy,
     makeStringTypeProxy,
     Volume
@@ -9,8 +10,48 @@ import {
 
 export type ContainerVolumePair = {
     readonly container: Container,
-    readonly volumes: Volume[]
+    readonly volumes: Volume[],
+    readonly sidecars: Container[]
 };
+
+const S3_SNAPSHOT_VOLUME_NAME = "snapshot-s3";
+
+/**
+ * Add a PVC-backed S3 volume mount to a container definition.
+ * Requires the Mountpoint S3 CSI Driver v2 and a static PV/PVC (via Helm templates).
+ * Each pod gets its own Mountpoint Pod (FUSE process) even with a shared PVC.
+ */
+export function setupS3CsiVolumeForContainer(
+    mountPath: string,
+    pvcClaimName: BaseExpression<string>,
+    def: ContainerVolumePair): ContainerVolumePair {
+
+    const {volumeMounts, ...restOfContainer} = def.container;
+    return {
+        volumes: [
+            ...def.volumes,
+            {
+                name: S3_SNAPSHOT_VOLUME_NAME,
+                persistentVolumeClaim: {
+                    claimName: makeStringTypeProxy(pvcClaimName),
+                    readOnly: true
+                }
+            }
+        ],
+        container: {
+            ...restOfContainer,
+            volumeMounts: [
+                ...(volumeMounts === undefined ? [] : volumeMounts),
+                {
+                    name: S3_SNAPSHOT_VOLUME_NAME,
+                    mountPath: mountPath,
+                    readOnly: true
+                }
+            ]
+        },
+        sidecars: def.sidecars
+    } as const;
+}
 
 export function setupTestCredsForContainer(
     useLocalStack: BaseExpression<boolean>,
@@ -45,7 +86,8 @@ export function setupTestCredsForContainer(
                     readOnly: true
                 }
             ]
-        }
+        },
+        sidecars: def.sidecars
     } as const;
 }
 
@@ -125,6 +167,68 @@ export function setupLog4jConfigForContainer(
                     readOnly: true
                 }
             ]
-        }
+        },
+        sidecars: def.sidecars
+    } as const;
+}
+
+const LUCENE_FUSE_VOLUME_NAME = "lucene-fuse";
+
+/**
+ * Add a snapshot-fuse FUSE sidecar that translates ES/OS snapshot blobs into virtual Lucene files.
+ * The sidecar reads from the S3 CSI mount and presents Lucene files at /mnt/lucene.
+ * Requires the S3 CSI volume to already be configured (call setupS3CsiVolumeForContainer first).
+ */
+export function setupSnapshotFuseSidecar(
+    snapshotLocalDir: BaseExpression<string>,
+    snapshotName: BaseExpression<string>,
+    sidecarImage: BaseExpression<string>,
+    sidecarImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
+    def: ContainerVolumePair): ContainerVolumePair {
+
+    const {volumeMounts, ...restOfContainer} = def.container;
+    return {
+        volumes: [
+            ...def.volumes,
+            { name: LUCENE_FUSE_VOLUME_NAME, emptyDir: {} }
+        ],
+        container: {
+            ...restOfContainer,
+            volumeMounts: [
+                ...(volumeMounts === undefined ? [] : volumeMounts),
+                {
+                    name: LUCENE_FUSE_VOLUME_NAME,
+                    mountPath: "/mnt/lucene",
+                    mountPropagation: "HostToContainer"
+                }
+            ]
+        },
+        sidecars: [
+            ...def.sidecars,
+            {
+                name: "snapshot-fuse",
+                image: makeStringTypeProxy(sidecarImage),
+                imagePullPolicy: makeStringTypeProxy(sidecarImagePullPolicy),
+                args: [
+                    makeStringTypeProxy(expr.concat(expr.literal("--repo-root="), snapshotLocalDir)),
+                    makeStringTypeProxy(expr.concat(expr.literal("--snapshot-name="), snapshotName)),
+                    "--mount-point=/mnt/lucene"
+                ],
+                env: [{ name: "RUST_LOG", value: "info" }],
+                securityContext: { privileged: true },
+                volumeMounts: [
+                    {
+                        name: S3_SNAPSHOT_VOLUME_NAME,
+                        mountPath: "/mnt/s3",
+                        readOnly: true
+                    },
+                    {
+                        name: LUCENE_FUSE_VOLUME_NAME,
+                        mountPath: "/mnt/lucene",
+                        mountPropagation: "Bidirectional"
+                    }
+                ]
+            }
+        ]
     } as const;
 }

@@ -35,6 +35,8 @@ defaultBucketConfiguration:
 #    pullPolicy: Always
 #  installer:
 #    pullPolicy: Always
+#  snapshotFuse:
+#    pullPolicy: Always
 
 # For OTEL Daemonset
 otelConfiguration:

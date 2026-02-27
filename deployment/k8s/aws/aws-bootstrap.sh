@@ -974,7 +974,9 @@ if [[ "$use_public_images" == "false" ]]; then
     --set images.migrationConsole.repository=${MIGRATIONS_ECR_REGISTRY} \
     --set images.migrationConsole.tag=migrations_migration_console_latest \
     --set images.installer.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.installer.tag=migrations_migration_console_latest"
+    --set images.installer.tag=migrations_migration_console_latest \
+    --set images.snapshotFuse.repository=${MIGRATIONS_ECR_REGISTRY} \
+    --set images.snapshotFuse.tag=migrations_snapshot_fuse_latest"
 # Use latest public images
 else
   echo "Using public images tagged '$RELEASE_VERSION'"
@@ -988,7 +990,9 @@ else
     --set images.migrationConsole.repository=public.ecr.aws/opensearchproject/opensearch-migrations-console \
     --set images.migrationConsole.tag=$RELEASE_VERSION \
     --set images.installer.repository=public.ecr.aws/opensearchproject/opensearch-migrations-console \
-    --set images.installer.tag=$RELEASE_VERSION"
+    --set images.installer.tag=$RELEASE_VERSION \
+    --set images.snapshotFuse.repository=public.ecr.aws/opensearchproject/opensearch-migrations-snapshot-fuse \
+    --set images.snapshotFuse.tag=$RELEASE_VERSION"
 fi
 
 # --- chart and dashboard source selection ---
@@ -1023,6 +1027,27 @@ else
 fi
 
 check_existing_ma_release "$namespace" "$namespace"
+
+# Install Mountpoint S3 CSI Driver v2 addon (required for S3-backed PVs)
+if aws eks describe-addon --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" --addon-name aws-mountpoint-s3-csi-driver --region "${AWS_CFN_REGION}" >/dev/null 2>&1; then
+  echo "S3 CSI Driver addon already installed, skipping"
+else
+  echo "Installing Mountpoint S3 CSI Driver v2 addon..."
+  aws eks create-addon \
+    --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --addon-name aws-mountpoint-s3-csi-driver \
+    --region "${AWS_CFN_REGION}" \
+    --resolve-conflicts OVERWRITE
+  echo "Waiting for S3 CSI Driver addon to become active..."
+  if aws eks wait addon-active \
+    --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --addon-name aws-mountpoint-s3-csi-driver \
+    --region "${AWS_CFN_REGION}"; then
+    echo "✅  S3 CSI Driver v2 addon installed"
+  else
+    echo "⚠️  S3 CSI Driver addon did not become active — S3-backed volumes may not work"
+  fi
+fi
 
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
 helm install "$namespace" "${ma_chart_dir}" \

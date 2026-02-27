@@ -10,7 +10,7 @@ import {
 import {
     BaseExpression, configMapKey,
     defineRequiredParam,
-    expr, FunctionExpression, InputParameterSource, InputParametersRecord, InputParamsToExpressions,
+    expr, ExpressionType, FunctionExpression, InputParameterSource, InputParametersRecord, InputParamsToExpressions,
     INTERNAL, PlainObject,
     selectInputsForRegister,
     Serialized,
@@ -57,6 +57,35 @@ export function makeRepoParamDict(
             ...(includes3LocalDir ? { "s3LocalDir": expr.literal("/tmp") } : {})
         })
     );
+}
+
+export const S3_MOUNT_PATH = "/mnt/s3";
+
+/**
+ * Compute the local filesystem path for a snapshot repo mounted via S3 CSI driver.
+ * Converts s3://bucket/path → /mnt/s3/path.
+ */
+export function getSnapshotLocalDir(repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>) {
+    // Use FunctionExpression directly with "sprig.regexReplaceAll" because
+    // expr.regexReplaceAll renders without the sprig. prefix, which Argo doesn't evaluate.
+    // sprig.regexReplaceAll signature: (regex, input, replacement)
+    return new FunctionExpression<string, string, ExpressionType, "complicatedExpression">(
+        "sprig.regexReplaceAll",
+        [expr.literal("^s3://[^/]+/"), expr.get(repoConfig, "s3RepoPathUri"),
+         expr.literal(S3_MOUNT_PATH + "/")] as any);
+}
+
+/**
+ * Build param dict for RFS when using S3 CSI driver PV/PVC mount.
+ * Emits snapshotLocalDir (for RFS) pointing to the mounted S3 path.
+ * The S3 bucket is mounted at S3_MOUNT_PATH via a PersistentVolume backed by the S3 CSI driver,
+ * and the repo path is extracted from the s3RepoPathUri (s3://bucket/path → /mnt/s3/path).
+ */
+export function makeMountpointRepoParamDict(
+    repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>) {
+    return expr.makeDict({
+        "snapshotLocalDir": getSnapshotLocalDir(repoConfig)
+    });
 }
 
 function makeParamsDict(
