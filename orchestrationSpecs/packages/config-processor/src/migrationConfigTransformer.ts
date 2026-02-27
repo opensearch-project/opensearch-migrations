@@ -219,7 +219,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             seen.add(keyPair);
 
             const sourceCluster = userConfig.sourceClusters[fromSource];
-            if (sourceCluster.proxy === undefined) {
+            if (replayerConfig !== undefined && sourceCluster.proxy === undefined) {
                 console.warn(`Replayer is configured for ${fromSource} but a proxy is not. ` +
                     `A replayer won't be configured for the target (${toTarget})`);
                 replayerConfig = undefined;
