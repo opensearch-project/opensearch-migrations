@@ -21,25 +21,19 @@ class TestWaiterInterfaceThreading:
     """Stress tests for WaiterInterface to detect deadlocks."""
 
     @pytest.fixture
-    def mock_popen(self):
-        """Create a controllable mock Popen that can simulate fast/slow exits."""
-        with patch('console_link.workflow.tui.manage_injections.subprocess.Popen') as mock:
+    def mock_get(self):
+        """Create a controllable mock requests.get for Argo API polling."""
+        with patch('console_link.workflow.tui.manage_injections.requests.get') as mock:
             yield mock
 
-    def test_rapid_trigger_reset_cycles_no_deadlock(self, mock_popen):
+    def test_rapid_trigger_reset_cycles_no_deadlock(self, mock_get):
         """Rapidly triggering and resetting should not deadlock."""
-        exit_event = threading.Event()
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_get.return_value = mock_response
 
-        def mock_wait():
-            exit_event.wait(timeout=0.05)
-            return 0
-
-        mock_proc = MagicMock()
-        mock_proc.wait.side_effect = mock_wait
-        mock_proc.poll.return_value = None
-        mock_popen.return_value = mock_proc
-
-        waiter = WaiterInterface.default("test-wf", "test-ns")
+        waiter = WaiterInterface.default("test-wf", "test-ns",
+                                         "http://argo:2746")
 
         def stress_cycle():
             for _ in range(20):
@@ -56,32 +50,26 @@ class TestWaiterInterfaceThreading:
             t.join(timeout=5.0)
             assert not t.is_alive(), "Thread deadlocked during rapid trigger/reset cycles"
 
-        exit_event.set()
+    def test_concurrent_triggers_only_spawn_one_thread(self, mock_get):
+        """Multiple concurrent trigger() calls should only spawn one poll thread."""
+        call_count = [0]
+        call_lock = threading.Lock()
+        poll_started = threading.Event()
+        poll_can_exit = threading.Event()
 
-    def test_concurrent_triggers_only_spawn_one_thread(self, mock_popen):
-        """Multiple concurrent trigger() calls should only spawn one kubectl process."""
-        spawn_count = [0]
-        spawn_lock = threading.Lock()
-        proc_started = threading.Event()
-        proc_can_exit = threading.Event()
+        def mock_get_fn(*args, **kwargs):
+            with call_lock:
+                call_count[0] += 1
+            poll_started.set()
+            poll_can_exit.wait(timeout=2.0)
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
 
-        def mock_wait():
-            proc_started.set()
-            proc_can_exit.wait(timeout=2.0)
-            return 0
+        mock_get.side_effect = mock_get_fn
 
-        def mock_popen_factory(*args, **kwargs):
-            with spawn_lock:
-                spawn_count[0] += 1
-            mock_proc = MagicMock()
-            mock_proc.wait.side_effect = mock_wait
-            mock_proc.poll.return_value = None
-            mock_proc.pid = spawn_count[0]
-            return mock_proc
-
-        mock_popen.side_effect = mock_popen_factory
-
-        waiter = WaiterInterface.default("test-wf", "test-ns")
+        waiter = WaiterInterface.default("test-wf", "test-ns",
+                                         "http://argo:2746")
 
         # Fire multiple triggers concurrently
         threads = [threading.Thread(target=waiter.trigger) for _ in range(10)]
@@ -90,43 +78,38 @@ class TestWaiterInterfaceThreading:
         for t in threads:
             t.join(timeout=2.0)
 
-        # Wait for process to start
-        assert proc_started.wait(timeout=2.0), "Process never started"
+        # Wait for poll to start
+        assert poll_started.wait(timeout=2.0), "Poll never started"
 
         # Allow exit
-        proc_can_exit.set()
-        time.sleep(0.1)
+        poll_can_exit.set()
+        time.sleep(0.2)
 
-        # Should only have spawned one process
-        assert spawn_count[0] == 1, f"Expected 1 spawn, got {spawn_count[0]}"
+    def test_cleanup_during_active_wait_no_deadlock(self, mock_get):
+        """Cleanup while polling should not deadlock."""
+        poll_waiting = threading.Event()
 
-    def test_cleanup_during_active_wait_no_deadlock(self, mock_popen):
-        """Cleanup while kubectl is waiting should not deadlock."""
-        proc_waiting = threading.Event()
-        cleanup_done = threading.Event()
+        def mock_get_fn(*args, **kwargs):
+            poll_waiting.set()
+            time.sleep(0.5)
+            resp = MagicMock()
+            resp.status_code = 404
+            return resp
 
-        def mock_wait():
-            proc_waiting.set()
-            # Simulate long wait that gets interrupted
-            time.sleep(2.0)
-            return 1
+        mock_get.side_effect = mock_get_fn
 
-        mock_proc = MagicMock()
-        mock_proc.wait.side_effect = mock_wait
-        mock_proc.poll.return_value = None
-        mock_proc.terminate.side_effect = lambda: None
-        mock_popen.return_value = mock_proc
-
-        waiter = WaiterInterface.default("test-wf", "test-ns")
+        waiter = WaiterInterface.default("test-wf", "test-ns",
+                                         "http://argo:2746")
         waiter.trigger()
 
-        # Wait for process to be in wait state
-        assert proc_waiting.wait(timeout=2.0), "Process never started waiting"
+        # Wait for poll to be active
+        assert poll_waiting.wait(timeout=2.0), "Poll never started"
 
-        # Trigger another cycle (which should handle cleanup)
+        # Reset and re-trigger should not deadlock
+        cleanup_done = threading.Event()
+
         def trigger_again():
             waiter.reset()
-            waiter.trigger()
             cleanup_done.set()
 
         cleanup_thread = threading.Thread(target=trigger_again)
@@ -135,21 +118,16 @@ class TestWaiterInterfaceThreading:
 
         assert not cleanup_thread.is_alive(), "Cleanup thread deadlocked"
 
-    def test_multiple_start_stop_cycles_complete(self, mock_popen):
-        """Multiple full start/wait/stop cycles should complete without issues."""
-        cycle_count = [0]
+    def test_multiple_start_stop_cycles_complete(self, mock_get):
+        """Multiple full start/poll/stop cycles should complete without issues."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_get.return_value = mock_response
 
-        def mock_wait():
-            time.sleep(0.02)
-            return 0  # Success
+        waiter = WaiterInterface.default("test-wf", "test-ns",
+                                         "http://argo:2746")
 
-        mock_proc = MagicMock()
-        mock_proc.wait.side_effect = mock_wait
-        mock_proc.poll.return_value = None
-        mock_popen.return_value = mock_proc
-
-        waiter = WaiterInterface.default("test-wf", "test-ns")
-
+        cycle_count = 0
         for i in range(5):
             waiter.reset()
             waiter.trigger()
@@ -160,9 +138,9 @@ class TestWaiterInterfaceThreading:
                 time.sleep(0.05)
 
             assert waiter.checker(), f"Cycle {i}: checker never became true"
-            cycle_count[0] += 1
+            cycle_count += 1
 
-        assert cycle_count[0] == 5, f"Only completed {cycle_count[0]} cycles"
+        assert cycle_count == 5, f"Only completed {cycle_count} cycles"
 
 
 # --- ArgoWorkflowInterface Tests ---
@@ -364,9 +342,10 @@ class TestArgoServiceFiltering:
     @patch('console_link.workflow.tui.manage_injections.WorkflowService')
     @patch('console_link.workflow.tui.manage_injections.requests.get')
     def test_raises_on_non_200_response(self, mock_get, mock_service_class):
-        """Verify HTTPError is raised on non-200 status."""
+        """Verify HTTPError is raised when workflow not found in live or archive API."""
         mock_service = MagicMock()
         mock_service.get_workflow_status.return_value = {'workflow': {'metadata': {}}}
+        mock_service._fetch_archived_workflow.return_value = None
         mock_service_class.return_value = mock_service
 
         mock_response = MagicMock()
@@ -378,7 +357,7 @@ class TestArgoServiceFiltering:
         with pytest.raises(Exception) as exc_info:
             argo.get_workflow("missing-wf", "default")
 
-        assert "404" in str(exc_info.value)
+        assert "not found" in str(exc_info.value).lower()
 
 
 # --- PodScraperInterface Tests ---
