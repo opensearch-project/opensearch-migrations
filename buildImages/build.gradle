@@ -51,12 +51,6 @@ jibProjects.values().each { cfg ->
 
 def buildKitProjects = [
         [
-                serviceName: "elasticsearchTestConsole",
-                contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole",
-                imageName:  "elasticsearch_test_console",
-                imageTag:   "latest"
-        ],
-        [
                 serviceName: "captureProxyBase",
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/captureProxyBase",
                 imageName:  "capture_proxy_base",
@@ -98,6 +92,16 @@ def buildKitProjects = [
                         ":TrafficCapture:dockerSolution:syncArtifact_migration_console_staging_noDockerBuild",
                         "buildKit_migrationConsoleBase" // All buildKit projects are configured at the root
                 ]
+        ]
+]
+
+// Test/CI-only images — not built by buildKitAll, use buildKitTestAll instead
+def testBuildKitProjects = [
+        [
+                serviceName: "elasticsearchTestConsole",
+                contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole",
+                imageName:  "elasticsearch_test_console",
+                imageTag:   "latest"
         ],
         // Custom Elasticsearch images for k8s integration tests
         [
@@ -182,6 +186,11 @@ def buildKitProjects = [
 buildKitProjects.each { cfg ->
     cfg.repoName = getRepoNameIfPublishing(cfg)
 }
+testBuildKitProjects.each { cfg ->
+    cfg.repoName = getRepoNameIfPublishing(cfg)
+}
+
+def testBuildKitServiceNames = testBuildKitProjects.collect { "buildKit_${it.serviceName}".toString() } as Set
 
 gradle.projectsEvaluated {
     def imageHelper = new RegistryImageBuildUtils()
@@ -190,7 +199,7 @@ gradle.projectsEvaluated {
 
     imageHelper.applyBuildKitConfigurations(
             rootProject,
-            buildKitProjects,
+            buildKitProjects + testBuildKitProjects,
             publishedRegistry,
             intermediateRegistry
     )
@@ -228,27 +237,59 @@ tasks.register("jibAll_arm64") {
 
 tasks.register("buildKitAll") {
     group = "build"
-    description = "Build all BuildKit multi-arch images"
+    description = "Build all BuildKit multi-arch images (excludes test images)"
     dependsOn rootProject.tasks.matching {
         it.name.startsWith("buildKit_") &&
                 !it.name.endsWith("_amd64") &&
-                !it.name.endsWith("_arm64")
+                !it.name.endsWith("_arm64") &&
+                !testBuildKitServiceNames.contains(it.name)
     }
 }
 
 tasks.register("buildKitAll_amd64") {
     group = "build"
-    description = "Build all BuildKit amd64 images"
+    description = "Build all BuildKit amd64 images (excludes test images)"
     dependsOn rootProject.tasks.matching {
-        it.name.startsWith("buildKit_") && it.name.endsWith("_amd64")
+        it.name.startsWith("buildKit_") && it.name.endsWith("_amd64") &&
+                !testBuildKitServiceNames.contains(it.name.replaceAll('_amd64$', ''))
     }
 }
 
 tasks.register("buildKitAll_arm64") {
     group = "build"
-    description = "Build all BuildKit arm64 images"
+    description = "Build all BuildKit arm64 images (excludes test images)"
     dependsOn rootProject.tasks.matching {
-        it.name.startsWith("buildKit_") && it.name.endsWith("_arm64")
+        it.name.startsWith("buildKit_") && it.name.endsWith("_arm64") &&
+                !testBuildKitServiceNames.contains(it.name.replaceAll('_arm64$', ''))
+    }
+}
+
+tasks.register("buildKitTestAll") {
+    group = "build"
+    description = "Build all test BuildKit multi-arch images"
+    dependsOn rootProject.tasks.matching {
+        it.name.startsWith("buildKit_") &&
+                !it.name.endsWith("_amd64") &&
+                !it.name.endsWith("_arm64") &&
+                testBuildKitServiceNames.contains(it.name)
+    }
+}
+
+tasks.register("buildKitTestAll_amd64") {
+    group = "build"
+    description = "Build all test BuildKit amd64 images"
+    dependsOn rootProject.tasks.matching {
+        it.name.startsWith("buildKit_") && it.name.endsWith("_amd64") &&
+                testBuildKitServiceNames.contains(it.name.replaceAll('_amd64$', ''))
+    }
+}
+
+tasks.register("buildKitTestAll_arm64") {
+    group = "build"
+    description = "Build all test BuildKit arm64 images"
+    dependsOn rootProject.tasks.matching {
+        it.name.startsWith("buildKit_") && it.name.endsWith("_arm64") &&
+                testBuildKitServiceNames.contains(it.name.replaceAll('_arm64$', ''))
     }
 }
 
