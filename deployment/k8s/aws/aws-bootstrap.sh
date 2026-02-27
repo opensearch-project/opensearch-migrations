@@ -1037,6 +1037,28 @@ fi
 
 check_existing_ma_release "$namespace" "$namespace"
 
+echo "=== Helm install configuration ==="
+echo "Chart: ${ma_chart_dir}"
+echo "Namespace: ${namespace}"
+echo "Values flags: ${HELM_VALUES_FLAGS}"
+if [[ -n "$extra_helm_values" ]]; then
+  echo "Extra values files: ${extra_helm_values}"
+  IFS=',' read -ra EXTRA_FILES <<< "$extra_helm_values"
+  for f in "${EXTRA_FILES[@]}"; do
+    echo "--- Contents of $f ---"
+    cat "$f"
+    echo "--- End $f ---"
+  done
+fi
+echo "Set flags:"
+echo "  stageName=${STAGE}"
+echo "  aws.region=${AWS_CFN_REGION}"
+echo "  aws.account=${AWS_ACCOUNT}"
+echo "  defaultBucketConfiguration.snapshotRoleArn=${SNAPSHOT_ROLE}"
+echo "Image flags:"
+echo "  ${IMAGE_FLAGS}"
+echo "=== End helm install configuration ==="
+
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
 helm install "$namespace" "${ma_chart_dir}" \
   --namespace $namespace \
