@@ -16,8 +16,6 @@ spec:
 
   arguments:
     parameters:
-      - name: s3-snapshot-configmap
-        value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
       - name: monitor-retry-limit
@@ -75,30 +73,6 @@ spec:
           - name: target-config
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
-          - name: s3Region
-            valueFrom:
-              configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
-                key: AWS_REGION
-          - name: s3Endpoint
-            default: ""
-            valueFrom:
-              configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
-                key: ENDPOINT
-                optional: true
-          - name: s3BucketName
-            valueFrom:
-              configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
-                key: BUCKET_NAME
-          - name: snapshotRoleArn
-            default: ""
-            valueFrom:
-              configMapKeyRef:
-                name: "{{workflow.parameters.s3-snapshot-configmap}}"
-                key: SNAPSHOT_ROLE_ARN
-                optional: true
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
         imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
@@ -109,26 +83,6 @@ spec:
             
             SOURCE_CONFIGS='{{inputs.parameters.source-configs}}'
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
-            S3_REGION='{{inputs.parameters.s3Region}}'
-            S3_ENDPOINT='{{inputs.parameters.s3Endpoint}}'
-            S3_BUCKET='{{inputs.parameters.s3BucketName}}'
-            SNAPSHOT_ROLE_ARN='{{inputs.parameters.snapshotRoleArn}}'
-            
-            SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
-            
-            # Build snapshot repo config (includes s3RoleArn if provided)
-            SNAPSHOT_REPO=$(jq -n \
-              --arg region "$S3_REGION" \
-              --arg endpoint "$S3_ENDPOINT" \
-              --arg bucket "$S3_BUCKET" \
-              --arg suffix "$SUFFIX" \
-              --arg roleArn "$SNAPSHOT_ROLE_ARN" \
-              '{
-                "awsRegion": $region,
-                "endpoint": $endpoint,
-                "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
-              } + (if $roleArn != "" then {"s3RoleArn": $roleArn} else {} end)')
-            
             # Function to transform cluster config to match workflow schema
             # - version: ES_7.10 -> ES 7.10 (replace underscore with space)
             # - allow_insecure -> allowInsecure
@@ -145,7 +99,7 @@ spec:
             }
             
             # Build sourceClusters map from source-configs array with schema transformation
-            SOURCE_CLUSTERS=$(echo "$SOURCE_CONFIGS" | jq --argjson repo "$SNAPSHOT_REPO" '
+            SOURCE_CLUSTERS=$(echo "$SOURCE_CONFIGS" | jq '
               reduce to_entries[] as $e ({}; 
                 .["source\($e.key + 1)"] = (
                   $e.value.source
@@ -155,17 +109,13 @@ spec:
                   | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
                   # Move sigv4 under authConfig
                   | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
-                  # Add snapshot repos with default key
-                  | . + {"snapshotRepos": {"default": $repo}}
                 )
               )')
             
             # Transform target config to match schema
             TARGET_TRANSFORMED=$(echo "$TARGET_CONFIG" | jq '
-              # Target cluster schema does not accept a version field
-              del(.version)
               # Rename allow_insecure to allowInsecure
-              | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+              if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
               # Move sigv4 under authConfig
               | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
               # Move basic_auth under authConfig.basic with secretName
@@ -173,17 +123,26 @@ spec:
             ')
             
             # Build snapshotExtractAndLoadConfigs from snapshot-and-migration-configs
+            # If input provides snapshotConfig (e.g. BYOS with externallyManagedSnapshot), use it as-is.
+            # Otherwise, use defaults (snapshotNamePrefix: testsnapshot, createSnapshotConfig).
             SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '[
-              .[0]["snapshot-and-migration-configs"][] | {
-                "snapshotConfig": {
-                  "repoName": "default",
-                  "snapshotNameConfig": {
-                    "snapshotNamePrefix": "testsnapshot"
-                  }
-                },
-                "createSnapshotConfig": {},
-                "migrations": .migrations
-              }
+              .[0]["snapshot-and-migration-configs"][] |
+              if (.snapshotConfig.snapshotNameConfig.externallyManagedSnapshot // null) != null then
+                {
+                  "snapshotConfig": .snapshotConfig,
+                  "migrations": .migrations
+                }
+              else
+                {
+                  "snapshotConfig": (.snapshotConfig // {
+                    "snapshotNameConfig": {
+                      "snapshotNamePrefix": "testsnapshot"
+                    }
+                  }),
+                  "createSnapshotConfig": {},
+                  "migrations": .migrations
+                }
+              end
             ]')
             
             # Build the complete OVERALL_MIGRATION_CONFIG
@@ -200,10 +159,7 @@ spec:
                 "migrationConfigs": [{
                   "fromSource": "source1",
                   "toTarget": "target1",
-                  "snapshotExtractAndLoadConfigs": $snapshotConfigs,
-                  "replayerConfig": {
-                    "podReplicas": 0
-                  }
+                  "snapshotExtractAndLoadConfigs": $snapshotConfigs
                 }]
               }')
             

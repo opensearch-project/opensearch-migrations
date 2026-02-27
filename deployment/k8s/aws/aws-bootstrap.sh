@@ -374,6 +374,12 @@ else
 fi
 
 TOOLS_ARCH=$(uname -m)
+
+# --- compute immutable image tag ---
+# Use git short SHA for a unique, immutable tag per commit. This allows
+# pullPolicy: IfNotPresent since each build produces a distinct tag.
+IMAGE_TAG=$(git -C "$base_dir" rev-parse --short HEAD 2>/dev/null || echo "latest")
+echo "Image tag: $IMAGE_TAG"
 case "$TOOLS_ARCH" in
   x86_64 | amd64) TOOLS_ARCH="amd64" ;;
   aarch64 | arm64) TOOLS_ARCH="arm64" ;;
@@ -553,8 +559,6 @@ fi
 # --- CFN deployment (optional) ---
 if [[ "$deploy_cfn" == "true" ]]; then
   # Determine template source
-  cfn_template_flag=""
-  cfn_template_value=""
   if [[ "$build_cfn" == "true" ]]; then
     echo "Building CloudFormation templates from source..."
     # Clear STACK_NAME_SUFFIX so CDK produces predictable template filenames.
@@ -564,11 +568,10 @@ if [[ "$deploy_cfn" == "true" ]]; then
     # the CDK has safe defaults when they're unset.
     STACK_NAME_SUFFIX="" \
       "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified
-    cfn_template_flag="--template-body"
     if [[ "$deploy_create_vpc" == "true" ]]; then
-      cfn_template_value="file://$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
+      cfn_template_file="$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
     else
-      cfn_template_value="file://$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Import-VPC-eks.template.json"
+      cfn_template_file="$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Import-VPC-eks.template.json"
     fi
   else
     if [[ "$deploy_create_vpc" == "true" ]]; then
@@ -581,22 +584,20 @@ if [[ "$deploy_cfn" == "true" ]]; then
     curl -fL -o "$cfn_template_file" \
       "https://github.com/opensearch-project/opensearch-migrations/releases/download/${RELEASE_VERSION}/${cfn_template_name}" \
       || { echo "Failed to download CFN template for version ${RELEASE_VERSION}"; rm -f "$cfn_template_file"; exit 1; }
-    cfn_template_flag="--template-body"
-    cfn_template_value="file://${cfn_template_file}"
   fi
 
-  # Build parameter overrides (use separate array to handle comma-separated subnet IDs)
-  cfn_params=("ParameterKey=Stage,ParameterValue=${stage_filter}")
+  # Build parameter overrides for `aws cloudformation deploy`
+  cfn_params=("Stage=${stage_filter}")
   if [[ "$deploy_import_vpc" == "true" ]]; then
-    cfn_params+=("ParameterKey=VPCId,ParameterValue=${vpc_id}")
-    cfn_params+=("ParameterKey=VPCSubnetIds,ParameterValue=\"${subnet_ids}\"")
+    cfn_params+=("VPCId=${vpc_id}")
+    cfn_params+=("VPCSubnetIds=${subnet_ids}")
     # Add VPC endpoint creation parameters
     if [[ -n "$create_vpc_endpoints" ]]; then
       IFS=',' read -ra ep_arr <<< "$create_vpc_endpoints"
       for ep in "${ep_arr[@]}"; do
         case "$ep" in
           s3)
-            cfn_params+=("ParameterKey=CreateS3Endpoint,ParameterValue=true")
+            cfn_params+=("CreateS3Endpoint=true")
             # Resolve route tables for the subnets so the S3 gateway endpoint gets associated
             s3_route_table_ids=$(aws ec2 describe-route-tables \
               --filters "Name=association.subnet-id,Values=${subnet_ids}" \
@@ -607,14 +608,14 @@ if [[ "$deploy_cfn" == "true" ]]; then
                 --filters "Name=vpc-id,Values=${vpc_id}" "Name=association.main,Values=true" \
                 --query 'RouteTables[0].RouteTableId' --output text ${region:+--region "$region"})
             fi
-            cfn_params+=("ParameterKey=S3EndpointRouteTableIds,ParameterValue=\"${s3_route_table_ids}\"")
+            cfn_params+=("S3EndpointRouteTableIds=${s3_route_table_ids}")
             ;;
-          ecr)             cfn_params+=("ParameterKey=CreateECREndpoint,ParameterValue=true") ;;
-          ecrDocker)       cfn_params+=("ParameterKey=CreateECRDockerEndpoint,ParameterValue=true") ;;
-          cloudwatchLogs)  cfn_params+=("ParameterKey=CreateCloudWatchLogsEndpoint,ParameterValue=true") ;;
-          efs)             cfn_params+=("ParameterKey=CreateEFSEndpoint,ParameterValue=true") ;;
-          sts)             cfn_params+=("ParameterKey=CreateSTSEndpoint,ParameterValue=true") ;;
-          eksAuth)         cfn_params+=("ParameterKey=CreateEKSAuthEndpoint,ParameterValue=true") ;;
+          ecr)             cfn_params+=("CreateECREndpoint=true") ;;
+          ecrDocker)       cfn_params+=("CreateECRDockerEndpoint=true") ;;
+          cloudwatchLogs)  cfn_params+=("CreateCloudWatchLogsEndpoint=true") ;;
+          efs)             cfn_params+=("CreateEFSEndpoint=true") ;;
+          sts)             cfn_params+=("CreateSTSEndpoint=true") ;;
+          eksAuth)         cfn_params+=("CreateEKSAuthEndpoint=true") ;;
           *) echo "Warning: Unknown VPC endpoint type: $ep (valid: s3,ecr,ecrDocker,cloudwatchLogs,efs)" >&2 ;;
         esac
       done
@@ -622,45 +623,45 @@ if [[ "$deploy_cfn" == "true" ]]; then
   fi
 
   echo "Deploying CloudFormation stack: $cfn_stack_name"
-  # Clean up DELETE_FAILED stacks so they can be recreated
-  if stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} --query 'Stacks[0].StackStatus' --output text 2>/dev/null) \
-      && [[ "$stack_status" == "DELETE_FAILED" ]]; then
-    echo "Stack $cfn_stack_name is in DELETE_FAILED state. Deleting before recreating..."
-    aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"}
-    aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-      || { echo "Failed to delete DELETE_FAILED stack: $cfn_stack_name"; exit 1; }
-  fi
-  # create-stack/update-stack to support both --template-file and --template-url
-  if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
-    update_output=$(aws cloudformation update-stack \
-      "$cfn_template_flag" "$cfn_template_value" \
-      --stack-name "$cfn_stack_name" \
-      --parameters "${cfn_params[@]}" \
-      --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-      ${region:+--region "$region"} 2>&1) && update_started=true || update_started=false
-    if [[ "$update_started" == "true" ]]; then
-      echo "Waiting for stack update to complete..."
-      aws cloudformation wait stack-update-complete \
-        --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-        || { echo "CloudFormation stack update failed for: $cfn_stack_name"; exit 1; }
-    elif echo "$update_output" | grep -q "No updates are to be performed"; then
-      echo "No updates needed for stack: $cfn_stack_name"
-    else
-      echo "CloudFormation update-stack failed: $update_output" >&2
-      exit 1
+
+  # Delete stack if it's in a terminal failed state
+  delete_stuck_stack() {
+    if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
+      local status
+      status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+        --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
+      echo "Current stack status: $status"
+      if [[ "$status" == "ROLLBACK_COMPLETE" || "$status" == "UPDATE_ROLLBACK_COMPLETE" || "$status" == "DELETE_FAILED" ]]; then
+        echo "Stack $cfn_stack_name is in $status state. Deleting before re-creating..."
+        aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"}
+        aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+          || { echo "Failed to delete $status stack: $cfn_stack_name"; exit 1; }
+        echo "Deleted $status stack: $cfn_stack_name"
+      fi
     fi
-  else
-    aws cloudformation create-stack \
-      "$cfn_template_flag" "$cfn_template_value" \
+  }
+
+  run_cfn_deploy() {
+    aws cloudformation deploy \
+      --template-file "$cfn_template_file" \
       --stack-name "$cfn_stack_name" \
-      --parameters "${cfn_params[@]}" \
+      --parameter-overrides "${cfn_params[@]}" \
       --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-      ${region:+--region "$region"} \
-      || { echo "CloudFormation deployment failed for stack: $cfn_stack_name"; exit 1; }
-    echo "Waiting for stack creation to complete..."
-    aws cloudformation wait stack-create-complete \
-      --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-      || { echo "CloudFormation stack creation failed for: $cfn_stack_name"; exit 1; }
+      --no-fail-on-empty-changeset \
+      ${region:+--region "$region"}
+  }
+
+  delete_stuck_stack
+
+  # Run deploy; if changeset fails ResourceExistenceCheck, delete the stack and retry.
+  # This hook validates resources during changeset creation and can fail when a previous
+  # deployment left the stack in an inconsistent state.
+  if ! run_cfn_deploy; then
+    echo "Deploy failed. Attempting recovery — deleting stack and retrying..."
+    aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"} 2>/dev/null || true
+    aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} 2>/dev/null || true
+    run_cfn_deploy \
+      || { echo "CloudFormation deployment failed for: $cfn_stack_name"; exit 1; }
   fi
 
   echo "CloudFormation stack deployed successfully: $cfn_stack_name"
@@ -920,6 +921,12 @@ if [[ "$push_images_to_ecr" == "true" ]]; then
       crane copy "${MIGRATIONS_ECR_REGISTRY}:migrations_console_latest" \
         "${MIGRATIONS_ECR_REGISTRY}:migrations_migration_console_latest" 2>&1 | tail -1 || true
     fi
+    # Tag mirrored images with the immutable IMAGE_TAG
+    echo "Tagging MA images with $IMAGE_TAG..."
+    for name in capture_proxy traffic_replayer reindex_from_snapshot migration_console; do
+      crane copy "${MIGRATIONS_ECR_REGISTRY}:migrations_${name}_latest" \
+        "${MIGRATIONS_ECR_REGISTRY}:migrations_${name}_${IMAGE_TAG}" 2>&1 | tail -1 || true
+    done
   else
     echo "Skipping MA image mirroring — --build-images will push locally-built images."
   fi
@@ -937,10 +944,13 @@ if [[ "$build_images" == "true" ]]; then
   # When mirroring, buildkit still pulls from public registries — building on
   # isolated clusters is not supported. Use --ma-images-source instead.
 
-  if docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
-    echo "Buildkit already configured and healthy, skipping setup"
+  if docker buildx inspect local-remote-builder 2>/dev/null | grep -q "Status: running"; then
+    echo "Buildkit already running, skipping setup"
+  elif timeout 120 docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
+    echo "Buildkit bootstrapped successfully, skipping setup"
   else
     echo "Setting up buildkit for local builds..."
+    docker buildx rm local-remote-builder 2>/dev/null || true
     "${base_dir}/buildImages/setUpK8sImageBuildServices.sh"
   fi
 
@@ -951,7 +961,10 @@ if [[ "$build_images" == "true" ]]; then
     | docker login --username AWS --password-stdin "$ecr_domain" \
     || { echo "ECR login failed"; exit 1; }
 
-  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
+  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -PimageVersion="$IMAGE_TAG" -x test \
+    || { echo "Image build failed, retrying in 10s..."; sleep 10; \
+         "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -PimageVersion="$IMAGE_TAG" -x test; } \
+    || { echo "Image build failed on retry, giving up."; exit 1; }
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."
   docker buildx rm local-remote-builder 2>/dev/null || true
@@ -966,15 +979,15 @@ fi
 if [[ "$use_public_images" == "false" ]]; then
   IMAGE_FLAGS="\
     --set images.captureProxy.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.captureProxy.tag=migrations_capture_proxy_latest \
+    --set images.captureProxy.tag=migrations_capture_proxy_${IMAGE_TAG} \
     --set images.trafficReplayer.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.trafficReplayer.tag=migrations_traffic_replayer_latest \
+    --set images.trafficReplayer.tag=migrations_traffic_replayer_${IMAGE_TAG} \
     --set images.reindexFromSnapshot.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.reindexFromSnapshot.tag=migrations_reindex_from_snapshot_latest \
+    --set images.reindexFromSnapshot.tag=migrations_reindex_from_snapshot_${IMAGE_TAG} \
     --set images.migrationConsole.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.migrationConsole.tag=migrations_migration_console_latest \
+    --set images.migrationConsole.tag=migrations_migration_console_${IMAGE_TAG} \
     --set images.installer.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.installer.tag=migrations_migration_console_latest"
+    --set images.installer.tag=migrations_migration_console_${IMAGE_TAG}"
 # Use latest public images
 else
   echo "Using public images tagged '$RELEASE_VERSION'"
@@ -1023,6 +1036,28 @@ else
 fi
 
 check_existing_ma_release "$namespace" "$namespace"
+
+echo "=== Helm install configuration ==="
+echo "Chart: ${ma_chart_dir}"
+echo "Namespace: ${namespace}"
+echo "Values flags: ${HELM_VALUES_FLAGS}"
+if [[ -n "$extra_helm_values" ]]; then
+  echo "Extra values files: ${extra_helm_values}"
+  IFS=',' read -ra EXTRA_FILES <<< "$extra_helm_values"
+  for f in "${EXTRA_FILES[@]}"; do
+    echo "--- Contents of $f ---"
+    cat "$f"
+    echo "--- End $f ---"
+  done
+fi
+echo "Set flags:"
+echo "  stageName=${STAGE}"
+echo "  aws.region=${AWS_CFN_REGION}"
+echo "  aws.account=${AWS_ACCOUNT}"
+echo "  defaultBucketConfiguration.snapshotRoleArn=${SNAPSHOT_ROLE}"
+echo "Image flags:"
+echo "  ${IMAGE_FLAGS}"
+echo "=== End helm install configuration ==="
 
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
 helm install "$namespace" "${ma_chart_dir}" \

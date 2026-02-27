@@ -311,7 +311,7 @@ export const SNAPSHOT_NAME_CONFIG = z.union([
 
 export const NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG = z.object({
     snapshotNameConfig: SNAPSHOT_NAME_CONFIG,
-    repoName: z.string()
+    repoName: z.string().default("default")
 });
 
 export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
