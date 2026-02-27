@@ -633,11 +633,11 @@ if [[ "$deploy_cfn" == "true" ]]; then
     echo "--- end events ---"
   }
 
-  # Handle stacks in terminal failed states (ROLLBACK_COMPLETE, DELETE_FAILED)
+  # Handle stacks in terminal failed states (ROLLBACK_COMPLETE, UPDATE_ROLLBACK_COMPLETE, DELETE_FAILED)
   if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
     stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
       --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
-    if [[ "$stack_status" == "ROLLBACK_COMPLETE" || "$stack_status" == "DELETE_FAILED" ]]; then
+    if [[ "$stack_status" == "ROLLBACK_COMPLETE" || "$stack_status" == "UPDATE_ROLLBACK_COMPLETE" || "$stack_status" == "DELETE_FAILED" ]]; then
       echo "Stack $cfn_stack_name is in $stack_status state. Deleting before re-creating..."
       dump_cfn_events
       aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"}
