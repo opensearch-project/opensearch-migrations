@@ -359,6 +359,51 @@ class TestArgoServiceFiltering:
 
         assert "not found" in str(exc_info.value).lower()
 
+    @patch('console_link.workflow.tui.manage_injections.WorkflowService')
+    @patch('console_link.workflow.tui.manage_injections.requests.get')
+    def test_falls_back_to_archive_on_non_200(self, mock_get, mock_service_class):
+        """Verify archive fallback returns data when live API fails."""
+        mock_service = MagicMock()
+        mock_service.get_workflow_status.return_value = {
+            'workflow': {'metadata': {'resourceVersion': '1'}},
+            'started_at': '2024-01-01T00:00:00Z'
+        }
+        mock_service._fetch_archived_workflow.return_value = {
+            'metadata': {'name': 'archived-wf', 'namespace': 'default'},
+            'status': {
+                'phase': 'Succeeded',
+                'startedAt': '2024-01-01T00:00:00Z',
+                'finishedAt': '2024-01-01T00:05:00Z',
+                'nodes': {
+                    'node-1': {
+                        'id': 'node-1',
+                        'displayName': 'step-one',
+                        'type': 'Pod',
+                        'phase': 'Succeeded',
+                        'boundaryID': 'archived-wf',
+                        'children': [],
+                        'startedAt': '2024-01-01T00:01:00Z',
+                        'finishedAt': '2024-01-01T00:02:00Z',
+                        'inputs': {'parameters': [{'name': 'groupName', 'value': 'g1'}]},
+                        'outputs': {'parameters': [{'name': 'statusOutput', 'value': 'ok'}]}
+                    }
+                }
+            }
+        }
+        mock_service_class.return_value = mock_service
+
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_get.return_value = mock_response
+
+        argo = make_argo_service("http://argo:2746", False, "token")
+        _, slim_data = argo.get_workflow("archived-wf", "default")
+
+        assert "node-1" in slim_data["status"]["nodes"]
+        node = slim_data["status"]["nodes"]["node-1"]
+        assert node["phase"] == "Succeeded"
+        assert node["displayName"] == "step-one"
+
 
 # --- PodScraperInterface Tests ---
 
