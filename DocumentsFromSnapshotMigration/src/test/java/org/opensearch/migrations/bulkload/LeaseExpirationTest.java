@@ -334,9 +334,10 @@ public class LeaseExpirationTest extends SourceTestBase {
                 Assertions.assertEquals(RfsMigrateDocuments.PROCESS_TIMED_OUT_EXIT_CODE, exitCode,
                     "Worker should exit with PROCESS_TIMED_OUT (2); lease expired before all docs migrated");
 
-                // ASSERT: partial docs on target (migration was in progress when lease expired)
-                Assertions.assertTrue(finalDocCount > 0 && finalDocCount < TOTAL_DOCS,
-                    "Target should have some but not all docs; got " + finalDocCount);
+                // ASSERT: target doc count is well below lease-expiry baseline (~58),
+                // consistent with early handoff near t=45s
+                Assertions.assertTrue(finalDocCount >= 40 && finalDocCount <= 50,
+                    "Target should have 40-50 docs (stopped at early checkpoint); got " + finalDocCount);
 
                 // ASSERT: coordinator has a work item with successor_items (checkpoint was persisted)
                 coordinatorOps.refresh(coordinatorIndexName);
