@@ -10,6 +10,7 @@ import java.util.function.Function;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.CreateSnapshot;
+import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
@@ -246,16 +247,16 @@ public class LeaseExpirationTest extends SourceTestBase {
      * Verifies that RFS persists checkpoint metadata ({@code successor_items}) on the coordinator
      * before the lease expires, and that the checkpoint value reflects the expected doc position.
      *
-     * Setup: 50 docs, 1 doc/sec, PT60s lease. Coordinator disabled at t=40s, re-enabled at t=48s.
+     * Setup: 80 docs, 1 doc/sec, PT60s lease. Coordinator disabled at t=40s, re-enabled at t=48s.
      * Expected checkpoint at t=45s (75% of PT60s lease) pointing to doc 45 ({@code geonames__0__45}).
-     * Coordinator recovers within lease window, worker completes successfully (exit 0).
+     * Lease expires at t=60s while migration is in progress; worker exits PROCESS_TIMED_OUT (2).
      * Assertions run after worker exits.
      */
     @Disabled("MIGRATIONS-2864: expected to pass after pre-expiry checkpointing is implemented")
     @Test
     @SneakyThrows
     public void testEarlyCheckpointPersistedBeforeLeaseExpiry() {
-        final int TOTAL_DOCS = 50;
+        final int TOTAL_DOCS = 80;
         final int SHARDS = 1;
         final int COORDINATOR_DISABLE_AFTER_SECONDS = 40;
         final int COORDINATOR_REENABLE_AFTER_SECONDS = 8; // re-enabled at t=48s, within lease window
@@ -329,13 +330,13 @@ public class LeaseExpirationTest extends SourceTestBase {
                 log.atInfo().setMessage("Run: exit code {}, target doc count: {}")
                     .addArgument(exitCode).addArgument(finalDocCount).log();
 
-                // ASSERT: worker exits 0 ; coordinator recovered within lease window, work completed
-                Assertions.assertEquals(0, exitCode,
-                    "Worker should complete successfully (exit 0) ; coordinator recovered before lease expired");
+                // ASSERT: worker exits PROCESS_TIMED_OUT; lease expired while migration was in progress
+                Assertions.assertEquals(RfsMigrateDocuments.PROCESS_TIMED_OUT_EXIT_CODE, exitCode,
+                    "Worker should exit with PROCESS_TIMED_OUT (2); lease expired before all docs migrated");
 
-                // ASSERT: all docs migrated to target
-                Assertions.assertEquals(TOTAL_DOCS, finalDocCount,
-                    "All " + TOTAL_DOCS + " docs should be on target after successful completion");
+                // ASSERT: partial docs on target (migration was in progress when lease expired)
+                Assertions.assertTrue(finalDocCount > 0 && finalDocCount < TOTAL_DOCS,
+                    "Target should have some but not all docs; got " + finalDocCount);
 
                 // ASSERT: coordinator has a work item with successor_items (checkpoint was persisted)
                 coordinatorOps.refresh(coordinatorIndexName);
