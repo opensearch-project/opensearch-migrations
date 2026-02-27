@@ -23,18 +23,18 @@ defaultBucketConfiguration:
   endpoint: ""
   snapshotRoleArn: ""
 
-# Useful for updating images while developing
-#images:
-#  captureProxy:
-#    pullPolicy: Always
-#  trafficReplayer:
-#    pullPolicy: Always
-#  reindexFromSnapshot:
-#    pullPolicy: Always
-#  migrationConsole:
-#    pullPolicy: Always
-#  installer:
-#    pullPolicy: Always
+# Always pull to avoid stale cached images when using mutable tags (e.g. *_latest)
+images:
+  captureProxy:
+    pullPolicy: Always
+  trafficReplayer:
+    pullPolicy: Always
+  reindexFromSnapshot:
+    pullPolicy: Always
+  migrationConsole:
+    pullPolicy: Always
+  installer:
+    pullPolicy: Always
 
 # For OTEL Daemonset
 otelConfiguration:
