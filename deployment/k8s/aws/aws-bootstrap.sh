@@ -633,7 +633,17 @@ if [[ "$deploy_cfn" == "true" ]]; then
       echo "Current stack status: $status"
       if [[ "$status" == "ROLLBACK_COMPLETE" || "$status" == "UPDATE_ROLLBACK_COMPLETE" || "$status" == "DELETE_FAILED" ]]; then
         echo "Stack $cfn_stack_name is in $status state. Deleting before re-creating..."
-        aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"}
+        local retain_args=()
+        if [[ "$status" == "DELETE_FAILED" ]]; then
+          local failed_resources
+          failed_resources=$(aws cloudformation list-stack-resources --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+            --query "StackResourceSummaries[?ResourceStatus=='DELETE_FAILED'].LogicalResourceId" --output text 2>/dev/null)
+          if [[ -n "$failed_resources" ]]; then
+            echo "Retaining stuck resources: $failed_resources"
+            retain_args=(--retain-resources $failed_resources)
+          fi
+        fi
+        aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"} "${retain_args[@]}"
         aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
           || { echo "Failed to delete $status stack: $cfn_stack_name"; exit 1; }
         echo "Deleted $status stack: $cfn_stack_name"
@@ -658,8 +668,7 @@ if [[ "$deploy_cfn" == "true" ]]; then
   # deployment left the stack in an inconsistent state.
   if ! run_cfn_deploy; then
     echo "Deploy failed. Attempting recovery — deleting stack and retrying..."
-    aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"} 2>/dev/null || true
-    aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} 2>/dev/null || true
+    delete_stuck_stack
     run_cfn_deploy \
       || { echo "CloudFormation deployment failed for: $cfn_stack_name"; exit 1; }
   fi
