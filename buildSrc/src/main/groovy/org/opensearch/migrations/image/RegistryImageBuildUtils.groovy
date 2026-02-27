@@ -100,7 +100,12 @@ class RegistryImageBuildUtils {
                             def versionTag = rootProject.findProperty("imageVersion")
                             if (versionTag) {
                                 def suffix = (targetArch != "multi") ? "_${targetArch}" : ""
-                                tags = ["${versionTag}${suffix}".toString()]
+                                def (versionDest, _) = targetFormatter.getFullTargetImageIdentifier(
+                                        targetReg.hostUrl, config.imageName.toString(), versionTag,
+                                        config.get("repoName", null)?.toString())
+                                // Extract just the tag portion for Jib's tags list
+                                def formattedTag = versionDest.toString().split(":")[-1]
+                                tags = ["${formattedTag}${suffix}".toString()]
                             }
                         }
                         extraDirectories {
