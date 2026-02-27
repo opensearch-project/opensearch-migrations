@@ -67,6 +67,12 @@ def buildKitProjects = [
                 ]
         ],
         [
+                serviceName: "elasticsearchTestConsole",
+                contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole",
+                imageName:  "elasticsearch_test_console",
+                imageTag:   "latest"
+        ],
+        [
                 serviceName: "migrationConsoleBase",
                 contextDir: "migrationConsole/build/dockerContext",
                 imageName:  "migration_console_base",
@@ -97,12 +103,6 @@ def buildKitProjects = [
 
 // Test/CI-only images — not built by buildKitAll, use buildKitTestAll instead
 def testBuildKitProjects = [
-        [
-                serviceName: "elasticsearchTestConsole",
-                contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole",
-                imageName:  "elasticsearch_test_console",
-                imageTag:   "latest"
-        ],
         // Custom Elasticsearch images for k8s integration tests
         [
                 serviceName: "customElasticsearch152",
