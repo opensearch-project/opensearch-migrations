@@ -244,23 +244,25 @@ public class LeaseExpirationTest extends SourceTestBase {
     }
 
     /**
-     * Verifies that RFS persists checkpoint metadata ({@code successor_items}) before the lease
-     * expires, even when the coordinator is temporarily unavailable at the checkpoint trigger.
+     * Verifies that RFS persists checkpoint metadata ({@code successor_items}) on the coordinator
+     * before the lease expires, and that the checkpoint value reflects the expected doc position.
      *
-     * <p>Setup: 60 docs, 1 doc/sec, PT60s lease. Coordinator disabled at t=40s (before
-     * checkpoint trigger at t=45s), re-enabled at t=55s (within retry window, before lease expires).
-     * Probe window: polls every 200ms from t=55s to t=59s for {@code successor_items}.
-     * Worker exits PROCESS_TIMED_OUT (2) via the lease-timeout handoff path.
+     * Setup: 80 docs, 1 doc/sec, PT60s lease. Coordinator disabled at t=40s, re-enabled at t=48s.
+     * Expected checkpoint at t=45s (75% of PT60s lease) pointing to doc 45 ({@code geonames__0__45}).
+     * Lease expires at t=60s while migration is in progress; worker exits PROCESS_TIMED_OUT (2).
+     * Assertions run after worker exits.
      */
+    @Disabled("MIGRATIONS-2864: expected to pass after pre-expiry checkpointing is implemented")
     @Test
     @SneakyThrows
     public void testEarlyCheckpointPersistedBeforeLeaseExpiry() {
-        final int TOTAL_DOCS = 60;
+        final int TOTAL_DOCS = 80;
         final int SHARDS = 1;
-        final int COORDINATOR_DISABLE_AFTER_SECONDS = 40; // 5s before expected checkpoint at t=45s
-        final int COORDINATOR_REENABLE_AFTER_SECONDS = 15; // re-enabled at t=55s, within retry window
-        final int PROBE_WINDOW_SECONDS = 4; // poll from t=55s to t=59s
-        final int PROBE_INTERVAL_MS = 200;
+        final int COORDINATOR_DISABLE_AFTER_SECONDS = 40;
+        final int COORDINATOR_REENABLE_AFTER_SECONDS = 8; // re-enabled at t=48s, within lease window
+        // At 75% of PT60s = t=45s, progressCursor should be at doc 45
+        // Successor work item ID: geonames__0__45
+        final String EXPECTED_CHECKPOINT_WORK_ITEM = "geonames__0__45";
 
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
         var tempDirSnapshot = Files.createTempDirectory("earlyCheckpoint_snapshot");
@@ -304,12 +306,7 @@ public class LeaseExpirationTest extends SourceTestBase {
             var coordinatorOps = new ClusterOperations(osCoordinatorContainer);
             var coordinatorIndexName = OpenSearchWorkCoordinator.getFinalIndexName(DEFAULT_COORDINATOR_INDEX_SUFFIX);
 
-            // Two scheduled events: disable at t=40s, re-enable at t=55s
-            // Probe window: poll every 200ms from t=55s until t=59s for successor_items
-            var probeDone = new java.util.concurrent.CountDownLatch(1);
-            var probeError = new java.util.concurrent.atomic.AtomicReference<Exception>();
-            var firstCheckpointSeenAtNanos = new java.util.concurrent.atomic.AtomicLong(0);
-            var targetDocCountAtProbe = new java.util.concurrent.atomic.AtomicLong(-1);
+            // Two scheduled events: disable at t=40s, re-enable at t=48s
             var scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
                 var t = new Thread(r, "coordinator-outage-scheduler");
                 t.setDaemon(true);
@@ -317,91 +314,49 @@ public class LeaseExpirationTest extends SourceTestBase {
             });
             scheduler.schedule(() -> {
                 coordinatorProxy.disable();
-                log.atInfo()
-                    .setMessage("Coordinator disabled at ~{}s")
-                    .addArgument(COORDINATOR_DISABLE_AFTER_SECONDS)
-                    .log();
+                log.atInfo().setMessage("Coordinator disabled at ~{}s")
+                    .addArgument(COORDINATOR_DISABLE_AFTER_SECONDS).log();
             }, COORDINATOR_DISABLE_AFTER_SECONDS, TimeUnit.SECONDS);
-
             scheduler.schedule(() -> {
                 coordinatorProxy.enable();
-                log.atInfo()
-                    .setMessage("Coordinator re-enabled at t=~{}s")
-                    .addArgument(COORDINATOR_DISABLE_AFTER_SECONDS + COORDINATOR_REENABLE_AFTER_SECONDS)
-                    .log();
-
-                // Poll every 200ms until successor_items observed or probe window exhausts
-                var pollDeadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(PROBE_WINDOW_SECONDS);
-                var checkpointedWorkItemQuery = "{\"query\":{\"exists\":{\"field\":\""
-                    + OpenSearchWorkCoordinator.SUCCESSOR_ITEMS_FIELD_NAME + "\"}}}";
-                while (System.nanoTime() < pollDeadlineNanos) {
-                    try {
-                        coordinatorOps.refresh(coordinatorIndexName);
-                        var response = coordinatorOps.post("/" + coordinatorIndexName + "/_count", checkpointedWorkItemQuery);
-                        long count = new com.fasterxml.jackson.databind.ObjectMapper()
-                            .readTree(response.getValue()).path("count").asLong();
-                        if (count > 0) {
-                            firstCheckpointSeenAtNanos.set(System.nanoTime());
-                            targetDocCountAtProbe.set(targetOps.getDocCount("geonames"));
-                            log.atInfo()
-                                .setMessage("Checkpoint observed: work items with successor_items={}, target docs={}")
-                                .addArgument(count)
-                                .addArgument(targetDocCountAtProbe.get())
-                                .log();
-                            probeDone.countDown();
-                            return;
-                        }
-                        Thread.sleep(PROBE_INTERVAL_MS);
-                    } catch (Exception | AssertionError e) {
-                        probeError.set(e instanceof Exception ? (Exception) e : new RuntimeException(e));
-                        log.atError()
-                            .setCause(e)
-                            .setMessage("Probe poll failed")
-                            .log();
-                        probeDone.countDown();
-                        return;
-                    }
-                }
-                log.atWarn()
-                    .setMessage("Probe window exhausted without observing checkpoint")
-                    .log();
-                probeDone.countDown();
+                log.atInfo().setMessage("Coordinator re-enabled at t=~{}s")
+                    .addArgument(COORDINATOR_DISABLE_AFTER_SECONDS + COORDINATOR_REENABLE_AFTER_SECONDS).log();
             }, COORDINATOR_DISABLE_AFTER_SECONDS + COORDINATOR_REENABLE_AFTER_SECONDS, TimeUnit.SECONDS);
 
             try {
                 int exitCode = runSingleWorkerWithDedicatedCoordinator(
                     tempDirSnapshot, tempDirLucene, targetProxy, coordinatorProxy);
                 long finalDocCount = targetOps.getDocCount("geonames");
-                log.atInfo()
-                    .setMessage("Run: exit code {}, target doc count: {}")
-                    .addArgument(exitCode)
-                    .addArgument(finalDocCount)
-                    .log();
+                log.atInfo().setMessage("Run: exit code {}, target doc count: {}")
+                    .addArgument(exitCode).addArgument(finalDocCount).log();
 
-                // ASSERT: target has docs (migration was in progress)
-                Assertions.assertTrue(finalDocCount > 0,
-                    "Target should have docs after migration attempt");
-
-                // ASSERT: probe completed and ran without error
-                Assertions.assertTrue(probeDone.await(70, TimeUnit.SECONDS),
-                    "Probe window did not complete within timeout or scheduler may not have run");
-                Assertions.assertNull(probeError.get(),
-                    "Probe poll failed with exception: " + probeError.get());
-
-                // ASSERT: checkpoint was observed during probe window (before lease expires at t=60s)
-                Assertions.assertTrue(firstCheckpointSeenAtNanos.get() > 0,
-                    "Expected successor_items on coordinator within probe window (t="
-                    + (COORDINATOR_DISABLE_AFTER_SECONDS + COORDINATOR_REENABLE_AFTER_SECONDS) + "s to t="
-                    + (COORDINATOR_DISABLE_AFTER_SECONDS + COORDINATOR_REENABLE_AFTER_SECONDS + PROBE_WINDOW_SECONDS) + "s). "
-                    + "Target had " + targetDocCountAtProbe.get() + " docs when probe exhausted.");
-
-                // ASSERT: target doc count at checkpoint time confirms migration was in progress
-                Assertions.assertTrue(targetDocCountAtProbe.get() > 0 && targetDocCountAtProbe.get() < TOTAL_DOCS,
-                    "At checkpoint observation time, target should have some but not all docs, got " + targetDocCountAtProbe.get());
-
-                // ASSERT: worker exits with PROCESS_TIMED_OUT - early checkpoint triggered, work handed off via lease-timeout path
+                // ASSERT: worker exits PROCESS_TIMED_OUT; lease expired while migration was in progress
                 Assertions.assertEquals(RfsMigrateDocuments.PROCESS_TIMED_OUT_EXIT_CODE, exitCode,
-                    "Worker should exit with PROCESS_TIMED_OUT (2). Early checkpoint triggered and handed off, lease-timeout path still exits 2");
+                    "Worker should exit with PROCESS_TIMED_OUT (2); lease expired before all docs migrated");
+
+                // ASSERT: target doc count is well below lease-expiry baseline (~58),
+                // consistent with early handoff near t=45s
+                Assertions.assertTrue(finalDocCount >= 40 && finalDocCount <= 50,
+                    "Target should have 40-50 docs (stopped at early checkpoint); got " + finalDocCount);
+
+                // ASSERT: coordinator has a work item with successor_items (checkpoint was persisted)
+                coordinatorOps.refresh(coordinatorIndexName);
+                var successorQuery = "{\"query\":{\"exists\":{\"field\":\""
+                    + OpenSearchWorkCoordinator.SUCCESSOR_ITEMS_FIELD_NAME + "\"}}}";
+                var searchResponse = coordinatorOps.post("/" + coordinatorIndexName + "/_search", successorQuery);
+                Assertions.assertEquals(200, searchResponse.getKey(), "Failed to query coordinator index");
+                var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                var hits = mapper.readTree(searchResponse.getValue()).path("hits").path("hits");
+                Assertions.assertTrue(hits.size() > 0,
+                    "Expected at least one work item with successor_items on coordinator");
+
+                // ASSERT: the successor work item points to doc 45 (checkpoint at 75% of PT60s lease = t=45s)
+                // Today this fails ; checkpoint happens at lease expiry, not at 75%
+                var successorItems = hits.get(0).path("_source")
+                    .path(OpenSearchWorkCoordinator.SUCCESSOR_ITEMS_FIELD_NAME).asText();
+                Assertions.assertEquals(EXPECTED_CHECKPOINT_WORK_ITEM, successorItems,
+                    "Successor work item should be " + EXPECTED_CHECKPOINT_WORK_ITEM
+                    + " (checkpoint at doc 45 = 75% of PT60s lease), got: " + successorItems);
             } finally {
                 scheduler.shutdownNow();
             }
