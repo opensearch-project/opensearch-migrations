@@ -1,6 +1,8 @@
 package org.opensearch.migrations.bulkload.workcoordination;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
@@ -49,7 +51,16 @@ public class ScopedWorkCoordinator {
                 InterruptedException {
                 var workItemId = workItem.getWorkItem().toString();
                 log.info("Acquired work item: {} with lease expiration at {}", workItemId, workItem.leaseExpirationTime);
-                leaseExpireTrigger.registerExpiration(workItemId, workItem.leaseExpirationTime);
+                var acquisitionTime = Instant.now();
+                var leaseDuration = Duration.between(acquisitionTime, workItem.leaseExpirationTime);
+                // Trigger early checkpoint at max(lease*0.75, lease-4.5min) to allow cleanup before expiry
+                var earlyTriggerOffset = leaseDuration.multipliedBy(3).dividedBy(4)
+                    .compareTo(leaseDuration.minus(Duration.ofMinutes(4).plusSeconds(30))) > 0
+                    ? leaseDuration.multipliedBy(3).dividedBy(4)
+                    : leaseDuration.minus(Duration.ofMinutes(4).plusSeconds(30));
+                var earlyTriggerTime = acquisitionTime.plus(earlyTriggerOffset.isNegative() ? Duration.ZERO : earlyTriggerOffset);
+                log.info("Scheduling early checkpoint trigger at {} ({}s into lease)", earlyTriggerTime, earlyTriggerOffset.toSeconds());
+                leaseExpireTrigger.registerExpiration(workItemId, earlyTriggerTime);
                 long startTime = System.currentTimeMillis();
                 try {
                     T result = visitor.onAcquiredWork(workItem);
