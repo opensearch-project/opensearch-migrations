@@ -15,7 +15,7 @@ export function transform(msg: JavaMap): JavaMap {
   if (ctx.endpoint === 'unknown') return msg;
   runPipeline(requestRegistry, ctx);
   if (ctx.body.size > 0) {
-    var payload = msg.get('payload');
+    let payload = msg.get('payload');
     if (!payload) {
       payload = new Map();
       msg.set('payload', payload);

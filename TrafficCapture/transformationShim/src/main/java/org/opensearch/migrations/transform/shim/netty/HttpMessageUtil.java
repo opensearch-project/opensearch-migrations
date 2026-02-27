@@ -12,7 +12,6 @@ import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -162,7 +161,7 @@ public final class HttpMessageUtil {
             try {
                 return MAPPER.writeValueAsString(jsonBody);
             } catch (JsonProcessingException e) {
-                throw new RuntimeException("Failed to serialize inlinedJsonBody", e);
+                throw new IllegalStateException("Failed to serialize inlinedJsonBody", e);
             }
         }
         // Fallback to inlinedTextBody (String)

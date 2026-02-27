@@ -15,8 +15,7 @@ export const response: MicroTransform<ResponseContext> = {
     const total: JavaMap = hits.get('total');
 
     const docs: JavaMap[] = [];
-    for (let i = 0; i < hitsArray.length; i++) {
-      const hit = hitsArray[i];
+    for (const hit of hitsArray) {
       const source: JavaMap = hit.get('_source');
       const doc = new Map();
       for (const key of source.keys()) {

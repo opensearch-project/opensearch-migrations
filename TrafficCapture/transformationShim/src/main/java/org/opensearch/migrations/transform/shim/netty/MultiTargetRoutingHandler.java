@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -29,14 +28,12 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInitializer;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.channel.pool.AbstractChannelPoolMap;
 import io.netty.channel.pool.ChannelPool;
 import io.netty.channel.pool.ChannelPoolHandler;
 import io.netty.channel.pool.FixedChannelPool;
-import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.FullHttpRequest;
@@ -66,6 +63,8 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<Map<String, Object>> MAP_TYPE_REF = new TypeReference<>() {};
     private static final int MAX_CONNECTIONS_PER_TARGET = 32;
+    private static final String HANDLER_READ_TIMEOUT = "readTimeout";
+    private static final String HANDLER_RESPONSE = "responseHandler";
 
     /** Structured tuple logger — mirrors replayer's OutputTupleJsonLogger. */
     private static final Logger TUPLE_LOGGER = LoggerFactory.getLogger("OutputTupleJsonLogger");
@@ -147,12 +146,12 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         request.release();
 
         long requestId = requestCounter.getAndIncrement();
-        var futures = dispatchAll(ctx, requestMap);
+        var futures = dispatchAll(requestMap);
         handlePrimaryCompletion(ctx, futures, keepAlive, requestMap, requestId);
     }
 
     private Map<String, CompletableFuture<TargetResponse>> dispatchAll(
-        ChannelHandlerContext ctx, Map<String, Object> requestMap
+        Map<String, Object> requestMap
     ) {
         Map<String, CompletableFuture<TargetResponse>> futures = new LinkedHashMap<>();
         for (String name : activeTargets) {
@@ -285,9 +284,9 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
             }
             Channel ch = f.getNow();
             // Add per-request handlers (removed after response)
-            ch.pipeline().addLast("readTimeout", new ReadTimeoutHandler(
+            ch.pipeline().addLast(HANDLER_READ_TIMEOUT, new ReadTimeoutHandler(
                 secondaryTimeout.toSeconds(), TimeUnit.SECONDS));
-            ch.pipeline().addLast("responseHandler", new PooledTargetResponseHandler(
+            ch.pipeline().addLast(HANDLER_RESPONSE, new PooledTargetResponseHandler(
                 target, future, startNanos, originalRequestMap, reqTransformDuration, pool, ch));
 
             ch.writeAndFlush(reqToSend).addListener((ChannelFutureListener) wf -> {
@@ -520,8 +519,8 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         @Override
         public void channelReleased(Channel ch) {
             // Remove per-request handlers so the channel is clean for reuse
-            if (ch.pipeline().get("readTimeout") != null) ch.pipeline().remove("readTimeout");
-            if (ch.pipeline().get("responseHandler") != null) ch.pipeline().remove("responseHandler");
+            if (ch.pipeline().get(HANDLER_READ_TIMEOUT) != null) ch.pipeline().remove(HANDLER_READ_TIMEOUT);
+            if (ch.pipeline().get(HANDLER_RESPONSE) != null) ch.pipeline().remove(HANDLER_RESPONSE);
         }
 
         @Override

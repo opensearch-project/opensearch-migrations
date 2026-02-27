@@ -23,11 +23,11 @@ export function transform(msg: JavaMap): JavaMap {
   if (ctx.endpoint === 'unknown') return msg;
   runPipeline(responseRegistry, ctx);
 
-  var payload = response.get('payload');
+  let payload = response.get('payload');
   if (!payload) {
     payload = new Map();
     response.set('payload', payload);
   }
   payload.set('inlinedJsonBody', ctx.responseBody);
-  return msg;
+  return response;
 }
