@@ -381,7 +381,9 @@ ENVEOF
                                         """
                                     }
                                     // Teardown order: CDK first (clusters only), then EKS CFN (EKS + VPC)
-                                    sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json || true"
+                                    if (!params.SKIP_CFN_DELETE) {
+                                        sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json || true"
+                                    }
                                 }
                                 // Always attempt to delete the CFN stack (handles early deploy failures)
                                 if (env.STACK_NAME && !params.SKIP_CFN_DELETE) {
