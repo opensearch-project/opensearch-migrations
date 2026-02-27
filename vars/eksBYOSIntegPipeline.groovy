@@ -87,6 +87,7 @@ def call(Map config = [:]) {
                 choices: ['default', 'large'],
                 description: 'Target cluster size (default: 2x r6g.large, large: 24x r6g.8xlarge with dedicated masters)'
             )
+            booleanParam(name: 'SKIP_CFN_DELETE', defaultValue: true, description: 'Skip deleting the EKS CFN stack during teardown (preserves infrastructure for reuse)')
         }
         options {
             lock(label: params.STAGE, quantity: 1, variable: 'maStageName')
@@ -383,7 +384,7 @@ ENVEOF
                                     sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json || true"
                                 }
                                 // Always attempt to delete the CFN stack (handles early deploy failures)
-                                if (env.STACK_NAME) {
+                                if (env.STACK_NAME && !params.SKIP_CFN_DELETE) {
                                     sh "aws cloudformation delete-stack --stack-name ${env.STACK_NAME} --region ${params.REGION} || true"
                                     sh "aws cloudformation wait stack-delete-complete --stack-name ${env.STACK_NAME} --region ${params.REGION} || true"
                                 }
