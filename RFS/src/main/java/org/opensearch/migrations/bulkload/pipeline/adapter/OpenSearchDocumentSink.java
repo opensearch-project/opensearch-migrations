@@ -57,23 +57,6 @@ public class OpenSearchDocumentSink implements DocumentSink {
     /**
      * Full constructor with all options.
      *
-     * @param client                  the OpenSearch client
-     * @param transformerSupplier     supplier for document transformers, null for no transformation
-     * @param allowServerGeneratedIds whether to strip document IDs for server-generated IDs
-     * @param allowlist               exception types to treat as success during bulk writes
-     */
-    public OpenSearchDocumentSink(
-        OpenSearchClient client,
-        Supplier<IJsonTransformer> transformerSupplier,
-        boolean allowServerGeneratedIds,
-        DocumentExceptionAllowlist allowlist
-    ) {
-        this(client, transformerSupplier, allowServerGeneratedIds, allowlist, null);
-    }
-
-    /**
-     * Full constructor with request context for HTTP-level metrics (bytes sent/read, request count/duration).
-     *
      * @param client                    the OpenSearch client
      * @param transformerSupplier       supplier for document transformers, null for no transformation
      * @param allowServerGeneratedIds   whether to strip document IDs for server-generated IDs

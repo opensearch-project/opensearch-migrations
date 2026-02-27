@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @Slf4j
-public class Transformer_ES_7_10_OS_2_11Test {
+public class CanonicalTransformerSnapshotTest {
     @Test
     public void transformGlobalMetadata_AsExpected() throws Exception {
         TestResources.Snapshot snapshot = TestResources.SNAPSHOT_ES_7_10_BWC_CHECK;

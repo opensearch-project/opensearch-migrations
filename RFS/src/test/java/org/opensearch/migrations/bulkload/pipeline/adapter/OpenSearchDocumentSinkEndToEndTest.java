@@ -101,7 +101,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
         try (var cluster = new SearchClusterContainer(targetVersion)) {
             cluster.start();
             var client = createClient(cluster);
-            var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty());
+            var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
             var shardId = new ShardId("snap", "sink_deletes", 0);
 
             sink.createIndex(new IndexMetadataSnapshot("sink_deletes", 1, 0, null, null, null)).block();
