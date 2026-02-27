@@ -308,7 +308,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cfn-lint "/tmp/cdk.out/*.template.json" --format json --non-zero-exit-code none > /tmp/cfn-lint-output.json
+          cfn-lint "/tmp/cdk.out/*.template.json" --config-file "$GITHUB_WORKSPACE/.cfnlintrc.yaml" --format json --non-zero-exit-code none > /tmp/cfn-lint-output.json
 
           ISSUE_COUNT=$(jq 'length' /tmp/cfn-lint-output.json)
           BASELINE_ISSUE_COUNT=6
