@@ -1,5 +1,5 @@
 # Using same base image as other Java containers in this repo
-FROM amazoncorretto:17-al2023-headless
+FROM mirror.gcr.io/library/amazoncorretto:17-al2023-headless
 
 # Install procps to use pgrep in entrypoint.sh
 RUN dnf install -y procps && \

@@ -161,6 +161,7 @@ public class RequestSenderOrchestrator {
     ) {
         var sessionNumber = requestKey.sourceRequestIndexSessionIdentifier;
         var channelInteractionNum = requestKey.getReplayerRequestIndex();
+        var generation = requestKey.trafficStreamKey.getSourceGeneration();
         // TODO: Separate socket connection from the first bytes sent.
         // Ideally, we would match the relative timestamps of when connections were being initiated
         // as well as the period between connection and the first bytes sent. However, this code is a
@@ -171,6 +172,7 @@ public class RequestSenderOrchestrator {
             ctx.getLogicalEnclosingScope(),
             sessionNumber,
             channelInteractionNum,
+            generation,
             connectionReplaySession -> scheduleSendRequestOnConnectionReplaySession(
                 ctx,
                 connectionReplaySession,
@@ -180,6 +182,14 @@ public class RequestSenderOrchestrator {
                 visitor
             )
         );
+    }
+
+    /**
+     * Immediately cancels a connection without going through the OnlineRadixSorter.
+     * Delegates directly to {@link ClientConnectionPool#cancelConnection}.
+     */
+    public TrackedFuture<String, Void> cancelConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
+        return clientConnectionPool.cancelConnection(ctx, sessionNumber);
     }
 
     public TrackedFuture<String, Void> scheduleClose(
@@ -248,7 +258,17 @@ public class RequestSenderOrchestrator {
         int channelInteractionNumber,
         Function<ConnectionReplaySession, TrackedFuture<String, T>> onSessionCallback
     ) {
-        final var replaySession = clientConnectionPool.getCachedSession(ctx, sessionNumber);
+        return submitUnorderedWorkToEventLoop(ctx, sessionNumber, channelInteractionNumber, 0, onSessionCallback);
+    }
+
+    private <T> TrackedFuture<String, T> submitUnorderedWorkToEventLoop(
+        IReplayContexts.IChannelKeyContext ctx,
+        int sessionNumber,
+        int channelInteractionNumber,
+        int generation,
+        Function<ConnectionReplaySession, TrackedFuture<String, T>> onSessionCallback
+    ) {
+        final var replaySession = clientConnectionPool.getCachedSession(ctx, sessionNumber, generation);
         return NettyFutureBinders.bindNettySubmitToTrackableFuture(replaySession.eventLoop)
             .getDeferredFutureThroughHandle((v, t) -> {
                 log.atTrace().setMessage("adding work item at slot {} for {} with {}")
@@ -323,7 +343,7 @@ public class RequestSenderOrchestrator {
         Instant atTime,
         ChannelTask<T> task
     ) {
-        log.atInfo().setMessage("{} scheduling {} at {}")
+        log.atDebug().setMessage("{} scheduling {} at {}")
             .addArgument(channelInteraction)
             .addArgument(task.kind)
             .addArgument(atTime)
@@ -406,7 +426,7 @@ public class RequestSenderOrchestrator {
                     var newStartTime = computedStartTime.isBefore(now)
                         ? now.plus(nextRetryDelay)
                         : computedStartTime;
-                    log.atInfo().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
+                    log.atDebug().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
                     var schedulingDelay = Duration.between(now(), newStartTime);
                     return NettyFutureBinders.bindNettyScheduleToCompletableFuture(
                         eventLoop, schedulingDelay)

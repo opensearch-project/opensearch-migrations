@@ -737,11 +737,11 @@ exports[`test workflow template renderings create-snapshot 1`] = `
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
           },
         },
@@ -2015,6 +2015,12 @@ spec:
             {
               "name": "imageMigrationConsolePullPolicy",
             },
+            {
+              "name": "imageCoordinatorClusterLocation",
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
+            },
           ],
         },
         "name": "setupandrunbulkload",
@@ -2029,6 +2035,10 @@ spec:
                   {
                     "name": "clusterName",
                     "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}",
+                  },
+                  {
+                    "name": "coordinatorImage",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
                   },
                 ],
               },
@@ -2202,11 +2212,11 @@ exports[`test workflow template renderings full-migration 1`] = `
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -2287,6 +2297,12 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
             {
               "name": "imageSnapshotFusePullPolicy",
+            },
+            {
+              "name": "imageCoordinatorClusterLocation",
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
             },
           ],
         },
@@ -2391,6 +2407,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
                   },
                   {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}",
+                  },
+                  {
                     "name": "sessionName",
                     "value": "{{steps.idGenerator.id}}",
                   },
@@ -2468,6 +2492,12 @@ exports[`test workflow template renderings full-migration 1`] = `
             },
             {
               "name": "imageSnapshotFusePullPolicy",
+            },
+            {
+              "name": "imageCoordinatorClusterLocation",
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
             },
           ],
         },
@@ -2574,6 +2604,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                     "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}",
                   },
                   {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}",
+                  },
+                  {
                     "name": "label",
                     "value": "{{=jsonpath(toJSON(item), '$.label')}}",
                   },
@@ -2660,6 +2698,12 @@ exports[`test workflow template renderings full-migration 1`] = `
             {
               "name": "imageSnapshotFusePullPolicy",
             },
+            {
+              "name": "imageCoordinatorClusterLocation",
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
+            },
           ],
         },
         "name": "migration",
@@ -2722,6 +2766,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                   {
                     "name": "imageSnapshotFusePullPolicy",
                     "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}",
                   },
                   {
                     "name": "createSnapshotConfig",
@@ -2863,6 +2915,26 @@ exports[`test workflow template renderings full-migration 1`] = `
                 },
               },
             },
+            {
+              "name": "imageCoordinatorClusterLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "key": "coordinatorClusterImage",
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "optional": undefined,
+                },
+              },
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "key": "coordinatorClusterPullPolicy",
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "optional": undefined,
+                },
+              },
+            },
           ],
         },
         "name": "main",
@@ -2917,6 +2989,14 @@ exports[`test workflow template renderings full-migration 1`] = `
                   {
                     "name": "imageSnapshotFusePullPolicy",
                     "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}",
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}",
                   },
                   {
                     "name": "sourceConfig",
@@ -3007,6 +3087,10 @@ exports[`test workflow template renderings full-migration-with-workflow-cli 1`] 
           "name": "approvalConfigMapName",
           "value": "approval-config",
         },
+        {
+          "name": "monitor-retry-limit",
+          "value": "33",
+        },
       ],
     },
     "entrypoint": "main",
@@ -3071,11 +3155,11 @@ echo "Workflow submit output: $WORKFLOW_OUTPUT"
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -3155,11 +3239,11 @@ exit 0
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -3187,11 +3271,10 @@ exit 0
         },
         "retryStrategy": {
           "backoff": {
-            "cap": "15",
-            "duration": "2",
-            "factor": "2",
+            "duration": "60",
+            "factor": "1",
           },
-          "limit": "100",
+          "limit": "{{workflow.parameters.monitor-retry-limit}}",
           "retryPolicy": "Always",
         },
       },
@@ -3228,11 +3311,11 @@ fi
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -3456,11 +3539,11 @@ exports[`test workflow template renderings metadata-migration 1`] = `
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
           },
           "volumeMounts": [
@@ -3929,11 +4012,11 @@ echo ---
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "1800Mi",
             },
           },
         },
@@ -4446,6 +4529,9 @@ spec:
             {
               "name": "clusterName",
             },
+            {
+              "name": "coordinatorImage",
+            },
           ],
         },
         "name": "createrfscoordinatorstatefulset",
@@ -4481,7 +4567,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: opensearch
-          image: opensearchproject/opensearch:3.1.0
+          image: "{{inputs.parameters.coordinatorImage}}"
           ports:
             - name: https
               containerPort: 9200
@@ -4545,6 +4631,9 @@ spec:
               "name": "clusterName",
             },
             {
+              "name": "coordinatorImage",
+            },
+            {
               "name": "groupName",
               "value": "Start RFS OpenSearch cluster for worker coordination",
             },
@@ -4588,6 +4677,10 @@ spec:
                   {
                     "name": "clusterName",
                     "value": "{{inputs.parameters.clusterName}}",
+                  },
+                  {
+                    "name": "coordinatorImage",
+                    "value": "{{inputs.parameters.coordinatorImage}}",
                   },
                 ],
               },
@@ -5321,11 +5414,11 @@ echo $SHOULD_FINALIZE",
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },
@@ -5574,11 +5667,11 @@ echo "Cleanup complete. Workflow stats preserved under /$STATS_KEY/"",
           "resources": {
             "limits": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
             "requests": {
               "cpu": "500m",
-              "memory": "2000Mi",
+              "memory": "500Mi",
             },
           },
         },

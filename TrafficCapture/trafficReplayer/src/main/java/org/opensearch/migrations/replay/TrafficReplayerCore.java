@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import java.io.EOFException;
 import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -97,12 +98,18 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         private final ReplayEngine replayEngine;
         private Consumer<SourceTargetCaptureTuple> resultTupleConsumer;
         private ITrafficCaptureSource trafficCaptureSource;
+        /** How long to delay the first request on a resumed connection. Configurable via CLI. */
+        private final Duration quiescentDuration;
 
         @Override
         public Consumer<RequestResponsePacketPair> onRequestReceived(
             @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-            @NonNull HttpMessageAndTimestamp request
+            @NonNull HttpMessageAndTimestamp request,
+            boolean isResumedConnection
         ) {
+            // quiescentDuration is passed to ReplayEngine which applies it relative to the
+            // time-shifted start, not relative to now
+            var quiescentDurationForRequest = isResumedConnection ? quiescentDuration : null;
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
             var requestKey = ctx.getReplayerRequestKey();
@@ -119,7 +126,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             );
 
             var allWorkFinishedForTransactionFuture =
-                sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey, finishedAccumulatingResponseFuture)
+                sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey, finishedAccumulatingResponseFuture, quiescentDurationForRequest)
                     .getDeferredFutureThroughHandle(
                         // TODO - what if finishedAccumulatingResponseFuture completed exceptionally?
                         (arr, httpRequestException) -> finishedAccumulatingResponseFuture.thenCompose(
@@ -146,13 +153,14 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             IReplayContexts.IReplayerHttpTransactionContext ctx,
             HttpMessageAndTimestamp request,
             UniqueReplayerRequestKey requestKey,
-            TextTrackedFuture<RequestResponsePacketPair> finishedAccumulatingResponseFuture) {
+            TextTrackedFuture<RequestResponsePacketPair> finishedAccumulatingResponseFuture,
+            Duration quiescentDurationForRequest) {
             var workDequeuedByLimiterFuture = new TextTrackedFuture<TrafficStreamLimiter.WorkItem>(
                 () -> "waiting for " + ctx + " to be queued and run through TrafficStreamLimiter"
             );
             var wi = liveTrafficStreamLimiter.queueWork(1, ctx, workDequeuedByLimiterFuture.future::complete);
             var httpSentRequestFuture = workDequeuedByLimiterFuture.thenCompose(
-                    ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx),
+                    ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx, quiescentDurationForRequest),
                     () -> "Waiting to get response from target"
                 )
                 .whenComplete(
@@ -231,15 +239,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             }
         }
 
-        @Override
-        public void onTrafficStreamsExpired(
-            RequestResponsePacketPair.ReconstructionStatus status,
-            @NonNull IReplayContexts.IChannelKeyContext ctx,
-            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
-        ) {
-            commitTrafficStreams(status, trafficStreamKeysBeingHeld);
-        }
-
         @SneakyThrows
         private void commitTrafficStreams(
             RequestResponsePacketPair.ReconstructionStatus status,
@@ -272,12 +271,39 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             @NonNull Instant timestamp,
             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
         ) {
+            // For TRAFFIC_SOURCE_READER_INTERRUPTED: close tracing contexts (no commit) AND schedule channel close
+            // so the ConnectionReplaySession drains and the onClose callback fires
+            if (status == RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED) {
+                commitTrafficStreams(false, trafficStreamKeysBeingHeld);
+                notifyConnectionDone(trafficStreamKeysBeingHeld);
+                // cancelConnection bypasses the sorter and time-shifting: marks the session cancelled
+                // (prevents reconnection) and closes the channel immediately
+                replayEngine.cancelConnection(ctx, channelSessionNumber);
+                return;
+            }
+            notifyConnectionDone(trafficStreamKeysBeingHeld);
             replayEngine.setFirstTimestamp(timestamp);
             var cf = replayEngine.closeConnection(channelInteractionNum, ctx, channelSessionNumber, timestamp);
             cf.map(
                 f -> f.whenComplete((v, t) -> commitTrafficStreams(status, trafficStreamKeysBeingHeld)),
                 () -> "closing the channel in the ReplayEngine"
             );
+        }
+
+        @Override
+        public void onTrafficStreamsExpired(
+            RequestResponsePacketPair.ReconstructionStatus status,
+            @NonNull IReplayContexts.IChannelKeyContext ctx,
+            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+        ) {
+            notifyConnectionDone(trafficStreamKeysBeingHeld);
+            commitTrafficStreams(status, trafficStreamKeysBeingHeld);
+        }
+
+        private void notifyConnectionDone(List<ITrafficStreamKey> keys) {
+            if (keys != null && !keys.isEmpty()) {
+                trafficCaptureSource.onConnectionAccumulationComplete(keys.get(0));
+            }
         }
 
         @Override
@@ -295,7 +321,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             log.trace("done sending and finalizing data to the packet handler");
 
             if (t != null) {
-                log.error("Got exception in CompletableFuture callback: ", t);
+                log.atError().setMessage("Got exception in CompletableFuture callback for {}")
+                    .addArgument(tupleHandlingContext)
+                    .setCause(t)
+                    .log();
             }
             try (var requestResponseTuple = new SourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
                 log.atDebug()
@@ -316,7 +345,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         ReplayEngine replayEngine,
         HttpMessageAndTimestamp request,
         TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
-        IReplayContexts.IReplayerHttpTransactionContext ctx
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        Duration quiescentDurationForRequest
     ) {
         return transformAndSendRequest(
             inputRequestTransformerFactory,
@@ -325,7 +355,17 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             ctx,
             request.getFirstPacketTimestamp(),
             request.getLastPacketTimestamp(),
-            request.packetBytes::stream);
+            request.packetBytes::stream,
+            quiescentDurationForRequest);
+    }
+
+    public TrackedFuture<String, TransformedTargetRequestAndResponseList> transformAndSendRequest(
+        ReplayEngine replayEngine,
+        HttpMessageAndTimestamp request,
+        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
+        IReplayContexts.IReplayerHttpTransactionContext ctx
+    ) {
+        return transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx, null);
     }
 
     @Override
@@ -384,6 +424,9 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     .filter(s -> !s.isEmpty())
                     .ifPresent(s -> log.atDebug().setMessage("TrafficStream Summary: {{}}").addArgument(s).log());
             }
+            log.atInfo().setMessage("Read {} traffic stream(s) from source")
+                .addArgument(trafficStreams::size)
+                .log();
             trafficStreams.forEach(trafficToHttpTransactionAccumulator::accept);
         }
     }

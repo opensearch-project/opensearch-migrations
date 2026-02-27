@@ -534,7 +534,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addOptionalInput("indices", c => [] as readonly string[])
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "SnapshotFuse", "MigrationConsole"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "SnapshotFuse", "MigrationConsole", "CoordinatorCluster"]))
 
         .addSteps(b => {
             const createRfsCluster = shouldCreateRfsWorkCoordinationCluster(b.inputs.documentBackfillConfig);
@@ -542,7 +542,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 // (conditional) Deploy an OpenSearch cluster for RFS work coordination
                 .addStep("createRfsCoordinator", RfsCoordinatorCluster, "createRfsCoordinator", c =>
                     c.register({
-                        clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName)
+                        clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName),
+                        coordinatorImage: b.inputs.imageCoordinatorClusterLocation
                     }),
                     { when: { templateExp: createRfsCluster }}
                 )

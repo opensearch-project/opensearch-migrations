@@ -17,3 +17,5 @@ data:
   migrationConsolePullPolicy: "{{ .Values.images.migrationConsole.pullPolicy }}"
   snapshotFuseImage: "{{ .Values.images.snapshotFuse.repository }}:{{ .Values.images.snapshotFuse.tag }}"
   snapshotFusePullPolicy: "{{ .Values.images.snapshotFuse.pullPolicy }}"
+  coordinatorClusterImage: "{{ .Values.images.coordinatorCluster.repository }}:{{ .Values.images.coordinatorCluster.tag }}"
+  coordinatorClusterPullPolicy: "{{ .Values.images.coordinatorCluster.pullPolicy }}"
