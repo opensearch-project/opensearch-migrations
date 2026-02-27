@@ -7,6 +7,7 @@ conditionalPackageInstalls:
   argo-workflows: true          # orchestrates the steps of a migration
   strimzi-kafka-operator: true  # Required by capture and replay
   fluent-bit: true
+  cloudnative-pg: true          # PostgreSQL operator for Argo archive
 
   # Simpler alternative to the opentelemetry-operator.
   # ONLY set up the otel-collector and require manual instrumentation
@@ -33,6 +34,16 @@ etcdCluster:
   storageClass: ""  # Use default storage class
   cpu: 100m
   memory: 256Mi
+
+# CNPG PostgreSQL cluster configuration (for Argo archive)
+cnpgCluster:
+  instances: 2
+  database: "argo"
+  owner: "argo"
+  storageSize: "10Gi"
+  storageClass: ""  # Use default storage class
+  cpu: "100m"
+  memory: "256Mi"
 
 # Kyverno policy toggles (requires conditionalPackageInstalls.kyverno: true)
 kyvernoPolicies:
@@ -230,6 +241,13 @@ charts:
       crds:
         enabled: true
 
+  # CloudNativePG operator - manages PostgreSQL clusters for Argo archive
+  cloudnative-pg:
+    version: "0.23.0"
+    repository: "https://cloudnative-pg.github.io/charts"
+    dependsOn: cert-manager
+    waitForInstallation: true
+
   opentelemetry-operator:
     version: "0.86.4"
     repository: "https://open-telemetry.github.io/opentelemetry-helm-charts"
@@ -315,6 +333,24 @@ charts:
           enabled: true
         resourceRateLimit: { "limit": 10.0, "burst": 25 }
         workflowWorkers: 16
+        persistence:
+          connectionPool:
+            maxIdleConns: 100
+            maxOpenConns: 0
+          nodeStatusOffLoad: true
+          archive: true
+          archiveTTL: "180d"
+          postgresql:
+            host: argo-postgres-rw
+            port: 5432
+            database: argo
+            tableName: argo_workflows
+            userNameSecret:
+              name: argo-postgres-app
+              key: username
+            passwordSecret:
+              name: argo-postgres-app
+              key: password
 
         replicas: 2
         affinity:

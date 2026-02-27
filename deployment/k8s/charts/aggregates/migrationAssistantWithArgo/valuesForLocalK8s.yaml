@@ -66,3 +66,8 @@ charts:
 etcdCluster:
   replicas: 1
   storageCapacity: 1Gi
+
+# Lightweight CNPG cluster for local development
+cnpgCluster:
+  instances: 1
+  storageSize: "1Gi"
