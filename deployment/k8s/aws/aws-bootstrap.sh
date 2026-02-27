@@ -374,6 +374,12 @@ else
 fi
 
 TOOLS_ARCH=$(uname -m)
+
+# --- compute immutable image tag ---
+# Use git short SHA for a unique, immutable tag per commit. This allows
+# pullPolicy: IfNotPresent since each build produces a distinct tag.
+IMAGE_TAG=$(git -C "$base_dir" rev-parse --short HEAD 2>/dev/null || echo "latest")
+echo "Image tag: $IMAGE_TAG"
 case "$TOOLS_ARCH" in
   x86_64 | amd64) TOOLS_ARCH="amd64" ;;
   aarch64 | arm64) TOOLS_ARCH="arm64" ;;
@@ -915,6 +921,12 @@ if [[ "$push_images_to_ecr" == "true" ]]; then
       crane copy "${MIGRATIONS_ECR_REGISTRY}:migrations_console_latest" \
         "${MIGRATIONS_ECR_REGISTRY}:migrations_migration_console_latest" 2>&1 | tail -1 || true
     fi
+    # Tag mirrored images with the immutable IMAGE_TAG
+    echo "Tagging MA images with $IMAGE_TAG..."
+    for name in capture_proxy traffic_replayer reindex_from_snapshot migration_console; do
+      crane copy "${MIGRATIONS_ECR_REGISTRY}:migrations_${name}_latest" \
+        "${MIGRATIONS_ECR_REGISTRY}:migrations_${name}_${IMAGE_TAG}" 2>&1 | tail -1 || true
+    done
   else
     echo "Skipping MA image mirroring — --build-images will push locally-built images."
   fi
@@ -949,7 +961,7 @@ if [[ "$build_images" == "true" ]]; then
     | docker login --username AWS --password-stdin "$ecr_domain" \
     || { echo "ECR login failed"; exit 1; }
 
-  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
+  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -PimageVersion="$IMAGE_TAG" -x test || exit
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."
   docker buildx rm local-remote-builder 2>/dev/null || true
@@ -964,15 +976,15 @@ fi
 if [[ "$use_public_images" == "false" ]]; then
   IMAGE_FLAGS="\
     --set images.captureProxy.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.captureProxy.tag=migrations_capture_proxy_latest \
+    --set images.captureProxy.tag=migrations_capture_proxy_${IMAGE_TAG} \
     --set images.trafficReplayer.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.trafficReplayer.tag=migrations_traffic_replayer_latest \
+    --set images.trafficReplayer.tag=migrations_traffic_replayer_${IMAGE_TAG} \
     --set images.reindexFromSnapshot.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.reindexFromSnapshot.tag=migrations_reindex_from_snapshot_latest \
+    --set images.reindexFromSnapshot.tag=migrations_reindex_from_snapshot_${IMAGE_TAG} \
     --set images.migrationConsole.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.migrationConsole.tag=migrations_migration_console_latest \
+    --set images.migrationConsole.tag=migrations_migration_console_${IMAGE_TAG} \
     --set images.installer.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.installer.tag=migrations_migration_console_latest"
+    --set images.installer.tag=migrations_migration_console_${IMAGE_TAG}"
 # Use latest public images
 else
   echo "Using public images tagged '$RELEASE_VERSION'"

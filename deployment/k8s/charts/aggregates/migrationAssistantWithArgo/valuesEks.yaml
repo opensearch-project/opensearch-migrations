@@ -22,22 +22,22 @@ defaultBucketConfiguration:
   emptyBeforeDelete: true
   endpoint: ""
   snapshotRoleArn: ""
-  bucketOperationImagePullPolicy: "Always"
+  bucketOperationImagePullPolicy: "IfNotPresent"
 
-# Always pull to avoid stale cached images when using mutable tags (e.g. *_latest)
+# Immutable image tags (git SHA) allow IfNotPresent — each build has a unique tag
 images:
   captureProxy:
-    pullPolicy: Always
+    pullPolicy: IfNotPresent
   trafficReplayer:
-    pullPolicy: Always
+    pullPolicy: IfNotPresent
   reindexFromSnapshot:
-    pullPolicy: Always
+    pullPolicy: IfNotPresent
   migrationConsole:
-    pullPolicy: Always
+    pullPolicy: IfNotPresent
   installer:
-    pullPolicy: Always
+    pullPolicy: IfNotPresent
   coordinatorCluster:
-    pullPolicy: Always
+    pullPolicy: IfNotPresent
 
 # For OTEL Daemonset
 otelConfiguration:
