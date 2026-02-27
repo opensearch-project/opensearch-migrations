@@ -102,7 +102,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
                 allowServerGeneratedIds, allowlist)
             .then(Mono.just(new ProgressCursor(
                 shardId,
-                batch.size(),
+                (long) batch.size(),
                 batch.size(),
                 bytesInBatch
             )));

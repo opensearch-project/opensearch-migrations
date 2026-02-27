@@ -39,7 +39,7 @@ public interface DocumentSource extends AutoCloseable {
      * @param startingDocOffset the document offset to resume from (0 for start)
      * @return a cold Flux of document changes
      */
-    Flux<DocumentChange> readDocuments(ShardId shardId, int startingDocOffset);
+    Flux<DocumentChange> readDocuments(ShardId shardId, long startingDocOffset);
 
     @Override
     default void close() throws Exception {
