@@ -125,39 +125,41 @@ class TestWorkflowServiceSubmission:
 class TestWorkflowServiceMonitoring:
     """Test suite for workflow monitoring functionality."""
 
-    @patch('console_link.workflow.services.workflow_service.client.CustomObjectsApi')
-    def test_wait_for_workflow_completion_success(self, mock_api_class):
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_wait_for_workflow_completion_success(self, mock_get):
         """Test successful workflow completion monitoring."""
         service = WorkflowService()
 
-        # Mock Kubernetes API
-        mock_api = Mock()
-        mock_api_class.return_value = mock_api
-
         # First call: workflow running, second call: workflow succeeded
-        mock_api.get_namespaced_custom_object.side_effect = [
-            {
-                'status': {'phase': 'Running', 'nodes': {}}
-            },
-            {
-                'status': {
-                    'phase': 'Succeeded',
-                    'nodes': {
-                        'node-1': {
-                            'outputs': {
-                                'parameters': [
-                                    {'name': 'message', 'value': 'Hello World'}
-                                ]
-                            }
+        running_response = Mock()
+        running_response.status_code = 200
+        running_response.json.return_value = {
+            'status': {'phase': 'Running', 'nodes': {}}
+        }
+
+        succeeded_response = Mock()
+        succeeded_response.status_code = 200
+        succeeded_response.json.return_value = {
+            'status': {
+                'phase': 'Succeeded',
+                'nodes': {
+                    'node-1': {
+                        'outputs': {
+                            'parameters': [
+                                {'name': 'message', 'value': 'Hello World'}
+                            ]
                         }
                     }
                 }
             }
-        ]
+        }
+
+        mock_get.side_effect = [running_response, succeeded_response]
 
         phase, output = service.wait_for_workflow_completion(
             namespace='argo',
             workflow_name='test-workflow',
+            argo_server='http://localhost:2746',
             timeout=10,
             interval=1
         )
@@ -165,44 +167,46 @@ class TestWorkflowServiceMonitoring:
         assert phase == 'Succeeded'
         assert output == 'Hello World'
 
-    @patch('console_link.workflow.services.workflow_service.client.CustomObjectsApi')
-    def test_wait_for_workflow_completion_timeout(self, mock_api_class):
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_wait_for_workflow_completion_timeout(self, mock_get):
         """Test workflow monitoring timeout."""
         service = WorkflowService()
 
-        mock_api = Mock()
-        mock_api_class.return_value = mock_api
-
         # Always return running status
-        mock_api.get_namespaced_custom_object.return_value = {
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
             'status': {'phase': 'Running', 'nodes': {}}
         }
+        mock_get.return_value = mock_response
 
         with pytest.raises(TimeoutError) as exc_info:
             service.wait_for_workflow_completion(
                 namespace='argo',
                 workflow_name='test-workflow',
+                argo_server='http://localhost:2746',
                 timeout=2,
                 interval=1
             )
 
         assert 'did not complete' in str(exc_info.value)
 
-    @patch('console_link.workflow.services.workflow_service.client.CustomObjectsApi')
-    def test_wait_for_workflow_completion_failed(self, mock_api_class):
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_wait_for_workflow_completion_failed(self, mock_get):
         """Test monitoring workflow that fails."""
         service = WorkflowService()
 
-        mock_api = Mock()
-        mock_api_class.return_value = mock_api
-
-        mock_api.get_namespaced_custom_object.return_value = {
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
             'status': {'phase': 'Failed', 'nodes': {}}
         }
+        mock_get.return_value = mock_response
 
         phase, output = service.wait_for_workflow_completion(
             namespace='argo',
             workflow_name='test-workflow',
+            argo_server='http://localhost:2746',
             timeout=10,
             interval=1
         )
@@ -210,21 +214,22 @@ class TestWorkflowServiceMonitoring:
         assert phase == 'Failed'
         assert output is None
 
-    @patch('console_link.workflow.services.workflow_service.client.CustomObjectsApi')
-    def test_wait_for_workflow_completion_no_output(self, mock_api_class):
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_wait_for_workflow_completion_no_output(self, mock_get):
         """Test monitoring workflow that completes without output."""
         service = WorkflowService()
 
-        mock_api = Mock()
-        mock_api_class.return_value = mock_api
-
-        mock_api.get_namespaced_custom_object.return_value = {
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
             'status': {'phase': 'Succeeded', 'nodes': {}}
         }
+        mock_get.return_value = mock_response
 
         phase, output = service.wait_for_workflow_completion(
             namespace='argo',
             workflow_name='test-workflow',
+            argo_server='http://localhost:2746',
             timeout=10,
             interval=1
         )
@@ -232,25 +237,26 @@ class TestWorkflowServiceMonitoring:
         assert phase == 'Succeeded'
         assert output is None
 
-    @patch('console_link.workflow.services.workflow_service.client.CustomObjectsApi')
-    def test_wait_for_workflow_completion_api_error(self, mock_api_class):
-        """Test handling of Kubernetes API errors during monitoring."""
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_wait_for_workflow_completion_api_error(self, mock_get):
+        """Test handling of Argo API errors during monitoring."""
         service = WorkflowService()
 
-        mock_api = Mock()
-        mock_api_class.return_value = mock_api
-
-        mock_api.get_namespaced_custom_object.side_effect = Exception("API Error")
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+        mock_get.return_value = mock_response
 
         with pytest.raises(Exception) as exc_info:
             service.wait_for_workflow_completion(
                 namespace='argo',
                 workflow_name='test-workflow',
+                argo_server='http://localhost:2746',
                 timeout=10,
                 interval=1
             )
 
-        assert 'API Error' in str(exc_info.value)
+        assert '500' in str(exc_info.value)
 
 
 class TestWorkflowServiceStop:
