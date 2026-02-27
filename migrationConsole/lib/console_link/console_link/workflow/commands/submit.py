@@ -167,8 +167,9 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, argo_server, in
             # Wait for workflow completion if requested
             if wait:
                 service = WorkflowService()
-                _handle_workflow_wait(service, namespace, workflow_name, argo_server,
-                                     timeout, wait_interval, token, insecure)
+                _handle_workflow_wait(
+                    service, namespace, workflow_name, argo_server,
+                    timeout, wait_interval, token, insecure)
 
         except FileNotFoundError as e:
             click.echo(f"Error: {str(e)}", err=True)

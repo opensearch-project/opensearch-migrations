@@ -4,7 +4,7 @@ import requests
 import threading
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 from console_link.workflow.services.workflow_service import WorkflowApproveResult, logger, WorkflowService
 from console_link.workflow.tree_utils import clean_display_name
