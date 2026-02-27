@@ -143,3 +143,45 @@ tasks.register('cdkSynthMinified', CdkMinifyTask) {
     cdkOutDir.set(layout.projectDirectory.dir('cdk.out'))
     minifiedDir.set(layout.projectDirectory.dir('cdk.out-minified'))
 }
+
+abstract class CfnLintTask extends DefaultTask {
+
+    @Inject
+    abstract ExecOperations getExecOperations()
+
+    @InputDirectory
+    @PathSensitive(PathSensitivity.RELATIVE)
+    abstract DirectoryProperty getCdkOutDir()
+
+    @InputFile
+    @PathSensitive(PathSensitivity.RELATIVE)
+    abstract RegularFileProperty getConfigFile()
+
+    @TaskAction
+    void lint() {
+        def templates = cdkOutDir.get().asFileTree.matching {
+            include '*.template.json'
+        }.files.collect { it.absolutePath }
+
+        if (templates.isEmpty()) {
+            logger.lifecycle('No templates found to lint')
+            return
+        }
+
+        execOperations.exec {
+            commandLine = ['cfn-lint'] + templates + [
+                '--config-file', configFile.get().asFile.absolutePath,
+                '--non-zero-exit-code', 'none'
+            ]
+        }
+    }
+}
+
+tasks.register('cfnLint', CfnLintTask) {
+    description = 'Run cfn-lint on synthesized CDK templates'
+    group = 'verification'
+    dependsOn 'cdkSynth'
+
+    cdkOutDir.set(layout.projectDirectory.dir('cdk.out'))
+    configFile.set(rootProject.layout.projectDirectory.file('.cfnlintrc.yaml'))
+}
