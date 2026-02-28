@@ -19,7 +19,6 @@ import {
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
     DEFAULT_RESOURCES,
-    KAFKA_SERVICES_CONFIG,
     ResourceRequirementsType,
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
@@ -104,7 +103,7 @@ export const MigrationConsole = WorkflowBuilder.create({
             expr.recordToString(expr.mergeDicts(
                     expr.mergeDicts(
                         expr.mergeDicts(
-                            makeOptionalDict("kafka", expr.asString(c.inputs.kafkaInfo), typeToken<z.infer<typeof KAFKA_SERVICES_CONFIG>>()),
+                            makeOptionalDict("kafka", expr.asString(c.inputs.kafkaInfo), typeToken<z.infer<typeof CONSOLE_KAFKA_SERVICES_CONFIG>>()),
                             makeOptionalDict("source_cluster", expr.asString(c.inputs.sourceConfig), typeToken<z.infer<typeof CLUSTER_CONFIG>>())
                         ),
                         expr.mergeDicts(

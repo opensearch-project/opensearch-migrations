@@ -1,0 +1,31 @@
+{
+  "sourceClusters": {
+    "source": {
+      "version": "ES 7.10.2",
+      "endpoint": "http://source:9200"
+    }
+  },
+  "targetClusters": {
+    "target": {
+      "endpoint": "http://target:9200"
+    }
+  },
+  "snapshotMigrationConfigs": [],
+  "traffic": {
+    "proxies": {
+      "proxy1": {
+        "source": "source",
+        "listenPort": 9201,
+        "proxyConfig": {
+          "listenPort": 9201
+        }
+      }
+    },
+    "replayers": {
+      "replayer1": {
+        "fromProxy": "proxy1",
+        "toTarget": "target"
+      }
+    }
+  }
+}

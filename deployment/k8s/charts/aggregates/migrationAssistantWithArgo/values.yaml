@@ -1,8 +1,7 @@
 conditionalPackageInstalls:
   kyverno: false
   # Migration infrastructure components
-  etcd-operator: true           # Aenix etcd operator for workflow coordination
-  cert-manager: true            # needed by etcd-operator and otel operator
+  cert-manager: true            # needed by otel operator (which is off by default)
   kube-prometheus-stack: true   # will be needed for auto-scaling
   argo-workflows: true          # orchestrates the steps of a migration
   strimzi-kafka-operator: true  # Required by capture and replay
@@ -25,14 +24,6 @@ conditionalPackageInstalls:
   gatekeeper: false
   grafana: false
   jaeger: true
-
-# etcd cluster configuration (managed by Aenix etcd-operator)
-etcdCluster:
-  replicas: 3
-  storageCapacity: 10Gi
-  storageClass: ""  # Use default storage class
-  cpu: 100m
-  memory: 256Mi
 
 # Kyverno policy toggles (requires conditionalPackageInstalls.kyverno: true)
 kyvernoPolicies:
@@ -204,24 +195,6 @@ otelConfiguration:
           exporters: [ debug ]
 
 charts:
-  # Aenix etcd-operator - simple and reliable etcd management
-  # Handles node drain gracefully, automatic PDB management
-  # See: https://etcd.aenix.io/docs/v0.4/
-  etcd-operator:
-    version: "0.4.2"
-    repository: "oci://ghcr.io/aenix-io/charts/etcd-operator"
-    namespace: ma
-    dependsOn: cert-manager
-    waitForInstallation: true
-    values:
-      etcdOperator:
-        vpa:
-          enabled: false
-      kubeRbacProxy:
-        vpa:
-          enabled: false
-
-
   cert-manager:
     version: 1.17.2
     repository: https://charts.jetstack.io
@@ -250,47 +223,24 @@ charts:
 
 
   strimzi-kafka-operator:
-    version: 0.47.0
+    version: 0.50.0
     repository: "https://strimzi.io/charts/"
     values:
-      replicas: 1
-      storageType: ephemeral
-      storageSize: 100Gi
-      storageDeleteClaim: true
-      dedicatedController:
-        replicas: 1
-        storageSize: 10Gi
+      storageType: ephemeral # strimzi is stateless
+      storageSize: 5Gi
 
+      # Increase probe thresholds to prevent unnecessary restarts during high API load.
       readinessProbe:
-        initialDelaySeconds: 5
-        periodSeconds: 2
-        timeoutSeconds: 3
-        failureThreshold: 1
+        initialDelaySeconds: 15
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
       livenessProbe:
-        initialDelaySeconds: 5
-        periodSeconds: 2
-        timeoutSeconds: 3
-        failureThreshold: 1
+        initialDelaySeconds: 15
+        periodSeconds: 15
+        timeoutSeconds: 5
+        failureThreshold: 3
 
-      kafka:
-        template:
-          pod:
-            readinessProbe:
-              initialDelaySeconds: 5
-              periodSeconds: 5
-              timeoutSeconds: 3
-              failureThreshold: 1
-
-        readinessProbe:
-          initialDelaySeconds: 5
-          periodSeconds: 2
-          timeoutSeconds: 3
-          failureThreshold: 1
-        livenessProbe:
-          initialDelaySeconds: 5
-          periodSeconds: 2
-          timeoutSeconds: 3
-          failureThreshold: 1
 
   argo-workflows:
     version: "0.47.1"
@@ -432,7 +382,7 @@ charts:
           
           [FILTER]
               Name               parser
-              Match_Regex        ^fluentbit-argo-.*$|^fluentbit-.*-(etcd|run-console|latch|create-rs|delete-rs)-.*$
+              Match_Regex        ^fluentbit-argo-.*$|^fluentbit-.*-(run-console|create-rs|delete-rs)-.*$
               Key_Name           log
               Parser             logfmt_parser
               Preserve_Key       On

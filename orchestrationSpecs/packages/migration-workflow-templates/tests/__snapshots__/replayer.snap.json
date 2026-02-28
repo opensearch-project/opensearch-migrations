@@ -1,0 +1,175 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "replayer"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "createdeployment",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sessionName"
+            },
+            {
+              "name": "jsonConfig"
+            },
+            {
+              "name": "podReplicas"
+            },
+            {
+              "name": "jvmArgs"
+            },
+            {
+              "name": "loggingConfigurationOverrideConfigMap"
+            },
+            {
+              "name": "imageTrafficReplayerLocation"
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy"
+            },
+            {
+              "name": "resources"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{=inputs.parameters.sessionName+'-replayer'}}\"\n  labels:\n    app: replayer\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\nspec:\n  replicas: \"{{inputs.parameters.podReplicas}}\"\n  selector:\n    matchLabels:\n      app: replayer\n  template:\n    metadata:\n      labels:\n        app: replayer\n        workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: replayer\n          image: \"{{inputs.parameters.imageTrafficReplayerLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageTrafficReplayerPullPolicy}}\"\n          command:\n            - /runJavaWithClasspath.sh\n          args:\n            - org.opensearch.migrations.replay.TrafficReplayer\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: JDK_JAVA_OPTIONS\n              value: \"{{=inputs.parameters.jvmArgs + ' ' + (('' == inputs.parameters.loggingConfigurationOverrideConfigMap) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}\"\n          volumeMounts:\n            - name: log4j-configuration\n              mountPath: /config/logConfiguration\n              readOnly: true\n      volumes:\n        - name: log4j-configuration\n          configMap:\n            name: \"{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}\"\n            optional: {{=!('' == inputs.parameters.loggingConfigurationOverrideConfigMap)}}\n",
+          "action": "create",
+          "setOwnerReference": true
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "createdeploymentfromconfig",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "kafkaTrafficBrokers"
+            },
+            {
+              "name": "kafkaTopicName"
+            },
+            {
+              "name": "kafkaGroupId"
+            },
+            {
+              "name": "targetConfig"
+            },
+            {
+              "name": "replayerConfig"
+            },
+            {
+              "name": "podReplicas",
+              "value": "1"
+            },
+            {
+              "name": "imageTrafficReplayerLocation"
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "createdeployment",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "podReplicas",
+                    "value": "{{=jsonpath(toJSON(fromJSON(inputs.parameters.replayerConfig)), '$.podReplicas')}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "targetAwsRegion",
+                    "value": "{{=sprig.dig('authConfig', 'sigv4', 'region', '', fromJSON(inputs.parameters.targetConfig))}}"
+                  },
+                  {
+                    "name": "targetAwsSigningName",
+                    "value": "{{=sprig.dig('authConfig', 'sigv4', 'service', '', fromJSON(inputs.parameters.targetConfig))}}"
+                  },
+                  {
+                    "name": "targetCACert",
+                    "value": "{{=sprig.dig('authConfig', 'mtls', 'caCert', '', fromJSON(inputs.parameters.targetConfig))}}"
+                  },
+                  {
+                    "name": "targetClientSecretName",
+                    "value": "{{=sprig.dig('authConfig', 'mtls', 'clientSecretName', '', fromJSON(inputs.parameters.targetConfig))}}"
+                  },
+                  {
+                    "name": "targetInsecure",
+                    "value": "{{=sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig))}}"
+                  },
+                  {
+                    "name": "speedupFactor",
+                    "value": "{{=jsonpath(toJSON(fromJSON(inputs.parameters.replayerConfig)), '$.speedupFactor')}}"
+                  },
+                  {
+                    "name": "authHeaderOverride",
+                    "value": "{{=jsonpath(toJSON(fromJSON(inputs.parameters.replayerConfig)), '$.authHeaderOverride')}}"
+                  },
+                  {
+                    "name": "jvmArgs",
+                    "value": "{{=jsonpath(toJSON(fromJSON(inputs.parameters.replayerConfig)), '$.jvmArgs')}}"
+                  },
+                  {
+                    "name": "loggingConfigurationOverrideConfigMap",
+                    "value": "{{=jsonpath(toJSON(fromJSON(inputs.parameters.replayerConfig)), '$.loggingConfigurationOverrideConfigMap')}}"
+                  },
+                  {
+                    "name": "resources",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.replayerConfig)['resources'])}}"
+                  },
+                  {
+                    "name": "sessionName",
+                    "value": ""
+                  },
+                  {
+                    "name": "jsonConfig",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.replayerConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources', 'jvmArgs')), sprig.merge(sprig.dict(), sprig.dict())))}}"
+                  }
+                ]
+              },
+              "name": "deployReplayer"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      }
+    ]
+  }
+}
