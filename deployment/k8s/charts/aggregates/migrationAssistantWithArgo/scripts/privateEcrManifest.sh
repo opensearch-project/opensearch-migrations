@@ -48,7 +48,7 @@ quay.io/argoproj/argoexec:v3.7.9
 
 # --- fluent-bit ---
 cr.fluentbit.io/fluent/fluent-bit:4.0.1
-docker.io/library/busybox:latest
+mirror.gcr.io/library/busybox:latest
 
 # --- kube-prometheus-stack ---
 quay.io/prometheus/prometheus:v3.3.1
@@ -59,7 +59,7 @@ quay.io/prometheus/alertmanager:v0.28.1
 quay.io/kiwigrid/k8s-sidecar:1.30.0
 registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0
 registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.5.3
-docker.io/bats/bats:v1.4.1
+mirror.gcr.io/bats/bats:v1.4.1
 quay.io/thanos/thanos:v0.38.0
 
 # --- etcd-operator ---
@@ -75,14 +75,14 @@ ghcr.io/open-telemetry/opentelemetry-operator/opentelemetry-operator:0.122.0
 quay.io/brancz/kube-rbac-proxy:v0.18.1
 
 # --- grafana ---
-docker.io/grafana/grafana:11.6.1
+mirror.gcr.io/grafana/grafana:11.6.1
 
 # --- jaeger ---
-docker.io/jaegertracing/jaeger-agent:1.53.0
-docker.io/jaegertracing/jaeger-collector:1.53.0
-docker.io/jaegertracing/jaeger-query:1.53.0
-docker.io/jaegertracing/jaeger-cassandra-schema:1.53.0
-docker.io/library/cassandra:3.11.6
+mirror.gcr.io/jaegertracing/jaeger-agent:1.53.0
+mirror.gcr.io/jaegertracing/jaeger-collector:1.53.0
+mirror.gcr.io/jaegertracing/jaeger-query:1.53.0
+mirror.gcr.io/jaegertracing/jaeger-cassandra-schema:1.53.0
+mirror.gcr.io/library/cassandra:3.11.6
 
 # --- kyverno ---
 reg.kyverno.io/kyverno/kyverno:v1.15.2
@@ -92,15 +92,15 @@ reg.kyverno.io/kyverno/cleanup-controller:v1.15.2
 reg.kyverno.io/kyverno/reports-controller:v1.15.2
 reg.kyverno.io/kyverno/kyverno-cli:v1.15.2
 registry.k8s.io/kubectl:v1.32.7
-docker.io/library/busybox:1.35
+mirror.gcr.io/library/busybox:1.35
 
 # --- localstack ---
-docker.io/localstack/localstack:4.3.0
-docker.io/amazon/aws-cli:latest
+mirror.gcr.io/localstack/localstack:4.3.0
+mirror.gcr.io/amazon/aws-cli:latest
 
 # --- direct template references ---
-docker.io/amazon/aws-cli:2.25.11
+mirror.gcr.io/amazon/aws-cli:2.25.11
 
 # --- coordinator cluster (used by RFS workflow) ---
-docker.io/opensearchproject/opensearch:3.1.0
+mirror.gcr.io/opensearchproject/opensearch:3.1.0
 "
