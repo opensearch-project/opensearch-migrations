@@ -10,6 +10,13 @@ This document contains a list of maintainers in this repo. See [opensearch-proje
 | Brian Presley      | [sumobrian](https://github.com/sumobrian)             | Amazon      |
 | Andre Kurait       | [andrekurait](https://github.com/AndreKurait)         | Amazon      |
 | Jugal Chauhan      | [jugal-chauhan](https://github.com/jugal-chauhan)     | Amazon      |
+| Prasad Renake      | [prenake](https://github.com/prenake)                 | Amazon      |
+| Akshay Zade        | [akshay2000](https://github.com/akshay2000)           | Amazon      |
+| Karthic Kannan     | [k-rooot](https://github.com/k-rooot)                 | Amazon      |
+| Nagaraj G          | [nagarajg17](https://github.com/nagarajg17)           | Amazon      |
+| Nirav Pithadiya    | [niravpi](https://github.com/niravpi)                 | Amazon      |
+| Pranav Garg        | [pgtgrly](https://github.com/pgtgrly)                 | Amazon      |
+| Gopala Krishna A   | [krishna-ggk](https://github.com/krishna-ggk)         | Amazon      |
 
 
 ## Emeritus
