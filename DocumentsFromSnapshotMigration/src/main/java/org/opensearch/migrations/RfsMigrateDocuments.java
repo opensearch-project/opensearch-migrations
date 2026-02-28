@@ -40,6 +40,7 @@ import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
+import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
@@ -250,6 +251,23 @@ public class RfsMigrateDocuments {
             validateValueWith = IndexNameValidator.class)
         public String indexNameSuffix = "";
 
+        // Defaults mirror OpenSearchWorkCoordinator.CompletionRetryConfig.DEFAULT
+        // (defined again as literals because annotations require compile time constants)
+        @Parameter(required = false,
+            names = { "--coordinator-retry-max-retries" },
+            description = "Optional. Maximum number of retries when marking work items as completed on the coordinator. Default: 7")
+        public int coordinatorRetryMaxRetries = 7;
+
+        @Parameter(required = false,
+            names = { "--coordinator-retry-initial-delay-ms" },
+            description = "Optional. Initial delay in milliseconds for coordinator completion retries (doubles each attempt). Default: 1000")
+        public long coordinatorRetryInitialDelayMs = 1000;
+
+        @Parameter(required = false,
+            names = { "--coordinator-retry-max-delay-ms" },
+            description = "Optional. Maximum delay in milliseconds for any single coordinator completion retry. Default: 64000")
+        public long coordinatorRetryMaxDelayMs = 64_000;
+
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
 
@@ -446,7 +464,18 @@ public class RfsMigrateDocuments {
         var progressCursor = new AtomicReference<WorkItemCursor>();
         var cancellationRunnableRef = new AtomicReference<Runnable>();
         var workItemTimeProvider = new WorkItemTimeProvider();
-        var coordinatorFactory = new WorkCoordinatorFactory(coordinatorInfo.version(), arguments.indexNameSuffix);
+        var completionRetryConfig = new OpenSearchWorkCoordinator.CompletionRetryConfig(
+            arguments.coordinatorRetryMaxRetries,
+            arguments.coordinatorRetryInitialDelayMs,
+            arguments.coordinatorRetryMaxDelayMs);
+        log.atInfo().setMessage("Coordinator completion retry config: maxRetries={}, initialDelay={}ms, maxDelay={}ms, totalWindow=~{}s")
+            .addArgument(completionRetryConfig.maxRetries())
+            .addArgument(completionRetryConfig.initialDelayMs())
+            .addArgument(completionRetryConfig.maxDelayMs())
+            .addArgument(calculateTotalRetryWindowSeconds(completionRetryConfig))
+            .log();
+        var coordinatorFactory = new WorkCoordinatorFactory(
+            coordinatorInfo.version(), arguments.indexNameSuffix, completionRetryConfig);
         var cleanShutdownCompleted = new AtomicBoolean(false);
 
         try (var workCoordinator = coordinatorFactory.get(
@@ -560,6 +589,28 @@ public class RfsMigrateDocuments {
 
     @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     private record CoordinatorInfo(ConnectionContext connectionContext, Version version) {}
+
+    /**
+     * Calculates the approximate total retry window in seconds based on exponential backoff with a max delay cap.
+     * This sums the backoff delays (initial * 2^n, capped at maxDelay) across all retry attempts.
+     * Does not include request execution time or network latency.
+     * Logic matches the runtime retry implementation in OpenSearchWorkCoordinator.retryWithExponentialBackoff()
+     */
+    private static long calculateTotalRetryWindowSeconds(OpenSearchWorkCoordinator.CompletionRetryConfig config) {
+        long totalMs = 0;
+        long delay = config.initialDelayMs();
+        for (int i = 0; i < config.maxRetries(); i++) {
+            totalMs += Math.min(delay, config.maxDelayMs());
+            
+            // Update delay for next iteration
+            if (delay < config.maxDelayMs()) {
+                delay = (delay > config.maxDelayMs() / OpenSearchWorkCoordinator.EXPONENTIAL_BACKOFF_MULTIPLIER)
+                    ? config.maxDelayMs()
+                    : delay * OpenSearchWorkCoordinator.EXPONENTIAL_BACKOFF_MULTIPLIER;
+            }
+        }
+        return totalMs / 1000;
+    }
 
     private static CoordinatorInfo resolveCoordinatorConnection(Args arguments, ConnectionContext targetConnectionContext, Version targetVersion) {
         if (arguments.coordinatorArgs.isEnabled()) {

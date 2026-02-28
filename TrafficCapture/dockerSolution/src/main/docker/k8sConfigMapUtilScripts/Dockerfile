@@ -1,4 +1,4 @@
-FROM amazonlinux:2023
+FROM mirror.gcr.io/library/amazonlinux:2023
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ENV LANG=C.UTF-8
