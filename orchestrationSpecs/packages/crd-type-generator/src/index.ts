@@ -45,6 +45,16 @@ export async function generateTypes(opts: GenerateOptions): Promise<void> {
 
     fs.mkdirSync(path.dirname(outputFile), { recursive: true });
 
+    // Read version written by fetchSchemas.sh, if present
+    const versionFile = path.join(schemaDir, 'version.json');
+    const version: string | undefined = fs.existsSync(versionFile)
+        ? JSON.parse(fs.readFileSync(versionFile, 'utf-8')).version
+        : undefined;
+
+    const fullBanner = version
+        ? bannerComment.replace(/\*\/$/, `* Generated from version: ${version} */`)
+        : bannerComment;
+
     // Load and merge all definitions from relevant schema files
     const allDefinitions: Record<string, any> = {};
     const schemaFiles = new Set(resources.map(r => schemaFilename(r.apiVersion)));
@@ -57,7 +67,7 @@ export async function generateTypes(opts: GenerateOptions): Promise<void> {
 
     const masterSchema: JSONSchema4 = { type: 'object', definitions: updateRefs(allDefinitions) };
     const allTypes = await compile(masterSchema, 'CrdTypes', {
-        bannerComment,
+        bannerComment: fullBanner,
         unreachableDefinitions: true,
         strictIndexSignatures: false,
     });
@@ -85,7 +95,8 @@ export async function generateTypes(opts: GenerateOptions): Promise<void> {
     );
 
     fs.writeFileSync(outputFile,
-        `${allTypes}\n// Clean type aliases\n${resourceAliases}\n${additionalTypes.length ? '\n' + makeAliases(additionalTypes) + '\n' : ''}`
+        `${allTypes}\n// Clean type aliases\n${resourceAliases}\n${additionalTypes.length ? '\n' + makeAliases(additionalTypes) + '\n' : ''}` +
+        (version ? `\n/** Version of the operator/server this file was generated from. */\nexport const GENERATED_FROM_VERSION = ${JSON.stringify(version)};\n` : '')
     );
-    console.log(`Generated ${outputFile}`);
+    console.log(`Generated ${outputFile}${version ? ` (from version ${version})` : ''}`);
 }

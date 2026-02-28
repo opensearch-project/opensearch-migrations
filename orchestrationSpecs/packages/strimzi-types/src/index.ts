@@ -1,6 +1,9 @@
 /* Generated Strimzi type definitions — do not edit manually, run `npm run rebuild` */
 // Run `npm run rebuild` with a cluster that has Strimzi installed to regenerate.
 
+/** Version of the Strimzi operator this file was generated from. */
+export const GENERATED_FROM_VERSION = "unknown — run npm run rebuild";
+
 export interface KafkaSpec {
     kafka: {
         version?: string;

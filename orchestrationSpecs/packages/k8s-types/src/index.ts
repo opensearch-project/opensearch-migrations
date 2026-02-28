@@ -1,5 +1,8 @@
 /* Generated Kubernetes type definitions — do not edit manually, run `npm run rebuild` */
 
+/** Version of the Kubernetes server this file was generated from. */
+export const GENERATED_FROM_VERSION = "unknown — run npm run rebuild";
+
 /**
  * Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
  *
