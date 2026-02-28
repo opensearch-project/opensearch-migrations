@@ -193,8 +193,22 @@ class TestRunner:
             logger.warning(f"Failed to cleanup labeled Kubernetes resources: {e}")
 
     def cleanup_deployment(self) -> None:
+        helm_uninstall_error = None
+        try:
+            self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
+        except Exception as e:
+            logger.error(f"Helm uninstall of '{MA_RELEASE_NAME}' release failed: {e}")
+            helm_uninstall_error = e
         self.cleanup_clusters()
         self.k8s_service.delete_namespace()
+        # Assert both namespaces are actually gone
+        self.k8s_service.wait_for_namespace_deleted("kyverno-ma", timeout_seconds=60)
+        self.k8s_service.wait_for_namespace_deleted(self.k8s_service.namespace, timeout_seconds=120)
+        if helm_uninstall_error:
+            raise HelmCommandFailed(
+                f"Helm uninstall of '{MA_RELEASE_NAME}' release failed cleanly. "
+                f"This may indicate webhook or finalizer issues (e.g. Kyverno)."
+            ) from helm_uninstall_error
 
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)

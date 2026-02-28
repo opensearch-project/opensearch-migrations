@@ -52,6 +52,10 @@ images:
     repository: migrations/migration_console
     tag: latest
     pullPolicy: IfNotPresent
+  coordinatorCluster:
+    repository: docker.io/opensearchproject/opensearch
+    tag: "3.1.0"
+    pullPolicy: IfNotPresent
 
 # Default AWS values are dummy values for LocalStack usage
 aws:
@@ -571,9 +575,14 @@ charts:
         enabled: false
 
   kyverno:
+    uninstallTimeout: 120         # Timeout for helm uninstall (seconds), with force-cleanup fallback
+    preUninstallCleanup:
+      webhooks: true             # Delete mutating/validating webhook configs before uninstall
+    postUninstallCleanup:
+      crds: true                 # Delete CRDs after uninstall
     version: "3.5.2"
     repository: "https://kyverno.github.io/kyverno/"
-    namespace: ma
+    namespace: kyverno-ma
     values:
       admissionController:
         replicas: 1
@@ -601,4 +610,4 @@ charts:
           requests: null
           limits: null
       config:
-        excludeKyvernoNamespace: false
+        excludeKyvernoNamespace: true

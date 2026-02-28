@@ -1,4 +1,5 @@
 import {
+    defineParam,
     expr,
     INTERNAL,
     selectInputsForRegister,
@@ -21,6 +22,12 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
 
     .addParams(CommonWorkflowParameters)
 
+    .addParams({
+        // Max retries for monitoring workflow (fixed 60s interval between retries)
+        // Default 33 (~33 min), use 900 for ~15 hours
+        "monitor-retry-limit": defineParam({expression: "33"})
+    })
+
     .addTemplate("configureAndSubmitWorkflow", t => t
         // TODO: Remove base64 encoding to maintain strong typing throughout workflows
         // Currently using base64 as a workaround for passing complex JSON through Argo workflow parameters.
@@ -31,7 +38,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/bash", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addEnvVar("MIGRATION_CONFIG_BASE64", cb.inputs.migrationConfigBase64)
             .addArgs([configureAndSubmitScript])
         )
@@ -43,7 +50,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/bash", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addArgs([monitorScript])
             // Monitor script exit codes:
             // - Exit 0: Workflow is in terminal state (Succeeded or Failed) - stop retrying
@@ -56,12 +63,11 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             )
         )
         .addRetryParameters({
-            limit: "100",
+            limit: "{{workflow.parameters.monitor-retry-limit}}",
             retryPolicy: "Always",
             backoff: {
-                duration: "2",     // Start at 2 seconds
-                factor: "2",       // Exponential backoff  
-                cap: "15"          // Cap at 15 seconds
+                duration: "60",    // Fixed 60 second interval
+                factor: "1"        // No exponential increase
             }
         })
     )
@@ -73,7 +79,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/bash", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addEnvVar("MONITOR_RESULT", cb.inputs.monitorResult)
             .addArgs([`
 set -e

@@ -1,4 +1,4 @@
-# Deployment of the Migration Assistant into EKS
+# Deploying the Migration Assistant on AWS EKS
 
 This guide is for **developers** that are interested in building everything and
 deploying those artifacts directly to EKS themselves.
@@ -15,91 +15,164 @@ for instructions of how to deploy directly from AWS without installing anything.
 The EKS solution requires less AWS resources and fewer upfront configuration
 options than the previous release build upon ECS.  You'll need some permissions,
 but the CloudFormation should deploy in < 15 minutes.  Once that succeeds, you
-should have all the permissions that you need to deploy and run the 
-Migration Assistant on Kubernetes. 
+should have all the permissions that you need to deploy and run the
+Migration Assistant on Kubernetes.
 
 
-# Quick Start for EKS
+## Overview
 
-## Prerequisites
+The `aws-bootstrap.sh` script is the single entry point for deploying the
+Migration Assistant onto AWS EKS.  The same script can be used by end-users
+and developers to bootstrap their Migration Assistant to EKS. It handles:
 
-As a developer, you'll need to install
-* Java Development Kit (JDK) 11-17
-* [kubectl](https://kubernetes.io/docs/tasks/tools/) 
-* [helm](https://helm.sh/docs/intro/install/)
-* [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and an AWS Account.
+1. **CloudFormation deployment** — creates the EKS cluster, ECR registry,
+   IAM roles, and networking (new VPC or imported VPC).
+2. **EKS configuration** — sets up kubectl access, namespaces, and node pools.
+3. **Helm chart installation** — installs the Migration Assistant with all
+   sub-charts (Argo Workflows, Kafka, Prometheus, etc.).
+4. **CloudWatch dashboards** — deploys monitoring dashboards.
 
-
-## Step 1: Deploying an EKS Cluster with CloudFormation
-
-Create the CloudFormation template for EKS from source and deploy it.  Make 
-sure that up-to-date AWS credentials are available. 
-
-```bash
-echo "Build the CloudFormation templates"
-pushd $(git rev-parse --show-toplevel)
-./gradlew :deployment:migration-assistant-solution:cdkSynthMinified
-
-echo "Confirm that AWS Credentials are resolvable by the aws cli."
-export AWS_REGION=us-east-2
-export CFN_STACK_NAME=MA-EKS-DEV-TEST
-aws cloudformation deploy \
-  --template-file deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json \
-  --stack-name "$CFN_STACK_NAME" \
-  --parameter-overrides Stage=devtest \
-  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
-
-aws cloudformation wait stack-create-complete \
-  --stack-name "${CFN_STACK_NAME}" --region "${AWS_REGION}"
-
-echo "Get the exported values to set as environment variables, which should include the $MIGRATIONS_ECR_REGISTRY"
-eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`MigrationsExportString\`)].[Value]" --output text) 
-
-echo "Updating kubectl to use the new EKS cluster"
-aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
-echo "For convenience, setting the default namespace for all kubectl commands to 'ma' (default for aws-bootstrap.sh)"
-kubectl config set-context --current --namespace=ma
-```
+By default, all artifacts come from the latest published release.
+The script:
+- Downloads CloudFormation templates from the Solutions S3 bucket
+- Downloads Helm chart and dashboards from the GitHub release
+- Uses container images from `public.ecr.aws/opensearchproject`
 
 
-## Step 2: Deploying the Migration Assistant onto the EKS Cluster
+### Prerequisites
 
-The user-facing script to provision the Migration Assistant can be run by 
-developers from their own workspace with
+- [kubectl](https://kubernetes.io/docs/tasks/tools/)
+- [helm](https://helm.sh/docs/intro/install/) (auto-installed if missing)
+- [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+  with valid credentials
+- `jq`, `curl`
+
+### Deploy latest with a new VPC
 
 ```bash
-pushd $(git rev-parse --show-toplevel)
-export AWS_CFN_REGION=us-east-2
-./deployment/k8s/aws/aws-bootstrap.sh --skip-git-pull --build-images-locally --base-dir "$(git rev-parse --show-toplevel)"
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --deploy-create-vpc-cfn \
+  --stack-name MA \
+  --stage prod \
+  --region us-east-2
 ```
 
-### Building locally to EKS
+### Deploy into an existing VPC
 
-Notice that the `aws-bootstrap.sh` script normally clones the git repo and uses
-public ECR images. These flags build the code from the current code 
-(assuming that the script is run from the location of this README) but 
-otherwise performs the same initialization actions as users perform.  
-To update images see [buildImages](../../../buildImages/README.md).
-To update the K8s deployment (other than images, configmaps, workflow templates,
-resource settings, etc.) see the [k8s README](../README.md).
+Run without `--vpc-id` first to discover available VPCs and subnets:
 
-When building images (`--build-images-locally`), the script,
-by default, automatically configures cross-platform builds for amd64 and arm64.
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --deploy-import-vpc-cfn \
+  --stack-name MA-Production \
+  --stage prod \
+  --region us-east-2
+```
 
-1. A `general-work-pool` NodePool is pre-created from the Migration Assistant  
-   chart.  By default, both `amd64` and `arm64` are enabled 
-   (see `valuesEks.yaml` to adjust).  * If that has been overridden so that only
-   one architecture is enabled, the nodepool set up for the  migration-console
-   would need to be adjusted since it includes both architectures. 
-2. The aws-bootstrap.sh script, when configuring --build-local* queries
-   this nodepool to determine which architectures that it can build
-3. When multiple architectures are configured, native buildkit pods are deployed 
-   on each architecture for parallel docker builds.
-4. If only one architecture is configured, we should only build for one 
-   architecture.
+Then re-run with the IDs:
 
-To change the general-work-pool that will be used by default, 
-change these values in within the `--helm-values` passed into the script.
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --deploy-import-vpc-cfn \
+  --stack-name MA-Production \
+  --stage prod \
+  --vpc-id vpc-0abc123 \
+  --subnet-ids subnet-111,subnet-222 \
+  --region us-east-2
+```
+
+### Grant EKS access to a CI role or teammate
+
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --skip-cfn-deploy \
+  --eks-access-principal-arn arn:aws:iam::123456789012:role/MyRole \
+  --stage dev \
+  --region us-east-2 \
+  --skip-console-exec
+```
+
+Run `./deployment/k8s/aws/aws-bootstrap.sh --help` for the full list of options.
+
+See the [project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki)
+for additional deployment guidance.
+
+
+## Isolated / Air-Gapped Networks
+
+For subnets without internet access, the bootstrap script can mirror all required
+container images and helm charts to your private ECR registry, and create the VPC
+endpoints needed for EKS to pull from ECR. Add `--push-all-images-to-private-ecr`
+and `--create-vpc-endpoints` (unless you're managing those endpoints elsewhere) 
+and the script handles the rest.
+
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --deploy-import-vpc-cfn \
+  --push-all-images-to-private-ecr \
+  --create-vpc-endpoints \
+  --stack-name MA-Prod \
+  --stage prod \
+  --vpc-id vpc-xxx \
+  --subnet-ids subnet-aaa,subnet-bbb \
+  --region us-east-1 \
+  --version 2.6.4
+```
+
+The mirroring step runs from your machine (which has internet), copies ~50 images
+and 11 helm charts to ECR, then the EKS cluster pulls everything through VPC
+endpoints. Seven endpoints are created: ECR API, ECR Docker, S3, CloudWatch Logs,
+EFS, STS, and EKS Auth.
+
+
+## Developer Workflow
+
+### Prerequisites
+
+In addition to the general prerequisites above, if building any of the
+artifacts directly, you'll also need to install:
+- Java Development Kit (JDK) 11-17
+- Docker: for image builds, including builder support for buildkit remote builds
+- The opensearch-migrations repo
+
+### Build everything from source
+
+```bash
+# From the repo root
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --deploy-create-vpc-cfn \
+  --build-cfn \
+  --build-images \
+  --build-chart-and-dashboards \
+  --stack-name MA-Dev \
+  --stage dev \
+  --region us-east-2
+```
+
+### Build only some components
+
+When mixing built and downloaded artifacts, `--version` is required to prevent
+version mismatches:
+
+```bash
+# Build CFN from source, use released images and chart
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --deploy-create-vpc-cfn \
+  --build-cfn \
+  --stack-name MA-Dev \
+  --stage dev \
+  --region us-east-2 \
+  --version 2.6.4
+```
+
+## Customizing the workloads node pool
+
+The Migration Assistant chart creates a `general-work-pool` NodePool. By
+default, both `amd64` and `arm64` architectures are enabled (see
+`valuesEks.yaml`). The bootstrap script queries this pool to determine which
+architectures to build when using `--build-images`.
+
+To customize, pass `--helm-values` with a file containing:
 
 ```yaml
 workloadsNodePool:
@@ -116,23 +189,35 @@ workloadsNodePool:
   architectures: ["amd64"]
 ```
 
-### In-K8s Source/Target Test Clusters
+For more details on the K8s deployment, see the [k8s README](../README.md).
+To update images, see [buildImages](../../../buildImages/README.md).
 
-Integ tests spin up a number of Elasticsearch/OpenSearch clusters through argo
-to test various workflows.  In many development scenarios, it can be helpful
-to have a warm source and target cluster that are ready immediately.  To spin
-up an ES 7.10 and OS 2.11 (no reason it's that version), install the following
-chart with the specified overrides
 
+## In-K8s Source/Target Test Clusters
+
+Integration tests spin up Elasticsearch/OpenSearch clusters through Argo
+workflows. For development, you can deploy source and target clusters
+that remain indefinitely.  Notice that these clusters are NOT configured to
+use persistent data storage though to make them as lightweight as possible.
 
 ```bash
-pushd $(git rev-parse --show-toplevel)/deployment/k8s/charts/aggregates/
-eval $(aws cloudformation list-exports --query "Exports[?starts_with(Name, \`MigrationsExportString\`)].[Value]" --output text) 
+cd $(git rev-parse --show-toplevel)
+
+eval $(aws cloudformation list-exports \
+  --query "Exports[?starts_with(Name, \`MigrationsExportString\`)].Value" \
+  --output text)
+
 export ELASTIC_SEARCH_IMAGE_TAG=migrations_elasticsearch_searchguard_latest
-helm upgrade --install -n ma tc testClusters \
-  -f testClusters/valuesEks.yaml \
+
+helm upgrade --install -n ma tc \
+  deployment/k8s/charts/aggregates/testClusters \
+  -f deployment/k8s/charts/aggregates/testClusters/valuesEks.yaml \
   --set "source.image=$MIGRATIONS_ECR_REGISTRY" \
   --set "source.imageTag=$ELASTIC_SEARCH_IMAGE_TAG" \
   --set "source.extraInitContainers[0].image=$MIGRATIONS_ECR_REGISTRY:$ELASTIC_SEARCH_IMAGE_TAG" \
-  --set "source.extraContainers[0].image=$MIGRATIONS_ECR_REGISTRY:$ELASTIC_SEARCH_IMAGE_TAG"
+  --set "source.extraContainers[0].image=$MIGRATIONS_ECR_REGISTRY:$ELASTIC_SEARCH_IMAGE_TAG" \
+  --post-renderer deployment/k8s/charts/aggregates/testClusters/patchElasticsearchEntrypointToIgnorePodIdentity.py
 ```
+
+The `--post-renderer` patches the Elasticsearch StatefulSet entrypoint to work
+correctly with EKS Pod Identity.

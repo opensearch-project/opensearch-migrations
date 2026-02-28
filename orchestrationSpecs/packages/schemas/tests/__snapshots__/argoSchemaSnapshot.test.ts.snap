@@ -139,12 +139,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "default": {
                         "limits": {
-                          "cpu": "2000m",
-                          "memory": "4000Mi"
+                          "cpu": "3500m",
+                          "memory": "3500Mi"
                         },
                         "requests": {
-                          "cpu": "2000m",
-                          "memory": "4000Mi"
+                          "cpu": "3500m",
+                          "memory": "3500Mi"
                         }
                       },
                       "required": [
@@ -264,6 +264,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "maxSnapshotRateMbPerNode": {
                             "type": "number",
                             "default": 0
+                          },
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
                           },
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
@@ -509,6 +513,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type": "number",
                             "default": 1
                           },
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
+                          },
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
                             "default": ""
@@ -577,6 +585,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type": "number",
                             "default": 1
                           },
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
+                          },
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
                             "default": ""
@@ -596,7 +608,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "initialLeaseDuration": {
                             "type": "string",
-                            "default": "PT10M"
+                            "default": "PT1H"
                           },
                           "maxConnections": {
                             "type": "number",
@@ -1000,6 +1012,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": ""
                     },
+                    "jvmArgs": {
+                      "type": "string",
+                      "default": ""
+                    },
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
                       "default": ""
@@ -1060,12 +1076,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "default": {
                         "limits": {
-                          "cpu": "2000m",
-                          "memory": "4000Mi"
+                          "cpu": "3500m",
+                          "memory": "3500Mi"
                         },
                         "requests": {
-                          "cpu": "2000m",
-                          "memory": "4000Mi"
+                          "cpu": "3500m",
+                          "memory": "3500Mi"
                         }
                       },
                       "required": [
@@ -1320,6 +1336,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "type": "number",
                                   "default": 0
                                 },
+                                "jvmArgs": {
+                                  "type": "string",
+                                  "default": ""
+                                },
                                 "loggingConfigurationOverrideConfigMap": {
                                   "type": "string",
                                   "default": ""
@@ -1528,6 +1548,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "number",
                         "default": 1
                       },
+                      "jvmArgs": {
+                        "type": "string",
+                        "default": ""
+                      },
                       "loggingConfigurationOverrideConfigMap": {
                         "type": "string",
                         "default": ""
@@ -1604,6 +1628,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "number",
                         "default": 1
                       },
+                      "jvmArgs": {
+                        "type": "string",
+                        "default": ""
+                      },
                       "loggingConfigurationOverrideConfigMap": {
                         "type": "string",
                         "default": ""
@@ -1623,7 +1651,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "initialLeaseDuration": {
                         "type": "string",
-                        "default": "PT10M"
+                        "default": "PT1H"
                       },
                       "maxConnections": {
                         "type": "number",
@@ -1807,12 +1835,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "default": {
                       "limits": {
-                        "cpu": "2000m",
-                        "memory": "4000Mi"
+                        "cpu": "3500m",
+                        "memory": "3500Mi"
                       },
                       "requests": {
-                        "cpu": "2000m",
-                        "memory": "4000Mi"
+                        "cpu": "3500m",
+                        "memory": "3500Mi"
                       }
                     },
                     "required": [
@@ -1949,6 +1977,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "default": ""
                   },
+                  "jvmArgs": {
+                    "type": "string",
+                    "default": ""
+                  },
                   "loggingConfigurationOverrideConfigMap": {
                     "type": "string",
                     "default": ""
@@ -2009,12 +2041,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "default": {
                       "limits": {
-                        "cpu": "2000m",
-                        "memory": "4000Mi"
+                        "cpu": "3500m",
+                        "memory": "3500Mi"
                       },
                       "requests": {
-                        "cpu": "2000m",
-                        "memory": "4000Mi"
+                        "cpu": "3500m",
+                        "memory": "3500Mi"
                       }
                     },
                     "required": [

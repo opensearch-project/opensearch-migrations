@@ -356,9 +356,7 @@ public class DataStreamMigrationTest extends SourceTestBase {
      */
     @SneakyThrows
     private void refreshDataStream(ClusterOperations cluster, String dataStreamName) {
-        var response = cluster.post("/" + dataStreamName + "/_refresh", null);
-        assertThat("Refresh should succeed for data stream " + dataStreamName + ", but got " + response.getKey() + ": " + response.getValue(),
-            response.getKey(), equalTo(200));
+        cluster.refresh(dataStreamName);
         log.info("Refreshed data stream: {}", dataStreamName);
     }
 

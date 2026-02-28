@@ -48,23 +48,57 @@ public class Accumulation {
     AtomicInteger numberOfResets;
     int startingSourceRequestIndex;
     private boolean hasBeenExpired;
+    final int sourceGeneration;
+    /** True when this connection was mid-flight during a partition reassignment (resumed). */
+    final boolean isResumedConnection;
 
     public Accumulation(ITrafficStreamKey key, TrafficStream ts) {
         this(
             key,
             ts.getPriorRequestsReceived() + (ts.hasLastObservationWasUnterminatedRead() ? 1 : 0),
-            ts.getLastObservationWasUnterminatedRead()
+            ts.getLastObservationWasUnterminatedRead(),
+            key.getSourceGeneration(),
+            false
+        );
+    }
+
+    public Accumulation(ITrafficStreamKey key, TrafficStream ts, boolean isResumedConnection) {
+        this(
+            key,
+            ts.getPriorRequestsReceived() + (ts.hasLastObservationWasUnterminatedRead() ? 1 : 0),
+            ts.getLastObservationWasUnterminatedRead(),
+            key.getSourceGeneration(),
+            isResumedConnection
         );
     }
 
     public Accumulation(@NonNull ITrafficStreamKey trafficChannelKey, int startingSourceRequestIndex) {
-        this(trafficChannelKey, startingSourceRequestIndex, false);
+        this(trafficChannelKey, startingSourceRequestIndex, false, 0, false);
     }
 
     public Accumulation(
         @NonNull ITrafficStreamKey trafficChannelKey,
         int startingSourceRequestIndex,
         boolean dropObservationsLeftoverFromPrevious
+    ) {
+        this(trafficChannelKey, startingSourceRequestIndex, dropObservationsLeftoverFromPrevious, 0, false);
+    }
+
+    public Accumulation(
+        @NonNull ITrafficStreamKey trafficChannelKey,
+        int startingSourceRequestIndex,
+        boolean dropObservationsLeftoverFromPrevious,
+        int sourceGeneration
+    ) {
+        this(trafficChannelKey, startingSourceRequestIndex, dropObservationsLeftoverFromPrevious, sourceGeneration, false);
+    }
+
+    public Accumulation(
+        @NonNull ITrafficStreamKey trafficChannelKey,
+        int startingSourceRequestIndex,
+        boolean dropObservationsLeftoverFromPrevious,
+        int sourceGeneration,
+        boolean isResumedConnection
     ) {
         this.trafficChannelKey = trafficChannelKey;
         numberOfResets = new AtomicInteger();
@@ -73,6 +107,8 @@ public class Accumulation {
         this.state = dropObservationsLeftoverFromPrevious
             ? State.IGNORING_LAST_REQUEST
             : State.WAITING_FOR_NEXT_READ_CHUNK;
+        this.sourceGeneration = sourceGeneration;
+        this.isResumedConnection = isResumedConnection;
     }
 
     public boolean hasBeenExpired() {

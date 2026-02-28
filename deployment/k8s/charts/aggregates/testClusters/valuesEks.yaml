@@ -27,6 +27,13 @@ source:
               operator: In
               values: ["dedicated-search-pool"]
 
+  # Set S3_CLIENT_ENDPOINT to force a specific S3 endpoint (e.g. s3.us-east-2.amazonaws.com
+  # for isolated VPCs where the global S3 endpoint is unreachable). Leave empty to use the
+  # AWS SDK default (global endpoint), which works on non-isolated networks.
+  extraEnvs:
+    - name: S3_CLIENT_ENDPOINT
+      value: ""
+
   esConfig:
     elasticsearch.yml: |
       cluster.name: "test-cluster"
@@ -55,6 +62,7 @@ source:
       node.max_local_storage_nodes: 3
       ######## End Search Guard Demo Configuration ########
       discovery.type: single-node
+      s3.client.default.endpoint: ${S3_CLIENT_ENDPOINT:}
 
   # The values below are to set up a key store that is periodically refreshed
   # with credentials vended via PodIdentity

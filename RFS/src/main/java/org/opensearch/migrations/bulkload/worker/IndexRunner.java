@@ -94,6 +94,11 @@ public class IndexRunner {
         try {
             return indexCreator.create(transformedMetadata, mode, awarenessAttributeSettings, context);
         } catch (Exception e) {
+            log.atError()
+                .setMessage("Index Creation failed for index \"{}\"")
+                .addArgument(indexName)
+                .setCause(e)
+                .log();
             return CreationResult.builder()
                 .name(indexName)
                 .exception(new IndexTransformationException(indexName, e))

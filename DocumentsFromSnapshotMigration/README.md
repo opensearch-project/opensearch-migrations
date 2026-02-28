@@ -102,6 +102,21 @@ These arguments should be carefully considered before setting, can include exper
 | --documents-per-bulk-request | The number of documents to be included within each bulk request sent. Default: no max (controlled by documents size) |
 | --max-connections           | The maximum number of connections to simultaneously used to communicate to the target. Default: 10                   |
 | --target-insecure           | Flag to allow untrusted SSL certificates for target cluster. Default: false                                          |
+| --coordinator-retry-max-retries | Maximum number of retries when marking work items as completed on the coordinator. Default: 7                      |
+| --coordinator-retry-initial-delay-ms | Initial delay in milliseconds for coordinator completion retries (doubles each attempt). Default: 1000       |
+| --coordinator-retry-max-delay-ms | Maximum delay in milliseconds for any single coordinator completion retry. Default: 64000                       |
+
+#### Coordinator Retry Behavior
+
+These settings apply to coordinator work-item completion retries only and do not change target bulk indexing retry behavior. They are intended for transient coordinator outages such as pod restarts or evictions.
+
+When RFS finishes migrating documents for a shard, it marks the work item as completed on the coordinator cluster. If the coordinator is temporarily unavailable during this step, RFS retries with exponential backoff (2x multiplier). With defaults (7 retries = 8 total executions, 1000ms initial delay, 64s max delay), the backoff sleep sequence is: 1s, 2s, 4s, 8s, 16s, 32s, 64s (~127s total sleep). Actual elapsed time can be longer due to request timeouts and latency.
+
+- **Happy path**: No retries needed, completion succeeds immediately with zero added latency.
+- **Transient outage**: RFS retries until the coordinator recovers or the retry budget is exhausted.
+- **Non-retryable errors**: Fail immediately without retrying.
+
+**Tuning**: Increase `--coordinator-retry-max-retries` or `--coordinator-retry-initial-delay-ms` for environments with longer coordinator restart times. Decrease for faster failure detection. Longer settings trade off resilience for slower failure detection and Argo retry.
 
 ### Example: Handling Target Conflicts
 

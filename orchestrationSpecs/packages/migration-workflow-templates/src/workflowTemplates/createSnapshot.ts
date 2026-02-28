@@ -84,7 +84,7 @@ function makeParamsDict(
         expr.mergeDicts(
             makeSourceParamDict(sourceConfig),
             expr.mergeDicts(
-                expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap"),
+                expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "jvmArgs"),
                 // noWait is essential for workflow logic - the workflow handles polling for snapshot
                 // completion separately via checkSnapshotStatus, so the CreateSnapshot command must
                 // return immediately to allow the workflow to manage the wait/retry behavior
@@ -128,7 +128,10 @@ export const CreateSnapshot = WorkflowBuilder.create({
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/root/createSnapshot/bin/CreateSnapshot"])
             .addEnvVarsFromRecord(getSourceHttpAuthCreds(getHttpAuthSecretName(b.inputs.sourceConfig)))
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addEnvVar("JDK_JAVA_OPTIONS",
+                expr.dig(expr.deserializeRecord(b.inputs.createSnapshotConfig), ["jvmArgs"], "")
+            )
+            .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
             .addArgs([
                 expr.literal("---INLINE-JSON"),
                 expr.asString(expr.serialize(

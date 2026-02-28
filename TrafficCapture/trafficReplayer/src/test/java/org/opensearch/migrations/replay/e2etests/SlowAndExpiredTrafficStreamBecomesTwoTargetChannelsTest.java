@@ -137,7 +137,8 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
                 TEST_RESPONSE_TIMEOUT,
                 trafficSource,
                 new TimeShifter(TIME_SPEEDUP_FACTOR),
-                t -> {}
+                t -> {},
+                Duration.ofSeconds(5)
             );
         }
 
