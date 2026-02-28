@@ -37,23 +37,22 @@ etcdCluster:
 
 # CNPG PostgreSQL cluster configuration (for Argo archive)
 cnpgCluster:
-  instances: 2
+  instances: 1
   database: "argo"
   owner: "argo"
-  storageSize: "10Gi"
+  storageSize: "1Gi"
   storageClass: ""  # Use default storage class
   resources:
     requests:
       cpu: "100m"
       memory: "256Mi"
     limits:
-      cpu: "500m"
-      memory: "512Mi"
-  # EKS robustness: prevent both instances from being disrupted simultaneously
-  primaryUpdateStrategy: "unsupervised"  # Automatic failover during updates
-  primaryUpdateMethod: "switchover"      # Graceful switchover (not restart)
-  podAntiAffinityType: "required"        # Hard anti-affinity: instances MUST be on different nodes
-  topologyKey: "topology.kubernetes.io/zone"  # Spread across AZs for zone failure resilience
+      cpu: "100m"
+      memory: "256Mi"
+  primaryUpdateStrategy: "unsupervised"
+  primaryUpdateMethod: "switchover"
+  podAntiAffinityType: "preferred"        # Soft anti-affinity for dev-local
+  topologyKey: "kubernetes.io/hostname"
 
 # Kyverno policy toggles (requires conditionalPackageInstalls.kyverno: true)
 kyvernoPolicies:
@@ -332,8 +331,7 @@ charts:
         pullPolicy: IfNotPresent
       controller:
         pdb:
-          enabled: true
-          minAvailable: 1  # Ensures at least 1 pod always running
+          enabled: false
         containerSecurityContext:
           runAsNonRoot: true
           allowPrivilegeEscalation: false
@@ -343,11 +341,13 @@ charts:
           enabled: true
         resourceRateLimit: { "limit": 10.0, "burst": 25 }
         workflowWorkers: 16
-        # GC completed workflows from K8s after brief delay for archiving
-        workflowDefaults: |
+        # GC completed workflows from K8s after brief delay for archiving.
+        # Requires cloudnative-pg to be enabled — automatically stripped when CNPG is disabled.
+        workflowDefaults:
           spec:
             ttlStrategy:
               secondsAfterCompletion: 10
+        # Archive to CNPG-managed PostgreSQL. Automatically stripped when cloudnative-pg is disabled.
         persistence:
           connectionPool:
             maxIdleConns: 100
@@ -360,8 +360,6 @@ charts:
             port: 5432
             database: argo
             tableName: argo_workflows
-            ssl: true
-            sslMode: require
             userNameSecret:
               name: argo-postgres-app
               key: username
@@ -369,16 +367,7 @@ charts:
               name: argo-postgres-app
               key: password
 
-        replicas: 2
-        affinity:
-          podAntiAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-              - weight: 100
-                podAffinityTerm:
-                  labelSelector:
-                    matchLabels:
-                      app.kubernetes.io/name: argo-workflows-controller
-                  topologyKey: kubernetes.io/hostname
+        replicas: 1
       mainContainer:
         env:
           - name: RESOURCE_STATE_CHECK_INTERVAL
@@ -388,21 +377,11 @@ charts:
           - name: RESOURCE_STATE_CHECK_INTERVAL
             value: "1s"
       server:
-        replicas: 2
+        replicas: 1
         pdb:
-          enabled: true
-          minAvailable: 1  # Ensures at least 1 pod always running
+          enabled: false
         livenessProbe:
           enabled: true
-        affinity:
-          podAntiAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-              - weight: 100
-                podAffinityTerm:
-                  labelSelector:
-                    matchLabels:
-                      app.kubernetes.io/name: argo-workflows-server
-                  topologyKey: kubernetes.io/hostname
         extraArgs:
           - --auth-mode=server
       serviceAccount:

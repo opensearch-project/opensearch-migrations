@@ -47,17 +47,6 @@ charts:
           registry: ""
           repository: localhost:5000/migrations/migration_console
           tag: latest
-  argo-workflows:
-    values:
-      controller:
-        replicas: 1
-        pdb:
-          enabled: false
-      server:
-        replicas: 1
-        pdb:
-          enabled: false
-
 
   # Lightweight etcd-operator for local development
   # (no additional values needed - installed via kubectl apply)
@@ -66,17 +55,3 @@ charts:
 etcdCluster:
   replicas: 1
   storageCapacity: 1Gi
-
-# Lightweight CNPG cluster for local development
-cnpgCluster:
-  instances: 1
-  storageSize: "1Gi"
-  resources:
-    requests:
-      cpu: "100m"
-      memory: "256Mi"
-    limits:
-      cpu: "100m"
-      memory: "256Mi"
-  podAntiAffinityType: "preferred"        # Soft anti-affinity for single-node local dev
-  topologyKey: "kubernetes.io/hostname"   # No AZ topology on local

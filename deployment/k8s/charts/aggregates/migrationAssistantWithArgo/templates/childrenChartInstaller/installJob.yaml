@@ -118,6 +118,13 @@ spec:
               echo "Preparing chart: {{ $name }}"
 
           {{- if $chart.values }}
+              {{- /* Strip persistence/workflowDefaults from argo-workflows when CNPG is disabled */}}
+              {{- if and (eq $name "argo-workflows") (not (index $.Values.conditionalPackageInstalls "cloudnative-pg")) }}
+                {{- if hasKey $chart.values "controller" }}
+                  {{- $_ := unset $chart.values.controller "persistence" }}
+                  {{- $_ := unset $chart.values.controller "workflowDefaults" }}
+                {{- end }}
+              {{- end }}
               VALUES_B64="{{ $chart.values | toYaml | b64enc }}"
               echo "$VALUES_B64" | base64 -d > /tmp/values-{{ $name }}.yaml
               VALUE_PARAM="--values /tmp/values-{{ $name }}.yaml"
