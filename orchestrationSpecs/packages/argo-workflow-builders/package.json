@@ -10,7 +10,6 @@
   },
   "scripts": {
     "build": "echo 'argo-workflow-builders: no build step needed (exports .ts directly)'",
-    "rebuildK8sSchemas": "./scripts/fetchK8sSchemas.sh && ts-node scripts/generateK8sTypes.ts",
     "type-check": "tsc --noEmit",
     "test": "jest",
     "test:integ": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.integ.config.mjs",
@@ -18,14 +17,14 @@
     "test:parity:broken": "PARITY_INCLUDE_BROKEN=1 NODE_OPTIONS=--experimental-vm-modules jest --config jest.integ.config.mjs -- parity/"
   },
   "dependencies": {
+    "@opensearch-migrations/argo-types": "*",
+    "@opensearch-migrations/k8s-types": "*",
     "zod": "^4"
   },
   "devDependencies": {
     "@kubernetes/client-node": "^1.4.0",
     "@testcontainers/k3s": "^11.11.0",
     "@types/jest": "*",
-    "@types/json-schema": "^7.0.15",
-    "json-schema-to-typescript": "^15.0.4",
     "yaml": "^2.8.2"
   },
   "files": [

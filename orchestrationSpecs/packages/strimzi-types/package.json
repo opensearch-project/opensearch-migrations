@@ -1,0 +1,16 @@
+{
+  "name": "@opensearch-migrations/strimzi-types",
+  "version": "1.0.0",
+  "description": "Generated TypeScript types for Strimzi Kafka CRDs",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "echo 'strimzi-types: no build step needed'",
+    "rebuild": "bash scripts/fetchSchemas.sh && tsx scripts/generate.ts"
+  },
+  "devDependencies": {
+    "@opensearch-migrations/crd-type-generator": "*",
+    "@types/node": "*",
+    "tsx": "*"
+  }
+}

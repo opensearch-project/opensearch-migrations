@@ -20,6 +20,7 @@
   "dependencies": {
     "zod": "^4",
     "@asteasolutions/zod-to-openapi": "^8.1.0",
+    "@opensearch-migrations/strimzi-types": "*",
     "deepmerge": "^4.3.1"
   },
   "devDependencies": {

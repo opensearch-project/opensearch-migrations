@@ -14,7 +14,8 @@
   },
   "dependencies": {
     "@opensearch-migrations/argo-workflow-builders": "*",
-    "@opensearch-migrations/schemas": "*"
+    "@opensearch-migrations/schemas": "*",
+    "@opensearch-migrations/strimzi-types": "*"
   },
   "devDependencies": {
     "@types/jest": "*",

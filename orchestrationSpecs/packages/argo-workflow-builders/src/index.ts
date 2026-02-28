@@ -20,4 +20,5 @@ export * from "./models/workflowTypes";
 export * from "./renderers/argoResourceRenderer";
 export * from "./renderers/argoExpressionRender";
 export * from "./utils";
-export * from "./kubernetesResourceTypes/kubernetesTypes";
+export * from "@opensearch-migrations/k8s-types";
+export { WorkflowTemplate as ArgoWorkflowTemplate, Workflow as ArgoWorkflow, CronWorkflow as ArgoCronWorkflow } from "@opensearch-migrations/argo-types";

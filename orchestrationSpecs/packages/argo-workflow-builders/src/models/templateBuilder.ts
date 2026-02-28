@@ -44,7 +44,7 @@ import {
 import {AllowLiteralOrExpression, expr, isExpression} from "./expression";
 import {typeToken, TypeToken} from "./sharedTypes";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
-import { Container } from "../kubernetesResourceTypes/kubernetesTypes";
+import { Container } from "@opensearch-migrations/k8s-types";
 import { SetRequired } from "../utils";
 
 /**
