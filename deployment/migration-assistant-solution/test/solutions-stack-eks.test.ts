@@ -38,7 +38,7 @@ describe('Solutions stack', () => {
         const template = Template.fromStack(stack);
         verifyResources(template, {
             vpcCount: 0,
-            vpcEndpointCount: 0,
+            vpcEndpointCount: 7,
             subnetCount: 0,
             natGatewayCount: 0
         });

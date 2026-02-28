@@ -28,13 +28,25 @@ import {
 } from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {makeTargetParamDict, makeCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
+import {makeTargetParamDict, makeRfsCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
+import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
+
+function shouldCreateRfsWorkCoordinationCluster(
+    documentBackfillConfig: BaseExpression<Serialized<z.infer<typeof RFS_OPTIONS>>>
+): BaseExpression<boolean, "complicatedExpression"> {
+    return expr.not(
+        expr.get(
+            expr.deserializeRecord(documentBackfillConfig),
+            "useTargetClusterForWorkCoordination"
+        )
+    );
+}
 
 function makeParamsDict(
     sourceVersion: BaseExpression<z.infer<typeof CLUSTER_VERSION_STRING>>,
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
-    coordinatorConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
+    rfsCoordinatorConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
     options: BaseExpression<Serialized<z.infer<typeof RFS_OPTIONS>>>,
     sessionName: BaseExpression<string>
@@ -43,9 +55,9 @@ function makeParamsDict(
         expr.mergeDicts(
             expr.mergeDicts(
                 makeTargetParamDict(targetConfig),
-                makeCoordinatorParamDict(coordinatorConfig)
+                makeRfsCoordinatorParamDict(rfsCoordinatorConfig)
             ),
-            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas", "resources")
+            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas", "resources", "useTargetClusterForWorkCoordination", "jvmArgs")
         ),
         expr.mergeDicts(
             expr.makeDict({
@@ -77,6 +89,7 @@ function getRfsDeploymentManifest
 
     useLocalstackAwsCreds: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
+    jvmArgs: BaseExpression<string>,
 
     rfsImageName: BaseExpression<string>,
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
@@ -181,7 +194,8 @@ function getRfsDeploymentManifest
         setupLog4jConfigForContainer(
             useCustomLogging,
             args.loggingConfigMap,
-            { container: baseContainerDefinition, volumes: []}
+            { container: baseContainerDefinition, volumes: []},
+            args.jvmArgs
         )
     );
     const deploymentName = getRfsDeploymentName(args.sessionName);
@@ -361,6 +375,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("targetBasicCredsSecretNameOrEmpty", typeToken<string>())
         .addRequiredInput("coordinatorBasicCredsSecretNameOrEmpty", typeToken<string>())
         .addRequiredInput("podReplicas", typeToken<number>())
+        .addRequiredInput("jvmArgs", typeToken<string>())
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
@@ -378,6 +393,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 manifest: getRfsDeploymentManifest({
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
+                    jvmArgs: b.inputs.jvmArgs,
                     useLocalstackAwsCreds: expr.deserializeRecord(b.inputs.useLocalStack),
                     sessionName: b.inputs.sessionName,
                     targetBasicCredsSecretNameOrEmpty: b.inputs.targetBasicCredsSecretNameOrEmpty,
@@ -392,7 +408,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     snapshotK8sLabel: b.inputs.snapshotK8sLabel,
                     fromSnapshotMigrationK8sLabel: b.inputs.fromSnapshotMigrationK8sLabel,
                     taskK8sLabel: b.inputs.taskK8sLabel,
-                })
+                }),
+                successCondition: "status.readyReplicas > 0"
             }))
     )
 
@@ -403,7 +420,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addRequiredInput("coordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("rfsCoordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
@@ -414,13 +431,14 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     ...selectInputsForRegister(b,c),
                     podReplicas: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["podReplicas"], 1),
                     targetBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
-                    coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.coordinatorConfig),
+                    coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.rfsCoordinatorConfig),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
+                    jvmArgs: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["jvmArgs"], ""),
                     useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
                     rfsJsonConfig: expr.asString(expr.serialize(
                         makeParamsDict(b.inputs.sourceVersion,
                             b.inputs.targetConfig,
-                            b.inputs.coordinatorConfig,
+                            b.inputs.rfsCoordinatorConfig,
                             b.inputs.snapshotConfig,
                             b.inputs.documentBackfillConfig,
                             b.inputs.sessionName)
@@ -440,7 +458,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addRequiredInput("coordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("rfsCoordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("sessionName", typeToken<string>())
         .addOptionalInput("indices", c => [] as readonly string[])
@@ -456,7 +474,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    targetConfig: b.inputs.coordinatorConfig,
+                    targetConfig: b.inputs.rfsCoordinatorConfig,
                     backfillSession: expr.serialize(expr.makeDict({
                         sessionName: b.inputs.sessionName,
                         deploymentName: getRfsDeploymentName(b.inputs.sessionName)
@@ -490,16 +508,39 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addOptionalInput("indices", c => [] as readonly string[])
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole", "CoordinatorCluster"]))
 
-        .addSteps(b => b
-            .addStep("configureCoordinator", INTERNAL, "doNothing")
-            .addStep("runBulkLoad", INTERNAL, "runBulkLoad", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    coordinatorConfig: b.inputs.targetConfig
-                }))
-        )
+        .addSteps(b => {
+            const createRfsCluster = shouldCreateRfsWorkCoordinationCluster(b.inputs.documentBackfillConfig);
+            return b
+                // (conditional) Deploy an OpenSearch cluster for RFS work coordination
+                .addStep("createRfsCoordinator", RfsCoordinatorCluster, "createRfsCoordinator", c =>
+                    c.register({
+                        clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName),
+                        coordinatorImage: b.inputs.imageCoordinatorClusterLocation
+                    }),
+                    { when: { templateExp: createRfsCluster }}
+                )
+
+                // Always run bulk load, use deployed cluster or target cluster based on flag 'createRfsCluster'
+                .addStep("runBulkLoad", INTERNAL, "runBulkLoad", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        rfsCoordinatorConfig: expr.ternary(
+                            createRfsCluster,
+                            expr.serialize(makeRfsCoordinatorConfig(getRfsCoordinatorClusterName(b.inputs.sessionName))),
+                            b.inputs.targetConfig
+                        )
+                    }))
+
+                // (conditional) Cleanup OpenSearch cluster used for RFS work coordination
+                .addStep("cleanupRfsCoordinator", RfsCoordinatorCluster, "deleteRfsCoordinator", c =>
+                    c.register({
+                        clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName)
+                    }),
+                    { when: { templateExp: createRfsCluster }}
+                );
+        })
     )
 
     .getFullScope();

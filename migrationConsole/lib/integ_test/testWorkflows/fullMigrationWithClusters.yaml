@@ -46,6 +46,8 @@ spec:
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
+      - name: monitor-retry-limit
+        value: "33"
       - name: otel-collector-endpoint
         value: "http://otel-collector:4317"
 
@@ -209,7 +211,7 @@ spec:
           - name: cluster-type
           - name: namespace
       container:
-        image: bitnamisecure/kubectl:latest
+        image: mirror.gcr.io/bitnamisecure/kubectl:latest
         command: [sh, -c]
         args:
           - |
@@ -376,7 +378,7 @@ spec:
 
     - name: cleanup-all-clusters
       container:
-        image: dtzar/helm-kubectl:3.18.6
+        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
         args:
           - |

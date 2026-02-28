@@ -2,6 +2,7 @@
   "name": "@opensearch-migrations/migration-workflow-templates",
   "version": "1.0.0",
   "scripts": {
+    "build": "echo 'migration-workflow-templates: no build step needed'",
     "dev": "tsx src/makeTemplates.ts",
     "make-templates": "tsx makeTemplates.cjs",
     "type-check-deps": "npm run -w @opensearch-migrations/argo-workflow-builders type-check && npm run -w @opensearch-migrations/schemas type-check",

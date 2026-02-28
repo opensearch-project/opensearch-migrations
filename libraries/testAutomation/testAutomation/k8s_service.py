@@ -237,11 +237,31 @@ class K8sService:
             time.sleep(2)
         logger.warning(f"Timeout waiting for pods to terminate in {self.namespace}")
 
+    def wait_for_namespace_deleted(self, namespace: str, timeout_seconds: int = 120) -> None:
+        """Poll until namespace is fully deleted, raise TimeoutError if not."""
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            result = self.run_command(
+                ["kubectl", "get", "namespace", namespace, "-o", "name"],
+                ignore_errors=True
+            )
+            if not result or not result.stdout.strip():
+                logger.info(f"Namespace '{namespace}' deleted successfully")
+                return
+            time.sleep(3)
+        raise TimeoutError(f"Namespace '{namespace}' still exists after {timeout_seconds}s")
+
     def delete_namespace(self) -> None:
         logger.info(f"Deleting namespace '{self.namespace}'")
-        # Delete webhooks first to prevent them blocking namespace deletion
+        # Delete kyverno webhooks first — they can block API calls during cleanup
+        self.delete_kyverno_webhooks()
+        # Delete webhooks referencing our namespace
         self.delete_webhooks_referencing_namespace()
-        # Delete namespace
+        # Delete kyverno's separate namespace if it exists (ownerReference cascade
+        # may not complete in time when the parent namespace is force-deleted)
+        self.run_command(["kubectl", "delete", "namespace", "kyverno-ma",
+                         "--ignore-not-found", "--grace-period=0"], ignore_errors=True)
+        # Delete main namespace
         self.run_command(["kubectl", "delete", "namespace", self.namespace,
                          "--ignore-not-found", "--grace-period=0", "--force"])
         # Wait for pods to fully terminate before deleting webhooks again
@@ -249,6 +269,14 @@ class K8sService:
         self.wait_for_pods_terminated()
         # Delete webhooks again in case they were recreated during pod termination
         self.delete_webhooks_referencing_namespace()
+
+    def delete_kyverno_webhooks(self) -> None:
+        """Delete all kyverno-labeled webhook configurations."""
+        for webhook_type in ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]:
+            self.run_command(
+                ["kubectl", "delete", webhook_type, "-l", "app.kubernetes.io/instance=kyverno", "--ignore-not-found"],
+                ignore_errors=True
+            )
 
     def check_helm_release_exists(self, release_name: str) -> bool:
         logger.info(f"Checking if {release_name} is already deployed in '{self.namespace}' namespace")
@@ -328,20 +356,12 @@ class K8sService:
             logger.error(f"Failed to list ConfigMaps in namespace '{target_namespace}': {e.stderr}")
             raise subprocess.CalledProcessError(e.returncode, e.cmd, e.stderr)
 
-    def delete_configmap(self, configmap_name: str) -> CompletedProcess | bool:
+    def delete_configmap(self, configmap_name: str) -> CompletedProcess:
         target_namespace = self.namespace
-
-        # Check if ConfigMap exists first
-        check_command = ["kubectl", "get", "configmap", configmap_name, "-n", target_namespace, "--ignore-not-found"]
-        check_result = self.run_command(check_command, ignore_errors=True)
-
-        if not check_result or not check_result.stdout.strip():
-            logger.info(f"ConfigMap '{configmap_name}' doesn't exist in namespace '{target_namespace}', "
-                        f"skipping delete")
-            return True
-
         logger.info(f"Deleting ConfigMap '{configmap_name}' from namespace '{target_namespace}'...")
-        delete_command = ["kubectl", "delete", "configmap", configmap_name, "-n", target_namespace]
+        delete_command = [
+            "kubectl", "delete", "configmap", configmap_name, "-n", target_namespace, "--ignore-not-found"
+        ]
         return self.run_command(delete_command)
 
     def delete_all_argo_templates(self) -> None:

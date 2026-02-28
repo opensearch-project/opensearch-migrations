@@ -25,6 +25,7 @@ import {ContainerBuilder, IMAGE_PULL_POLICY} from "./containerBuilder";
 type WaitForCreationOptions = {
     kubectlImage: AllowLiteralOrExpression<string>;
     kubectlImagePullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>;
+    kubectlPodResources?: Record<string, any>;
     maxDurationSeconds: AllowLiteralOrExpression<number | string>;
     maxKubeWaitDuration?: number;
     retryPolicy?: string;
@@ -114,11 +115,14 @@ export class WaitForNewResourceBuilder<
 
         // reconcile durations like your commented code did
         const DEFAULT_WAIT_DURATION = 300;
-        const maxKformatBodubeWaitDuration =
+        const maxKubeWaitDuration =
             waitOpts.maxKubeWaitDuration ??
             (typeof waitOpts.maxDurationSeconds === "number" ? waitOpts.maxDurationSeconds : DEFAULT_WAIT_DURATION);
-
-        const maxDurationSeconds = waitOpts.maxDurationSeconds ?? waitOpts.maxKubeWaitDuration;
+        const maxDurationSeconds = waitOpts.maxDurationSeconds ?? maxKubeWaitDuration;
+        const resources = waitOpts.kubectlPodResources ?? {
+            limits: { cpu: "50m", memory: "32Mi" },
+            requests: { cpu: "50m", memory: "32Mi" }
+        };
 
         const namespaceArgs =
             def.namespace !== undefined ? ["-n", def.namespace] : [];
@@ -130,7 +134,7 @@ export class WaitForNewResourceBuilder<
                 "wait",
                 "--for=create",
                 def.resourceKindAndName,
-                `--timeout=${waitOpts.maxKubeWaitDuration}s`,
+                `--timeout=${maxKubeWaitDuration}s`,
                 ...namespaceArgs
             ])
             .addActiveDeadlineSeconds(() => expr.literal(maxDurationSeconds as any))
@@ -143,10 +147,7 @@ export class WaitForNewResourceBuilder<
                     cap: `${maxDurationSeconds as any}`
                 }
             })
-            .addResources({
-                limits: { cpu: "50m", memory: "32Mi" },
-                requests: { cpu: "50m", memory: "32Mi" }
-            }).getBody();
+            .addResources(resources).getBody();
     }
 }
 

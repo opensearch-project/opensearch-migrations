@@ -13,22 +13,15 @@ global.console = new Console({
 const COMMAND_LINE_HELP_MESSAGE = `
 Usage: initialize-workflow [options] [input-file]
 
-Initialize migration workflow in etcd.  
+Initialize migration workflow and its requisite resources.  
 When the configuration is provided in the user-schema with the --user-config option, 
 that configuration will first be validated and transformed before doing the initialization.
 
 Arguments:
   --user-config <file>         (stdin: '-') User-specified YAML/JSON configuration file ('-' for stdin)
   --transformed-config <file>  (stdin: '-') Workflow-ready YAML/JSON configuration file (output of MigrationConfigTransformer)
-  --etcd-endpoints <urls>      Comma-separated etcd endpoints (env: ETCD_ENDPOINTS)
-  --unique-run-nonce <string>  Value to disambiguate workflow instances for snapshot names, keys, etc (env: UNIQUE_RUN_NONCE)
-  --etcd-user <user>           Username for etcd authentication (env: ETCD_USER)
-  --etcd-password <pass>       Password for etcd authentication (env: ETCD_PASSWORD)
   --output-dir <dir>           Directory to write output files (workflowMigration.config.yaml, approvalConfigMaps.yaml, concurrencyConfigMaps.yaml)
 
-Options:
-  --skip-initialize            Only do transformation of user-config. Does no processing if passed a transformed config.            
-  
   -h, --help               Show this help message
 `;
 
@@ -56,57 +49,24 @@ export async function main() {
     }
 
     // Parse command line arguments
-    let etcdEndpoints = process.env.ETCD_ENDPOINTS;
-    let etcdUser = process.env.ETCD_USER;
-    let etcdPassword = process.env.ETCD_PASSWORD;
-    let uniqueRunNonce = process.env.UNIQUE_RUN_NONCE;
     let userConfigFile = process.env.USER_WORKFLOW_CONFIGURATION;
     let workflowConfigFile = process.env.TRANSFORMED_WORKFLOW_CONFIGURATION;
     let outputDir: string | undefined;
-    let skipInitialize = false;
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
 
-        if (arg === '--etcd-endpoints' && i + 1 < args.length) {
-            etcdEndpoints = args[++i];
-        } else if (arg === '--etcd-user' && i + 1 < args.length) {
-            etcdUser = args[++i];
-        } else if (arg === '--etcd-password' && i + 1 < args.length) {
-            etcdPassword = args[++i];
-        } else if (arg === '--unique-run-nonce' && i + 1 < args.length) {
-            uniqueRunNonce = args[++i];
-        } else if (arg === '--user-config' && i + 1 < args.length) {
+        if (arg === '--user-config' && i + 1 < args.length) {
             userConfigFile = args[++i];
         } else if (arg === '--transformed-config' && i + 1 < args.length) {
             workflowConfigFile = args[++i];
         } else if (arg === '--output-dir' && i + 1 < args.length) {
             outputDir = args[++i];
-        } else if (arg === '--skip-initialize') {
-            skipInitialize = true;
+        } else {
+            console.error('Error: unknown arg: `' + arg + '`.');
+            process.stderr.write(COMMAND_LINE_HELP_MESSAGE);
+            process.exit(5);
         }
-    }
-
-    // Verify required etcd configuration values are set
-    const missingVars: string[] = [];
-
-    if (!skipInitialize) {
-        if (!etcdEndpoints) {
-            missingVars.push('ETCD_ENDPOINTS (or --etcd-endpoints)');
-        }
-        if (!uniqueRunNonce) {
-            missingVars.push('UNIQUE_RUN_NONCE (or --unique-run-nonce)');
-        }
-    }
-
-    if (missingVars.length > 0) {
-        console.error('Error: Missing required configuration values:');
-        missingVars.forEach(varName => {
-            console.error(`  - ${varName}`);
-        });
-        console.error('\nPlease provide these via environment variables or command line arguments.');
-        console.error('Run with --help for usage information.');
-        process.exit(2);
     }
 
     // Verify that either configJson or inputFile is provided
@@ -137,38 +97,8 @@ export async function main() {
 
         // Generate output files
         if (outputDir) {
-            const initializer = new MigrationInitializer({
-                endpoints: [etcdEndpoints as string],
-                ...(!etcdUser || !etcdPassword ? {} : {
-                    auth: {
-                        username: etcdUser as string,
-                        password: etcdPassword as string
-                    }
-                })
-            }, uniqueRunNonce as string);
-
+            const initializer = new MigrationInitializer();
             await initializer.generateOutputFiles(workflows, outputDir, userConfigFile ? await parseInput(userConfigFile) : null);
-            await initializer.close();
-        }
-
-        if (!skipInitialize) {
-            const initializer = new MigrationInitializer({
-                    endpoints: [etcdEndpoints as string],
-                    ...(!etcdUser || !etcdPassword ? {} : {
-                        auth: {
-                            username: etcdUser as string,
-                            password: etcdPassword as string
-                        }
-                    })
-                },
-                uniqueRunNonce as string
-            );
-
-            try {
-                await initializer.initializeWorkflow(workflows);
-            } finally {
-                await initializer.close();
-            }
         }
 
         // Output transformed workflow to stdout if no output directory specified - ignoring auxiliary configmap values

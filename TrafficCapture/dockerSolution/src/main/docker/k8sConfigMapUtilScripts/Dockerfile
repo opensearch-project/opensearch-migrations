@@ -1,7 +1,7 @@
-FROM amazonlinux:2023
+FROM mirror.gcr.io/library/amazonlinux:2023
 
-ENV PIP_ROOT_USER_ACTION ignore
-ENV LANG C.UTF-8
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV LANG=C.UTF-8
 
 RUN dnf install -y \
         jq \
@@ -15,8 +15,7 @@ RUN dnf install -y \
         vim \
         wget \
         && \
-    dnf clean all && \
-    rm -rf /var/cache/dnf
+    dnf clean all
 
 # Define the virtual environment path to use for all pipenv runs
 ENV WORKON_HOME=/

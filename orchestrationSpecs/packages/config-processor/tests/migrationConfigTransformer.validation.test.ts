@@ -43,7 +43,6 @@ describe('MigrationConfigTransformer validation', () => {
             "target1": {
                 "endpoint": "https://opensearch-cluster-master-headless:9200",
                 "allowInsecure": true,
-                "version": "OS 2.11",
                 "authConfig": {
                     "basic": {
                         "secretName": "target1-creds"

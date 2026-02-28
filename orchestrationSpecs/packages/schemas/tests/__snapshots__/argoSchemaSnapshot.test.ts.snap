@@ -139,12 +139,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "default": {
                         "limits": {
-                          "cpu": "2000m",
-                          "memory": "4000Mi"
+                          "cpu": "3500m",
+                          "memory": "3500Mi"
                         },
                         "requests": {
-                          "cpu": "2000m",
-                          "memory": "4000Mi"
+                          "cpu": "3500m",
+                          "memory": "3500Mi"
                         }
                       },
                       "required": [
@@ -232,7 +232,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "sourceEndpoint",
                 "proxyConfig"
               ]
-            }
+            },
+            "default": []
           },
           "snapshots": {
             "type": "array",
@@ -244,6 +245,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "items": {
                     "type": "object",
                     "properties": {
+                      "label": {
+                        "type": "string"
+                      },
                       "snapshotPrefix": {
                         "type": "string"
                       },
@@ -260,6 +264,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "maxSnapshotRateMbPerNode": {
                             "type": "number",
                             "default": 0
+                          },
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
                           },
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
@@ -309,7 +317,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "semaphoreKey": {
                         "type": "string"
                       },
-                      "dependsUponProxySetups": {
+                      "dependsOnProxySetups": {
                         "type": "array",
                         "items": {
                           "type": "string"
@@ -318,6 +326,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       }
                     },
                     "required": [
+                      "label",
                       "snapshotPrefix",
                       "config",
                       "repo",
@@ -338,10 +347,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "allowInsecure": {
                       "type": "boolean",
                       "default": false
-                    },
-                    "version": {
-                      "type": "string",
-                      "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
                     },
                     "authConfig": {
                       "anyOf": [
@@ -413,6 +418,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         }
                       ]
                     },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
+                    },
                     "label": {
                       "type": "string"
                     }
@@ -427,7 +436,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "createSnapshotConfig",
                 "sourceConfig"
               ]
-            }
+            },
+            "default": []
           },
           "snapshotMigrations": {
             "type": "array",
@@ -437,8 +447,31 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "label": {
                   "type": "string"
                 },
-                "snapshotLabel": {
-                  "type": "string"
+                "snapshotNameResolution": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "externalSnapshotName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "externalSnapshotName"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "dataSnapshotResourceName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "dataSnapshotResourceName"
+                      ]
+                    }
+                  ]
                 },
                 "migrations": {
                   "type": "array",
@@ -479,6 +512,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "clusterAwarenessAttributes": {
                             "type": "number",
                             "default": 1
+                          },
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
                           },
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
@@ -548,6 +585,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type": "number",
                             "default": 1
                           },
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
+                          },
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
                             "default": ""
@@ -567,7 +608,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "initialLeaseDuration": {
                             "type": "string",
-                            "default": "PT10M"
+                            "default": "PT1H"
                           },
                           "maxConnections": {
                             "type": "number",
@@ -580,6 +621,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "otelCollectorEndpoint": {
                             "type": "string",
                             "default": "http://otel-collector:4317"
+                          },
+                          "useTargetClusterForWorkCoordination": {
+                            "type": "boolean",
+                            "default": true
                           },
                           "resources": {
                             "type": "object",
@@ -668,10 +713,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "boolean",
                       "default": false
                     },
-                    "version": {
-                      "type": "string",
-                      "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
-                    },
                     "authConfig": {
                       "anyOf": [
                         {
@@ -749,16 +790,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   },
                   "required": [
                     "endpoint",
-                    "version",
                     "label"
                   ]
                 },
                 "snapshotConfig": {
                   "type": "object",
                   "properties": {
-                    "snapshotName": {
-                      "type": "string"
-                    },
                     "label": {
                       "type": "string"
                     },
@@ -800,7 +837,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     }
                   },
                   "required": [
-                    "snapshotName",
                     "label",
                     "repoConfig"
                   ]
@@ -808,14 +844,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               },
               "required": [
                 "label",
-                "snapshotLabel",
+                "snapshotNameResolution",
                 "migrations",
                 "sourceVersion",
                 "sourceLabel",
                 "targetConfig",
                 "snapshotConfig"
               ]
-            }
+            },
+            "default": []
           },
           "trafficReplays": {
             "type": "array",
@@ -861,10 +898,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "boolean",
                       "default": false
                     },
-                    "version": {
-                      "type": "string",
-                      "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
-                    },
                     "authConfig": {
                       "anyOf": [
                         {
@@ -942,7 +975,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   },
                   "required": [
                     "endpoint",
-                    "version",
                     "label"
                   ]
                 },
@@ -977,6 +1009,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": 1
                     },
                     "authHeaderOverride": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "jvmArgs": {
                       "type": "string",
                       "default": ""
                     },
@@ -1040,12 +1076,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "default": {
                         "limits": {
-                          "cpu": "2000m",
-                          "memory": "4000Mi"
+                          "cpu": "3500m",
+                          "memory": "3500Mi"
                         },
                         "requests": {
-                          "cpu": "2000m",
-                          "memory": "4000Mi"
+                          "cpu": "3500m",
+                          "memory": "3500Mi"
                         }
                       },
                       "required": [
@@ -1062,15 +1098,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "kafkaConfig",
                 "toTarget"
               ]
-            }
+            },
+            "default": []
           }
-        },
-        "required": [
-          "proxies",
-          "snapshots",
-          "snapshotMigrations",
-          "trafficReplays"
-        ]
+        }
       }
     }
   },
@@ -1151,10 +1182,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "type": "boolean",
             "default": false
           },
-          "version": {
-            "type": "string",
-            "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
-          },
           "authConfig": {
             "anyOf": [
               {
@@ -1224,6 +1251,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 ]
               }
             ]
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
           },
           "enabled": {
             "type": "boolean",
@@ -1305,6 +1336,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "type": "number",
                                   "default": 0
                                 },
+                                "jvmArgs": {
+                                  "type": "string",
+                                  "default": ""
+                                },
                                 "loggingConfigurationOverrideConfigMap": {
                                   "type": "string",
                                   "default": ""
@@ -1373,10 +1408,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "allowInsecure": {
             "type": "boolean",
             "default": false
-          },
-          "version": {
-            "type": "string",
-            "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
           },
           "authConfig": {
             "anyOf": [
@@ -1454,8 +1485,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           }
         },
         "required": [
-          "endpoint",
-          "version"
+          "endpoint"
         ]
       }
     },
@@ -1517,6 +1547,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "clusterAwarenessAttributes": {
                         "type": "number",
                         "default": 1
+                      },
+                      "jvmArgs": {
+                        "type": "string",
+                        "default": ""
                       },
                       "loggingConfigurationOverrideConfigMap": {
                         "type": "string",
@@ -1594,6 +1628,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "number",
                         "default": 1
                       },
+                      "jvmArgs": {
+                        "type": "string",
+                        "default": ""
+                      },
                       "loggingConfigurationOverrideConfigMap": {
                         "type": "string",
                         "default": ""
@@ -1613,7 +1651,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "initialLeaseDuration": {
                         "type": "string",
-                        "default": "PT10M"
+                        "default": "PT1H"
                       },
                       "maxConnections": {
                         "type": "number",
@@ -1630,6 +1668,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "skipApproval": {
                         "type": "boolean",
                         "default": false
+                      },
+                      "useTargetClusterForWorkCoordination": {
+                        "type": "boolean",
+                        "default": true
                       },
                       "resources": {
                         "type": "object",
@@ -1793,12 +1835,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "default": {
                       "limits": {
-                        "cpu": "2000m",
-                        "memory": "4000Mi"
+                        "cpu": "3500m",
+                        "memory": "3500Mi"
                       },
                       "requests": {
-                        "cpu": "2000m",
-                        "memory": "4000Mi"
+                        "cpu": "3500m",
+                        "memory": "3500Mi"
                       }
                     },
                     "required": [
@@ -1935,6 +1977,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "default": ""
                   },
+                  "jvmArgs": {
+                    "type": "string",
+                    "default": ""
+                  },
                   "loggingConfigurationOverrideConfigMap": {
                     "type": "string",
                     "default": ""
@@ -1995,12 +2041,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "default": {
                       "limits": {
-                        "cpu": "2000m",
-                        "memory": "4000Mi"
+                        "cpu": "3500m",
+                        "memory": "3500Mi"
                       },
                       "requests": {
-                        "cpu": "2000m",
-                        "memory": "4000Mi"
+                        "cpu": "3500m",
+                        "memory": "3500Mi"
                       }
                     },
                     "required": [

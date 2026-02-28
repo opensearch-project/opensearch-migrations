@@ -4,7 +4,7 @@ import {
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     ARGO_MIGRATION_CONFIG, KAFKA_CLUSTER_CONFIG, CAPTURE_CONFIG,
-    GENERATE_SNAPSHOT,
+    GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -232,10 +232,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
         const output = {
             ...(kafkaClusters.length > 0 ? { kafkaClusters } : {}),
-            proxies,
-            snapshots,
-            snapshotMigrations,
-            trafficReplays,
+            ...(proxies.length > 0 ? { proxies } : {}),
+            ...(snapshots.length > 0 ? { snapshots } : {}),
+            ...(snapshotMigrations.length > 0 ? { snapshotMigrations } : {}),
+            ...(trafficReplays.length > 0 ? { trafficReplays } : {})
         };
 
         try {
@@ -286,7 +286,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
     /** Build snapshot creation configs grouped by source cluster. */
     private buildSnapshots(userConfig: InputConfig) {
-        // Build a map of source → proxy names for dependsUponProxySetups
+        // Build a map of source → proxy names for dependsOnProxySetups
         const proxyNamesBySource = new Map<string, string[]>();
         for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
             const source = proxy.source;
@@ -307,19 +307,19 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     throw new Error(`Snapshot '${snapshotName}' in source '${sourceName}' references repo '${snapshotDef.repoName}' which is not defined`);
                 }
 
-                const globalSnapshotName = `${sourceName}-${snapshotName}`;
                 const proxyDeps = proxyNamesBySource.get(sourceName);
 
                 const { snapshotPrefix: _sp, ...createSnapshotOpts } = snapshotDef.config.createSnapshotConfig;
                 const semaphore = this.generateSemaphoreConfig(sourceCluster.version, sourceName, snapshotName);
                 createConfigs.push({
-                    snapshotPrefix: snapshotDef.config.createSnapshotConfig.snapshotPrefix || globalSnapshotName,
+                    label: snapshotName,
+                    snapshotPrefix: snapshotDef.config.createSnapshotConfig.snapshotPrefix || snapshotName,
                     config: {
                         ...createSnapshotOpts,
                     },
-                    repo: { ...repoConfig, useLocalStack: /^localstacks?:\/\//i.test(repoConfig.endpoint ?? ""), repoName: snapshotDef.repoName },
+                    repo: repoConfig,
                     ...semaphore,
-                    ...(proxyDeps && proxyDeps.length > 0 ? { dependsUponProxySetups: proxyDeps } : {})
+                    ...(proxyDeps && proxyDeps.length > 0 ? { dependsOnProxySetups: proxyDeps } : {})
                 });
             }
 
@@ -357,23 +357,26 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     throw new Error(`Migration references snapshot '${snapshotName}' not defined in source '${fromSource}'`);
                 }
 
-                const globalSnapshotName = `${fromSource}-${snapshotName}`;
+                const globallyUniqueSnapshotName = `${fromSource}-${snapshotName}`;
                 const repoConfig = sourceCluster.snapshotInfo?.repos?.[snapshotDef.repoName];
 
+                const isExternal = 'externallyManagedSnapshotName' in snapshotDef.config;
+                const snapshotNameResolution = isExternal
+                    ? { externalSnapshotName: (snapshotDef.config as z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT>).externallyManagedSnapshotName }
+                    : { dataSnapshotResourceName: globallyUniqueSnapshotName };
+
                 results.push({
-                    label: globalSnapshotName,
-                    snapshotLabel: globalSnapshotName,
+                    label: snapshotName,
+                    snapshotNameResolution,
                     migrations: autoLabelMigrations(migrations),
                     sourceVersion: sourceCluster.version || "",
                     sourceLabel: fromSource,
                     targetConfig: { ...restOfTarget, label: toTarget },
                     snapshotConfig: {
-                        snapshotName: globalSnapshotName,
-                        label: globalSnapshotName,
+                        label: snapshotName,
                         ...(repoConfig ? {
                             repoConfig: {
                                 ...repoConfig,
-                                useLocalStack: /^localstacks?:\/\//i.test(repoConfig.endpoint ?? ""),
                                 repoName: snapshotDef.repoName
                             }
                         } : {})

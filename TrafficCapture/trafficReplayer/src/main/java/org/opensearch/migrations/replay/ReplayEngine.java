@@ -121,7 +121,7 @@ public class ReplayEngine {
             f -> f.whenComplete((v, t) -> Utils.setIfLater(lastCompletedSourceTimeEpochMs, timestamp.toEpochMilli()))
                 .whenComplete((v, t) -> {
                     var newCount = totalCountOfScheduledTasksOutstanding.decrementAndGet();
-                    log.atInfo().setMessage("Scheduled task '{}' finished ({}) decremented tasksOutstanding to {}")
+                    log.atDebug().setMessage("Scheduled task '{}' finished ({}) decremented tasksOutstanding to {}")
                         .addArgument(taskDescription)
                         .addArgument(stringableKey)
                         .addArgument(newCount)
@@ -140,7 +140,7 @@ public class ReplayEngine {
     }
 
     private static void logStartOfWork(Object stringableKey, long newCount, Instant start, String label) {
-        log.atInfo().setMessage("Scheduling '{}' ({}) to run at {} incremented tasksOutstanding to {}")
+        log.atDebug().setMessage("Scheduling '{}' ({}) to run at {} incremented tasksOutstanding to {}")
             .addArgument(label)
             .addArgument(stringableKey)
             .addArgument(start)
@@ -173,9 +173,29 @@ public class ReplayEngine {
         ByteBufList packets,
         RequestSenderOrchestrator.RetryVisitor<T> retryVisitor
     ) {
+        return scheduleRequest(ctx, originalStart, originalEnd, numPackets, packets, retryVisitor, null);
+    }
+
+    public <T> TrackedFuture<String, T> scheduleRequest(
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        Instant originalStart,
+        Instant originalEnd,
+        int numPackets,
+        ByteBufList packets,
+        RequestSenderOrchestrator.RetryVisitor<T> retryVisitor,
+        Duration quiescentDurationForRequest
+    ) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "request";
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
+        // Apply quiescent delay relative to the time-shifted start (not wall-clock now),
+        // so the delay is consistent regardless of when the request is processed
+        if (quiescentDurationForRequest != null) {
+            var quiescentUntil = start.plus(quiescentDurationForRequest);
+            log.atInfo().setMessage("Applying quiescent delay: shifting start from {} to {} for {}")
+                .addArgument(start).addArgument(quiescentUntil).addArgument(ctx).log();
+            start = quiescentUntil;
+        }
         var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
         var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets - 1L) : Duration.ZERO;
         var requestKey = ctx.getReplayerRequestKey();
@@ -190,6 +210,20 @@ public class ReplayEngine {
             .log();
         var result = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets, retryVisitor);
         return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
+    }
+
+    /**
+     * Immediately cancels a connection due to a traffic source reader interruption.
+     * Unlike {@link #closeConnection}, this bypasses the OnlineRadixSorter and time-shifting —
+     * the channel is closed directly and the session is marked cancelled to prevent reconnection.
+     */
+    public TrackedFuture<String, Void> cancelConnection(
+        IReplayContexts.IChannelKeyContext ctx,
+        int channelSessionNumber
+    ) {
+        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
+        var future = networkSendOrchestrator.cancelConnection(ctx, channelSessionNumber);
+        return hookWorkFinishingUpdates(future, Instant.now(), ctx.getChannelKey(), "cancel");
     }
 
     public TrackedFuture<String, Void> closeConnection(

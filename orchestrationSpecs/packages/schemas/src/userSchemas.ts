@@ -172,6 +172,7 @@ export const REPLAYER_OPTIONS = z.object({
     speedupFactor: z.number().default(1.1).optional(),
     podReplicas: z.number().default(1).optional(),
     authHeaderOverride: z.string().default("").optional(),
+    jvmArgs: z.string().default("").optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
     resources: RESOURCE_REQUIREMENTS
         .describe("Resource limits and requests for replayer container.")
@@ -184,6 +185,7 @@ export const CREATE_SNAPSHOT_OPTIONS = z.object({
     snapshotPrefix: z.string().default("").optional(),
     indexAllowlist: z.array(z.string()).default([]).optional(),
     maxSnapshotRateMbPerNode: z.number().default(0).optional(),
+    jvmArgs: z.string().default("").optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
 });
 
@@ -194,6 +196,7 @@ export const USER_METADATA_OPTIONS = z.object({
 
     allowLooseVersionMatching: z.boolean().default(true).optional(),
     clusterAwarenessAttributes: z.number().default(1).optional(),
+    jvmArgs: z.string().default("").optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
     multiTypeBehavior: z.union(["NONE", "UNION", "SPLIT"].map(s=>z.literal(s))).default("NONE").optional(),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
@@ -208,16 +211,18 @@ export const USER_RFS_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional(),
     podReplicas: z.number().default(1).optional(),
 
+    jvmArgs: z.string().default("").optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
     allowLooseVersionMatching: z.boolean().default(true).describe("").optional(),
     docTransformerConfigBase64: z.string().default("").optional(),
     documentsPerBulkRequest: z.number().default(0x7fffffff).optional(),
-    initialLeaseDuration: z.string().default("PT10M").optional(),
+    initialLeaseDuration: z.string().default("PT1H").optional(),
     maxConnections: z.number().default(10).optional(),
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional(),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
 
     skipApproval: z.boolean().default(false).optional(),  // TODO - fullmigration
+    useTargetClusterForWorkCoordination: z.boolean().default(true),
     resources: z.preprocess((v) =>
             deepmerge(DEFAULT_RESOURCES.RFS, (v ?? {})),
         RESOURCE_REQUIREMENTS
@@ -305,7 +310,6 @@ export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123]
 export const CLUSTER_CONFIG = z.object({
     endpoint:  z.string().regex(/^(?:https?:\/\/[^:\/\s]+(:\d+)?(\/)?)?$/).default("").optional(),
     allowInsecure: z.boolean().default(false).optional(),
-    version: CLUSTER_VERSION_STRING,
     authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
 });
 
@@ -342,11 +346,17 @@ export const REPLAYER_CONFIG = z.object({
 export const TRAFFIC_CONFIG = z.object({
     proxies: z.record(z.string(), CAPTURE_CONFIG),
     replayers: z.record(z.string(), REPLAYER_CONFIG)
-})/*.refine(data => {
-    Object.values(data.replayers)
-        .filter(rc=> !(rc.fromProxy in data.proxies))
-        .length > 0
-}, { message: "All replayers must reference a valid proxy"})*/;
+}).superRefine((data, ctx) => {
+    for (const [name, rc] of Object.entries(data.replayers)) {
+        if (!(rc.fromProxy in data.proxies)) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Replayer '${name}' references unknown proxy '${rc.fromProxy}'. Available: ${Object.keys(data.proxies).join(', ')}`,
+                path: ['replayers', name, 'fromProxy']
+            });
+        }
+    }
+});
 
 export const EXTERNALLY_MANAGED_SNAPSHOT = z.object({
     externallyManagedSnapshotName: z.string()
@@ -380,37 +390,30 @@ export const SNAPSHOT_INFO = z.object({
 })
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
+    version: CLUSTER_VERSION_STRING,
     enabled: z.boolean().default(true).optional(),
     snapshotInfo: SNAPSHOT_INFO.optional()
 }).superRefine((data, ctx) => {
-    // for (const migrationConfig of data.snapshotMigrationConfigs) {
-    //     const sourceCluster = data.sourceClusters[migrationConfig.fromSource];
-    //     if (!sourceCluster) continue;
-    //
-    //     const snapshotRepos = sourceCluster.snapshotRepos;
-    //     const snapshotConfigs = migrationConfig.perSnapshotConfig ?? [];
-    //
-    //     for (let i = 0; i < snapshotConfigs.length; i++) {
-    //         const snapshotConfig = snapshotConfigs[i];
-    //         const repoName = snapshotConfig.snapshotConfig.repoName;
-    //
-    //         if (repoName) {
-    //             if (!snapshotRepos) {
-    //                 ctx.addIssue({
-    //                     code: z.ZodIssueCode.custom,
-    //                     message: `snapshotExtractAndLoadConfig[${i}] references repoName '${repoName}' but source cluster '${migrationConfig.fromSource}' has no snapshotRepos defined`,
-    //                     path: ['snapshotMigrationConfigs', data.snapshotMigrationConfigs.indexOf(migrationConfig), 'perSnapshotConfig', i, 'snapshotConfig', 'repoName']
-    //                 });
-    //             } else if (!(repoName in snapshotRepos)) {
-    //                 ctx.addIssue({
-    //                     code: z.ZodIssueCode.custom,
-    //                     message: `repoName '${repoName}' does not exist in source cluster '${migrationConfig.fromSource}'. Available repos: ${Object.keys(snapshotRepos).join(', ')}`,
-    //                     path: ['snapshotMigrationConfigs', data.snapshotMigrationConfigs.indexOf(migrationConfig), 'perSnapshotConfig', i, 'snapshotConfig', 'repoName']
-    //                 });
-    //             }
-    //         }
-    //     }
-    // }
+    const repos = data.snapshotInfo?.repos;
+    const snapshots = data.snapshotInfo?.snapshots ?? {};
+    for (const [snapName, snapConfig] of Object.entries(snapshots)) {
+        const repoName = snapConfig.repoName;
+        if (repoName) {
+            if (!repos) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `Snapshot '${snapName}' references repoName '${repoName}' but no repos are defined`,
+                    path: ['snapshotInfo', 'snapshots', snapName, 'repoName']
+                });
+            } else if (!(repoName in repos)) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `Snapshot '${snapName}' references unknown repoName '${repoName}'. Available: ${Object.keys(repos).join(', ')}`,
+                    path: ['snapshotInfo', 'snapshots', snapName, 'repoName']
+                });
+            }
+        }
+    }
 });
 
 export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
@@ -438,13 +441,19 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     fromSource: z.string(),
     toTarget: z.string(),
     perSnapshotConfig: PER_SNAPSHOT_MIGRATION_CONFIG_RECORD.optional(),
-}).refine(data => {
-        // TODO: validate label uniqueness across perSnapshotConfig entries
-        // const labels = data.perSnapshotConfig?.map(m => m.label).filter(s => s);
-        // return labels ? labels.length == new Set(labels).size : true;
-        return true;
-    },
-    {message: "labels of perSnapshotConfig items must be unique when they are provided"});
+}).superRefine((data, ctx) => {
+    if (!data.perSnapshotConfig) return;
+    for (const [snapName, migrations] of Object.entries(data.perSnapshotConfig)) {
+        const labels = migrations.map(m => m.label).filter(Boolean);
+        if (labels.length !== new Set(labels).size) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Duplicate labels in perSnapshotConfig['${snapName}']`,
+                path: ['perSnapshotConfig', snapName]
+            });
+        }
+    }
+});
 
 export const KAFKA_CLUSTERS_MAP = z.record(z.string(), KAFKA_CLUSTER_CONFIG);
 export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
@@ -464,33 +473,71 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                 "sources to finish before any replays in this group can start.")
             .optional()
     }).superRefine((data, ctx) => {
-        // for (const migrationConfig of data.snapshotMigrationConfigs) {
-        //     const sourceCluster = data.sourceClusters[migrationConfig.fromSource];
-        //     if (!sourceCluster) continue;
-        //
-        //     const snapshotConfig = sourceCluster.snapshotConfig;
-        //     const snapshotMigrationConfigs = migrationConfig.perSnapshotConfig ?? [];
-        //
-        //     for (let i = 0; i < snapshotMigrationConfigs.length; i++) {
-        //         const snapshotConfig = snapshotConfigs[i];
-        //         const repoName = snapshotConfig.snapshot;
-        //
-        //         if (repoName) {
-        //             if (!snapshotRepos) {
-        //                 ctx.addIssue({
-        //                     code: z.ZodIssueCode.custom,
-        //                     message: `snapshotExtractAndLoadConfig[${i}] references repoName '${repoName}' but source cluster '${migrationConfig.fromSource}' has no snapshotRepos defined`,
-        //                     path: ['snapshotMigrationConfigs', data.snapshotMigrationConfigs.indexOf(migrationConfig), 'perSnapshotConfig', i, 'snapshotConfig', 'repoName']
-        //                 });
-        //             } else if (!(repoName in snapshotRepos)) {
-        //                 ctx.addIssue({
-        //                     code: z.ZodIssueCode.custom,
-        //                     message: `repoName '${repoName}' does not exist in source cluster '${migrationConfig.fromSource}'. Available repos: ${Object.keys(snapshotRepos).join(', ')}`,
-        //                     path: ['snapshotMigrationConfigs', data.snapshotMigrationConfigs.indexOf(migrationConfig), 'perSnapshotConfig', i, 'snapshotConfig', 'repoName']
-        //                 });
-        //             }
-        //         }
-        //     }
-        // }
+        for (let i = 0; i < data.snapshotMigrationConfigs.length; i++) {
+            const mc = data.snapshotMigrationConfigs[i];
+
+            if (!(mc.fromSource in data.sourceClusters)) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `snapshotMigrationConfigs[${i}] references unknown source '${mc.fromSource}'. Available: ${Object.keys(data.sourceClusters).join(', ')}`,
+                    path: ['snapshotMigrationConfigs', i, 'fromSource']
+                });
+            }
+
+            if (!(mc.toTarget in data.targetClusters)) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `snapshotMigrationConfigs[${i}] references unknown target '${mc.toTarget}'. Available: ${Object.keys(data.targetClusters).join(', ')}`,
+                    path: ['snapshotMigrationConfigs', i, 'toTarget']
+                });
+            }
+
+            if (mc.perSnapshotConfig) {
+                const sourceCluster = data.sourceClusters[mc.fromSource];
+                const availableSnapshots = sourceCluster?.snapshotInfo?.snapshots ?? {};
+                for (const snapName of Object.keys(mc.perSnapshotConfig)) {
+                    if (!(snapName in availableSnapshots)) {
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: `perSnapshotConfig references unknown snapshot '${snapName}' in source '${mc.fromSource}'. Available: ${Object.keys(availableSnapshots).join(', ') || '(none)'}`,
+                            path: ['snapshotMigrationConfigs', i, 'perSnapshotConfig', snapName]
+                        });
+                    }
+                }
+            }
+        }
+
+        if (data.traffic) {
+            for (const [proxyName, proxyConfig] of Object.entries(data.traffic.proxies)) {
+                if (!(proxyConfig.source in data.sourceClusters)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `Proxy '${proxyName}' references unknown source '${proxyConfig.source}'. Available: ${Object.keys(data.sourceClusters).join(', ')}`,
+                        path: ['traffic', 'proxies', proxyName, 'source']
+                    });
+                }
+            }
+
+            for (const [replayerName, rc] of Object.entries(data.traffic.replayers)) {
+                if (!(rc.toTarget in data.targetClusters)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `Replayer '${replayerName}' references unknown target '${rc.toTarget}'. Available: ${Object.keys(data.targetClusters).join(', ')}`,
+                        path: ['traffic', 'replayers', replayerName, 'toTarget']
+                    });
+                }
+
+                for (let j = 0; j < (rc.dependsOnSnapshotMigrations ?? []).length; j++) {
+                    const dep = rc.dependsOnSnapshotMigrations![j];
+                    if (!(dep.source in data.sourceClusters)) {
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: `Replayer '${replayerName}' dependsOnSnapshotMigrations[${j}] references unknown source '${dep.source}'. Available: ${Object.keys(data.sourceClusters).join(', ')}`,
+                            path: ['traffic', 'replayers', replayerName, 'dependsOnSnapshotMigrations', j, 'source']
+                        });
+                    }
+                }
+            }
+        }
     })
 );

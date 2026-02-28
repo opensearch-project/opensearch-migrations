@@ -81,118 +81,56 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Synth EKS CFN Template') {
+            // Use aws-bootstrap.sh (the production deployment path) which builds
+            // minified CFN templates via cdkSynthMinified to stay under the
+            // CloudFormation --template-body 51,200 byte limit.
+            stage('Deploy & Install') {
                 steps {
-                    timeout(time: 20, unit: 'MINUTES') {
-                        dir('deployment/migration-assistant-solution') {
-                            script {
-                                echo "Synthesizing CloudFormation templates via CDK..."
-                                sh "npm install --dev"
-                                sh "npx cdk synth '*'"
-                                echo "CDK synthesis completed. EKS CFN Templates should be available in cdk.out/"
+                    timeout(time: 90, unit: 'MINUTES') {
+                        script {
+                            def templateName = isImportVpc ? "Migration-Assistant-Infra-Import-VPC-eks" : "Migration-Assistant-Infra-Create-VPC-eks"
+                            env.STACK_NAME = "${templateName}-${stage}-${params.REGION}"
+
+                            def bootstrapArgs = isImportVpc ?
+                                "--deploy-import-vpc-cfn --vpc-id ${env.TEST_VPC_ID} --subnet-ids ${env.TEST_SUBNET_IDS}" :
+                                "--deploy-create-vpc-cfn"
+                            def buildImagesArg = params.BUILD_IMAGES ? "--build-images" : ""
+
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 7200, roleSessionName: 'jenkins-session') {
+                                    sh """
+                                        set -euo pipefail
+                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                          ${bootstrapArgs} \
+                                          --build-cfn \
+                                          --stack-name "${env.STACK_NAME}" \
+                                          --stage "${stage}" \
+                                          --region "${params.REGION}" \
+                                          --version latest \
+                                          --skip-console-exec \
+                                          ${buildImagesArg}
+                                    """
+                                }
                             }
                         }
                     }
                 }
             }
 
-            stage('Deploy EKS CFN Stack') {
+            stage('Validate EKS Deployment') {
                 steps {
-                    timeout(time: 30, unit: 'MINUTES') {
-                        dir('deployment/migration-assistant-solution') {
-                            script {
-                                def templateName = isImportVpc ? "Migration-Assistant-Infra-Import-VPC-eks" : "Migration-Assistant-Infra-Create-VPC-eks"
-                                env.STACK_NAME = "${templateName}-${stage}-${params.REGION}"
-                                echo "Deploying CloudFormation stack: ${env.STACK_NAME} in region ${params.REGION}"
-                                
-                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        if (isImportVpc) {
-                                            sh """
-                                                set -euo pipefail
-                                                aws cloudformation create-stack \
-                                                  --stack-name "${env.STACK_NAME}" \
-                                                  --template-body file://cdk.out/${templateName}.template.json \
-                                                  --parameters ParameterKey=Stage,ParameterValue=${stage} \
-                                                               ParameterKey=VPCId,ParameterValue=${env.TEST_VPC_ID} \
-                                                               ParameterKey=VPCSubnetIds,ParameterValue=\\"${env.TEST_SUBNET_IDS}\\" \
-                                                  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-                                                  --region "${params.REGION}"
-
-                                                echo "Waiting for stack CREATE_COMPLETE..."
-                                                aws cloudformation wait stack-create-complete \
-                                                  --stack-name "${env.STACK_NAME}" \
-                                                  --region "${params.REGION}"
-
-                                                echo "CloudFormation stack ${env.STACK_NAME} is CREATE_COMPLETE."
-                                            """
-                                        } else {
-                                            sh """
-                                                set -euo pipefail
-                                                aws cloudformation create-stack \
-                                                  --stack-name "${env.STACK_NAME}" \
-                                                  --template-body file://cdk.out/${templateName}.template.json \
-                                                  --parameters ParameterKey=Stage,ParameterValue=${stage} \
-                                                  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-                                                  --region "${params.REGION}"
-
-                                                echo "Waiting for stack CREATE_COMPLETE..."
-                                                aws cloudformation wait stack-create-complete \
-                                                  --stack-name "${env.STACK_NAME}" \
-                                                  --region "${params.REGION}"
-
-                                                echo "CloudFormation stack ${env.STACK_NAME} is CREATE_COMPLETE."
-                                            """
-                                        }
-                                    }
+                    timeout(time: 15, unit: 'MINUTES') {
+                        script {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    sh """
+                                        set -euo pipefail
+                                        kubectl wait --namespace ma --for=condition=ready pod/migration-console-0 --timeout=600s
+                                        kubectl exec -n ma migration-console-0 -- /bin/bash -lc 'console --version'
+                                    """
                                 }
-                                echo "CloudFormation stack ${env.STACK_NAME} deployed successfully"
                             }
-                        }
-                    }
-                }
-            }
-
-            stage('Install & Validate EKS Deployment') {
-                steps {
-                    timeout(time: 60, unit: 'MINUTES') {
-                        dir('test') {
-                            script {
-                                echo "Running EKS deployment validation..."
-                                echo "Stage: ${stage}"
-                                echo "Region: ${params.REGION}"
-                                echo "Stack Name: ${env.STACK_NAME}"
-                                echo "Build Images: ${params.BUILD_IMAGES}"
-                                echo "Branch: ${params.GIT_BRANCH}"
-                                
-                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        if (params.BUILD_IMAGES) {
-                                            sh """
-                                                set -euo pipefail
-                                                chmod +x awsRunEksValidation.sh
-                                                ./awsRunEksValidation.sh \
-                                                  --stage "${stage}" \
-                                                  --region "${params.REGION}" \
-                                                  --stack-name "${env.STACK_NAME}" \
-                                                  --build-images true \
-                                                  --org-name opensearch-project \
-                                                  --branch "${params.GIT_BRANCH}"
-                                            """
-                                        } else {
-                                            sh """
-                                                set -euo pipefail
-                                                chmod +x awsRunEksValidation.sh
-                                                ./awsRunEksValidation.sh \
-                                                  --stage "${stage}" \
-                                                  --region "${params.REGION}" \
-                                                  --stack-name "${env.STACK_NAME}"
-                                            """
-                                        }
-                                    }
-                                }
-                                echo "EKS deployment validation completed successfully"
-                            }
+                            echo "EKS deployment validation completed successfully"
                         }
                     }
                 }

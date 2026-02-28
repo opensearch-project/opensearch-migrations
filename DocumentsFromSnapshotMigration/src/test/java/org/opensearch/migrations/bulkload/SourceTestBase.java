@@ -112,19 +112,25 @@ public class SourceTestBase {
     {
         int timeoutSeconds = 30;
         ProcessBuilder processBuilder = setupProcess(processArgs);
+        return waitForProcessExit(runAndMonitorProcess(processBuilder), timeoutSeconds);
+    }
 
-        var process = runAndMonitorProcess(processBuilder);
+    /**
+     * Waits for a process to finish within the given timeout, killing it if necessary.
+     * Returns the process exit value, or fails the test if the process does not finish in time.
+     */
+    @SneakyThrows
+    protected static int waitForProcessExit(Process process, int timeoutSeconds) {
         boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
         if (!finished) {
             log.atError().setMessage("Process timed out, attempting to kill it...").log();
-            process.destroy(); // Try to be nice about things first...
+            process.destroy();
             if (!process.waitFor(10, TimeUnit.SECONDS)) {
                 log.atError().setMessage("Process still running, attempting to force kill it...").log();
                 process.destroyForcibly();
             }
             Assertions.fail("The process did not finish within the timeout period (" + timeoutSeconds + " seconds).");
         }
-
         return process.exitValue();
     }
 
@@ -352,6 +358,34 @@ public class SourceTestBase {
         String transformationConfig,
         DocumentExceptionAllowlist allowlist
     ) throws RfsMigrateDocuments.NoWorkLeftException {
+        return migrateDocumentsWithOneWorker(sourceRepo, snapshotName, previousSnapshotName, indexAllowlist,
+            targetAddress, null, clockJitter, context, sourceVersion, targetVersion, null,
+            transformationConfig, allowlist);
+    }
+
+    /**
+     * @param coordinatorAddress if null, uses targetAddress for coordination
+     * @param coordinatorVersion if null, uses targetVersion for coordination
+     */
+    @SuppressWarnings("unchecked")
+    @SneakyThrows
+    public static CompletionStatus migrateDocumentsWithOneWorker(
+        SourceRepo sourceRepo,
+        String snapshotName,
+        String previousSnapshotName,
+        List<String> indexAllowlist,
+        String targetAddress,
+        String coordinatorAddress,
+        Random clockJitter,
+        DocumentMigrationTestContext context,
+        Version sourceVersion,
+        Version targetVersion,
+        Version coordinatorVersion,
+        String transformationConfig,
+        DocumentExceptionAllowlist allowlist
+    ) throws RfsMigrateDocuments.NoWorkLeftException {
+        var resolvedCoordinatorAddress = coordinatorAddress != null ? coordinatorAddress : targetAddress;
+        var resolvedCoordinatorVersion = coordinatorVersion != null ? coordinatorVersion : targetVersion;
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
         try (var processManager = new LeaseExpireTrigger(workItemId -> {
@@ -395,21 +429,25 @@ public class SourceTestBase {
                     ));
 
             AtomicReference<WorkItemCursor> progressCursor = new AtomicReference<>();
-            var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
-            var connectionContext = ConnectionContextTestParams.builder()
+            var coordinatorFactory = new WorkCoordinatorFactory(resolvedCoordinatorVersion);
+            var coordinatorConnectionContext = ConnectionContextTestParams.builder()
+                    .host(resolvedCoordinatorAddress)
+                    .build()
+                    .toConnectionContext();
+            var targetConnectionContext = ConnectionContextTestParams.builder()
                     .host(targetAddress)
                     .build()
                     .toConnectionContext();
             var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
 
             try (var workCoordinator = coordinatorFactory.get(
-                    new CoordinateWorkHttpClient(connectionContext),
+                    new CoordinateWorkHttpClient(coordinatorConnectionContext),
                     TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                     UUID.randomUUID().toString(),
                     Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift)),
                     workItemRef::set
             )) {
-                var clientFactory = new OpenSearchClientFactory(connectionContext);
+                var clientFactory = new OpenSearchClientFactory(targetConnectionContext);
                 return RfsMigrateDocuments.run(
                     readerFactory,
                     new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> docTransformer, false, allowlist),

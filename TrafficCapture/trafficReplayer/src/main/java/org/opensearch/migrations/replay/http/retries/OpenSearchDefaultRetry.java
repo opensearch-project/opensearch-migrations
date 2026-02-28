@@ -123,9 +123,11 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
             } else {
                 return reconstructedSourceTransactionFuture.thenCompose(rrp ->
                         TextTrackedFuture.completedFuture(
-                            bulkResponseHadNoErrors(rrp.getResponseData().asByteBuf()) ?
-                                RequestSenderOrchestrator.RetryDirective.RETRY :
-                                RequestSenderOrchestrator.RetryDirective.DONE,
+                            Optional.ofNullable(rrp.getResponseData())
+                                .map(sourceResponse -> bulkResponseHadNoErrors(sourceResponse.asByteBuf()) ?
+                                    RequestSenderOrchestrator.RetryDirective.RETRY :
+                                    RequestSenderOrchestrator.RetryDirective.DONE)
+                                .orElse(RequestSenderOrchestrator.RetryDirective.DONE),
                             () -> "evaluating retry status dependent upon source error field"),
                     () -> "checking the accumulated source response value");
             }

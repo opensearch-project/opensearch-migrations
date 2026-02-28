@@ -104,12 +104,3 @@ charts:
         replicas: 1
         pdb:
           enabled: false
-
-
-  # Lightweight etcd-operator for local development
-  # (no additional values needed - installed via kubectl apply)
-
-# Lightweight etcd cluster for local development
-etcdCluster:
-  replicas: 1
-  storageCapacity: 1Gi

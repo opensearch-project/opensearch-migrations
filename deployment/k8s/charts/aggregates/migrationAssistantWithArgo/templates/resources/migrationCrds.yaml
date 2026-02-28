@@ -1,4 +1,4 @@
-{{- range (list
+{{- range $item := (list
   (dict "kind" "CapturedTraffic"   "plural" "capturedtraffics"   "singular" "capturedtraffic")
   (dict "kind" "DataSnapshot"      "plural" "datasnapshots"      "singular" "datasnapshot")
   (dict "kind" "SnapshotMigration" "plural" "snapshotmigrations" "singular" "snapshotmigration")
@@ -7,20 +7,33 @@
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: {{ .plural }}.migration.opensearch.org
+  name: {{ $item.plural }}.migrations.opensearch.org
 spec:
-  group: migration.opensearch.org
+  group: migrations.opensearch.org
   names:
-    kind: {{ .kind }}
-    plural: {{ .plural }}
-    singular: {{ .singular }}
+    kind: {{ $item.kind }}
+    plural: {{ $item.plural }}
+    singular: {{ $item.singular }}
   scope: Namespaced
   versions:
     - name: v1alpha1
       served: true
       storage: true
+      subresources:
+        status: {} # Enables the /status endpoint
       schema:
         openAPIV3Schema:
           type: object
-          x-kubernetes-preserve-unknown-fields: true
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              {{- if eq $item.kind "DataSnapshot" }}
+              properties:
+                snapshotName:
+                  type: string
+              {{- end }}
+              x-kubernetes-preserve-unknown-fields: true
 {{- end }}
