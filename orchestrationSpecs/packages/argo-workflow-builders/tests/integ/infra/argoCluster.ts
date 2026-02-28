@@ -1,8 +1,6 @@
 import { K3sContainer, StartedK3sContainer } from "@testcontainers/k3s";
 import { KubeConfig, CoreV1Api, AppsV1Api, RbacAuthorizationV1Api } from "@kubernetes/client-node";
 import * as fs from "fs";
-import * as path from "path";
-import * as yaml from "yaml";
 
 const KUBECONFIG_PATH = "/tmp/integ-test-kubeconfig.yaml";
 const META_PATH = "/tmp/integ-test-meta.json";
@@ -49,20 +47,20 @@ export async function startCluster(): Promise<void> {
 
   console.log("Installing Argo Workflows...");
   
-  // Read Argo manifest
-  const manifestPath = path.join(__dirname, "../fixtures/quick-start-minimal.yaml");
-  const manifestContent = fs.readFileSync(manifestPath, "utf-8");
-  
-  // Write to temp file and copy to container
+  // Download Argo manifest on the host and copy into the container
+  // (K3s BusyBox wget doesn't support HTTPS)
+  const argoVersion = "v4.0.0";
+  const manifestUrl = `https://github.com/argoproj/argo-workflows/releases/download/${argoVersion}/quick-start-minimal.yaml`;
+  const { execSync } = await import("child_process");
   const tempFile = "/tmp/argo-install-manifest.yaml";
-  fs.writeFileSync(tempFile, manifestContent);
+  execSync(`curl -sL -o ${tempFile} ${manifestUrl}`);
   
   await container.copyFilesToContainer([{
     source: tempFile,
     target: "/tmp/argo-manifest.yaml",
   }]);
   
-  console.log("Manifest copied to container");
+  console.log(`Argo ${argoVersion} manifest downloaded and copied to container`);
   
   // Apply manifest with server-side apply (required for large CRDs in Argo 4.0.0)
   const applyResult = await container.exec(["kubectl", "apply", "--server-side", "-f", "/tmp/argo-manifest.yaml"]);
