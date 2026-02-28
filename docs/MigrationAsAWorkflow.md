@@ -564,7 +564,7 @@ dimensions that a user might need.
 
 ### Argo
 
-To begin to achieve the vision for the UX laid out above, we need a to start
+To begin to achieve the vision for the UX laid out above, we need to start
 with the following runtime components and features. A workflow engine that can
 run tasks and move data between tasks as they execute is an obvious place to
 start. We’ll need to make a significant effort into maintaining the precise
@@ -582,7 +582,7 @@ engines include Airflow, Metaflow or Dagger - and rolling a bespoke workflow
 control-plane could also be an option. While those might offer some
 improvements, we’ll still likely be stuck with some of the same shortcomings (
 like K8s poll intervals), though the implementations might make it easier/harder
-to rollout workflows. The rest of this document assumes that we’ll use Argo.
+to roll out workflows. The rest of this document assumes that we’ll use Argo.
 
 Argo workflows can’t be modified while they’re in progress. Just as we don’t
 want to modify configurations while a java process is running, we probably

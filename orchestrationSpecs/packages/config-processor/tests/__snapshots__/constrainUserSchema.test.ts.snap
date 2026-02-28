@@ -4,7 +4,10 @@ exports[`paramsFns runtime validation simple transform matches expected 1`] = `
 {
   "additionalProperties": false,
   "properties": {
-    "migrationConfigs": {
+    "skipApprovals": {
+      "type": "boolean",
+    },
+    "snapshotMigrationConfigs": {
       "items": {
         "additionalProperties": false,
         "properties": {
@@ -33,9 +36,6 @@ exports[`paramsFns runtime validation simple transform matches expected 1`] = `
       "maxItems": 1,
       "minItems": 1,
       "type": "array",
-    },
-    "skipApprovals": {
-      "type": "boolean",
     },
     "sourceClusters": {
       "additionalProperties": false,
@@ -128,7 +128,7 @@ exports[`paramsFns runtime validation simple transform matches expected 1`] = `
   "required": [
     "sourceClusters",
     "targetClusters",
-    "migrationConfigs",
+    "snapshotMigrationConfigs",
   ],
   "type": "object",
 }

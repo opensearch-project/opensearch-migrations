@@ -1,5 +1,4 @@
 import {CaptureProxy} from "./captureProxy";
-import {CaptureReplay} from "./captureReplay";
 import {CreateOrGetSnapshot} from "./createOrGetSnapshot";
 import {CreateSnapshot} from "./createSnapshot";
 import {DocumentBulkLoad} from "./documentBulkLoad";
@@ -8,13 +7,13 @@ import {TestMigrationWithWorkflowCli} from "./testMigrationWithWorkflowCli";
 import {MetadataMigration} from "./metadataMigration";
 import {MigrationConsole} from "./migrationConsole";
 import {Replayer} from "./replayer";
+import {ResourceManagement} from "./resourceManagement";
 import {RfsCoordinatorCluster} from "./rfsCoordinatorCluster";
 import {SetupKafka} from "./setupKafka";
-import {ConfigManagementHelpers} from "./configManagementHelpers";
+import {SetupCapture} from "./setupCapture";
 
 export const AllWorkflowTemplates = [
     CaptureProxy,
-    CaptureReplay,
     CreateOrGetSnapshot,
     CreateSnapshot,
     DocumentBulkLoad,
@@ -22,8 +21,9 @@ export const AllWorkflowTemplates = [
     MetadataMigration,
     MigrationConsole,
     Replayer,
+    ResourceManagement,
     RfsCoordinatorCluster,
+    SetupCapture,
     SetupKafka,
-    ConfigManagementHelpers,
     TestMigrationWithWorkflowCli,
 ];

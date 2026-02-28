@@ -1,9 +1,10 @@
 import {
-    DENORMALIZED_S3_REPO_CONFIG, NORMALIZED_SNAPSHOT_MIGRATION_CONFIG,
+    DENORMALIZED_S3_REPO_CONFIG,
     OVERALL_MIGRATION_CONFIG,
-    PARAMETERIZED_MIGRATION_CONFIG_ARRAYS, PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     S3_REPO_CONFIG,
-    SNAPSHOT_MIGRATION_CONFIG, SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG
+    SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
+    ARGO_MIGRATION_CONFIG, KAFKA_CLUSTER_CONFIG, CAPTURE_CONFIG,
+    GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -11,7 +12,7 @@ import {promises as dns} from "dns";
 import { generateSemaphoreKey } from './semaphoreUtils';
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
-type OutputConfig = z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG_ARRAYS>;
+type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG>;
 
 async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string> {
     // Determine protocol based on localstack vs localstacks
@@ -21,16 +22,12 @@ async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string
     // Extract hostname and port - first normalize to http(s):// for parsing
     const normalizedEndpoint = s3Endpoint.replace(/^localstacks?:\/\//i, protocol);
     const url = new URL(normalizedEndpoint);
-    const localStackHostName = url.hostname;
     const port = url.port ? `:${url.port}` : '';
-
-    const result = await dns.lookup(localStackHostName);
+    const result = await dns.lookup(url.hostname);
     let s3Ip = result.address;
-
     if (result.family === 6) {
         s3Ip = `[${s3Ip}]`;
     }
-
     return `${protocol}${s3Ip}${port}`;
 }
 
@@ -60,37 +57,30 @@ async function rewriteRepoRecordEndpointIfLocalStack(
     return Object.fromEntries(rewrittenEntries);
 }
 
-function namePerIndexSnapshotMigration(
-    data: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>,
-    idx: number) :
-z.infer<typeof PER_INDICES_SNAPSHOT_MIGRATION_CONFIG> {
-    const {label, ...rest} = data;
-    return {
-        ...({ label: label? label : `snapshot-migration-${idx.toString()}` }),
-        ...rest
-    };
+function autoLabelMigrations(
+    migrations: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>[]
+) {
+    return migrations.map((m, idx) => {
+        const {label, ...rest} = m;
+        return { ...rest, label: label || `migration-${idx}` };
+    });
 }
 
+/** Auto-label migration items within perSnapshotConfig records. */
 export function setNamesInUserConfig(userConfig: InputConfig): InputConfig {
-    const {migrationConfigs, ...rest} = userConfig;
+    const { snapshotMigrationConfigs, ...rest } = userConfig;
     return {
         ...rest,
-        migrationConfigs: migrationConfigs.map(mc => {
-            const {snapshotExtractAndLoadConfigs, ...rest} = mc;
-
-            const newSnapshotConfig = snapshotExtractAndLoadConfigs === undefined ? undefined :
-                snapshotExtractAndLoadConfigs.map((sc, idx) => {
-                    const {label, migrations, ...rest} = sc;
-                    return {
-                        ...rest,
-                        ...(migrations ? { migrations: migrations.flatMap(namePerIndexSnapshotMigration) } : {}),
-                        ...({ label: label? label : `snapshot-${idx.toString()}` }),
-                    } as z.infer<typeof NORMALIZED_SNAPSHOT_MIGRATION_CONFIG>;
-                });
-
+        snapshotMigrationConfigs: snapshotMigrationConfigs.map(mc => {
+            const { perSnapshotConfig, ...mcRest } = mc;
+            if (!perSnapshotConfig) return mc;
             return {
-                ...rest,
-                ...(newSnapshotConfig === undefined ? {} : { snapshotExtractAndLoadConfigs: newSnapshotConfig })
+                ...mcRest,
+                perSnapshotConfig: Object.fromEntries(
+                    Object.entries(perSnapshotConfig).map(([snapshotName, migrations]) =>
+                        [snapshotName, autoLabelMigrations(migrations)]
+                    )
+                )
             };
         })
     };
@@ -162,12 +152,42 @@ function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = [
     }
 }
 
+/** Build a NAMED_KAFKA_CLIENT_CONFIG from a kafka cluster reference and topic. */
+function buildKafkaClientConfig(
+    kafkaClusterKey: string,
+    kafkaClusters: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>,
+    topic: string
+) {
+    const cluster = kafkaClusters[kafkaClusterKey];
+    if (!cluster) {
+        throw new Error(`Kafka cluster '${kafkaClusterKey}' not found in kafkaClusterConfiguration`);
+    }
+    if ('existing' in cluster) {
+        return {
+            ...cluster.existing,
+            kafkaTopic: topic || cluster.existing.kafkaTopic,
+            label: kafkaClusterKey
+        };
+    }
+    // autoCreate — connection not known at transform time, resolved by workflow
+    return {
+        enableMSKAuth: false,
+        kafkaConnection: "",
+        kafkaTopic: topic,
+        label: kafkaClusterKey
+    };
+}
+
+function isGenerateSnapshot(config: any): config is z.infer<typeof GENERATE_SNAPSHOT> {
+    return 'createSnapshotConfig' in config;
+}
+
 export class MigrationConfigTransformer extends StreamSchemaTransformer<
     typeof OVERALL_MIGRATION_CONFIG,
-    typeof PARAMETERIZED_MIGRATION_CONFIG_ARRAYS
+    typeof ARGO_MIGRATION_CONFIG
 > {
     constructor() {
-        super(OVERALL_MIGRATION_CONFIG, PARAMETERIZED_MIGRATION_CONFIG_ARRAYS);
+        super(OVERALL_MIGRATION_CONFIG, ARGO_MIGRATION_CONFIG);
     }
 
     validateInput(data: unknown): InputConfig {
@@ -185,104 +205,221 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         return this.transformSync(processedInput);
     }
 
-    // This actually returns a promise of an InputConfig+a couple modifications around snapshot repos
     private async preprocessInput(input: InputConfig): Promise<InputConfig> {
         const processedSourceClusters = {...input.sourceClusters};
 
         for (const [name, cluster] of Object.entries(input.sourceClusters)) {
-            if (cluster.snapshotRepos !== undefined) {
+            if (cluster.snapshotInfo !== undefined && cluster.snapshotInfo.repos !== undefined) {
                 processedSourceClusters[name] = {
                     ...cluster,
-                    snapshotRepos: await rewriteRepoRecordEndpointIfLocalStack(cluster.snapshotRepos)
+                    snapshotInfo: {
+                        ...cluster.snapshotInfo,
+                        repos: await rewriteRepoRecordEndpointIfLocalStack(cluster.snapshotInfo.repos)
+                    }
                 };
             }
         }
 
-        return {
-            ...input,
-            sourceClusters: processedSourceClusters
-        };
+        return { ...input, sourceClusters: processedSourceClusters };
     }
 
     private transformSync(userConfig: InputConfig): OutputConfig {
-        userConfig = setNamesInUserConfig(userConfig);
-        const seen = new Set<string>();
-        const duplicates = new Set<string>();
+        const kafkaClusters = this.buildKafkaClusters(userConfig);
+        const proxies = this.buildProxies(userConfig);
+        const snapshots = this.buildSnapshots(userConfig);
+        const snapshotMigrations = this.buildSnapshotMigrations(userConfig);
+        const trafficReplays = this.buildTrafficReplays(userConfig);
 
-        const output = userConfig.migrationConfigs.map(mc => {
-            let {fromSource, toTarget, snapshotExtractAndLoadConfigs, replayerConfig} = mc;
-
-            const keyPair = `${fromSource} => ${toTarget}`;
-            if (seen.has(keyPair)) {
-                duplicates.add(keyPair);
-            }
-            seen.add(keyPair);
-
-            const sourceCluster = userConfig.sourceClusters[fromSource];
-            if (sourceCluster.proxy === undefined && replayerConfig !== undefined) {
-                console.warn(`Replayer is configured for ${fromSource} but a proxy is not. ` +
-                    `A replayer won't be configured for the target (${toTarget})`);
-                replayerConfig = undefined;
-            }
-
-            const newSnapshotConfig = snapshotExtractAndLoadConfigs === undefined ? undefined :
-                snapshotExtractAndLoadConfigs.map((sc, idx) => {
-                    const {snapshotConfig, createSnapshotConfig, label, ...rest} = sc;
-                    if (sourceCluster.snapshotRepos === undefined) {
-                        throw Error(`Configured a snapshot repo with ${snapshotConfig}, for ${fromSource}. but the source cluster definition does not define a repo.`);
-                    }
-                    
-                    let enhancedCreateSnapshotConfig = createSnapshotConfig;
-                    if (createSnapshotConfig && snapshotConfig) {
-                        enhancedCreateSnapshotConfig = {
-                            ...createSnapshotConfig,
-                            ...this.generateSemaphoreConfig(sourceCluster.version || "", fromSource, snapshotConfig)
-                        };
-                    }
-                    
-                    return {
-                        ...rest,
-                        label,
-                        ...(snapshotConfig !== undefined && {
-                            snapshotConfig: {
-                                snapshotNameConfig: snapshotConfig.snapshotNameConfig,
-                                repoConfig: sourceCluster.snapshotRepos[snapshotConfig.repoName] ?? {},
-                                label
-                            }
-                        }),
-                        ...(enhancedCreateSnapshotConfig !== undefined && {
-                            createSnapshotConfig: enhancedCreateSnapshotConfig
-                        })
-                    }// as z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>;
-                });
-
-            const { snapshotRepos, ...restOfSourceCluster } = sourceCluster; // drop the normalized form of the repos
-            return {
-                sourceConfig: {...restOfSourceCluster, label: fromSource},
-                targetConfig: {...userConfig.targetClusters[toTarget], label: toTarget},
-                ...(newSnapshotConfig === undefined ? {} : { snapshotExtractAndLoadConfigArray: newSnapshotConfig }),
-                ...(replayerConfig === undefined ? {} : { replayerConfig})
-            };
-        }) as OutputConfig;
-
-        if (duplicates.size > 0) {
-            throw new Error("Found duplicate source-target bindings.  This is most likely an error.  " +
-                "Define separate sources with an equivalent structure if you think you need this.\n" +
-                "Duplicates: " + [...duplicates].join(","));
-        }
+        const output = {
+            ...(kafkaClusters.length > 0 ? { kafkaClusters } : {}),
+            ...(proxies.length > 0 ? { proxies } : {}),
+            ...(snapshots.length > 0 ? { snapshots } : {}),
+            ...(snapshotMigrations.length > 0 ? { snapshotMigrations } : {}),
+            ...(trafficReplays.length > 0 ? { trafficReplays } : {})
+        };
 
         try {
-            return PARAMETERIZED_MIGRATION_CONFIG_ARRAYS.parse(output);
+            return ARGO_MIGRATION_CONFIG.parse(output);
         } catch (error) {
             throw new Error("Error while safely parsing the transformed workflow " +
-                "as a configuration for the argo workflow.", { cause: error} );
+                "as a configuration for the argo workflow.", { cause: error });
         }
     }
 
-    private generateSemaphoreConfig(sourceVersion: string, sourceName: string, snapshotConfig: any) {
+    /** Collect auto-created kafka clusters with their aggregated topics from proxies. */
+    private buildKafkaClusters(userConfig: InputConfig) {
+        const kafkaClusters = userConfig.kafkaClusterConfiguration ?? {};
+        // Aggregate topics per kafka cluster from proxies
+        const topicsByCluster = new Map<string, Set<string>>();
+        for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
+            const clusterKey = proxy.kafka ?? "default";
+            if (!topicsByCluster.has(clusterKey)) topicsByCluster.set(clusterKey, new Set());
+            topicsByCluster.get(clusterKey)!.add(proxy.kafkaTopic || proxyName);
+        }
+
+        return Object.entries(kafkaClusters)
+            .filter(([_, config]) => 'autoCreate' in config)
+            .map(([name, config]) => ({
+                name,
+                config: (config as any).autoCreate,
+                topics: [...(topicsByCluster.get(name) ?? [])]
+            }));
+    }
+
+    /** Denormalize each proxy with source endpoint and kafka client config. */
+    private buildProxies(userConfig: InputConfig) {
+        const kafkaClusters = userConfig.kafkaClusterConfiguration ?? {};
+        return Object.entries(userConfig.traffic?.proxies || {}).map(([proxyName, proxy]) => {
+            const sourceCluster = userConfig.sourceClusters[proxy.source];
+            if (!sourceCluster) {
+                throw new Error(`Proxy '${proxyName}' references unknown source cluster '${proxy.source}'`);
+            }
+            const topic = proxy.kafkaTopic || proxyName;
+            return {
+                name: proxyName,
+                kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
+                sourceEndpoint: sourceCluster.endpoint ?? "",
+                proxyConfig: proxy.proxyConfig
+            };
+        });
+    }
+
+    /** Build snapshot creation configs grouped by source cluster. */
+    private buildSnapshots(userConfig: InputConfig) {
+        // Build a map of source → proxy names for dependsOnProxySetups
+        const proxyNamesBySource = new Map<string, string[]>();
+        for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
+            const source = proxy.source;
+            if (!proxyNamesBySource.has(source)) proxyNamesBySource.set(source, []);
+            proxyNamesBySource.get(source)!.push(proxyName);
+        }
+
+        const results: any[] = [];
+        for (const [sourceName, sourceCluster] of Object.entries(userConfig.sourceClusters)) {
+            const snapshotInfo = sourceCluster.snapshotInfo;
+            const createConfigs: any[] = [];
+
+            for (const [snapshotName, snapshotDef] of Object.entries(snapshotInfo?.snapshots || {})) {
+                if (!isGenerateSnapshot(snapshotDef.config)) continue;
+
+                const repoConfig = snapshotInfo?.repos?.[snapshotDef.repoName];
+                if (!repoConfig) {
+                    throw new Error(`Snapshot '${snapshotName}' in source '${sourceName}' references repo '${snapshotDef.repoName}' which is not defined`);
+                }
+
+                const proxyDeps = proxyNamesBySource.get(sourceName);
+
+                const { snapshotPrefix: _sp, ...createSnapshotOpts } = snapshotDef.config.createSnapshotConfig;
+                const semaphore = this.generateSemaphoreConfig(sourceCluster.version, sourceName, snapshotName);
+                createConfigs.push({
+                    label: snapshotName,
+                    snapshotPrefix: snapshotDef.config.createSnapshotConfig.snapshotPrefix || snapshotName,
+                    config: {
+                        ...createSnapshotOpts,
+                    },
+                    repo: repoConfig,
+                    ...semaphore,
+                    ...(proxyDeps && proxyDeps.length > 0 ? { dependsOnProxySetups: proxyDeps } : {})
+                });
+            }
+
+            if (createConfigs.length > 0) {
+                const { snapshotInfo: _si, enabled: _e1, ...restOfSource } = sourceCluster;
+                results.push({
+                    createSnapshotConfig: createConfigs,
+                    sourceConfig: { ...restOfSource, label: sourceName }
+                });
+            }
+        }
+        return results;
+    }
+
+    /** Build snapshot migration configs from snapshotMigrationConfigs + perSnapshotConfig. */
+    private buildSnapshotMigrations(userConfig: InputConfig) {
+        const results: any[] = [];
+
+        for (const mc of userConfig.snapshotMigrationConfigs) {
+            const { fromSource, toTarget, perSnapshotConfig } = mc;
+            if (!perSnapshotConfig) continue;
+
+            const sourceCluster = userConfig.sourceClusters[fromSource];
+            const targetCluster = userConfig.targetClusters[toTarget];
+            if (!targetCluster) {
+                throw new Error(`Migration references unknown target cluster '${toTarget}'`);
+            }
+
+            const { enabled: _e2, ...restOfTarget } = targetCluster;
+            const { snapshotInfo: _si, enabled: _e1, ...restOfSource } = sourceCluster;
+
+            for (const [snapshotName, migrations] of Object.entries(perSnapshotConfig)) {
+                const snapshotDef = sourceCluster.snapshotInfo?.snapshots[snapshotName];
+                if (!snapshotDef) {
+                    throw new Error(`Migration references snapshot '${snapshotName}' not defined in source '${fromSource}'`);
+                }
+
+                const globallyUniqueSnapshotName = `${fromSource}-${snapshotName}`;
+                const repoConfig = sourceCluster.snapshotInfo?.repos?.[snapshotDef.repoName];
+
+                const isExternal = 'externallyManagedSnapshotName' in snapshotDef.config;
+                const snapshotNameResolution = isExternal
+                    ? { externalSnapshotName: (snapshotDef.config as z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT>).externallyManagedSnapshotName }
+                    : { dataSnapshotResourceName: globallyUniqueSnapshotName };
+
+                results.push({
+                    label: snapshotName,
+                    snapshotNameResolution,
+                    migrations: autoLabelMigrations(migrations),
+                    sourceVersion: sourceCluster.version || "",
+                    sourceLabel: fromSource,
+                    targetConfig: { ...restOfTarget, label: toTarget },
+                    snapshotConfig: {
+                        label: snapshotName,
+                        ...(repoConfig ? {
+                            repoConfig: {
+                                ...repoConfig,
+                                repoName: snapshotDef.repoName
+                            }
+                        } : {})
+                    }
+                });
+            }
+        }
+        return results;
+    }
+
+    /** Build traffic replay configs by resolving proxy → kafka chain. */
+    private buildTrafficReplays(userConfig: InputConfig) {
+        const kafkaClusters = userConfig.kafkaClusterConfiguration ?? {};
+        const proxies = userConfig.traffic?.proxies;
+
+        return Object.entries(userConfig.traffic?.replayers || {}).map(([_name, replayer]) => {
+            const proxy = proxies?.[replayer.fromProxy];
+            if (!proxy) {
+                throw new Error(`Replayer references unknown proxy '${replayer.fromProxy}'`);
+            }
+
+            const targetCluster = userConfig.targetClusters[replayer.toTarget];
+            if (!targetCluster) {
+                throw new Error(`Replayer references unknown target cluster '${replayer.toTarget}'`);
+            }
+
+            const topic = proxy.kafkaTopic || replayer.fromProxy;
+            const { enabled: _e3, ...restOfTarget } = targetCluster;
+
+            return {
+                fromProxy: replayer.fromProxy,
+                kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
+                toTarget: { ...restOfTarget, label: replayer.toTarget },
+                ...(replayer.dependsOnSnapshotMigrations ? { dependsOnSnapshotMigrations: replayer.dependsOnSnapshotMigrations } : {}),
+                ...(replayer.replayerConfig ? { replayerConfig: replayer.replayerConfig } : {})
+            };
+        });
+    }
+
+    private generateSemaphoreConfig(sourceVersion: string, sourceName: string, snapshotName: string) {
         return {
             semaphoreConfigMapName: 'concurrency-config',
-            semaphoreKey: generateSemaphoreKey(sourceVersion, sourceName, snapshotConfig)
+            semaphoreKey: generateSemaphoreKey(sourceVersion, sourceName, snapshotName)
         };
     }
 }

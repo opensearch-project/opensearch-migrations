@@ -22,9 +22,15 @@ import {
 import {RetryableTemplateBodyBuilder, RetryableTemplateRebinder} from "./templateBodyBuilder";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {NonSerializedPlainObject, PlainObject} from "./plainObject";
+import {Workflow} from "./workflowBuilder";
 import {
     LabelledAllTasksAsOutputReferenceable,
     getTaskOutputsByTaskName,
+    INLINE,
+    INTERNAL,
+    InlineInputsFrom,
+    InlineOutputsFrom,
+    InlineTemplateFn,
     InputsFrom,
     KeyFor,
     OutputsFrom,
@@ -63,7 +69,7 @@ class StepGroupBuilder<
 
     public addStep<
         Name extends string,
-        TemplateSource,
+        TemplateSource extends typeof INTERNAL | Workflow<any, any, any>,
         K extends KeyFor<ParentWorkflowScope, TemplateSource>,
         LoopT extends NonSerializedPlainObject = never
     >(
@@ -169,7 +175,7 @@ export class StepsBuilder<
     // Convenience method for single step
     public addStep<
         Name extends string,
-        TemplateSource,
+        TemplateSource extends typeof INTERNAL | Workflow<any, any, any>,
         K extends KeyFor<ParentWorkflowScope, TemplateSource>,
         LoopT extends NonSerializedPlainObject = never
     >(
@@ -191,15 +197,30 @@ export class StepsBuilder<
             { [P in Name]: TasksWithOutputs<Name, OutputsFrom<ParentWorkflowScope, TemplateSource, K>> }
         >,
         OutputParamsScope
-    > {
-        return this.addStepGroup(gb => {
-            return gb.addTask<Name, TemplateSource, K, LoopT, TaskOpts<StepsScope, "steps", LoopT>>(
-                name, source, key, ...args
-            );
-        });
+    >;
+    public addStep<
+        Name extends string,
+        InlineFnType extends InlineTemplateFn<ParentWorkflowScope>,
+        LoopT extends NonSerializedPlainObject = never
+    >(
+        name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
+        source: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, typeof INLINE>,
+        inlineFn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, InlineFnType>,
+        ...args: ParamsTuple<InlineInputsFrom<InlineFnType>, Name, StepsScope, "steps", LoopT, TaskOpts<StepsScope, "steps", LoopT>>
+    ): StepsBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        ExtendScope<StepsScope, { [P in Name]: TasksWithOutputs<Name, InlineOutputsFrom<InlineFnType>> }>,
+        OutputParamsScope
+    >;
+    public addStep(name: any, source: any, keyOrFn?: any, ...restArgs: any[]): any {
+        return this.addStepGroup(gb => (gb as any).addTask(name, source, keyOrFn, ...restArgs));
     }
 
-    protected getBody() {
+    /**
+     * Made public because waitForResourceBuilder uses this to make its own body.
+     */
+    public getBody() {
         return {steps: this.stepGroups};
     }
 }

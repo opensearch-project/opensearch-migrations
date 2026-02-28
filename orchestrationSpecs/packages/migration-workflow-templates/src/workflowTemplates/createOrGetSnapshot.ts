@@ -4,7 +4,7 @@ import {ARGO_CREATE_SNAPSHOT_OPTIONS, SNAPSHOT_NAME_CONFIG} from "@opensearch-mi
 import {
     COMPLETE_SNAPSHOT_CONFIG,
     CREATE_SNAPSHOT_OPTIONS,
-    DYNAMIC_SNAPSHOT_CONFIG, NAMED_SOURCE_CLUSTER_CONFIG
+    DYNAMIC_SNAPSHOT_CONFIG, NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO
 } from "@opensearch-migrations/schemas";
 import {
     BaseExpression,
@@ -31,32 +31,36 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
     .addTemplate("getSnapshotName", t=>t
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("snapshotNameConfig", typeToken<z.infer<typeof SNAPSHOT_NAME_CONFIG>>())
+        .addRequiredInput("snapshotPrefix", typeToken<string>())
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
 
         .addSteps(b => b
             .addStepGroup(c => c))
         .addExpressionOutput("snapshotName", b=>
             expr.ternary(
-                expr.hasKey(expr.deserializeRecord(b.inputs.snapshotNameConfig), "snapshotNamePrefix"),
+                expr.hasKey(expr.deserializeRecord(b.inputs.snapshotNameConfig), "createSnapshotConfig"),
                 expr.concatWith("_",
                     b.inputs.sourceLabel,
-                    expr.getLoose(expr.deserializeRecord(b.inputs.snapshotNameConfig), "snapshotNamePrefix"),
+                    b.inputs.snapshotPrefix,
                     b.inputs.uniqueRunNonce
                 ),
-                expr.getLoose(expr.deserializeRecord(b.inputs.snapshotNameConfig), "externallyManagedSnapshot"))
+                expr.getLoose(expr.deserializeRecord(b.inputs.snapshotNameConfig), "externallyManagedSnapshotName"))
         )
         .addExpressionOutput("autoCreate", b=>
-            expr.hasKey(expr.deserializeRecord(b.inputs.snapshotNameConfig), "snapshotNamePrefix")
+            expr.hasKey(expr.deserializeRecord(b.inputs.snapshotNameConfig), "createSnapshotConfig")
         )
     )
 
 
     .addTemplate("createOrGetSnapshot", t => t
         .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
-        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>())
+        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>>())
+        .addRequiredInput("snapshotPrefix", typeToken<string>())
         .addRequiredInput("targetLabel", typeToken<string>())
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
+        .addRequiredInput("semaphoreConfigMapName", typeToken<string>())
+        .addRequiredInput("semaphoreKey", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
@@ -64,7 +68,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c),
                     sourceLabel: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "label"),
                     snapshotNameConfig: expr.serialize(
-                        expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "snapshotNameConfig")) as any,
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "config")) as any,
                 })
             )
             .addStep("createSnapshot", CreateSnapshot, "snapshotWorkflow",
@@ -78,6 +82,8 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                             label: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
                         })
                     ),
+                    semaphoreConfigMapName: b.inputs.semaphoreConfigMapName,
+                    semaphoreKey: b.inputs.semaphoreKey
                 }), {
                     when: tasks => tasks.getSnapshotName.outputs.autoCreate
                 }

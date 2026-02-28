@@ -13,7 +13,7 @@ Usage: process-config [input-file]
 Process and validate migration configuration files.
 
 Arguments:
-  input-file    Path to input JSON file ('-' for stdin')
+  input-file    Path to input YAML file ('-' for stdin')
 `);
         process.exit(0);
     }

@@ -1,0 +1,43 @@
+{
+  skipApprovals : true,
+  kafkaClusters: {
+    ...
+  },
+  sourceClusters: {
+    "source": {
+      "endpoint": "https://elasticsearch-master-headless:9200",
+      "allowInsecure": true,
+      "version": "ES 7.10",
+      "authConfig": {
+        "basic": {
+          "secretName": "source-creds"
+        }
+      },
+      "proxy": {
+        kafkaConfig: "default",
+        options: { listenPort: 9200 }
+      }
+    }
+  },
+  targetClusters: {
+    "target": {
+      "endpoint": "https://opensearch-cluster-master-headless:9200",
+      "allowInsecure": true,
+      "version": "OS 2.11",
+      "authConfig": {
+        "basic": {
+          "secretName": "target-creds"
+        }
+      }
+    }
+  },
+  snapshotMigrationConfigs: [
+    {
+      "fromSource": "source",
+      "toTarget": "target",
+      "replayerConfig": {
+        "podReplicas": 1
+      }
+    }
+  ]
+}

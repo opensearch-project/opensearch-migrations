@@ -144,7 +144,7 @@ export const Replayer = WorkflowBuilder.create({
 
     .addTemplate("createDeploymentFromConfig", t => t
         .addRequiredInput("kafkaTrafficBrokers", typeToken<string>())
-        .addRequiredInput("kafkaTrafficTopic", typeToken<string>())
+        .addRequiredInput("kafkaTopicName", typeToken<string>())
         .addRequiredInput("kafkaGroupId", typeToken<string>())
 
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())

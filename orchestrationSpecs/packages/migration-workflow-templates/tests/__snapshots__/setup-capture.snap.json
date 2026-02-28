@@ -1,0 +1,79 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "setup-capture"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "setupproxy",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxySettings"
+            },
+            {
+              "name": "kafkaName"
+            },
+            {
+              "name": "proxyName"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "createkafkatopic",
+                "name": "setup-kafka"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.kafkaName}}"
+                  },
+                  {
+                    "name": "topicName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "topicPartitions",
+                    "value": 1
+                  },
+                  {
+                    "name": "topicReplicas",
+                    "value": 3
+                  }
+                ]
+              },
+              "name": "createKafkaTopic"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      }
+    ]
+  }
+}

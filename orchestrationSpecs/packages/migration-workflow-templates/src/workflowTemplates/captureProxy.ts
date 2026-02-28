@@ -1,7 +1,7 @@
 // TODO
 
 import {typeToken, WorkflowBuilder} from "@opensearch-migrations/argo-workflow-builders";
-import {CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
+import {CLUSTER_CONFIG, PROXY_OPTIONS} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
@@ -24,12 +24,11 @@ export const CaptureProxy = WorkflowBuilder.create({
 
     .addTemplate("deployCaptureProxy", t => t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof CLUSTER_CONFIG>>())
-        .addRequiredInput("listenerPort", typeToken<number>())
-        .addRequiredInput("kafkaConnection", typeToken<string>())
-        .addRequiredInput("kafkaTopic", typeToken<string>())
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof PROXY_OPTIONS>>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
 
         .addSteps(b => b.addStepGroup(c => c)) // TODO convert to a resource!
     )
+
 
     .getFullScope();
