@@ -270,10 +270,10 @@ def call(Map config = [:]) {
                                             --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
                                             --access-scope type=cluster
 
-                                        aws eks update-kubeconfig --region ${params.REGION} --name $env.eksClusterName
+                                        aws eks update-kubeconfig --region ${params.REGION} --name $env.eksClusterName --alias $env.eksClusterName
 
                                         for i in {1..10}; do
-                                            if kubectl get namespace default >/dev/null 2>&1; then
+                                            if kubectl --context=$env.eksClusterName get namespace default >/dev/null 2>&1; then
                                                 echo "kubectl configured and ready"
                                                 break
                                             fi
@@ -281,7 +281,7 @@ def call(Map config = [:]) {
                                             sleep 5
                                         done
                                     """
-                                    sh 'kubectl create namespace ma --dry-run=client -o yaml | kubectl apply -f -'
+                                    sh "kubectl --context=${env.eksClusterName} create namespace ma --dry-run=client -o yaml | kubectl --context=${env.eksClusterName} apply -f -"
                                     def clusterDetails = readJSON text: env.clusterDetailsJson
                                     def targetCluster = clusterDetails.target
                                     def targetVersionExpanded = expandVersionString("${params.TARGET_VERSION}")
@@ -296,9 +296,9 @@ def call(Map config = [:]) {
                                             version: params.TARGET_VERSION
                                     ]
                                     sh """
-                                        kubectl create configmap target-${targetVersionExpanded}-migration-config \
+                                        kubectl --context=${env.eksClusterName} create configmap target-${targetVersionExpanded}-migration-config \
                                             --from-file=cluster-config=/tmp/target-cluster-config.json \
-                                            --namespace ma --dry-run=client -o yaml | kubectl apply -f -
+                                            --namespace ma --dry-run=client -o yaml | kubectl --context=${env.eksClusterName} apply -f -
                                     """
 
                                     // Modify target security group to allow EKS cluster security group
@@ -360,7 +360,7 @@ def call(Map config = [:]) {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir ${WORKSPACE} --use-public-images false --skip-console-exec --stage ${maStageName}"
+                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir ${WORKSPACE} --use-public-images false --skip-console-exec --skip-setting-k8s-context --stage ${maStageName}"
                                     }
                                 }
                             }
@@ -378,12 +378,12 @@ def call(Map config = [:]) {
                                     // Wait for migration-console pod to be ready
                                     sh """
                                         echo "Waiting for migration-console pod to be ready"
-                                        kubectl wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=600s
+                                        kubectl --context=${env.eksClusterName} wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=600s
                                         echo "Migration console pod is ready"
                                     """
                                     sh """
                                         echo "Applying workflow template"
-                                        kubectl apply -f ${WORKSPACE}/migrationConsole/lib/integ_test/testWorkflows/fullMigrationImportedClusters.yaml -n ma
+                                        kubectl --context=${env.eksClusterName} apply -f ${WORKSPACE}/migrationConsole/lib/integ_test/testWorkflows/fullMigrationImportedClusters.yaml -n ma
                                         echo "Workflow template applied successfully"
                                     """
 
@@ -406,8 +406,8 @@ export BYOS_POD_REPLICAS='${params.RFS_WORKERS}'
 export BYOS_MONITOR_RETRY_LIMIT='${params.MONITOR_RETRY_LIMIT}'
 ENVEOF
 
-                                        kubectl cp /tmp/byos-env.sh ma/migration-console-0:/tmp/byos-env.sh
-                                        kubectl exec migration-console-0 -n ma -- bash -c '
+                                        kubectl --context=${env.eksClusterName} cp /tmp/byos-env.sh ma/migration-console-0:/tmp/byos-env.sh
+                                        kubectl --context=${env.eksClusterName} exec migration-console-0 -n ma -- bash -c '
                                             source /tmp/byos-env.sh && \
                                             cd /root/lib/integ_test && \
                                             pipenv run pytest integ_test/ma_workflow_test.py \
@@ -439,7 +439,7 @@ ENVEOF
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: region, duration: 4500, roleSessionName: 'jenkins-session') {
                                 // Stage 1: Delete MA stack (EKS cluster) and cleanup orphaned EKS security groups
                                 stage('Destroy EKS CFN & EKS Resources') {
-                                    sh "echo 'CLEANUP: Listing pods in ma namespace' && kubectl -n ma get pods || true"
+                                    sh "echo 'CLEANUP: Listing pods in ma namespace' && kubectl --context=${eksClusterName} -n ma get pods || true"
                                     
                                     // Revoke SG ingress rule added during setup (skip helm/namespace deletion - CFN handles EKS cleanup)
                                     if (env.clusterDetailsJson && env.clusterSecurityGroup) {
