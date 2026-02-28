@@ -1071,7 +1071,7 @@ echo "=== End helm install configuration ==="
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
 helm install "$namespace" "${ma_chart_dir}" \
   --namespace $namespace \
-  --timeout 10m \
+  --timeout 15m \
   $HELM_VALUES_FLAGS \
   ${extra_helm_values:+-f "$extra_helm_values"} \
   --set stageName="${STAGE}" \
