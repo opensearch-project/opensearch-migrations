@@ -69,9 +69,8 @@ sprig.regexMatch('\\d+', text)
 ## Documentation
 
 - [README.md](README.md) - Full documentation
-- [CONTRACT_TEST_RESULTS.md](CONTRACT_TEST_RESULTS.md) - Latest test results
 - [QUICK_REFERENCE.md](QUICK_REFERENCE.md) - Code examples
-- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues
+- `artifacts/parity-catalog.md` - Generated after running tests (see `npm run test:integ`)
 
 ## Prerequisites
 
@@ -90,4 +89,4 @@ Subsequent runs are faster (images cached).
 
 ## Need Help?
 
-See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and solutions.
+File an issue or check the test output in `artifacts/parity-catalog.md` for diagnostics.

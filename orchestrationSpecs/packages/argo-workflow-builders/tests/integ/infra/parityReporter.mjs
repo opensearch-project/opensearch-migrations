@@ -317,6 +317,6 @@ export default class ParityReporter {
   }
 
   escapePipes(text) {
-    return text.replace(/\|/g, "\\|");
+    return text.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
   }
 }
