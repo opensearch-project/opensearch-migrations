@@ -99,7 +99,7 @@ def call(Map config = [:]) {
             migrationContextId: migrationContextId,
             defaultStageId: 'full-es68',
             skipCaptureProxyOnNodeSetup: true,
-            jobName: 'full-es68source-e2e-test',
+            jobName: config.jobName ?: 'full-es68source-e2e-test',
             testUniqueId: testUniqueId,
             integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py --source_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9201 --target_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9202',
             preIntegTestStep: { deployStage ->

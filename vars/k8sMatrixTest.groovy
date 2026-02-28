@@ -1,5 +1,5 @@
 def call(Map config = [:]) {
-    def childJobName = "k8s-local-integ-test"
+    def childJobName = config.childJobName ?: "k8s-local-integ-test"
 
     def allSourceVersions = ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10']
     def allTargetVersions = ['OS_1.3', 'OS_2.19', 'OS_3.1']

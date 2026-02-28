@@ -9,4 +9,6 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
          remote: "${gitUrl}"])
 
-eksBYOSIntegPipeline()
+// Allow job name override for webhook routing (e.g., pr-* vs main-*)
+def jobNameOverride = params.JOB_NAME_OVERRIDE ?: ''
+eksBYOSIntegPipeline(jobName: jobNameOverride ?: null)
