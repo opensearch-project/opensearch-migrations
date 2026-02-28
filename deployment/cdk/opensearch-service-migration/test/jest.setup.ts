@@ -4,7 +4,7 @@ jest.mock('node:child_process', () => {
 
   // Define the list of expected Docker images as per CI.yml
   const expectedDockerImages = [
-    'docker.io/apache/kafka:3.9.1',
+    'mirror.gcr.io/apache/kafka:3.9.1',
     'migrations/capture_proxy_es:latest',
     'migrations/capture_proxy:latest',
     'migrations/elasticsearch_searchguard:latest',
