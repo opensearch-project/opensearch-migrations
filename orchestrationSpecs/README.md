@@ -1,5 +1,35 @@
 # Migration Orchestration Workflow Template Specifications
 
+## Package Structure
+
+```
+orchestrationSpecs/packages/
+├── crd-type-generator/          devDependency only — shared script for generating TS types from CRD schemas
+├── k8s-types/                   Generated plain TS interfaces for core K8s resources (Pod, ConfigMap, etc.)
+├── argo-types/                  Generated plain TS interfaces for Argo Workflows CRDs (Workflow, WorkflowTemplate, etc.)
+├── strimzi-types/               Generated plain TS interfaces for Strimzi Kafka CRDs (Kafka, KafkaTopic, etc.)
+├── schemas/                     Zod schemas for user-facing migration config; wraps strimzi-types in Zod
+├── argo-workflow-builders/      Builder library for constructing Argo Workflows; depends on k8s-types + argo-types
+├── migration-workflow-templates/ Full migration workflow definitions; depends on argo-workflow-builders + schemas + strimzi-types
+└── config-processor/            CLI tool that transforms user config → K8s resources and submits the workflow
+```
+
+### Dependency graph
+
+```
+crd-type-generator (devDep only)
+    ↑ devDep          ↑ devDep        ↑ devDep
+ k8s-types         argo-types      strimzi-types
+    ↑                  ↑               ↑          ↑
+argo-workflow-builders            schemas    migration-workflow-templates
+         ↑                           ↑
+         └──────── migration-workflow-templates
+                            ↑
+                    config-processor
+```
+
+The three CRD type packages (`k8s-types`, `argo-types`, `strimzi-types`) contain only generated TypeScript interfaces — no Zod, no runtime dependencies. Run `npm run rebuild` inside any of them (requires `kubectl` pointed at a cluster with the relevant operators) to refresh types after an upgrade.
+
 ## Usage
 
 ### Templates
