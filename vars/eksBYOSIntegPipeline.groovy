@@ -386,6 +386,23 @@ ENVEOF
                                         sh "cd $WORKSPACE/test/amazon-opensearch-service-sample-cdk && cdk destroy '*' --force --concurrency 3 && rm -f cdk.context.json || true"
                                     }
                                 }
+                                // Delete OpenSearch domain stacks BEFORE the EKS CFN stack.
+                                // The domain stacks place ENIs in the VPC subnets owned by the EKS stack —
+                                // deleting EKS first leaves subnets stuck in DELETE_FAILED.
+                                if (!params.SKIP_CFN_DELETE) {
+                                    sh """
+                                      for stack in \$(aws cloudformation list-stacks \
+                                        --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE UPDATE_ROLLBACK_COMPLETE ROLLBACK_COMPLETE \
+                                        --query "StackSummaries[?contains(StackName, '${maStageName}')].StackName" \
+                                        --output text --region ${params.REGION}); do
+                                        if echo "\$stack" | grep -qE '^(OpenSearchDomain|OpenSearchServerless|SelfManagedEC2)-'; then
+                                          echo "CLEANUP: Deleting domain stack: \$stack"
+                                          aws cloudformation delete-stack --stack-name "\$stack" --region ${params.REGION}
+                                          aws cloudformation wait stack-delete-complete --stack-name "\$stack" --region ${params.REGION} || true
+                                        fi
+                                      done
+                                    """
+                                }
                                 // Always attempt to delete the CFN stack (handles early deploy failures)
                                 if (env.STACK_NAME && !params.SKIP_CFN_DELETE) {
                                     sh "aws cloudformation delete-stack --stack-name ${env.STACK_NAME} --region ${params.REGION} || true"
