@@ -70,6 +70,7 @@ function makeOptionalDefaultedFieldsRequired<T extends z.ZodTypeAny>(schema: T):
 
 export const NAMED_KAFKA_CLUSTER_CONFIG = z.object({
     name: z.string(),
+    version: z.string(),
     config: makeOptionalDefaultedFieldsRequired(KAFKA_CLUSTER_CREATION_CONFIG),
     topics: z.array(z.string()).readonly()
 });
@@ -179,6 +180,7 @@ export const DENORMALIZED_CREATE_SNAPSHOTS_CONFIG = z.object({
 
 export const DENORMALIZED_REPLAY_CONFIG = z.object({
     fromProxy: z.string(),
+    kafkaClusterName: z.string(),
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     toTarget: NAMED_TARGET_CLUSTER_CONFIG,
     dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER).min(1).optional(),

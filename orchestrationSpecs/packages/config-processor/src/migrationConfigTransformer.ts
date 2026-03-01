@@ -14,6 +14,9 @@ import { generateSemaphoreKey } from './semaphoreUtils';
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG>;
 
+/** Kafka version deployed by auto-created clusters. Not user-configurable. */
+const KAFKA_VERSION = "4.0.0";
+
 async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string> {
     // Determine protocol based on localstack vs localstacks
     const isSecure = /^localstacks:\/\//i.test(s3Endpoint);
@@ -169,10 +172,10 @@ function buildKafkaClientConfig(
             label: kafkaClusterKey
         };
     }
-    // autoCreate — connection not known at transform time, resolved by workflow
+    // autoCreate — Strimzi creates a deterministic bootstrap service: <clusterName>-kafka-bootstrap:9092
     return {
         enableMSKAuth: false,
-        kafkaConnection: "",
+        kafkaConnection: `${kafkaClusterKey}-kafka-bootstrap:9092`,
         kafkaTopic: topic,
         label: kafkaClusterKey
     };
@@ -261,6 +264,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             .filter(([_, config]) => 'autoCreate' in config)
             .map(([name, config]) => ({
                 name,
+                version: KAFKA_VERSION,
                 config: (config as any).autoCreate,
                 topics: [...(topicsByCluster.get(name) ?? [])]
             }));
@@ -408,6 +412,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
             return {
                 fromProxy: replayer.fromProxy,
+                kafkaClusterName: proxy.kafka ?? "default",
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
                 toTarget: { ...restOfTarget, label: replayer.toTarget },
                 ...(replayer.dependsOnSnapshotMigrations ? { dependsOnSnapshotMigrations: replayer.dependsOnSnapshotMigrations } : {}),

@@ -33,7 +33,7 @@ import {
     INTERNAL, isExpression,
     makeParameterLoop, OutputParametersRecord,
     selectInputsFieldsAsExpressionRecord,
-    selectInputsForRegister, TemplateBuilder,
+    selectInputsForRegister, Serialized, TemplateBuilder,
     typeToken, WorkflowAndTemplatesScope,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
@@ -45,6 +45,7 @@ import {ResourceManagement} from "./resourceManagement";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {SetupKafka} from "./setupKafka";
+import {SetupCapture} from "./setupCapture";
 
 const SECONDS_IN_DAYS = 24*3600;
 const LONGEST_POSSIBLE_MIGRATION = 365*SECONDS_IN_DAYS;
@@ -98,25 +99,16 @@ export const FullMigration = WorkflowBuilder.create({
 
     .addTemplate("setupSingleKafkaCluster", t => t
         .addRequiredInput("kafkaClusterConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
+        .addRequiredInput("clusterName",        typeToken<string>())
+        .addRequiredInput("version",            typeToken<string>())
 
         .addSteps(b => b
             .addStep("deployCluster", SetupKafka, "deployKafkaCluster", c =>
                 c.register({
-                    clusterName: expr.get(
-                        expr.deserializeRecord(b.inputs.kafkaClusterConfig), "name")
+                    clusterName:   b.inputs.clusterName,
+                    version:       b.inputs.version,
+                    clusterConfig: expr.jsonPathStrictSerialized(b.inputs.kafkaClusterConfig, "config"),
                 })
-            )
-            .addStep("createTopics", SetupKafka, "createKafkaTopic", c =>
-                c.register({
-                    clusterName: expr.get(
-                        expr.deserializeRecord(b.inputs.kafkaClusterConfig), "name"),
-                    topicName: expr.asString(c.item),
-                    topicPartitions: 1,
-                    topicReplicas: 1
-                }), {
-                    loopWith: makeParameterLoop(
-                        expr.get(expr.deserializeRecord(b.inputs.kafkaClusterConfig), "topics"))
-                }
             )
         )
     )
@@ -125,21 +117,31 @@ export const FullMigration = WorkflowBuilder.create({
     // ── Section 2: Proxies ───────────────────────────────────────────────
 
     .addTemplate("setupSingleProxy", t => t
-        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addRequiredInput("proxyConfig",      typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("kafkaClusterName", typeToken<string>())
+        .addRequiredInput("kafkaTopicName",   typeToken<string>())
+        .addRequiredInput("proxyName",        typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "CaptureProxy"]))
 
         .addSteps(b => b
-            .addStep("waitForTopic", ResourceManagement, "waitForKafkaTopic", c =>
+            .addStep("waitForKafkaCluster", ResourceManagement, "waitForKafkaCluster", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    resourceName: expr.jsonPathStrict(b.inputs.proxyConfig, "kafkaConfig", "kafkaTopic")
+                    resourceName: b.inputs.kafkaClusterName,
                 })
             )
-            .addStep("placeholderProxySetup", INTERNAL, "doNothing")
+            .addStep("setupProxy", SetupCapture, "setupProxy", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    proxyConfig:      b.inputs.proxyConfig,
+                    kafkaClusterName: b.inputs.kafkaClusterName,
+                    kafkaTopicName:   b.inputs.kafkaTopicName,
+                    proxyName:        b.inputs.proxyName,
+                })
+            )
             .addStep("patchCapturedTraffic", ResourceManagement, "patchCapturedTrafficReady", c =>
                 c.register({
-                    resourceName: expr.get(
-                        expr.deserializeRecord(b.inputs.proxyConfig), "name")
+                    resourceName: b.inputs.proxyName,
                 })
             )
         )
@@ -360,6 +362,18 @@ export const FullMigration = WorkflowBuilder.create({
                     }
                 }
             )
+            .addStep("waitForProxy", ResourceManagement, "waitForCapturedTraffic", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: expr.jsonPathStrict(b.inputs.replayConfig, "fromProxy"),
+                })
+            )
+            .addStep("waitForKafkaCluster", ResourceManagement, "waitForKafkaCluster", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: expr.jsonPathStrict(b.inputs.replayConfig, "kafkaClusterName"),
+                })
+            )
             .addStep("placeholderReplay", INTERNAL, "doNothing")
         )
     )
@@ -377,7 +391,9 @@ export const FullMigration = WorkflowBuilder.create({
         .addSteps(b => b.addStepGroup(g => g
             .addStep("setupKafkaClusters", INTERNAL, "setupSingleKafkaCluster", c =>
                 c.register({
-                    kafkaClusterConfig: expr.serialize(c.item)
+                    kafkaClusterConfig: expr.serialize(c.item),
+                    clusterName: expr.get(c.item, "name"),
+                    version:     expr.cast(expr.get(c.item, "version")).to<string>(),
                 }), {
                     loopWith: makeParameterLoop(
                         expr.ternary(
@@ -391,7 +407,10 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("setupProxies", INTERNAL, "setupSingleProxy", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    proxyConfig: expr.serialize(c.item)
+                    proxyConfig:      expr.serialize(c.item),
+                    kafkaClusterName: expr.jsonPathStrict(expr.get(c.item, "kafkaConfig") as any, "label"),
+                    kafkaTopicName:   expr.jsonPathStrict(expr.get(c.item, "kafkaConfig") as any, "kafkaTopic"),
+                    proxyName:        expr.get(c.item, "name"),
                 }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.config), "proxies"))

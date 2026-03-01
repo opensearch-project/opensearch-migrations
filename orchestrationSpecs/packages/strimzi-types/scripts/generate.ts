@@ -5,8 +5,8 @@ generateTypes({
     outputFile: './src/index.ts',
     bannerComment: '/* Generated Strimzi type definitions — do not edit manually, run `npm run rebuild` */',
     resources: [
-        { apiVersion: 'kafka.strimzi.io/v1beta2', kind: 'Kafka' },
-        { apiVersion: 'kafka.strimzi.io/v1beta2', kind: 'KafkaNodePool' },
-        { apiVersion: 'kafka.strimzi.io/v1beta2', kind: 'KafkaTopic' },
+        { apiVersion: 'kafka.strimzi.io/v1', kind: 'Kafka' },
+        { apiVersion: 'kafka.strimzi.io/v1', kind: 'KafkaNodePool' },
+        { apiVersion: 'kafka.strimzi.io/v1', kind: 'KafkaTopic' },
     ],
 }).catch(console.error);

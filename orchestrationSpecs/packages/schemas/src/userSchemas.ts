@@ -108,7 +108,7 @@ export const KAFKA_CLIENT_CONFIG = z.object({
     kafkaConnection: z.string()
         .describe("Sequence of <HOSTNAME:PORT> values delimited by ','.  " +
             "If empty, the cluster is automatically created and this is filled in.")
-        .regex(/^(?:[a-z.]+:[0-9]+,?)*$/),
+        .regex(/^(?:[a-z0-9][-a-z0-9.]*:[0-9]+,?)*$/),
     kafkaTopic: z.string().describe("Empty defaults to the name of the target label").default(""),
 });
 
@@ -277,7 +277,13 @@ export const USER_RFS_OPTIONS = z.object({
 });
 
 export const KAFKA_CLUSTER_CREATION_CONFIG = z.object({
-    // This should be a reference to the strimzi kafka config type
+    replicas:      z.number().int().min(1).default(1).optional(),
+    storage:       z.discriminatedUnion("type", [
+                       z.object({ type: z.literal("ephemeral") }),
+                       z.object({ type: z.literal("persistent-claim"), size: z.string() })
+                   ]).default({ type: "ephemeral" }).optional(),
+    partitions:    z.number().int().min(1).default(1).optional(),
+    topicReplicas: z.number().int().min(1).default(1).optional(),
 });
 
 export const KAFKA_CLUSTER_CONFIG = z.union([
@@ -323,8 +329,8 @@ export const SOURCE_CLUSTER_REPOS_RECORD =
     .describe("Keys are the repository names that are managed by the source cluster");
 
 export const CAPTURE_CONFIG = z.object({
-    kafka: z.string().default("default").optional(),
-    kafkaTopic: z.string().default("").optional()
+    kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional(),
+    kafkaTopic: z.string().regex(K8S_NAMING_PATTERN).default("").optional()
         .describe("Kafka topic for captured traffic. Empty defaults to the proxy name."),
     source: z.string(),
     proxyConfig: PROXY_OPTIONS
@@ -344,7 +350,7 @@ export const REPLAYER_CONFIG = z.object({
 });
 
 export const TRAFFIC_CONFIG = z.object({
-    proxies: z.record(z.string(), CAPTURE_CONFIG),
+    proxies: z.record(z.string().regex(K8S_NAMING_PATTERN), CAPTURE_CONFIG),
     replayers: z.record(z.string(), REPLAYER_CONFIG)
 }).superRefine((data, ctx) => {
     for (const [name, rc] of Object.entries(data.replayers)) {
@@ -455,7 +461,7 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     }
 });
 
-export const KAFKA_CLUSTERS_MAP = z.record(z.string(), KAFKA_CLUSTER_CONFIG);
+export const KAFKA_CLUSTERS_MAP = z.record(z.string().regex(K8S_NAMING_PATTERN), KAFKA_CLUSTER_CONFIG);
 export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);
 

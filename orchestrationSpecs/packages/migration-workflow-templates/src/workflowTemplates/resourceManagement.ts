@@ -1,5 +1,7 @@
 import {
     expr,
+    INTERNAL,
+    selectInputsForRegister,
     typeToken,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
@@ -19,6 +21,52 @@ export const ResourceManagement = WorkflowBuilder.create({
 
 
     // ── Wait templates (resource get with retry) ─────────────────────────
+
+    .addTemplate("waitForKafkaClusterCreated", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addWaitForNewResource(b => b
+            .setDefinition({
+                resourceKindAndName: expr.concat(expr.literal("kafka/"), b.inputs.resourceName),
+                waitForCreation: {
+                    kubectlImage: b.inputs.imageMigrationConsoleLocation,
+                    kubectlImagePullPolicy: b.inputs.imageMigrationConsolePullPolicy,
+                    maxDurationSeconds: LONGEST_POSSIBLE_MIGRATION
+                }
+            })
+        )
+    )
+
+
+    .addTemplate("waitForKafkaClusterReady", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addWaitForExistingResource(b => b
+            .setDefinition({
+                resource: {
+                    apiVersion: "kafka.strimzi.io/v1",
+                    kind: "Kafka",
+                    name: b.inputs.resourceName
+                },
+                conditions: { successCondition: "status.listeners" }
+            })
+        )
+    )
+
+
+    .addTemplate("waitForKafkaCluster", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addSteps(b => b
+            .addStep("waitForCreation", INTERNAL, "waitForKafkaClusterCreated", c =>
+                c.register({ ...selectInputsForRegister(b, c), resourceName: b.inputs.resourceName })
+            )
+            .addStep("waitForReady", INTERNAL, "waitForKafkaClusterReady", c =>
+                c.register({ ...selectInputsForRegister(b, c), resourceName: b.inputs.resourceName })
+            )
+        )
+    )
+
 
     .addTemplate("waitForKafkaTopic", b => b
         .addRequiredInput("resourceName", typeToken<string>())
