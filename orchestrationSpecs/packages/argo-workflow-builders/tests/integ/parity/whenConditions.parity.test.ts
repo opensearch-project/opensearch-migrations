@@ -9,7 +9,7 @@ async function submitConditionalProbe(input: string, whenCondition: string) {
   const workflow = {
     apiVersion: "argoproj.io/v1alpha1",
     kind: "Workflow",
-    metadata: { generateName: "when-probe-", namespace },
+    metadata: { generateName: "pwc-when-direct-", namespace },
     spec: {
       entrypoint: "main",
       activeDeadlineSeconds: 30,
@@ -63,7 +63,7 @@ describe("When Conditions - simple string match true", () => {
     };
 
     test("builder API executes step", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "when-conditions-builder-true" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pwc-when-literal-true-builder" })
         .addTemplate("conditional", t => t
           .addSteps(s => s.addStepGroup(c => c))
         )
@@ -110,7 +110,7 @@ describe("When Conditions - simple string match false", () => {
     };
 
     test("builder API skips step", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "when-conditions-builder-false" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pwc-when-literal-false-builder" })
         .addTemplate("conditional", t => t
           .addSteps(s => s.addStepGroup(c => c))
         )
@@ -157,7 +157,7 @@ describe("When Conditions - expression based true", () => {
     };
 
     test("builder API executes step", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "when-conditions-builder-expr-true" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pwc-when-expr-true-builder" })
         .addTemplate("conditional", t => t
           .addSteps(s => s.addStepGroup(c => c))
         )
@@ -207,7 +207,7 @@ describe("When Conditions - expression based false", () => {
     };
 
     test("builder API skips step", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "when-conditions-builder-expr-false" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pwc-when-expr-false-builder" })
         .addTemplate("conditional", t => t
           .addSteps(s => s.addStepGroup(c => c))
         )

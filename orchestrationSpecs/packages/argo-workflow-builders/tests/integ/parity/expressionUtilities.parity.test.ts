@@ -112,7 +112,7 @@ describe("Expression Utilities - taskData steps output reference", () => {
       const workflow = {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "Workflow",
-        metadata: { generateName: "taskdata-probe-", namespace },
+        metadata: { generateName: "peu-taskdata-raw-", namespace },
         spec: {
           entrypoint: "main",
           activeDeadlineSeconds: 30,
@@ -165,7 +165,7 @@ describe("Expression Utilities - taskData steps output reference", () => {
     reportKnownBroken(spec, builderVariant, "Runtime Failed: taskData reference rendering is not yet compatible for this steps output access.");
 
     test("builder API produces same result", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "taskdata-builder-workflow" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "peu-taskdata-builder" })
         .addTemplate("producer", t => t
           .addSteps(s => s.addStepGroup(c => c))
           .addExpressionOutput("value", () => expr.literal("hello"))

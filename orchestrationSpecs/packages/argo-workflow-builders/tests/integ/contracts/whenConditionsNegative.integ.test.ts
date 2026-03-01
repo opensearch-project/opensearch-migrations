@@ -9,7 +9,7 @@ describe("Negative When Conditions Tests", () => {
       apiVersion: "argoproj.io/v1alpha1",
       kind: "Workflow",
       metadata: {
-        generateName: "when-probe-",
+        generateName: "cwcn-when-direct-",
         namespace,
       },
       spec: {

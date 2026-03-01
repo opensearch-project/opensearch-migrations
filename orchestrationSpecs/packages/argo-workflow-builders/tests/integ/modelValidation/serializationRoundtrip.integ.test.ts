@@ -3,7 +3,7 @@ import { submitRenderedWorkflow } from "../infra/probeHelper";
 
 describe("Serialization Round-trip Tests", () => {
   test("Object param serialized as JSON string", async () => {
-    const wf = WorkflowBuilder.create({ k8sResourceName: "test-object-param" })
+    const wf = WorkflowBuilder.create({ k8sResourceName: "mvs-serial-object" })
       .addParams({
         config: defineParam({ expression: { host: "localhost", port: 9200 } }),
       })
@@ -27,7 +27,7 @@ describe("Serialization Round-trip Tests", () => {
   });
 
   test("Number param stays as number in YAML", async () => {
-    const wf = WorkflowBuilder.create({ k8sResourceName: "test-number-param" })
+    const wf = WorkflowBuilder.create({ k8sResourceName: "mvs-serial-number" })
       .addParams({
         count: defineParam({ expression: 42 }),
       })
@@ -50,7 +50,7 @@ describe("Serialization Round-trip Tests", () => {
   });
 
   test("Boolean param", async () => {
-    const wf = WorkflowBuilder.create({ k8sResourceName: "test-bool-param" })
+    const wf = WorkflowBuilder.create({ k8sResourceName: "mvs-serial-bool" })
       .addParams({
         flag: defineParam({ expression: true }),
       })

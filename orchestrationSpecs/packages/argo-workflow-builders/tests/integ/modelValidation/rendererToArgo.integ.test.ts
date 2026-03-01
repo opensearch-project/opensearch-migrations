@@ -3,7 +3,7 @@ import { submitRenderedWorkflow } from "../infra/probeHelper";
 
 describe("Renderer to Argo Tests", () => {
   test("Workflow with parameters renders and runs", async () => {
-    const wf = WorkflowBuilder.create({ k8sResourceName: "test-basic" })
+    const wf = WorkflowBuilder.create({ k8sResourceName: "mvr-basic" })
       .addParams({
         input: defineParam({ expression: "test-value" }),
       })
@@ -17,11 +17,11 @@ describe("Renderer to Argo Tests", () => {
   });
 
   test("Workflow with steps template runs", async () => {
-    const suspendWf = WorkflowBuilder.create({ k8sResourceName: "test-steps-suspend" })
+    const suspendWf = WorkflowBuilder.create({ k8sResourceName: "mvr-steps-suspend" })
       .addTemplate("suspend-task", t => t.addSuspend(0))
       .getFullScope();
     
-    const wf = WorkflowBuilder.create({ k8sResourceName: "test-steps" })
+    const wf = WorkflowBuilder.create({ k8sResourceName: "mvr-steps" })
       .addTemplate("main", t => t
         .addSteps(sb => sb
           .addStep("task1", suspendWf, "suspend-task")
@@ -36,11 +36,11 @@ describe("Renderer to Argo Tests", () => {
   });
 
   test("Workflow with DAG template runs", async () => {
-    const suspendWf = WorkflowBuilder.create({ k8sResourceName: "test-dag-suspend" })
+    const suspendWf = WorkflowBuilder.create({ k8sResourceName: "mvr-dag-suspend" })
       .addTemplate("suspend-task", t => t.addSuspend(0))
       .getFullScope();
     
-    const wf = WorkflowBuilder.create({ k8sResourceName: "test-dag" })
+    const wf = WorkflowBuilder.create({ k8sResourceName: "mvr-dag" })
       .addTemplate("main", t => t
         .addDag(db => db
           .addTask("task1", suspendWf, "suspend-task")

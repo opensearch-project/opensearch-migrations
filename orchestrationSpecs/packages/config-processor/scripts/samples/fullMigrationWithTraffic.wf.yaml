@@ -15,7 +15,7 @@ sourceClusters:
       repos:
         default:
           awsRegion: "us-east-2"
-          endpoint: "http://10.99.62.203:4566"
+          endpoint: "http://10.106.183.16:4566"
           s3RepoPathUri: "s3://migrations-default-123456789012-dev-us-east-2"
       snapshots:
         snap1:
@@ -28,7 +28,6 @@ targetClusters:
   target:
     endpoint: "https://opensearch-cluster-master-headless:9200"
     allowInsecure: true
-    version: "OS 2.11"
     authConfig:
       basic:
         secretName: "target-creds"
@@ -43,11 +42,11 @@ snapshotMigrationConfigs:
 
 traffic:
   proxies:
-    captureProxy:
+    capture-proxy:
       source: "source"
       proxyConfig:
         listenPort: 9201
   replayers:
     replay1:
-      fromProxy: "captureProxy"
+      fromProxy: "capture-proxy"
       toTarget: "target"

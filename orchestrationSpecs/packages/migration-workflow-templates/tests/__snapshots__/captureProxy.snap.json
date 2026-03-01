@@ -1,0 +1,73 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "capture-proxy"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "deployproxyservice",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "serviceName"
+            },
+            {
+              "name": "port"
+            }
+          ]
+        },
+        "steps": [
+          []
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deploycaptureproxy",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceConfig"
+            },
+            {
+              "name": "proxyConfig"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          []
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      }
+    ]
+  }
+}

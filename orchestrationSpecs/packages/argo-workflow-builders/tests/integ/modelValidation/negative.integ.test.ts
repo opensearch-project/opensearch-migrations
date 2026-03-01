@@ -3,7 +3,7 @@ import { submitRenderedWorkflow } from "../infra/probeHelper";
 
 describe("Negative Model Validation Tests", () => {
   test("serialized object is not plain string", async () => {
-    const wf = WorkflowBuilder.create({ k8sResourceName: "test-object-not-string" })
+    const wf = WorkflowBuilder.create({ k8sResourceName: "mvn-neg-obj-not-str" })
       .addParams({
         config: defineParam({ expression: { host: "localhost", port: 9200 } }),
       })
@@ -24,7 +24,7 @@ describe("Negative Model Validation Tests", () => {
   });
 
   test("number is not stringified", async () => {
-    const wf = WorkflowBuilder.create({ k8sResourceName: "test-number-not-string" })
+    const wf = WorkflowBuilder.create({ k8sResourceName: "mvn-neg-num-not-str" })
       .addParams({
         count: defineParam({ expression: 42 }),
       })
@@ -41,7 +41,7 @@ describe("Negative Model Validation Tests", () => {
   });
 
   test("boolean is not capitalized", async () => {
-    const wf = WorkflowBuilder.create({ k8sResourceName: "test-bool-not-cap" })
+    const wf = WorkflowBuilder.create({ k8sResourceName: "mvn-neg-bool-not-cap" })
       .addParams({
         flag: defineParam({ expression: true }),
       })
@@ -59,7 +59,7 @@ describe("Negative Model Validation Tests", () => {
   });
 
   test("workflow with parameters runs successfully", async () => {
-    const wf = WorkflowBuilder.create({ k8sResourceName: "test-params-work" })
+    const wf = WorkflowBuilder.create({ k8sResourceName: "mvn-params-work" })
       .addParams({
         input: defineParam({ expression: "test-value" }),
       })

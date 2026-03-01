@@ -9,7 +9,7 @@ describe("Loop and Item Contract Tests", () => {
       apiVersion: "argoproj.io/v1alpha1",
       kind: "Workflow",
       metadata: {
-        generateName: "loop-strings-",
+        generateName: "cli-items-strings-direct-",
         namespace,
       },
       spec: {
@@ -74,7 +74,7 @@ describe("Loop and Item Contract Tests", () => {
       apiVersion: "argoproj.io/v1alpha1",
       kind: "Workflow",
       metadata: {
-        generateName: "loop-numbers-",
+        generateName: "cli-items-numbers-direct-",
         namespace,
       },
       spec: {
@@ -137,7 +137,7 @@ describe("Loop and Item Contract Tests", () => {
       apiVersion: "argoproj.io/v1alpha1",
       kind: "Workflow",
       metadata: {
-        generateName: "loop-objects-",
+        generateName: "cli-items-objects-direct-",
         namespace,
       },
       spec: {
@@ -204,7 +204,7 @@ describe("Loop and Item Contract Tests", () => {
       apiVersion: "argoproj.io/v1alpha1",
       kind: "Workflow",
       metadata: {
-        generateName: "loop-expr-",
+        generateName: "cli-items-expr-direct-",
         namespace,
       },
       spec: {
@@ -266,7 +266,7 @@ describe("Loop and Item Contract Tests", () => {
       apiVersion: "argoproj.io/v1alpha1",
       kind: "Workflow",
       metadata: {
-        generateName: "loop-param-",
+        generateName: "cli-param-json-array-direct-",
         namespace,
       },
       spec: {
@@ -336,7 +336,7 @@ describe("Loop and Item Contract Tests", () => {
       apiVersion: "argoproj.io/v1alpha1",
       kind: "Workflow",
       metadata: {
-        generateName: "loop-coerce-",
+        generateName: "cli-items-coerce-direct-",
         namespace,
       },
       spec: {

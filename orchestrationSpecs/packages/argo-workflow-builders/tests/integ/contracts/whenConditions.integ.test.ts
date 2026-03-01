@@ -9,7 +9,7 @@ describe("When Conditions Contract Tests", () => {
       apiVersion: "argoproj.io/v1alpha1",
       kind: "Workflow",
       metadata: {
-        generateName: "when-probe-",
+        generateName: "cwc-when-direct-",
         namespace,
       },
       spec: {

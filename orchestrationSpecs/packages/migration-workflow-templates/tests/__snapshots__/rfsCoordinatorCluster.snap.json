@@ -1,0 +1,272 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "rfs-coordinator-cluster"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "createrfscoordinatorsecret",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: \"{{=inputs.parameters.clusterName+'-creds'}}\"\n  labels:\n    app: \"{{inputs.parameters.clusterName}}\"\ntype: Opaque\nstringData:\n  username: admin\n  password: myStrongPassword123!\n",
+          "action": "apply",
+          "setOwnerReference": true
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "createrfscoordinatorservice",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: v1\nkind: Service\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  labels:\n    app: \"{{inputs.parameters.clusterName}}\"\nspec:\n  clusterIP: None\n  selector:\n    app: \"{{inputs.parameters.clusterName}}\"\n  ports:\n    - name: https\n      port: 9200\n      targetPort: https\n",
+          "action": "apply",
+          "setOwnerReference": true
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "createrfscoordinatorstatefulset",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "coordinatorImage"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  labels:\n    app: \"{{inputs.parameters.clusterName}}\"\n    app.kubernetes.io/instance: \"{{inputs.parameters.clusterName}}\"\nspec:\n  serviceName: \"{{inputs.parameters.clusterName}}\"\n  replicas: 1\n  persistentVolumeClaimRetentionPolicy:\n    whenDeleted: Delete\n    whenScaled: Retain\n  selector:\n    matchLabels:\n      app: \"{{inputs.parameters.clusterName}}\"\n  template:\n    metadata:\n      labels:\n        app: \"{{inputs.parameters.clusterName}}\"\n        app.kubernetes.io/instance: \"{{inputs.parameters.clusterName}}\"\n    spec:\n      serviceAccountName: argo-workflow-executor\n      securityContext:\n        fsGroup: 1000\n      containers:\n        - name: opensearch\n          image: \"{{inputs.parameters.coordinatorImage}}\"\n          ports:\n            - name: https\n              containerPort: 9200\n          env:\n            - name: cluster.name\n              value: \"{{inputs.parameters.clusterName}}\"\n            - name: discovery.type\n              value: single-node\n            - name: OPENSEARCH_INITIAL_ADMIN_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=inputs.parameters.clusterName+'-creds'}}\"\n                  key: username\n                  optional: false\n            - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=inputs.parameters.clusterName+'-creds'}}\"\n                  key: password\n                  optional: false\n            - name: OPENSEARCH_JAVA_OPTS\n              value: -Xms1g -Xmx1g\n          resources:\n            requests:\n              cpu: \"1\"\n              memory: 2Gi\n            limits:\n              cpu: \"1\"\n              memory: 2Gi\n          readinessProbe:\n            exec:\n              command:\n                - sh\n                - -c\n                - curl -sk -u \"${OPENSEARCH_INITIAL_ADMIN_USERNAME}:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}\" \"https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=10s\"\n            initialDelaySeconds: 10\n            periodSeconds: 15\n            timeoutSeconds: 15\n            failureThreshold: 20\n          volumeMounts:\n            - name: data\n              mountPath: /usr/share/opensearch/data\n  volumeClaimTemplates:\n    - metadata:\n        name: data\n      spec:\n        accessModes:\n          - ReadWriteOnce\n        resources:\n          requests:\n            storage: 1Gi\n",
+          "action": "apply",
+          "setOwnerReference": true,
+          "successCondition": "status.readyReplicas > 0"
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "createrfscoordinator",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "coordinatorImage"
+            },
+            {
+              "name": "groupName",
+              "value": "Start RFS OpenSearch cluster for worker coordination"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "createrfscoordinatorsecret",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  }
+                ]
+              },
+              "name": "createSecret"
+            }
+          ],
+          [
+            {
+              "template": "createrfscoordinatorservice",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  }
+                ]
+              },
+              "name": "createService"
+            },
+            {
+              "template": "createrfscoordinatorstatefulset",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "coordinatorImage",
+                    "value": "{{inputs.parameters.coordinatorImage}}"
+                  }
+                ]
+              },
+              "name": "createStatefulSet"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deleterfscoordinatorstatefulset",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n",
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found"
+          ]
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deleterfscoordinatorservice",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: v1\nkind: Service\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n",
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found"
+          ]
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deleterfscoordinatorsecret",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: \"{{=inputs.parameters.clusterName+'-creds'}}\"\n",
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found"
+          ]
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deleterfscoordinator",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "groupName",
+              "value": "Stop RFS OpenSearch cluster for worker coordination"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "deleterfscoordinatorstatefulset",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  }
+                ]
+              },
+              "name": "deleteStatefulSet"
+            },
+            {
+              "template": "deleterfscoordinatorservice",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  }
+                ]
+              },
+              "name": "deleteService"
+            }
+          ],
+          [
+            {
+              "template": "deleterfscoordinatorsecret",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  }
+                ]
+              },
+              "name": "deleteSecret"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      }
+    ]
+  }
+}

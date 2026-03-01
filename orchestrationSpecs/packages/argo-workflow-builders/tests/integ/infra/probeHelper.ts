@@ -1,5 +1,5 @@
 import { submitAndWait, WorkflowResult } from "./workflowRunner";
-import { getTestNamespace } from "./argoCluster";
+import { getTestNamespace, getServiceAccountName } from "./argoCluster";
 
 export interface ProbeConfig {
   inputs?: Record<string, string>;
@@ -31,7 +31,7 @@ export async function submitProbe(config: ProbeConfig): Promise<WorkflowResult> 
     spec: {
       entrypoint: "main",
       activeDeadlineSeconds: 30,
-      serviceAccountName: "test-runner",
+      serviceAccountName: getServiceAccountName(),
       arguments: {
         parameters: inputParams,
       },
@@ -139,7 +139,7 @@ export async function submitChainProbe(config: ChainProbeConfig): Promise<Workfl
     spec: {
       entrypoint: "main",
       activeDeadlineSeconds: 30,
-      serviceAccountName: "test-runner",
+      serviceAccountName: getServiceAccountName(),
       arguments: {
         parameters: [
           {
@@ -173,7 +173,7 @@ export async function submitRenderedWorkflow(
     spec: {
       ...rendered.spec,
       activeDeadlineSeconds: 30,
-      serviceAccountName: "test-runner",
+      serviceAccountName: getServiceAccountName(),
     },
   };
   

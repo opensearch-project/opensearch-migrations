@@ -9,7 +9,7 @@ async function submitConditionalProbe(input: string, whenCondition: string) {
   const workflow = {
     apiVersion: "argoproj.io/v1alpha1",
     kind: "Workflow",
-    metadata: { generateName: "when-probe-", namespace },
+    metadata: { generateName: "pwcn-when-direct-", namespace },
     spec: {
       entrypoint: "main",
       activeDeadlineSeconds: 30,
@@ -60,7 +60,7 @@ describe("When Conditions Negative - false condition not succeeded", () => {
     };
 
     test("builder conditional workflow does not execute step", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "when-conditions-builder-neg-false-not-succeeded" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pwcn-when-neg-literal-false-builder" })
         .addTemplate("conditional", t => t
           .addSteps(s => s.addStepGroup(c => c))
         )
@@ -110,7 +110,7 @@ describe("When Conditions Negative - true condition not skipped", () => {
     };
 
     test("builder conditional workflow executes step", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "when-conditions-builder-neg-true-not-skipped" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pwcn-when-neg-literal-true-builder" })
         .addTemplate("conditional", t => t
           .addSteps(s => s.addStepGroup(c => c))
         )
@@ -160,7 +160,7 @@ describe("When Conditions Negative - expression false not succeeded", () => {
     };
 
     test("builder conditional workflow does not execute step", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "when-conditions-builder-neg-expr-false-not-succeeded" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pwcn-when-neg-expr-false-builder" })
         .addTemplate("conditional", t => t
           .addSteps(s => s.addStepGroup(c => c))
         )
@@ -212,7 +212,7 @@ describe("When Conditions Negative - expression true not skipped", () => {
     };
 
     test("builder conditional workflow executes step", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "when-conditions-builder-neg-expr-true-not-skipped" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pwcn-when-neg-expr-true-builder" })
         .addTemplate("conditional", t => t
           .addSteps(s => s.addStepGroup(c => c))
         )
@@ -264,7 +264,7 @@ describe("When Conditions Negative - wrong comparison value skips", () => {
     };
 
     test("builder conditional workflow skips step", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "when-conditions-builder-neg-wrong-value-skips" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pwcn-when-neg-wrong-val-builder" })
         .addTemplate("conditional", t => t
           .addSteps(s => s.addStepGroup(c => c))
         )

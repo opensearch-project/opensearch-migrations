@@ -8,7 +8,7 @@ import {
   Serialized,
   typeToken,
 } from "../../../src/index.js";
-import { getTestNamespace } from "../infra/argoCluster.js";
+import { getTestNamespace, getServiceAccountName } from "../infra/argoCluster.js";
 import { submitRenderedWorkflow } from "../infra/probeHelper.js";
 import { submitAndWait } from "../infra/workflowRunner.js";
 import { BuilderVariant, ParitySpec, reportContractResult, reportParityResult } from "../infra/parityHelper.js";
@@ -31,7 +31,7 @@ describe("Loop Item - withItems iterates over array strings", () => {
       const workflow = {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "Workflow",
-        metadata: { generateName: "loop-strings-", namespace },
+        metadata: { generateName: "pli-items-strings-direct-", namespace },
         spec: {
           entrypoint: "main",
           activeDeadlineSeconds: 30,
@@ -67,7 +67,7 @@ describe("Loop Item - withItems iterates over array strings", () => {
     };
 
     test("builder workflow loops 3 times and passes item", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "loop-strings-builder" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pli-items-strings-builder" })
         .addTemplate("process-item", t => t
           .addRequiredInput("value", typeToken<string>())
           .addSuspend(0)
@@ -108,7 +108,7 @@ describe("Loop Item - withItems iterates over numbers", () => {
       const workflow = {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "Workflow",
-        metadata: { generateName: "loop-numbers-", namespace },
+        metadata: { generateName: "pli-items-numbers-direct-", namespace },
         spec: {
           entrypoint: "main",
           activeDeadlineSeconds: 30,
@@ -143,7 +143,7 @@ describe("Loop Item - withItems iterates over numbers", () => {
     };
 
     test("builder workflow loops and coerces numbers to strings", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "loop-numbers-builder" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pli-items-numbers-builder" })
         .addTemplate("process-item", t => t
           .addRequiredInput("value", typeToken<string>())
           .addSuspend(0)
@@ -183,7 +183,7 @@ describe("Loop Item - withItems JSON objects are serialized", () => {
       const workflow = {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "Workflow",
-        metadata: { generateName: "loop-objects-", namespace },
+        metadata: { generateName: "pli-items-objects-direct-", namespace },
         spec: {
           entrypoint: "main",
           activeDeadlineSeconds: 30,
@@ -220,7 +220,7 @@ describe("Loop Item - withItems JSON objects are serialized", () => {
     };
 
     test("builder workflow loops objects as serialized values", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "loop-objects-builder" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pli-items-objects-builder" })
         .addTemplate("process-item", t => t
           .addRequiredInput("obj", typeToken<Serialized<{ name: string; age: number }>>())
           .addSuspend(0)
@@ -262,7 +262,7 @@ describe("Loop Item - item used in expression directly", () => {
       const workflow = {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "Workflow",
-        metadata: { generateName: "loop-expr-", namespace },
+        metadata: { generateName: "pli-items-expr-direct-", namespace },
         spec: {
           entrypoint: "main",
           activeDeadlineSeconds: 30,
@@ -297,7 +297,7 @@ describe("Loop Item - item used in expression directly", () => {
     };
 
     test("builder workflow computes per-item expression values", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "loop-expr-builder" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pli-items-expr-builder" })
         .addTemplate("process-item", t => t
           .addRequiredInput("computed", typeToken<string>())
           .addSuspend(0)
@@ -340,7 +340,7 @@ describe("Loop Item - withParam from JSON array", () => {
       const workflow = {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "Workflow",
-        metadata: { generateName: "loop-param-", namespace },
+        metadata: { generateName: "pli-param-json-array-direct-", namespace },
         spec: {
           entrypoint: "main",
           activeDeadlineSeconds: 30,
@@ -376,7 +376,7 @@ describe("Loop Item - withParam from JSON array", () => {
     };
 
     test("builder workflow loops over parameter array", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "loop-param-builder" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pli-param-json-array-builder" })
         .addTemplate("process-item", t => t
           .addRequiredInput("value", typeToken<string>())
           .addSuspend(0)
@@ -417,7 +417,7 @@ describe("Loop Item - item number coerced with string()", () => {
       const workflow = {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "Workflow",
-        metadata: { generateName: "loop-coerce-", namespace },
+        metadata: { generateName: "pli-items-coerce-direct-", namespace },
         spec: {
           entrypoint: "main",
           activeDeadlineSeconds: 30,
@@ -452,7 +452,7 @@ describe("Loop Item - item number coerced with string()", () => {
     };
 
     test("builder workflow computes value-prefixed numeric items", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "loop-coerce-builder" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pli-items-coerce-builder" })
         .addTemplate("process-item", t => t
           .addRequiredInput("computed", typeToken<string>())
           .addSuspend(0)
@@ -478,6 +478,181 @@ describe("Loop Item - item number coerced with string()", () => {
       const items = loopNodes.map((n: any) => n.inputs?.parameters?.find((p: any) => p.name === "computed")?.value).sort();
       expect(items).toEqual(["value-10", "value-20", "value-30"]);
       reportParityResult(spec, builderVariant, result);
+    });
+  });
+});
+
+describe("Loop Item - withParam over objects delivers parsed objects", () => {
+  const spec: ParitySpec = {
+    category: "Loop Item",
+    name: "withParam over objects delivers parsed objects",
+    argoExpression: "withParam: {{=toJSON(workflow.parameters.items)}}",
+    inputs: { items: JSON.stringify([{ name: "alice", age: 30 }, { name: "bob", age: 25 }]) },
+  };
+
+  describe("ArgoYaml", () => {
+    test("raw workflow: each item is a parsed object, nested fields accessible via item['field']", async () => {
+      const namespace = getTestNamespace();
+      const workflow = {
+        apiVersion: "argoproj.io/v1alpha1",
+        kind: "Workflow",
+        metadata: { generateName: "pli-param-objects-direct-", namespace },
+        spec: {
+          entrypoint: "main",
+          activeDeadlineSeconds: 30,
+          serviceAccountName: "test-runner",
+          arguments: { parameters: [{ name: "items", value: spec.inputs!.items }] },
+          templates: [
+            { name: "process-item", inputs: { parameters: [{ name: "name" }] }, suspend: { duration: "0" } },
+            {
+              name: "main",
+              steps: [[{
+                name: "loop-step",
+                template: "process-item",
+                arguments: { parameters: [
+                  // item is a parsed object in withParam — access fields directly
+                  { name: "name", value: "{{=item['name']}}" },
+                ]},
+                withParam: "{{workflow.parameters.items}}",
+              }]],
+            },
+          ],
+        },
+      };
+      const result = await submitAndWait(workflow);
+      expect(result.phase).toBe("Succeeded");
+      const loopNodes = countLoopNodes(result);
+      const names = loopNodes.map((n: any) => n.inputs?.parameters?.find((p: any) => p.name === "name")?.value).sort();
+      expect(names).toEqual(["alice", "bob"]);
+      reportContractResult(spec, result);
+    });
+  });
+
+  describe("Builder - withParam over objects: c.item is a parsed object at runtime", () => {
+    const builderVariant: BuilderVariant = {
+      name: "withParam over objects",
+      code: "c.item is T at runtime in withParam; use expr.get(c.item, 'field') for field access, expr.serialize(c.item) to pass as Serialized<T>",
+    };
+
+    test("builder: c.item is a parsed object; expr.get accesses fields; expr.serialize passes to typed inputs", async () => {
+      type Person = { name: string; age: number };
+      const items: Person[] = [{ name: "alice", age: 30 }, { name: "bob", age: 25 }];
+
+      const wf = WorkflowBuilder.create({ k8sResourceName: "pli-param-objects-builder" })
+        .addTemplate("process-item", t => t
+          .addRequiredInput("name", typeToken<string>())
+          .addSuspend(0)
+        )
+        .addTemplate("main", t => t
+          .addRequiredInput("items", typeToken<Person[]>())
+          .addSteps(s => s.addStep(
+            "loop-step",
+            INTERNAL,
+            "process-item",
+            c => c.register({
+              // c.item is a parsed object at runtime — expr.get works directly
+              name: expr.asString(expr.get(c.item, "name")),
+            }),
+            { loopWith: makeParameterLoop(expr.deserializeRecord(s.inputs.items)) }
+          ))
+        )
+        .setEntrypoint("main")
+        .getFullScope();
+
+      const rendered = renderWorkflowTemplate(wf);
+      const result = await submitRenderedWorkflow(rendered, { items: JSON.stringify(items) });
+      expect(result.phase).toBe("Succeeded");
+      const loopNodes = countLoopNodes(result);
+      const names = loopNodes.map((n: any) => n.inputs?.parameters?.find((p: any) => p.name === "name")?.value).sort();
+      expect(names).toEqual(["alice", "bob"]);
+      reportParityResult(spec, builderVariant, result);
+    });
+  });
+});
+
+describe("Loop Item - withParam over objects with nested fields (realistic fullMigration pattern)", () => {
+  // This mirrors how fullMigration passes proxies/snapshots/replays:
+  // - A JSON string of an array of complex objects is passed as a workflow parameter
+  // - One deserializeRecord hydrates it into an array (no nested serialization)
+  // - The loop iterates over the items, accessing nested fields
+  type KafkaConfig = { connection: string; topic: string };
+  type ProxyConfig = { name: string; kafkaConfig: KafkaConfig; listenPort: number };
+
+  const proxies: ProxyConfig[] = [
+    { name: "proxy-a", kafkaConfig: { connection: "kafka-a:9092", topic: "topic-a" }, listenPort: 9200 },
+    { name: "proxy-b", kafkaConfig: { connection: "kafka-b:9092", topic: "topic-b" }, listenPort: 9201 },
+  ];
+
+  const spec: ParitySpec = {
+    category: "Loop Item",
+    name: "withParam over nested objects (fullMigration pattern)",
+    argoExpression: "withParam over complex objects, accessing nested fields",
+    inputs: { proxies: JSON.stringify(proxies) },
+  };
+
+  describe("ArgoYaml", () => {
+    test("raw: nested fields accessible via item['kafkaConfig']['connection']", async () => {
+      const namespace = getTestNamespace();
+      const workflow = {
+        apiVersion: "argoproj.io/v1alpha1",
+        kind: "Workflow",
+        metadata: { generateName: "pli-param-nested-direct-", namespace },
+        spec: {
+          entrypoint: "main",
+          activeDeadlineSeconds: 30,
+          serviceAccountName: getServiceAccountName(),
+          arguments: { parameters: [{ name: "proxies", value: spec.inputs!.proxies }] },
+          templates: [
+            {
+              name: "process-proxy",
+              inputs: { parameters: [{ name: "name" }, { name: "connection" }, { name: "topic" }] },
+              suspend: { duration: "0" }
+            },
+            {
+              name: "main",
+              steps: [[{
+                name: "loop-step",
+                template: "process-proxy",
+                arguments: { parameters: [
+                  { name: "name",       value: "{{=item['name']}}" },
+                  // nested object: item['kafkaConfig'] is a JSON string, need fromJSON to parse it
+                  { name: "connection", value: "{{=fromJSON(item['kafkaConfig'])['connection']}}" },
+                  { name: "topic",      value: "{{=fromJSON(item['kafkaConfig'])['topic']}}" },
+                ]},
+                withParam: "{{workflow.parameters.proxies}}",
+              }]],
+            },
+          ],
+        },
+      };
+      const result = await submitAndWait(workflow);
+      expect(result.phase).toBe("Succeeded");
+      const loopNodes = countLoopNodes(result);
+      const connections = loopNodes
+        .map((n: any) => n.inputs?.parameters?.find((p: any) => p.name === "connection")?.value)
+        .sort();
+      expect(connections).toEqual(["kafka-a:9092", "kafka-b:9092"]);
+      reportContractResult(spec, result);
+    });
+  });
+
+  describe("Builder - withParam over nested objects without casts", () => {
+    const builderVariant: BuilderVariant = {
+      name: "withParam nested objects no-cast",
+      code: "TODO: find the cast-free pattern for passing c.item to typed inputs and accessing nested fields",
+    };
+
+    test.skip("builder: pass c.item to typed input and access nested fields without cast", async () => {
+      // This test documents the GOAL: no expr.cast() needed.
+      // Currently fullMigration uses expr.cast(c.item).to<Serialized<T>>() as a workaround.
+      // The ideal would be:
+      //   proxyConfig: c.item  (directly, type-safe)
+      //   kafkaConnection: expr.get(expr.get(c.item, "kafkaConfig"), "connection")
+      //
+      // Blocked by: c.item is typed as T but withParam delivers it as a parsed object,
+      // and the register() call expects Serialized<T> for complex object inputs.
+      // See: taskBuilder.ts ParamProviderCallbackObject item type.
+      reportParityResult(spec, builderVariant, { phase: "Skipped" } as any);
     });
   });
 });

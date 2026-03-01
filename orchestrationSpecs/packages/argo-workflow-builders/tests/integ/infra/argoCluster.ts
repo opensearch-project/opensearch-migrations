@@ -160,9 +160,22 @@ export function getKubeConfig(): string {
 }
 
 export function getTestNamespace(): string {
+  if (fs.existsSync(META_PATH)) {
+    return JSON.parse(fs.readFileSync(META_PATH, "utf-8")).namespace ?? TEST_NAMESPACE;
+  }
   return TEST_NAMESPACE;
 }
 
 export function getArgoNamespace(): string {
+  if (fs.existsSync(META_PATH)) {
+    return JSON.parse(fs.readFileSync(META_PATH, "utf-8")).argoNamespace ?? ARGO_NAMESPACE;
+  }
   return ARGO_NAMESPACE;
+}
+
+export function getServiceAccountName(): string {
+  if (fs.existsSync(META_PATH)) {
+    return JSON.parse(fs.readFileSync(META_PATH, "utf-8")).serviceAccountName ?? "test-runner";
+  }
+  return "test-runner";
 }

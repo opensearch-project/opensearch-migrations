@@ -1,0 +1,303 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "migration-console"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "getconsoleconfig",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "backfillSession",
+              "description": "The metadata about the deployment performing the RFS backfill",
+              "value": ""
+            },
+            {
+              "name": "kafkaInfo",
+              "description": "Snapshot configuration information (JSON)",
+              "value": ""
+            },
+            {
+              "name": "sourceConfig",
+              "description": "Source cluster configuration (JSON)",
+              "value": ""
+            },
+            {
+              "name": "snapshotConfig",
+              "description": "Snapshot configuration information (JSON)",
+              "value": ""
+            },
+            {
+              "name": "targetConfig",
+              "description": "Target cluster configuration (JSON)",
+              "value": ""
+            }
+          ]
+        },
+        "steps": [
+          []
+        ],
+        "outputs": {
+          "parameters": [
+            {
+              "name": "configContents",
+              "valueFrom": {
+                "expression": "toJSON(sprig.merge(sprig.merge(sprig.merge(((0 == len(inputs.parameters.kafkaInfo)) ? ({}) : (sprig.dict(\"kafka\", fromJSON(inputs.parameters.kafkaInfo)))), ((0 == len(inputs.parameters.sourceConfig)) ? ({}) : (sprig.dict(\"source_cluster\", fromJSON(inputs.parameters.sourceConfig))))), sprig.merge(((0 == len(inputs.parameters.targetConfig)) ? ({}) : (sprig.dict(\"target_cluster\", fromJSON(inputs.parameters.targetConfig)))), ((0 == len(inputs.parameters.snapshotConfig)) ? ({}) : (sprig.dict(\"snapshot\", fromJSON(inputs.parameters.snapshotConfig)))))), ((0 == len(inputs.parameters.backfillSession)) ? ({}) : (sprig.dict(\"backfill\", sprig.dict(\"reindex_from_snapshot\", sprig.dict(\"k8s\", sprig.dict(\"namespace\", \"{{workflow.namespace}}\", \"deployment_name\", fromJSON(inputs.parameters.backfillSession)['deploymentName']), \"backfill_session_name\", fromJSON(inputs.parameters.backfillSession)['sessionName'])))))))"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "runmigrationcommandforstatus",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "command"
+            },
+            {
+              "name": "configContents"
+            },
+            {
+              "name": "sourceK8sLabel",
+              "value": ""
+            },
+            {
+              "name": "targetK8sLabel",
+              "value": ""
+            },
+            {
+              "name": "snapshotK8sLabel",
+              "value": ""
+            },
+            {
+              "name": "fromSnapshotMigrationK8sLabel",
+              "value": ""
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": ""
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "container": {
+          "env": [
+            {
+              "name": "SOURCE_USERNAME",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('source_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents)))) ? ('empty') : (sprig.dig('source_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents))))}}",
+                  "key": "username",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "SOURCE_PASSWORD",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('source_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents)))) ? ('empty') : (sprig.dig('source_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents))))}}",
+                  "key": "password",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "TARGET_USERNAME",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('target_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents)))) ? ('empty') : (sprig.dig('target_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents))))}}",
+                  "key": "username",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "TARGET_PASSWORD",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('target_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents)))) ? ('empty') : (sprig.dig('target_cluster', 'authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.configContents))))}}",
+                  "key": "password",
+                  "optional": true
+                }
+              }
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "command": [
+            "/bin/sh",
+            "-c"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "1800Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "1800Mi"
+            }
+          },
+          "args": [
+            "\nset -e -x\n\n# Save pod name to output path\necho $HOSTNAME > /tmp/podname\n\necho File contents...\n \nbase64 -d > /config/migration_services.yaml_ << EOF\n{{=toBase64(inputs.parameters.configContents)}}\nEOF\n\ncat /config/migration_services.yaml_ |\njq -f workflowConfigToServicesConfig.jq > /config/migration_services.yaml\n\n. /etc/profile.d/venv.sh\nsource /.venv/bin/activate\n\necho file dump\necho ---\nexport MIGRATION_USE_SERVICES_YAML_CONFIG=true\ncat /config/migration_services.yaml\necho ---\n\n{{inputs.parameters.command}}\n"
+          ]
+        },
+        "metadata": {
+          "labels": {
+            "migrations.opensearch.org/source": "{{inputs.parameters.sourceK8sLabel}}",
+            "migrations.opensearch.org/target": "{{inputs.parameters.targetK8sLabel}}",
+            "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
+            "migrations.opensearch.org/from-snapshot-migration": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}",
+            "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}"
+          }
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "statusOutput",
+              "valueFrom": {
+                "path": "/tmp/status-output.txt"
+              }
+            },
+            {
+              "name": "overriddenPhase",
+              "valueFrom": {
+                "path": "/tmp/phase-output.txt"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "runconsole",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "command"
+            },
+            {
+              "name": "backfillSession",
+              "description": "The metadata about the deployment performing the RFS backfill",
+              "value": ""
+            },
+            {
+              "name": "kafkaInfo",
+              "description": "Snapshot configuration information (JSON)",
+              "value": ""
+            },
+            {
+              "name": "sourceConfig",
+              "description": "Source cluster configuration (JSON)",
+              "value": ""
+            },
+            {
+              "name": "snapshotConfig",
+              "description": "Snapshot configuration information (JSON)",
+              "value": ""
+            },
+            {
+              "name": "targetConfig",
+              "description": "Target cluster configuration (JSON)",
+              "value": ""
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "getconsoleconfig",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "backfillSession",
+                    "value": "{{inputs.parameters.backfillSession}}"
+                  },
+                  {
+                    "name": "kafkaInfo",
+                    "value": "{{inputs.parameters.kafkaInfo}}"
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}"
+                  }
+                ]
+              },
+              "name": "getConsoleConfig"
+            }
+          ],
+          [
+            {
+              "template": "runmigrationcommandforstatus",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "command",
+                    "value": "{{inputs.parameters.command}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "configContents",
+                    "value": "{{steps.getConsoleConfig.outputs.parameters.configContents}}"
+                  }
+                ]
+              },
+              "name": "runConsoleWithConfig"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      }
+    ]
+  }
+}
