@@ -35,7 +35,7 @@ jobs:
         uses: lewijacn/jenkins-trigger@1.0.4
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
-          job_name: "full-es68source-e2e-test"
+          job_name: ${{ github.event_name == 'push' && 'main-full-es68source-e2e-test' || 'pr-full-es68source-e2e-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }}"
 
@@ -48,7 +48,7 @@ jobs:
         uses: lewijacn/jenkins-trigger@1.0.4
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
-          job_name: "elasticsearch-5x-k8s-local-test"
+          job_name: ${{ github.event_name == 'push' && 'main-elasticsearch-5x-k8s-local-test' || 'pr-elasticsearch-5x-k8s-local-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }}"
 
@@ -66,7 +66,7 @@ jobs:
         uses: lewijacn/jenkins-trigger@1.0.4
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
-          job_name: "eks-integ-test"
+          job_name: ${{ github.event_name == 'push' && 'main-eks-integ-test' || 'pr-eks-integ-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }}"
           job_timeout_minutes: "120"
