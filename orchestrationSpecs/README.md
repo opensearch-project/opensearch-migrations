@@ -125,7 +125,7 @@ npm run -w packages/config-processor bundle && \
 npm run make-templates -- --outputDirectory ${PWD}/k8sResources && \
 for file in k8sResources/*.yaml; do kc delete -f "$file" --ignore-not-found=true; done && \
 kubectl create -f k8sResources && \ 
-kubectl delete migration-workflow ; \
+kubectl delete workflow migration-workflow ; \
 ./packages/config-processor/bundled/createMigrationWorkflowFromUserConfiguration.sh ./packages/config-processor/scripts/sampleMigration.wf.yaml
 ```
 
