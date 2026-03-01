@@ -1,5 +1,16 @@
 def call(Map config = [:]) {
-    def childJobName = config.childJobName ?: "k8s-local-integ-test"
+    def jobName = config.jobName ?: "k8s-matrix-test"
+    def defaultChildJobName = "k8s-local-integ-test"
+    if (jobName.startsWith("main-")) {
+        defaultChildJobName = "Periodic runs from MAIN/main-k8s-local-integ-test"
+    } else if (jobName.startsWith("pr-")) {
+        defaultChildJobName = "Run on PRs/pr-k8s-local-integ-test"
+    }
+    def childJobName = config.childJobName ?: defaultChildJobName
+    // Default behavior: keep periodic cadence for non-PR jobs, disable for pr-* jobs.
+    def enablePeriodicSchedule = config.containsKey('enablePeriodicSchedule') ?
+            config.enablePeriodicSchedule :
+            !jobName.startsWith("pr-")
 
     def allSourceVersions = ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10']
     def allTargetVersions = ['OS_1.3', 'OS_2.19', 'OS_3.1']
@@ -29,8 +40,21 @@ def call(Map config = [:]) {
         }
 
         triggers {
-            // Trigger once per day at a hashed minute around 10 PM
-            cron('H 22 * * *')
+            GenericTrigger(
+                    genericVariables: [
+                            [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
+                            [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
+                            [key: 'job_name', value: '$.job_name']
+                    ],
+                    tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
+                    causeString: 'Triggered by PR on opensearch-migrations repository',
+                    regexpFilterExpression: "^$jobName\$",
+                    regexpFilterText: "\$job_name",
+            )
+            if (enablePeriodicSchedule) {
+                // Trigger once per day at a hashed minute around 10 PM
+                cron('H 22 * * *')
+            }
         }
 
         stages {

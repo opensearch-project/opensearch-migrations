@@ -61,21 +61,29 @@ functionName(jobName: jobNameOverride ?: null)
 ```
 
 **Special case for matrix tests:**
+- Use `JOB_NAME_OVERRIDE` for matrix parent webhook routing
 - Use `CHILD_JOB_NAME_OVERRIDE` parameter
 - Pass as `childJobName` to the vars function
+- Default child job path follows parent job name:
+  - `main-*` parent defaults to `Periodic runs from MAIN/main-k8s-local-integ-test`
+  - `pr-*` parent defaults to `Run on PRs/pr-k8s-local-integ-test`
+- Periodic schedule is enabled by default for non-`pr-*` job names and disabled for `pr-*` job names
 
 ### Supported Cover Files
 
 | Cover File | Vars Function | Override Parameter |
 |------------|---------------|-------------------|
+| eksCreateVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
 | eksBYOSIntegTestCover.groovy | eksBYOSIntegPipeline | JOB_NAME_OVERRIDE |
+| eksImportVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
 | eksIntegTestCover.groovy | eksIntegPipeline | JOB_NAME_OVERRIDE |
 | elasticsearch5xK8sLocalTestCover.groovy | elasticsearch5xK8sLocalTest | JOB_NAME_OVERRIDE |
 | elasticsearch8xK8sLocalTestCover.groovy | elasticsearch8xK8sLocalTest | JOB_NAME_OVERRIDE |
 | fullES68SourceE2ETestCover.groovy | fullES68SourceE2ETest | JOB_NAME_OVERRIDE |
 | k8sLocalIntegTestCover.groovy | k8sLocalDeployment | JOB_NAME_OVERRIDE |
-| k8sMatrixTestCover.groovy | k8sMatrixTest | CHILD_JOB_NAME_OVERRIDE |
+| k8sMatrixTestCover.groovy | k8sMatrixTest | JOB_NAME_OVERRIDE + CHILD_JOB_NAME_OVERRIDE |
 | rfsDefaultE2ETestCover.groovy | rfsDefaultE2ETest | JOB_NAME_OVERRIDE |
+| solutionsCFNTestCover.groovy | solutionsCFNTest | JOB_NAME_OVERRIDE |
 | trafficReplayDefaultE2ETestCover.groovy | trafficReplayDefaultE2ETest | JOB_NAME_OVERRIDE |
 
 ### GitHub Actions Integration
