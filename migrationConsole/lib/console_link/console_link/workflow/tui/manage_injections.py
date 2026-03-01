@@ -1,12 +1,10 @@
-import atexit
 import ijson
 import json
 import requests
-import subprocess
 import threading
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 from console_link.workflow.services.workflow_service import WorkflowApproveResult, logger, WorkflowService
 from console_link.workflow.tree_utils import clean_display_name
@@ -19,82 +17,44 @@ class WaiterInterface:
     reset: Callable[[], None]
 
     @classmethod
-    def default(cls, workflow_name: str, namespace: str) -> "WaiterInterface":
-        _running = threading.Event()
+    def default(cls, workflow_name: str, namespace: str,
+                argo_url: str, insecure: bool = False, token: str = None) -> "WaiterInterface":
+        _stop = threading.Event()
         _ready_signal = threading.Event()
-        _active_process: List[subprocess.Popen] = []
-        _lock = threading.Lock()  # The gatekeeper for process management
 
-        def cleanup_subprocess():
-            """Kill kubectl processes safely using the lock."""
-            with _lock:
-                for p in _active_process:
-                    if p.poll() is None:
-                        try:
-                            logger.info(f"Terminating kubectl process: {p.pid}...")
-                            p.terminate()
-                            p.wait(timeout=0.2)
-                        except Exception:
-                            p.kill()
-                _active_process.clear()
+        def _poll_argo_api():
+            """Poll Argo REST API to detect workflow creation."""
+            headers = {"Authorization": f"Bearer {token}"} if token else {}
+            url = f"{argo_url}/api/v1/workflows/{namespace}/{workflow_name}"
 
-        atexit.register(cleanup_subprocess)
-
-        def run_kubectl_wait_loop():
-            while _running.is_set():
-                cmd = [
-                    "kubectl", "wait", f"workflow/{workflow_name}",
-                    "--for=create", "-n", namespace, "--timeout=300s"
-                ]
-
-                proc: Optional[subprocess.Popen] = None
-
-                # Ensure we don't start a process if cleanup is happening (or about to)
-                with _lock:  # CRITICAL SECTION:
-                    if not _running.is_set():
-                        logger.debug("Spawn aborted: waiter is stopping.")
-                        return
-
-                    try:
-                        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        logger.info(f"Tracking process {proc.pid} as kubectl wait...")
-                        _active_process.append(proc)
-                    except Exception as e:
-                        logger.error(f"Failed to spawn kubectl: {e}")
-                        _running.clear()
-                        return
-
+            while not _stop.is_set():
                 try:
-                    exit_code = proc.wait()
-
-                    with _lock:
-                        if proc in _active_process:
-                            _active_process.remove(proc)
-
-                    if exit_code == 0:
-                        logger.info(f"Kubectl wait {proc.pid} succeeded.")
-                        _running.clear()
+                    resp = requests.get(url, headers=headers, verify=not insecure, timeout=10)
+                    if resp.status_code == 200:
+                        logger.info(f"Workflow {workflow_name} found via Argo API.")
                         _ready_signal.set()
                         return
+                except Exception as e:
+                    logger.debug(f"Argo API poll error: {e}")
 
-                except Exception:
-                    logger.exception("Caught exception while waiting for kubectl process")
-                    # Use event.wait for a interruptible sleep
-                    if not _running.wait(timeout=2):
-                        break
+                # Interruptible sleep — returns early if _stop is set
+                _stop.wait(timeout=2)
 
         def trigger():
-            with _lock:
-                if not _running.is_set():
-                    logger.debug("Starting background wait thread.")
-                    _ready_signal.clear()
-                    _running.set()
-                    threading.Thread(target=run_kubectl_wait_loop, daemon=True, name="run_kubectl_wait_loop").start()
+            if not _ready_signal.is_set():
+                logger.debug("Starting background wait thread.")
+                _stop.clear()
+                _ready_signal.clear()
+                threading.Thread(target=_poll_argo_api, daemon=True, name="argo_api_poll").start()
+
+        def reset():
+            _stop.set()
+            _ready_signal.clear()
 
         return cls(
             trigger=trigger,
             checker=lambda: _ready_signal.is_set(),
-            reset=lambda: _ready_signal.clear()
+            reset=reset
         )
 
 
@@ -105,46 +65,58 @@ class ArgoWorkflowInterface:
     approve_step: Callable[[str, str, dict], WorkflowApproveResult]
 
 
+def _build_slim_node(node_id: str, node: dict) -> dict:
+    """Extract only the fields needed for tree rendering from a workflow node."""
+    return {
+        "id": node_id,
+        "displayName": clean_display_name(node.get("displayName") or node_id),
+        "phase": node.get("phase"),
+        "type": node.get("type"),
+        "boundaryID": node.get("boundaryID"),
+        "children": node.get("children", []),
+        "startedAt": node.get("startedAt"),
+        "finishedAt": node.get("finishedAt"),
+        "inputs": {"parameters": [p for p in node.get("inputs", {}).get("parameters", []) if
+                                  p['name'] in ('groupName', 'configContents', 'name')]},
+        "outputs": {"parameters": [p for p in node.get("outputs", {}).get("parameters", []) if
+                                   p['name'] in ('statusOutput', 'overriddenPhase')]}
+    }
+
+
 def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflowInterface:
     def _get_workflow_data_internal(service, name, namespace) -> tuple[str, dict]:
         res = service.get_workflow_status(name, namespace, argo_url, token, insecure)
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         url = f"{argo_url}/api/v1/workflows/{namespace}/{name}"
 
-        resp = requests.get(url, headers=headers, verify=not insecure, stream=True)
-        if resp.status_code != 200:
-            raise requests.HTTPError(f"Request failed with status {resp.status_code}")
+        resp = requests.get(url, headers=headers, verify=not insecure, stream=True, timeout=30)
 
         slim_nodes = {}
-        try:
-            parser = ijson.kvitems(resp.raw, 'status.nodes')
-            for node_id, node in parser:
-                # Only keep what is actually rendered in tree_utils
-                slim_nodes[node_id] = {
-                    "id": node_id,
-                    "displayName": clean_display_name(node.get("displayName") or node_id),
-                    # no reason to keep the massive version
-                    "phase": node.get("phase"),
-                    "type": node.get("type"),
-                    "boundaryID": node.get("boundaryID"),
-                    "children": node.get("children", []),
-                    "startedAt": node.get("startedAt"),
-                    "finishedAt": node.get("finishedAt"),
-                    # Only keep inputs/outputs if they contain specific UI keys
-                    "inputs": {"parameters": [p for p in node.get("inputs", {}).get("parameters", []) if
-                                              p['name'] in ('groupName', 'configContents', 'name')]},
-                    "outputs": {"parameters": [p for p in node.get("outputs", {}).get("parameters", []) if
-                                               p['name'] in ('statusOutput', 'overriddenPhase')]}
-                }
-        except Exception as e:
-            logger.error(f"Streaming parse failed: {e}")
-            raise
-        finally:
+        resource_version = None
+        if resp.status_code == 200:
+            try:
+                parser = ijson.kvitems(resp.raw, 'status.nodes')
+                for node_id, node in parser:
+                    slim_nodes[node_id] = _build_slim_node(node_id, node)
+            except Exception as e:
+                logger.error(f"Streaming parse failed: {e}")
+                raise
+            finally:
+                resp.close()
+        else:
             resp.close()
+            # Fall back to archive API
+            archived = service.fetch_archived_workflow(name, namespace, argo_url, token, insecure)
+            if archived:
+                resource_version = archived.get("metadata", {}).get("resourceVersion")
+                for node_id, node in archived.get("status", {}).get("nodes", {}).items():
+                    slim_nodes[node_id] = _build_slim_node(node_id, node)
+            else:
+                raise Exception(f"Workflow {name} not found in live or archive API")
 
         slim_data = {
             "metadata": {"name": name,
-                         "resourceVersion": res.get('workflow', {}).get('metadata', {}).get('resourceVersion')},
+                         "resourceVersion": resource_version},
             "status": {
                 "nodes": slim_nodes,
                 "startedAt": res.get('started_at')

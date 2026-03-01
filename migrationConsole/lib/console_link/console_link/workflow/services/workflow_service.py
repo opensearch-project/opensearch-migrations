@@ -9,7 +9,6 @@ import time
 from typing import Dict, Any, Optional, Tuple, TypedDict, List
 
 import requests
-from kubernetes import client
 
 
 logger = logging.getLogger(__name__)
@@ -162,7 +161,8 @@ class WorkflowService:
                 url,
                 json=request_body,
                 headers=headers,
-                verify=not insecure
+                verify=not insecure,
+                timeout=30
             )
 
             response.raise_for_status()
@@ -248,7 +248,7 @@ class WorkflowService:
             logger.info(f"Listing workflows in namespace {namespace} (exclude_completed={exclude_completed})")
             logger.debug(f"List request URL: {url}")
 
-            response = requests.get(url, headers=headers, verify=not insecure)
+            response = requests.get(url, headers=headers, verify=not insecure, timeout=30)
 
             if response.status_code == 200:
                 result = response.json()
@@ -292,6 +292,50 @@ class WorkflowService:
                 error=str(e)
             )
 
+    def fetch_archived_workflow(
+        self,
+        workflow_name: str,
+        namespace: str,
+        argo_server: str,
+        token: Optional[str] = None,
+        insecure: bool = False
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch a workflow from the Argo archive by name and namespace.
+
+        Args:
+            workflow_name: Name of the workflow
+            namespace: Kubernetes namespace
+            argo_server: Argo Server URL
+            token: Optional bearer token
+            insecure: Whether to skip TLS verification
+
+        Returns:
+            Workflow data dict if found in archive, None otherwise
+        """
+        headers = self._prepare_headers(token)
+        url = f"{argo_server}/api/v1/archived-workflows"
+        params = {
+            "listOptions.fieldSelector": f"metadata.namespace={namespace},metadata.name={workflow_name}"
+        }
+        for attempt in range(3):
+            try:
+                response = requests.get(url, headers=headers, params=params,
+                                        verify=not insecure, timeout=30)
+                if response.status_code == 200:
+                    items = response.json().get("items") or []
+                    if items:
+                        logger.info(f"Found workflow {workflow_name} in archive")
+                        return items[0]
+                break  # Non-retryable status
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                logger.debug(f"Archive lookup attempt {attempt + 1} failed for {workflow_name}: {e}")
+                if attempt < 2:
+                    time.sleep(1)
+            except Exception as e:
+                logger.debug(f"Archive lookup failed for {workflow_name}: {e}")
+                break
+        return None
+
     def get_workflow_status(
         self,
         workflow_name: str,
@@ -319,14 +363,18 @@ class WorkflowService:
             logger.info(f"Getting status for workflow {workflow_name}")
             logger.debug(f"Request URL: {url}")
 
-            response = requests.get(url, headers=headers, verify=not insecure)
+            response = requests.get(url, headers=headers, verify=not insecure, timeout=30)
 
             if response.status_code != 200:
-                error_msg = self._format_error_message("get workflow status", response)
-                logger.error(error_msg)
-                return self._create_error_status_result(workflow_name, namespace, error_msg)
-
-            workflow = response.json()
+                # Try archive fallback before giving up
+                workflow = self.fetch_archived_workflow(
+                    workflow_name, namespace, argo_server, token, insecure)
+                if not workflow:
+                    error_msg = self._format_error_message("get workflow status", response)
+                    logger.error(error_msg)
+                    return self._create_error_status_result(workflow_name, namespace, error_msg)
+            else:
+                workflow = response.json()
             status = workflow.get("status", {})
 
             phase = status.get("phase", "Unknown")
@@ -392,7 +440,8 @@ class WorkflowService:
             response = requests.put(
                 url,
                 headers=headers,
-                verify=not insecure
+                verify=not insecure,
+                timeout=30
             )
 
             # Handle response
@@ -498,7 +547,8 @@ class WorkflowService:
                 url,
                 headers=headers,
                 json=body if body else None,
-                verify=not insecure
+                verify=not insecure,
+                timeout=30
             )
 
             # Handle response
@@ -802,6 +852,9 @@ class WorkflowService:
         self,
         namespace: str,
         workflow_name: str,
+        argo_server: str,
+        token: Optional[str] = None,
+        insecure: bool = False,
         timeout: int = 120,
         interval: int = 2
     ) -> Tuple[str, Optional[str]]:
@@ -810,6 +863,9 @@ class WorkflowService:
         Args:
             namespace: Kubernetes namespace
             workflow_name: Name of workflow to monitor
+            argo_server: Argo Server URL
+            token: Optional bearer token for authentication
+            insecure: Whether to skip TLS verification
             timeout: Maximum seconds to wait
             interval: Seconds between status checks
 
@@ -820,19 +876,16 @@ class WorkflowService:
             TimeoutError: If timeout is exceeded
         """
         start_time = time.time()
-        custom_api = client.CustomObjectsApi()
+        headers = self._prepare_headers(token)
+        url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
 
         while time.time() - start_time < timeout:
             try:
-                # Get workflow status
-                workflow = custom_api.get_namespaced_custom_object(
-                    group="argoproj.io",
-                    version="v1alpha1",
-                    namespace=namespace,
-                    plural="workflows",
-                    name=workflow_name
-                )
+                response = requests.get(url, headers=headers, verify=not insecure, timeout=30)
+                if response.status_code != 200:
+                    raise Exception(f"Argo API returned {response.status_code}: {response.text}")
 
+                workflow = response.json()
                 phase = workflow.get("status", {}).get("phase", "Unknown")
                 elapsed = int(time.time() - start_time)
 

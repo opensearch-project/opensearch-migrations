@@ -95,7 +95,7 @@ def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token):
         app = WorkflowTreeApp(namespace, workflow_name,
                               make_argo_service(argo_server, insecure, token),
                               make_k8s_pod_scraper(_initialize_k8s_client(ctx)),
-                              WaiterInterface.default(workflow_name, namespace),
+                              WaiterInterface.default(workflow_name, namespace, argo_server, insecure, token),
                               3.0)
         app.run()
     except Exception as e:

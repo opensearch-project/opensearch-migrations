@@ -18,6 +18,7 @@ argo-workflows|0.47.1|https://argoproj.github.io/argo-helm
 fluent-bit|0.49.0|https://fluent.github.io/helm-charts
 kube-prometheus-stack|72.0.0|https://prometheus-community.github.io/helm-charts
 etcd-operator|0.4.2|oci://ghcr.io/aenix-io/charts
+cloudnative-pg|0.27.1|https://cloudnative-pg.github.io/charts
 opentelemetry-operator|0.86.4|https://open-telemetry.github.io/opentelemetry-helm-charts
 localstack|0.6.23|https://localstack.github.io/helm-charts
 grafana|8.15.0|https://grafana.github.io/helm-charts
@@ -66,6 +67,10 @@ quay.io/thanos/thanos:v0.38.0
 ghcr.io/aenix-io/etcd-operator:v0.4.2
 gcr.io/kubebuilder/kube-rbac-proxy:v0.16.0
 quay.io/coreos/etcd:v3.5.12
+
+# --- cloudnative-pg operator + PostgreSQL runtime ---
+ghcr.io/cloudnative-pg/cloudnative-pg:1.26.0
+ghcr.io/cloudnative-pg/postgresql:17.2
 
 # --- otel collector ---
 public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3

@@ -7,6 +7,7 @@ conditionalPackageInstalls:
   argo-workflows: true          # orchestrates the steps of a migration
   strimzi-kafka-operator: true  # Required by capture and replay
   fluent-bit: true
+  cloudnative-pg: true          # PostgreSQL operator for Argo archive
 
   # Simpler alternative to the opentelemetry-operator.
   # ONLY set up the otel-collector and require manual instrumentation
@@ -33,6 +34,25 @@ etcdCluster:
   storageClass: ""  # Use default storage class
   cpu: 100m
   memory: 256Mi
+
+# CNPG PostgreSQL cluster configuration (for Argo archive)
+cnpgCluster:
+  instances: 1
+  database: "argo"
+  owner: "argo"
+  storageSize: "1Gi"
+  storageClass: ""  # Use default storage class
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "100m"
+      memory: "256Mi"
+  primaryUpdateStrategy: "unsupervised"
+  primaryUpdateMethod: "switchover"
+  podAntiAffinityType: "preferred"        # Soft anti-affinity for dev-local
+  topologyKey: "kubernetes.io/hostname"
 
 # Kyverno policy toggles (requires conditionalPackageInstalls.kyverno: true)
 kyvernoPolicies:
@@ -230,6 +250,13 @@ charts:
       crds:
         enabled: true
 
+  # CloudNativePG operator - manages PostgreSQL clusters for Argo archive
+  cloudnative-pg:
+    version: "0.27.1"
+    repository: "https://cloudnative-pg.github.io/charts"
+    dependsOn: cert-manager
+    waitForInstallation: true
+
   opentelemetry-operator:
     version: "0.86.4"
     repository: "https://open-telemetry.github.io/opentelemetry-helm-charts"
@@ -304,8 +331,7 @@ charts:
         pullPolicy: IfNotPresent
       controller:
         pdb:
-          enabled: true
-          minAvailable: 1  # Ensures at least 1 pod always running
+          enabled: false
         containerSecurityContext:
           runAsNonRoot: true
           allowPrivilegeEscalation: false
@@ -315,17 +341,33 @@ charts:
           enabled: true
         resourceRateLimit: { "limit": 10.0, "burst": 25 }
         workflowWorkers: 16
+        # GC completed workflows from K8s after brief delay for archiving.
+        # Requires cloudnative-pg to be enabled — automatically stripped when CNPG is disabled.
+        workflowDefaults:
+          spec:
+            ttlStrategy:
+              secondsAfterCompletion: 10
+        # Archive to CNPG-managed PostgreSQL. Automatically stripped when cloudnative-pg is disabled.
+        persistence:
+          connectionPool:
+            maxIdleConns: 100
+            maxOpenConns: 0
+          nodeStatusOffLoad: true
+          archive: true
+          archiveTTL: "180d"
+          postgresql:
+            host: argo-postgres-rw
+            port: 5432
+            database: argo
+            tableName: argo_workflows
+            userNameSecret:
+              name: argo-postgres-app
+              key: username
+            passwordSecret:
+              name: argo-postgres-app
+              key: password
 
-        replicas: 2
-        affinity:
-          podAntiAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-              - weight: 100
-                podAffinityTerm:
-                  labelSelector:
-                    matchLabels:
-                      app.kubernetes.io/name: argo-workflows-controller
-                  topologyKey: kubernetes.io/hostname
+        replicas: 1
       mainContainer:
         env:
           - name: RESOURCE_STATE_CHECK_INTERVAL
@@ -335,21 +377,11 @@ charts:
           - name: RESOURCE_STATE_CHECK_INTERVAL
             value: "1s"
       server:
-        replicas: 2
+        replicas: 1
         pdb:
-          enabled: true
-          minAvailable: 1  # Ensures at least 1 pod always running
+          enabled: false
         livenessProbe:
           enabled: true
-        affinity:
-          podAntiAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-              - weight: 100
-                podAffinityTerm:
-                  labelSelector:
-                    matchLabels:
-                      app.kubernetes.io/name: argo-workflows-server
-                  topologyKey: kubernetes.io/hostname
         extraArgs:
           - --auth-mode=server
       serviceAccount:

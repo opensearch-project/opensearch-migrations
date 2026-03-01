@@ -125,39 +125,44 @@ class TestWorkflowServiceSubmission:
 class TestWorkflowServiceMonitoring:
     """Test suite for workflow monitoring functionality."""
 
-    @patch('console_link.workflow.services.workflow_service.client.CustomObjectsApi')
-    def test_wait_for_workflow_completion_success(self, mock_api_class):
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_wait_for_workflow_completion_success(self, mock_get):
         """Test successful workflow completion monitoring."""
         service = WorkflowService()
 
-        # Mock Kubernetes API
-        mock_api = Mock()
-        mock_api_class.return_value = mock_api
+        call_count = [0]
 
-        # First call: workflow running, second call: workflow succeeded
-        mock_api.get_namespaced_custom_object.side_effect = [
-            {
-                'status': {'phase': 'Running', 'nodes': {}}
-            },
-            {
-                'status': {
-                    'phase': 'Succeeded',
-                    'nodes': {
-                        'node-1': {
-                            'outputs': {
-                                'parameters': [
-                                    {'name': 'message', 'value': 'Hello World'}
-                                ]
+        def mock_get_fn(*args, **kwargs):
+            call_count[0] += 1
+            resp = Mock()
+            resp.status_code = 200
+            if call_count[0] == 1:
+                resp.json.return_value = {
+                    'status': {'phase': 'Running', 'nodes': {}}
+                }
+            else:
+                resp.json.return_value = {
+                    'status': {
+                        'phase': 'Succeeded',
+                        'nodes': {
+                            'node-1': {
+                                'outputs': {
+                                    'parameters': [
+                                        {'name': 'message', 'value': 'Hello World'}
+                                    ]
+                                }
                             }
                         }
                     }
                 }
-            }
-        ]
+            return resp
+
+        mock_get.side_effect = mock_get_fn
 
         phase, output = service.wait_for_workflow_completion(
             namespace='argo',
             workflow_name='test-workflow',
+            argo_server='http://localhost:2746',
             timeout=10,
             interval=1
         )
@@ -165,44 +170,46 @@ class TestWorkflowServiceMonitoring:
         assert phase == 'Succeeded'
         assert output == 'Hello World'
 
-    @patch('console_link.workflow.services.workflow_service.client.CustomObjectsApi')
-    def test_wait_for_workflow_completion_timeout(self, mock_api_class):
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_wait_for_workflow_completion_timeout(self, mock_get):
         """Test workflow monitoring timeout."""
         service = WorkflowService()
 
-        mock_api = Mock()
-        mock_api_class.return_value = mock_api
-
         # Always return running status
-        mock_api.get_namespaced_custom_object.return_value = {
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
             'status': {'phase': 'Running', 'nodes': {}}
         }
+        mock_get.return_value = mock_response
 
         with pytest.raises(TimeoutError) as exc_info:
             service.wait_for_workflow_completion(
                 namespace='argo',
                 workflow_name='test-workflow',
+                argo_server='http://localhost:2746',
                 timeout=2,
                 interval=1
             )
 
         assert 'did not complete' in str(exc_info.value)
 
-    @patch('console_link.workflow.services.workflow_service.client.CustomObjectsApi')
-    def test_wait_for_workflow_completion_failed(self, mock_api_class):
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_wait_for_workflow_completion_failed(self, mock_get):
         """Test monitoring workflow that fails."""
         service = WorkflowService()
 
-        mock_api = Mock()
-        mock_api_class.return_value = mock_api
-
-        mock_api.get_namespaced_custom_object.return_value = {
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
             'status': {'phase': 'Failed', 'nodes': {}}
         }
+        mock_get.return_value = mock_response
 
         phase, output = service.wait_for_workflow_completion(
             namespace='argo',
             workflow_name='test-workflow',
+            argo_server='http://localhost:2746',
             timeout=10,
             interval=1
         )
@@ -210,21 +217,22 @@ class TestWorkflowServiceMonitoring:
         assert phase == 'Failed'
         assert output is None
 
-    @patch('console_link.workflow.services.workflow_service.client.CustomObjectsApi')
-    def test_wait_for_workflow_completion_no_output(self, mock_api_class):
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_wait_for_workflow_completion_no_output(self, mock_get):
         """Test monitoring workflow that completes without output."""
         service = WorkflowService()
 
-        mock_api = Mock()
-        mock_api_class.return_value = mock_api
-
-        mock_api.get_namespaced_custom_object.return_value = {
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
             'status': {'phase': 'Succeeded', 'nodes': {}}
         }
+        mock_get.return_value = mock_response
 
         phase, output = service.wait_for_workflow_completion(
             namespace='argo',
             workflow_name='test-workflow',
+            argo_server='http://localhost:2746',
             timeout=10,
             interval=1
         )
@@ -232,25 +240,26 @@ class TestWorkflowServiceMonitoring:
         assert phase == 'Succeeded'
         assert output is None
 
-    @patch('console_link.workflow.services.workflow_service.client.CustomObjectsApi')
-    def test_wait_for_workflow_completion_api_error(self, mock_api_class):
-        """Test handling of Kubernetes API errors during monitoring."""
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_wait_for_workflow_completion_api_error(self, mock_get):
+        """Test handling of Argo API errors during monitoring."""
         service = WorkflowService()
 
-        mock_api = Mock()
-        mock_api_class.return_value = mock_api
-
-        mock_api.get_namespaced_custom_object.side_effect = Exception("API Error")
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+        mock_get.return_value = mock_response
 
         with pytest.raises(Exception) as exc_info:
             service.wait_for_workflow_completion(
                 namespace='argo',
                 workflow_name='test-workflow',
+                argo_server='http://localhost:2746',
                 timeout=10,
                 interval=1
             )
 
-        assert 'API Error' in str(exc_info.value)
+        assert '500' in str(exc_info.value)
 
 
 class TestWorkflowServiceStop:
@@ -1089,6 +1098,209 @@ class TestWorkflowServiceStatus:
         assert result['phase'] == 'Unknown'
         assert result['error'] is not None
         assert 'failed' in result['error'].lower() or '404' in result['error']
+
+
+class TestFetchArchivedWorkflow:
+    """Test suite for fetch_archived_workflow functionality."""
+
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_fetch_archived_workflow_success(self, mock_get):
+        """Test successful archive lookup returns first matching workflow."""
+        service = WorkflowService()
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'items': [{'metadata': {'name': 'test-wf'}, 'status': {'phase': 'Succeeded'}}]
+        }
+        mock_get.return_value = mock_response
+
+        result = service.fetch_archived_workflow(
+            'test-wf', 'argo', 'http://localhost:2746')
+
+        assert result is not None
+        assert result['metadata']['name'] == 'test-wf'
+        mock_get.assert_called_once()
+        call_args = mock_get.call_args
+        assert 'archived-workflows' in call_args[0][0]
+        assert 'metadata.name=test-wf' in call_args[1]['params']['listOptions.fieldSelector']
+
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_fetch_archived_workflow_empty_items(self, mock_get):
+        """Test archive lookup with no matching workflows returns None."""
+        service = WorkflowService()
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'items': []}
+        mock_get.return_value = mock_response
+
+        result = service.fetch_archived_workflow(
+            'missing-wf', 'argo', 'http://localhost:2746')
+
+        assert result is None
+
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_fetch_archived_workflow_null_items(self, mock_get):
+        """Test archive lookup with null items field returns None."""
+        service = WorkflowService()
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'items': None}
+        mock_get.return_value = mock_response
+
+        result = service.fetch_archived_workflow(
+            'missing-wf', 'argo', 'http://localhost:2746')
+
+        assert result is None
+
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_fetch_archived_workflow_non_200(self, mock_get):
+        """Test archive lookup with non-200 status returns None without retry."""
+        service = WorkflowService()
+
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_get.return_value = mock_response
+
+        result = service.fetch_archived_workflow(
+            'test-wf', 'argo', 'http://localhost:2746')
+
+        assert result is None
+        # Should only call once (no retry on non-200)
+        assert mock_get.call_count == 1
+
+    @patch('console_link.workflow.services.workflow_service.time.sleep')
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_fetch_archived_workflow_retries_on_connection_error(self, mock_get, mock_sleep):
+        """Test archive lookup retries on ConnectionError then succeeds."""
+        service = WorkflowService()
+        import requests as req
+
+        success_response = Mock()
+        success_response.status_code = 200
+        success_response.json.return_value = {
+            'items': [{'metadata': {'name': 'test-wf'}}]
+        }
+        mock_get.side_effect = [
+            req.exceptions.ConnectionError("Connection refused"),
+            success_response
+        ]
+
+        result = service.fetch_archived_workflow(
+            'test-wf', 'argo', 'http://localhost:2746')
+
+        assert result is not None
+        assert mock_get.call_count == 2
+        mock_sleep.assert_called_once_with(1)
+
+    @patch('console_link.workflow.services.workflow_service.time.sleep')
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_fetch_archived_workflow_retries_on_timeout(self, mock_get, mock_sleep):
+        """Test archive lookup retries on Timeout."""
+        service = WorkflowService()
+        import requests as req
+
+        mock_get.side_effect = [
+            req.exceptions.Timeout("Request timed out"),
+            req.exceptions.Timeout("Request timed out"),
+            req.exceptions.Timeout("Request timed out"),
+        ]
+
+        result = service.fetch_archived_workflow(
+            'test-wf', 'argo', 'http://localhost:2746')
+
+        assert result is None
+        assert mock_get.call_count == 3
+        assert mock_sleep.call_count == 2
+
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_fetch_archived_workflow_generic_exception_no_retry(self, mock_get):
+        """Test archive lookup breaks on generic exception without retry."""
+        service = WorkflowService()
+
+        mock_get.side_effect = ValueError("Unexpected error")
+
+        result = service.fetch_archived_workflow(
+            'test-wf', 'argo', 'http://localhost:2746')
+
+        assert result is None
+        assert mock_get.call_count == 1
+
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_fetch_archived_workflow_with_token(self, mock_get):
+        """Test archive lookup passes auth token."""
+        service = WorkflowService()
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'items': []}
+        mock_get.return_value = mock_response
+
+        service.fetch_archived_workflow(
+            'test-wf', 'argo', 'http://localhost:2746', token='my-token')
+
+        call_args = mock_get.call_args
+        assert call_args[1]['headers']['Authorization'] == 'Bearer my-token'
+
+
+class TestGetWorkflowStatusArchiveFallback:
+    """Test archive fallback in get_workflow_status."""
+
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_status_falls_back_to_archive_on_404(self, mock_get):
+        """Test that get_workflow_status falls back to archive when live API returns 404."""
+        service = WorkflowService()
+
+        live_response = Mock()
+        live_response.status_code = 404
+
+        archive_response = Mock()
+        archive_response.status_code = 200
+        archive_response.json.return_value = {
+            'items': [{
+                'status': {
+                    'phase': 'Succeeded',
+                    'progress': '3/3',
+                    'startedAt': '2024-01-01T10:00:00Z',
+                    'finishedAt': '2024-01-01T10:05:00Z',
+                    'nodes': {}
+                }
+            }]
+        }
+
+        mock_get.side_effect = [live_response, archive_response]
+
+        result = service.get_workflow_status(
+            workflow_name='archived-wf',
+            namespace='argo',
+            argo_server='http://localhost:2746'
+        )
+
+        assert result['success'] is True
+        assert result['phase'] == 'Succeeded'
+        assert mock_get.call_count == 2
+
+    @patch('console_link.workflow.services.workflow_service.requests.get')
+    def test_status_returns_error_when_both_fail(self, mock_get):
+        """Test that get_workflow_status returns error when live and archive both fail."""
+        service = WorkflowService()
+
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_response.text = 'Not Found'
+        mock_response.json.side_effect = ValueError("Not JSON")
+        mock_get.return_value = mock_response
+
+        result = service.get_workflow_status(
+            workflow_name='missing-wf',
+            namespace='argo',
+            argo_server='http://localhost:2746'
+        )
+
+        assert result['success'] is False
+        assert result['phase'] == 'Unknown'
 
 
 class TestWorkflowServiceApprove:
