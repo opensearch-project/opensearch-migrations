@@ -16,7 +16,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from ..models.utils import ExitCode
-from ..services.workflow_service import WorkflowService
+from ..services.workflow_service import WorkflowService, ENDING_PHASES
 from ..tree_utils import (
     build_nested_workflow_tree,
     filter_tree_nodes,
@@ -159,7 +159,7 @@ class WorkflowDataFetcher:
             return response.json()
 
         # Fall back to archive API
-        archived = self.service._fetch_archived_workflow(
+        archived = self.service.fetch_archived_workflow(
             workflow_name, namespace, argo_server, self.token, insecure)
         return archived or {}
 
@@ -181,7 +181,7 @@ class WorkflowDataFetcher:
                     if not name:
                         continue
                     phase = item.get("status", {}).get("phase", "Unknown")
-                    if exclude_completed and phase in ("Succeeded", "Failed", "Error", "Stopped", "Terminated"):
+                    if exclude_completed and phase in ENDING_PHASES:
                         continue
                     workflows.append(item)
                     seen_names.add(name)

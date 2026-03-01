@@ -161,7 +161,8 @@ class WorkflowService:
                 url,
                 json=request_body,
                 headers=headers,
-                verify=not insecure
+                verify=not insecure,
+                timeout=30
             )
 
             response.raise_for_status()
@@ -291,7 +292,7 @@ class WorkflowService:
                 error=str(e)
             )
 
-    def _fetch_archived_workflow(
+    def fetch_archived_workflow(
         self,
         workflow_name: str,
         namespace: str,
@@ -366,7 +367,7 @@ class WorkflowService:
 
             if response.status_code != 200:
                 # Try archive fallback before giving up
-                workflow = self._fetch_archived_workflow(
+                workflow = self.fetch_archived_workflow(
                     workflow_name, namespace, argo_server, token, insecure)
                 if not workflow:
                     error_msg = self._format_error_message("get workflow status", response)
@@ -439,7 +440,8 @@ class WorkflowService:
             response = requests.put(
                 url,
                 headers=headers,
-                verify=not insecure
+                verify=not insecure,
+                timeout=30
             )
 
             # Handle response
@@ -545,7 +547,8 @@ class WorkflowService:
                 url,
                 headers=headers,
                 json=body if body else None,
-                verify=not insecure
+                verify=not insecure,
+                timeout=30
             )
 
             # Handle response

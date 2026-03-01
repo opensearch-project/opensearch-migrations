@@ -19,7 +19,7 @@ class WaiterInterface:
     @classmethod
     def default(cls, workflow_name: str, namespace: str,
                 argo_url: str, insecure: bool = False, token: str = None) -> "WaiterInterface":
-        _running = threading.Event()
+        _stop = threading.Event()
         _ready_signal = threading.Event()
 
         def _poll_argo_api():
@@ -27,32 +27,34 @@ class WaiterInterface:
             headers = {"Authorization": f"Bearer {token}"} if token else {}
             url = f"{argo_url}/api/v1/workflows/{namespace}/{workflow_name}"
 
-            while _running.is_set():
+            while not _stop.is_set():
                 try:
                     resp = requests.get(url, headers=headers, verify=not insecure, timeout=10)
                     if resp.status_code == 200:
                         logger.info(f"Workflow {workflow_name} found via Argo API.")
-                        _running.clear()
                         _ready_signal.set()
                         return
                 except Exception as e:
                     logger.debug(f"Argo API poll error: {e}")
 
-                # Interruptible sleep
-                if not _running.wait(timeout=2):
-                    break
+                # Interruptible sleep — returns early if _stop is set
+                _stop.wait(timeout=2)
 
         def trigger():
-            if not _running.is_set():
+            if not _ready_signal.is_set():
                 logger.debug("Starting background wait thread.")
+                _stop.clear()
                 _ready_signal.clear()
-                _running.set()
                 threading.Thread(target=_poll_argo_api, daemon=True, name="argo_api_poll").start()
+
+        def reset():
+            _stop.set()
+            _ready_signal.clear()
 
         return cls(
             trigger=trigger,
             checker=lambda: _ready_signal.is_set(),
-            reset=lambda: _ready_signal.clear()
+            reset=reset
         )
 
 
@@ -90,6 +92,7 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
         resp = requests.get(url, headers=headers, verify=not insecure, stream=True, timeout=30)
 
         slim_nodes = {}
+        resource_version = None
         if resp.status_code == 200:
             try:
                 parser = ijson.kvitems(resp.raw, 'status.nodes')
@@ -103,16 +106,17 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
         else:
             resp.close()
             # Fall back to archive API
-            archived = service._fetch_archived_workflow(name, namespace, argo_url, token, insecure)
+            archived = service.fetch_archived_workflow(name, namespace, argo_url, token, insecure)
             if archived:
+                resource_version = archived.get("metadata", {}).get("resourceVersion")
                 for node_id, node in archived.get("status", {}).get("nodes", {}).items():
                     slim_nodes[node_id] = _build_slim_node(node_id, node)
             else:
-                raise requests.HTTPError(f"Workflow {name} not found in live or archive API")
+                raise Exception(f"Workflow {name} not found in live or archive API")
 
         slim_data = {
             "metadata": {"name": name,
-                         "resourceVersion": res.get('workflow', {}).get('metadata', {}).get('resourceVersion')},
+                         "resourceVersion": resource_version},
             "status": {
                 "nodes": slim_nodes,
                 "startedAt": res.get('started_at')

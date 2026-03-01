@@ -1101,7 +1101,7 @@ class TestWorkflowServiceStatus:
 
 
 class TestFetchArchivedWorkflow:
-    """Test suite for _fetch_archived_workflow functionality."""
+    """Test suite for fetch_archived_workflow functionality."""
 
     @patch('console_link.workflow.services.workflow_service.requests.get')
     def test_fetch_archived_workflow_success(self, mock_get):
@@ -1115,7 +1115,7 @@ class TestFetchArchivedWorkflow:
         }
         mock_get.return_value = mock_response
 
-        result = service._fetch_archived_workflow(
+        result = service.fetch_archived_workflow(
             'test-wf', 'argo', 'http://localhost:2746')
 
         assert result is not None
@@ -1135,7 +1135,7 @@ class TestFetchArchivedWorkflow:
         mock_response.json.return_value = {'items': []}
         mock_get.return_value = mock_response
 
-        result = service._fetch_archived_workflow(
+        result = service.fetch_archived_workflow(
             'missing-wf', 'argo', 'http://localhost:2746')
 
         assert result is None
@@ -1150,7 +1150,7 @@ class TestFetchArchivedWorkflow:
         mock_response.json.return_value = {'items': None}
         mock_get.return_value = mock_response
 
-        result = service._fetch_archived_workflow(
+        result = service.fetch_archived_workflow(
             'missing-wf', 'argo', 'http://localhost:2746')
 
         assert result is None
@@ -1164,7 +1164,7 @@ class TestFetchArchivedWorkflow:
         mock_response.status_code = 404
         mock_get.return_value = mock_response
 
-        result = service._fetch_archived_workflow(
+        result = service.fetch_archived_workflow(
             'test-wf', 'argo', 'http://localhost:2746')
 
         assert result is None
@@ -1188,7 +1188,7 @@ class TestFetchArchivedWorkflow:
             success_response
         ]
 
-        result = service._fetch_archived_workflow(
+        result = service.fetch_archived_workflow(
             'test-wf', 'argo', 'http://localhost:2746')
 
         assert result is not None
@@ -1208,7 +1208,7 @@ class TestFetchArchivedWorkflow:
             req.exceptions.Timeout("Request timed out"),
         ]
 
-        result = service._fetch_archived_workflow(
+        result = service.fetch_archived_workflow(
             'test-wf', 'argo', 'http://localhost:2746')
 
         assert result is None
@@ -1222,7 +1222,7 @@ class TestFetchArchivedWorkflow:
 
         mock_get.side_effect = ValueError("Unexpected error")
 
-        result = service._fetch_archived_workflow(
+        result = service.fetch_archived_workflow(
             'test-wf', 'argo', 'http://localhost:2746')
 
         assert result is None
@@ -1238,7 +1238,7 @@ class TestFetchArchivedWorkflow:
         mock_response.json.return_value = {'items': []}
         mock_get.return_value = mock_response
 
-        service._fetch_archived_workflow(
+        service.fetch_archived_workflow(
             'test-wf', 'argo', 'http://localhost:2746', token='my-token')
 
         call_args = mock_get.call_args

@@ -342,10 +342,10 @@ class TestArgoServiceFiltering:
     @patch('console_link.workflow.tui.manage_injections.WorkflowService')
     @patch('console_link.workflow.tui.manage_injections.requests.get')
     def test_raises_on_non_200_response(self, mock_get, mock_service_class):
-        """Verify HTTPError is raised when workflow not found in live or archive API."""
+        """Verify Exception is raised when workflow not found in live or archive API."""
         mock_service = MagicMock()
         mock_service.get_workflow_status.return_value = {'workflow': {'metadata': {}}}
-        mock_service._fetch_archived_workflow.return_value = None
+        mock_service.fetch_archived_workflow.return_value = None
         mock_service_class.return_value = mock_service
 
         mock_response = MagicMock()
@@ -368,7 +368,7 @@ class TestArgoServiceFiltering:
             'workflow': {'metadata': {'resourceVersion': '1'}},
             'started_at': '2024-01-01T00:00:00Z'
         }
-        mock_service._fetch_archived_workflow.return_value = {
+        mock_service.fetch_archived_workflow.return_value = {
             'metadata': {'name': 'archived-wf', 'namespace': 'default'},
             'status': {
                 'phase': 'Succeeded',

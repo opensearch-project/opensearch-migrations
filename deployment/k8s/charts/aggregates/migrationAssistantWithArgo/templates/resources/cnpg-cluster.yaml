@@ -78,6 +78,10 @@ spec:
               podAntiAffinityType: {{ .Values.cnpgCluster.podAntiAffinityType | default "preferred" }}
               topologyKey: {{ .Values.cnpgCluster.topologyKey | default "kubernetes.io/hostname" }}
 
+            {{- if .Values.cnpgCluster.imageName }}
+            imageName: {{ .Values.cnpgCluster.imageName }}
+            {{- end }}
+
             bootstrap:
               initdb:
                 database: {{ .Values.cnpgCluster.database }}

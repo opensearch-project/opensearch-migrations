@@ -12,9 +12,6 @@ from ..services.script_runner import ScriptRunner
 
 logger = logging.getLogger(__name__)
 
-# Terminal workflow phases
-ENDING_PHASES = ["Succeeded", "Failed", "Error", "Stopped", "Terminated"]
-
 
 def _handle_workflow_wait(
         service: WorkflowService,

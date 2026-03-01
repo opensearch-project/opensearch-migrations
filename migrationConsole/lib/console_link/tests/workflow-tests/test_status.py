@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from console_link.workflow.commands.status import StatusCommandHandler, WorkflowDataFetcher
-from console_link.workflow.services.workflow_service import WorkflowService, WorkflowListResult
+from console_link.workflow.services.workflow_service import WorkflowService, WorkflowListResult, ENDING_PHASES
 
 
 class FakeWorkflowService(WorkflowService):
@@ -31,7 +31,7 @@ class FakeWorkflowService(WorkflowService):
         if exclude_completed:
             workflow_names = [
                 name for name in workflow_names
-                if self.workflows[name].get('status', {}).get('phase') not in ('Succeeded', 'Failed')
+                if self.workflows[name].get('status', {}).get('phase') not in ENDING_PHASES
             ]
         return {
             'success': True,
