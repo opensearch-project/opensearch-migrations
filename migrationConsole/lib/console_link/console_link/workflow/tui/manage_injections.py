@@ -21,6 +21,7 @@ class WaiterInterface:
                 argo_url: str, insecure: bool = False, token: str = None) -> "WaiterInterface":
         _stop = threading.Event()
         _ready_signal = threading.Event()
+        _thread = [None]
 
         def _poll_argo_api():
             """Poll Argo REST API to detect workflow creation."""
@@ -42,10 +43,14 @@ class WaiterInterface:
 
         def trigger():
             if not _ready_signal.is_set():
+                # Don't spawn if a thread is already polling
+                if _thread[0] and _thread[0].is_alive():
+                    return
                 logger.debug("Starting background wait thread.")
                 _stop.clear()
                 _ready_signal.clear()
-                threading.Thread(target=_poll_argo_api, daemon=True, name="argo_api_poll").start()
+                _thread[0] = threading.Thread(target=_poll_argo_api, daemon=True, name="argo_api_poll")
+                _thread[0].start()
 
         def reset():
             _stop.set()
@@ -77,9 +82,9 @@ def _build_slim_node(node_id: str, node: dict) -> dict:
         "startedAt": node.get("startedAt"),
         "finishedAt": node.get("finishedAt"),
         "inputs": {"parameters": [p for p in node.get("inputs", {}).get("parameters", []) if
-                                  p['name'] in ('groupName', 'configContents', 'name')]},
+                                  p.get('name') in ('groupName', 'configContents', 'name')]},
         "outputs": {"parameters": [p for p in node.get("outputs", {}).get("parameters", []) if
-                                   p['name'] in ('statusOutput', 'overriddenPhase')]}
+                                   p.get('name') in ('statusOutput', 'overriddenPhase')]}
     }
 
 
