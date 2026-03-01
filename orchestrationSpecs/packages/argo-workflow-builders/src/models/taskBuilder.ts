@@ -10,7 +10,7 @@ import {
     WorkflowAndTemplatesScope
 } from "./workflowTypes";
 import {Workflow} from "./workflowBuilder";
-import {DeepWiden, NonSerializedPlainObject, PlainObject} from "./plainObject";
+import {DeepWiden, NonSerializedPlainObject, PlainObject, Serialized} from "./plainObject";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {NamedTask, TaskType} from "./sharedTypes";

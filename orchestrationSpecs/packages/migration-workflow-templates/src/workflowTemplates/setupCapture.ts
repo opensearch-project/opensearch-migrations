@@ -44,7 +44,7 @@ function makeProxyDeploymentManifest(args: {
     kafkaConnection: BaseExpression<string>,
     kafkaTopic: BaseExpression<string>,
     listenPort: BaseExpression<Serialized<number>>,
-    podReplicas: BaseExpression<Serialized<number>>,
+    podReplicas: BaseExpression<number>,
     otelCollectorEndpoint: BaseExpression<string>,
     allowInsecure: BaseExpression<boolean>,
 }) {
@@ -53,7 +53,7 @@ function makeProxyDeploymentManifest(args: {
         kind: "Deployment",
         metadata: { name: args.proxyName },
         spec: {
-            replicas: args.podReplicas,
+            replicas: makeDirectTypeProxy(args.podReplicas),
             selector: { matchLabels: { "migrations/proxy": args.proxyName } },
             template: {
                 metadata: { labels: { "migrations/proxy": args.proxyName } },
@@ -83,7 +83,7 @@ function makeProxyDeploymentManifest(args: {
                             "echo \"Starting proxy with: $ARGS\"",
                             "exec /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy $ARGS"
                         ].join("\n")],
-                        ports: [{ containerPort: args.listenPort }]
+                        ports: [{ containerPort: makeDirectTypeProxy(expr.deserializeRecord(args.listenPort)) }]
                     }]
                 }
             }
@@ -132,7 +132,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     kafkaConnection:       expr.jsonPathStrict(b.inputs.proxyConfig, "kafkaConfig", "kafkaConnection"),
                     kafkaTopic:            expr.jsonPathStrict(b.inputs.proxyConfig, "kafkaConfig", "kafkaTopic"),
                     listenPort:            b.inputs.listenPort,
-                    podReplicas:           b.inputs.podReplicas,
+                    podReplicas:           expr.deserializeRecord(b.inputs.podReplicas),
                     otelCollectorEndpoint: expr.cast(expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "otelCollectorEndpoint")).to<string>(),
                     allowInsecure:         expr.cast(expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "noCapture")).to<boolean>(),
                 })

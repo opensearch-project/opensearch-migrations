@@ -162,7 +162,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("waitForProxyDeps", ResourceManagement, "waitForCapturedTraffic", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
-                        resourceName: expr.asString(c.item)
+                        resourceName: c.item
                     }), {
                     loopWith: makeParameterLoop(
                         expr.ternary(
@@ -214,7 +214,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("createSnapshot", INTERNAL, "createSingleSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    snapshotItemConfig: expr.serialize(c.item),
+                    snapshotItemConfig: expr.cast(c.item).to<Serialized<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>>(),
                     sourceConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotsSourceConfig, "sourceConfig")
                 }), {
                     loopWith: makeParameterLoop(
@@ -391,7 +391,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addSteps(b => b.addStepGroup(g => g
             .addStep("setupKafkaClusters", INTERNAL, "setupSingleKafkaCluster", c =>
                 c.register({
-                    kafkaClusterConfig: expr.serialize(c.item),
+                    kafkaClusterConfig: expr.cast(c.item).to<Serialized<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>>(),
                     clusterName: expr.get(c.item, "name"),
                     version:     expr.cast(expr.get(c.item, "version")).to<string>(),
                 }), {
@@ -407,7 +407,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("setupProxies", INTERNAL, "setupSingleProxy", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    proxyConfig:      expr.serialize(c.item),
+                    proxyConfig:      expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>(),
                     kafkaClusterName: expr.jsonPathStrict(expr.get(c.item, "kafkaConfig") as any, "label"),
                     kafkaTopicName:   expr.jsonPathStrict(expr.get(c.item, "kafkaConfig") as any, "kafkaTopic"),
                     proxyName:        expr.get(c.item, "name"),
@@ -419,7 +419,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("createSnapshots", INTERNAL, "createSnapshotsForSource", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    snapshotsSourceConfig: expr.serialize(c.item)
+                    snapshotsSourceConfig: expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_CREATE_SNAPSHOTS_CONFIG>>>()
                 }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.config), "snapshots"))
@@ -438,7 +438,7 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.literal("-"),
                         expr.get(c.item, "label")
                     ),
-                    snapshotMigrationConfig: expr.serialize(c.item)
+                    snapshotMigrationConfig: expr.cast(c.item).to<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>()
                 }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.config), "snapshotMigrations"))
@@ -447,7 +447,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("runTrafficReplays", INTERNAL, "runSingleReplay", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    replayConfig: expr.serialize(c.item)
+                    replayConfig: expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_REPLAY_CONFIG>>>()
                 }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.config), "trafficReplays"))
