@@ -1,0 +1,61 @@
+services:
+  opensearch:
+    image: mirror.gcr.io/opensearchproject/opensearch:3.3.0
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Admin_1234!
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  solr:
+    image: mirror.gcr.io/library/solr:8
+    ports:
+      - "8983:8983"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8983/solr/admin/info/system || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # Watches TypeScript transform sources and rebuilds JS on change
+  transform-watcher:
+    image: node:20-slim
+    working_dir: /transforms
+    volumes:
+      - ../transforms/src:/transforms/src:ro
+      - ../transforms/build.mjs:/transforms/build.mjs:ro
+      - ../transforms/package.json:/transforms/package.json:ro
+      - ../transforms/tsconfig.json:/transforms/tsconfig.json:ro
+      - transform-dist:/transforms/dist
+    command: ["sh", "-c", "npm install && npm run build && npm run watch"]
+
+  transformation-shim:
+    image: migrations/transformation_shim
+    ports:
+      - "8080:8080"
+    volumes:
+      - transform-dist:/transforms:ro
+    command:
+      - --listenPort
+      - "8080"
+      - --target
+      - opensearch=http://opensearch:9200
+      - --primary
+      - opensearch
+      - --targetTransform
+      - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
+      - --watchTransforms
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      transform-watcher:
+        condition: service_started
+
+volumes:
+  transform-dist:
