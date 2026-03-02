@@ -1,6 +1,7 @@
 .coverage
 coverage.xml
 .idea
+.kiro
 .DS_Store
 .gradle/
 .venv

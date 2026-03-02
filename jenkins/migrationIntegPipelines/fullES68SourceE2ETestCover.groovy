@@ -5,5 +5,6 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
          remote: "${gitUrl}"])
 
-// Shared library function (location from root: vars/fullES68SourceE2ETest.groovy)
-fullES68SourceE2ETest()
+// Allow job name override for webhook routing (e.g., pr-* vs main-*)
+def jobNameOverride = params.JOB_NAME_OVERRIDE ?: ''
+fullES68SourceE2ETest(jobName: jobNameOverride ?: null)
