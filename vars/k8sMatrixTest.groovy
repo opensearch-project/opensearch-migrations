@@ -4,7 +4,7 @@ def call(Map config = [:]) {
     if (jobName.startsWith("main-")) {
         defaultChildJobName = "Periodic runs from MAIN/main-k8s-local-integ-test"
     } else if (jobName.startsWith("pr-")) {
-        defaultChildJobName = "Run on PRs/pr-k8s-local-integ-test"
+        defaultChildJobName = "pr-checks/pr-k8s-local-integ-test"
     }
     def childJobName = config.childJobName ?: defaultChildJobName
     // Default behavior: keep periodic cadence for non-PR jobs, disable for pr-* jobs.

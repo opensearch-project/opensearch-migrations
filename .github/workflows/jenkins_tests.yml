@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Jenkins Job Trigger and Monitor
-        uses: lewijacn/jenkins-trigger@1.0.4
+        uses: jugal-chauhan/jenkins-trigger@1.0.6
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
           job_name: ${{ github.event_name == 'push' && 'main-full-es68source-e2e-test' || 'pr-full-es68source-e2e-test' }}
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Jenkins Job Trigger and Monitor
-        uses: lewijacn/jenkins-trigger@1.0.4
+        uses: jugal-chauhan/jenkins-trigger@1.0.6
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
           job_name: ${{ github.event_name == 'push' && 'main-elasticsearch-5x-k8s-local-test' || 'pr-elasticsearch-5x-k8s-local-test' }}
@@ -63,7 +63,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Jenkins Job Trigger and Monitor
-        uses: lewijacn/jenkins-trigger@1.0.4
+        uses: jugal-chauhan/jenkins-trigger@1.0.6
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
           job_name: ${{ github.event_name == 'push' && 'main-eks-integ-test' || 'pr-eks-integ-test' }}
