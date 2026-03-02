@@ -87,7 +87,7 @@ def call(Map config = [:]) {
                 choices: ['default', 'large'],
                 description: 'Target cluster size (default: 2x r6g.large, large: 24x r6g.8xlarge with dedicated masters)'
             )
-            booleanParam(name: 'SKIP_CFN_DELETE', defaultValue: true, description: 'Skip deleting the EKS CFN stack during teardown (preserves infrastructure for reuse)')
+            booleanParam(name: 'SKIP_CFN_DELETE', defaultValue: false, description: 'Skip deleting the EKS CFN stack during teardown (preserves infrastructure for reuse)')
         }
         options {
             lock(label: params.STAGE, quantity: 1, variable: 'maStageName')
