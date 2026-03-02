@@ -10,6 +10,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
+    "build": "echo 'schemas: no build step needed (exports .ts directly)'",
     "type-check": "tsc --noEmit",
     "schema": "tsx src/showUserSchema.ts",
     "argo-schema": "tsx src/showArgoSchema.ts",
@@ -19,6 +20,7 @@
   "dependencies": {
     "zod": "^4",
     "@asteasolutions/zod-to-openapi": "^8.1.0",
+    "@opensearch-migrations/strimzi-types": "*",
     "deepmerge": "^4.3.1"
   },
   "devDependencies": {

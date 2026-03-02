@@ -32,6 +32,12 @@ rules:
     resources: ["customresourcedefinitions"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
+  # OpenSearch migration custom resources
+  - apiGroups: ["migrations.opensearch.org"]
+    resources: ["capturedtraffics", "datasnapshots", "snapshotmigrations",
+                "capturedtraffics/status", "datasnapshots/status", "snapshotmigrations/status"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
   # Kafka resources permissions
   - apiGroups: ["kafka.strimzi.io"]
     resources: ["kafkas", "kafkatopics", "kafkanodepools", "kafkausers"]

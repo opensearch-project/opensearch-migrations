@@ -93,11 +93,6 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
     return schema;
 }
 
-export const KAFKA_SERVICES_CONFIG = z.object({
-    brokerEndpoints: z.string().describe("Specify an external kafka broker list if using one other than the one managed by the workflow"),
-    standard: z.string()
-});
-
 export const S3_REPO_CONFIG = z.object({
     awsRegion: z.string().describe("The AWS region that the bucket reside in (us-east-2, etc)"),
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
@@ -108,16 +103,27 @@ export const S3_REPO_CONFIG = z.object({
         .describe("IAM role ARN to assume when accessing S3 for snapshot operations")
 });
 
+export const KAFKA_CLIENT_CONFIG = z.object({
+    enableMSKAuth: z.boolean().default(false).optional(),
+    kafkaConnection: z.string()
+        .describe("Sequence of <HOSTNAME:PORT> values delimited by ','.  " +
+            "If empty, the cluster is automatically created and this is filled in.")
+        .regex(/^(?:[a-z0-9][-a-z0-9.]*:[0-9]+,?)*$/),
+    kafkaTopic: z.string().describe("Empty defaults to the name of the target label").default(""),
+});
+
+export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+
 export const CPU_QUANTITY = z.string()
     .regex(/^[0-9]+m$/)
     .describe("CPU quantity in millicores (e.g., '100m', '500m')");
 
 export const MEMORY_QUANTITY = z.string()
-    .regex(/^[0-9]+((E|P|T|G|M)i?|Ki|k)$/)
+    .regex(/^[0-9]+(([EPTGM])i?|Ki|k)$/)
     .describe("Memory quantity with unit (e.g., '512Mi', '2G')");
 
 export const STORAGE_QUANTITY = z.string()
-    .regex(/^[0-9]+((E|P|T|G|M)i?|Ki|k)$/)
+    .regex(/^[0-9]+(([EPTGM])i?|Ki|k)$/)
     .describe("Storage quantity with unit (e.g., '10Gi', '5G')");
 
 export const CONTAINER_RESOURCES = {
@@ -137,12 +143,29 @@ export type ResourceRequirementsType = z.infer<typeof RESOURCE_REQUIREMENTS>;
 
 export const PROXY_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
+    podReplicas: z.number().default(1).optional(),
+    resources: RESOURCE_REQUIREMENTS
+        .describe("Resource limits and requests for replayer container.")
+        .default(DEFAULT_RESOURCES.REPLAYER).optional(),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
+
     setHeaders: z.array(z.string()).optional(),
-    // TODO: Capture proxy resources non-functional currently
-    // resources: RESOURCE_REQUIREMENTS.optional()
-    //     .describe("Resource limits and requests for proxy container.")
-    //     .default(DEFAULT_RESOURCES.CAPTURE_PROXY),
+    destinationConnectionPoolSize: z.number().default(0).optional(),
+    destinationConnectionPoolTimeout: z.string()
+        .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
+        .default("PT30S").optional(),
+    kafkaClientId: z.string().default("HttpCaptureProxyProducer").optional(),
+    listenPort: z.number(),
+    maxTrafficBufferSize: z.number().default(1048576).optional(),
+    noCapture: z.boolean().default(false).optional(),
+    numThreads: z.number().default(1).optional(),
+    // TODO - this should become a record of different settings...
+    //  we can still create and mount a file, but fof the configuration UX, it should be strongly typed
+    sslConfigSettings: z.string().default("").optional(),
+    suppressCaptureForHeaderMatch: z.array(z.string()).default([]).optional(),
+    suppressCaptureForMethod: z.array(z.string()).default([]).optional(),
+    suppressCaptureForUriPath: z.array(z.string()).default([]).optional(),
+    suppressMethodAndPath: z.string().default("").optional(),
 });
 
 export const REPLAYER_OPTIONS = z.object({
@@ -154,13 +177,12 @@ export const REPLAYER_OPTIONS = z.object({
     resources: RESOURCE_REQUIREMENTS
         .describe("Resource limits and requests for replayer container.")
         .default(DEFAULT_RESOURCES.REPLAYER).optional(),
-    // docTransformerBase64: z.string().default("").optional(),
-    // otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
 });
 
 // Note: noWait is not included here as it is hardcoded to true in the workflow.
 // The workflow manages snapshot completion polling separately via checkSnapshotStatus.
 export const CREATE_SNAPSHOT_OPTIONS = z.object({
+    snapshotPrefix: z.string().default("").optional(),
     indexAllowlist: z.array(z.string()).default([]).optional(),
     maxSnapshotRateMbPerNode: z.number().default(0).optional(),
     jvmArgs: z.string().default("").optional(),
@@ -254,7 +276,20 @@ export const USER_RFS_OPTIONS = z.object({
         );
 });
 
-export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+export const KAFKA_CLUSTER_CREATION_CONFIG = z.object({
+    replicas:      z.number().int().min(1).default(1).optional(),
+    storage:       z.discriminatedUnion("type", [
+                       z.object({ type: z.literal("ephemeral") }),
+                       z.object({ type: z.literal("persistent-claim"), size: z.string() })
+                   ]).default({ type: "ephemeral" }).optional(),
+    partitions:    z.number().int().min(1).default(1).optional(),
+    topicReplicas: z.number().int().min(1).default(1).optional(),
+});
+
+export const KAFKA_CLUSTER_CONFIG = z.union([
+    z.object({autoCreate: KAFKA_CLUSTER_CREATION_CONFIG}),
+    z.object({existing: KAFKA_CLIENT_CONFIG })
+]);
 
 export const HTTP_AUTH_BASIC = z.object({
     basic: z.object({
@@ -285,33 +320,106 @@ export const CLUSTER_CONFIG = z.object({
 });
 
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
+    enabled: z.boolean().default(true).optional(),
     endpoint:  z.string().regex(/^https?:\/\/[^:\/\s]+(:\d+)?(\/)?$/), // override to required
 });
 
-export const SOURCE_CLUSTER_REPOS_RECORD = z.record(z.string(), S3_REPO_CONFIG)
+export const SOURCE_CLUSTER_REPOS_RECORD =
+    z.record(z.string(), S3_REPO_CONFIG)
     .describe("Keys are the repository names that are managed by the source cluster");
 
-export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
-    version: CLUSTER_VERSION_STRING,
-    snapshotRepos: SOURCE_CLUSTER_REPOS_RECORD.optional(),
-    proxy: PROXY_OPTIONS.optional()
+export const CAPTURE_CONFIG = z.object({
+    kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional(),
+    kafkaTopic: z.string().regex(K8S_NAMING_PATTERN).default("").optional()
+        .describe("Kafka topic for captured traffic. Empty defaults to the proxy name."),
+    source: z.string(),
+    proxyConfig: PROXY_OPTIONS
+});
+
+export const SNAPSHOT_MIGRATION_FILTER = z.object({
+    source: z.string(),
+    snapshot: z.string()
+});
+
+export const REPLAYER_CONFIG = z.object({
+    skipApprovals: z.boolean().default(false).optional(), // TODO - format
+    fromProxy: z.string(),
+    toTarget: z.string(),
+    dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER).min(1).optional(),
+    replayerConfig: REPLAYER_OPTIONS.optional()
+});
+
+export const TRAFFIC_CONFIG = z.object({
+    proxies: z.record(z.string().regex(K8S_NAMING_PATTERN), CAPTURE_CONFIG),
+    replayers: z.record(z.string(), REPLAYER_CONFIG)
+}).superRefine((data, ctx) => {
+    for (const [name, rc] of Object.entries(data.replayers)) {
+        if (!(rc.fromProxy in data.proxies)) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Replayer '${name}' references unknown proxy '${rc.fromProxy}'. Available: ${Object.keys(data.proxies).join(', ')}`,
+                path: ['replayers', name, 'fromProxy']
+            });
+        }
+    }
 });
 
 export const EXTERNALLY_MANAGED_SNAPSHOT = z.object({
-    externallyManagedSnapshot: z.string()
+    externallyManagedSnapshotName: z.string()
 });
 
-export const GENERATED_SNAPSHOT = z.object({
-    snapshotNamePrefix: z.string()
+export const GENERATE_SNAPSHOT = z.object({
+    createSnapshotConfig: CREATE_SNAPSHOT_OPTIONS,
+    requiredForCompleteMigration: z.union([
+        z.object({toTargets: z.array(z.string())}),
+        z.boolean().default(true).optional()
+    ])
 });
 
 export const SNAPSHOT_NAME_CONFIG = z.union([
-    EXTERNALLY_MANAGED_SNAPSHOT, GENERATED_SNAPSHOT
+    EXTERNALLY_MANAGED_SNAPSHOT, GENERATE_SNAPSHOT
 ]);
 
 export const NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG = z.object({
-    snapshotNameConfig: SNAPSHOT_NAME_CONFIG,
+    config: SNAPSHOT_NAME_CONFIG,
     repoName: z.string()
+});
+
+export const SNAPSHOT_CONFIGS_MAP = z.record(
+    z.string(),
+    NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG
+);
+
+export const SNAPSHOT_INFO = z.object({
+    repos: SOURCE_CLUSTER_REPOS_RECORD.optional(),
+    snapshots: SNAPSHOT_CONFIGS_MAP
+})
+
+export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
+    version: CLUSTER_VERSION_STRING,
+    enabled: z.boolean().default(true).optional(),
+    snapshotInfo: SNAPSHOT_INFO.optional()
+}).superRefine((data, ctx) => {
+    const repos = data.snapshotInfo?.repos;
+    const snapshots = data.snapshotInfo?.snapshots ?? {};
+    for (const [snapName, snapConfig] of Object.entries(snapshots)) {
+        const repoName = snapConfig.repoName;
+        if (repoName) {
+            if (!repos) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `Snapshot '${snapName}' references repoName '${repoName}' but no repos are defined`,
+                    path: ['snapshotInfo', 'snapshots', snapName, 'repoName']
+                });
+            } else if (!(repoName in repos)) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `Snapshot '${snapName}' references unknown repoName '${repoName}'. Available: ${Object.keys(repos).join(', ')}`,
+                    path: ['snapshotInfo', 'snapshots', snapName, 'repoName']
+                });
+            }
+        }
+    }
 });
 
 export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
@@ -327,29 +435,33 @@ export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
         data.documentBackfillConfig !== undefined,
     {message: "At least one of metadataMigrationConfig or documentBackfillConfig must be provided"});
 
-export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    label: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional(),
-    createSnapshotConfig: CREATE_SNAPSHOT_OPTIONS.optional(),
-    snapshotConfig: NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
-    migrations: z.array(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1)
-}).refine(data => {
-    const labels = data.migrations.map(m => m.label).filter(s => s);
-    return labels.length == new Set(labels).size;
-},
-    {message: "labels of migration items must be unique when they are provided"});
+export const SNAPSHOT_MIGRATION_CONFIG_ARRAY =
+    z.array(USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG);
+
+export const PER_SNAPSHOT_MIGRATION_CONFIG_RECORD =
+    z.record(z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/),
+        SNAPSHOT_MIGRATION_CONFIG_ARRAY.min(1));
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     skipApprovals : z.boolean().default(false).optional(), // TODO - format
     fromSource: z.string(),
     toTarget: z.string(),
-    snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).min(1).optional(),
-    replayerConfig: REPLAYER_OPTIONS.optional()
-}).refine(data => {
-        const labels = data.snapshotExtractAndLoadConfigs?.map(m => m.label).filter(s => s);
-        return labels ? labels.length == new Set(labels).size : true;
-    },
-    {message: "labels of snapshotExtractAndLoadConfigs items must be unique when they are provided"});
+    perSnapshotConfig: PER_SNAPSHOT_MIGRATION_CONFIG_RECORD.optional(),
+}).superRefine((data, ctx) => {
+    if (!data.perSnapshotConfig) return;
+    for (const [snapName, migrations] of Object.entries(data.perSnapshotConfig)) {
+        const labels = migrations.map(m => m.label).filter(Boolean);
+        if (labels.length !== new Set(labels).size) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Duplicate labels in perSnapshotConfig['${snapName}']`,
+                path: ['perSnapshotConfig', snapName]
+            });
+        }
+    }
+});
 
+export const KAFKA_CLUSTERS_MAP = z.record(z.string().regex(K8S_NAMING_PATTERN), KAFKA_CLUSTER_CONFIG);
 export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);
 
@@ -357,33 +469,77 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 (
     z.object({
         skipApprovals : z.boolean().default(false).optional(), // TODO - format
+        kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({}).optional(),
         sourceClusters: SOURCE_CLUSTERS_MAP,
         targetClusters: TARGET_CLUSTERS_MAP,
-        migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG).min(1)
+        snapshotMigrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG),
+        traffic: TRAFFIC_CONFIG
+            .describe("Top-level items are independent of each other but " +
+                "items in the inner-arrays require all snapshot activities across each of the items' " +
+                "sources to finish before any replays in this group can start.")
+            .optional()
     }).superRefine((data, ctx) => {
-        for (const migrationConfig of data.migrationConfigs) {
-            const sourceCluster = data.sourceClusters[migrationConfig.fromSource];
-            if (!sourceCluster) continue;
+        for (let i = 0; i < data.snapshotMigrationConfigs.length; i++) {
+            const mc = data.snapshotMigrationConfigs[i];
 
-            const snapshotRepos = sourceCluster.snapshotRepos;
-            const snapshotConfigs = migrationConfig.snapshotExtractAndLoadConfigs ?? [];
+            if (!(mc.fromSource in data.sourceClusters)) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `snapshotMigrationConfigs[${i}] references unknown source '${mc.fromSource}'. Available: ${Object.keys(data.sourceClusters).join(', ')}`,
+                    path: ['snapshotMigrationConfigs', i, 'fromSource']
+                });
+            }
 
-            for (let i = 0; i < snapshotConfigs.length; i++) {
-                const snapshotConfig = snapshotConfigs[i];
-                const repoName = snapshotConfig.snapshotConfig.repoName;
+            if (!(mc.toTarget in data.targetClusters)) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `snapshotMigrationConfigs[${i}] references unknown target '${mc.toTarget}'. Available: ${Object.keys(data.targetClusters).join(', ')}`,
+                    path: ['snapshotMigrationConfigs', i, 'toTarget']
+                });
+            }
 
-                if (repoName) {
-                    if (!snapshotRepos) {
+            if (mc.perSnapshotConfig) {
+                const sourceCluster = data.sourceClusters[mc.fromSource];
+                const availableSnapshots = sourceCluster?.snapshotInfo?.snapshots ?? {};
+                for (const snapName of Object.keys(mc.perSnapshotConfig)) {
+                    if (!(snapName in availableSnapshots)) {
                         ctx.addIssue({
                             code: z.ZodIssueCode.custom,
-                            message: `snapshotExtractAndLoadConfig[${i}] references repoName '${repoName}' but source cluster '${migrationConfig.fromSource}' has no snapshotRepos defined`,
-                            path: ['migrationConfigs', data.migrationConfigs.indexOf(migrationConfig), 'snapshotExtractAndLoadConfigs', i, 'snapshotConfig', 'repoName']
+                            message: `perSnapshotConfig references unknown snapshot '${snapName}' in source '${mc.fromSource}'. Available: ${Object.keys(availableSnapshots).join(', ') || '(none)'}`,
+                            path: ['snapshotMigrationConfigs', i, 'perSnapshotConfig', snapName]
                         });
-                    } else if (!(repoName in snapshotRepos)) {
+                    }
+                }
+            }
+        }
+
+        if (data.traffic) {
+            for (const [proxyName, proxyConfig] of Object.entries(data.traffic.proxies)) {
+                if (!(proxyConfig.source in data.sourceClusters)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `Proxy '${proxyName}' references unknown source '${proxyConfig.source}'. Available: ${Object.keys(data.sourceClusters).join(', ')}`,
+                        path: ['traffic', 'proxies', proxyName, 'source']
+                    });
+                }
+            }
+
+            for (const [replayerName, rc] of Object.entries(data.traffic.replayers)) {
+                if (!(rc.toTarget in data.targetClusters)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `Replayer '${replayerName}' references unknown target '${rc.toTarget}'. Available: ${Object.keys(data.targetClusters).join(', ')}`,
+                        path: ['traffic', 'replayers', replayerName, 'toTarget']
+                    });
+                }
+
+                for (let j = 0; j < (rc.dependsOnSnapshotMigrations ?? []).length; j++) {
+                    const dep = rc.dependsOnSnapshotMigrations![j];
+                    if (!(dep.source in data.sourceClusters)) {
                         ctx.addIssue({
                             code: z.ZodIssueCode.custom,
-                            message: `repoName '${repoName}' does not exist in source cluster '${migrationConfig.fromSource}'. Available repos: ${Object.keys(snapshotRepos).join(', ')}`,
-                            path: ['migrationConfigs', data.migrationConfigs.indexOf(migrationConfig), 'snapshotExtractAndLoadConfigs', i, 'snapshotConfig', 'repoName']
+                            message: `Replayer '${replayerName}' dependsOnSnapshotMigrations[${j}] references unknown source '${dep.source}'. Available: ${Object.keys(data.sourceClusters).join(', ')}`,
+                            path: ['traffic', 'replayers', replayerName, 'dependsOnSnapshotMigrations', j, 'source']
                         });
                     }
                 }

@@ -80,8 +80,8 @@ docker-registry-xxxxxxxxxx-xxxxx   1/1     Running   0          20s
 Port forward both services to your local machine. You can run these in separate terminals or background them:
 ```bash
 echo "Port forward BuildKit & Docker Registry (run in background)"
-nohup kubectl port-forward -n buildkit svc/buildkitd 1234:1234 --address 0.0.0.0 > /tmp/buildkit-forward.log 2>&1 &
-nohup kubectl port-forward -n buildkit svc/docker-registry 5001:5000 --address 0.0.0.0 > /tmp/registry-forward.log 2>&1 &
+nohup kubectl port-forward -n buildkit svc/buildkitd 1234:1234 > /tmp/buildkit-forward.log 2>&1 &
+nohup kubectl port-forward -n buildkit svc/docker-registry 5001:5000 > /tmp/registry-forward.log 2>&1 &
 ```
 
 **Important**: Keep these port-forward processes running while building images. If they terminate, your builds will fail with connection errors.

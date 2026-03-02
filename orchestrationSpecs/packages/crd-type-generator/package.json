@@ -1,0 +1,15 @@
+{
+  "name": "@opensearch-migrations/crd-type-generator",
+  "version": "1.0.0",
+  "description": "Shared script for generating TypeScript types from Kubernetes CRD OpenAPI schemas",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "echo 'crd-type-generator: no build step needed'"
+  },
+  "devDependencies": {
+    "@types/json-schema": "^7.0.15",
+    "@types/node": "*",
+    "json-schema-to-typescript": "^15.0.4"
+  }
+}

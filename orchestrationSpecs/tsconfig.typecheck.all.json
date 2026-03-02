@@ -5,13 +5,19 @@
     "moduleResolution": "bundler",
     "paths": {
       "@opensearch-migrations/argo-workflow-builders": ["./packages/argo-workflow-builders/src/index.ts"],
-      "@opensearch-migrations/schemas": ["./packages/schemas/src/index.ts"]
+      "@opensearch-migrations/schemas": ["./packages/schemas/src/index.ts"],
+      "@opensearch-migrations/k8s-types": ["./packages/k8s-types/src/index.ts"],
+      "@opensearch-migrations/argo-types": ["./packages/argo-types/src/index.ts"],
+      "@opensearch-migrations/strimzi-types": ["./packages/strimzi-types/src/index.ts"]
     }
   },
   "include": [
     "./packages/argo-workflow-builders/src/**/*",
+    "./packages/argo-types/src/**/*",
     "./packages/config-processor/src/**/*",
+    "./packages/k8s-types/src/**/*",
     "./packages/migration-workflow-templates/src/**/*",
-    "./packages/schemas/src/**/*"
+    "./packages/schemas/src/**/*",
+    "./packages/strimzi-types/src/**/*"
   ]
 }

@@ -308,6 +308,8 @@ jobs:
             --exclude "http://capture-proxy*"
             --exclude "https://capture-proxy*"
             --exclude-path "TrafficCapture/dockerSolution/src/main/docker/k8sConfigMapUtilScripts/tests/data"
+            --exclude-path "orchestrationSpecs/packages/argo-workflow-builders/tests/integ/artifacts"
+            --exclude "file://.*artifacts/parity-catalog.md"
           fail: true
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}

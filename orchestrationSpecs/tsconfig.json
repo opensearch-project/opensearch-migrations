@@ -1,8 +1,11 @@
 {
   "references": [
+    { "path": "./packages/k8s-types" },
+    { "path": "./packages/argo-types" },
+    { "path": "./packages/strimzi-types" },
     { "path": "./packages/schemas" },
     { "path": "./packages/argo-workflow-builders" },
-    { "path": "./packages/migration-workflow-templates"},
+    { "path": "./packages/migration-workflow-templates" },
     { "path": "./packages/config-processor" }
   ]
 }

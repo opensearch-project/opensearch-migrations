@@ -55,7 +55,13 @@ source:
 
   imageTag: "latest"
   image: "migrations/elasticsearch_searchguard"
-  roles: [ "master ", "data", "ingest" ]
+  roles:
+    - "master " # PURPOSEFULLY ADD THIS SPACE.
+                # This is critical the cheat with the chart.
+                # The chart does an exact-match for 'master' in a place that is incompatible with
+                # a single-node cluster but later these values will be implicitly trimmed
+    - "data"
+    - "ingest"
   antiAffinity: "soft"
   esJavaOpts: "-Xms512m -Xmx512m"
   protocol: https

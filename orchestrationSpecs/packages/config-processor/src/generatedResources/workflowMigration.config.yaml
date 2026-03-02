@@ -1,0 +1,113 @@
+{
+  "proxies": [],
+  "snapshots": [
+    {
+      "createSnapshotConfig": [
+        {
+          "label": "snap1",
+          "snapshotPrefix": "snap1",
+          "config": {
+            "indexAllowlist": [],
+            "maxSnapshotRateMbPerNode": 0,
+            "loggingConfigurationOverrideConfigMap": ""
+          },
+          "repo": {
+            "awsRegion": "us-east-2",
+            "endpoint": "http://10.106.183.16:4566",
+            "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2",
+            "s3RoleArn": "",
+            "useLocalStack": true,
+            "repoName": "default"
+          },
+          "semaphoreConfigMapName": "concurrency-config",
+          "semaphoreKey": "snapshot-legacy-source"
+        }
+      ],
+      "sourceConfig": {
+        "endpoint": "https://elasticsearch-master-headless:9200",
+        "allowInsecure": true,
+        "authConfig": {
+          "basic": {
+            "secretName": "source-creds"
+          }
+        },
+        "version": "ES 7.10",
+        "label": "source"
+      }
+    }
+  ],
+  "snapshotMigrations": [
+    {
+      "label": "snap1",
+      "snapshotNameResolution": {
+        "dataSnapshotResourceName": "source-snap1"
+      },
+      "migrations": [
+        {
+          "label": "migration-0",
+          "metadataMigrationConfig": {
+            "componentTemplateAllowlist": [],
+            "indexAllowlist": [],
+            "indexTemplateAllowlist": [],
+            "allowLooseVersionMatching": true,
+            "clusterAwarenessAttributes": 1,
+            "loggingConfigurationOverrideConfigMap": "",
+            "multiTypeBehavior": "NONE",
+            "otelCollectorEndpoint": "http://otel-collector:4317",
+            "output": "HUMAN_READABLE",
+            "transformerConfigBase64": ""
+          },
+          "documentBackfillConfig": {
+            "indexAllowlist": [],
+            "podReplicas": 1,
+            "loggingConfigurationOverrideConfigMap": "",
+            "allowLooseVersionMatching": true,
+            "docTransformerConfigBase64": "",
+            "documentsPerBulkRequest": 1000,
+            "initialLeaseDuration": "PT10M",
+            "maxConnections": 4,
+            "maxShardSizeBytes": 1000000000,
+            "otelCollectorEndpoint": "http://otel-collector:4317",
+            "useTargetClusterForWorkCoordination": true,
+            "resources": {
+              "limits": {
+                "cpu": "1000m",
+                "memory": "2Gi",
+                "ephemeral-storage": "5242880Ki"
+              },
+              "requests": {
+                "cpu": "25m",
+                "memory": "1Gi",
+                "ephemeral-storage": "5242880Ki"
+              }
+            }
+          }
+        }
+      ],
+      "sourceVersion": "ES 7.10",
+      "sourceLabel": "source",
+      "targetConfig": {
+        "endpoint": "https://opensearch-cluster-master-headless:9200",
+        "allowInsecure": true,
+        "authConfig": {
+          "basic": {
+            "secretName": "target-creds"
+          }
+        },
+        "label": "target"
+      },
+      "snapshotConfig": {
+        "label": "snap1",
+        "repoConfig": {
+          "awsRegion": "us-east-2",
+          "endpoint": "http://10.106.183.16:4566",
+          "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2",
+          "s3RoleArn": "",
+          "useLocalStack": true,
+          "repoName": "default"
+        }
+      }
+    }
+  ],
+  "trafficReplays": []
+}

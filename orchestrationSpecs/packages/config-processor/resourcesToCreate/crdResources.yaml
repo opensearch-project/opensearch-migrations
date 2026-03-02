@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: migrations.opensearch.org/v1alpha1
+    kind: DataSnapshot
+    metadata:
+      name: source-snap1
+    spec: {}
+    status:
+      phase: Initialized
+  - apiVersion: migrations.opensearch.org/v1alpha1
+    kind: SnapshotMigration
+    metadata:
+      name: source-snap1
+    spec: {}
+    status:
+      phase: Initialized
