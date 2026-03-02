@@ -5,5 +5,6 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
          remote: "${gitUrl}"])
 
-// Shared library function (location from root: vars/elasticsearch8xK8sLocalTest.groovy)
-elasticsearch8xK8sLocalTest()
+// Allow job name override for webhook routing (e.g., pr-* vs main-*)
+def jobNameOverride = params.JOB_NAME_OVERRIDE ?: ''
+elasticsearch8xK8sLocalTest(jobName: jobNameOverride ?: null)
