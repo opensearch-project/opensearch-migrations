@@ -156,30 +156,23 @@ public class DeltaLuceneReader {
             .addArgument(totalDocsToAdd)
             .log();
 
-        var maxDocumentsToReadAtOnce = 100; // Arbitrary value
-        var sharedSegmentReaderScheduler = Schedulers.boundedElastic();
-
-        // Create additions stream
+        // Create additions stream — sequential segment processing preserves document ordering
         var additionsStream = Flux.fromIterable(additions)
-            .flatMapSequential( c ->
+            .concatMapDelayError( c ->
                 LuceneReader.readDocsFromSegment(c,
                     startDocId,
-                    sharedSegmentReaderScheduler,
-                    maxDocumentsToReadAtOnce,
                     Path.of(c.getReader().getSegmentName()),
                     DocumentChangeType.INDEX)
-            ).subscribeOn(sharedSegmentReaderScheduler); // Scheduler to read documents on
+            ).subscribeOn(Schedulers.boundedElastic());
 
         // Create deletions stream - these are documents that were removed between snapshots
         var deletionsStream = Flux.fromIterable(removes)
-            .flatMapSequential( c ->
+            .concatMapDelayError( c ->
                 LuceneReader.readDocsFromSegment(c,
                     startDocId,
-                    sharedSegmentReaderScheduler,
-                    maxDocumentsToReadAtOnce,
                     Path.of(c.getReader().getSegmentName()),
                     DocumentChangeType.DELETE)
-            ).subscribeOn(sharedSegmentReaderScheduler);
+            ).subscribeOn(Schedulers.boundedElastic());
 
         return new DeltaResult(additionsStream, deletionsStream);
     }
