@@ -104,7 +104,7 @@ export const S3_REPO_CONFIG = z.object({
         .describe("Override the default S3 endpoint for clients to connect to. " +
             "Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"),
     s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\/[a-zA-Z0-9!\-_.*'()/]*)?$/).describe("s3://BUCKETNAME/PATH"),
-    s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
+    s3RoleArn: z.string().regex(/^(arn:[a-z][a-z0-9-]*:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
         .describe("IAM role ARN to assume when accessing S3 for snapshot operations")
 });
 

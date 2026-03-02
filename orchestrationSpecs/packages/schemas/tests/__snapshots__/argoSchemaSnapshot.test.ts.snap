@@ -117,7 +117,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "s3RoleArn": {
                       "type": "string",
-                      "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                      "pattern": "^(arn:[a-z][a-z0-9-]*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                       "default": "",
                       "description": "IAM role ARN to assume when accessing S3 for snapshot operations"
                     }
@@ -560,7 +560,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         },
                         "s3RoleArn": {
                           "type": "string",
-                          "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "pattern": "^(arn:[a-z][a-z0-9-]*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                           "default": ""
                         },
                         "useLocalStack": {
@@ -823,7 +823,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 },
                 "s3RoleArn": {
                   "type": "string",
-                  "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                  "pattern": "^(arn:[a-z][a-z0-9-]*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                   "default": "",
                   "description": "IAM role ARN to assume when accessing S3 for snapshot operations"
                 }
