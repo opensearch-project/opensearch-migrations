@@ -21,6 +21,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
+import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.NonNull;
 import lombok.SneakyThrows;
@@ -124,9 +125,20 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                 return reconstructedSourceTransactionFuture.thenCompose(rrp ->
                         TextTrackedFuture.completedFuture(
                             Optional.ofNullable(rrp.getResponseData())
-                                .map(sourceResponse -> bulkResponseHadNoErrors(sourceResponse.asByteBuf()) ?
-                                    RequestSenderOrchestrator.RetryDirective.RETRY :
-                                    RequestSenderOrchestrator.RetryDirective.DONE)
+                                .map(sourceResponse -> {
+                                    // Short-circuit: if source returned 5xx, retry without JSON parsing
+                                    // to avoid JsonParseException on non-JSON bodies (e.g. HTML 502 pages)
+                                    var parsed = HttpByteBufFormatter.processHttpMessageFromBufs(
+                                        HttpByteBufFormatter.HttpMessageType.RESPONSE,
+                                        Stream.of(sourceResponse.asByteBuf()));
+                                    if (parsed instanceof HttpResponse &&
+                                        ((HttpResponse) parsed).status().code() / 100 == 5) {
+                                        return RequestSenderOrchestrator.RetryDirective.RETRY;
+                                    }
+                                    return bulkResponseHadNoErrors(sourceResponse.asByteBuf()) ?
+                                        RequestSenderOrchestrator.RetryDirective.RETRY :
+                                        RequestSenderOrchestrator.RetryDirective.DONE;
+                                })
                                 .orElse(RequestSenderOrchestrator.RetryDirective.DONE),
                             () -> "evaluating retry status dependent upon source error field"),
                     () -> "checking the accumulated source response value");
