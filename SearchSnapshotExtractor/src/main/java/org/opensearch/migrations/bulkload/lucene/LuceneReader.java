@@ -15,7 +15,6 @@ import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 @Slf4j
@@ -28,25 +27,18 @@ public class LuceneReader {
        If the startDocId is 0, it will start from the first document in the segment.
      */
     public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId) {
-        var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
             .addArgument(() -> reader.leaves().size())
             .log();
 
-        // Create shared scheduler for i/o bound document reading
-        var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
         return getSegmentsFromStartingSegment(reader.leaves(), startDocId)
             .concatMapDelayError(c -> readDocsFromSegment(c,
                     startDocId,
-                    sharedSegmentReaderScheduler,
-                    maxDocumentsToReadAtOnce,
                     reader.getIndexDirectoryPath(),
                     DocumentChangeType.INDEX)
             )
-            .subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
-            .publishOn(Schedulers.boundedElastic()) // Switch scheduler for subsequent chain
-            .doFinally(s -> sharedSegmentReaderScheduler.dispose());
+            .subscribeOn(Schedulers.boundedElastic());
     }
 
     /**
@@ -96,8 +88,8 @@ public class LuceneReader {
         return Flux.fromIterable(sortedReaderAndBase.subList(index, sortedReaderAndBase.size()));
     }
 
-    public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId, Scheduler scheduler,
-                                                int concurrency, Path indexDirectoryPath, DocumentChangeType operation) {
+    public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
+                                                Path indexDirectoryPath, DocumentChangeType operation) {
         var segmentReader = readerAndBase.getReader();
         var liveDocs = readerAndBase.getLiveDocs();
 
@@ -123,7 +115,7 @@ public class LuceneReader {
         var idxStream = (liveDocs != null) ? liveDocs.stream().filter(idx -> idx >= startDocIdInSegment) :
             IntStream.range(startDocIdInSegment, segmentReader.maxDoc());
         return Flux.fromStream(idxStream.boxed())
-            .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
+            .concatMap(docIdx -> {
                     try {
                         // Get document, returns null to skip malformed docs
                         LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation);
@@ -138,9 +130,7 @@ public class LuceneReader {
                         return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
-                }).subscribeOn(scheduler),
-                        concurrency, 1)
-                .subscribeOn(scheduler);
+                });
     }
 
     public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation) {
