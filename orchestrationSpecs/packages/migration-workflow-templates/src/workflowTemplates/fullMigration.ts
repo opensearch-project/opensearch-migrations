@@ -121,6 +121,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("kafkaTopicName",   typeToken<string>())
         .addRequiredInput("proxyName",        typeToken<string>())
+        .addRequiredInput("listenPort",       typeToken<number>())
+        .addRequiredInput("podReplicas",      typeToken<number>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "CaptureProxy"]))
 
         .addSteps(b => b
@@ -137,6 +139,8 @@ export const FullMigration = WorkflowBuilder.create({
                     kafkaClusterName: b.inputs.kafkaClusterName,
                     kafkaTopicName:   b.inputs.kafkaTopicName,
                     proxyName:        b.inputs.proxyName,
+                    listenPort:       b.inputs.listenPort,
+                    podReplicas:      b.inputs.podReplicas,
                 })
             )
             .addStep("patchCapturedTraffic", ResourceManagement, "patchCapturedTrafficReady", c =>
@@ -214,7 +218,18 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("createSnapshot", INTERNAL, "createSingleSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    snapshotItemConfig: expr.serialize(c.item),
+                    snapshotItemConfig: expr.serialize(expr.makeDict({
+                        label: expr.get(c.item, "label"),
+                        snapshotPrefix: expr.get(c.item, "snapshotPrefix"),
+                        config: expr.deserializeRecord(expr.get(c.item, "config")),
+                        repo: expr.deserializeRecord(expr.get(c.item, "repo")),
+                        semaphoreConfigMapName: expr.get(c.item, "semaphoreConfigMapName"),
+                        semaphoreKey: expr.get(c.item, "semaphoreKey"),
+                        dependsOnProxySetups: expr.getLoose(
+                            expr.deserializeRecord(expr.recordToString(c.item)),
+                            "dependsOnProxySetups"
+                        )
+                    })),
 //                    snapshotItemConfig: expr.cast(c.item).to<Serialized<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>>(),
                     sourceConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotsSourceConfig, "sourceConfig")
                 }), {
@@ -392,7 +407,12 @@ export const FullMigration = WorkflowBuilder.create({
         .addSteps(b => b.addStepGroup(g => g
             .addStep("setupKafkaClusters", INTERNAL, "setupSingleKafkaCluster", c =>
                 c.register({
-                    kafkaClusterConfig: expr.serialize(c.item),
+                    kafkaClusterConfig: expr.serialize(expr.makeDict({
+                        name: expr.get(c.item, "name"),
+                        version: expr.get(c.item, "version"),
+                        config: expr.deserializeRecord(expr.get(c.item, "config")),
+                        topics: expr.deserializeRecord(expr.get(c.item, "topics"))
+                    })),
                     //kafkaClusterConfig: expr.cast(c.item).to<Serialized<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>>(),
                     clusterName: expr.get(c.item, "name"),
                     version:     expr.cast(expr.get(c.item, "version")).to<string>(),
@@ -409,11 +429,34 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("setupProxies", INTERNAL, "setupSingleProxy", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    proxyConfig:      expr.serialize(c.item),
+                    proxyConfig:      expr.serialize(expr.makeDict({
+                        name: expr.get(c.item, "name"),
+                        kafkaConfig: expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        sourceEndpoint: expr.get(c.item, "sourceEndpoint"),
+                        proxyConfig: expr.deserializeRecord(expr.get(c.item, "proxyConfig"))
+                    })),
                     // proxyConfig:      expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>(),
-                    kafkaClusterName: expr.jsonPathStrict(expr.get(c.item, "kafkaConfig") as any, "label"),
-                    kafkaTopicName:   expr.jsonPathStrict(expr.get(c.item, "kafkaConfig") as any, "kafkaTopic"),
+                    kafkaClusterName: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["label"],
+                        ""
+                    ),
+                    kafkaTopicName:   expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["kafkaTopic"],
+                        ""
+                    ),
                     proxyName:        expr.get(c.item, "name"),
+                    listenPort:       expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
+                        ["listenPort"],
+                        9200
+                    ),
+                    podReplicas:      expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
+                        ["podReplicas"],
+                        1
+                    ),
                 }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.config), "proxies"))
@@ -422,7 +465,10 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("createSnapshots", INTERNAL, "createSnapshotsForSource", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    snapshotsSourceConfig: expr.serialize(c.item)
+                    snapshotsSourceConfig: expr.serialize(expr.makeDict({
+                        createSnapshotConfig: expr.deserializeRecord(expr.get(c.item, "createSnapshotConfig")),
+                        sourceConfig: expr.deserializeRecord(expr.get(c.item, "sourceConfig"))
+                    }))
                     //snapshotsSourceConfig: expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_CREATE_SNAPSHOTS_CONFIG>>>()
                 }), {
                     loopWith: makeParameterLoop(
@@ -437,12 +483,24 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.literal("-"),
                         // TODO/BUG - need to fix this in the type system.
                         // The following line is required, but won't type check w/out the any cast!
-                        expr.jsonPathStrict(expr.get(c.item, "targetConfig") as any, "label"),
+                        expr.dig(
+                            expr.deserializeRecord(expr.get(c.item, "targetConfig")),
+                            ["label"],
+                            ""
+                        ),
                         // expr.get(expr.get(c.item, "targetConfig"), "label"),
                         expr.literal("-"),
                         expr.get(c.item, "label")
                     ),
-                    snapshotMigrationConfig: expr.serialize(c.item),
+                    snapshotMigrationConfig: expr.serialize(expr.makeDict({
+                        label: expr.get(c.item, "label"),
+                        snapshotNameResolution: expr.deserializeRecord(expr.get(c.item, "snapshotNameResolution")),
+                        migrations: expr.deserializeRecord(expr.get(c.item, "migrations")),
+                        sourceVersion: expr.get(c.item, "sourceVersion"),
+                        sourceLabel: expr.get(c.item, "sourceLabel"),
+                        targetConfig: expr.deserializeRecord(expr.get(c.item, "targetConfig")),
+                        snapshotConfig: expr.deserializeRecord(expr.get(c.item, "snapshotConfig"))
+                    })),
 //                    snapshotMigrationConfig: expr.cast(c.item).to<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>()
                 }), {
                     loopWith: makeParameterLoop(
@@ -452,7 +510,20 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("runTrafficReplays", INTERNAL, "runSingleReplay", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    replayConfig: expr.serialize(c.item)
+                    replayConfig: expr.serialize(expr.makeDict({
+                        fromProxy: expr.get(c.item, "fromProxy"),
+                        kafkaClusterName: expr.get(c.item, "kafkaClusterName"),
+                        kafkaConfig: expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        toTarget: expr.deserializeRecord(expr.get(c.item, "toTarget")),
+                        dependsOnSnapshotMigrations: expr.getLoose(
+                            expr.deserializeRecord(expr.recordToString(c.item)),
+                            "dependsOnSnapshotMigrations"
+                        ),
+                        replayerConfig: expr.getLoose(
+                            expr.deserializeRecord(expr.recordToString(c.item)),
+                            "replayerConfig"
+                        )
+                    }))
                     // replayConfig: expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_REPLAY_CONFIG>>>()
                 }), {
                     loopWith: makeParameterLoop(

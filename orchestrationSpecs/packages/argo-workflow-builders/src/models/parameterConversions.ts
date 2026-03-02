@@ -7,7 +7,12 @@ import {
     ParameterSource,
     UnwrapSerialize
 } from "./expression";
-import {AggregateType, NonSerializedPlainObject, PlainObject, Serialized} from "./plainObject";
+import {
+    AggregateType,
+    NonSerializedPlainObject,
+    PlainObject,
+    Serialized
+} from "./plainObject";
 import {StripUndefined} from "./sharedTypes";
 import {Primitive} from "zod/v3";
 
@@ -201,11 +206,11 @@ type KeyListMatches<
     R extends Record<PropertyKey, unknown>,
     K extends readonly PropertyKey[]
 > =
-    Exclude<keyof R, K[number]> extends never
-        ? Exclude<K[number], keyof R> extends never
+    Exclude<Extract<keyof R, string>, Extract<K[number], string>> extends never
+        ? Exclude<Extract<K[number], string>, Extract<keyof R, string>> extends never
             ? K
-            : ["extra keys in argument", Exclude<K[number], keyof R>]
-        : ["missing keys from argument", Exclude<keyof R, K[number]>];
+            : ["extra keys in argument", Exclude<Extract<K[number], string>, Extract<keyof R, string>>]
+        : ["missing keys from argument", Exclude<Extract<keyof R, string>, Extract<K[number], string>>];
 
 // === New: Guard that enforces "all optional keys of R are present in CB.defaultKeys" ===
 // - If R has no optional keys, it's OK even if CB.defaultKeys is omitted.
@@ -259,7 +264,7 @@ export function selectInputsFieldsAsExpressionRecord<
         if (dh && typeof dh === "object" && "expression" in dh) {
             out[k] = expr.dig(P as any, [k as any], "");
         } else {
-            out[k] = expr.jsonPathStrict(expr.serialize(P), k as any);
+            out[k] = expr.jsonPathStrict(expr.recordToString(P as BaseExpression<any>), k as any);
         }
     }
     return out as SelectedExprRecord<T, CB>;

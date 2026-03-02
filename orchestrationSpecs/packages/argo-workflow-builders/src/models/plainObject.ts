@@ -1,4 +1,5 @@
 declare const __missingBrand: unique symbol;
+declare const __argoWithParamHybridBrand: unique symbol;
 
 export const MISSING_FIELD = Symbol("missingField");
 export type MissingField = typeof MISSING_FIELD;
@@ -13,6 +14,7 @@ export type Primitive = string | number | boolean | MissingField;
 export type NonSerializedPlainObject = Primitive | AggregateType;
 export type AggregateType = readonly PlainObject[] | { [key: string]: PlainObject };
 export type PlainObject = Primitive | AggregateType | Serialized<PlainObject>;
+export type ArgoWithParamHybridBrand = { readonly [__argoWithParamHybridBrand]: true };
 
 export type WidenPrimitive<T> =
     T extends string ? string :

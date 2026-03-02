@@ -10,7 +10,7 @@ import {
     WorkflowAndTemplatesScope
 } from "./workflowTypes";
 import {Workflow} from "./workflowBuilder";
-import {DeepWiden, NonSerializedPlainObject, PlainObject, Serialized} from "./plainObject";
+import {DeepWiden, PlainObject, Serialized} from "./plainObject";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {NamedTask, TaskType} from "./sharedTypes";
@@ -38,7 +38,7 @@ export type WhenCondition = (SimpleExpression<boolean> | {templateExp: TemplateE
 export type TaskOpts<
     S extends TasksOutputsScope,
     Label extends TaskType,
-    LoopT extends NonSerializedPlainObject
+    LoopT extends PlainObject
 > = {
     loopWith?: LoopWithUnion<LoopT> | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => LoopWithUnion<LoopT>),
     when?: WhenCondition | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => WhenCondition)
@@ -60,7 +60,7 @@ function reduceWhen<
 function reduceLoopWith<
     S extends TasksOutputsScope,
     Label extends TaskType,
-    LoopT extends NonSerializedPlainObject
+    LoopT extends PlainObject
 >(
     loopWith: LoopWithUnion<LoopT> | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => LoopWithUnion<LoopT>) | undefined,
     tasks: AllTasksAsOutputReferenceableInner<S, Label>
@@ -141,7 +141,7 @@ export type ParamProviderCallbackObject<
     TasksScope extends Record<string, TasksWithOutputs<any, any>>,
     Label extends TaskType,
     Inputs extends InputParametersRecord,
-    LoopItemsType extends NonSerializedPlainObject = never
+    LoopItemsType extends PlainObject = never
 > =
     {
         register: (params: ParamsWithLiteralsOrExpressionsIncludingSerialized<CallerParams<Inputs>>) => ParamsPushedSymbol;
@@ -159,7 +159,7 @@ export type ParamsRegistrationFn<
     TaskScope extends TasksOutputsScope,
     Inputs extends InputParametersRecord,
     Label extends TaskType,
-    LoopT extends NonSerializedPlainObject
+    LoopT extends PlainObject
 > = (ctx: ParamProviderCallbackObject<TaskScope, Label, Inputs, LoopT>) => ParamsPushedSymbol;
 
 // Tri-state discriminator for inputs: "empty" | "allOptional" | "hasRequired"
@@ -191,7 +191,7 @@ export type ParamsTuple<
     Name extends string,
     S extends TasksOutputsScope,
     Label extends TaskType,
-    LoopT extends NonSerializedPlainObject,
+    LoopT extends PlainObject,
     OptsType extends TaskOpts<S, Label, LoopT>
 > =
     InputKind<I> extends "empty"
@@ -219,7 +219,7 @@ export function unpackParams<
     I extends InputParametersRecord,
     S extends TasksOutputsScope,
     Label extends TaskType,
-    LoopT extends NonSerializedPlainObject
+    LoopT extends PlainObject
 >(
     args: readonly unknown[]
 ): {
@@ -357,7 +357,7 @@ export abstract class TaskBuilder<
 
     /** Hook for subclasses/wrappers to customize task creation (e.g. DAG adds `when`). */
     protected onTaskPushed<
-        LoopT extends NonSerializedPlainObject,
+        LoopT extends PlainObject,
         OptsType extends TaskOpts<S, Label, LoopT>
     >(task: NamedTask, opts?: OptsType): NamedTask {
         const reducedWhen = reduceWhen(opts?.when, this.getTaskOutputsByTaskName());
@@ -369,7 +369,7 @@ export abstract class TaskBuilder<
 
     protected getParamsFromCallback<
         Inputs extends InputParametersRecord,
-        LoopT extends NonSerializedPlainObject = never
+        LoopT extends PlainObject = never
     >(
         inputs: Inputs,
         fn: ParamsRegistrationFn<S, Inputs, Label, LoopT>,
@@ -394,7 +394,7 @@ export abstract class TaskBuilder<
         Name extends string,
         TemplateSource extends typeof INTERNAL | Workflow<any, any, any>,
         K extends KeyFor<C, TemplateSource>,
-        LoopT extends NonSerializedPlainObject,
+        LoopT extends PlainObject,
         OptsType extends TaskOpts<S, Label, LoopT>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, S>,
@@ -409,7 +409,7 @@ export abstract class TaskBuilder<
     public addTask<
         Name extends string,
         InlineFnType extends InlineTemplateFn<C>,
-        LoopT extends NonSerializedPlainObject = never,
+        LoopT extends PlainObject = never,
         OptsType extends TaskOpts<S, Label, LoopT> = TaskOpts<S, Label, LoopT>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, S>,
@@ -472,7 +472,7 @@ export abstract class TaskBuilder<
         TKey extends string,
         IN extends InputParametersRecord,
         OUT extends OutputParametersRecord,
-        LoopT extends NonSerializedPlainObject,
+        LoopT extends PlainObject,
         OptsType extends TaskOpts<S, Label, LoopT>
     >(
         name: UniqueNameConstraintAtDeclaration<TKey, S>,
@@ -503,7 +503,7 @@ export abstract class TaskBuilder<
 
     protected buildParamProviderCallbackObject<
         Inputs extends InputParametersRecord,
-        LoopT extends NonSerializedPlainObject = never
+        LoopT extends PlainObject = never
     >(
         inputs: Inputs,
         register: (params: ParamsWithLiteralsOrExpressionsIncludingSerialized<CallerParams<Inputs>>) => ParamsPushedSymbol,
@@ -530,7 +530,7 @@ export abstract class TaskBuilder<
 
     protected callTemplate<
         TKey extends Extract<keyof TemplateSignaturesScope, string>,
-        LoopT extends NonSerializedPlainObject = never
+        LoopT extends PlainObject = never
     >(
         name: string,
         templateKey: TKey,
@@ -574,7 +574,7 @@ export abstract class TaskBuilder<
     protected callInlineTemplate<
         IN extends InputParametersRecord,
         OUT extends OutputParametersRecord,
-        LoopT extends NonSerializedPlainObject = never
+        LoopT extends PlainObject = never
     >(
         name: string,
         bodyBuilder: { getBody(): any; inputsScope?: any, retryParameters?: any },

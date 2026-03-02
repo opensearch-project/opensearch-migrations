@@ -29,8 +29,8 @@ function makeProxyServiceManifest(proxyName: BaseExpression<string>, listenPort:
         spec: {
             type: "LoadBalancer",
             selector: { "migrations/proxy": proxyName },
-            ports: [{ port: makeDirectTypeProxy(expr.deserializeRecord(listenPort)),
-                      targetPort: makeDirectTypeProxy(expr.deserializeRecord(listenPort)),
+            ports: [{ port: makeDirectTypeProxy(listenPort),
+                      targetPort: makeDirectTypeProxy(listenPort),
                       protocol: "TCP" }]
         }
     };
@@ -83,7 +83,7 @@ function makeProxyDeploymentManifest(args: {
                             "echo \"Starting proxy with: $ARGS\"",
                             "exec /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy $ARGS"
                         ].join("\n")],
-                        ports: [{ containerPort: makeDirectTypeProxy(expr.deserializeRecord(args.listenPort)) }]
+                        ports: [{ containerPort: makeDirectTypeProxy(args.listenPort) }]
                     }]
                 }
             }
@@ -145,6 +145,8 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("kafkaClusterName",  typeToken<string>())
         .addRequiredInput("kafkaTopicName",    typeToken<string>())
         .addRequiredInput("proxyName",         typeToken<string>())
+        .addRequiredInput("listenPort",        typeToken<number>())
+        .addRequiredInput("podReplicas",       typeToken<number>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
 
         .addSteps(b => b
@@ -159,15 +161,15 @@ export const SetupCapture = WorkflowBuilder.create({
             .addStep("deployService", INTERNAL, "deployProxyService", c =>
                 c.register({
                     proxyName:  b.inputs.proxyName,
-                    listenPort: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["proxyConfig", "listenPort"], 9200),
+                    listenPort: b.inputs.listenPort,
                 })
             )
             .addStep("deployProxy", INTERNAL, "deployProxyDeployment", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     proxyConfig:  b.inputs.proxyConfig,
-                    listenPort:   expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["proxyConfig", "listenPort"], 9200),
-                    podReplicas:  expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["proxyConfig", "podReplicas"], 1),
+                    listenPort:   b.inputs.listenPort,
+                    podReplicas:  b.inputs.podReplicas,
                 })
             )
         )

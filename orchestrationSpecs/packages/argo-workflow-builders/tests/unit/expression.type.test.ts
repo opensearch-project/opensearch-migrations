@@ -1,5 +1,5 @@
 import {expectTypeOf} from "expect-type";
-import {BaseExpression, DeepWiden, expr} from '../../src';
+import {BaseExpression, DeepWiden, expr, INTERNAL, makeParameterLoop, typeToken, WorkflowBuilder} from '../../src';
 
 describe("expression type contracts", () => {
     it("expr.literal() produces the correct value/complexity types", () => {
@@ -126,5 +126,27 @@ describe("expression type contracts", () => {
         // unknown key is rejected by the tuple path typing
         // @ts-expect-error "metadatas" is not a valid key
         expr.dig(cfg, ["metadatas", "indices"] as const, [] as string[]);
+    });
+
+    it("withParam hybrid loop items cannot be serialized directly", () => {
+        const wf = WorkflowBuilder.create({ k8sResourceName: "withparam-hybrid-negative" })
+            .addTemplate("consumer", t => t
+                .addRequiredInput("payload", typeToken<{ name: string; nested: { value: string } }>())
+                .addSteps(s => s)
+            )
+            .addTemplate("main", t => t
+                .addSteps(s => s
+                    .addStep("loop", INTERNAL, "consumer", c => c.register({
+                        // @ts-expect-error - withParam hybrid item must be normalized before serialize
+                        payload: expr.serialize(c.item),
+                    }), {
+                        loopWith: makeParameterLoop(
+                            expr.literal([{ name: "a", nested: { value: "b" } }])
+                        )
+                    })
+                )
+            );
+
+        expectTypeOf(wf).not.toBeAny();
     });
 });

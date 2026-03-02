@@ -21,12 +21,19 @@ import {
     AllowLiteralOrExpression,
     AllowSerializedAggregateOrPrimitiveExpressionOrLiteral,
     BaseExpression,
+    ExpressionType,
     FromParameterExpression,
     InputParameterSource,
     ParameterSource,
     WorkflowParameterSource
 } from "./expression";
-import {NonSerializedPlainObject, PlainObject} from "./plainObject";
+import {
+    AggregateType,
+    ArgoWithParamHybridBrand,
+    NonSerializedPlainObject,
+    PlainObject,
+    Serialized
+} from "./plainObject";
 import {TypeToken} from "./sharedTypes";
 
 export type ExpressionOrConfigMapValue<T extends PlainObject> =
@@ -81,6 +88,10 @@ export type InvalidType<T> = { INVALID_TYPE: T };
 
 type StripUndefined<T> = Exclude<T, undefined>;
 type HasUndefined<T> = undefined extends T ? true : false;
+type StringCoercibleExpr = BaseExpression<string | number | boolean, ExpressionType>;
+type NumericLikeExpr = BaseExpression<number | Serialized<number>, ExpressionType>;
+type BooleanLikeExpr = BaseExpression<boolean | Serialized<boolean>, ExpressionType>;
+type IsBroadString<T> = [T] extends [string] ? (string extends T ? true : false) : false;
 
 type NormalizeBaseExpression<T> =
     T extends BaseExpression<infer R, infer C>
@@ -92,7 +103,23 @@ type NormalizeBaseExpression<T> =
 // Apply the literal-or-expression transformation to parameter schemas
 export type ParamsWithLiteralsOrExpressions<T> = {
     [K in keyof T]:
-    T[K] extends PlainObject | undefined
+    T[K] extends string | undefined
+        ? HasUndefined<T[K]> extends true
+            ? IsBroadString<StripUndefined<T[K]>> extends true
+                ? string | StringCoercibleExpr | undefined
+                : AllowLiteralOrExpression<StripUndefined<T[K]>> | undefined
+            : IsBroadString<StripUndefined<T[K]>> extends true
+                ? string | StringCoercibleExpr
+                : AllowLiteralOrExpression<StripUndefined<T[K]>>
+        : T[K] extends number | undefined
+            ? HasUndefined<T[K]> extends true
+                ? number | NumericLikeExpr | undefined
+                : number | NumericLikeExpr
+        : T[K] extends boolean | undefined
+            ? HasUndefined<T[K]> extends true
+                ? boolean | BooleanLikeExpr | undefined
+                : boolean | BooleanLikeExpr
+        : T[K] extends PlainObject | undefined
         ? HasUndefined<T[K]> extends true
             ? AllowLiteralOrExpression<StripUndefined<T[K]>> | undefined
             : AllowLiteralOrExpression<StripUndefined<T[K]>>
@@ -103,7 +130,23 @@ export type ParamsWithLiteralsOrExpressions<T> = {
 
 export type ParamsWithLiteralsOrExpressionsIncludingSerialized<T> = {
     [K in keyof T]:
-    T[K] extends PlainObject | undefined
+    T[K] extends string | undefined
+        ? HasUndefined<T[K]> extends true
+            ? IsBroadString<StripUndefined<T[K]>> extends true
+                ? string | StringCoercibleExpr | undefined
+                : AllowLiteralOrExpression<StripUndefined<T[K]>> | undefined
+            : IsBroadString<StripUndefined<T[K]>> extends true
+                ? string | StringCoercibleExpr
+                : AllowLiteralOrExpression<StripUndefined<T[K]>>
+        : T[K] extends number | undefined
+            ? HasUndefined<T[K]> extends true
+                ? number | NumericLikeExpr | undefined
+                : number | NumericLikeExpr
+        : T[K] extends boolean | undefined
+            ? HasUndefined<T[K]> extends true
+                ? boolean | BooleanLikeExpr | undefined
+                : boolean | BooleanLikeExpr
+        : T[K] extends PlainObject | undefined
         ? HasUndefined<T[K]> extends true
             ? AllowSerializedAggregateOrPrimitiveExpressionOrLiteral<StripUndefined<T[K]>> | undefined
             : AllowSerializedAggregateOrPrimitiveExpressionOrLiteral<StripUndefined<T[K]>>
@@ -167,18 +210,26 @@ export function makeItemsLoop<T extends PlainObject>(items: T[]) {
     } as LoopWithItems<T>;
 }
 
-export type LoopWithParam<T extends PlainObject> = {
+type ArgoWithParamField<T extends PlainObject> =
+    T extends AggregateType ? Serialized<T> : T;
+
+export type ArgoWithParamItem<T extends NonSerializedPlainObject> =
+    T extends Record<string, PlainObject>
+        ? ({ [K in keyof T]: ArgoWithParamField<T[K]> } & ArgoWithParamHybridBrand)
+        : T;
+
+export type LoopWithParam<TItem extends PlainObject, TRaw extends NonSerializedPlainObject = NonSerializedPlainObject> = {
     loopWith: "params",
-    value: BaseExpression<T[]>
+    value: BaseExpression<readonly TRaw[]>
 }
 
 export function makeParameterLoop<T extends NonSerializedPlainObject>(expr: BaseExpression<readonly T[]>) {
     return {
         loopWith: "params",
         value: expr
-    } as LoopWithParam<T>;
+    } as LoopWithParam<ArgoWithParamItem<T>, T>;
 }
 
 export type LoopWithUnion<T extends PlainObject> = (T extends number ? LoopWithSequence : never)
     | LoopWithItems<T>
-    | LoopWithParam<T>;
+    | LoopWithParam<T, any>;

@@ -21,7 +21,7 @@ import {
 } from "./workflowTypes";
 import {RetryableTemplateBodyBuilder, RetryableTemplateRebinder} from "./templateBodyBuilder";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
-import {NonSerializedPlainObject, PlainObject} from "./plainObject";
+import {PlainObject} from "./plainObject";
 import {Workflow} from "./workflowBuilder";
 import {
     LabelledAllTasksAsOutputReferenceable,
@@ -71,7 +71,7 @@ class StepGroupBuilder<
         Name extends string,
         TemplateSource extends typeof INTERNAL | Workflow<any, any, any>,
         K extends KeyFor<ParentWorkflowScope, TemplateSource>,
-        LoopT extends NonSerializedPlainObject = never
+        LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, TasksScope>,
         source: UniqueNameConstraintOutsideDeclaration<Name, TasksScope, TemplateSource>,
@@ -177,7 +177,7 @@ export class StepsBuilder<
         Name extends string,
         TemplateSource extends typeof INTERNAL | Workflow<any, any, any>,
         K extends KeyFor<ParentWorkflowScope, TemplateSource>,
-        LoopT extends NonSerializedPlainObject = never
+        LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         source: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TemplateSource>,
@@ -201,7 +201,7 @@ export class StepsBuilder<
     public addStep<
         Name extends string,
         InlineFnType extends InlineTemplateFn<ParentWorkflowScope>,
-        LoopT extends NonSerializedPlainObject = never
+        LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         source: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, typeof INLINE>,

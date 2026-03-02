@@ -35,15 +35,15 @@ import {
     TaskRebinder
 } from "./taskBuilder";
 import {RetryParameters, RetryableTemplateBodyBuilder, RetryableTemplateRebinder} from "./templateBodyBuilder";
-import {NonSerializedPlainObject, PlainObject} from "./plainObject";
+import {PlainObject} from "./plainObject";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {NamedTask} from "./sharedTypes";
 import {SynchronizationConfig} from "./synchronization";
 
-export type DagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends NonSerializedPlainObject> =
+export type DagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainObject> =
     TaskOpts<TasksOutputsScope, "tasks", LoopT> & { dependencies?: ReadonlyArray<Extract<keyof TaskScope, string>> };
 
-function isDagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends NonSerializedPlainObject>(
+function isDagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainObject>(
     v: unknown
 ): v is DagTaskOpts<TasksOutputsScope, LoopT> {
     return !!v
@@ -59,7 +59,7 @@ class DagTaskBuilder<
     protected readonly label = "tasks";
 
     protected onTaskPushed<
-        LoopT extends NonSerializedPlainObject,
+        LoopT extends PlainObject,
         OptsType extends TaskOpts<TaskScope, "tasks", LoopT>
     >(
         task: NamedTask, opts?: OptsType
@@ -145,7 +145,7 @@ export class DagBuilder<
         Name extends string,
         TemplateSource extends typeof INTERNAL | Workflow<any, any, any>,
         K extends KeyFor<ParentWorkflowScope, TemplateSource>,
-        LoopT extends NonSerializedPlainObject = never
+        LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, TaskScope>,
         source: UniqueNameConstraintOutsideDeclaration<Name, TaskScope, TemplateSource>,
@@ -174,7 +174,7 @@ export class DagBuilder<
     public addTask<
         Name extends string,
         InlineFnType extends InlineTemplateFn<ParentWorkflowScope>,
-        LoopT extends NonSerializedPlainObject = never
+        LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, TaskScope>,
         source: UniqueNameConstraintOutsideDeclaration<Name, TaskScope, typeof INLINE>,

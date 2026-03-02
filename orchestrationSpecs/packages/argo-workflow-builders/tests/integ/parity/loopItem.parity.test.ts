@@ -12,11 +12,18 @@ import { getTestNamespace, getServiceAccountName } from "../infra/argoCluster.js
 import { submitRenderedWorkflow } from "../infra/probeHelper.js";
 import { submitAndWait } from "../infra/workflowRunner.js";
 import { BuilderVariant, ParitySpec, reportContractResult, reportParityResult } from "../infra/parityHelper.js";
+import { LowercaseOnly } from "../../../src/models/workflowTypes.js";
 
 function countLoopNodes(result: any, prefix = "loop-step(") {
   return Object.values(result.raw.status.nodes).filter(
     (n: any) => n.displayName && n.displayName.startsWith(prefix)
   );
+}
+
+function uniqueWorkflowName<const P extends string>(
+  prefix: LowercaseOnly<P>
+): LowercaseOnly<`${P}-${number}-${string}`> {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` as LowercaseOnly<`${P}-${number}-${string}`>;
 }
 
 describe("Loop Item - withItems iterates over array strings", () => {
@@ -63,11 +70,11 @@ describe("Loop Item - withItems iterates over array strings", () => {
   describe("Builder - loopWith items", () => {
     const builderVariant: BuilderVariant = {
       name: "loopWith items",
-      code: "addStep(..., c => c.register({ value: expr.asString(c.item) }), { loopWith: makeItemsLoop(['a','b','c']) })",
+      code: "addStep(..., c => c.register({ value: c.item }), { loopWith: makeItemsLoop(['a','b','c']) })",
     };
 
     test("builder workflow loops 3 times and passes item", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "pli-items-strings-builder" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: uniqueWorkflowName("pli-items-strings-builder") })
         .addTemplate("process-item", t => t
           .addRequiredInput("value", typeToken<string>())
           .addSuspend(0)
@@ -77,7 +84,7 @@ describe("Loop Item - withItems iterates over array strings", () => {
             "loop-step",
             INTERNAL,
             "process-item",
-            c => c.register({ value: expr.asString(c.item) }),
+            c => c.register({ value: c.item }),
             { loopWith: makeItemsLoop(["a", "b", "c"]) }
           ))
         )
@@ -139,11 +146,11 @@ describe("Loop Item - withItems iterates over numbers", () => {
   describe("Builder - loopWith items", () => {
     const builderVariant: BuilderVariant = {
       name: "loopWith items",
-      code: "addStep(..., c => c.register({ value: expr.asString(c.item) }), { loopWith: makeItemsLoop([1,2,3]) })",
+      code: "addStep(..., c => c.register({ value: c.item }), { loopWith: makeItemsLoop([1,2,3]) })",
     };
 
     test("builder workflow loops and coerces numbers to strings", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "pli-items-numbers-builder" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: uniqueWorkflowName("pli-items-numbers-builder") })
         .addTemplate("process-item", t => t
           .addRequiredInput("value", typeToken<string>())
           .addSuspend(0)
@@ -153,7 +160,7 @@ describe("Loop Item - withItems iterates over numbers", () => {
             "loop-step",
             INTERNAL,
             "process-item",
-            c => c.register({ value: expr.asString(c.item) }),
+            c => c.register({ value: c.item }),
             { loopWith: makeItemsLoop([1, 2, 3]) }
           ))
         )
@@ -220,7 +227,7 @@ describe("Loop Item - withItems JSON objects are serialized", () => {
     };
 
     test("builder workflow loops objects as serialized values", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "pli-items-objects-builder" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: uniqueWorkflowName("pli-items-objects-builder") })
         .addTemplate("process-item", t => t
           .addRequiredInput("obj", typeToken<Serialized<{ name: string; age: number }>>())
           .addSuspend(0)
@@ -293,11 +300,11 @@ describe("Loop Item - item used in expression directly", () => {
   describe("Builder - loop item expression", () => {
     const builderVariant: BuilderVariant = {
       name: "item expression",
-      code: "addStep(..., c => c.register({ computed: expr.concat(expr.asString(c.item), expr.literal('-processed')) }), { loopWith: makeItemsLoop(['x','y']) })",
+      code: "addStep(..., c => c.register({ computed: expr.concat(c.item, expr.literal('-processed')) }), { loopWith: makeItemsLoop(['x','y']) })",
     };
 
     test("builder workflow computes per-item expression values", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "pli-items-expr-builder" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: uniqueWorkflowName("pli-items-expr-builder") })
         .addTemplate("process-item", t => t
           .addRequiredInput("computed", typeToken<string>())
           .addSuspend(0)
@@ -308,7 +315,7 @@ describe("Loop Item - item used in expression directly", () => {
             INTERNAL,
             "process-item",
             c => c.register({
-              computed: expr.concat(expr.asString(c.item), expr.literal("-processed")),
+              computed: expr.concat(c.item, expr.literal("-processed")),
             }),
             { loopWith: makeItemsLoop(["x", "y"]) }
           ))
@@ -372,11 +379,11 @@ describe("Loop Item - withParam from JSON array", () => {
   describe("Builder - loopWith param", () => {
     const builderVariant: BuilderVariant = {
       name: "loopWith param",
-      code: "addStep(..., c => c.register({ value: expr.asString(c.item) }), { loopWith: makeParameterLoop(ctx.inputs.items) })",
+      code: "addStep(..., c => c.register({ value: c.item }), { loopWith: makeParameterLoop(ctx.inputs.items) })",
     };
 
     test("builder workflow loops over parameter array", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "pli-param-json-array-builder" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: uniqueWorkflowName("pli-param-json-array-builder") })
         .addTemplate("process-item", t => t
           .addRequiredInput("value", typeToken<string>())
           .addSuspend(0)
@@ -387,7 +394,7 @@ describe("Loop Item - withParam from JSON array", () => {
             "loop-step",
             INTERNAL,
             "process-item",
-            c => c.register({ value: expr.asString(c.item) }),
+            c => c.register({ value: c.item }),
             { loopWith: makeParameterLoop(expr.deserializeRecord(s.inputs.items)) }
           ))
         )
@@ -448,11 +455,11 @@ describe("Loop Item - item number coerced with string()", () => {
   describe("Builder - item number coercion", () => {
     const builderVariant: BuilderVariant = {
       name: "item number coercion",
-      code: "addStep(..., c => c.register({ computed: expr.concat(expr.literal('value-'), expr.asString(c.item)) }), { loopWith: makeItemsLoop([10,20,30]) })",
+      code: "addStep(..., c => c.register({ computed: expr.concat(expr.literal('value-'), c.item) }), { loopWith: makeItemsLoop([10,20,30]) })",
     };
 
     test("builder workflow computes value-prefixed numeric items", async () => {
-      const wf = WorkflowBuilder.create({ k8sResourceName: "pli-items-coerce-builder" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: uniqueWorkflowName("pli-items-coerce-builder") })
         .addTemplate("process-item", t => t
           .addRequiredInput("computed", typeToken<string>())
           .addSuspend(0)
@@ -463,7 +470,7 @@ describe("Loop Item - item number coerced with string()", () => {
             INTERNAL,
             "process-item",
             c => c.register({
-              computed: expr.concat(expr.literal("value-"), expr.asString(c.item)),
+              computed: expr.concat(expr.literal("value-"), c.item),
             }),
             { loopWith: makeItemsLoop([10, 20, 30]) }
           ))
@@ -538,7 +545,7 @@ describe("Loop Item - withParam over objects delivers parsed objects", () => {
       type Person = { name: string; age: number };
       const items: Person[] = [{ name: "alice", age: 30 }, { name: "bob", age: 25 }];
 
-      const wf = WorkflowBuilder.create({ k8sResourceName: "pli-param-objects-builder" })
+      const wf = WorkflowBuilder.create({ k8sResourceName: uniqueWorkflowName("pli-param-objects-builder") })
         .addTemplate("process-item", t => t
           .addRequiredInput("name", typeToken<string>())
           .addSuspend(0)
@@ -551,7 +558,7 @@ describe("Loop Item - withParam over objects delivers parsed objects", () => {
             "process-item",
             c => c.register({
               // c.item is a parsed object at runtime — expr.get works directly
-              name: expr.asString(expr.get(c.item, "name")),
+              name: expr.get(c.item, "name"),
             }),
             { loopWith: makeParameterLoop(expr.deserializeRecord(s.inputs.items)) }
           ))
@@ -570,56 +577,39 @@ describe("Loop Item - withParam over objects delivers parsed objects", () => {
   });
 });
 
-describe("Loop Item - withParam over objects with nested fields (realistic fullMigration pattern)", () => {
-  // This mirrors how fullMigration passes proxies/snapshots/replays:
-  // - A JSON string of an array of complex objects is passed as a workflow parameter
-  // - One deserializeRecord hydrates it into an array (no nested serialization)
-  // - The loop iterates over the items, accessing nested fields
-  type KafkaConfig = { connection: string; topic: string };
-  type ProxyConfig = { name: string; kafkaConfig: KafkaConfig; listenPort: number };
 
-  const proxies: ProxyConfig[] = [
-    { name: "proxy-a", kafkaConfig: { connection: "kafka-a:9092", topic: "topic-a" }, listenPort: 9200 },
-    { name: "proxy-b", kafkaConfig: { connection: "kafka-b:9092", topic: "topic-b" }, listenPort: 9201 },
-  ];
 
+describe("Loop Item - withParam: nested loop over sub-array", () => {
+  // Rule: to loop over a sub-array inside a template, use withParam + toJson(fromJson(param).subarray)
   const spec: ParitySpec = {
     category: "Loop Item",
-    name: "withParam over nested objects (fullMigration pattern)",
-    argoExpression: "withParam over complex objects, accessing nested fields",
-    inputs: { proxies: JSON.stringify(proxies) },
+    name: "nested loop over sub-array extracted from parameter",
+    argoExpression: "withParam: toJson(fromJson(inputs.parameters.obj).tags)",
+    inputs: { config: JSON.stringify({ env: "prod", tags: ["tag-a", "tag-b", "tag-c"] }) },
   };
 
   describe("ArgoYaml", () => {
-    test("raw: nested fields accessible via item['kafkaConfig']['connection']", async () => {
+    test("raw: loop over sub-array extracted from JSON parameter using toJson(fromJson(param).field)", async () => {
       const namespace = getTestNamespace();
       const workflow = {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "Workflow",
-        metadata: { generateName: "pli-param-nested-direct-", namespace },
+        metadata: { generateName: "pli-param-nested-loop-direct-", namespace },
         spec: {
           entrypoint: "main",
           activeDeadlineSeconds: 30,
           serviceAccountName: getServiceAccountName(),
-          arguments: { parameters: [{ name: "proxies", value: spec.inputs!.proxies }] },
+          arguments: { parameters: [{ name: "config", value: spec.inputs!.config }] },
           templates: [
-            {
-              name: "process-proxy",
-              inputs: { parameters: [{ name: "name" }, { name: "connection" }, { name: "topic" }] },
-              suspend: { duration: "0" }
-            },
+            { name: "handle-tag", inputs: { parameters: [{ name: "tag" }] }, suspend: { duration: "0" } },
             {
               name: "main",
               steps: [[{
-                name: "loop-step",
-                template: "process-proxy",
-                arguments: { parameters: [
-                  { name: "name",       value: "{{=item['name']}}" },
-                  // nested object: item['kafkaConfig'] is a JSON string, need fromJSON to parse it
-                  { name: "connection", value: "{{=fromJSON(item['kafkaConfig'])['connection']}}" },
-                  { name: "topic",      value: "{{=fromJSON(item['kafkaConfig'])['topic']}}" },
-                ]},
-                withParam: "{{workflow.parameters.proxies}}",
+                name: "tag-steps",
+                template: "handle-tag",
+                arguments: { parameters: [{ name: "tag", value: "{{item}}" }] },
+                // Extract sub-array from JSON param: fromJson gives native array, toJson converts back to JSON string for withParam
+                withParam: "{{= toJSON(fromJSON(workflow.parameters.config)['tags']) }}",
               }]],
             },
           ],
@@ -627,32 +617,72 @@ describe("Loop Item - withParam over objects with nested fields (realistic fullM
       };
       const result = await submitAndWait(workflow);
       expect(result.phase).toBe("Succeeded");
-      const loopNodes = countLoopNodes(result);
-      const connections = loopNodes
-        .map((n: any) => n.inputs?.parameters?.find((p: any) => p.name === "connection")?.value)
+      const loopNodes = countLoopNodes(result, "tag-steps(");
+      const tags = loopNodes
+        .map((n: any) => n.inputs?.parameters?.find((p: any) => p.name === "tag")?.value)
         .sort();
-      expect(connections).toEqual(["kafka-a:9092", "kafka-b:9092"]);
+      expect(tags).toEqual(["tag-a", "tag-b", "tag-c"]);
       reportContractResult(spec, result);
     });
   });
+});
 
-  describe("Builder - withParam over nested objects without casts", () => {
-    const builderVariant: BuilderVariant = {
-      name: "withParam nested objects no-cast",
-      code: "TODO: find the cast-free pattern for passing c.item to typed inputs and accessing nested fields",
-    };
 
-    test.skip("builder: pass c.item to typed input and access nested fields without cast", async () => {
-      // This test documents the GOAL: no expr.cast() needed.
-      // Currently fullMigration uses expr.cast(c.item).to<Serialized<T>>() as a workaround.
-      // The ideal would be:
-      //   proxyConfig: c.item  (directly, type-safe)
-      //   kafkaConnection: expr.get(expr.get(c.item, "kafkaConfig"), "connection")
-      //
-      // Blocked by: c.item is typed as T but withParam delivers it as a parsed object,
-      // and the register() call expects Serialized<T> for complex object inputs.
-      // See: taskBuilder.ts ParamProviderCallbackObject item type.
-      reportParityResult(spec, builderVariant, { phase: "Skipped" } as any);
+describe("Loop Item - toJson to build JSON param inline from scalars", () => {
+  // Rule: use toJson({...}) to construct a JSON object from multiple scalar params
+  const spec: ParitySpec = {
+    category: "Loop Item",
+    name: "toJson builds JSON object from scalar params",
+    argoExpression: "toJson({\"env\": inputs.parameters.env, \"count\": inputs.parameters.count})",
+  };
+
+  describe("ArgoYaml", () => {
+    test("raw: toJson constructs JSON object from scalar inputs, fromJson reads it back", async () => {
+      const namespace = getTestNamespace();
+      const workflow = {
+        apiVersion: "argoproj.io/v1alpha1",
+        kind: "Workflow",
+        metadata: { generateName: "pli-param-tojson-build-direct-", namespace },
+        spec: {
+          entrypoint: "main",
+          activeDeadlineSeconds: 30,
+          serviceAccountName: getServiceAccountName(),
+          arguments: { parameters: [{ name: "env", value: "prod" }, { name: "count", value: "3" }] },
+          templates: [
+            {
+              name: "consumer",
+              inputs: { parameters: [{ name: "config" }] },
+              outputs: {
+                parameters: [
+                  { name: "env",   valueFrom: { expression: "fromJSON(inputs.parameters.config)['env']" } },
+                  { name: "count", valueFrom: { expression: "string(fromJSON(inputs.parameters.config)['count'])" } },
+                ]
+              },
+              suspend: { duration: "0" }
+            },
+            {
+              name: "main",
+              steps: [[{
+                name: "step",
+                template: "consumer",
+                arguments: { parameters: [{
+                  name: "config",
+                  // Build JSON object inline from scalar workflow params
+                  value: "{{= toJSON({\"env\": workflow.parameters.env, \"count\": int(workflow.parameters.count)}) }}",
+                }]},
+              }]],
+            },
+          ],
+        },
+      };
+      const result = await submitAndWait(workflow);
+      expect(result.phase).toBe("Succeeded");
+      const step = Object.values(result.nodeOutputs).find((n: any) =>
+        n.parameters?.env !== undefined
+      ) as any;
+      expect(step?.parameters?.env).toBe("prod");
+      expect(step?.parameters?.count).toBe("3");
+      reportContractResult(spec, result);
     });
   });
 });
