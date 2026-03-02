@@ -50,7 +50,7 @@ else
   # Set up port-forward if not running
   if ! pgrep -f "kubectl port-forward.*buildkitd.*1234:1234" >/dev/null; then
     echo "Starting buildkit port-forward..."
-    nohup kubectl port-forward -n "$NAMESPACE" svc/buildkitd 1234:1234 --address 0.0.0.0 > /tmp/buildkit-forward.log 2>&1 &
+    nohup kubectl port-forward -n "$NAMESPACE" svc/buildkitd 1234:1234 > /tmp/buildkit-forward.log 2>&1 &
     sleep 2
   else
     echo "buildkit port-forward already running"

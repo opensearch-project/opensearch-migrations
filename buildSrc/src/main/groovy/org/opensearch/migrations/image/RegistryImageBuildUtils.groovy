@@ -97,11 +97,18 @@ class RegistryImageBuildUtils {
                             if (targetArch != "multi") dest = "${registryDestination}_${targetArch}"
                             image = dest
 
+                            // For single-arch builds, also tag as the base name (without suffix)
+                            // to match BuildKit behavior and allow local k8s deployments to find images
+                            def tagList = []
+                            if (targetArch != "multi") {
+                                tagList.add(config.imageTag.toString())
+                            }
                             def versionTag = rootProject.findProperty("imageVersion")
                             if (versionTag) {
                                 def suffix = (targetArch != "multi") ? "_${targetArch}" : ""
-                                tags = ["${versionTag}${suffix}".toString()]
+                                tagList.add("${versionTag}${suffix}".toString())
                             }
+                            if (tagList) tags = tagList
                         }
                         extraDirectories {
                             paths {
