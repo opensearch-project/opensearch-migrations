@@ -175,7 +175,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             sourceClusterOperations.createDocument(indexName, docIdOnBoth, doc);
 
             // Refresh to ensure documents are searchable
-            sourceClusterOperations.post("/_refresh", null);
+            sourceClusterOperations.refresh();
 
             // === ACTION: Take first snapshot ===
             var snapshot1Name = "snapshot1";
@@ -201,7 +201,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             sourceClusterOperations.deleteDocument(indexName, docIdDeletedOnSecondSnapshot, null, null);
             var docIdOnlyOnSecond = "docOnlyOnSecond";
             sourceClusterOperations.createDocument(indexName, docIdOnlyOnSecond, doc);
-            sourceClusterOperations.post("/_refresh", null);
+            sourceClusterOperations.refresh();
 
             // === ACTION: Take second snapshot ===
             var snapshot2Name = "snapshot2";
@@ -251,7 +251,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 Assertions.assertEquals(numberOfShards + 1, expectedTerminationException.numRuns);
 
                 // === VERIFICATION: Check the results ===
-                targetClusterOperations.post("/_refresh", null);
+                targetClusterOperations.refresh();
                 {
                     var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdDeletedOnSecondSnapshot);
                      Assertions.assertEquals(404, response.getKey(), "doc2 should be deleted on target");
@@ -297,7 +297,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 Assertions.assertEquals(numberOfShards + 1, expectedTerminationException.numRuns);
 
                 // === VERIFICATION: Check the results ===
-                targetClusterOperations.post("/_refresh", null);
+                targetClusterOperations.refresh();
                 {
                     var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdDeletedOnSecondSnapshot);
                     Assertions.assertEquals(200, response.getKey(), docIdDeletedOnSecondSnapshot + " should created when restoring first snapshot");

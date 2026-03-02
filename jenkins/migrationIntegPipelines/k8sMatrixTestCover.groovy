@@ -5,5 +5,10 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
          remote: "${gitUrl}"])
 
-// Shared library function (location from root: vars/k8sMatrixTest.groovy)
-k8sMatrixTest()
+// Allow job name overrides for matrix parent and child job routing
+def jobNameOverride = params.JOB_NAME_OVERRIDE ?: ''
+def childJobNameOverride = params.CHILD_JOB_NAME_OVERRIDE ?: ''
+k8sMatrixTest(
+        jobName: jobNameOverride ?: null,
+        childJobName: childJobNameOverride ?: null
+)

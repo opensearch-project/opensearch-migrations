@@ -167,6 +167,9 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
 
     private boolean hasRequestContentTypeMatching(HttpJsonMessageWithFaultingPayload message,
                                                   Predicate<String> contentTypeFilter) {
+        if (message == null) {
+            return false;
+        }
         // ContentType not text if specified and has a value with / and that value does not start with text/
         return Optional.ofNullable(message.headers().insensitiveGet(HttpHeaderNames.CONTENT_TYPE.toString()))
             .map(s -> s.stream()

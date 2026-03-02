@@ -1,0 +1,50 @@
+plugins {
+    id 'org.opensearch.migrations.java-application-conventions'
+    id 'io.freefair.lombok'
+    id 'com.google.cloud.tools.jib'
+}
+
+dependencies {
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformer')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
+    implementation project(':awsUtilities')
+
+    implementation libs.netty.all
+    implementation libs.jackson.databind
+    implementation libs.jcommander
+    implementation libs.slf4j.api
+    implementation libs.log4j.api
+    implementation libs.log4j.core
+    implementation libs.log4j.slf4j2.impl
+    implementation libs.aws.auth
+    implementation libs.aws.sdk.core
+
+    runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformerProvider')
+
+    testImplementation libs.junit.jupiter.api
+    testRuntimeOnly libs.junit.jupiter.engine
+}
+
+application {
+    mainClass = 'org.opensearch.migrations.transform.shim.ShimMain'
+}
+
+jib {
+    to {
+        image = 'migrations/transformation_shim'
+    }
+    from {
+        image = 'amazoncorretto:17-al2023-headless'
+        platforms {
+            platform {
+                architecture = System.getProperty("os.arch") in ["aarch64", "arm64"] ? "arm64" : "amd64"
+                os = "linux"
+            }
+        }
+    }
+}
+
+tasks.withType(Test).configureEach {
+    systemProperty 'io.netty.handler.codec.http.defaultStrictLineParsing', false
+}

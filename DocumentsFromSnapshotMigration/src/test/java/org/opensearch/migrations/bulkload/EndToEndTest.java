@@ -103,6 +103,7 @@ public class EndToEndTest extends SourceTestBase {
             if (!cached) {
                 Startables.deepStart(sourceCluster, targetCluster).join();
                 var sourceClusterOperations = new ClusterOperations(sourceCluster);
+                var targetClusterOperations = new ClusterOperations(targetCluster);
 
                 String body = String.format(
                     "{" +
@@ -118,17 +119,17 @@ public class EndToEndTest extends SourceTestBase {
                     numberOfShards
                 );
                 sourceClusterOperations.createIndex(indexName, body);
-                new ClusterOperations(targetCluster).createIndex(indexName, body);
+                targetClusterOperations.createIndex(indexName, body);
 
                 if (supportsCompletion) {
                     String completionIndex = "completion_index";
                     sourceClusterOperations.createIndexWithCompletionField(completionIndex, numberOfShards);
-                    new ClusterOperations(targetCluster).createIndexWithCompletionField(completionIndex, numberOfShards);
+                    targetClusterOperations.createIndexWithCompletionField(completionIndex, numberOfShards);
                     String completionDoc = "{\"completion\": \"bananas\"}";
                     String docType = sourceClusterOperations.defaultDocType();
                     sourceClusterOperations.createDocument(completionIndex, "1", completionDoc, null, docType);
-                    sourceClusterOperations.post("/_refresh", null);
-                    new ClusterOperations(targetCluster).post("/_refresh", null);
+                    sourceClusterOperations.refresh();
+                    targetClusterOperations.refresh();
                 }
 
                 String largeDoc = generateLargeDocJson(2);
@@ -139,14 +140,14 @@ public class EndToEndTest extends SourceTestBase {
                 sourceClusterOperations.createDocument(indexName, "224", "{\"score\": 60, \"active\": true}", "1", null);
                 sourceClusterOperations.createDocument(indexName, "225", "{\"score\": 77, \"active\": false}", "2", null);
 
-                sourceClusterOperations.post("/" + indexName + "/_refresh", null);
+                sourceClusterOperations.refresh(indexName);
                 sourceClusterOperations.createDocument(indexName, "toBeDeleted", "{\"score\": 99, \"active\": true}", "1", null);
                 sourceClusterOperations.createDocument(indexName, "remaining", "{\"score\": 88, \"active\": false}", "1", null);
-                sourceClusterOperations.post("/" + indexName + "/_refresh", null);
+                sourceClusterOperations.refresh(indexName);
                 sourceClusterOperations.deleteDocument(indexName, "toBeDeleted", "1", null);
-                sourceClusterOperations.post("/" + indexName + "/_refresh", null);
+                sourceClusterOperations.refresh(indexName);
 
-                if (isEs5SingleType) {
+                if (sourceClusterOperations.shouldTestEs5SingleType()) {
                     sourceClusterOperations.createEs5SingleTypeIndexWithDocs(ES5_SINGLE_TYPE_INDEX);
                 }
 
@@ -186,7 +187,7 @@ public class EndToEndTest extends SourceTestBase {
 
                 if (supportsCompletion) {
                     targetClusterOperations.createIndexWithCompletionField("completion_index", numberOfShards);
-                    targetClusterOperations.post("/_refresh", null);
+                    targetClusterOperations.refresh();
                 }
             }
 
@@ -268,7 +269,7 @@ public class EndToEndTest extends SourceTestBase {
         if (!sourceClusterOperations.shouldTestEs5SingleType()) {
             return;
         }
-        targetClusterOperations.post("/_refresh", null);
+        targetClusterOperations.refresh();
         var res = targetClusterOperations.get("/" + ES5_SINGLE_TYPE_INDEX + "/_search");
         String body = res.getValue();
         Assertions.assertTrue(body.contains("Doc One"),
@@ -283,7 +284,7 @@ public class EndToEndTest extends SourceTestBase {
 
     @SneakyThrows
     private void validateCompletionDoc(ClusterOperations targetClusterOperations) {
-        targetClusterOperations.post("/_refresh", null);
+        targetClusterOperations.refresh();
         String docType = targetClusterOperations.defaultDocType();
         var res = targetClusterOperations.get("/completion_index/" + docType + "/1");
         ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
