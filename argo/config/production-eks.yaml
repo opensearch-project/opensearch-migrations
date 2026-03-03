@@ -1,27 +1,53 @@
 # Production EKS Configuration
-# IRSA service accounts, Karpenter node pool, S3 artifact repository
+# EKS Pod Identity v2 service accounts, Karpenter node pool, S3 artifact repository
+#
+# Pod Identity v2 setup:
+#   Pod Identity associations are created EXTERNALLY (not via SA annotations).
+#   The EKS Pod Identity Agent (DaemonSet) injects AWS credentials directly into pods.
+#   No IRSA annotations or STS assume-role calls needed in workflow code.
+#
+#   Create associations via CLI or IaC:
+#     aws eks create-pod-identity-association \
+#       --cluster-name CLUSTER_NAME \
+#       --namespace ma \
+#       --service-account ci-deployment-sa \
+#       --role-arn arn:aws:iam::ACCOUNT_ID:role/ArgoDeploymentRole
+#
+#     aws eks create-pod-identity-association \
+#       --cluster-name CLUSTER_NAME \
+#       --namespace ma \
+#       --service-account ci-release-sa \
+#       --role-arn arn:aws:iam::ACCOUNT_ID:role/ArgoReleaseRole
+#
+#   The IAM roles must have the Pod Identity trust policy:
+#     {
+#       "Version": "2012-10-17",
+#       "Statement": [{
+#         "Effect": "Allow",
+#         "Principal": { "Service": "pods.eks.amazonaws.com" },
+#         "Action": ["sts:AssumeRole", "sts:TagSession"]
+#       }]
+#     }
 
 ---
-# CI deployment service account with cross-account access
+# CI deployment service account — Pod Identity v2 provides AWS credentials
+# via external association (no annotation needed)
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: ci-deployment-sa
   namespace: ma
-  annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/ArgoDeploymentRole
   labels:
     app: ci-pipeline
 
 ---
-# Release pipeline service account with prod S3 + ECR access
+# Release pipeline service account — Pod Identity v2 provides AWS credentials
+# via external association (no annotation needed)
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: ci-release-sa
   namespace: ma
-  annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/ArgoReleaseRole
   labels:
     app: ci-pipeline
 

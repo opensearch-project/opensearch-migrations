@@ -142,13 +142,6 @@ spec:
             REGION="{{workflow.parameters.region}}"
             SIZE="{{workflow.parameters.target-cluster-size}}"
 
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-deploy-target" --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             # Size configs matching Jenkins targetClusterSizes
             if [ "${SIZE}" = "large" ]; then
               DATA_TYPE="r6g.8xlarge.search"; MGR_TYPE="m6g.2xlarge.search"
@@ -213,13 +206,6 @@ spec:
             STACK_NAME_SUFFIX="${STAGE}-${REGION}"
             MA_STACK_NAME="Migration-Assistant-Infra-Import-VPC-eks-${STACK_NAME_SUFFIX}"
 
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-synth-deploy" --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             CLUSTER_DETAILS=$(cat /workspace/test/cluster-details.json)
             VPC_ID=$(echo "$CLUSTER_DETAILS" | jq -r '.target.vpcId')
             SUBNET_IDS=$(echo "$CLUSTER_DETAILS" | jq -r '.target.subnetIds')
@@ -275,13 +261,6 @@ spec:
             REGION="{{workflow.parameters.region}}"
             STACK_NAME_SUFFIX=$(cat /workspace/test/stack-name-suffix.txt)
             MA_STACK_NAME=$(cat /workspace/test/ma-stack-name.txt)
-
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-configure-eks" --duration-seconds 1200)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
             # Parse CFN exports
             RAW_OUTPUT=$(aws cloudformation describe-stacks \
@@ -367,13 +346,6 @@ spec:
             REGION="{{workflow.parameters.region}}"
             REGISTRY=$(cat /workspace/test/eks-exports.json | jq -r '.registryEndpoint')
 
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-build-images" --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             # Cross-arch build setup (matches Jenkins QEMU + buildx)
             docker run --privileged --rm tonistiigi/binfmt --install all || true
             docker buildx rm ecr-builder 2>/dev/null || true
@@ -414,13 +386,6 @@ spec:
             REGION="{{workflow.parameters.region}}"
             EKS_CLUSTER=$(cat /workspace/test/eks-exports.json | jq -r '.eksClusterName')
 
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-helm-install" --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             aws eks update-kubeconfig --region "${REGION}" --name "${EKS_CLUSTER}"
             ./aws-bootstrap.sh --skip-git-pull --base-dir /workspace --use-public-images false --skip-console-exec --stage "${STAGE}"
         env:
@@ -455,13 +420,6 @@ spec:
             STAGE="{{workflow.parameters.stage}}"
             REGION="{{workflow.parameters.region}}"
             EKS_CLUSTER=$(cat /workspace/test/eks-exports.json | jq -r '.eksClusterName')
-
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-byos-test" --duration-seconds 43200)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
             aws eks update-kubeconfig --region "${REGION}" --name "${EKS_CLUSTER}"
 
@@ -557,13 +515,6 @@ spec:
             EKS_SG=$(echo "$EKS_EXPORTS" | jq -r '.clusterSecurityGroup // empty')
             CLUSTER_DETAILS=$(cat /workspace/test/cluster-details.json 2>/dev/null || echo '{}')
 
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-cleanup" --duration-seconds 4500)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             # Revoke SG ingress (matches Jenkins)
             TARGET_SG=$(echo "$CLUSTER_DETAILS" | jq -r '.target.securityGroupId // empty')
             if [ -n "${EKS_SG}" ] && [ -n "${TARGET_SG}" ]; then
@@ -648,13 +599,6 @@ spec:
             REGION="{{workflow.parameters.region}}"
             STACK="{{inputs.parameters.stack-name}}"
 
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-cfn-delete" --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             STATUS=$(aws cloudformation describe-stacks --stack-name "${STACK}" --region "${REGION}" \
               --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
             [ "${STATUS}" = "DOES_NOT_EXIST" ] && exit 0
@@ -680,13 +624,6 @@ spec:
             STAGE="{{workflow.parameters.stage}}"
             REGION="{{workflow.parameters.region}}"
             NETWORK_STACK="NetworkInfra-${STAGE}-${REGION}"
-
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-network-cleanup" --duration-seconds 4500)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
             STATUS=$(aws cloudformation describe-stacks --stack-name "${NETWORK_STACK}" --region "${REGION}" \
               --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")

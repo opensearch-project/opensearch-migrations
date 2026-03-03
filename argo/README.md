@@ -75,7 +75,7 @@ argo/
 │   └── nightly-matrix.yaml           # CronWorkflow (0 22 * * * UTC)
 │
 ├── config/                            # Production EKS configs
-│   ├── production-eks.yaml           # IRSA SAs, secrets, Karpenter NodePool
+│   ├── production-eks.yaml           # Pod Identity v2 SAs, secrets, Karpenter NodePool
 │   └── s3-artifact-repo.yaml         # S3 artifact repo (replaces MinIO)
 │
 ├── images/                            # Container images
@@ -117,7 +117,7 @@ argo submit -n ma argo/examples/run-matrix.yaml --watch
 |---|---|---|
 | `k8sLocalDeployment.groovy` | `k8s-local-test.yaml` | WorkflowTemplate + DAG + onExit |
 | `k8sMatrixTest.groovy` | `k8s-matrix-test.yaml` | Workflow-of-Workflows + withParam |
-| `defaultIntegPipeline.groovy` | `aws-integ/default-integ-pipeline.yaml` | WorkflowTemplate + IRSA |
+| `defaultIntegPipeline.groovy` | `aws-integ/default-integ-pipeline.yaml` | WorkflowTemplate + Pod Identity v2 |
 | `eksIntegPipeline.groovy` | `aws-integ/eks-integ-pipeline.yaml` | Ordered CFN cleanup DAG |
 | `eksBYOSIntegPipeline.groovy` | `aws-integ/eks-byos-integ-pipeline.yaml` | BYOS via EKS |
 | `eksSolutionsCFNTest.groovy` | `aws-integ/eks-solutions-cfn-test.yaml` | Create-VPC + Import-VPC modes |
@@ -132,7 +132,7 @@ argo submit -n ma argo/examples/run-matrix.yaml --watch
 | `jenkins_tests.yml` (GHA) | `events/sensor-integ-tests.yaml` | Argo Events Sensor |
 | `cron('H 22 * * *')` | `cron/nightly-matrix.yaml` | CronWorkflow |
 | `lock(label: STAGE)` | `ci-stage-locks-configmap.yaml` | synchronization.semaphores |
-| `withAWS(role: ...)` | IRSA + STS AssumeRole | ServiceAccount annotations |
+| `withAWS(role: ...)` | EKS Pod Identity v2 | Pod Identity association (external to SA) |
 | `post { always }` | `onExit` handler | Exit handler DAG |
 | `archiveArtifacts` | S3 artifact outputs | MinIO (local) / S3 (prod) |
 | Console logs + Blue Ocean | Argo UI + ReportPortal | `upload-results.yaml` |
@@ -156,7 +156,7 @@ argo submit -n ma argo/examples/run-matrix.yaml --watch
 | Artifact storage | MinIO | S3 (`config/s3-artifact-repo.yaml`) |
 | Image registry | minikube local | ECR |
 | Node scheduling | Single node | Karpenter (`config/production-eks.yaml`) |
-| AWS auth | N/A | IRSA service accounts |
+| AWS auth | N/A | EKS Pod Identity v2 service accounts |
 | Secrets | K8s secrets | External Secrets Operator |
 
 ## Production Setup

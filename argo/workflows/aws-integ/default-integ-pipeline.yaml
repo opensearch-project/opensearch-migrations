@@ -12,7 +12,7 @@ metadata:
 spec:
   entrypoint: main
   onExit: cleanup-handler
-  serviceAccountName: ci-deployment-sa  # IRSA with cross-account access
+  serviceAccountName: ci-deployment-sa  # Pod Identity v2 provides cross-account AWS credentials
   arguments:
     parameters:
       - name: repo-url
@@ -94,7 +94,7 @@ spec:
                   from: "{{tasks.deploy.outputs.artifacts.source}}"
 
     # ================================================================
-    # VERIFY AWS IDENTITY — replaces Jenkins 'Test Caller Identity' stage
+    # VERIFY AWS IDENTITY — confirms Pod Identity v2 credentials are injected
     # ================================================================
     - name: verify-aws-identity
       container:
@@ -102,21 +102,8 @@ spec:
         command: [bash, -c]
         args:
           - |
-            echo "Verifying AWS identity..."
+            echo "Verifying AWS identity via Pod Identity v2..."
             aws sts get-caller-identity
-            echo "Assuming cross-account role for test account..."
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-ci" \
-              --duration-seconds 5400 \
-              --output json)
-            echo "Successfully assumed role in test account"
-        env:
-          - name: TEST_ACCOUNT_ID
-            valueFrom:
-              secretKeyRef:
-                name: migrations-test-account-id
-                key: account-id
 
     # ================================================================
     # SETUP CDK CONTEXT — replaces Jenkins 'Setup E2E CDK Context' stage
@@ -195,15 +182,6 @@ spec:
           - |
             set -euo pipefail
 
-            # Assume cross-account role
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-deploy" \
-              --duration-seconds 5400)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             SKIP_PROXY_ARG=""
             if [ "{{workflow.parameters.skip-capture-proxy}}" = "true" ]; then
               SKIP_PROXY_ARG="--skip-capture-proxy"
@@ -255,15 +233,6 @@ spec:
         args:
           - |
             set -euo pipefail
-
-            # Assume cross-account role
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-test" \
-              --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
             # Generate unique ID
             UNIQUE_ID="{{workflow.parameters.test-unique-id}}"
@@ -350,13 +319,6 @@ spec:
           - |
             set +e
             STAGE="{{workflow.parameters.stage}}"
-
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-cleanup" --duration-seconds 5400)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
             echo "=== Destroying CDK stacks for stage: ${STAGE} ==="
 

@@ -82,13 +82,6 @@ spec:
             STAGE="{{workflow.parameters.stage}}"
             REGION="{{workflow.parameters.region}}"
 
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-solutions-cfn" --duration-seconds 5400)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             # CDK deploy (matches Jenkins 'Deployment' stage)
             cd deployment/migration-assistant-solution
             npm install
@@ -157,13 +150,6 @@ spec:
           - |
             set +e
             STAGE="{{workflow.parameters.stage}}"
-
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-cleanup" --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
             echo "Destroying Solutions CFN stack for stage ${STAGE}..."
             npm ci 2>/dev/null

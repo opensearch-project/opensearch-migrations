@@ -1,6 +1,7 @@
 # Production S3 artifact repository configuration
 # Patch this into workflow-controller-configmap on production EKS
 # Replaces MinIO used in minikube setup
+# useSDKCreds: true — picks up credentials from EKS Pod Identity v2 (no stored keys)
 apiVersion: v1
 kind: ConfigMap
 metadata:

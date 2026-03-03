@@ -103,13 +103,6 @@ spec:
             MODE="{{inputs.parameters.mode}}"
             STACK_NAME="Migration-Assistant-Infra-${MODE}-eks-${STAGE}-${REGION}"
 
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-eks-cfn-${MODE}" --duration-seconds 5400)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             echo "=== Testing ${MODE} mode ==="
 
             BOOTSTRAP_ARGS="--stack-name ${STACK_NAME} --stage ${STAGE} --region ${REGION}"
@@ -220,13 +213,6 @@ spec:
         args:
           - |
             set +e
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-cleanup" --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             STACK="{{inputs.parameters.stack-name}}"
             STATUS=$(aws cloudformation describe-stacks --stack-name "${STACK}" \
               --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")

@@ -122,13 +122,6 @@ spec:
             STAGE="{{workflow.parameters.stage}}"
             REGION="{{workflow.parameters.region}}"
 
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-deploy-clusters" --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             # Write cluster context JSON (matches deployClustersStep.groovy)
             CONTEXT_FILE="tmp/cluster-context-integ.json"
             mkdir -p tmp
@@ -194,13 +187,6 @@ spec:
             REGION="{{workflow.parameters.region}}"
             STACK_NAME_SUFFIX="${STAGE}-${REGION}"
             STACK_NAME="Migration-Assistant-Infra-Import-VPC-eks-${STACK_NAME_SUFFIX}"
-
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-deploy-eks" --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
             # Read cluster details from deploy-clusters step
             CLUSTER_DETAILS=$(cat /workspace/test/cluster-details.json)
@@ -282,13 +268,6 @@ spec:
             REGION="{{workflow.parameters.region}}"
             SOURCE_VER="{{workflow.parameters.source-version}}"
             TARGET_VER="{{workflow.parameters.target-version}}"
-
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-post-setup" --duration-seconds 1200)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
             CLUSTER_DETAILS=$(cat /workspace/test/cluster-details.json)
             EKS_EXPORTS=$(cat /workspace/test/eks-exports.json)
@@ -390,13 +369,6 @@ spec:
         args:
           - |
             set -euo pipefail
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-eks-test" --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             TEST_IDS_ARG=""
             TEST_IDS="{{workflow.parameters.test-ids}}"
             if [ "${TEST_IDS}" != "all" ] && [ -n "${TEST_IDS}" ]; then
@@ -479,13 +451,6 @@ spec:
             STAGE="{{workflow.parameters.stage}}"
             REGION="{{workflow.parameters.region}}"
 
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-cleanup" --duration-seconds 4500)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             # Read saved state
             EKS_EXPORTS=$(cat /workspace/test/eks-exports.json 2>/dev/null || echo '{}')
             EKS_CLUSTER=$(echo "$EKS_EXPORTS" | jq -r '.eksClusterName // empty')
@@ -549,13 +514,6 @@ spec:
         args:
           - |
             set +e
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-cfn-delete" --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             STACK="{{inputs.parameters.stack-name}}"
             REGION="{{workflow.parameters.region}}"
 

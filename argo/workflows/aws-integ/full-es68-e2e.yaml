@@ -178,13 +178,6 @@ spec:
             CLUSTER_NAME="migration-${STAGE}-ecs-cluster"
 
             # Assume role
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-pre-cleanup" --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             TASK_ARN=$(aws ecs list-tasks --cluster "${CLUSTER_NAME}" \
               --family "migration-${STAGE}-migration-console" | jq -r '.taskArns[0]')
 
@@ -233,13 +226,6 @@ spec:
           - |
             set -euo pipefail
             STAGE="{{workflow.parameters.stage}}"
-
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-test" --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
             UNIQUE_ID="integ_full_$(date +%s)_argo"
             TEST_DIR="/root/lib/integ_test/integ_test"
@@ -315,13 +301,6 @@ spec:
           - |
             set +e
             STAGE="{{workflow.parameters.stage}}"
-
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-cleanup" --duration-seconds 5400)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
             echo "=== Destroying ES 6.8 E2E stacks for stage: ${STAGE} ==="
 

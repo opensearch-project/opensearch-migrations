@@ -103,13 +103,6 @@ spec:
             REGION="{{workflow.parameters.region}}"
             BUILD_STACK="Migration-Assistant-Build-EKS-${STAGE}-${REGION}"
 
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-build-eks" --duration-seconds 5400)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             echo "Deploying build EKS cluster..."
             ./deployment/k8s/aws/aws-bootstrap.sh \
               --deploy-create-vpc-cfn \
@@ -165,13 +158,6 @@ spec:
             REGION="{{workflow.parameters.region}}"
             ISOLATED_STACK="Migration-Assistant-Isolated-EKS-${STAGE}-${REGION}"
 
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-isolated-eks" --duration-seconds 5400)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
-
             echo "Deploying isolated EKS cluster (no internet)..."
 
             # Read build ECR from previous step
@@ -216,13 +202,6 @@ spec:
             set -euo pipefail
             STAGE="{{workflow.parameters.stage}}"
             REGION="{{workflow.parameters.region}}"
-
-            CREDS=$(aws sts assume-role \
-              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-validate" --duration-seconds 3600)
-            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
-            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
             # Update kubeconfig for isolated cluster
             CLUSTER_NAME="migration-${STAGE}-isolated"

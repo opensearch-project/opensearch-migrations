@@ -10,7 +10,7 @@ metadata:
     replaces: release.jenkinsFile
 spec:
   entrypoint: release
-  serviceAccountName: ci-release-sa  # IRSA with prod S3 + ECR access
+  serviceAccountName: ci-release-sa  # Pod Identity v2 provides prod S3 + ECR access
   arguments:
     parameters:
       - name: release-tag
