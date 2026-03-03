@@ -18,6 +18,7 @@ dependencies {
     testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation libs.testcontainers
     testImplementation libs.reactor.test
+    testImplementation libs.blockhound
     testImplementation libs.junit.jupiter.api
     testImplementation libs.junit.jupiter.params
     testImplementation libs.hamcrest

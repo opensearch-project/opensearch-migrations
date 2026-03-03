@@ -10,18 +10,16 @@ import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
-import org.opensearch.migrations.bulkload.pipeline.MigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.MetadataMigrationPipeline;
+import org.opensearch.migrations.bulkload.pipeline.MigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchMetadataSink;
 import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSourceFactory;
-import org.opensearch.migrations.bulkload.pipeline.source.SourceType;
 import org.opensearch.migrations.bulkload.pipeline.source.SourcelessDocumentSource;
 import org.opensearch.migrations.bulkload.pipeline.source.SourcelessExtractionConfig;
-import org.opensearch.migrations.bulkload.pipeline.source.SourcelessMetadataSource;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -31,7 +29,6 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Full pipeline E2E tests combining sources and sinks against real OpenSearch clusters.
