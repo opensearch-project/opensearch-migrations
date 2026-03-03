@@ -33,6 +33,8 @@ import reactor.core.scheduler.Schedulers;
 @Slf4j
 public class MigrationPipeline {
 
+    private static final long PROGRESS_LOG_INTERVAL_MS = 30_000;
+
     private final DocumentSource source;
     private final DocumentSink sink;
     private final int maxDocsPerBatch;
@@ -101,12 +103,15 @@ public class MigrationPipeline {
     public Flux<ProgressCursor> migrateShard(ShardId shardId, String indexName, long startingDocOffset) {
         log.info("Starting shard migration: {} from offset {} (batchConcurrency={})", shardId, startingDocOffset, batchConcurrency);
         final long[] cumulativeOffset = { startingDocOffset };
+        final long[] cumulativeBytes = { 0 };
+        final long[] lastLogTime = { System.currentTimeMillis() };
         return source.readDocuments(shardId, startingDocOffset)
             .subscribeOn(Schedulers.boundedElastic())
             .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
             .flatMapSequential(batch -> sink.writeBatch(shardId, indexName, batch)
                 .map(cursor -> {
                     cumulativeOffset[0] += cursor.docsInBatch();
+                    cumulativeBytes[0] += cursor.bytesInBatch();
                     return new ProgressCursor(
                         shardId,
                         cumulativeOffset[0],
@@ -114,14 +119,19 @@ public class MigrationPipeline {
                         cursor.bytesInBatch()
                     );
                 })
-                .doOnNext(cursor -> log.debug(
-                    "Batch written for {}: {} docs, {} bytes, cumulative offset {}",
-                    shardId, cursor.docsInBatch(), cursor.bytesInBatch(), cursor.lastDocProcessed()
-                ))
+                .doOnNext(cursor -> {
+                    long now = System.currentTimeMillis();
+                    if (now - lastLogTime[0] >= PROGRESS_LOG_INTERVAL_MS) {
+                        lastLogTime[0] = now;
+                        log.info("{} progress: {} docs, {} MB sent",
+                            shardId, cumulativeOffset[0], cumulativeBytes[0] / (1024 * 1024));
+                    }
+                })
             , batchConcurrency)
             .onErrorMap(e -> !(e instanceof PipelineException),
                 e -> new PipelineException("Failed migrating shard " + shardId, e))
-            .doOnComplete(() -> log.info("Completed shard migration: {}", shardId));
+            .doOnComplete(() -> log.info("Completed shard migration: {} — {} docs, {} MB total",
+                shardId, cumulativeOffset[0], cumulativeBytes[0] / (1024 * 1024)));
     }
 
     /**
