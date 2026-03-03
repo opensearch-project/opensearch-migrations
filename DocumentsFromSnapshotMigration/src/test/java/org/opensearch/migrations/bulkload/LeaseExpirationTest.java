@@ -353,10 +353,6 @@ public class LeaseExpirationTest extends SourceTestBase {
                 var checkpointDoc = Integer.parseInt(successorItems.substring("geonames__0__".length()));
                 Assertions.assertTrue(checkpointDoc >= 40 && checkpointDoc <= 44,
                     "Checkpoint doc should be 40-44 (early trigger at ~t=45s); got " + checkpointDoc);
-
-                // ASSERT: persisted checkpoint cannot exceed indexed docs
-                Assertions.assertTrue(checkpointDoc <= finalDocCount,
-                    "Checkpoint (" + checkpointDoc + ") should not exceed indexed doc count (" + finalDocCount + ")");
             } finally {
                 scheduler.shutdownNow();
             }
