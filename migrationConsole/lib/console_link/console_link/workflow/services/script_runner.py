@@ -277,18 +277,36 @@ class ScriptRunner:
         raise ValueError(f"Could not extract workflow name from output: {output}")
 
     def get_basic_creds_secrets_in_config(self, config_data: str):
-        # Create temporary file with config data
+        """Validate config against Zod schema and scrape secrets. Returns combined result."""
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_file:
             temp_file.write(config_data)
             temp_file_path = temp_file.name
 
         try:
-            result_str = self.run_config_processor_node_script("findSecrets", temp_file_path)
+            result_str = self.run_config_processor_node_script(
+                "findSecrets", temp_file_path)
             return json.loads(result_str)
         finally:
-            # Clean up temporary file
             try:
-                # os.unlink(temp_file_path)
+                os.unlink(temp_file_path)
+                logger.debug(f"Cleaned up temporary file: {temp_file_path}")
+            except OSError as e:
+                logger.warning(f"Failed to clean up temporary file {temp_file_path}: {e}")
+                raise e
+
+    def validate_config(self, config_data: str):
+        """Validate config against Zod schema. Returns dict with 'valid' bool and optional 'errors'."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_file:
+            temp_file.write(config_data)
+            temp_file_path = temp_file.name
+
+        try:
+            result_str = self.run_config_processor_node_script(
+                "validate", temp_file_path)
+            return json.loads(result_str)
+        finally:
+            try:
+                os.unlink(temp_file_path)
                 logger.debug(f"Cleaned up temporary file: {temp_file_path}")
             except OSError as e:
                 logger.warning(f"Failed to clean up temporary file {temp_file_path}: {e}")

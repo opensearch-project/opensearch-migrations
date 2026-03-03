@@ -29,14 +29,14 @@ def _get_empty_config_template() -> str:
     return runner.get_sample_config()
 
 
-def _launch_editor_for_config(config: Optional[WorkflowConfig] = None) -> CommandResult[WorkflowConfig]:
-    """Launch editor to edit workflow configuration"""
+def _launch_editor_for_config(config: Optional[WorkflowConfig] = None) -> CommandResult[str]:
+    """Launch editor to edit workflow configuration. Returns raw YAML string."""
     editor = os.environ.get('EDITOR', 'vi')
 
     # Create temporary file with current config
     with tempfile.NamedTemporaryFile(mode='w+', suffix='.yaml', delete=False) as f:
-        if config and config.data:
-            f.write(config.to_yaml())
+        if config:
+            f.write(config.raw_yaml)
         else:
             # Write empty template
             f.write(_get_empty_config_template())
@@ -45,24 +45,18 @@ def _launch_editor_for_config(config: Optional[WorkflowConfig] = None) -> Comman
     try:
         # Launch editor
         subprocess.run([editor, temp_file], check=True)
+    except subprocess.CalledProcessError as e:
+        logger.warning(f"Editor exited with non-zero status: {e.returncode}")
 
+    try:
         # Read back the edited content
         with open(temp_file, 'r') as f:
             edited_content = f.read()
 
-        # Parse the edited content - no validation, just parse
-        try:
-            new_config = WorkflowConfig.from_yaml(edited_content)
-            return CommandResult(success=True, value=new_config)
-        except Exception as e:
-            logger.exception(f"Failed to parse edited configuration: {e}")
-            return CommandResult(success=False, value=e)
+        return CommandResult(success=True, value=edited_content)
 
-    except subprocess.CalledProcessError as e:
-        logger.exception(f"Editor exited with error: {e}")
-        return CommandResult(success=False, value=e)
     except Exception as e:
-        logger.exception(f"Error launching editor: {e}")
+        logger.exception(f"Error reading edited file: {e}")
         return CommandResult(success=False, value=e)
     finally:
         # Clean up temp file
@@ -91,39 +85,63 @@ def view_config(ctx):
             click.echo("No configuration found.")
             return
 
-        click.echo(config.to_yaml())
+        click.echo(config.raw_yaml, nl=False)
     except Exception as e:
         logger.error(f"Failed to load configuration: {e}")
         raise click.ClickException(f"Failed to load configuration: {e}")
 
 
-def _parse_config_from_stdin(stdin_content: str) -> WorkflowConfig:
-    """Parse configuration from stdin content as YAML (JSON is valid YAML 1.2)"""
+def _parse_config_from_stdin() -> str:
+    """Read configuration from stdin and return raw content."""
+    stdin_stream = click.get_text_stream('stdin')
+    stdin_content = stdin_stream.read()
     if not stdin_content.strip():
         raise click.ClickException("Configuration was empty, a value is required")
-
-    try:
-        return WorkflowConfig.from_yaml(stdin_content)
-    except Exception as e:
-        raise click.ClickException(f"Failed to parse input as YAML: {e}")
+    return stdin_content
 
 
-def _get_basic_creds_secrets_in_config(secret_store: SecretStore, new_config: WorkflowConfig):
-    """Scrape any auth credentials secrets that need to be created."""
+def _validate_and_find_secrets(raw_yaml: str):
+    """Validate config via TS Zod schema and scrape secrets in one call.
 
+    Returns dict with 'valid' bool, optional 'errors', and optional 'validSecrets'/'invalidSecrets'.
+    """
     from ..services.script_runner import ScriptRunner
     runner = ScriptRunner()
-    result = runner.get_basic_creds_secrets_in_config(new_config.to_yaml())
-    logger.info(f"got back script result for get_secrets_in_config: {result}")
+    result = runner.get_basic_creds_secrets_in_config(raw_yaml)
+    logger.info(f"got back script result for validate_and_find_secrets: {result}")
+    return result
 
+
+def _process_secrets(secret_store: SecretStore, result: dict, interactive: bool = False):
+    """Process secrets from a validate+findSecrets result."""
     if 'invalidSecrets' in result and (invalid_secrets := result['invalidSecrets']):
         raise click.ClickException(f"Invalidly named secret{'s' if len(invalid_secrets) > 0 else ''} found:"
                                    f" {invalid_secrets}")
-    elif 'validSecrets' in result and (valid_secrets := result.get('validSecrets', [])):
-        valid_existing_resource_names = list(filter(secret_store.secret_exists, valid_secrets))
-        return set(valid_existing_resource_names), list(set(valid_secrets) - set(valid_existing_resource_names))
-    else:
-        return [], []
+
+    valid_secrets = result.get('validSecrets', [])
+    if not valid_secrets:
+        return
+
+    existing = list(filter(secret_store.secret_exists, valid_secrets))
+    missing = list(set(valid_secrets) - set(existing))
+
+    if existing:
+        msg = (f"Found {len(existing)} existing secret{'s' if len(existing) > 1 else ''} "
+               f"that will be used for HTTP-Basic authentication "
+               f"of requests to clusters:\n  " + "\n  ".join(existing))
+        if interactive:
+            click.echo(msg)
+        else:
+            logger.info(msg)
+
+    if missing:
+        if interactive:
+            _handle_add_basic_creds_secrets(secret_store, missing)
+        else:
+            raise click.ClickException(
+                f"Found {len(missing)} missing secret{'s' if len(missing) > 1 else ''} "
+                f"that must be created to make well-formed HTTP-Basic requests to clusters:\n  " +
+                "\n  ".join(missing))
 
 
 def _handle_add_basic_creds_secrets(secret_store, missing_secrets):
@@ -167,22 +185,18 @@ def _save_config(store, new_config: WorkflowConfig, session_name: str):
 
 def _handle_stdin_edit(wf_config_store, secret_store, session_name: str):
     """Handle configuration edit from stdin"""
-    stdin_stream = click.get_text_stream('stdin')
-    stdin_content = stdin_stream.read()
+    raw_yaml = _parse_config_from_stdin()
 
-    new_config = _parse_config_from_stdin(stdin_content)
-    _save_config(wf_config_store, new_config, session_name)
-
-    existing_items, missing_items = _get_basic_creds_secrets_in_config(secret_store, new_config)
-    if existing_items:
-        logger.info(f"Found {len(existing_items)} existing secret{'s' if len(existing_items) > 0 else ''} "
-                    f"that will be used for HTTP-Basic authentication "
-                    f"of requests to clusters:\n  " + "\n  ".join(existing_items))
-    if missing_items:
+    # Validate via TS and get secrets in one call — save regardless of validation result
+    result = _validate_and_find_secrets(raw_yaml)
+    new_config = WorkflowConfig(raw_yaml=raw_yaml)
+    if not result.get('valid', False):
+        _save_config(wf_config_store, new_config, session_name)
         raise click.ClickException(
-            f"Found {len(missing_items)} missing secret{'s' if len(missing_items) > 0 else ''} "
-            f"that must be created to make well-formed HTTP-Basic requests to clusters:\n  " +
-            "\n  ".join(missing_items))
+            f"Configuration saved but has validation errors:\n{result.get('errors', 'Unknown error')}")
+
+    _save_config(wf_config_store, new_config, session_name)
+    _process_secrets(secret_store, result, interactive=False)
 
 
 def _handle_editor_edit(store, secret_store, session_name: str):
@@ -193,19 +207,35 @@ def _handle_editor_edit(store, secret_store, session_name: str):
         logger.exception(f"Failed to load configuration: {e}")
         raise click.ClickException(f"Failed to load configuration: {e}")
 
-    edit_result = _launch_editor_for_config(current_config)
-    if not edit_result.success:
-        raise click.ClickException(str(edit_result.value))
+    while True:
+        edit_result = _launch_editor_for_config(current_config)
+        if not edit_result.success:
+            raise click.ClickException(str(edit_result.value))
 
-    new_config = cast(WorkflowConfig, edit_result.value)
-    _save_config(store, new_config, session_name)
+        raw_yaml = cast(str, edit_result.value)
 
-    existing_items, missing_items = _get_basic_creds_secrets_in_config(secret_store, new_config)
-    if existing_items:
-        click.echo(f"Found {len(existing_items)} existing secrets that will be used for HTTP-Basic authentication"
-                   f" of requests to clusters:\n  " + "\n  ".join(existing_items))
-    if missing_items:
-        _handle_add_basic_creds_secrets(secret_store, missing_items)
+        result = _validate_and_find_secrets(raw_yaml)
+        if result.get('valid', False):
+            break
+
+        # Validation failed — let user choose
+        click.echo(f"\nValidation errors:\n{result.get('errors', 'Unknown error')}\n")
+        choice = click.prompt(
+            "Would you like to (s)ave anyway, (e)dit again, or (d)iscard?",
+            type=click.Choice(['s', 'e', 'd'], case_sensitive=False))
+
+        if choice == 's':
+            _save_config(store, WorkflowConfig(raw_yaml=raw_yaml), session_name)
+            return
+        elif choice == 'd':
+            click.echo("Changes discarded.")
+            return
+        # choice == 'e': clear old errors before re-opening editor
+        click.clear()
+        current_config = WorkflowConfig(raw_yaml=raw_yaml)
+
+    _save_config(store, WorkflowConfig(raw_yaml=raw_yaml), session_name)
+    _process_secrets(secret_store, result, interactive=True)
 
 
 @configure_group.command(name="edit")
