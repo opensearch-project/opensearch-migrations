@@ -132,7 +132,7 @@ public class RequestSenderOrchestrator {
     }
 
     public enum RetryDirective {
-        DONE, RETRY
+        DONE, RETRY, RETRANSFORM
     }
 
     @AllArgsConstructor
@@ -159,6 +159,18 @@ public class RequestSenderOrchestrator {
         ByteBufList packets,
         RetryVisitor<T> visitor
     ) {
+        return scheduleRequest(requestKey, ctx, start, interval, packets, visitor, null);
+    }
+
+    public <T> TrackedFuture<String, T> scheduleRequest(
+        UniqueReplayerRequestKey requestKey,
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        Instant start,
+        Duration interval,
+        ByteBufList packets,
+        RetryVisitor<T> visitor,
+        Supplier<TrackedFuture<String, ByteBufList>> retransformCallback
+    ) {
         var sessionNumber = requestKey.sourceRequestIndexSessionIdentifier;
         var channelInteractionNum = requestKey.getReplayerRequestIndex();
         var generation = requestKey.trafficStreamKey.getSourceGeneration();
@@ -179,7 +191,8 @@ public class RequestSenderOrchestrator {
                 start,
                 interval,
                 packets,
-                visitor
+                visitor,
+                retransformCallback
             )
         );
     }
@@ -292,7 +305,8 @@ public class RequestSenderOrchestrator {
         Instant startTime,
         Duration interval,
         ByteBufList packets,
-        RetryVisitor<T> visitor
+        RetryVisitor<T> visitor,
+        Supplier<TrackedFuture<String, ByteBufList>> retransformCallback
     ) {
         var eventLoop = connectionReplaySession.eventLoop;
         var scheduledContext = ctx.createScheduledContext(startTime);
@@ -311,7 +325,7 @@ public class RequestSenderOrchestrator {
                 final Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier =
                     () -> packetConsumerFactory.apply(connectionReplaySession, ctx);
                 return sendRequestWithRetries(senderSupplier, eventLoop, packets, startTime, initialRetryDelay,
-                    interval, visitor);
+                    interval, visitor, retransformCallback);
             }, () -> "sending packets for request"))
         )
             .whenComplete((v,t) -> packets.release(), () -> "waiting for request to be sent to release ByteBufList");
@@ -393,14 +407,15 @@ public class RequestSenderOrchestrator {
         return Duration.ofMillis(Math.min(d.multipliedBy(2).toMillis(), maxRetryDelay.toMillis()));
     }
 
-    private <T> TrackedFuture<String, T>
+    <T> TrackedFuture<String, T>
     sendRequestWithRetries(Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier,
                            EventLoop eventLoop,
                            ByteBufList byteBufList,
                            Instant referenceStartTime,
                            Duration nextRetryDelay,
                            Duration interval,
-                           RetryVisitor<T> visitor)
+                           RetryVisitor<T> visitor,
+                           Supplier<TrackedFuture<String, ByteBufList>> retransformCallback)
     {
         if (eventLoop.isShuttingDown()) {
             return TextTrackedFuture.failedFuture(new IllegalStateException("EventLoop is shutting down"),
@@ -418,6 +433,26 @@ public class RequestSenderOrchestrator {
                 if (t != null) {
                     return TextTrackedFuture.failedFuture(t, () -> "failed future");
                 }
+                if (dtr.directive == RetryDirective.RETRANSFORM) {
+                    if (retransformCallback == null) {
+                        log.atWarn().setMessage("RETRANSFORM requested but no callback available, treating as DONE").log();
+                        return TextTrackedFuture.completedFuture(dtr.value,
+                            () -> "done - no retransform callback available");
+                    }
+                    var now = now();
+                    var schedulingDelay = Duration.between(now, now.plus(nextRetryDelay));
+                    log.atDebug().setMessage("RETRANSFORM: re-signing and retrying request after {}").addArgument(schedulingDelay).log();
+                    return NettyFutureBinders.bindNettyScheduleToCompletableFuture(
+                        eventLoop, schedulingDelay)
+                        .thenCompose(
+                            v -> retransformCallback.get()
+                                .thenCompose(newByteBufList ->
+                                    sendRequestWithRetries(senderSupplier, eventLoop, newByteBufList,
+                                        now.plus(nextRetryDelay), doubleRetryDelayCapped(nextRetryDelay),
+                                        interval, visitor, retransformCallback),
+                                    () -> "sending retransformed request"),
+                            () -> "retransforming request with delay of " + schedulingDelay);
+                }
                 if (dtr.directive == RetryDirective.RETRY) {
                     var computedStartTime = referenceStartTime.plus(nextRetryDelay);
                     // Ensure retry is not scheduled in the past to prevent tight retry loops
@@ -432,7 +467,7 @@ public class RequestSenderOrchestrator {
                         eventLoop, schedulingDelay)
                         .thenCompose(
                             v -> sendRequestWithRetries(senderSupplier, eventLoop, byteBufList, newStartTime,
-                                doubleRetryDelayCapped(nextRetryDelay), interval, visitor),
+                                doubleRetryDelayCapped(nextRetryDelay), interval, visitor, retransformCallback),
                             () -> "retrying request with delay of " + schedulingDelay);
                 } else {
                     return TextTrackedFuture.completedFuture(dtr.value,

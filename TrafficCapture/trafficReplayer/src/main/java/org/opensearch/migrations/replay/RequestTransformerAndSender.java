@@ -125,16 +125,23 @@ public class RequestTransformerAndSender<T> {
             // read buffer horizons aren't set after the transformation work finishes, but after the packets
             // are fully handled
             return requestReadyFuture.thenCompose(
-                transformedRequest -> replayEngine.scheduleRequest(
-                    ctx,
-                    start,
-                    end,
-                    transformedRequest.transformedOutput.size(),
-                    transformedRequest.transformedOutput,
-                    getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture,
-                        arr -> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx)),
-                    effectiveQuiescentDuration
-                ),
+                transformedRequest -> {
+                    Supplier<TrackedFuture<String, ByteBufList>> retransformCallback =
+                        () -> transformAllData(inputRequestTransformerFactory.create(ctx), packetsSupplier)
+                            .thenApply(r -> r.transformedOutput,
+                                () -> "extracting retransformed ByteBufList");
+                    return replayEngine.scheduleRequest(
+                        ctx,
+                        start,
+                        end,
+                        transformedRequest.transformedOutput.size(),
+                        transformedRequest.transformedOutput,
+                        getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture,
+                            arr -> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx)),
+                        effectiveQuiescentDuration,
+                        retransformCallback
+                    );
+                },
                 () -> "transitioning transformed packets onto the wire"
             );
         } catch (Exception e) {
