@@ -103,4 +103,7 @@ mirror.gcr.io/amazon/aws-cli:2.25.11
 
 # --- coordinator cluster (used by RFS workflow) ---
 mirror.gcr.io/opensearchproject/opensearch:3.1.0
+
+# --- jib base images (used when building from source with --build-images) ---
+mirror.gcr.io/library/amazoncorretto:17-al2023-headless
 "

@@ -67,7 +67,7 @@ class RegistryImageBuildUtils {
                     def baseFormatter = ImageRegistryFormatterFactory.getFormatter(config.get("baseImageRegistryEndpoint", "").toString())
                     def targetFormatter = ImageRegistryFormatterFactory.getFormatter(targetReg.hostUrl)
 
-                    def baseImage = baseFormatter.getFullBaseImageIdentifier(
+                    def baseImage = config.get("baseImageFull")?.toString() ?: baseFormatter.getFullBaseImageIdentifier(
                             config.get("baseImageRegistryEndpoint", "").toString(),
                             config.get("baseImageGroup", "").toString(),
                             config.baseImageName.toString(),
