@@ -30,6 +30,92 @@ class RegistryImageBuildUtils {
         return formatter.getFullBaseImageIdentifier(registry.containerUrl, group, image, tag)
     }
 
+    /**
+     * Build a list of candidate base images to try, in priority order.
+     * If intermediateRegistry is ECR, the ECR mirrored path comes first.
+     * Then the configured endpoint (e.g. docker.io), then fallback mirrors.
+     */
+    static List<String> buildBaseImageCandidates(Registry intermediateRegistry, String endpoint, String group, String name, String tag) {
+        def candidates = []
+        // ECR mirrored path first (if available)
+        if (intermediateRegistry.isEcr()) {
+            candidates << "${intermediateRegistry.registryDomain}/mirrored/${endpoint}/${group}/${name}:${tag}"
+        }
+        // Configured endpoint (e.g. docker.io)
+        def formatter = ImageRegistryFormatterFactory.getFormatter(endpoint)
+        candidates << formatter.getFullBaseImageIdentifier(endpoint, group, name, tag)
+        // Fallback mirrors for docker.io images
+        if (endpoint == "docker.io") {
+            candidates << "mirror.gcr.io/${group}/${name}:${tag}"
+            candidates << "public.ecr.aws/docker/${group}/${name}:${tag}"
+        }
+        return candidates.unique()
+    }
+
+    /**
+     * Probe a registry image to check if it exists.
+     * Tries 'crane manifest' first (handles auth), falls back to HTTP HEAD.
+     */
+    static boolean probeImage(String image) {
+        try {
+            def proc = ["crane", "manifest", image].execute()
+            proc.waitForOrKill(15000)
+            return proc.exitValue() == 0
+        } catch (IOException e) {
+            // crane not found — try HTTP HEAD as fallback
+            return probeImageHttp(image)
+        } catch (Exception e) {
+            return false
+        }
+    }
+
+    /**
+     * Probe a registry image via HTTP HEAD to the v2 manifest endpoint.
+     * Works for unauthenticated registries; returns false for auth-required ones.
+     */
+    private static boolean probeImageHttp(String image) {
+        try {
+            // Parse image reference: registry/path:tag
+            def parts = image.split(":")
+            def tag = parts.length > 1 ? parts[-1] : "latest"
+            def repo = parts.length > 1 ? parts[0..-2].join(":") : parts[0]
+            def firstSlash = repo.indexOf("/")
+            if (firstSlash < 0) return false
+            def registry = repo.substring(0, firstSlash)
+            def path = repo.substring(firstSlash + 1)
+
+            def url = new URL("https://${registry}/v2/${path}/manifests/${tag}")
+            def conn = (HttpURLConnection) url.openConnection()
+            conn.setRequestMethod("HEAD")
+            conn.setConnectTimeout(5000)
+            conn.setReadTimeout(5000)
+            conn.setRequestProperty("Accept", "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.index.v1+json")
+            def code = conn.getResponseCode()
+            return code >= 200 && code < 400
+        } catch (Exception e) {
+            return false
+        }
+    }
+
+    /**
+     * Resolve the base image by trying each candidate in order.
+     * Returns the first accessible image, or the first candidate as fallback.
+     */
+    static String resolveBaseImageFromMirrors(Registry intermediateRegistry, String endpoint, String group, String name, String tag) {
+        def candidates = buildBaseImageCandidates(intermediateRegistry, endpoint, group, name, tag)
+        println "Resolving base image from mirrors: ${candidates}"
+        for (candidate in candidates) {
+            if (probeImage(candidate)) {
+                println "  ✅ Using base image: ${candidate}"
+                return candidate
+            }
+            println "  ❌ Not available: ${candidate}"
+        }
+        // Fallback to first candidate — Jib will fail with a clear error
+        println "  ⚠️ No mirror responded, falling back to: ${candidates[0]}"
+        return candidates[0]
+    }
+
     // Determine the build mode based on the tasks requested in the CLI, throwing if multiple variants are configured
     private String detectArchitecture(Project rootProject) {
         def startTasks = rootProject.gradle.startParameter.taskNames
@@ -67,12 +153,10 @@ class RegistryImageBuildUtils {
 
                 project.plugins.withId('com.google.cloud.tools.jib') {
                     Registry targetReg = config.get("repoName", null) ? finalRegistry : intermediateRegistry
-                    def baseFormatter = ImageRegistryFormatterFactory.getFormatter(config.get("baseImageRegistryEndpoint", "").toString())
                     def targetFormatter = ImageRegistryFormatterFactory.getFormatter(targetReg.hostUrl)
 
-                    def baseImage = intermediateRegistry.isEcr()
-                        ? "${intermediateRegistry.registryDomain}/mirrored/${config.get("baseImageRegistryEndpoint", "")}/${config.get("baseImageGroup", "")}/${config.baseImageName}:${config.baseImageTag}"
-                        : baseFormatter.getFullBaseImageIdentifier(
+                    def baseImage = resolveBaseImageFromMirrors(
+                            intermediateRegistry,
                             config.get("baseImageRegistryEndpoint", "").toString(),
                             config.get("baseImageGroup", "").toString(),
                             config.baseImageName.toString(),
