@@ -72,8 +72,17 @@ class RegistryImageBuildUtils {
     /**
      * Resolve the base image by trying each candidate in order.
      * Returns the first accessible image, or the first candidate as fallback.
+     * If the base image endpoint matches the intermediate registry (i.e. it's a locally-built image),
+     * skip mirror resolution entirely — just use the direct registry path.
      */
     static String resolveBaseImageFromMirrors(Registry intermediateRegistry, String endpoint, String group, String name, String tag) {
+        // If the base image is already on the intermediate registry (e.g. captureProxyBase built by buildKit),
+        // don't apply mirror resolution — just resolve it directly.
+        if (endpoint == intermediateRegistry.hostUrl) {
+            def directImage = resolveBaseImage(intermediateRegistry, group, name, tag)
+            println "Base image is on intermediate registry, skipping mirror resolution: ${directImage}"
+            return directImage
+        }
         def candidates = buildBaseImageCandidates(intermediateRegistry, endpoint, group, name, tag)
         println "Resolving base image from mirrors: ${candidates}"
         for (candidate in candidates) {
