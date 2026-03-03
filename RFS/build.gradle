@@ -82,6 +82,7 @@ tasks.named('test') {
 
 dependencies {
     api project(':rfs-pipeline')
+    api project(':rfs-common')
     implementation project(':awsUtilities')
     implementation project(':coreUtilities')
     implementation project(':transformation')

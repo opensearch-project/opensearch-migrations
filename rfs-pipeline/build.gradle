@@ -4,6 +4,10 @@ plugins {
 }
 
 dependencies {
+    // The adapter package bridges existing rfs-common types to the clean pipeline IR.
+    // Core pipeline types have ZERO dependency on rfs-common.
+    compileOnly project(':rfs-common')
+
     implementation libs.jackson.databind
     implementation libs.reactor.core
     implementation libs.slf4j.api
