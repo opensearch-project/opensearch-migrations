@@ -53,7 +53,7 @@ public class ScopedWorkCoordinator {
                 log.info("Acquired work item: {} with lease expiration at {}", workItemId, workItem.leaseExpirationTime);
                 var acquisitionTime = Instant.now();
                 var leaseDuration = Duration.between(acquisitionTime, workItem.leaseExpirationTime);
-                // Trigger early checkpoint at max(lease*0.75, lease-4.5min) to allow cleanup before expiry
+                // Fire timeout callback before hard expiry: max(lease*0.75, lease-4.5min).
                 var earlyTriggerOffset = leaseDuration.multipliedBy(3).dividedBy(4)
                     .compareTo(leaseDuration.minus(Duration.ofMinutes(4).plusSeconds(30))) > 0
                     ? leaseDuration.multipliedBy(3).dividedBy(4)
