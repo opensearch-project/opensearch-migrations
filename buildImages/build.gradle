@@ -28,12 +28,6 @@ def jibProjects = [
                 baseImageGroup : "library",
                 baseImageName : "amazoncorretto",
                 baseImageTag  : "17-al2023-headless",
-                // When building against a private ECR registry, use the mirrored copy.
-                // Extract just the registry domain (strip any repo path prefix) since mirrorToEcr.sh
-                // is called with the bare ECR domain, not the full MIGRATIONS_ECR_REGISTRY path.
-                baseImageFull : intermediateRegistry.hostUrl.contains(".ecr.") && intermediateRegistry.hostUrl.contains(".amazonaws.com")
-                        ? "${intermediateRegistry.hostUrl.split('/')[0]}/mirrored/mirror.gcr.io/library/amazoncorretto:17-al2023-headless"
-                        : null,
                 imageName     : "traffic_replayer",
                 imageTag      : "latest",
                 extraPermissions: ['/runJavaWithClasspath.sh': '755'],
@@ -46,9 +40,6 @@ def jibProjects = [
                 baseImageGroup : "library",
                 baseImageName : "amazoncorretto",
                 baseImageTag  : "17-al2023-headless",
-                baseImageFull : intermediateRegistry.hostUrl.contains(".ecr.") && intermediateRegistry.hostUrl.contains(".amazonaws.com")
-                        ? "${intermediateRegistry.hostUrl.split('/')[0]}/mirrored/mirror.gcr.io/library/amazoncorretto:17-al2023-headless"
-                        : null,
                 imageName     : "transformation_shim",
                 imageTag      : "latest",
                 requiredDependencies: [

@@ -20,6 +20,9 @@ class RegistryImageBuildUtils {
                 this.containerUrl = rawUrl
             }
         }
+
+        String getRegistryDomain() { hostUrl.split('/')[0] }
+        boolean isEcr() { registryDomain.contains('.ecr.') && registryDomain.contains('.amazonaws.com') }
     }
 
     static String resolveBaseImage(Registry registry, String group, String image, String tag) {
@@ -67,12 +70,14 @@ class RegistryImageBuildUtils {
                     def baseFormatter = ImageRegistryFormatterFactory.getFormatter(config.get("baseImageRegistryEndpoint", "").toString())
                     def targetFormatter = ImageRegistryFormatterFactory.getFormatter(targetReg.hostUrl)
 
-                    def baseImage = config.get("baseImageFull")?.toString() ?: baseFormatter.getFullBaseImageIdentifier(
+                    def baseImage = intermediateRegistry.isEcr()
+                        ? "${intermediateRegistry.registryDomain}/mirrored/${config.get("baseImageRegistryEndpoint", "")}/${config.get("baseImageGroup", "")}/${config.baseImageName}:${config.baseImageTag}"
+                        : baseFormatter.getFullBaseImageIdentifier(
                             config.get("baseImageRegistryEndpoint", "").toString(),
                             config.get("baseImageGroup", "").toString(),
                             config.baseImageName.toString(),
                             config.baseImageTag.toString()
-                    )
+                        )
 
                     def (registryDestination, _) = targetFormatter.getFullTargetImageIdentifier(
                             targetReg.hostUrl,
@@ -157,10 +162,10 @@ class RegistryImageBuildUtils {
     }
 
     void registerLoginTask(Project project, Registry registry) {
-        def registryDomain = registry.hostUrl.split("/")[0]
-        def isEcr = registryDomain.contains(".ecr.") && registryDomain.contains(".amazonaws.com")
+        def isEcr = registry.isEcr()
 
         if (isEcr) {
+            def registryDomain = registry.registryDomain
             def region = (registryDomain =~ /^(\d+)\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com$/)[0][2]
             project.tasks.register("loginToECR", Exec) {
                 group = "docker"
