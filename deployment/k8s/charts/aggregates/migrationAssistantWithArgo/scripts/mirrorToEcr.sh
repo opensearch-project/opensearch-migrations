@@ -81,20 +81,34 @@ echo "$IMAGES" | while IFS= read -r image; do
   tag="${image##*:}"
   ecr_repo="mirrored/${image_no_tag}"
 
+  # Build list of source candidates: original + docker.io fallback for mirror.gcr.io
+  sources="$image"
+  case "$image" in
+    mirror.gcr.io/*)
+      # mirror.gcr.io proxies Docker Hub — add docker.io as fallback
+      docker_path="${image#mirror.gcr.io/}"
+      sources="$image docker.io/${docker_path}"
+      ;;
+  esac
+
   echo "  Copying $image → ${ECR_HOST}/${ecr_repo}:${tag}"
   aws ecr create-repository --repository-name "$ecr_repo" --region "$REGION" 2>/dev/null || true
   copied=false
-  for attempt in 1 2 3; do
-    if crane copy "$image" "${ECR_HOST}/${ecr_repo}:${tag}" 2>&1; then
-      echo "  ✅ $image"
-      copied=true
-      break
-    fi
-    echo "  ⚠️  Attempt $attempt failed for $image, retrying in 5s..." >&2
-    sleep 5
+  for src in $sources; do
+    for attempt in 1 2 3; do
+      if crane copy "$src" "${ECR_HOST}/${ecr_repo}:${tag}" 2>&1; then
+        [ "$src" != "$image" ] && echo "  ℹ️  Used fallback source: $src"
+        echo "  ✅ $image"
+        copied=true
+        break 2
+      fi
+      echo "  ⚠️  Attempt $attempt failed for $src, retrying in 5s..." >&2
+      sleep 5
+    done
+    [ "$copied" = false ] && echo "  ⚠️  All attempts failed for source $src, trying next..." >&2
   done
   if [ "$copied" = false ]; then
-    echo "  ❌ FAILED after 3 attempts: $image" >&2
+    echo "  ❌ FAILED all sources for: $image" >&2
     failed_images="$failed_images $image"
   fi
 done
