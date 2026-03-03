@@ -86,26 +86,32 @@ public class OpenSearchDocumentSink implements DocumentSink {
 
     @Override
     public Mono<ProgressCursor> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch) {
-        var bulkOps = batch.stream()
-            .map(doc -> toBulkOp(doc, indexName))
-            .collect(Collectors.toList());
-
-        // Apply transformation if configured
-        List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
-
         long bytesInBatch = batch.stream()
             .mapToLong(doc -> doc.source() != null ? doc.source().length : 0)
             .sum();
 
-        return client.sendBulkRequest(indexName, opsToSend,
+        Mono<OpenSearchClient.BulkResponse> bulkMono;
+        if (transformer == null) {
+            // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
+            bulkMono = client.sendBulkRequestRaw(indexName, batch,
                 requestContextSupplier != null ? requestContextSupplier.get() : null,
-                allowServerGeneratedIds, allowlist)
-            .then(Mono.just(new ProgressCursor(
-                shardId,
-                (long) batch.size(),
-                batch.size(),
-                bytesInBatch
-            )));
+                allowServerGeneratedIds, allowlist);
+        } else {
+            var bulkOps = batch.stream()
+                .map(doc -> toBulkOp(doc, indexName))
+                .collect(Collectors.toList());
+            List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
+            bulkMono = client.sendBulkRequest(indexName, opsToSend,
+                requestContextSupplier != null ? requestContextSupplier.get() : null,
+                allowServerGeneratedIds, allowlist);
+        }
+
+        return bulkMono.then(Mono.just(new ProgressCursor(
+            shardId,
+            (long) batch.size(),
+            batch.size(),
+            bytesInBatch
+        )));
     }
 
     @SuppressWarnings("unchecked")

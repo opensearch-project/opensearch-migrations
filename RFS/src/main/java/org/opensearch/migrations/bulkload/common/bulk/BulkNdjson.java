@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -47,6 +48,23 @@ public final class BulkNdjson {
     }
 
     /**
+     * Write an action line + raw source bytes to an output stream in NDJSON format.
+     * Skips Jackson deserialization/reserialization of the document body.
+     */
+    @SneakyThrows
+    public static void writeRawOperation(String operationType, BaseOperationMeta meta,
+                                         byte[] rawSource, OutputStream out, ObjectMapper mapper) {
+        Map<String, Object> metaMap = mapper.convertValue(meta, new TypeReference<>() {});
+        Map<String, Object> actionLine = Map.of(operationType, metaMap);
+        out.write(mapper.writeValueAsBytes(actionLine));
+
+        if (rawSource != null && rawSource.length > 0) {
+            out.write(NEWLINE_BYTES);
+            out.write(rawSource);
+        }
+    }
+
+    /**
      * Write a single operation to an output stream in NDJSON format.
      * @param ops The operation to write
      * @param out The output stream to write to
@@ -61,18 +79,26 @@ public final class BulkNdjson {
     }
 
     /**
+     * Convert a list of bulk operations to NDJSON bytes, using raw source bytes when available.
+     * Avoids the byte[]→Map→byte[] round-trip for document bodies.
+     */
+    public static byte[] toBulkNdjsonBytes(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
+        try (var baos = new ByteArrayOutputStream()) {
+            writeAll(ops, baos, mapper);
+            return baos.toByteArray();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
      * Convert a list of bulk operations to NDJSON string.
      * @param ops The list of operations to convert
      * @param mapper The ObjectMapper to use for serialization
      * @return The NDJSON string representation
      */
     public static String toBulkNdjson(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
-        try (var baos = new ByteArrayOutputStream()) {
-            writeAll(ops, baos, mapper);
-            return baos.toString(StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        return new String(toBulkNdjsonBytes(ops, mapper), StandardCharsets.UTF_8);
     }
 
     /**
