@@ -20,11 +20,81 @@ class RegistryImageBuildUtils {
                 this.containerUrl = rawUrl
             }
         }
+
+        String getRegistryDomain() { hostUrl.split('/')[0] }
+        boolean isEcr() { registryDomain.contains('.ecr.') && registryDomain.contains('.amazonaws.com') }
     }
 
     static String resolveBaseImage(Registry registry, String group, String image, String tag) {
         def formatter = ImageRegistryFormatterFactory.getFormatter(registry.containerUrl)
         return formatter.getFullBaseImageIdentifier(registry.containerUrl, group, image, tag)
+    }
+
+    /**
+     * Build a list of candidate base images to try, in priority order.
+     * If intermediateRegistry is ECR, the ECR mirrored path comes first.
+     * Then the configured endpoint (e.g. docker.io), then fallback mirrors.
+     */
+    static List<String> buildBaseImageCandidates(Registry intermediateRegistry, String endpoint, String group, String name, String tag) {
+        def candidates = []
+        // ECR mirrored paths first (if available)
+        if (intermediateRegistry.isEcr()) {
+            candidates << "${intermediateRegistry.registryDomain}/mirrored/${endpoint}/${group}/${name}:${tag}"
+            // mirrorToEcr.sh uses mirror.gcr.io as the manifest source, so also try that path
+            if (endpoint == "docker.io") {
+                candidates << "${intermediateRegistry.registryDomain}/mirrored/mirror.gcr.io/${group}/${name}:${tag}"
+            }
+        }
+        // Configured endpoint (e.g. docker.io)
+        def formatter = ImageRegistryFormatterFactory.getFormatter(endpoint)
+        candidates << formatter.getFullBaseImageIdentifier(endpoint, group, name, tag)
+        // Fallback mirrors for docker.io images
+        if (endpoint == "docker.io") {
+            candidates << "mirror.gcr.io/${group}/${name}:${tag}"
+            candidates << "public.ecr.aws/docker/${group}/${name}:${tag}"
+        }
+        return candidates.unique()
+    }
+
+    /**
+     * Probe a registry image to check if it exists using crane.
+     */
+    static boolean probeImage(String image) {
+        try {
+            def proc = ["crane", "manifest", image].execute()
+            proc.waitForOrKill(15000)
+            return proc.exitValue() == 0
+        } catch (Exception e) {
+            return false
+        }
+    }
+
+    /**
+     * Resolve the base image by trying each candidate in order.
+     * Returns the first accessible image, or the first candidate as fallback.
+     * If the base image endpoint matches the intermediate registry (i.e. it's a locally-built image),
+     * skip mirror resolution entirely — just use the direct registry path.
+     */
+    static String resolveBaseImageFromMirrors(Registry intermediateRegistry, String endpoint, String group, String name, String tag) {
+        // If the base image is already on the intermediate registry (e.g. captureProxyBase built by buildKit),
+        // don't apply mirror resolution — just resolve it directly.
+        if (endpoint == intermediateRegistry.hostUrl) {
+            def directImage = resolveBaseImage(intermediateRegistry, group, name, tag)
+            println "Base image is on intermediate registry, skipping mirror resolution: ${directImage}"
+            return directImage
+        }
+        def candidates = buildBaseImageCandidates(intermediateRegistry, endpoint, group, name, tag)
+        println "Resolving base image from mirrors: ${candidates}"
+        for (candidate in candidates) {
+            if (probeImage(candidate)) {
+                println "  ✅ Using base image: ${candidate}"
+                return candidate
+            }
+            println "  ❌ Not available: ${candidate}"
+        }
+        // Fallback to first candidate — Jib will fail with a clear error
+        println "  ⚠️ No mirror responded, falling back to: ${candidates[0]}"
+        return candidates[0]
     }
 
     // Determine the build mode based on the tasks requested in the CLI, throwing if multiple variants are configured
@@ -64,15 +134,15 @@ class RegistryImageBuildUtils {
 
                 project.plugins.withId('com.google.cloud.tools.jib') {
                     Registry targetReg = config.get("repoName", null) ? finalRegistry : intermediateRegistry
-                    def baseFormatter = ImageRegistryFormatterFactory.getFormatter(config.get("baseImageRegistryEndpoint", "").toString())
                     def targetFormatter = ImageRegistryFormatterFactory.getFormatter(targetReg.hostUrl)
 
-                    def baseImage = baseFormatter.getFullBaseImageIdentifier(
+                    def baseImage = resolveBaseImageFromMirrors(
+                            intermediateRegistry,
                             config.get("baseImageRegistryEndpoint", "").toString(),
                             config.get("baseImageGroup", "").toString(),
                             config.baseImageName.toString(),
                             config.baseImageTag.toString()
-                    )
+                        )
 
                     def (registryDestination, _) = targetFormatter.getFullTargetImageIdentifier(
                             targetReg.hostUrl,
@@ -100,15 +170,26 @@ class RegistryImageBuildUtils {
                             def versionTag = rootProject.findProperty("imageVersion")
                             if (versionTag) {
                                 def suffix = (targetArch != "multi") ? "_${targetArch}" : ""
-                                tags = ["${versionTag}${suffix}".toString()]
+                                def versionDest = targetFormatter.getFullTargetImageIdentifier(
+                                        targetReg.hostUrl, config.imageName.toString(), versionTag,
+                                        config.get("repoName", null)?.toString())[0]
+                                // Extract just the tag portion for Jib's tags list
+                                def formattedTag = versionDest.toString().split(":")[-1]
+                                tags = ["${formattedTag}${suffix}".toString()]
                             }
                         }
                         extraDirectories {
                             paths {
-                                path { from = project.file("docker"); into = '/' }
+                                def dockerDir = project.file("docker")
+                                if (dockerDir.exists()) {
+                                    path { from = dockerDir; into = '/' }
+                                }
                                 path { from = project.file("build/versionDir"); into = '/' }
                             }
-                            permissions = ['/runJavaWithClasspath.sh': '755']
+                            def extraPerms = (Map<String, String>) config.get("extraPermissions", [:])
+                            if (extraPerms) {
+                                permissions = extraPerms
+                            }
                         }
                         allowInsecureRegistries = true
                         container { entrypoint = ['tail', '-f', '/dev/null'] }
@@ -146,10 +227,10 @@ class RegistryImageBuildUtils {
     }
 
     void registerLoginTask(Project project, Registry registry) {
-        def registryDomain = registry.hostUrl.split("/")[0]
-        def isEcr = registryDomain.contains(".ecr.") && registryDomain.contains(".amazonaws.com")
+        def isEcr = registry.isEcr()
 
         if (isEcr) {
+            def registryDomain = registry.registryDomain
             def region = (registryDomain =~ /^(\d+)\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com$/)[0][2]
             project.tasks.register("loginToECR", Exec) {
                 group = "docker"

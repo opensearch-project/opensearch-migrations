@@ -24,14 +24,26 @@ def getRepoNameIfPublishing = { Map cfg ->
 
 def jibProjects = [
         "TrafficCapture:trafficReplayer": [
-                baseImageRegistryEndpoint: "mirror.gcr.io",
+                baseImageRegistryEndpoint: "docker.io",
                 baseImageGroup : "library",
                 baseImageName : "amazoncorretto",
                 baseImageTag  : "17-al2023-headless",
                 imageName     : "traffic_replayer",
                 imageTag      : "latest",
+                extraPermissions: ['/runJavaWithClasspath.sh': '755'],
                 requiredDependencies: [
                     ":TrafficCapture:trafficReplayer": ["syncVersionFile_traffic_replayer"]
+                ]
+        ],
+        "TrafficCapture:transformationShim": [
+                baseImageRegistryEndpoint: "docker.io",
+                baseImageGroup : "library",
+                baseImageName : "amazoncorretto",
+                baseImageTag  : "17-al2023-headless",
+                imageName     : "transformation_shim",
+                imageTag      : "latest",
+                requiredDependencies: [
+                    ":TrafficCapture:transformationShim": ["syncVersionFile_transformation_shim"]
                 ]
         ],
         "TrafficCapture:trafficCaptureProxyServer": [
