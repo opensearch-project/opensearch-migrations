@@ -63,7 +63,7 @@ class ReplayEngineQuiescentTest {
         var orchestrator = mock(RequestSenderOrchestrator.class);
         var engine = buildEngine(orchestrator);
 
-        when(orchestrator.scheduleRequest(any(), any(), any(), any(), any(), any()))
+        when(orchestrator.scheduleRequest(any(), any(), any(), any(), any(), any(), any()))
             .thenReturn(TextTrackedFuture.completedFuture(null, () -> "mock"));
 
         var sourceRequestTime = Instant.parse("2025-01-01T00:00:00.100Z");
@@ -76,7 +76,7 @@ class ReplayEngineQuiescentTest {
             1, packets, (reqBytes, arr, t) -> null, quiescentDuration);
 
         var startCaptor = ArgumentCaptor.forClass(Instant.class);
-        verify(orchestrator).scheduleRequest(any(), any(), startCaptor.capture(), any(), any(), any());
+        verify(orchestrator).scheduleRequest(any(), any(), startCaptor.capture(), any(), any(), any(), any());
 
         var effectiveStart = startCaptor.getValue();
         // The time-shifted start is sourceRequestTime (TimeShifter is identity in tests)
@@ -95,7 +95,7 @@ class ReplayEngineQuiescentTest {
         var orchestrator = mock(RequestSenderOrchestrator.class);
         var engine = buildEngine(orchestrator);
 
-        when(orchestrator.scheduleRequest(any(), any(), any(), any(), any(), any()))
+        when(orchestrator.scheduleRequest(any(), any(), any(), any(), any(), any(), any()))
             .thenReturn(TextTrackedFuture.completedFuture(null, () -> "mock"));
 
         var sourceRequestTime = Instant.parse("2025-01-01T00:00:01Z");
@@ -108,7 +108,7 @@ class ReplayEngineQuiescentTest {
             1, packets, (reqBytes, arr, t) -> null, null);
 
         var startCaptor = ArgumentCaptor.forClass(Instant.class);
-        verify(orchestrator).scheduleRequest(any(), any(), startCaptor.capture(), any(), any(), any());
+        verify(orchestrator).scheduleRequest(any(), any(), startCaptor.capture(), any(), any(), any(), any());
 
         var effectiveStart = startCaptor.getValue();
         // Without quiescentUntil, the start should be the normal time-shifted value (close to now + 1s)
