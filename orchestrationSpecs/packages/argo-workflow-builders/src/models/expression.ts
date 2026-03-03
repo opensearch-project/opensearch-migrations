@@ -26,7 +26,7 @@ export type AllowLiteralOrExpression<T extends PlainObject, C extends Expression
     T | BaseExpression<T, C>;
 
 export type AllowSerializedAggregateOrPrimitiveExpressionOrLiteral<T extends PlainObject, C extends ExpressionType = ExpressionType> =
-    T extends AggregateType
+    [T] extends [AggregateType]
         ? BaseExpression<Serialized<T>, C>
         : T | BaseExpression<T, C>;
 
@@ -419,6 +419,10 @@ type UnwrapSerialized<T> = T extends Serialized<infer U>
         ? T
         : never;
 
+type JsonPathExpressionBrand = {
+    readonly __jsonPathExpressionBrand: true;
+};
+
 // Outbound boundary normalization for expr.serialize/toJSON:
 // unwrap nested Serialized<...> markers so we serialize the logical payload once
 // instead of producing doubly-serialized nested fields.
@@ -782,25 +786,25 @@ class ExprBuilder {
     >(
         source: BaseExpression<Serialized<T>, any>,
         key: K
-    ): BaseExpression<SegmentsValueStrict<T, readonly [K]>, "complicatedExpression">;
+    ): BaseExpression<SegmentsValueStrict<T, readonly [K]>, "complicatedExpression"> & JsonPathExpressionBrand;
     jsonPathStrict<
         T extends Record<string, any>,
         S extends KeySegments<T>
     >(
         source: BaseExpression<Serialized<T>, any>,
         ...segs: S
-    ): BaseExpression<SegmentsValueStrict<T, S>, "complicatedExpression">;
+    ): BaseExpression<SegmentsValueStrict<T, S>, "complicatedExpression"> & JsonPathExpressionBrand;
     jsonPathStrict<
         T extends Serialized<Record<string, any>>,
         K extends Extract<KeysOfUnion<UnwrapSerialized<T>>, string>
     >(
         source: BaseExpression<T, any>,
         key: K
-    ): BaseExpression<SegmentsValueStrict<UnwrapSerialized<T>, readonly [K]>, "complicatedExpression">;
+    ): BaseExpression<SegmentsValueStrict<UnwrapSerialized<T>, readonly [K]>, "complicatedExpression"> & JsonPathExpressionBrand;
     jsonPathStrict(
         source: BaseExpression<Serialized<any>, any>,
         ...segs: readonly unknown[]
-    ): BaseExpression<any, "complicatedExpression"> {
+    ): BaseExpression<any, "complicatedExpression"> & JsonPathExpressionBrand {
         const path = _segmentsToPath(segs);
         return new RecordFieldSelectExpression(source, path) as any;
     }
@@ -816,7 +820,7 @@ class ExprBuilder {
     >(
         source: BaseExpression<Serialized<T>, any>,
         key: K
-    ): BaseExpression<Serialized<SegmentsValueStrict<T, readonly [K]>>, "complicatedExpression"> {
+    ): BaseExpression<Serialized<SegmentsValueStrict<T, readonly [K]>>, "complicatedExpression"> & JsonPathExpressionBrand {
         return this.jsonPathStrict(source, key) as any;
     }
 
@@ -846,10 +850,10 @@ class ExprBuilder {
     }
 
     deserializeRecord<R extends PlainObject, CIn extends ExpressionType>(
-        data: BaseExpression<Serialized<R>, CIn>
+        data: BaseExpression<Serialized<R>, CIn> & { readonly __jsonPathExpressionBrand?: never }
     ): BaseExpression<R, "complicatedExpression">;
     deserializeRecord<T extends Serialized<PlainObject>, CIn extends ExpressionType>(
-        data: BaseExpression<T, CIn>
+        data: BaseExpression<T, CIn> & { readonly __jsonPathExpressionBrand?: never }
     ): BaseExpression<UnwrapSerialized<T>, "complicatedExpression">;
     deserializeRecord<R extends PlainObject, CIn extends ExpressionType>(
         data: BaseExpression<Serialized<R>, CIn>

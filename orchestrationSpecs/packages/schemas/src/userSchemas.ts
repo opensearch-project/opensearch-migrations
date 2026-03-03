@@ -345,7 +345,7 @@ export const REPLAYER_CONFIG = z.object({
     skipApprovals: z.boolean().default(false).optional(), // TODO - format
     fromProxy: z.string(),
     toTarget: z.string(),
-    dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER).min(1).optional(),
+    dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER).default([]).optional(),
     replayerConfig: REPLAYER_OPTIONS.optional()
 });
 
@@ -533,7 +533,7 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     });
                 }
 
-                for (let j = 0; j < (rc.dependsOnSnapshotMigrations ?? []).length; j++) {
+                for (let j = 0; j < (rc.dependsOnSnapshotMigrations).length; j++) {
                     const dep = rc.dependsOnSnapshotMigrations![j];
                     if (!(dep.source in data.sourceClusters)) {
                         ctx.addIssue({

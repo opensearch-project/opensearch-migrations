@@ -68,7 +68,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c),
                     sourceLabel: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "label"),
                     snapshotNameConfig: expr.serialize(
-                        expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "config")) as any,
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "config")),
                 })
             )
             .addStep("createSnapshot", CreateSnapshot, "snapshotWorkflow",

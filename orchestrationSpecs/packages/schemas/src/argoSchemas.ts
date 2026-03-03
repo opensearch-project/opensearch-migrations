@@ -183,7 +183,7 @@ export const DENORMALIZED_REPLAY_CONFIG = z.object({
     kafkaClusterName: z.string(),
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     toTarget: NAMED_TARGET_CLUSTER_CONFIG,
-    dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER).min(1).optional(),
+    dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER),
     replayerConfig: REPLAYER_OPTIONS.optional()
 })
 

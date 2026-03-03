@@ -149,4 +149,17 @@ describe("expression type contracts", () => {
 
         expectTypeOf(wf).not.toBeAny();
     });
+
+    it("jsonPath outputs cannot be passed to deserializeRecord", () => {
+        const src = expr.recordToString(expr.literal({
+            outer: { inner: "x" },
+            raw: "{\"a\":1}"
+        }));
+
+        // @ts-expect-error - fromJSON(jsonpath(...)) is disallowed
+        expr.deserializeRecord(expr.jsonPathStrict(src, "outer"));
+
+        // @ts-expect-error - fromJSON(jsonpath(...)) is disallowed, even with serialized hint
+        expr.deserializeRecord(expr.jsonPathStrictSerialized(src, "outer"));
+    });
 });

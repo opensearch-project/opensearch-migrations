@@ -184,7 +184,9 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     sourceConfig: b.inputs.sourceConfig,
-                    createSnapshotConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotItemConfig, "config"),
+                    createSnapshotConfig: expr.serialize(
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "config")
+                    ),
                     snapshotPrefix: expr.get(
                         expr.deserializeRecord(b.inputs.snapshotItemConfig), "snapshotPrefix"),
                     snapshotConfig: expr.serialize(expr.makeDict({
@@ -192,7 +194,7 @@ export const FullMigration = WorkflowBuilder.create({
                             createSnapshotConfig: expr.get(
                                 expr.deserializeRecord(b.inputs.snapshotItemConfig), "config")
                         }),
-                        repoConfig: expr.deserializeRecord(expr.jsonPathStrictSerialized(b.inputs.snapshotItemConfig, "repo")),
+                        repoConfig: expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "repo"),
                         label: expr.get(
                             expr.deserializeRecord(b.inputs.snapshotItemConfig), "label")
                     })),
@@ -231,7 +233,9 @@ export const FullMigration = WorkflowBuilder.create({
                         )
                     })),
 //                    snapshotItemConfig: expr.cast(c.item).to<Serialized<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>>(),
-                    sourceConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotsSourceConfig, "sourceConfig")
+                    sourceConfig: expr.serialize(
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotsSourceConfig), "sourceConfig")
+                    )
                 }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.snapshotsSourceConfig),
@@ -292,47 +296,54 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: expr.getLoose(
-                        expr.deserializeRecord(
-                            expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotNameResolution")),
+                        expr.get(
+                            expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
+                            "snapshotNameResolution"
+                        ),
                         "dataSnapshotResourceName")
                 }), {
                     when: { templateExp: expr.hasKey(
-                        expr.deserializeRecord(
-                            expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotNameResolution")),
+                        expr.get(
+                            expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
+                            "snapshotNameResolution"
+                        ),
                         "dataSnapshotResourceName") }
                 }
             )
             .addStep("readSnapshotName", ResourceManagement, "readDataSnapshotName", c =>
                 c.register({
                     resourceName: expr.getLoose(
-                        expr.deserializeRecord(
-                            expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotNameResolution")),
+                        expr.get(
+                            expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
+                            "snapshotNameResolution"
+                        ),
                         "dataSnapshotResourceName")
                 }), {
                     when: { templateExp: expr.hasKey(
-                        expr.deserializeRecord(
-                            expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotNameResolution")),
+                        expr.get(
+                            expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
+                            "snapshotNameResolution"
+                        ),
                         "dataSnapshotResourceName") }
                 }
             )
             .addStep("migrateFromSnapshot", INTERNAL, "migrateFromSnapshot", c => {
-                    const snapshotNameResolution = expr.deserializeRecord(
-                        expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotNameResolution"));
+                    const snapshotMigrationConfig = expr.deserializeRecord(b.inputs.snapshotMigrationConfig);
+                    const snapshotNameResolution = expr.get(snapshotMigrationConfig, "snapshotNameResolution");
                     const resolvedSnapshotName = expr.ternary(
                         expr.hasKey(snapshotNameResolution, "externalSnapshotName"),
                         expr.getLoose(snapshotNameResolution, "externalSnapshotName"),
                         c.steps.readSnapshotName.outputs.snapshotName
                     );
-                    const snapshotRepoConfig = expr.deserializeRecord(
-                        expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "snapshotConfig"));
+                    const snapshotRepoConfig = expr.get(snapshotMigrationConfig, "snapshotConfig");
 
                     return c.register({
                         ...selectInputsForRegister(b, c),
                         ...selectInputsFieldsAsExpressionRecord(c.item, c,
                             getZodKeys(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)),
-                        sourceVersion: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "sourceVersion"),
-                        sourceLabel: expr.jsonPathStrict(b.inputs.snapshotMigrationConfig, "sourceLabel"),
-                        targetConfig: expr.jsonPathStrictSerialized(b.inputs.snapshotMigrationConfig, "targetConfig"),
+                        sourceVersion: expr.get(snapshotMigrationConfig, "sourceVersion"),
+                        sourceLabel: expr.get(snapshotMigrationConfig, "sourceLabel"),
+                        targetConfig: expr.serialize(expr.get(snapshotMigrationConfig, "targetConfig")),
                         snapshotConfig: expr.serialize(expr.makeDict({
                             snapshotName: resolvedSnapshotName,
                             label: expr.get(snapshotRepoConfig, "label"),
@@ -371,9 +382,9 @@ export const FullMigration = WorkflowBuilder.create({
                     });
                 }, {
                     loopWith: makeParameterLoop(
-                        expr.dig(expr.deserializeRecord(b.inputs.replayConfig), ["dependsOnSnapshotMigrations"], [])),
+                        expr.get(expr.deserializeRecord(b.inputs.replayConfig), "dependsOnSnapshotMigrations")),
                     when: { templateExp: expr.not(expr.isEmpty(
-                        expr.getLoose(expr.deserializeRecord(b.inputs.replayConfig),
+                        expr.get(expr.deserializeRecord(b.inputs.replayConfig),
                             "dependsOnSnapshotMigrations")))
                     }
                 }
@@ -508,24 +519,29 @@ export const FullMigration = WorkflowBuilder.create({
                 }
             )
             .addStep("runTrafficReplays", INTERNAL, "runSingleReplay", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    replayConfig: expr.serialize(expr.makeDict({
+                c.register((() => {
+                    const itemRecord = expr.deserializeRecord(expr.recordToString(c.item));
+                    const baseReplayConfig = expr.makeDict({
                         fromProxy: expr.get(c.item, "fromProxy"),
                         kafkaClusterName: expr.get(c.item, "kafkaClusterName"),
                         kafkaConfig: expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
                         toTarget: expr.deserializeRecord(expr.get(c.item, "toTarget")),
-                        dependsOnSnapshotMigrations: expr.getLoose(
-                            expr.deserializeRecord(expr.recordToString(c.item)),
-                            "dependsOnSnapshotMigrations"
-                        ),
-                        replayerConfig: expr.getLoose(
-                            expr.deserializeRecord(expr.recordToString(c.item)),
-                            "replayerConfig"
+                        dependsOnSnapshotMigrations: expr.get(itemRecord, "dependsOnSnapshotMigrations"),
+                    });
+                    const withReplayerConfig = expr.ternary(
+                        expr.hasKey(itemRecord, "replayerConfig"),
+                        expr.makeDict({
+                            replayerConfig: expr.getLoose(itemRecord, "replayerConfig")
+                        }),
+                        expr.makeDict({})
+                    );
+                    return {
+                        ...selectInputsForRegister(b, c),
+                        replayConfig: expr.serialize(
+                            expr.mergeDicts(baseReplayConfig, withReplayerConfig)
                         )
-                    }))
-                    // replayConfig: expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_REPLAY_CONFIG>>>()
-                }), {
+                    };
+                })()), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.config), "trafficReplays"))
                 }
