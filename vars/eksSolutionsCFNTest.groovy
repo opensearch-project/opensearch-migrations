@@ -6,6 +6,7 @@ def call(Map config = [:]) {
     //   defaultGitBranch: git branch default
     def vpcMode = config.vpcMode ?: 'create'
     def isImportVpc = (vpcMode == 'import')
+    def jobName = config.jobName ?: (isImportVpc ? "eksImportVPCSolutionsCFNTest" : "eksCreateVPCSolutionsCFNTest")
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -24,6 +25,20 @@ def call(Map config = [:]) {
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
+        }
+
+        triggers {
+            GenericTrigger(
+                    genericVariables: [
+                            [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
+                            [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
+                            [key: 'job_name', value: '$.job_name']
+                    ],
+                    tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
+                    causeString: 'Triggered by PR on opensearch-migrations repository',
+                    regexpFilterExpression: "^$jobName\$",
+                    regexpFilterText: "\$job_name",
+            )
         }
 
         environment {
