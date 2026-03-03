@@ -9,7 +9,9 @@ import java.util.Objects;
  * <p>Unlike {@code LuceneDocumentChange}, this type has no {@code luceneDocNumber} or other
  * implementation-specific fields. Progress tracking is handled separately via {@link ProgressCursor}.
  *
- * <p>This is a value type: two {@code DocumentChange} instances with the same fields are equal.
+ * <p>Note: this record contains a {@code byte[]} field ({@code source}), so the default
+ * record {@code equals()}/{@code hashCode()} use reference equality for that field.
+ * Use {@link java.util.Arrays#equals(byte[], byte[])} for deep comparison when needed.
  *
  * @param id        the document identifier ({@code _id}), must not be null
  * @param type      the document type ({@code _type}), nullable (absent in ES 7+)

@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.pipeline.source;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -90,7 +91,7 @@ public class SourcelessDocumentSource implements DocumentSource {
 
         metrics.recordShardExtractionStarted(SourceType.SOURCELESS, shardId.indexName(), shardId.shardNumber());
         final long startNanos = System.nanoTime();
-        final int[] docCount = {0};
+        final AtomicInteger docCount = new AtomicInteger(0);
         int deleteThreshold = (int) (config.docsPerShard() * (1.0 - config.deleteRatio()));
 
         return Flux.range((int) startingDocOffset, count)
@@ -104,7 +105,7 @@ public class SourcelessDocumentSource implements DocumentSource {
                 if (!isDelete) {
                     metrics.recordDocumentParsed(SourceType.SOURCELESS, body.length);
                 }
-                docCount[0]++;
+                docCount.incrementAndGet();
 
                 return new DocumentChange(
                     shardId.indexName() + "-" + shardId.shardNumber() + "-" + docNum,
@@ -116,9 +117,10 @@ public class SourcelessDocumentSource implements DocumentSource {
             })
             .doOnComplete(() -> {
                 long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
-                metrics.recordBatchReadDuration(SourceType.SOURCELESS, durationMs, docCount[0]);
+                int totalDocs = docCount.get();
+                metrics.recordBatchReadDuration(SourceType.SOURCELESS, durationMs, totalDocs);
                 metrics.recordShardExtractionCompleted(
-                    SourceType.SOURCELESS, shardId.indexName(), shardId.shardNumber(), docCount[0]);
+                    SourceType.SOURCELESS, shardId.indexName(), shardId.shardNumber(), totalDocs);
             });
     }
 

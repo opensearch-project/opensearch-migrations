@@ -1,6 +1,9 @@
 package org.opensearch.migrations.bulkload.pipeline.source;
 
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.pipeline.ir.GlobalMetadataSnapshot;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
@@ -20,6 +23,7 @@ public class SourcelessMetadataSource implements MetadataSource {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final List<SourcelessExtractionConfig> configs;
+    private final Map<String, SourcelessExtractionConfig> configByIndex;
 
     public SourcelessMetadataSource(SourcelessExtractionConfig config) {
         this(List.of(config));
@@ -30,6 +34,8 @@ public class SourcelessMetadataSource implements MetadataSource {
             throw new IllegalArgumentException("configs must not be null or empty");
         }
         this.configs = List.copyOf(configs);
+        this.configByIndex = this.configs.stream()
+            .collect(Collectors.toMap(SourcelessExtractionConfig::indexName, Function.identity()));
     }
 
     @Override
@@ -40,10 +46,10 @@ public class SourcelessMetadataSource implements MetadataSource {
 
     @Override
     public IndexMetadataSnapshot readIndexMetadata(String indexName) {
-        var config = configs.stream()
-            .filter(c -> c.indexName().equals(indexName))
-            .findFirst()
-            .orElseThrow(() -> new IllegalArgumentException("Unknown index: " + indexName));
+        var config = configByIndex.get(indexName);
+        if (config == null) {
+            throw new IllegalArgumentException("Unknown index: " + indexName);
+        }
 
         ObjectNode settings = MAPPER.createObjectNode();
         settings.put("number_of_shards", config.shardCount());

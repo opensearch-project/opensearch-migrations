@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 import org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor;
@@ -89,15 +90,15 @@ public class MigrationPipeline {
      */
     public Flux<ProgressCursor> migrateShard(ShardId shardId, String indexName, long startingDocOffset) {
         log.info("Starting shard migration: {} from offset {}", shardId, startingDocOffset);
-        final long[] cumulativeOffset = { startingDocOffset };
+        final AtomicLong cumulativeOffset = new AtomicLong(startingDocOffset);
         return source.readDocuments(shardId, startingDocOffset)
             .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
             .concatMap(batch -> sink.writeBatch(shardId, indexName, batch)
                 .map(cursor -> {
-                    cumulativeOffset[0] += cursor.docsInBatch();
+                    long newOffset = cumulativeOffset.addAndGet(cursor.docsInBatch());
                     return new ProgressCursor(
                         shardId,
-                        cumulativeOffset[0],
+                        newOffset,
                         cursor.docsInBatch(),
                         cursor.bytesInBatch()
                     );
