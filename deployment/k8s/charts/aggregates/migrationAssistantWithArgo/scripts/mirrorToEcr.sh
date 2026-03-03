@@ -69,8 +69,8 @@ aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
   crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
 
 # --- DockerHub mirrors (tried in order for mirror.gcr.io/* images) ---
-# Override: DOCKERHUB_MIRRORS="mirror.gcr.io docker.io ghcr.io/dockerhub" ./mirrorToEcr.sh ...
-DOCKERHUB_MIRRORS="${DOCKERHUB_MIRRORS:-mirror.gcr.io docker.io}"
+# Override: DOCKERHUB_MIRRORS="mirror.gcr.io docker.io public.ecr.aws" ./mirrorToEcr.sh ...
+DOCKERHUB_MIRRORS="${DOCKERHUB_MIRRORS:-mirror.gcr.io docker.io public.ecr.aws}"
 
 # Copies a single image to ECR, trying mirror sources for mirror.gcr.io/* images.
 copy_image() {
@@ -81,7 +81,14 @@ copy_image() {
   local sources="$image"
   case "$image" in mirror.gcr.io/*)
     local path="${image#mirror.gcr.io/}" ; sources=""
-    for m in $DOCKERHUB_MIRRORS; do sources="${sources:+$sources }${m}/${path}"; done
+    for m in $DOCKERHUB_MIRRORS; do
+      # public.ecr.aws hosts official library images under docker/library/
+      if [ "$m" = "public.ecr.aws" ]; then
+        case "$path" in library/*) sources="${sources:+$sources }${m}/docker/${path}" ;; esac
+      else
+        sources="${sources:+$sources }${m}/${path}"
+      fi
+    done
   ;; esac
 
   aws ecr create-repository --repository-name "$ecr_repo" --region "$REGION" 2>/dev/null || true
