@@ -75,7 +75,8 @@ DOCKERHUB_MIRRORS="${DOCKERHUB_MIRRORS:-mirror.gcr.io docker.io public.ecr.aws}"
 # Copies a single image to ECR, trying mirror sources for mirror.gcr.io/* images.
 copy_image() {
   local image="$1" image_no_tag="${image%%:*}" tag="${image##*:}"
-  local ecr_repo="mirrored/${image_no_tag}" dest="${ECR_HOST}/${ecr_repo}:${tag}"
+  local ecr_repo="mirrored/${image_no_tag}"
+  local dest="${ECR_HOST}/${ecr_repo}:${tag}"
 
   # Build source candidates — for mirror.gcr.io/*, try each mirror
   local sources="$image"
