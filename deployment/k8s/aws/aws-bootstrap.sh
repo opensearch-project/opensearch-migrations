@@ -933,34 +933,46 @@ if [[ "$push_images_to_ecr" == "true" ]]; then
   if [[ "$build_images" != "true" ]]; then
     echo "Mirroring MA images to private ECR..."
     export PATH="${HOME}/bin:${PATH}"
+
+    # crane copy with single retry
+    crane_copy_retry() {
+      local src="$1" dst="$2"
+      crane copy "$src" "$dst" 2>&1 | tail -1 || { sleep 5; crane copy "$src" "$dst" 2>&1 | tail -1; } \
+        || echo "  ❌ FAILED: $src → $dst" >&2
+    }
+
+    # MA image mapping: build_tag_name|public_ecr_suffix
+    # build_tag_name: what the build system produces (migrations_<name>_latest)
+    # public_ecr_suffix: the public.ecr.aws image name suffix (opensearch-migrations-<suffix>)
+    MA_IMAGES="capture_proxy|traffic-capture-proxy
+traffic_replayer|traffic-replayer
+reindex_from_snapshot|reindex-from-snapshot
+migration_console|console"
+
     if [[ -n "${ma_images_source:-}" ]]; then
       # Copy from another ECR registry using build tag names
-      for tag in migrations_capture_proxy_latest migrations_traffic_replayer_latest migrations_reindex_from_snapshot_latest migrations_migration_console_latest; do
-        src="${ma_images_source}:${tag}"
-        dst="${MIGRATIONS_ECR_REGISTRY}:${tag}"
-        echo "  $tag → $dst"
-        crane copy "$src" "$dst" 2>&1 | tail -1 || { sleep 5; crane copy "$src" "$dst" 2>&1 | tail -1; } || echo "  ❌ FAILED: $tag" >&2
+      echo "$MA_IMAGES" | while IFS='|' read -r build_name _; do
+        src="${ma_images_source}:migrations_${build_name}_latest"
+        dst="${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest"
+        echo "  $build_name → $dst"
+        crane_copy_retry "$src" "$dst"
       done
     else
       # Copy from public ECR using release image names
       aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
         crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
-      for img in traffic-capture-proxy traffic-replayer reindex-from-snapshot console; do
-        src="public.ecr.aws/opensearchproject/opensearch-migrations-${img}:${RELEASE_VERSION}"
-        tag="migrations_${img//-/_}_latest"
-        dst="${MIGRATIONS_ECR_REGISTRY}:${tag}"
-        echo "  $img → $dst"
-        crane copy "$src" "$dst" 2>&1 | tail -1 || { sleep 5; crane copy "$src" "$dst" 2>&1 | tail -1; } || echo "  ❌ FAILED: $img" >&2
+      echo "$MA_IMAGES" | while IFS='|' read -r build_name public_suffix; do
+        src="public.ecr.aws/opensearchproject/opensearch-migrations-${public_suffix}:${RELEASE_VERSION}"
+        dst="${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest"
+        echo "  $public_suffix → $dst"
+        crane_copy_retry "$src" "$dst"
       done
-      # installer uses migration_console image
-      crane copy "${MIGRATIONS_ECR_REGISTRY}:migrations_console_latest" \
-        "${MIGRATIONS_ECR_REGISTRY}:migrations_migration_console_latest" 2>&1 | tail -1 || true
     fi
     # Tag mirrored images with the immutable IMAGE_TAG
     echo "Tagging MA images with $IMAGE_TAG..."
-    for name in capture_proxy traffic_replayer reindex_from_snapshot migration_console; do
-      crane copy "${MIGRATIONS_ECR_REGISTRY}:migrations_${name}_latest" \
-        "${MIGRATIONS_ECR_REGISTRY}:migrations_${name}_${IMAGE_TAG}" 2>&1 | tail -1 || true
+    echo "$MA_IMAGES" | while IFS='|' read -r build_name _; do
+      crane_copy_retry "${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest" \
+        "${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_${IMAGE_TAG}"
     done
   else
     echo "Skipping MA image mirroring — --build-images will push locally-built images."
@@ -1095,11 +1107,19 @@ echo "  ${IMAGE_FLAGS}"
 echo "=== End helm install configuration ==="
 
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
+# Build extra values flags — split comma-separated list into individual -f args
+EXTRA_VALUES_FLAGS=""
+if [[ -n "$extra_helm_values" ]]; then
+  IFS=',' read -ra _evf <<< "$extra_helm_values"
+  for f in "${_evf[@]}"; do
+    EXTRA_VALUES_FLAGS="$EXTRA_VALUES_FLAGS -f $f"
+  done
+fi
 helm install "$namespace" "${ma_chart_dir}" \
   --namespace $namespace \
   --timeout 15m \
   $HELM_VALUES_FLAGS \
-  ${extra_helm_values:+-f "$extra_helm_values"} \
+  $EXTRA_VALUES_FLAGS \
   --set stageName="${STAGE}" \
   --set aws.region="${AWS_CFN_REGION}" \
   --set aws.account="${AWS_ACCOUNT}" \

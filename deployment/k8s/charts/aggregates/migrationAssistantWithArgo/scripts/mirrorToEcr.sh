@@ -120,10 +120,13 @@ wait || { echo "⚠️  Some image copies failed" >&2; }
 # --- mirror helm charts as OCI artifacts ---
 echo ""
 echo "=== Mirroring Helm charts ==="
-echo "$CHARTS" | while IFS='|' read -r name version repo; do
-  name=$(echo "$name" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-  version=$(echo "$version" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-  repo=$(echo "$repo" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+_chartlist=$(mktemp)
+echo "$CHARTS" | grep -v '^[[:space:]]*$' > "$_chartlist"
+_chart_fail=0
+while IFS='|' read -r name version repo; do
+  name="${name#"${name%%[![:space:]]*}"}"; name="${name%"${name##*[![:space:]]}"}"
+  version="${version#"${version%%[![:space:]]*}"}"; version="${version%"${version##*[![:space:]]}"}"
+  repo="${repo#"${repo%%[![:space:]]*}"}"; repo="${repo%"${repo##*[![:space:]]}"}"
   [ -z "$name" ] && continue
 
   echo "  Pulling $name $version from $repo..."
@@ -142,10 +145,12 @@ echo "$CHARTS" | while IFS='|' read -r name version repo; do
 
   aws ecr create-repository --repository-name "charts/${name}" --region "$REGION" 2>/dev/null || true
   echo "  Pushing $tgz → oci://${ECR_HOST}/charts"
-  helm push "$tgz" "oci://${ECR_HOST}/charts" 2>&1 || echo "  ❌ FAILED to push $name" >&2
+  helm push "$tgz" "oci://${ECR_HOST}/charts" 2>&1 || { echo "  ❌ FAILED to push $name" >&2; _chart_fail=1; }
   rm -f "$tgz"
   echo "  ✅ $name $version"
-done
+done < "$_chartlist"
+rm -f "$_chartlist"
+[ "$_chart_fail" -eq 0 ] || echo "⚠️  Some chart copies failed" >&2
 
 echo ""
 echo "=== Mirroring complete ==="
