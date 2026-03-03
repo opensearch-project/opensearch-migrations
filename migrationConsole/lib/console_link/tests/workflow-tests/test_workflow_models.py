@@ -49,7 +49,9 @@ class TestWorkflowModels:
                 }
             }
         }
-        config = WorkflowConfig(data, raw_yaml="targets:\n  test:\n    endpoint: https://test.com:9200\n    auth:\n      username: admin\n      password: password\n")
+        raw = ("targets:\n  test:\n    endpoint: https://test.com:9200\n"
+               "    auth:\n      username: admin\n      password: password\n")
+        config = WorkflowConfig(data, raw_yaml=raw)
 
         # Test raw_yaml content
         assert "targets:" in config.raw_yaml

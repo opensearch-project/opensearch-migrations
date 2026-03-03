@@ -114,8 +114,9 @@ def _validate_and_find_secrets(raw_yaml: str):
 
 def _process_secrets(secret_store: SecretStore, result: dict, interactive: bool = False):
     """Process secrets from a validate+findSecrets result."""
-    if 'invalidSecrets' in result and (invalid_secrets := result['invalidSecrets']):
-        raise click.ClickException(f"Invalidly named secret{'s' if len(invalid_secrets) > 0 else ''} found:"
+    invalid_secrets = result.get('invalidSecrets')
+    if invalid_secrets:
+        raise click.ClickException(f"Invalidly named secret{'s' if len(invalid_secrets) > 1 else ''} found:"
                                    f" {invalid_secrets}")
 
     valid_secrets = result.get('validSecrets', [])
@@ -125,23 +126,32 @@ def _process_secrets(secret_store: SecretStore, result: dict, interactive: bool 
     existing = list(filter(secret_store.secret_exists, valid_secrets))
     missing = list(set(valid_secrets) - set(existing))
 
-    if existing:
-        msg = (f"Found {len(existing)} existing secret{'s' if len(existing) > 1 else ''} "
-               f"that will be used for HTTP-Basic authentication "
-               f"of requests to clusters:\n  " + "\n  ".join(existing))
-        if interactive:
-            click.echo(msg)
-        else:
-            logger.info(msg)
+    _notify_existing_secrets(existing, interactive)
+    _handle_missing_config_secrets(secret_store, missing, interactive)
 
-    if missing:
-        if interactive:
-            _handle_add_basic_creds_secrets(secret_store, missing)
-        else:
-            raise click.ClickException(
-                f"Found {len(missing)} missing secret{'s' if len(missing) > 1 else ''} "
-                f"that must be created to make well-formed HTTP-Basic requests to clusters:\n  " +
-                "\n  ".join(missing))
+
+def _notify_existing_secrets(existing, interactive):
+    if not existing:
+        return
+    msg = (f"Found {len(existing)} existing secret{'s' if len(existing) > 1 else ''} "
+           f"that will be used for HTTP-Basic authentication "
+           f"of requests to clusters:\n  " + "\n  ".join(existing))
+    if interactive:
+        click.echo(msg)
+    else:
+        logger.info(msg)
+
+
+def _handle_missing_config_secrets(secret_store, missing, interactive):
+    if not missing:
+        return
+    if interactive:
+        _handle_add_basic_creds_secrets(secret_store, missing)
+    else:
+        raise click.ClickException(
+            f"Found {len(missing)} missing secret{'s' if len(missing) > 1 else ''} "
+            f"that must be created to make well-formed HTTP-Basic requests to clusters:\n  " +
+            "\n  ".join(missing))
 
 
 def _handle_add_basic_creds_secrets(secret_store, missing_secrets):
