@@ -30,7 +30,7 @@ RENDERED=$(helm template test "$CHART_DIR" \
   2>/dev/null)
 
 # Public registries that should NOT appear in image references
-PUBLIC_REGISTRIES="docker.io|quay.io|registry.k8s.io|ghcr.io|gcr.io|cr.fluentbit.io|reg.kyverno.io|public.ecr.aws"
+PUBLIC_REGISTRIES="docker.io|quay.io|registry.k8s.io|ghcr.io|mirror.gcr.io|gcr.io|cr.fluentbit.io|reg.kyverno.io|public.ecr.aws"
 
 echo ""
 echo "Checking for public registry references in image: fields..."
