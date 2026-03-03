@@ -23,6 +23,10 @@ spec:
         value: "eks-isolated"
       - name: region
         value: "us-east-1"
+      - name: isolated-vpc-id
+        value: ""  # VPC ID for isolated deployment (no internet)
+      - name: isolated-subnet-ids
+        value: ""  # Comma-separated subnet IDs (isolated, no internet)
   activeDeadlineSeconds: 14400  # 4 hours (isolated deploy is slow)
 
   synchronization:
@@ -110,19 +114,22 @@ spec:
             ./deployment/k8s/aws/aws-bootstrap.sh \
               --deploy-create-vpc-cfn \
               --build-cfn \
-              --stack-name "${BUILD_STACK}" \
-              --stage "${STAGE}-build" \
-              --eks-access-principal-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
               --build-images \
               --build-chart-and-dashboards \
-              --base-dir "$(pwd)" \
-              --skip-console-exec \
+              --stack-name "${BUILD_STACK}" \
+              --stage "${STAGE}-build" \
               --region "${REGION}" \
-              2>&1 | while IFS= read -r line; do printf '%s | %s\n' "$(date '+%H:%M:%S')" "$line"; done
+              --version latest \
+              --skip-console-exec \
+              2>&1 | while IFS= read -r line; do printf '%s | %s\n' "$(date '+%H:%M:%S')" "$line"; done; exit ${PIPESTATUS[0]}
 
-            # Save build cluster info
-            aws cloudformation describe-stacks --stack-name "${BUILD_STACK}" \
-              --query "Stacks[0].Outputs" --output json > /workspace/test/build-cluster-outputs.json
+            # Save build ECR registry (matches Jenkins env.BUILD_ECR)
+            BUILD_ECR=$(aws cloudformation describe-stacks \
+              --stack-name "${BUILD_STACK}" --region "${REGION}" \
+              --query 'Stacks[0].Outputs[?OutputKey==`MigrationsExportString`].OutputValue' \
+              --output text | tr ';' '\n' | grep MIGRATIONS_ECR_REGISTRY | cut -d= -f2)
+            echo "${BUILD_ECR}" > /workspace/test/build-ecr.txt
+            echo "Build ECR registry: ${BUILD_ECR}"
         env:
           - name: TEST_ACCOUNT_ID
             valueFrom:
@@ -166,18 +173,25 @@ spec:
             export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
             echo "Deploying isolated EKS cluster (no internet)..."
+
+            # Read build ECR from previous step
+            BUILD_ECR=$(cat /workspace/test/build-ecr.txt 2>/dev/null || echo "")
+
+            # Matches Jenkins: --push-all-images-to-private-ecr --create-vpc-endpoints --ma-images-source
             ./deployment/k8s/aws/aws-bootstrap.sh \
-              --deploy-create-vpc-cfn \
+              --deploy-import-vpc-cfn \
               --build-cfn \
+              --build-chart-and-dashboards \
+              --push-all-images-to-private-ecr \
+              --create-vpc-endpoints \
+              --ma-images-source "${BUILD_ECR}" \
               --stack-name "${ISOLATED_STACK}" \
               --stage "${STAGE}-isolated" \
-              --eks-access-principal-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --use-public-images false \
-              --isolated-deployment \
-              --base-dir "$(pwd)" \
-              --skip-console-exec \
+              --vpc-id "{{workflow.parameters.isolated-vpc-id}}" \
+              --subnet-ids "{{workflow.parameters.isolated-subnet-ids}}" \
               --region "${REGION}" \
-              2>&1 | while IFS= read -r line; do printf '%s | %s\n' "$(date '+%H:%M:%S')" "$line"; done
+              --skip-console-exec \
+              2>&1 | while IFS= read -r line; do printf '%s | %s\n' "$(date '+%H:%M:%S')" "$line"; done; exit ${PIPESTATUS[0]}
         env:
           - name: TEST_ACCOUNT_ID
             valueFrom:

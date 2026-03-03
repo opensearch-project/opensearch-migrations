@@ -131,6 +131,7 @@ spec:
           {
             "full-migration": {
               "stage": "STAGE_PLACEHOLDER",
+              "vpcId": "<VPC_ID>",
               "engineVersion": "OS_2.19",
               "domainName": "os-cluster-STAGE_PLACEHOLDER",
               "dataNodeCount": 2,
@@ -142,7 +143,9 @@ spec:
               "trafficReplayerServiceEnabled": true,
               "trafficReplayerExtraArgs": "--speedup-factor 10.0",
               "reindexFromSnapshotServiceEnabled": true,
+              "reindexFromSnapshotExtraArgs": "--doc-transformer-config-base64 W3siVHlwZU1hcHBpbmdTYW5pdGl6YXRpb25UcmFuc2Zvcm1lclByb3ZpZGVyIjp7InJlZ2V4TWFwcGluZ3MiOlt7InNvdXJjZUluZGV4UGF0dGVybiI6IihtYXRjaF9hbGxfdGVzdF9lMmVfMDAwMV8uKikiLCJzb3VyY2VUeXBlUGF0dGVybiI6Ii4qIiwidGFyZ2V0SW5kZXhQYXR0ZXJuIjoiJDFfdHJhbnNmb3JtZWQifSx7InNvdXJjZUluZGV4UGF0dGVybiI6IiguKikiLCJzb3VyY2VUeXBlUGF0dGVybiI6IiguKikiLCJ0YXJnZXRJbmRleFBhdHRlcm4iOiIkMSJ9XSwic291cmNlUHJvcGVydGllcyI6eyJ2ZXJzaW9uIjp7Im1ham9yIjo2LCJtaW5vciI6OH19fX1d",
               "sourceCluster": {
+                "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
                 "auth": {"type": "none"},
                 "version": "ES_6.8.23"
               },

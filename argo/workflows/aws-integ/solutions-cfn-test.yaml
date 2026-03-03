@@ -89,52 +89,28 @@ spec:
             export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
             export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
-            # Write CDK context for solutions deployment
+            # CDK deploy (matches Jenkins 'Deployment' stage)
             cd deployment/migration-assistant-solution
-            cat > cdk.context.json << EOF
-            {
-              "stage": "${STAGE}",
-              "vpcEnabled": true,
-              "migrationConsoleServiceEnabled": true,
-              "sourceCluster": {
-                "endpoint": "https://vpc-source-${STAGE}.${REGION}.es.amazonaws.com:443",
-                "auth": {"type": "none"},
-                "version": "ES_7.10"
-              },
-              "targetCluster": {
-                "endpoint": "https://vpc-target-${STAGE}.${REGION}.es.amazonaws.com:443",
-                "auth": {"type": "none"},
-                "version": "OS_2.19"
-              }
-            }
-            EOF
+            npm install
+            npx cdk deploy "Migration-Assistant-Infra-Create-VPC-${STAGE}-${REGION}" \
+              --parameters Stage=${STAGE} \
+              --require-approval never --concurrency 3
 
-            echo "Deploying Solutions CFN stack..."
-            npm ci
-            npx cdk synth --context stage="${STAGE}"
-            npx cdk deploy --require-approval never --context stage="${STAGE}" \
-              --outputs-file /tmp/cdk-outputs.json 2>&1 | tail -50
+            # Wait for instance to be ready (matches Jenkins sleep 15)
+            sleep 15
 
-            echo "Validating deployment..."
-            cat /tmp/cdk-outputs.json | jq .
+            # Init Bootstrap (matches Jenkins 'Init Bootstrap' stage)
+            cd /workspace/test
+            ./awsRunInitBootstrap.sh \
+              --stage "${STAGE}" \
+              --log-group-name "solutions-deployment-jenkins-pipeline-${STAGE}" \
+              --workflow INIT_BOOTSTRAP
 
-            # Validate migration console EC2 instance is running
-            INSTANCE_ID=$(aws ec2 describe-instances \
-              --filters "Name=tag:Name,Values=*${STAGE}*migration-console*" \
-                        "Name=instance-state-name,Values=running" \
-              --query "Reservations[0].Instances[0].InstanceId" --output text)
-
-            if [ "${INSTANCE_ID}" = "None" ] || [ -z "${INSTANCE_ID}" ]; then
-              echo "ERROR: Migration console EC2 instance not found or not running"
-              exit 1
-            fi
-            echo "Migration console EC2 instance running: ${INSTANCE_ID}"
-
-            # Validate SSM connectivity
-            aws ssm start-session --target "${INSTANCE_ID}" \
-              --document-name AWS-StartNonInteractiveCommand \
-              --parameters '{"command":["echo SSM connectivity validated"]}' || \
-              echo "Warning: SSM session failed (may need VPC endpoint)"
+            # Verify Bootstrap (matches Jenkins 'Verify Bootstrap Instance' stage)
+            ./awsRunInitBootstrap.sh \
+              --stage "${STAGE}" \
+              --log-group-name "solutions-deployment-jenkins-pipeline-${STAGE}" \
+              --workflow VERIFY_INIT_BOOTSTRAP
 
             echo "Solutions CFN test PASSED"
         env:
@@ -191,7 +167,7 @@ spec:
 
             echo "Destroying Solutions CFN stack for stage ${STAGE}..."
             npm ci 2>/dev/null
-            npx cdk destroy --force --context stage="${STAGE}" 2>&1 | tail -30 || true
+            npx cdk destroy "Migration-Assistant-Infra-Create-VPC-${STAGE}-us-east-1" --force 2>&1 | tail -30 || true
             echo "CDK destroy complete"
         env:
           - name: TEST_ACCOUNT_ID

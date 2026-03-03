@@ -1,6 +1,6 @@
 # Replaces: vars/eksIntegPipeline.groovy
 # EKS-based integration test: AOS source → AOS target via EKS/k8s
-# Deploys clusters, EKS infra via aws-bootstrap.sh, runs tests, ordered cleanup
+# Deploys AOS clusters via awsDeployCluster.sh, EKS via aws-bootstrap.sh, runs tests, ordered cleanup
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
@@ -85,6 +85,10 @@ spec:
           - name: post-cluster-setup
             depends: deploy-ma-on-eks
             template: post-cluster-setup
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.deploy-ma-on-eks.outputs.artifacts.source}}"
 
           - name: run-tests
             depends: post-cluster-setup
@@ -92,10 +96,12 @@ spec:
             arguments:
               artifacts:
                 - name: source
-                  from: "{{tasks.deploy-ma-on-eks.outputs.artifacts.source}}"
+                  from: "{{tasks.post-cluster-setup.outputs.artifacts.source}}"
 
     # ================================================================
-    # DEPLOY CLUSTERS — creates AOS source + target domains via deployClustersStep
+    # DEPLOY CLUSTERS — creates AOS source + target domains
+    # Matches Jenkins deployClustersStep.groovy: writes cluster context JSON,
+    # runs awsDeployCluster.sh, reads cluster-details-<stage>.json
     # ================================================================
     - name: deploy-clusters
       inputs:
@@ -113,6 +119,9 @@ spec:
         args:
           - |
             set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+
             CREDS=$(aws sts assume-role \
               --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
               --role-session-name "argo-deploy-clusters" --duration-seconds 3600)
@@ -120,17 +129,39 @@ spec:
             export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
             export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
-            # Deploy source and target AOS domains
-            python3 deployClusters.py \
-              --stage "{{workflow.parameters.stage}}" \
-              --source-version "{{workflow.parameters.source-version}}" \
-              --source-cluster-type "{{workflow.parameters.source-cluster-type}}" \
-              --target-version "{{workflow.parameters.target-version}}" \
-              --target-cluster-type "{{workflow.parameters.target-cluster-type}}" \
-              --output-file /tmp/cluster-context.json
+            # Write cluster context JSON (matches deployClustersStep.groovy)
+            CONTEXT_FILE="tmp/cluster-context-integ.json"
+            mkdir -p tmp
+            cat > "${CONTEXT_FILE}" << EOF
+            {
+              "stage": "${STAGE}",
+              "vpcAZCount": 2,
+              "clusters": [
+                {
+                  "clusterId": "source",
+                  "clusterVersion": "{{workflow.parameters.source-version}}",
+                  "clusterType": "{{workflow.parameters.source-cluster-type}}",
+                  "openAccessPolicyEnabled": true,
+                  "domainRemovalPolicy": "DESTROY"
+                },
+                {
+                  "clusterId": "target",
+                  "clusterVersion": "{{workflow.parameters.target-version}}",
+                  "clusterType": "{{workflow.parameters.target-cluster-type}}",
+                  "openAccessPolicyEnabled": true,
+                  "domainRemovalPolicy": "DESTROY"
+                }
+              ]
+            }
+            EOF
+            echo "Using cluster context:" && cat "${CONTEXT_FILE}"
 
-            # Save cluster context for later stages
-            cp /tmp/cluster-context.json /workspace/test/cluster-context.json
+            # Deploy clusters via awsDeployCluster.sh (same as Jenkins)
+            ./awsDeployCluster.sh --stage "${STAGE}" --context-file "${CONTEXT_FILE}"
+
+            # Save cluster details for later stages
+            cp "tmp/cluster-details-${STAGE}.json" /workspace/test/cluster-details.json
+            echo "Cluster details:" && cat /workspace/test/cluster-details.json
         env:
           - name: TEST_ACCOUNT_ID
             valueFrom:
@@ -140,7 +171,8 @@ spec:
         activeDeadlineSeconds: 3600  # 60 min
 
     # ================================================================
-    # DEPLOY MA ON EKS — runs aws-bootstrap.sh to create EKS infra + helm install
+    # DEPLOY MA ON EKS — runs aws-bootstrap.sh (matches Jenkins 'Deploy & Bootstrap MA')
+    # Reads cluster details, extracts VPC/subnet, deploys EKS + MA
     # ================================================================
     - name: deploy-ma-on-eks
       inputs:
@@ -160,7 +192,8 @@ spec:
             set -euo pipefail
             STAGE="{{workflow.parameters.stage}}"
             REGION="{{workflow.parameters.region}}"
-            STACK_NAME="Migration-Assistant-Infra-Import-VPC-eks-${STAGE}-${REGION}"
+            STACK_NAME_SUFFIX="${STAGE}-${REGION}"
+            STACK_NAME="Migration-Assistant-Infra-Import-VPC-eks-${STACK_NAME_SUFFIX}"
 
             CREDS=$(aws sts assume-role \
               --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
@@ -169,12 +202,12 @@ spec:
             export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
             export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
-            # Read cluster context
-            CLUSTER_DETAILS=$(cat /workspace/test/cluster-context.json)
+            # Read cluster details from deploy-clusters step
+            CLUSTER_DETAILS=$(cat /workspace/test/cluster-details.json)
             VPC_ID=$(echo "$CLUSTER_DETAILS" | jq -r '.target.vpcId')
             SUBNET_IDS=$(echo "$CLUSTER_DETAILS" | jq -r '.target.subnetIds')
 
-            # Deploy EKS + MA via aws-bootstrap.sh
+            # Deploy EKS + MA via aws-bootstrap.sh (matches Jenkins exactly)
             ./deployment/k8s/aws/aws-bootstrap.sh \
               --deploy-import-vpc-cfn \
               --build-cfn \
@@ -188,14 +221,29 @@ spec:
               --base-dir "$(pwd)" \
               --skip-console-exec \
               --region "${REGION}" \
-              2>&1 | while IFS= read -r line; do printf '%s | %s\n' "$(date '+%H:%M:%S')" "$line"; done
+              2>&1 | while IFS= read -r line; do printf '%s | %s\n' "$(date '+%H:%M:%S')" "$line"; done; exit ${PIPESTATUS[0]}
 
-            # Capture exports for cleanup
+            # Capture CFN exports (matches Jenkins: registryEndpoint, eksClusterName, clusterSecurityGroup)
             RAW_OUTPUT=$(aws cloudformation describe-stacks \
               --stack-name "${STACK_NAME}" \
               --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
               --output text)
-            echo "${RAW_OUTPUT}" > /workspace/test/cfn-exports.txt
+
+            # Parse exports into individual values
+            REGISTRY=$(echo "${RAW_OUTPUT}" | tr ';' '\n' | grep MIGRATIONS_ECR_REGISTRY | cut -d= -f2)
+            EKS_CLUSTER=$(echo "${RAW_OUTPUT}" | tr ';' '\n' | grep MIGRATIONS_EKS_CLUSTER_NAME | cut -d= -f2)
+            EKS_SG=$(echo "${RAW_OUTPUT}" | tr ';' '\n' | grep EKS_CLUSTER_SECURITY_GROUP | cut -d= -f2)
+
+            # Save for post-cluster-setup and cleanup
+            cat > /workspace/test/eks-exports.json << EOF
+            {
+              "registryEndpoint": "${REGISTRY}",
+              "eksClusterName": "${EKS_CLUSTER}",
+              "clusterSecurityGroup": "${EKS_SG}",
+              "stackName": "${STACK_NAME}"
+            }
+            EOF
+            echo "EKS exports:" && cat /workspace/test/eks-exports.json
         env:
           - name: TEST_ACCOUNT_ID
             valueFrom:
@@ -209,13 +257,21 @@ spec:
         activeDeadlineSeconds: 9000  # 150 min
 
     # ================================================================
-    # POST-CLUSTER SETUP — create configmaps, modify security groups
-    # Reads cluster-context.json from deploy-clusters and:
-    #   1. Creates source/target cluster configmaps for testAutomation
-    #   2. Adds SG ingress rules so EKS pods can reach AOS domains
-    #   3. Updates kubeconfig for the EKS cluster
+    # POST-CLUSTER SETUP — matches Jenkins 'Post-Cluster Setup' stage exactly
+    # 1. Update kubeconfig for EKS cluster
+    # 2. Create source/target configmaps with cluster-config JSON (sigv4 auth)
+    # 3. Add SG ingress rules: EKS cluster SG → AOS domain SGs
+    # 4. Wait for MA pods ready
     # ================================================================
     - name: post-cluster-setup
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
       container:
         image: ci-runner:latest
         command: [bash, -c]
@@ -224,64 +280,84 @@ spec:
             set -euo pipefail
             STAGE="{{workflow.parameters.stage}}"
             REGION="{{workflow.parameters.region}}"
+            SOURCE_VER="{{workflow.parameters.source-version}}"
+            TARGET_VER="{{workflow.parameters.target-version}}"
 
             CREDS=$(aws sts assume-role \
               --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
-              --role-session-name "argo-post-setup" --duration-seconds 3600)
+              --role-session-name "argo-post-setup" --duration-seconds 1200)
             export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
             export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
             export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
-            CLUSTER_DETAILS=$(cat /workspace/test/cluster-context.json)
+            CLUSTER_DETAILS=$(cat /workspace/test/cluster-details.json)
+            EKS_EXPORTS=$(cat /workspace/test/eks-exports.json)
+            EKS_CLUSTER=$(echo "$EKS_EXPORTS" | jq -r '.eksClusterName')
+            EKS_SG=$(echo "$EKS_EXPORTS" | jq -r '.clusterSecurityGroup')
 
-            # 1. Update kubeconfig for the EKS cluster
-            EKS_CLUSTER_NAME="migration-${STAGE}"
-            echo "Updating kubeconfig for ${EKS_CLUSTER_NAME}..."
-            aws eks update-kubeconfig --name "${EKS_CLUSTER_NAME}" --region "${REGION}"
+            # 1. Update kubeconfig
+            aws eks update-kubeconfig --name "${EKS_CLUSTER}" --region "${REGION}"
 
-            # 2. Get security group IDs for EKS node group and AOS domains
-            EKS_SG=$(aws eks describe-cluster --name "${EKS_CLUSTER_NAME}" \
-              --query "cluster.resourcesVpcConfig.clusterSecurityGroupId" --output text)
-            SOURCE_SG=$(echo "$CLUSTER_DETAILS" | jq -r '.source.securityGroupId // empty')
-            TARGET_SG=$(echo "$CLUSTER_DETAILS" | jq -r '.target.securityGroupId // empty')
+            # Helper: expand version string (ES_7.10 → elasticsearch-7-10)
+            expand_version() {
+              local ver="$1"
+              local prefix=$(echo "$ver" | cut -d_ -f1)
+              local nums=$(echo "$ver" | cut -d_ -f2 | tr '.' '-')
+              if [ "$prefix" = "ES" ]; then echo "elasticsearch-${nums}"
+              else echo "opensearch-${nums}"; fi
+            }
 
-            # 3. Add SG ingress rules: allow EKS → AOS on port 443
-            for SG in ${SOURCE_SG} ${TARGET_SG}; do
-              if [ -n "${SG}" ]; then
-                echo "Adding ingress rule: ${SG} ← ${EKS_SG} (port 443)"
+            SOURCE_EXPANDED=$(expand_version "${SOURCE_VER}")
+            TARGET_EXPANDED=$(expand_version "${TARGET_VER}")
+
+            # 2. Create source configmap (matches Jenkins: JSON with sigv4 auth)
+            SOURCE_ENDPOINT=$(echo "$CLUSTER_DETAILS" | jq -r '.source.endpoint')
+            cat > /tmp/source-cluster-config.json << EOF
+            {
+              "endpoint": "${SOURCE_ENDPOINT}",
+              "allow_insecure": true,
+              "sigv4": {"region": "${REGION}", "service": "es"},
+              "version": "${SOURCE_VER}"
+            }
+            EOF
+            kubectl create configmap "source-${SOURCE_EXPANDED}-migration-config" \
+              --from-file=cluster-config=/tmp/source-cluster-config.json \
+              --namespace ma --dry-run=client -o yaml | kubectl apply -f -
+
+            # 3. Create target configmap
+            TARGET_ENDPOINT=$(echo "$CLUSTER_DETAILS" | jq -r '.target.endpoint')
+            cat > /tmp/target-cluster-config.json << EOF
+            {
+              "endpoint": "${TARGET_ENDPOINT}",
+              "allow_insecure": true,
+              "sigv4": {"region": "${REGION}", "service": "es"},
+              "version": "${TARGET_VER}"
+            }
+            EOF
+            kubectl create configmap "target-${TARGET_EXPANDED}-migration-config" \
+              --from-file=cluster-config=/tmp/target-cluster-config.json \
+              --namespace ma --dry-run=client -o yaml | kubectl apply -f -
+
+            # 4. Add SG ingress rules: EKS → AOS (matches Jenkins: protocol -1, port -1)
+            TARGET_SG=$(echo "$CLUSTER_DETAILS" | jq -r '.target.securityGroupId')
+            if [ -n "${TARGET_SG}" ] && [ "${TARGET_SG}" != "null" ]; then
+              EXISTS=$(aws ec2 describe-security-groups --group-ids "${TARGET_SG}" \
+                --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='${EKS_SG}']]" \
+                --output text 2>/dev/null || true)
+              if [ -z "${EXISTS}" ]; then
+                echo "Adding SG ingress: ${TARGET_SG} ← ${EKS_SG}"
                 aws ec2 authorize-security-group-ingress \
-                  --group-id "${SG}" \
-                  --protocol tcp --port 443 \
-                  --source-group "${EKS_SG}" \
-                  --region "${REGION}" 2>/dev/null || echo "  (rule may already exist)"
+                  --group-id "${TARGET_SG}" --protocol -1 --port -1 \
+                  --source-group "${EKS_SG}" || true
+              else
+                echo "SG ingress rule already exists"
               fi
-            done
-
-            # 4. Create source/target configmaps for testAutomation
-            SOURCE_ENDPOINT=$(echo "$CLUSTER_DETAILS" | jq -r '.source.endpoint // empty')
-            TARGET_ENDPOINT=$(echo "$CLUSTER_DETAILS" | jq -r '.target.endpoint // empty')
-
-            if [ -n "${SOURCE_ENDPOINT}" ]; then
-              kubectl create configmap source-cluster-config -n ma \
-                --from-literal=endpoint="${SOURCE_ENDPOINT}" \
-                --from-literal=version="{{workflow.parameters.source-version}}" \
-                --from-literal=auth-type="none" \
-                --dry-run=client -o yaml | kubectl apply -f -
             fi
 
-            if [ -n "${TARGET_ENDPOINT}" ]; then
-              kubectl create configmap target-cluster-config -n ma \
-                --from-literal=endpoint="${TARGET_ENDPOINT}" \
-                --from-literal=version="{{workflow.parameters.target-version}}" \
-                --from-literal=auth-type="none" \
-                --dry-run=client -o yaml | kubectl apply -f -
-            fi
-
-            # 5. Wait for MA pods to be ready
-            echo "Waiting for MA pods to be ready..."
-            kubectl wait --for=condition=ready pod -l app=migration-console -n ma --timeout=300s || true
-
-            echo "Post-cluster setup complete"
+            # 5. Wait for MA pods ready
+            echo "Waiting for MA pods..."
+            kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=migration-console \
+              -n ma --timeout=300s || true
         env:
           - name: TEST_ACCOUNT_ID
             valueFrom:
@@ -291,7 +367,7 @@ spec:
         activeDeadlineSeconds: 900  # 15 min
 
     # ================================================================
-    # RUN EKS TESTS — runs pytest via testAutomation framework
+    # RUN EKS TESTS — matches Jenkins 'Perform Python E2E Tests' stage
     # ================================================================
     - name: run-eks-tests
       inputs:
@@ -322,14 +398,15 @@ spec:
             export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
             TEST_IDS_ARG=""
-            if [ "{{workflow.parameters.test-ids}}" != "all" ]; then
-              TEST_IDS_ARG="--test-ids='{{workflow.parameters.test-ids}}'"
+            TEST_IDS="{{workflow.parameters.test-ids}}"
+            if [ "${TEST_IDS}" != "all" ] && [ -n "${TEST_IDS}" ]; then
+              TEST_IDS_ARG="--test-ids='${TEST_IDS}'"
             fi
 
             pipenv install --deploy
             pipenv run app \
-              --source-version={{workflow.parameters.source-version}} \
-              --target-version={{workflow.parameters.target-version}} \
+              --source-version="{{workflow.parameters.source-version}}" \
+              --target-version="{{workflow.parameters.target-version}}" \
               ${TEST_IDS_ARG} \
               --reuse-clusters --skip-delete --skip-install
         env:
@@ -341,8 +418,8 @@ spec:
         activeDeadlineSeconds: 7200  # 2 hours
 
     # ================================================================
-    # CLEANUP HANDLER — ordered CFN stack deletion
-    # Order: MA stack → domain stacks → network stack (VPC dependencies)
+    # CLEANUP HANDLER — matches Jenkins post { always } exactly
+    # Order: EKS cleanup (helm uninstall + SG revocation) → MA stack → domains → network
     # ================================================================
     - name: cleanup-handler
       dag:
@@ -377,20 +454,8 @@ spec:
               parameters:
                 - name: stack-name
                   value: "NetworkInfra-{{workflow.parameters.stage}}-{{workflow.parameters.region}}"
-          - name: upload-results
-            templateRef:
-              name: reportportal-upload
-              template: upload-junit
-            arguments:
-              parameters:
-                - name: launch-name
-                  value: "eks-integ"
-                - name: source-version
-                  value: "{{workflow.parameters.source-version}}"
-                - name: target-version
-                  value: "{{workflow.parameters.target-version}}"
 
-    # EKS-specific cleanup: helm uninstall, revoke SG rules
+    # EKS cleanup: helm uninstall, SG revocation (matches Jenkins post block)
     - name: eks-cleanup
       container:
         image: ci-runner:latest
@@ -398,6 +463,9 @@ spec:
         args:
           - |
             set +e
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+
             CREDS=$(aws sts assume-role \
               --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
               --role-session-name "argo-cleanup" --duration-seconds 4500)
@@ -405,10 +473,42 @@ spec:
             export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
             export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
-            # Helm uninstall + namespace cleanup
-            kubectl -n ma get pods || true
-            cd /workspace/libraries/testAutomation 2>/dev/null && pipenv install --deploy && pipenv run app --delete-only || true
-            kubectl delete namespace ma --ignore-not-found --timeout=60s || true
+            # Read saved state
+            EKS_EXPORTS=$(cat /workspace/test/eks-exports.json 2>/dev/null || echo '{}')
+            EKS_CLUSTER=$(echo "$EKS_EXPORTS" | jq -r '.eksClusterName // empty')
+            EKS_SG=$(echo "$EKS_EXPORTS" | jq -r '.clusterSecurityGroup // empty')
+            CLUSTER_DETAILS=$(cat /workspace/test/cluster-details.json 2>/dev/null || echo '{}')
+
+            if [ -n "${EKS_CLUSTER}" ]; then
+              aws eks update-kubeconfig --name "${EKS_CLUSTER}" --region "${REGION}" 2>/dev/null || true
+
+              # Helm uninstall + namespace cleanup (matches Jenkins)
+              cd /workspace/libraries/testAutomation 2>/dev/null && \
+                pipenv install --deploy 2>/dev/null && \
+                pipenv run app --delete-only || true
+              kubectl -n ma get pods || true
+              echo "List resources not removed by helm uninstall:"
+              kubectl get all,pvc,configmap,secret,workflow -n ma -o wide --ignore-not-found || true
+              kubectl delete namespace ma --ignore-not-found --timeout=60s || true
+
+              # Revoke SG ingress rules (matches Jenkins SG revocation)
+              if [ -n "${EKS_SG}" ]; then
+                TARGET_SG=$(echo "$CLUSTER_DETAILS" | jq -r '.target.securityGroupId // empty')
+                if [ -n "${TARGET_SG}" ]; then
+                  if aws ec2 describe-security-groups --group-ids "${TARGET_SG}" >/dev/null 2>&1; then
+                    EXISTS=$(aws ec2 describe-security-groups --group-ids "${TARGET_SG}" \
+                      --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='${EKS_SG}']]" \
+                      --output json 2>/dev/null || echo "[]")
+                    if [ "${EXISTS}" != "[]" ]; then
+                      echo "CLEANUP: Revoking EKS SG ingress rule"
+                      aws ec2 revoke-security-group-ingress \
+                        --group-id "${TARGET_SG}" --protocol -1 --port -1 \
+                        --source-group "${EKS_SG}" || true
+                    fi
+                  fi
+                fi
+              fi
+            fi
             echo "EKS cleanup complete"
         env:
           - name: TEST_ACCOUNT_ID
@@ -427,7 +527,7 @@ spec:
         limit: 3
         retryPolicy: Always
         backoff:
-          duration: "30s"
+          duration: "60s"
           factor: 2
           maxDuration: "5m"
       container:
@@ -444,9 +544,19 @@ spec:
             export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
 
             STACK="{{inputs.parameters.stack-name}}"
-            echo "Deleting CFN stack: ${STACK}"
-            aws cloudformation delete-stack --stack-name "${STACK}" --region "{{workflow.parameters.region}}" || true
-            aws cloudformation wait stack-delete-complete --stack-name "${STACK}" --region "{{workflow.parameters.region}}" || true
+            REGION="{{workflow.parameters.region}}"
+
+            # Check if stack exists
+            STATUS=$(aws cloudformation describe-stacks --stack-name "${STACK}" --region "${REGION}" \
+              --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+            if [ "${STATUS}" = "DOES_NOT_EXIST" ]; then
+              echo "Stack ${STACK} does not exist, skipping"
+              exit 0
+            fi
+
+            echo "Deleting CFN stack: ${STACK} (status: ${STATUS})"
+            aws cloudformation delete-stack --stack-name "${STACK}" --region "${REGION}" || true
+            aws cloudformation wait stack-delete-complete --stack-name "${STACK}" --region "${REGION}"
             echo "Stack ${STACK} deleted"
         env:
           - name: TEST_ACCOUNT_ID
