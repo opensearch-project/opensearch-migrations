@@ -44,7 +44,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
     private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
 
     private final OpenSearchClient client;
-    private final Supplier<IJsonTransformer> transformerSupplier;
+    private final IJsonTransformer transformer;
     private final boolean allowServerGeneratedIds;
     private final DocumentExceptionAllowlist allowlist;
     private final Supplier<IRfsContexts.IRequestContext> requestContextSupplier;
@@ -71,7 +71,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
         Supplier<IRfsContexts.IRequestContext> requestContextSupplier
     ) {
         this.client = client;
-        this.transformerSupplier = transformerSupplier;
+        this.transformer = transformerSupplier != null ? transformerSupplier.get() : null;
         this.allowServerGeneratedIds = allowServerGeneratedIds;
         this.allowlist = allowlist != null ? allowlist : DocumentExceptionAllowlist.empty();
         this.requestContextSupplier = requestContextSupplier;
@@ -110,10 +110,9 @@ public class OpenSearchDocumentSink implements DocumentSink {
 
     @SuppressWarnings("unchecked")
     private List<BulkOperationSpec> applyTransformation(List<BulkOperationSpec> ops) {
-        if (transformerSupplier == null) {
+        if (transformer == null) {
             return ops;
         }
-        var transformer = transformerSupplier.get();
         var asMaps = ops.stream()
             .map(op -> OBJECT_MAPPER.convertValue(op, Map.class))
             .toList();
