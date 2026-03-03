@@ -5,10 +5,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
+import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
@@ -16,6 +18,9 @@ import reactor.core.publisher.Flux;
 /**
  * Real {@link DocumentSource} adapter that reads documents from a Lucene snapshot
  * via {@link SnapshotExtractor}. Converts Lucene-specific types to pipeline IR.
+ *
+ * <p>Supports optional delta mode: when {@code previousSnapshotName} and {@code deltaMode}
+ * are set, reads delta changes (deletions first, then additions) between two snapshots.
  */
 @Slf4j
 public class LuceneSnapshotSource implements DocumentSource {
@@ -23,12 +28,39 @@ public class LuceneSnapshotSource implements DocumentSource {
     private final SnapshotExtractor extractor;
     private final String snapshotName;
     private final Path workDir;
-    private final Map<ShardId, SnapshotExtractor.ShardEntry> shardEntryCache = new ConcurrentHashMap<>();
 
+    // Delta configuration (null = regular mode)
+    private final String previousSnapshotName;
+    private final DeltaMode deltaMode;
+    private final BaseRootRfsContext deltaRootContext;
+
+    private final Map<ShardId, SnapshotExtractor.ShardEntry> shardEntryCache = new ConcurrentHashMap<>();
+    private final Map<ShardId, SnapshotExtractor.ShardEntry> previousShardEntryCache = new ConcurrentHashMap<>();
+
+    /** Regular (non-delta) constructor. */
     public LuceneSnapshotSource(SnapshotExtractor extractor, String snapshotName, Path workDir) {
+        this(extractor, snapshotName, workDir, null, null, null);
+    }
+
+    /** Delta-aware constructor. */
+    public LuceneSnapshotSource(
+        SnapshotExtractor extractor,
+        String snapshotName,
+        Path workDir,
+        String previousSnapshotName,
+        DeltaMode deltaMode,
+        BaseRootRfsContext deltaRootContext
+    ) {
         this.extractor = extractor;
         this.snapshotName = snapshotName;
         this.workDir = workDir;
+        this.previousSnapshotName = previousSnapshotName;
+        this.deltaMode = deltaMode;
+        this.deltaRootContext = deltaRootContext;
+    }
+
+    public boolean isDeltaMode() {
+        return previousSnapshotName != null && deltaMode != null;
     }
 
     @Override
@@ -39,13 +71,29 @@ public class LuceneSnapshotSource implements DocumentSource {
     @Override
     public List<ShardId> listShards(String indexName) {
         var entries = extractor.listShards(snapshotName, indexName);
-        return entries.stream()
+        var result = entries.stream()
             .map(entry -> {
                 var shardId = new ShardId(snapshotName, indexName, entry.shardId());
                 shardEntryCache.put(shardId, entry);
                 return shardId;
             })
             .toList();
+
+        // Pre-cache previous snapshot shard entries for delta mode
+        if (isDeltaMode()) {
+            try {
+                var previousEntries = extractor.listShards(previousSnapshotName, indexName);
+                for (var entry : previousEntries) {
+                    var shardId = new ShardId(snapshotName, indexName, entry.shardId());
+                    previousShardEntryCache.put(shardId, entry);
+                }
+            } catch (Exception e) {
+                log.warn("Could not list shards for previous snapshot {} index {}: {}",
+                    previousSnapshotName, indexName, e.getMessage());
+            }
+        }
+
+        return result;
     }
 
     @Override
@@ -57,21 +105,42 @@ public class LuceneSnapshotSource implements DocumentSource {
 
     @Override
     public Flux<DocumentChange> readDocuments(ShardId shardId, long startingDocOffset) {
-        var entry = resolveShardEntry(shardId);
+        var entry = resolveShardEntry(shardId, shardEntryCache);
         if (entry == null) {
             return Flux.error(new IllegalArgumentException("Shard not found: " + shardId));
         }
+
+        if (isDeltaMode()) {
+            var previousEntry = resolveShardEntry(shardId, previousShardEntryCache);
+            if (previousEntry == null) {
+                log.info("No previous shard for {} — treating as full read (all additions)", shardId);
+                return readRegularDocuments(entry, shardId, startingDocOffset);
+            }
+            log.info("Reading delta documents from {} (mode={}, offset={})", shardId, deltaMode, startingDocOffset);
+            return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaRootContext)
+                .skip(startingDocOffset)
+                .map(LuceneAdapter::fromLucene);
+        }
+
+        return readRegularDocuments(entry, shardId, startingDocOffset);
+    }
+
+    private Flux<DocumentChange> readRegularDocuments(
+        SnapshotExtractor.ShardEntry entry, ShardId shardId, long startingDocOffset
+    ) {
         log.info("Reading documents from {} starting at offset {}", shardId, startingDocOffset);
         return extractor.readDocuments(entry, workDir)
             .skip(startingDocOffset)
             .map(LuceneAdapter::fromLucene);
     }
 
-    private SnapshotExtractor.ShardEntry resolveShardEntry(ShardId shardId) {
-        var entry = shardEntryCache.get(shardId);
+    private SnapshotExtractor.ShardEntry resolveShardEntry(
+        ShardId shardId, Map<ShardId, SnapshotExtractor.ShardEntry> cache
+    ) {
+        var entry = cache.get(shardId);
         if (entry == null) {
             listShards(shardId.indexName());
-            entry = shardEntryCache.get(shardId);
+            entry = cache.get(shardId);
         }
         return entry;
     }
@@ -79,5 +148,6 @@ public class LuceneSnapshotSource implements DocumentSource {
     @Override
     public void close() {
         shardEntryCache.clear();
+        previousShardEntryCache.clear();
     }
 }

@@ -6,11 +6,13 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.adapter.SnapshotExtractor;
+import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
@@ -46,6 +48,14 @@ public class PipelineRunner {
     @Builder.Default
     private final DocumentExceptionAllowlist allowlist = DocumentExceptionAllowlist.empty();
 
+    // Optional: delta snapshot support
+    @Builder.Default
+    private final String previousSnapshotName = null;
+    @Builder.Default
+    private final DeltaMode deltaMode = null;
+    @Builder.Default
+    private final BaseRootRfsContext deltaRootContext = null;
+
     @Builder.Default
     private final ScopedWorkCoordinator workCoordinator = null;
     @Builder.Default
@@ -64,7 +74,7 @@ public class PipelineRunner {
         if (workCoordinator == null) {
             throw new IllegalStateException("workCoordinator must be set for coordinated migration");
         }
-        var source = new LuceneSnapshotSource(extractor, snapshotName, workDir);
+        var source = createDocumentSource();
         var contextRef = new AtomicReference<IDocumentMigrationContexts.IDocumentReindexContext>();
         var sink = new OpenSearchDocumentSink(
             targetClient, transformerSupplier, allowServerGeneratedIds, allowlist,
@@ -85,12 +95,27 @@ public class PipelineRunner {
                 return ctx;
             });
         } finally {
-            source.close();
-            try {
-                sink.close();
-            } catch (Exception e) {
-                log.warn("Failed to close document sink", e);
-            }
+            closeQuietly(source);
+            closeQuietly(sink);
+        }
+    }
+
+    private LuceneSnapshotSource createDocumentSource() {
+        if (previousSnapshotName != null && deltaMode != null) {
+            log.info("Creating delta document source: previous={}, mode={}", previousSnapshotName, deltaMode);
+            return new LuceneSnapshotSource(
+                extractor, snapshotName, workDir,
+                previousSnapshotName, deltaMode, deltaRootContext
+            );
+        }
+        return new LuceneSnapshotSource(extractor, snapshotName, workDir);
+    }
+
+    private static void closeQuietly(AutoCloseable closeable) {
+        try {
+            closeable.close();
+        } catch (Exception e) {
+            log.warn("Error closing resource", e);
         }
     }
 }

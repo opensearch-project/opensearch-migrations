@@ -91,7 +91,7 @@ public class PipelineDocumentsRunner {
                                 batchCount.incrementAndGet();
                                 totalDocsMigrated.addAndGet(cursor.docsInBatch());
                                 totalBytesMigrated.addAndGet(cursor.bytesInBatch());
-                                cursorConsumer.accept(new WorkItemCursor((int) cursor.lastDocProcessed()));
+                                cursorConsumer.accept(new WorkItemCursor(cursor.lastDocProcessed()));
                             },
                             error -> {
                                 log.atError()
@@ -127,8 +127,12 @@ public class PipelineDocumentsRunner {
 
                         var error = migrationError.get();
                         if (error != null) {
+                            context.recordPipelineError();
                             throw new RuntimeException("Shard migration failed for " + wi, error);
                         }
+                        context.recordShardDuration(durationMs);
+                        context.recordDocsMigrated(totalDocsMigrated.get());
+                        context.recordBytesMigrated(totalBytesMigrated.get());
                         return CompletionStatus.WORK_COMPLETED;
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
@@ -140,7 +144,7 @@ public class PipelineDocumentsRunner {
                 public CompletionStatus onNoAvailableWorkToBeDone() {
                     return CompletionStatus.NOTHING_DONE;
                 }
-            }, context::createCloseContet);
+            }, context::createCloseContext);
         }
     }
 }

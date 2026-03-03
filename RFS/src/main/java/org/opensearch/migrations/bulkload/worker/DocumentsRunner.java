@@ -116,7 +116,7 @@ public class DocumentsRunner {
                 public CompletionStatus onNoAvailableWorkToBeDone() throws IOException {
                     return CompletionStatus.NOTHING_DONE;
                 }
-            }, context::createCloseContet);
+            }, context::createCloseContext);
         }
     }
 
@@ -155,7 +155,7 @@ public class DocumentsRunner {
             reader,
             workItem.getIndexName(),
             workItem.getShardNumber(),
-            workItem.getStartingDocId(),
+            Math.toIntExact(workItem.getStartingDocId()),
             rootContext
         );
 
