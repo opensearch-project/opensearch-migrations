@@ -1,0 +1,31 @@
+{
+  "status": {
+    "nodes": {
+      "root": {
+        "id": "root",
+        "displayName": "workflow",
+        "type": "Steps",
+        "phase": "Running",
+        "inputs": {
+          "parameters": [
+            {"name": "groupName", "value": "rootgroup"}
+          ]
+        }
+      },
+      "step1": {
+        "id": "step1", 
+        "displayName": "step1",
+        "type": "Pod",
+        "phase": "Succeeded",
+        "boundaryID": "root"
+      },
+      "step2": {
+        "id": "step2",
+        "displayName": "step2", 
+        "type": "Pod",
+        "phase": "Running",
+        "boundaryID": "root"
+      }
+    }
+  }
+}

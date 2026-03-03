@@ -39,7 +39,7 @@ export const CaptureReplay = WorkflowBuilder.create({
     )
 
 
-    .addSuspendTemplate("getUserApproval")
+    .addTemplate("getUserApproval", t => t.addSuspend())
 
 
     .addTemplate("getBrokersList", t => t

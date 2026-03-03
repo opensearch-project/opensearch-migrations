@@ -237,6 +237,46 @@ public class ClusterOperations {
         }
     }
 
+    /**
+     * Refreshes all indices on the cluster.
+     */
+    public void refresh() {
+        var response = post("/_refresh", null);
+        assertThat("Refresh all indices failed", response.getKey(), anyOf(equalTo(200), equalTo(201)));
+    }
+
+    /**
+     * Refreshes a specific index.
+     */
+    public void refresh(String indexName) {
+        var response = post("/" + indexName + "/_refresh", null);
+        assertThat("Refresh failed for " + indexName, response.getKey(), anyOf(equalTo(200), equalTo(201)));
+    }
+
+    /**
+     * Refreshes the given index and returns its document count.
+     */
+    @SneakyThrows
+    public long getDocCount(String indexName) {
+        return getDocCount(indexName, true);
+    }
+
+    /**
+     * Refreshes the given index and returns its document count.
+     * If failIfMissing is false, returns 0 when the index does not exist.
+     */
+    @SneakyThrows
+    public long getDocCount(String indexName, boolean failIfMissing) {
+        var refreshResult = get("/" + indexName + "/_refresh");
+        if (refreshResult.getKey() == 404 && !failIfMissing) return 0;
+        assertThat("Refresh failed for " + indexName, refreshResult.getKey(), equalTo(200));
+        var count = get("/" + indexName + "/_count");
+        if (count.getKey() == 404 && !failIfMissing) return 0;
+        assertThat("Count failed for " + indexName, count.getKey(), equalTo(200));
+        return new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(count.getValue()).path("count").asLong();
+    }
+
     @SneakyThrows
     public Map.Entry<Integer, String> delete(final String path) {
         final var request = new HttpDelete(clusterUrl + path);
@@ -258,6 +298,42 @@ public class ClusterOperations {
             + "  \"include_global_state\": true\n"
             + "}";
         var response = put("/_snapshot/" + repoName + "/" + snapshotName + "?wait_for_completion=true", snapshotJson);
+        assertThat(response.getKey(), equalTo(200));
+    }
+
+    /**
+     * Creates a legacy template with no mappings but with custom analyzer settings
+     */
+    @SneakyThrows
+    public void createLegacyTemplateNoMappings(final String templateName, final String pattern, final String aliasName) {
+        var matchPatternClause = (UnboundVersionMatchers.isBelowES_6_X)
+            .test(clusterVersion)
+            ? "\"template\":\"" + pattern + "\","
+            : "\"index_patterns\": [\"" + pattern + "\"],";
+
+        final var templateJson = "{\n" +
+            "  " + matchPatternClause + "\n" +
+            "  \"order\": 0,\n" +
+            "  \"settings\": {\n" +
+            "    \"index\": {\n" +
+            "      \"analysis\": {\n" +
+            "        \"analyzer\": {\n" +
+            "          \"default\": {\n" +
+            "            \"filter\": [\"lowercase\"],\n" +
+            "            \"tokenizer\": \"uax_url_email\"\n" +
+            "          }\n" +
+            "        }\n" +
+            "      },\n" +
+            "      \"number_of_shards\": \"1\"\n" +
+            "    }\n" +
+            "  },\n" +
+            "  \"mappings\": {},\n" +
+            "  \"aliases\": {\n" +
+            "    \"" + aliasName + "\": {}\n" +
+            "  }\n" +
+            "}";
+
+        var response = put("/_template/" + templateName, templateJson);
         assertThat(response.getKey(), equalTo(200));
     }
 
@@ -458,7 +534,7 @@ public class ClusterOperations {
         createDocument(indexName, "1", "{\"title\":\"Doc One\",\"flag\":true}", null, docType);
         createDocument(indexName, "2", "{\"title\":\"Doc Two\",\"flag\":false}", null, docType);
 
-        post("/" + indexName + "/_refresh", null);
+        refresh(indexName);
     }
 
     public String defaultDocType() {

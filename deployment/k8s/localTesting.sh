@@ -24,22 +24,30 @@ gradlew() {
     "${MIGRATIONS_REPO_ROOT_DIR}/gradlew" "$@"
 }
 
-if [ "${BUILD_IMAGES_WITHOUT_DOCKER:-false}" = "true" ]; then
-    export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-true}"
-    "${MIGRATIONS_REPO_ROOT_DIR}"/buildImages/setUpK8sImageBuildServices.sh
+export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-true}"
+"${MIGRATIONS_REPO_ROOT_DIR}"/buildImages/setUpK8sImageBuildServices.sh
 
-    LOCAL_REGISTRY_PORT="${LOCAL_REGISTRY_PORT:-30500}"
-    MINIKUBE_IP="$(minikube ip)"
-    LOCAL_REGISTRY="${MINIKUBE_IP}:${LOCAL_REGISTRY_PORT}"
-    export LOCAL_REGISTRY
-    echo "Using local registry at: ${LOCAL_REGISTRY}"
+LOCAL_REGISTRY_PORT="${LOCAL_REGISTRY_PORT:-30500}"
+MINIKUBE_IP="$(minikube ip)"
+LOCAL_REGISTRY="${MINIKUBE_IP}:${LOCAL_REGISTRY_PORT}"
+export LOCAL_REGISTRY
+echo "Using local registry at: ${LOCAL_REGISTRY}"
 
-    gradlew :buildImages:buildImagesToRegistry
-else
-    echo "Configuring Docker environment variables to point to minikube"
-    eval "$(minikube docker-env)"
-    gradlew :TrafficCapture:dockerSolution:buildImages
-fi
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64)
+    PLATFORM="amd64"
+    ;;
+  arm64|aarch64)
+    PLATFORM="arm64"
+    ;;
+  *)
+    echo "Unsupported architecture: $ARCH"
+    exit 1
+    ;;
+esac
+
+gradlew :buildImages:buildImagesToRegistry_$PLATFORM
 
 kubectl config set-context --current --namespace=ma
 

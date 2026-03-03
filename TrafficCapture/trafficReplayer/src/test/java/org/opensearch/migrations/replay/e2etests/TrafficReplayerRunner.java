@@ -226,7 +226,8 @@ public class TrafficReplayerRunner {
                 Duration.ofSeconds(30),
                 trafficSource,
                 timeShifter,
-                tupleReceiver
+                tupleReceiver,
+                Duration.ofSeconds(5)
             );
         }
     }

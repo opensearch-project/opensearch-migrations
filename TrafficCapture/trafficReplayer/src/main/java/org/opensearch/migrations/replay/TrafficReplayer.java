@@ -161,7 +161,7 @@ public class TrafficReplayer {
             arity = 1,
             description = "assume that connections were terminated after this many "
                 + "seconds of inactivity observed in the captured stream")
-        int observedPacketConnectionTimeout = 70;
+        int observedPacketConnectionTimeout = 360;
         @Parameter(
             required = false,
             names = { "--speedup-factor", "--speedupFactor" },
@@ -174,13 +174,13 @@ public class TrafficReplayer {
             names = { LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME,  "--lookaheadTimeWindow" },
             arity = 1,
             description = "Number of seconds of data that will be buffered.")
-        int lookaheadTimeSeconds = 300;
+        int lookaheadTimeSeconds = 400;
         @Parameter(
             required = false,
             names = { "--max-concurrent-requests", "--maxConcurrentRequests" },
             arity = 1,
             description = "Maximum number of requests at a time that can be outstanding")
-        int maxConcurrentRequests = 1024;
+        int maxConcurrentRequests = 10000;
         @Parameter(
             required = false,
             names = { "--num-client-threads", "--numClientThreads" },
@@ -194,7 +194,16 @@ public class TrafficReplayer {
             names = { "--target-response-timeout", "--targetResponseTimeout" },
             arity = 1,
             description = "Seconds to wait before timing out a replayed request to the target.")
-        int targetServerResponseTimeoutSeconds = 30;
+        int targetServerResponseTimeoutSeconds = 150;
+
+        @Parameter(
+            required = false,
+            names = { "--quiescent-period-ms", "--quiescentPeriodMs" },
+            arity = 1,
+            description = "Milliseconds to delay the first request on a resumed connection (one that was " +
+                "mid-flight when a Kafka partition was reassigned). Allows the previous replayer's " +
+                "in-flight requests to complete before the new replayer sends. Default: 5000ms.")
+        long quiescentPeriodMs = 5000;
 
         @Parameter(
             required = false,
@@ -321,7 +330,7 @@ public class TrafficReplayer {
             jCommander.parse(args);
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
-            System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_TARGET_ARGS)));
+            System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
             jCommander.usage();
             System.exit(2);
             return null;
@@ -330,7 +339,7 @@ public class TrafficReplayer {
     }
 
     public static void main(String[] args) throws Exception {
-        System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_TARGET_ARGS)));
+        System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
         final var workerId = ProcessHelpers.getNodeInstanceName();
         log.info("Starting Traffic Replayer with id=" + workerId);
 
@@ -443,7 +452,8 @@ public class TrafficReplayer {
                 serverTimeout,
                 blockingTrafficSource,
                 timeShifter,
-                tupleWriter
+                tupleWriter,
+                Duration.ofMillis(params.quiescentPeriodMs)
             );
             log.info("Done processing TrafficStreams");
         } finally {

@@ -38,7 +38,7 @@ public class MetadataMigration {
     protected void run(String[] args) {
         System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(
                 args,
-                ArgNameConstants.joinLists(ArgNameConstants.CENSORED_SOURCE_ARGS, ArgNameConstants.CENSORED_TARGET_ARGS)
+                ArgNameConstants.CENSORED_ARGS
         )));
         var metadataArgs = EnvVarParameterPuller.injectFromEnv(new MetadataArgs(), ENV_PREFIX);
         var migrateArgs  = EnvVarParameterPuller.injectFromEnv(new MigrateArgs(),  ENV_PREFIX);

@@ -117,25 +117,29 @@ spotless {
 }
 
 subprojects {
-    apply plugin: "com.diffplug.spotless"
     apply plugin: 'jacoco'
     apply plugin: 'maven-publish'
 
-    // See https://github.com/diffplug/spotless/tree/main/plugin-gradle#java for some documentation,
-    // though what '#' does is still undocumented from what I can tell
-    spotless {
-        java {
-            target "**/*.java"
-            targetExclude '**/build/**', ".gradle/**", "**/node_modules/**"
-            importOrder(
-                    'javax',
-                    'java',
-                    'org.opensearch',
-                    '',
-                    '\\#')
-            leadingTabsToSpaces()
-            endWithNewline()
-            removeUnusedImports()
+    // Skip spotless for frontend as it has no Java code and node_modules causes scan failures
+    if (project.name != 'frontend') {
+        apply plugin: "com.diffplug.spotless"
+
+        // See https://github.com/diffplug/spotless/tree/main/plugin-gradle#java for some documentation,
+        // though what '#' does is still undocumented from what I can tell
+        spotless {
+            java {
+                target "**/*.java"
+                targetExclude '**/build/**', ".gradle/**", "**/node_modules/**"
+                importOrder(
+                        'javax',
+                        'java',
+                        'org.opensearch',
+                        '',
+                        '\\#')
+                leadingTabsToSpaces()
+                endWithNewline()
+                removeUnusedImports()
+            }
         }
     }
 

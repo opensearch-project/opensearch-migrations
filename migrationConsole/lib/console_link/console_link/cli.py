@@ -247,10 +247,12 @@ def parse_headers(header: str) -> Dict:
 @click.option('-H', '--header', multiple=True, help='Pass custom header(s) to the server.')
 @click.option('-d', '--data', help='Send specified data in a POST request.')
 @click.option('--json', 'json_data', help='Send data as JSON.')
+@click.option('--timeout', type=int, default=15, show_default=True,
+              help='Request timeout in seconds.')
 @click.argument('cluster', required=True, type=click.Choice(['target_cluster', 'source_cluster'], case_sensitive=False))
 @click.argument('path', required=True)
 @click.pass_obj
-def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
+def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data, timeout):
     """This implements a small subset of curl commands, formatted for use against configured source or target clusters.
     By default the cluster definition is configured to use the `/config/migration_services.yaml` file that is
     pre-prepared on the migration console, but `--config-file` can point to any YAML file that defines a
@@ -273,14 +275,14 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
         if cluster is None:
             raise AttributeError
     except AttributeError:
-        raise click.BadArgumentUsage(f"Unknown cluster {cluster}. Currently only `source_cluster` and `target_cluster`"
-                                     " are valid and must also be defined in the config file.")
+        raise click.BadArgumentUsage(f"Unknown cluster {cluster}. Currently only `source_cluster` and "
+                                     "`target_cluster` are valid and must also be defined in the config file.")
 
     if path[0] != '/':
         path = '/' + path
 
     result: clusters_.CallAPIResult = clusters_.call_api(cluster, path, method=HttpMethod[request],
-                                                         headers=headers, data=data)
+                                                         headers=headers, data=data, timeout=timeout)
     if result.error_message:
         click.echo(result.error_message)
     else:
@@ -288,6 +290,83 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
         if not response.ok:
             click.echo(f"Error: {response.status_code}")
         click.echo(response.text)
+
+
+@cluster_group.command(name="generate-data")
+@click.option('--cluster', type=click.Choice(['source_cluster', 'target_cluster'], case_sensitive=False),
+              required=True, help='Target cluster for data generation')
+@click.option('--index-name', required=True, help='Name of the index to populate')
+@click.option('--doc-size-bytes', type=int, default=150, help='Approximate size of each document in bytes')
+@click.option('--num-docs', type=int, help='Total number of documents to generate')
+@click.option('--target-size-mb', type=float, help='Target total size in MB (alternative to num-docs)')
+@click.option('--batch-size', type=int, default=100, help='Number of documents per batch request')
+@click.pass_obj
+def generate_data_cmd(ctx, cluster, index_name, doc_size_bytes, num_docs, target_size_mb, batch_size):
+    """Generate bulk test data in the specified cluster and index"""
+    
+    # Validate arguments
+    if not num_docs and not target_size_mb:
+        raise click.UsageError("Either --num-docs or --target-size-mb must be specified")
+    
+    if num_docs and target_size_mb:
+        raise click.UsageError("Cannot specify both --num-docs and --target-size-mb")
+    
+    # Calculate num_docs from target size if needed
+    if target_size_mb:
+        target_bytes = target_size_mb * 1024 * 1024
+        num_docs = int(target_bytes / doc_size_bytes)
+        click.echo(f"Target size: {target_size_mb}MB = ~{num_docs:,} documents")
+    
+    # Get the cluster object
+    try:
+        cluster_obj = ctx.env.__getattribute__(cluster)
+        if cluster_obj is None:
+            raise AttributeError
+    except AttributeError:
+        raise click.BadArgumentUsage(f"Unknown cluster {cluster}. Currently only `source_cluster` and "
+                                     "`target_cluster` are valid and must also be defined in the config file.")
+    
+    click.echo(f"Generating {num_docs:,} documents in index '{index_name}' on {cluster}")
+    click.echo(f"Document size: ~{doc_size_bytes} bytes, Batch size: {batch_size}")
+    
+    # Import bulk generation function
+    try:
+        # Try container path first, then dev path
+        import os
+        import importlib.util
+        
+        # Container path (copied during Docker build)
+        container_path = "/root/testDocumentGenerator.py"
+        # Dev path (relative to current file)
+        dev_path = os.path.join(
+            os.path.dirname(__file__),
+            '../../../TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole/testDocumentGenerator.py')
+        
+        script_path = container_path if os.path.exists(container_path) else dev_path
+        
+        spec = importlib.util.spec_from_file_location("testDocumentGenerator", script_path)
+        test_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(test_module)
+        bulk_insert_data = test_module.bulk_insert_data
+        
+        # Execute bulk data generation
+        result = bulk_insert_data(cluster_obj, index_name, num_docs, doc_size_bytes, batch_size)
+        
+        # Display results
+        click.echo("\nData generation completed:")
+        click.echo(f"  Documents inserted: {result['total_inserted']:,}")
+        click.echo(f"  Errors: {result['total_errors']:,}")
+        click.echo(f"  Time elapsed: {result['elapsed_time']:.1f}s")
+        click.echo(f"  Rate: {result['docs_per_sec']:.1f} docs/sec")
+        click.echo(f"  Estimated size: {result['estimated_size_mb']:.1f}MB")
+        
+        if result['total_errors'] > 0:
+            click.echo(f"Warning: {result['total_errors']} documents failed to insert")
+            
+    except ImportError as e:
+        raise click.ClickException(f"Failed to import bulk data generation module: {e}")
+    except Exception as e:
+        raise click.ClickException(f"Error during data generation: {e}")
 
 
 # ##################### SNAPSHOT ###################

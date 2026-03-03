@@ -21,7 +21,13 @@ spec:
           [{
             "migrations": [{
               "metadataMigrationConfig": {},
-              "documentBackfillConfig": {}
+              "documentBackfillConfig": {
+                "maxShardSizeBytes": 16000000,
+                "resources": {
+                  requests: { cpu: "25m",   memory: "1Gi", ephemeral-storage: "5Gi" },
+                  limits:   { cpu: "1000m", memory: "2Gi", ephemeral-storage: "5Gi" }
+                }
+              }
             }]
           }]
       - name: replayer-config
@@ -40,6 +46,8 @@ spec:
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
+      - name: monitor-retry-limit
+        value: "33"
       - name: otel-collector-endpoint
         value: "http://otel-collector:4317"
 
@@ -203,7 +211,7 @@ spec:
           - name: cluster-type
           - name: namespace
       container:
-        image: bitnamisecure/kubectl:latest
+        image: mirror.gcr.io/bitnamisecure/kubectl:latest
         command: [sh, -c]
         args:
           - |
@@ -312,10 +320,14 @@ spec:
               SNAPSHOT_REPO=$(echo "$SNAPSHOT_REPO" | jq --arg roleArn "$SNAPSHOT_ROLE_ARN" '. + {"s3RoleArn": $roleArn}')
             fi
             
-            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" '. + {"snapshotRepo": $repo}')
+            SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" '
+              # Add snapshot repos with default key
+              . + {"snapshotRepos": {"default": $repo}}
+            ')
             
             SNAPSHOT_EXTRACT_CONFIGS=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '[.[] | {
               "snapshotConfig": {
+                "repoName": "default",
                 "snapshotNameConfig": {
                   "snapshotNamePrefix": "testsnapshot"
                 }
@@ -366,7 +378,7 @@ spec:
 
     - name: cleanup-all-clusters
       container:
-        image: dtzar/helm-kubectl:3.18.6
+        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
         args:
           - |

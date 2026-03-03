@@ -5,6 +5,7 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
          remote: "${gitUrl}"])
 
-// Shared library function (location from root: vars/k8sLocalDeployment.groovy)
-k8sLocalDeployment()
+// Allow job name override for webhook routing (e.g., pr-* vs main-*)
+def jobNameOverride = params.JOB_NAME_OVERRIDE ?: ''
+k8sLocalDeployment(jobName: jobNameOverride ?: null)
 

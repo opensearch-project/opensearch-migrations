@@ -19,7 +19,7 @@ class CommandRunner:
         for key, value in command_args.items():
             self.command.append(key)
             if value is not FlagOnlyArgument:
-                if type(value) is not str:
+                if not isinstance(value, str):
                     value = str(value)
                 self.command.append(value)
 

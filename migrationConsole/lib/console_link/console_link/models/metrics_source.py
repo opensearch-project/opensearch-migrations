@@ -120,9 +120,9 @@ class CloudwatchMetricsSource(MetricsSource):
         self.client_options = client_options
         logger.info(f"Initializing CloudwatchMetricsSource from config {config}")
         self.aws_region = None
-        if type(config["cloudwatch"]) is dict and "aws_region" in config["cloudwatch"]:
+        if isinstance(config["cloudwatch"], dict) and "aws_region" in config["cloudwatch"]:
             self.aws_region = config["cloudwatch"]["aws_region"]
-        if type(config["cloudwatch"]) is dict and "qualifier" in config["cloudwatch"]:
+        if isinstance(config["cloudwatch"], dict) and "qualifier" in config["cloudwatch"]:
             self.qualifier = config["cloudwatch"]["qualifier"]
 
         self.client = create_boto3_client(aws_service_name="cloudwatch", region=self.aws_region,

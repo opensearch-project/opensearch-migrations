@@ -36,6 +36,7 @@ import {ContainerBuilder} from "./containerBuilder";
 import {DeepWiden, PlainObject} from "./plainObject";
 import {DagBuilder} from "./dagBuilder";
 import {K8sResourceBuilder} from "./k8sResourceBuilder";
+import {SuspendTemplateBuilder, DurationInSeconds} from "./suspendTemplateBuilder";
 import {AllowLiteralOrExpression, expr, isExpression} from "./expression";
 import {typeToken, TypeToken} from "./sharedTypes";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
@@ -49,12 +50,12 @@ import { SetRequired } from "../utils";
  * receives the specification up to that point.
  */
 export class TemplateBuilder<
-    ContextualScope extends WorkflowAndTemplatesScope,
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
     BodyScope extends GenericScope = GenericScope,
     InputParamsScope extends InputParametersRecord = InputParametersRecord,
     OutputParamsScope extends OutputParametersRecord = OutputParametersRecord
 > {
-    constructor(protected readonly contextualScope: ContextualScope,
+    constructor(protected readonly parentWorkflowScope: ParentWorkflowScope,
                 protected readonly bodyScope: BodyScope,
                 public readonly inputScope: InputParamsScope,
                 protected readonly outputScope: OutputParamsScope) {
@@ -68,7 +69,7 @@ export class TemplateBuilder<
         name: Name,
         param: InputParamDef<T, R>
     ): TemplateBuilder<
-        ContextualScope,
+        ParentWorkflowScope,
         BodyScope,
         ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, R> }>,
         OutputParamsScope
@@ -77,18 +78,18 @@ export class TemplateBuilder<
             ({[name]: param})
         );
 
-        return new TemplateBuilder(this.contextualScope, this.bodyScope, newScope, this.outputScope);
+        return new TemplateBuilder(this.parentWorkflowScope, this.bodyScope, newScope, this.outputScope);
     }
 
     public get inputs() {
-        const workflowParams = workflowParametersAsExpressions(this.contextualScope.workflowParameters || {});
+        const workflowParams = workflowParametersAsExpressions(this.parentWorkflowScope.workflowParameters || {});
         const inputParams = templateInputParametersAsExpressions(this.inputScope);
 
         return {
-            workflowParameters: workflowParams as WorkflowInputsToExpressions<ContextualScope>,
+            workflowParameters: workflowParams as WorkflowInputsToExpressions<ParentWorkflowScope>,
             inputParameters: inputParams as InputParamsToExpressions<InputParamsScope>,
             rawParameters: { // just for debugging
-                workflow: this.contextualScope,
+                workflow: this.parentWorkflowScope,
                 currentTemplate: this.getTemplateSignatureScope()
             }
         };
@@ -98,23 +99,23 @@ export class TemplateBuilder<
         name: UniqueNameConstraintAtDeclaration<Name, InputParamsScope>,
         defaultValueFromScopeFn: UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
             (s: {
-                workflowParameters: WorkflowInputsToExpressions<ContextualScope>,
+                workflowParameters: WorkflowInputsToExpressions<ParentWorkflowScope>,
                 inputParameters: InputParamsToExpressions<InputParamsScope>,
-                rawParameters: { workflow: ContextualScope; currentTemplate: InputParamsScope }
+                rawParameters: { workflow: ParentWorkflowScope; currentTemplate: InputParamsScope }
             }) => AllowLiteralOrExpression<T>>,
         description?: string
     ): ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
         TemplateBuilder<
-            ContextualScope,
+            ParentWorkflowScope,
             BodyScope,
             ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, false> }>,
             OutputParamsScope
         >>>
     {
         const fn = defaultValueFromScopeFn as (s: {
-            workflowParameters: WorkflowInputsToExpressions<ContextualScope>,
+            workflowParameters: WorkflowInputsToExpressions<ParentWorkflowScope>,
             inputParameters: InputParamsToExpressions<InputParamsScope>,
-            rawParameters: { workflow: ContextualScope; currentTemplate: InputParamsScope }
+            rawParameters: { workflow: ParentWorkflowScope; currentTemplate: InputParamsScope }
         }) => T;
         const e = fn(this.inputs) as T;
         return this.extendWithParam(name as string,
@@ -127,23 +128,23 @@ export class TemplateBuilder<
         t: ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope, TypeToken<T>>>,
         defaultValueFromScopeFn?: UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
             (s: {
-                workflowParameters: WorkflowInputsToExpressions<ContextualScope>,
+                workflowParameters: WorkflowInputsToExpressions<ParentWorkflowScope>,
                 inputParameters: InputParamsToExpressions<InputParamsScope>,
-                rawParameters: { workflow: ContextualScope; currentTemplate: InputParamsScope }
+                rawParameters: { workflow: ParentWorkflowScope; currentTemplate: InputParamsScope }
             }) => AllowLiteralOrExpression<T>>,
         description?: string
     ): ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
         TemplateBuilder<
-            ContextualScope,
+            ParentWorkflowScope,
             BodyScope,
             ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, false> }>,
             OutputParamsScope
         >>>
     {
         const fn = defaultValueFromScopeFn as (s: {
-            workflowParameters: WorkflowInputsToExpressions<ContextualScope>,
+            workflowParameters: WorkflowInputsToExpressions<ParentWorkflowScope>,
             inputParameters: InputParamsToExpressions<InputParamsScope>,
-            rawParameters: { workflow: ContextualScope; currentTemplate: InputParamsScope }
+            rawParameters: { workflow: ParentWorkflowScope; currentTemplate: InputParamsScope }
         }) => T;
         return this.extendWithParam(name as string,
             defineParam<DeepWiden<T>>({
@@ -160,7 +161,7 @@ export class TemplateBuilder<
         description?: string
     ): UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
         TemplateBuilder<
-            ContextualScope,
+            ParentWorkflowScope,
             BodyScope,
             ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, true> }>,
             OutputParamsScope
@@ -181,14 +182,14 @@ export class TemplateBuilder<
     ): ScopeIsEmptyConstraint<
         BodyScope,
         TemplateBuilder<
-            ContextualScope,
+            ParentWorkflowScope,
             BodyScope,
             ExtendScope<InputParamsScope, R>,
             OutputParamsScope
         >
     > {
         return new TemplateBuilder(
-            this.contextualScope,
+            this.parentWorkflowScope,
             this.bodyScope,
             extendScope(this.inputScope, () => incomingRecord as R),
             this.outputScope
@@ -201,65 +202,65 @@ export class TemplateBuilder<
      */
     addInputs<NewInputScope extends InputParametersRecord>(
         builderFn:
-        (tb: TemplateBuilder<ContextualScope, {}, InputParamsScope, {}>) =>
-            TemplateBuilder<ContextualScope, {}, NewInputScope, {}>
+        (tb: TemplateBuilder<ParentWorkflowScope, {}, InputParamsScope, {}>) =>
+            TemplateBuilder<ParentWorkflowScope, {}, NewInputScope, {}>
     ): ScopeIsEmptyConstraint<BodyScope, ScopeIsEmptyConstraint<InputParamsScope,
-        TemplateBuilder<ContextualScope, BodyScope, NewInputScope, OutputParamsScope>
+        TemplateBuilder<ParentWorkflowScope, BodyScope, NewInputScope, OutputParamsScope>
     >> {
         const fn = builderFn as (
-            tb: TemplateBuilder<ContextualScope, {}, InputParamsScope, {}>
-        ) => TemplateBuilder<ContextualScope, {}, NewInputScope, {}>;
+            tb: TemplateBuilder<ParentWorkflowScope, {}, InputParamsScope, {}>
+        ) => TemplateBuilder<ParentWorkflowScope, {}, NewInputScope, {}>;
 
         return fn(this as any) as any;
     }
 
     addSteps<
-        FirstBuilder extends StepsBuilder<ContextualScope, InputParamsScope, any, any>,
-        FinalBuilder extends StepsBuilder<ContextualScope, InputParamsScope, any, any>
+        FirstBuilder extends StepsBuilder<ParentWorkflowScope, InputParamsScope, any, any>,
+        FinalBuilder extends StepsBuilder<ParentWorkflowScope, InputParamsScope, any, any>
     >(
         builderFn: ScopeIsEmptyConstraint<BodyScope, (
-            b: StepsBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder>,
-        factory?: (context: ContextualScope, inputs: InputParamsScope) => FirstBuilder
+            b: StepsBuilder<ParentWorkflowScope, InputParamsScope, {}, {}>) => FinalBuilder>,
+        factory?: (context: ParentWorkflowScope, inputs: InputParamsScope) => FirstBuilder
     ): FinalBuilder
     {
-        const fn = builderFn as (b: StepsBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
+        const fn = builderFn as (b: StepsBuilder<ParentWorkflowScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
-            ((c, i) => new StepsBuilder(c, i, {}, [], {}, {})))
-        (this.contextualScope, this.inputScope));
+            ((c, i) => new StepsBuilder(c, i, {}, [], {}, {}, undefined)))
+        (this.parentWorkflowScope, this.inputScope));
     }
 
     addDag<
-        FirstBuilder extends DagBuilder<ContextualScope, InputParamsScope, any, any>,
-        FinalBuilder extends DagBuilder<ContextualScope, InputParamsScope, any, any>
+        FirstBuilder extends DagBuilder<ParentWorkflowScope, InputParamsScope, any, any>,
+        FinalBuilder extends DagBuilder<ParentWorkflowScope, InputParamsScope, any, any>
     >(builderFn: ScopeIsEmptyConstraint<BodyScope,
-          (b: DagBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder>,
-      factory?: (context: ContextualScope, inputs: InputParamsScope) => FirstBuilder
+          (b: DagBuilder<ParentWorkflowScope, InputParamsScope, {}, {}>) => FinalBuilder>,
+      factory?: (context: ParentWorkflowScope, inputs: InputParamsScope) => FirstBuilder
     ): FinalBuilder
     {
-        const fn = builderFn as (b: DagBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
+        const fn = builderFn as (b: DagBuilder<ParentWorkflowScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
-            ((c, i) => new DagBuilder(c, this.inputScope, {}, [], {}, {})))
-        (this.contextualScope, this.inputScope));
+            ((c, i) => new DagBuilder(c, this.inputScope, {}, [], {}, {}, undefined)))
+        (this.parentWorkflowScope, this.inputScope));
     }
 
     addResourceTask<
-        FirstBuilder extends K8sResourceBuilder<ContextualScope, InputParamsScope, any, any>,
-        FinalBuilder extends K8sResourceBuilder<ContextualScope, InputParamsScope, any, any>
+        FirstBuilder extends K8sResourceBuilder<ParentWorkflowScope, InputParamsScope, any, any>,
+        FinalBuilder extends K8sResourceBuilder<ParentWorkflowScope, InputParamsScope, any, any>
     >(
         builderFn: ScopeIsEmptyConstraint<BodyScope,
-            (b: K8sResourceBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder>,
-        factory?: (context: ContextualScope, inputs: InputParamsScope) => FirstBuilder
+            (b: K8sResourceBuilder<ParentWorkflowScope, InputParamsScope, {}, {}>) => FinalBuilder>,
+        factory?: (context: ParentWorkflowScope, inputs: InputParamsScope) => FirstBuilder
     ): FinalBuilder
     {
-        const fn = builderFn as (b: K8sResourceBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
+        const fn = builderFn as (b: K8sResourceBuilder<ParentWorkflowScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
             ((c, i) => new K8sResourceBuilder(c, i, {}, {}, {})))
-        (this.contextualScope, this.inputScope));
+        (this.parentWorkflowScope, this.inputScope));
     }
 
     addContainer<
-        FirstBuilder extends ContainerBuilder<ContextualScope, InputParamsScope, any, any, any, any>,
-        FinalBuilder extends ContainerBuilder<ContextualScope, InputParamsScope,
+        FirstBuilder extends ContainerBuilder<ParentWorkflowScope, InputParamsScope, any, any, any, any>,
+        FinalBuilder extends ContainerBuilder<ParentWorkflowScope, InputParamsScope,
 
          GenericScope &
          // Excluding name from container as it is realized during containerBuilder::getBody()
@@ -267,15 +268,25 @@ export class TemplateBuilder<
           any, any, any>,
     >(
         builderFn: ScopeIsEmptyConstraint<BodyScope,
-            (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}, OutputParamsScope>) => FinalBuilder>,
-        factory?: (context: ContextualScope, inputs: InputParamsScope) => FirstBuilder
+            (b: ContainerBuilder<ParentWorkflowScope, InputParamsScope, {}, {}, {}, OutputParamsScope>) => FinalBuilder>,
+        factory?: (context: ParentWorkflowScope, inputs: InputParamsScope) => FirstBuilder
     ): FinalBuilder    
     {
-        const fn = builderFn as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}, {}>) => FinalBuilder;
+        const fn = builderFn as (b: ContainerBuilder<ParentWorkflowScope, InputParamsScope, {}, {}, {}, {}>) => FinalBuilder;
         const result = fn((factory ??
-            ((c, i) => new ContainerBuilder(c, i, {}, {}, {}, {}, {})))
-        (this.contextualScope, this.inputScope));
+            ((c, i) => new ContainerBuilder(c, i, {}, {}, {}, {}, {}, undefined)))
+        (this.parentWorkflowScope, this.inputScope));
         return result;
+    }
+
+    addSuspend(duration?: DurationInSeconds): SuspendTemplateBuilder<ParentWorkflowScope, InputParamsScope, {}> {
+        return new SuspendTemplateBuilder(
+            this.parentWorkflowScope,
+            this.inputScope,
+            duration !== undefined ? { duration } : {},
+            {},
+            undefined
+        );
     }
 
     getTemplateSignatureScope(): InputParamsScope {

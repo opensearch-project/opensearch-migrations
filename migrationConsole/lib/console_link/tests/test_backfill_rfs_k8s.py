@@ -94,7 +94,7 @@ def test_k8s_rfs_backfill_status_gets_deployment_status(k8s_rfs_backfill, mocker
     mock.assert_called_once_with(k8s_rfs_backfill.kubectl_runner)
     assert value.success
     assert BackfillStatus.RUNNING == value.value[0]
-    assert str(mocked_instance_status) == value.value[1]
+    assert "Pods - Running: 1, Pending: 2, Desired: 3" == value.value[1]
 
 
 def test_k8s_rfs_calculates_backfill_status_from_deployment_status_stopped(k8s_rfs_backfill, mocker):
@@ -110,7 +110,7 @@ def test_k8s_rfs_calculates_backfill_status_from_deployment_status_stopped(k8s_r
     mock.assert_called_once_with(k8s_rfs_backfill.kubectl_runner)
     assert value.success
     assert BackfillStatus.STOPPED == value.value[0]
-    assert str(mocked_stopped_status) == value.value[1]
+    assert "Pods - Running: 0, Pending: 0, Desired: 8" == value.value[1]
 
 
 def test_k8s_rfs_calculates_backfill_status_from_deployment_status_starting(k8s_rfs_backfill, mocker):
@@ -126,7 +126,7 @@ def test_k8s_rfs_calculates_backfill_status_from_deployment_status_starting(k8s_
     mock.assert_called_once_with(k8s_rfs_backfill.kubectl_runner)
     assert value.success
     assert BackfillStatus.STARTING == value.value[0]
-    assert str(mocked_starting_status) == value.value[1]
+    assert "Pods - Running: 0, Pending: 6, Desired: 8" == value.value[1]
 
 
 def test_k8s_rfs_calculates_backfill_status_from_deployment_status_running(k8s_rfs_backfill, mocker):
@@ -142,7 +142,7 @@ def test_k8s_rfs_calculates_backfill_status_from_deployment_status_running(k8s_r
     mock.assert_called_once_with(k8s_rfs_backfill.kubectl_runner)
     assert value.success
     assert BackfillStatus.RUNNING == value.value[0]
-    assert str(mocked_running_status) == value.value[1]
+    assert "Pods - Running: 3, Pending: 1, Desired: 1" == value.value[1]
 
 
 def test_k8s_rfs_get_status_deep_check(k8s_rfs_backfill, mocker):
@@ -166,7 +166,7 @@ def test_k8s_rfs_get_status_deep_check(k8s_rfs_backfill, mocker):
     mock_detailed.assert_called_once()
     assert value.success
     assert BackfillStatus.RUNNING == value.value[0]
-    assert str(mocked_instance_status) in value.value[1]
+    assert "Pods - Running: 1, Pending: 0, Desired: 1" in value.value[1]
     assert str(total_shards) in value.value[1]
 
 
@@ -184,7 +184,7 @@ def test_k8s_rfs_deep_status_check_failure(k8s_rfs_backfill, mocker, caplog):
         result = k8s_rfs_backfill.get_status(deep_check=True)
 
     # still make sure we logged the reason
-    assert "Failed to get detailed status:" in caplog.text
+    assert "Failed to get detailed status" in caplog.text
     mock_api.assert_called_once()
     mock_k8s.assert_called_once()
     assert result.success

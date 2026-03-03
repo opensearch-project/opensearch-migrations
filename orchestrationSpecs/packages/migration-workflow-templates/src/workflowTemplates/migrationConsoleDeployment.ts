@@ -109,7 +109,7 @@ export const MigrationConsoleDeployment = WorkflowBuilder.create({
                     b.inputs.imageMigrationConsolePullPolicy,
                     expr.toBase64(expr.asString(b.inputs.configContents)),
                     b.inputs.command,
-                    DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI
+                    DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI
                 )
             }))
 

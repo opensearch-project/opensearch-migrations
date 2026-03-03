@@ -13,6 +13,7 @@ import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
 
 import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.async.ByteBufferFeeder;
@@ -21,6 +22,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
+import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.NonNull;
 import lombok.SneakyThrows;
@@ -52,6 +54,14 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
 
         @Override
         public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
+            if (msg instanceof HttpResponse && errorField == null) {
+                var statusCode = ((HttpResponse) msg).status().code();
+                if (statusCode != 200) {
+                    log.atDebug().setMessage("Bulk response status {} is not 200, treating as error")
+                        .addArgument(statusCode).log();
+                    errorField = true;
+                }
+            }
             if (msg instanceof HttpContent && errorField == null) {
                 log.atDebug().setMessage("body contents: {}")
                     .addArgument(((HttpContent) msg).content().duplicate()).log();
@@ -69,6 +79,17 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
             if (errorField != null) {
                 return;
             }
+            try {
+                parseJsonTokens();
+            } catch (JsonParseException e) {
+                log.atWarn().setCause(e)
+                    .setMessage("Response body is not valid JSON, treating as error response")
+                    .log();
+                errorField = true;
+            }
+        }
+
+        private void parseJsonTokens() throws IOException {
             JsonToken token;
             while (!parser.isClosed() &&
                 ((token = parser.nextToken()) != null) &&
@@ -109,23 +130,36 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
 
         var targetRequestByteBuf = Unpooled.wrappedBuffer(targetRequestBytes);
         var parsedRequest = HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(targetRequestByteBuf), 0);
-        if (parsedRequest != null &&
-            bulkPathMatcher.matcher(parsedRequest.uri()).matches() &&
-            // do a more granular check.  If the raw response wasn't present, then just push it to the superclass
-            // since it isn't going to be any kind of response, let alone a bulk one
-            Optional.ofNullable(currentResponse.getRawResponse())
-                .map(r->r.status().code() == 200)
-                .orElse(false))
+        if (parsedRequest == null ||
+            !bulkPathMatcher.matcher(parsedRequest.uri()).matches())
         {
+            return super.shouldRetry(targetRequestBytes, currentResponse, reconstructedSourceTransactionFuture);
+        }
+
+        var targetStatusCode = Optional.ofNullable(currentResponse.getRawResponse())
+            .map(r -> r.status().code());
+
+        // If target returned 429 or 5xx for a bulk request, retry immediately without parsing the response body
+        if (targetStatusCode.map(code -> code == 429 || code / 100 == 5).orElse(false)) {
+            return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.RETRY,
+                () -> "target returned 429/5xx for bulk request, retrying");
+        }
+
+        // do a more granular check.  If the raw response wasn't present, then just push it to the superclass
+        // since it isn't going to be any kind of response, let alone a bulk one
+        if (targetStatusCode.map(code -> code == 200).orElse(false)) {
             if (bulkResponseHadNoErrors(currentResponse.getResponseAsByteBuf())) {
                 return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
                     () -> "no errors found in the target response, so not retrying");
             } else {
                 return reconstructedSourceTransactionFuture.thenCompose(rrp ->
                         TextTrackedFuture.completedFuture(
-                            bulkResponseHadNoErrors(rrp.getResponseData().asByteBuf()) ?
-                                RequestSenderOrchestrator.RetryDirective.RETRY :
-                                RequestSenderOrchestrator.RetryDirective.DONE,
+                            Optional.ofNullable(rrp.getResponseData())
+                                .map(sourceResponse ->
+                                    bulkResponseHadNoErrors(sourceResponse.asByteBuf()) ?
+                                        RequestSenderOrchestrator.RetryDirective.RETRY :
+                                        RequestSenderOrchestrator.RetryDirective.DONE)
+                                .orElse(RequestSenderOrchestrator.RetryDirective.DONE),
                             () -> "evaluating retry status dependent upon source error field"),
                     () -> "checking the accumulated source response value");
             }

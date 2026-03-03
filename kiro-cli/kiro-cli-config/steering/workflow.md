@@ -312,7 +312,6 @@ kubectl create secret generic <secret-name> -n ma \
   "targetClusters": {
     "target": {
       "endpoint": "https://search-<domain>.<region>.es.amazonaws.com",
-      "version": "OS 3.3",
       "authConfig": {
         "sigv4": { "region": "us-east-2", "service": "es" }
       }
@@ -422,7 +421,6 @@ kubectl get configmap migrations-default-s3-config -n ma -o yaml
   "targetClusters": {
     "target": {
       "endpoint": "https://search-<domain>.<region>.es.amazonaws.com",
-      "version": "OS 3.3",
       "authConfig": {"sigv4": {"region": "us-east-2", "service": "es"}}
     }
   },
@@ -472,7 +470,6 @@ kubectl get configmap migrations-default-s3-config -n ma -o yaml
   "targetClusters": {
     "target": {
       "endpoint": "https://target:9200",
-      "version": "OS 2.11",
       "authConfig": {"basic": {"secretName": "target-creds"}}
     }
   },

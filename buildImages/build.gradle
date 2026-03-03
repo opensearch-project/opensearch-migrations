@@ -24,6 +24,8 @@ def getRepoNameIfPublishing = { Map cfg ->
 
 def jibProjects = [
         "TrafficCapture:trafficReplayer": [
+                baseImageRegistryEndpoint: "mirror.gcr.io",
+                baseImageGroup : "library",
                 baseImageName : "amazoncorretto",
                 baseImageTag  : "17-al2023-headless",
                 imageName     : "traffic_replayer",

@@ -24,6 +24,8 @@ class OpenSearchDefaultRetryTest {
     @CsvSource(value = {
         "200, 200, DONE",
         "200, 404, RETRY",
+        "200, 500, RETRY",
+        "200, 429, RETRY",
         "404, 200, DONE",
         "200, 401, DONE",
         "200, 403, DONE"
@@ -95,7 +97,9 @@ class OpenSearchDefaultRetryTest {
 
         "404, 200, false, false, 0, DONE",
         "200, 401, false, false, 0, DONE",
-        "200, 403, false, false, 0, DONE"
+        "200, 403, false, false, 0, DONE",
+        "200, 500, false, false, 0, RETRY",
+        "200, 429, false, false, 0, RETRY"
     })
     public void testBulkResults(int sourceStatus, int targetStatus,
                                 String sourceErrorStr, String targetErrorStr, int previousAttempts,
@@ -141,6 +145,8 @@ class OpenSearchDefaultRetryTest {
     @CsvSource(value = {
         "200, 200, DONE",
         "200, 404, RETRY",
+        "200, 500, RETRY",
+        "200, 429, RETRY",
         "404, 200, DONE",
         "200, 401, DONE",
         "200, 403, DONE"

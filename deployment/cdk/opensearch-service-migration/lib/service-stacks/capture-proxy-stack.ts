@@ -23,6 +23,7 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly serviceName?: string,
     readonly targetGroups: ELBTargetGroup[],
     readonly extraArgs?: string,
+    readonly jvmArgs?: string,
     readonly taskInstanceCount?: number,
 }
 
@@ -147,6 +148,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 2048,
             taskMemoryLimitMiB: 4096,
+            ...(props.jvmArgs ? { environment: { "JDK_JAVA_OPTIONS": props.jvmArgs } } : {}),
             ...props
         });
     }
