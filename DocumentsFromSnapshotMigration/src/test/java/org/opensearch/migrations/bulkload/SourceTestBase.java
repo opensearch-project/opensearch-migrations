@@ -112,19 +112,25 @@ public class SourceTestBase {
     {
         int timeoutSeconds = 30;
         ProcessBuilder processBuilder = setupProcess(processArgs);
+        return waitForProcessExit(runAndMonitorProcess(processBuilder), timeoutSeconds);
+    }
 
-        var process = runAndMonitorProcess(processBuilder);
+    /**
+     * Waits for a process to finish within the given timeout, killing it if necessary.
+     * Returns the process exit value, or fails the test if the process does not finish in time.
+     */
+    @SneakyThrows
+    protected static int waitForProcessExit(Process process, int timeoutSeconds) {
         boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
         if (!finished) {
             log.atError().setMessage("Process timed out, attempting to kill it...").log();
-            process.destroy(); // Try to be nice about things first...
+            process.destroy();
             if (!process.waitFor(10, TimeUnit.SECONDS)) {
                 log.atError().setMessage("Process still running, attempting to force kill it...").log();
                 process.destroyForcibly();
             }
             Assertions.fail("The process did not finish within the timeout period (" + timeoutSeconds + " seconds).");
         }
-
         return process.exitValue();
     }
 
