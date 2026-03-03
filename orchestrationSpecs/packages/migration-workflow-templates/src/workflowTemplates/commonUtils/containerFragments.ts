@@ -105,7 +105,7 @@ export function setupLog4jConfigForContainer(
             env: [
                 ...(env === undefined ? [] : env),
                 {
-                    name: "JAVA_OPTS",
+                    name: "JDK_JAVA_OPTIONS",
                     value:
                         makeStringTypeProxy(expr.concatWith(" ",
                                 existingJavaOpts,

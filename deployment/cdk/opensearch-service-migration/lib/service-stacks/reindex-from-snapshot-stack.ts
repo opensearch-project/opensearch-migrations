@@ -31,6 +31,7 @@ export interface ReindexFromSnapshotProps extends StackPropsExt {
     readonly vpcDetails: VpcDetails,
     readonly fargateCpuArch: CpuArchitecture,
     readonly extraArgs?: string,
+    readonly jvmArgs?: string,
     readonly otelCollectorEnabled: boolean,
     readonly clusterAuthDetails: ClusterAuth,
     readonly skipClusterCertCheck?: boolean,
@@ -198,6 +199,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             environment: {
                 "RFS_COMMAND": command,
                 "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/reindex-from-snapshot-${props.defaultDeployId}`,
+                ...(props.jvmArgs ? { "JDK_JAVA_OPTIONS": props.jvmArgs } : {}),
             },
             secrets: secrets,
             ...props

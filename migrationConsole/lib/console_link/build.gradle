@@ -51,8 +51,21 @@ tasks.register('buildOpenApiDockerImage') {
             '-t', dockerImageName,
             '.'
         ]
-        def proc = buildCommand.execute(null, projectDirRef)
+        def env = System.getenv().collect { k, v -> "$k=$v" }
+        env.removeAll { it.startsWith('DOCKER_API_VERSION=') }
+        env.add('DOCKER_API_VERSION=1.44')
+        def proc = buildCommand.execute(env, projectDirRef)
+        def stdout = new StringBuilder()
+        def stderr = new StringBuilder()
+        proc.consumeProcessOutput(stdout, stderr)
         def exitCode = proc.waitFor()
+
+        if (stdout) {
+            logger.lifecycle("Docker build stdout:\n${stdout}")
+        }
+        if (stderr) {
+            logger.lifecycle("Docker build stderr:\n${stderr}")
+        }
 
         if (exitCode != 0) {
             throw new GradleException("Docker image build failed with exit code $exitCode")

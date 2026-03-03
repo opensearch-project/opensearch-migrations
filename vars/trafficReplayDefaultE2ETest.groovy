@@ -40,7 +40,8 @@ def call(Map config = [:]) {
         "dataNodeCount": 1,
         "managerNodeCount": 0,
         "serverAccessType": "ipv4",
-        "restrictServerAccessTo": "0.0.0.0/0"
+        "restrictServerAccessTo": "0.0.0.0/0",
+        "enableImdsCredentialRefresh": true
       }
     }
     """
@@ -80,7 +81,7 @@ def call(Map config = [:]) {
             sourceContextId: sourceContextId,
             migrationContextId: migrationContextId,
             defaultStageId: 'aws-integ',
-            jobName: 'traffic-replay-default-e2e-test',
+            jobName: config.jobName ?: 'traffic-replay-default-e2e-test',
             //deployStep: {
             //    echo 'Custom Test Step'
             //}

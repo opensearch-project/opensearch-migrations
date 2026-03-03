@@ -71,6 +71,11 @@ public class OnlineRadixSorter {
      * @return
      */
     public <T> TrackedFuture<String, T> addFutureForWork(final int index, FutureTransformer<T> processor) {
+        if (cancelled) {
+            return TextTrackedFuture.failedFuture(
+                new java.util.concurrent.CancellationException("sorter cancelled"),
+                () -> "cancelled sorter slot #" + index);
+        }
         var workItem = items.get(index);
         if (workItem == null) {
             if (index < currentOffset) {
@@ -155,4 +160,21 @@ public class OnlineRadixSorter {
     public int size() {
         return items.size();
     }
+
+    /**
+     * Cancels all pending work by completing each slot's signalWorkCompletedFuture with null.
+     * This cascades through the sorter chain, allowing all waiting slots to drain immediately
+     * rather than waiting for their scheduled work to complete naturally.
+     * Also sets a cancelled flag so new work added after this call is immediately drained too.
+     * Must be called from the event loop thread that owns this sorter.
+     */
+    public void cancelAllWork() {
+        cancelled = true;
+        // Complete all pending signalWorkCompletedFutures — this cascades through the chain
+        // since each slot's signalingToStartFuture is derived from the previous slot's signal
+        new java.util.ArrayList<>(items.values()).forEach(item ->
+            item.signalWorkCompletedFuture.future.complete(null));
+    }
+
+    private volatile boolean cancelled = false;
 }

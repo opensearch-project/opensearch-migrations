@@ -186,7 +186,9 @@ class OpenSearchClientTest {
         var responseMono = openSearchClient.sendBulkRequest(
             "myIndex",
             bulkDocs,
-            mock(IRfsContexts.IRequestContext.class)
+            mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
         );
         responseMono.block();
 
@@ -214,7 +216,9 @@ class OpenSearchClientTest {
         var responseMono = openSearchClient.sendBulkRequest(
             indexName,
             List.of(bulkDoc),
-            mock(IRfsContexts.IRequestContext.class)
+            mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
         );
         var exception = assertThrows(Exception.class, () -> responseMono.block());
 
@@ -265,7 +269,9 @@ class OpenSearchClientTest {
         openSearchClient.sendBulkRequest(
             indexName,
             List.of(bulkDoc),
-            mock(IRfsContexts.IRequestContext.class)
+            mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
         ).block();
 
         // Assertions
@@ -293,7 +299,9 @@ class OpenSearchClientTest {
         openSearchClient.sendBulkRequest(
             indexName,
             List.of(bulkDoc),
-            mock(IRfsContexts.IRequestContext.class)
+            mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
         ).block();
 
         // Assertions
@@ -323,7 +331,9 @@ class OpenSearchClientTest {
             var responseMono = openSearchClient.sendBulkRequest(
                     indexName,
                     List.of(bulkDoc),
-                    mock(IRfsContexts.IRequestContext.class)
+                    mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
             );
             assertThrows(Exception.class, responseMono::block);
 
@@ -366,7 +376,9 @@ class OpenSearchClientTest {
             var responseMono = openSearchClient.sendBulkRequest(
                     indexName,
                     List.of(bulkDoc),
-                    mock(IRfsContexts.IRequestContext.class)
+                    mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
             );
             assertThrows(Exception.class, responseMono::block);
 

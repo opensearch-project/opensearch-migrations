@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
@@ -100,7 +101,7 @@ class OpenSearchClient_ES_5_6_Test {
         var bulkDocs = List.of(createBulkDoc(docId1), createBulkDoc(docId2));
         when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(successResponse));
 
-        var result = openSearchClient.sendBulkRequest("indexName", bulkDocs, mock(IRfsContexts.IRequestContext.class)).block();
+        var result = openSearchClient.sendBulkRequest("indexName", bulkDocs, mock(IRfsContexts.IRequestContext.class), false, DocumentExceptionAllowlist.empty()).block();
 
         Mockito.verify(restClient).postAsync(eq("indexName/doc/_bulk"), any(), any(), any());
 

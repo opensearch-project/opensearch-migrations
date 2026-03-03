@@ -168,24 +168,31 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
     }
 
     @SneakyThrows
-    private static void readNextNStreams(
+    private void readNextNStreams(
         TestContext rootContext,
-        BlockingTrafficSource kafkaSource,
+        BlockingTrafficSource trafficSource,
         List<ITrafficStreamKey> keysReceived,
         int from,
         int count
     ) {
         Assertions.assertEquals(from, keysReceived.size());
         for (int i = 0; i < count;) {
-            var trafficStreams = kafkaSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
-            trafficStreams.forEach(ts -> {
+            var trafficStreams = trafficSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+            for (var ts : trafficStreams) {
+                if (ts instanceof TrafficSourceReaderInterruptedClose) {
+                    // Drain synthetic closes and decrement the counter so real records can resume
+                    var key = ts.getKey();
+                    log.atInfo().setMessage("Draining synthetic close for {}").addArgument(key).log();
+                    kafkaSource.onNetworkConnectionClosed(key.getConnectionId(), 0, key.getSourceGeneration());
+                    continue;
+                }
                 var tsk = ts.getKey();
                 log.atInfo().setMessage("checking for {}").addArgument(tsk).log();
                 Assertions.assertFalse(keysReceived.contains(tsk));
                 keysReceived.add(tsk);
-            });
+                i++;
+            }
             log.info("Read " + trafficStreams.size() + " traffic streams");
-            i += trafficStreams.size();
         }
     }
 }

@@ -3,7 +3,16 @@ import type { NextConfig } from "next";
 const { execSync } = require('node:child_process');
 
 function getGitMostRecentTag() {
-  return execOrUnknown('git describe --tags --abbrev=0 HEAD');
+  try {
+    const tags = execSync('git tag --list').toString().trim();
+    if (!tags) {
+      return 'untagged';
+    }
+    return execSync('git describe --tags --abbrev=0 HEAD').toString().trim();
+  } catch (e) {
+    console.error(`Failed to get git tag: ${e}`);
+    return 'unknown';
+  }
 }
 
 function getGitCommitHash() {

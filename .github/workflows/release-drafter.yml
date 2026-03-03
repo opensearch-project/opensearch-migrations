@@ -83,7 +83,7 @@ jobs:
           ./gradlew publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }} && tar -C build -cvf opensearch-migrations-build.tar.gz repository
       - name: Configure AWS Credentials
         if: ${{ !github.event.act }}
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.MIGRATIONS_DOCKER_ROLE }}
           aws-region: us-east-1
@@ -113,7 +113,6 @@ jobs:
             -Dbuild.snapshot=false \
             -Dbuild.version=0.${{ steps.get_data.outputs.version }} \
             --no-build-cache \
-            --no-configuration-cache \
             --no-daemon \
             --no-continue \
             --info
@@ -123,6 +122,11 @@ jobs:
       - name: Generate Solutions Artifact
         run: |
           ./deployment/migration-assistant-solution/package-artifacts.sh
+      - name: Build minified CFN templates for GitHub release
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+        run: |
+          STACK_NAME_SUFFIX="" ./gradlew :deployment:migration-assistant-solution:cdkSynthMinified
       - name: Pull images from DockerHub for SBOM scanning
         if: ${{ !github.event.act }}
         run: |
@@ -137,27 +141,27 @@ jobs:
           docker tag opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }} migrations/capture_proxy:latest
           docker tag opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }} migrations/reindex_from_snapshot:latest
       - name: Generate SBOM for migration_console
-        uses: anchore/sbom-action@v0.21.1
+        uses: anchore/sbom-action@v0.22.2
         with:
           image: migrations/migration_console:latest
           output-file: opensearch-migrations-console-sbom.spdx.json
       - name: Generate SBOM for traffic_replayer
-        uses: anchore/sbom-action@v0.21.1
+        uses: anchore/sbom-action@v0.22.2
         with:
           image: migrations/traffic_replayer:latest
           output-file: opensearch-migrations-traffic-replayer-sbom.spdx.json
       - name: Generate SBOM for capture_proxy
-        uses: anchore/sbom-action@v0.21.1
+        uses: anchore/sbom-action@v0.22.2
         with:
           image: migrations/capture_proxy:latest
           output-file: opensearch-migrations-traffic-capture-proxy-sbom.spdx.json
       - name: Generate SBOM for reindex_from_snapshot
-        uses: anchore/sbom-action@v0.21.1
+        uses: anchore/sbom-action@v0.22.2
         with:
           image: migrations/reindex_from_snapshot:latest
           output-file: opensearch-migrations-reindex-from-snapshot-sbom.spdx.json
       - name: Generate SBOM for artifacts
-        uses: anchore/sbom-action@v0.21.1
+        uses: anchore/sbom-action@v0.22.2
         with:
           file: opensearch-migrations-source.tar.gz
           output-file: opensearch-migrations-source-sbom.spdx.json
@@ -171,7 +175,7 @@ jobs:
             --app-version ${{ steps.get_data.outputs.version }}
       - name: Configure AWS Credentials for Solutions Credentials
         if: ${{ !github.event.act }}
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.SOLUTIONS_CREDENTIALS_ROLE }}
           aws-region: us-east-1
@@ -206,9 +210,11 @@ jobs:
           draft: true
           generate_release_notes: true
           files: |
-            deployment/migration-assistant-solution/build/temp/global-s3-assets/*.template
+            deployment/migration-assistant-solution/cdk.out-minified/*-eks.template.json
             opensearch-migrations-source.tar.gz
             opensearch-migrations-build.tar.gz
             kiro-cli/build/kiro-assistant.tar.gz
             migration-assistant-${{ steps.get_data.outputs.version }}.tgz
+            deployment/k8s/aws/aws-bootstrap.sh
+            deployment/k8s/dashboards/*.json
             **/*.spdx.json

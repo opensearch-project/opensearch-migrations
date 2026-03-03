@@ -194,16 +194,19 @@ export class StackComposer {
         const trafficReplayerGroupId = this.getContextForType('trafficReplayerGroupId', 'string', defaultValues, contextJSON)
         const trafficReplayerUserAgentSuffix = this.getContextForType('trafficReplayerUserAgentSuffix', 'string', defaultValues, contextJSON)
         const trafficReplayerExtraArgs = this.getContextForType('trafficReplayerExtraArgs', 'string', defaultValues, contextJSON)
+        const trafficReplayerJvmArgs = this.getContextForType('trafficReplayerJvmArgs', 'string', defaultValues, contextJSON)
         const captureProxyServiceEnabled = this.getContextForType('captureProxyServiceEnabled', 'boolean', defaultValues, contextJSON)
         const captureProxyDesiredCount = this.getContextForType('captureProxyDesiredCount', 'number', defaultValues, contextJSON)
         const targetClusterProxyServiceEnabled = this.getContextForType('targetClusterProxyServiceEnabled', 'boolean', defaultValues, contextJSON)
         const targetClusterProxyDesiredCount = this.getContextForType('targetClusterProxyDesiredCount', 'number', defaultValues, contextJSON)
         const captureProxyExtraArgs = this.getContextForType('captureProxyExtraArgs', 'string', defaultValues, contextJSON)
+        const captureProxyJvmArgs = this.getContextForType('captureProxyJvmArgs', 'string', defaultValues, contextJSON)
         const elasticsearchServiceEnabled = this.getContextForType('elasticsearchServiceEnabled', 'boolean', defaultValues, contextJSON)
         const kafkaBrokerServiceEnabled = this.getContextForType('kafkaBrokerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotServiceEnabled = this.getContextForType('reindexFromSnapshotServiceEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotExtraArgs = this.getContextForType('reindexFromSnapshotExtraArgs', 'string', defaultValues, contextJSON)
+        const reindexFromSnapshotJvmArgs = this.getContextForType('reindexFromSnapshotJvmArgs', 'string', defaultValues, contextJSON)
         const reindexFromSnapshotMaxShardSizeGiB = this.getContextForType('reindexFromSnapshotMaxShardSizeGiB', 'number', defaultValues, contextJSON)
         const reindexFromSnapshotWorkerSize = this.getContextForType('reindexFromSnapshotWorkerSize', 'string', defaultValues, contextJSON)
         const albAcmCertArn = this.getContextForType('albAcmCertArn', 'string', defaultValues, contextJSON);
@@ -467,6 +470,7 @@ export class StackComposer {
             reindexFromSnapshotStack = new ReindexFromSnapshotStack(scope, "reindexFromSnapshotStack", {
                 vpcDetails: networkStack.vpcDetails,
                 extraArgs: reindexFromSnapshotExtraArgs,
+                jvmArgs: reindexFromSnapshotJvmArgs,
                 clusterAuthDetails: servicesYaml.target_cluster?.auth,
                 skipClusterCertCheck: servicesYaml.target_cluster?.allowInsecure,
                 sourceClusterVersion: resolvedSourceClusterVersion,
@@ -497,6 +501,7 @@ export class StackComposer {
                 customKafkaGroupId: trafficReplayerGroupId,
                 userAgentSuffix: trafficReplayerCustomUserAgent,
                 extraArgs: trafficReplayerExtraArgs,
+                jvmArgs: trafficReplayerJvmArgs,
                 otelCollectorEnabled: otelCollectorEnabled,
                 streamingSourceType: streamingSourceType,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-TrafficReplayer`,
@@ -540,6 +545,7 @@ export class StackComposer {
                 skipClusterCertCheck: servicesYaml.source_cluster?.allowInsecure,
                 streamingSourceType: streamingSourceType,
                 extraArgs: captureProxyExtraArgs,
+                jvmArgs: captureProxyJvmArgs,
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxy`,
                 description: "This stack contains resources for the Capture Proxy ECS service",
                 stage: stage,

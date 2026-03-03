@@ -462,7 +462,8 @@ class WorkflowService:
         namespace: str,
         argo_server: str,
         token: Optional[str] = None,
-        insecure: bool = False
+        insecure: bool = False,
+        node_field_selector: Optional[str] = None
     ) -> WorkflowApproveResult:
         """Approve/resume a suspended workflow via Argo Workflows REST API.
 
@@ -472,6 +473,7 @@ class WorkflowService:
             argo_server: Argo Server URL
             token: Bearer token for authentication
             insecure: Whether to skip TLS verification
+            node_field_selector: Optional selector to resume specific node (e.g. "id=node-id")
 
         Returns:
             WorkflowApproveResult dict with success status, message, and error
@@ -485,10 +487,17 @@ class WorkflowService:
             logger.info(f"Resuming workflow {workflow_name} in namespace {namespace}")
             logger.debug(f"Resume request URL: {url}")
 
+            # Build request body with optional node selector
+            body = {}
+            if node_field_selector:
+                body["nodeFieldSelector"] = node_field_selector
+                logger.info(f"Resuming specific node with selector: {node_field_selector}")
+
             # Make PUT request to resume the workflow
             response = requests.put(
                 url,
                 headers=headers,
+                json=body if body else None,
                 verify=not insecure
             )
 
@@ -752,7 +761,8 @@ class WorkflowService:
                     "name": node.get("displayName", ""),
                     "phase": node.get("phase", "Unknown"),
                     "type": node_type,
-                    "started_at": node.get("startedAt", "")
+                    "started_at": node.get("startedAt", ""),
+                    "inputs": node.get('inputs')
                 })
 
         # Sort chronologically by start time

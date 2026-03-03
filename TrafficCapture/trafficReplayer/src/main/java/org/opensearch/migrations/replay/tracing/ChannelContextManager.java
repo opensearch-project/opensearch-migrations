@@ -19,9 +19,11 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IRepla
         @Getter
         final IReplayContexts.IChannelKeyContext context;
         private int refCount;
+        final int generation;
 
-        RefCountedContext(IReplayContexts.IChannelKeyContext context) {
+        RefCountedContext(IReplayContexts.IChannelKeyContext context, int generation) {
             this.context = context;
+            this.generation = generation;
         }
 
         IReplayContexts.IChannelKeyContext retain() {
@@ -48,10 +50,24 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IRepla
     }
 
     public IReplayContexts.IChannelKeyContext retainOrCreateContext(ITrafficStreamKey tsk) {
-        return connectionToChannelContextMap.computeIfAbsent(
+        var incomingGeneration = tsk.getSourceGeneration();
+        return connectionToChannelContextMap.compute(
             tsk.getConnectionId(),
-            k -> new RefCountedContext(globalContext.createChannelContext(tsk))
-        ).retain();
+            (k, existing) -> {
+                if (existing != null && existing.generation < incomingGeneration) {
+                    // Stale context from a previous partition assignment — force-close it.
+                    // Its ref count will never drain naturally since all pending commits for
+                    // the old generation are dropped as IGNORED.
+                    existing.context.close();
+                    existing = null;
+                }
+                if (existing == null) {
+                    existing = new RefCountedContext(globalContext.createChannelContext(tsk), incomingGeneration);
+                }
+                existing.retain();
+                return existing;
+            }
+        ).context;
     }
 
     public IReplayContexts.IChannelKeyContext releaseContextFor(IReplayContexts.IChannelKeyContext ctx) {

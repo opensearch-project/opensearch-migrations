@@ -1,6 +1,7 @@
 package org.opensearch.migrations.arguments;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 public class ArgLogUtils {
@@ -11,7 +12,7 @@ public class ArgLogUtils {
 
     public static final String CENSORED_VALUE = "******";
 
-    public static List<String> getRedactedArgs(String[] args, List<String> censoredArgs) {
+    public static List<String> getRedactedArgs(String[] args, Collection<String> censoredArgs) {
         List<String> redactedArgs = new ArrayList<>();
         boolean shouldCensorNext = false;
 

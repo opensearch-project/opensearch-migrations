@@ -96,6 +96,22 @@ public class FilterSchemeTest {
     }
 
     @Test
+    void testExcludedKibanaIndexTemplates() {
+        var filter = FilterScheme.filterByAllowList(null);
+
+        // Kibana index templates and indices should be excluded
+        assertThat(filter.test("kibana_index_template:.kibana"), equalTo(false));
+        assertThat(filter.test("kibana_index_template:.kibana_*"), equalTo(false));
+        assertThat(filter.test("kibana_logs"), equalTo(false));
+        assertThat(filter.test("kibana"), equalTo(false));
+        assertThat(filter.test(".kibana"), equalTo(false));
+
+        // User indices with kibana elsewhere in the name should not be excluded
+        assertThat(filter.test("my_kibana_data"), equalTo(true));
+        assertThat(filter.test("my_kibana_logs"), equalTo(true));
+    }
+
+    @Test
     void testExcludedES717SystemIndices() {
         var filter = FilterScheme.filterByAllowList(null);
 
