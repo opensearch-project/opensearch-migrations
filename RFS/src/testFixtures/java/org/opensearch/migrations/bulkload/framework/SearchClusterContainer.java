@@ -80,9 +80,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         return Collections.unmodifiableMap(merged);
     }
 
-    public static final ContainerVersion ES_V8_19 = Elasticsearch8Version.fromTag("8.19.4");
-    public static final ContainerVersion ES_V8_18 = Elasticsearch8Version.fromTag("8.18.4");
-    public static final ContainerVersion ES_V8_17 = Elasticsearch8Version.fromTag("8.17.5");
+    public static final ContainerVersion ES_V8_19 = Elasticsearch8Version.fromTag("8.19.11");
+    public static final ContainerVersion ES_V8_18 = Elasticsearch8Version.fromTag("8.18.8");
+    public static final ContainerVersion ES_V8_17 = Elasticsearch8Version.fromTag("8.17.10");
     public static final ContainerVersion ES_V8_16 = Elasticsearch8Version.fromTag("8.16.6");
     public static final ContainerVersion ES_V8_15 = Elasticsearch8Version.fromTag("8.15.5");
     public static final ContainerVersion ES_V8_14 = Elasticsearch8Version.fromTag("8.14.3");
@@ -101,7 +101,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static final ContainerVersion ES_V8_1 = Elasticsearch8Version.fromTag("8.1.3");
     public static final ContainerVersion ES_V8_0 = Elasticsearch8Version.fromTag("8.0.1");
 
-    public static final ContainerVersion ES_V7_17 = Elasticsearch7Version.fromTag("7.17.22");
+    public static final ContainerVersion ES_V7_17 = Elasticsearch7Version.fromTag("7.17.29");
     public static final ContainerVersion ES_V7_16 = Elasticsearch7Version.fromTag("7.16.3");
     public static final ContainerVersion ES_V7_15 = Elasticsearch7Version.fromTag("7.15.2");
     public static final ContainerVersion ES_V7_14 = Elasticsearch7Version.fromTag("7.14.2");
@@ -131,9 +131,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static final ContainerVersion ES_V6_0 = Elasticsearch6Version.fromTag("6.0.1");
 
     public static final ContainerVersion ES_V5_6_16 = ElasticsearchVersion.fromTag("5.6.16");
-    public static final ContainerVersion ES_V5_5 = ElasticsearchVersion.fromTag("5.5.2");
-    public static final ContainerVersion ES_V5_4 = ElasticsearchVersion.fromTag("5.4.2");
-    public static final ContainerVersion ES_V5_3 = Elasticsearch5Version.fromTag("5.3.2", ES_5_2_AND_5_3_CONFIG_YML);
+    public static final ContainerVersion ES_V5_5 = ElasticsearchVersion.fromTag("5.5.3");
+    public static final ContainerVersion ES_V5_4 = ElasticsearchVersion.fromTag("5.4.3");
+    public static final ContainerVersion ES_V5_3 = Elasticsearch5Version.fromTag("5.3.3", ES_5_2_AND_5_3_CONFIG_YML);
     public static final ContainerVersion ES_V5_2 = Elasticsearch5Version.fromTag("5.2.2", ES_5_2_AND_5_3_CONFIG_YML);
     public static final ContainerVersion ES_V5_1 = Elasticsearch5Version.fromTag("5.1.2", ES_5_0_AND_5_1_CONFIG_YML);
     public static final ContainerVersion ES_V5_0 = Elasticsearch5Version.fromTag("5.0.2", ES_5_0_AND_5_1_CONFIG_YML);
@@ -282,9 +282,56 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     @Getter
     private final ContainerVersion containerVersion;
 
+    /**
+     * Check if a Docker image exists locally (without pulling).
+     */
+    public static boolean isImageAvailable(ContainerVersion version) {
+        try {
+            Process p = new ProcessBuilder("docker", "image", "inspect", version.imageName)
+                .redirectErrorStream(true).start();
+            return p.waitFor() == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Build a custom-elasticsearch image on demand via Gradle if not already available locally.
+     */
+    private static void ensureCustomImageAvailable(ContainerVersion version) {
+        if (!version.imageName.startsWith("custom-elasticsearch:") || isImageAvailable(version)) {
+            return;
+        }
+        String tag = version.imageName.split(":")[1]; // e.g. "7.10.2"
+        String[] parts = tag.split("\\.");
+        String taskName = "buildImage_" + parts[0] + "_" + parts[1]; // e.g. "buildImage_7_10"
+
+        File dir = new File(System.getProperty("user.dir"));
+        while (dir != null && !new File(dir, "gradlew").exists()) {
+            dir = dir.getParentFile();
+        }
+        if (dir == null) {
+            throw new RuntimeException("Cannot find gradlew to build " + version.imageName);
+        }
+
+        log.info("Building Docker image on-demand: {} (task: :custom-es-images:{})", version.imageName, taskName);
+        try {
+            Process p = new ProcessBuilder(
+                new File(dir, "gradlew").getAbsolutePath(),
+                ":custom-es-images:" + taskName
+            ).directory(dir).inheritIO().start();
+            if (p.waitFor() != 0) {
+                throw new RuntimeException("Gradle build failed for image: " + version.imageName);
+            }
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException("Failed to build image: " + version.imageName, e);
+        }
+    }
+
     @SuppressWarnings("resource")
     public SearchClusterContainer(final ContainerVersion version) {
         super(DockerImageName.parse(version.imageName));
+        ensureCustomImageAvailable(version);
         var builder = this.withExposedPorts(9200, 9300);
 
         if (version instanceof OverrideFile) {
@@ -300,6 +347,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     public SearchClusterContainer(final ContainerVersion version, Map<String, String> supplementaryEnvVariables) {
         super(DockerImageName.parse(version.imageName));
+        ensureCustomImageAvailable(version);
         var builder = this.withExposedPorts(9200, 9300);
 
         var combinedEnvVariables = new ImmutableMap.Builder<String, String>().putAll(
@@ -416,7 +464,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_OSS, "elasticsearch");
         }
         public static ElasticsearchOssVersion fromTag(String tag) {
-            String imageName = "docker.elastic.co/elasticsearch/elasticsearch-oss:" + tag;
+            String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new ElasticsearchOssVersion(imageName, version);
         }
@@ -427,7 +475,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH, "elasticsearch");
         }
         public static ElasticsearchVersion fromTag(String tag) {
-            String imageName = "docker.elastic.co/elasticsearch/elasticsearch:" + tag;
+            String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new ElasticsearchVersion(imageName, version);
         }
@@ -438,7 +486,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_8, "elasticsearch");
         }
         public static Elasticsearch8Version fromTag(String tag) {
-            String imageName = "docker.elastic.co/elasticsearch/elasticsearch:" + tag;
+            String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new Elasticsearch8Version(imageName, version);
         }
@@ -449,7 +497,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_7, "elasticsearch");
         }
         public static Elasticsearch7Version fromTag(String tag) {
-            String imageName = "docker.elastic.co/elasticsearch/elasticsearch:" + tag;
+            String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new Elasticsearch7Version(imageName, version);
         }
@@ -460,8 +508,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_6, "elasticsearch");
         }
         public static Elasticsearch6Version fromTag(String tag, boolean oss) {
-            String prefix = oss ? "elasticsearch-oss" : "elasticsearch";
-            String imageName = "docker.elastic.co/elasticsearch/" + prefix + ":" + tag;
+            String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new Elasticsearch6Version(imageName, version);
         }
@@ -482,7 +529,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             return INITIALIZATION_FLAVOR.ELASTICSEARCH_5;
         }
         public static Elasticsearch5Version fromTag(String tag, String configContent) {
-            String imageName = "elasticsearch:" + tag;
+            String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new Elasticsearch5Version(imageName, version, OLDER_ES_CONFIG_PATH, configContent);
         }
@@ -527,7 +574,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             this.filePath = filePath;
         }
         public static OlderElasticsearchVersion fromTag(String tag) {
-            String imageName = "elasticsearch:" + tag;
+            String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new OlderElasticsearchVersion(imageName, version, OLDER_ES_CONFIG_PATH, OLDER_ES_CONFIG);
         }

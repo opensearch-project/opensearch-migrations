@@ -157,6 +157,8 @@ class TestRunner:
             command_list.append("--keep_workflows")
         if reuse_clusters:
             command_list.append("--reuse_clusters")
+        if self.registry_prefix:
+            command_list.append(f"--image_registry_prefix={self.registry_prefix}")
         command_list.append("-s")
         self.k8s_service.exec_migration_console_cmd(command_list=command_list)
         output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"

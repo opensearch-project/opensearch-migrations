@@ -411,8 +411,9 @@ async def test_live_check_lifecycle(mock_workflow_with_two_pods):
 
             # Collapse and verify no more calls
             live_node.collapse()
+            await pilot.pause(0.5)  # Let in-flight checks complete
             count_after_collapse = mock_check.call_count
-            await pilot.pause(0.3)
+            await pilot.pause(0.5)
             assert mock_check.call_count == count_after_collapse, \
                 f"Status check called while collapsed: {mock_check.call_count} > {count_after_collapse}"
 

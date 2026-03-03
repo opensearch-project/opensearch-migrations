@@ -118,6 +118,11 @@ jobs:
           skip_validation: true
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
+      - name: List Docker images
+        if: always()
+        run: |
+          echo "Recording Docker images. These include standard images pre-cached by GitHub Actions when Docker is run as root."
+          docker image list --format '{{ if ne .Repository "<none>" }}{{ .Repository }}{{ if ne .Tag "<none>" }}:{{ .Tag }}{{ end }}{{ else }}{{ .ID }}{{ end }}'
 
   generate-test-matrix:
     runs-on: ubuntu-22.04
@@ -146,6 +151,11 @@ jobs:
         with:
           gradle-cache-enabled: true
           gradle-cache-read-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift
+          sudo docker system prune -af
+          df -h
       - name: Restore Docker Cache
         uses: AndreKurait/docker-cache@0.6.0
         with:
@@ -199,6 +209,11 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
+      - name: List Docker images
+        if: always()
+        run: |
+          echo "Recording Docker images. These include standard images pre-cached by GitHub Actions when Docker is run as root."
+          docker image list --format '{{ if ne .Repository "<none>" }}{{ .Repository }}{{ if ne .Tag "<none>" }}:{{ .Tag }}{{ end }}{{ else }}{{ .ID }}{{ end }}'
       - name: Show disk usage
         if: always()
         run: |
@@ -219,6 +234,8 @@ jobs:
           key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
           # Only save cache on push events
           read-only: ${{ github.event_name != 'push' }}
+      - name: Build custom ES images
+        run: ./gradlew :custom-es-images:buildImage_7_10 --info
       - name: Start Docker Solution
         run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
         env:
@@ -226,6 +243,11 @@ jobs:
       - name: Run E2E test script
         run: |
           docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
+      - name: List Docker images
+        if: always()
+        run: |
+          echo "Recording Docker images. These include standard images pre-cached by GitHub Actions when Docker is run as root."
+          docker image list --format '{{ if ne .Repository "<none>" }}{{ .Repository }}{{ if ne .Tag "<none>" }}:{{ .Tag }}{{ end }}{{ else }}{{ .ID }}{{ end }}'
       - name: Show disk usage
         if: always()
         run: |
