@@ -46,6 +46,7 @@
     "dev-transform-config": "npm run dev-transform -w @opensearch-migrations/config-processor -- ",
     "dev-initialize-workflow-state": "npm run dev-initialize -w @opensearch-migrations/config-processor -- ",
     "type-check": "tsgo -p tsconfig.typecheck.all.json --noEmit",
+    "make-config-processor-bundle": "npm run bundle -w @opensearch-migrations/config-processor -- ",
     "make-templates": "npm run dev-make-templates -- ",
     "schema": "npm run dev-schema",
     "argo-schema": "npm run dev-argo-schema",
