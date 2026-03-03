@@ -37,9 +37,13 @@ class RegistryImageBuildUtils {
      */
     static List<String> buildBaseImageCandidates(Registry intermediateRegistry, String endpoint, String group, String name, String tag) {
         def candidates = []
-        // ECR mirrored path first (if available)
+        // ECR mirrored paths first (if available)
         if (intermediateRegistry.isEcr()) {
             candidates << "${intermediateRegistry.registryDomain}/mirrored/${endpoint}/${group}/${name}:${tag}"
+            // mirrorToEcr.sh uses mirror.gcr.io as the manifest source, so also try that path
+            if (endpoint == "docker.io") {
+                candidates << "${intermediateRegistry.registryDomain}/mirrored/mirror.gcr.io/${group}/${name}:${tag}"
+            }
         }
         // Configured endpoint (e.g. docker.io)
         def formatter = ImageRegistryFormatterFactory.getFormatter(endpoint)
