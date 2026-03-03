@@ -651,7 +651,29 @@ if [[ "$deploy_cfn" == "true" ]]; then
     fi
   }
 
+  # Stream CloudFormation stack events in the background while deploy runs.
+  # Polls describe-stack-events every 10s, prints new resource status changes.
+  stream_cfn_events() {
+    local seen_file
+    seen_file=$(mktemp)
+    trap "rm -f '$seen_file'" RETURN
+    while true; do
+      aws cloudformation describe-stack-events --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+        --query 'StackEvents[].[EventId,Timestamp,ResourceStatus,ResourceType,LogicalResourceId,ResourceStatusReason]' \
+        --output text 2>/dev/null | tac | while IFS=$'\t' read -r eid ts status rtype logical reason; do
+          grep -qxF "$eid" "$seen_file" 2>/dev/null && continue
+          echo "$eid" >> "$seen_file"
+          [[ "$reason" == "None" ]] && reason=""
+          printf "  %-26s %-30s %-40s %s%s\n" "$ts" "$status" "$rtype" "$logical" "${reason:+  ($reason)}"
+        done
+      sleep 10
+    done
+  }
+
   run_cfn_deploy() {
+    stream_cfn_events &
+    local stream_pid=$!
+
     aws cloudformation deploy \
       --template-file "$cfn_template_file" \
       --stack-name "$cfn_stack_name" \
@@ -659,6 +681,10 @@ if [[ "$deploy_cfn" == "true" ]]; then
       --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
       --no-fail-on-empty-changeset \
       ${region:+--region "$region"}
+    local rc=$?
+
+    kill $stream_pid 2>/dev/null; wait $stream_pid 2>/dev/null
+    return $rc
   }
 
   delete_stuck_stack
