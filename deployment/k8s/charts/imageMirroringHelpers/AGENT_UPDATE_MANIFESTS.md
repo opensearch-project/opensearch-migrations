@@ -128,3 +128,29 @@ Add it, re-mirror, and retry until all pods are Running.
 3. Not updating the OCI chart version override for cert-manager (`v` prefix)
 4. Missing the `docker.io/` prefix — images like `busybox:latest` are actually `docker.io/library/busybox:latest`
 5. Not checking the `testClusters` and `buildImages` manifests separately
+
+---
+
+# Agent Prompt: Convert Helm Chart DockerHub Images to mirror.gcr.io
+
+When pulling images referenced by helm charts, convert DockerHub images to use
+Google's `mirror.gcr.io` to avoid Docker Hub rate limits.
+
+## How to convert
+
+Replace the `docker.io` registry with `mirror.gcr.io`:
+- `docker.io/library/<image>:<tag>` → `mirror.gcr.io/library/<image>:<tag>`
+- `docker.io/<namespace>/<image>:<tag>` → `mirror.gcr.io/<namespace>/<image>:<tag>`
+- Bare names like `busybox:latest` → `mirror.gcr.io/library/busybox:latest`
+
+## Verify locally
+
+Before committing, confirm the image exists on the mirror:
+
+```bash
+docker pull mirror.gcr.io/library/<image>:<tag>
+# or for namespaced images:
+docker pull mirror.gcr.io/<namespace>/<image>:<tag>
+```
+
+If the pull fails, the image is not mirrored — leave it as-is.

@@ -11,7 +11,7 @@
 #   4. Install the Migration Assistant Helm chart with CloudWatch dashboards.
 #
 # By default, all artifacts are downloaded from the latest GitHub release:
-#   - CFN templates from the Solutions S3 bucket
+#   - CFN templates from GitHub releases
 #   - Helm chart from GitHub releases
 #   - Dashboard JSON files from GitHub releases
 #   - Container images for pods will use images from public.ecr.aws/opensearchproject
@@ -571,12 +571,18 @@ if [[ "$deploy_cfn" == "true" ]]; then
       cfn_template_value="file://$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Import-VPC-eks.template.json"
     fi
   else
-    cfn_template_flag="--template-url"
     if [[ "$deploy_create_vpc" == "true" ]]; then
-      cfn_template_value="https://solutions-reference.s3.amazonaws.com/migration-assistant-for-amazon-opensearch-service/${RELEASE_VERSION}/migration-assistant-for-amazon-opensearch-service-create-vpc-eks.template"
+      cfn_template_name="Migration-Assistant-Infra-Create-VPC-eks.template.json"
     else
-      cfn_template_value="https://solutions-reference.s3.amazonaws.com/migration-assistant-for-amazon-opensearch-service/${RELEASE_VERSION}/migration-assistant-for-amazon-opensearch-service-import-vpc-eks.template"
+      cfn_template_name="Migration-Assistant-Infra-Import-VPC-eks.template.json"
     fi
+    cfn_template_file=$(mktemp)
+    echo "Downloading CFN template from GitHub release: ${cfn_template_name}"
+    curl -fL -o "$cfn_template_file" \
+      "https://github.com/opensearch-project/opensearch-migrations/releases/download/${RELEASE_VERSION}/${cfn_template_name}" \
+      || { echo "Failed to download CFN template for version ${RELEASE_VERSION}"; rm -f "$cfn_template_file"; exit 1; }
+    cfn_template_flag="--template-body"
+    cfn_template_value="file://${cfn_template_file}"
   fi
 
   # Build parameter overrides (use separate array to handle comma-separated subnet IDs)
@@ -616,6 +622,14 @@ if [[ "$deploy_cfn" == "true" ]]; then
   fi
 
   echo "Deploying CloudFormation stack: $cfn_stack_name"
+  # Clean up DELETE_FAILED stacks so they can be recreated
+  if stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} --query 'Stacks[0].StackStatus' --output text 2>/dev/null) \
+      && [[ "$stack_status" == "DELETE_FAILED" ]]; then
+    echo "Stack $cfn_stack_name is in DELETE_FAILED state. Deleting before recreating..."
+    aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"}
+    aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+      || { echo "Failed to delete DELETE_FAILED stack: $cfn_stack_name"; exit 1; }
+  fi
   # create-stack/update-stack to support both --template-file and --template-url
   if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
     update_output=$(aws cloudformation update-stack \

@@ -249,7 +249,7 @@ export function createSnapshotOnAOSRole(scope: Construct, artifactS3Arn: string,
     requestingRole.addToPrincipalPolicy(new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['iam:PassRole'],
-        resources: [`arn:aws:iam::${Stack.of(scope).account}:role/*`]
+        resources: [`arn:${Stack.of(scope).partition}:iam::${Stack.of(scope).account}:role/*`]
     }));
 
     return snapshotRole

@@ -43,7 +43,6 @@ import eu.rekawek.toxiproxy.model.ToxicDirection;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -82,10 +81,10 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     //   t=0s   : RFS starts (lease acquisition, shard setup, doc migration begins)
     //   t=30s  : Coordinator disabled — mid-migration, ~30 docs already sent
     //   t=60s  : All 60 docs reach target, RFS tries to finalize on coordinator (fails)
-    //   t=150s : (test 2 only) Coordinator re-enabled after 120s restart window
+    //   t=115s : (test 2) Coordinator re-enabled after 85s, during retry 6's backoff sleep (expecting success on last retry)
     //   Test 1 uses COORDINATOR_NEVER_REENABLE_SECONDS so coordinator stays down permanently
     private static final int COORDINATOR_DISABLE_AFTER_SECONDS = 30;
-    private static final int COORDINATOR_REENABLE_AFTER_SECONDS = 120;
+    private static final int COORDINATOR_REENABLE_AFTER_SECONDS = 85;
     private static final int COORDINATOR_NEVER_REENABLE_SECONDS = 3600; // effectively never within test lifetime
 
     @TempDir
@@ -103,7 +102,6 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     }
 
     @Test
-    @Disabled("Known limitation: current coordinator retry window is shorter than long restart duration")
     @SneakyThrows
     void allDocsMigratedButCoordinatorLongRestartsAtCompletion() {
         runCoordinatorOutageScenario(COORDINATOR_REENABLE_AFTER_SECONDS, r -> {
@@ -159,12 +157,13 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
 
             // === ACTION : Ingest data on SOURCE cluster and take a snapshot
             var sourceClusterOperations = new ClusterOperations(esSourceContainer);
+            var targetClusterOperations = new ClusterOperations(osTargetContainer);
             setupAndSnapshotSourceCluster(
                 sourceClusterOperations, esSourceContainer, SHARDS, INDEX_NAME, TOTAL_DOCS,
                 tempDirSnapshot, testSnapshotContext);
 
             // ASSERT source snapshot has expected number of docs
-            var expectedDocs = getDocCountFromCluster(esSourceContainer.getUrl(), INDEX_NAME, true);
+            var expectedDocs = sourceClusterOperations.getDocCount(INDEX_NAME);
             Assertions.assertEquals(TOTAL_DOCS, expectedDocs, "Expected source doc count to match configured TOTAL_DOCS");
 
             // Schedule coordinator outage injection, tracking timestamps with nanoTime for monotonic ordering
@@ -212,7 +211,7 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                     "Outage should have been injected before RFS finished");
 
                 // ASSERT all docs migrated to target
-                var finalDocs = getDocCountFromCluster(osTargetContainer.getUrl(), INDEX_NAME, false);
+                var finalDocs = targetClusterOperations.getDocCount(INDEX_NAME);
                 Assertions.assertEquals(expectedDocs, finalDocs, "All docs should be on target");
 
                 // ASSERT coordinator work items reflect outcome (query coordinator directly, bypassing proxy)
@@ -320,7 +319,7 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
             sourceClusterOperations.createDocument(indexName, String.valueOf(i),
                 "{\"name\":\"doc-" + i + "\",\"score\":" + i + "}");
         }
-        sourceClusterOperations.post("/_refresh", null);
+        sourceClusterOperations.refresh();
 
         var snapshotArgs = new CreateSnapshot.Args();
         snapshotArgs.snapshotName = SNAPSHOT_NAME;
@@ -359,21 +358,6 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                 return;
             }
             Assertions.fail("Expected " + clusterLabel + " cluster to be reachable: " + e.getMessage(), e);
-        }
-    }
-
-    private static long getDocCountFromCluster(String host, String index, boolean failIfMissing) {
-        var client = new RestClient(ConnectionContextTestParams.builder().host(host).build().toConnectionContext());
-        var refresh = client.get(index + "/_refresh", null);
-        if (refresh.statusCode == 404 && !failIfMissing) return 0;
-        Assertions.assertEquals(200, refresh.statusCode, "Refresh failed for " + index);
-        var count = client.get(index + "/_count", null);
-        if (count.statusCode == 404 && !failIfMissing) return 0;
-        Assertions.assertEquals(200, count.statusCode, "Count failed for " + index);
-        try {
-            return OBJECT_MAPPER.readTree(count.body).path("count").asLong();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed parsing count response", e);
         }
     }
 
