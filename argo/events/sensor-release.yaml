@@ -1,0 +1,55 @@
+# Triggers release pipeline when a draft GitHub release is created
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: release-sensor
+  namespace: argo-events
+spec:
+  dependencies:
+    - name: release-created
+      eventSourceName: github-migrations
+      eventName: release-events
+      filters:
+        data:
+          - path: body.action
+            type: string
+            value: [created]
+          - path: body.release.draft
+            type: bool
+            value: ["true"]
+  triggers:
+    - template:
+        name: release
+        conditions: release-created
+        argoWorkflow:
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: release-
+                namespace: ma
+                labels:
+                  trigger: github-release
+                  test-type: release
+              spec:
+                workflowTemplateRef:
+                  name: release-pipeline
+                arguments:
+                  parameters:
+                    - name: release-tag
+                      value: ""
+                    - name: release-id
+                      value: ""
+          parameters:
+            - src:
+                dependencyName: release-created
+                dataKey: body.release.tag_name
+                useRawData: true
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: release-created
+                dataKey: body.release.id
+                useRawData: true
+              dest: spec.arguments.parameters.1.value

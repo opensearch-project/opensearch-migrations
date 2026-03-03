@@ -1,0 +1,25 @@
+# Submit with: argo submit -n ma argo/examples/run-ci-pipeline.yaml --watch
+# Runs the full CI pipeline (replaces CI.yml) with configurable parallelization
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: ci-pipeline-
+  namespace: ma
+  labels:
+    test-type: ci-pipeline
+spec:
+  workflowTemplateRef:
+    name: argo-ci-pipeline
+  arguments:
+    parameters:
+      - name: repo-url
+        value: "https://github.com/opensearch-project/opensearch-migrations.git"
+      - name: branch
+        value: "main"
+      - name: sha
+        value: ""
+      - name: pr-number
+        value: ""
+      # Reduce parallelization for local testing (30 is for production)
+      - name: gradle-parallelization
+        value: "4"

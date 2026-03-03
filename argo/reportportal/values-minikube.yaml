@@ -1,0 +1,52 @@
+# Lightweight config for minikube — minimal resource requests
+postgresql:
+  enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  persistence:
+    size: 2Gi
+
+opensearch:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+  persistence:
+    size: 2Gi
+
+minio:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+  persistence:
+    size: 1Gi
+
+serviceapi:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+
+uat:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+
+serviceui:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+serviceanalyzer:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi

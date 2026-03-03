@@ -1,0 +1,33 @@
+# Production S3 artifact repository configuration
+# Patch this into workflow-controller-configmap on production EKS
+# Replaces MinIO used in minikube setup
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workflow-controller-configmap-prod-patch
+  namespace: ma
+  labels:
+    app: ci-pipeline
+data:
+  artifactRepository: |
+    archiveLogs: true
+    s3:
+      bucket: opensearch-migrations-ci-artifacts
+      region: us-east-1
+      endpoint: s3.amazonaws.com
+      keyFormat: "{{workflow.name}}/{{pod.name}}"
+      useSDKCreds: true
+  persistence: |
+    archive: true
+    archiveTTL: 30d
+    postgresql:
+      host: argo-postgres.ma.svc.cluster.local
+      port: 5432
+      database: argo
+      tableName: argo_workflows
+      userNameSecret:
+        name: argo-postgres-config
+        key: username
+      passwordSecret:
+        name: argo-postgres-config
+        key: password

@@ -1,0 +1,17 @@
+# Submit with: argo submit -n ma argo/examples/run-matrix.yaml --watch
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: k8s-matrix-
+  namespace: ma
+  labels:
+    test-type: k8s-matrix
+spec:
+  workflowTemplateRef:
+    name: k8s-matrix-test
+  arguments:
+    parameters:
+      - name: source-version
+        value: "all"
+      - name: target-versions
+        value: '["OS_2.19","OS_3.1"]'

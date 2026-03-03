@@ -1,0 +1,145 @@
+# Triggers integration tests on PR/push (replaces jenkins_tests.yml GHA→Jenkins bridge)
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: integ-test-sensor
+  namespace: argo-events
+spec:
+  dependencies:
+    - name: pr-push
+      eventSourceName: github-migrations
+      eventName: pr-events
+      filters:
+        data:
+          - path: body.action
+            type: string
+            value: [opened, synchronize, reopened, ""]
+
+    - name: labeled
+      eventSourceName: github-migrations
+      eventName: pr-events
+      filters:
+        data:
+          - path: body.action
+            type: string
+            value: [labeled]
+          - path: body.label.name
+            type: string
+            value: ["run-eks-tests"]
+
+  triggers:
+    # --- full-es68-e2e (always on PR/push to main) ---
+    - template:
+        name: full-es68-e2e
+        conditions: pr-push
+        argoWorkflow:
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: full-es68-
+                namespace: ma
+                labels:
+                  trigger: github-event
+                  test-type: full-es68-e2e
+              spec:
+                workflowTemplateRef:
+                  name: full-es68-e2e
+                arguments:
+                  parameters:
+                    - name: repo-url
+                      value: ""
+                    - name: branch
+                      value: ""
+          parameters:
+            - src:
+                dependencyName: pr-push
+                dataKey: body.pull_request.head.repo.clone_url
+                useRawData: true
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: pr-push
+                dataKey: body.pull_request.head.ref
+                useRawData: true
+              dest: spec.arguments.parameters.1.value
+
+    # --- es5x-k8s-local (always on PR/push) ---
+    - template:
+        name: es5x-k8s-local
+        conditions: pr-push
+        argoWorkflow:
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: es5x-k8s-
+                namespace: ma
+                labels:
+                  trigger: github-event
+                  test-type: k8s-local
+                  source-version: ES_5.6
+              spec:
+                workflowTemplateRef:
+                  name: k8s-local-test
+                arguments:
+                  parameters:
+                    - name: repo-url
+                      value: ""
+                    - name: branch
+                      value: ""
+                    - name: source-version
+                      value: "ES_5.6"
+                    - name: target-version
+                      value: "OS_3.1"
+          parameters:
+            - src:
+                dependencyName: pr-push
+                dataKey: body.pull_request.head.repo.clone_url
+                useRawData: true
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: pr-push
+                dataKey: body.pull_request.head.ref
+                useRawData: true
+              dest: spec.arguments.parameters.1.value
+
+    # --- eks-integ (label-gated: only when 'run-eks-tests' label is added) ---
+    - template:
+        name: eks-integ
+        conditions: labeled
+        argoWorkflow:
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: eks-integ-
+                namespace: ma
+                labels:
+                  trigger: github-label
+                  test-type: eks-integ
+              spec:
+                workflowTemplateRef:
+                  name: eks-integ-pipeline
+                arguments:
+                  parameters:
+                    - name: repo-url
+                      value: ""
+                    - name: branch
+                      value: ""
+          parameters:
+            - src:
+                dependencyName: labeled
+                dataKey: body.pull_request.head.repo.clone_url
+                useRawData: true
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: labeled
+                dataKey: body.pull_request.head.ref
+                useRawData: true
+              dest: spec.arguments.parameters.1.value

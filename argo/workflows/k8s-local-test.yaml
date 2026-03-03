@@ -1,0 +1,255 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: k8s-local-test
+  namespace: ma
+  labels:
+    app: ci-pipeline
+    replaces: k8sLocalDeployment.groovy
+spec:
+  entrypoint: main
+  onExit: cleanup-handler
+  serviceAccountName: argo-workflow-executor
+  arguments:
+    parameters:
+      - name: repo-url
+        value: "https://github.com/opensearch-project/opensearch-migrations.git"
+      - name: branch
+        value: "main"
+      - name: source-version
+        value: "ES_7.10"
+      - name: target-version
+        value: "OS_2.19"
+      - name: test-ids
+        value: "all"
+      - name: unique-id
+        value: ""  # auto-generated if empty
+  activeDeadlineSeconds: 10800  # 3 hours (matches Jenkins timeout)
+
+  artifactGC:
+    strategy: OnWorkflowDeletion
+
+  templates:
+    # ================================================================
+    # MAIN DAG — orchestrates the full pipeline
+    # Mirrors Jenkins stages: Checkout → Build Images → Cleanup Previous → Deploy+Test
+    # ================================================================
+    - name: main
+      dag:
+        tasks:
+          - name: checkout
+            templateRef:
+              name: common-ci-steps
+              template: git-checkout
+            arguments:
+              parameters:
+                - name: repo-url
+                  value: "{{workflow.parameters.repo-url}}"
+                - name: branch
+                  value: "{{workflow.parameters.branch}}"
+
+          - name: get-registry-ip
+            templateRef:
+              name: common-ci-steps
+              template: get-registry-ip
+
+          - name: build-images
+            depends: checkout
+            templateRef:
+              name: common-ci-steps
+              template: build-docker-images
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+
+          - name: cleanup-previous
+            templateRef:
+              name: common-ci-steps
+              template: cleanup-ma
+
+          - name: deploy-and-test
+            depends: "checkout && build-images && cleanup-previous && get-registry-ip"
+            template: deploy-and-test
+            arguments:
+              parameters:
+                - name: registry-ip
+                  value: "{{tasks.get-registry-ip.outputs.result}}"
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+
+    # ================================================================
+    # DEPLOY AND TEST — the core step
+    # Runs the Python testAutomation framework which:
+    #   1. helm install MA chart with registry prefix
+    #   2. Wait for all pods healthy
+    #   3. kubectl exec into migration-console to run pytest
+    #   4. Collect test reports (JSON) and logs
+    # ================================================================
+    - name: deploy-and-test
+      inputs:
+        parameters:
+          - name: registry-ip
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: test-reports
+            path: /workspace/libraries/testAutomation/reports
+            optional: true
+            archive:
+              none: {}
+            s3:
+              key: "{{workflow.name}}/test-reports/"
+          - name: test-logs
+            path: /workspace/libraries/testAutomation/logs
+            optional: true
+            archive:
+              tar:
+                compressionLevel: 6
+            s3:
+              key: "{{workflow.name}}/logs/"
+      container:
+        image: python:3.11-slim
+        workingDir: /workspace/libraries/testAutomation
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+
+            # Install system dependencies
+            apt-get update -qq && apt-get install -y -qq \
+              curl pipenv kubectl helm > /dev/null 2>&1
+
+            # Install Python dependencies
+            pipenv install --deploy
+
+            # Create output directories
+            mkdir -p ./reports ./logs
+
+            # Configure kubectl
+            kubectl config set-context --current --namespace=ma 2>/dev/null || true
+
+            # Resolve test-ids argument
+            TEST_IDS_ARG=""
+            if [ "{{workflow.parameters.test-ids}}" != "all" ] && [ -n "{{workflow.parameters.test-ids}}" ]; then
+              TEST_IDS_ARG="--test-ids='{{workflow.parameters.test-ids}}'"
+            fi
+
+            # Generate unique ID if not provided
+            UNIQUE_ID="{{workflow.parameters.unique-id}}"
+            if [ -z "$UNIQUE_ID" ]; then
+              UNIQUE_ID="argo-$(date +%Y%m%d%H%M%S)-$(head -c 4 /dev/urandom | xxd -p)"
+            fi
+
+            # Run the test automation framework
+            echo "============================================"
+            echo "Running: {{workflow.parameters.source-version}} → {{workflow.parameters.target-version}}"
+            echo "Registry: {{inputs.parameters.registry-ip}}:5000/"
+            echo "Unique ID: ${UNIQUE_ID}"
+            echo "============================================"
+
+            pipenv run app \
+              --source-version={{workflow.parameters.source-version}} \
+              --target-version={{workflow.parameters.target-version}} \
+              ${TEST_IDS_ARG} \
+              --unique-id="${UNIQUE_ID}" \
+              --test-reports-dir='./reports' \
+              --copy-logs \
+              --registry-prefix='{{inputs.parameters.registry-ip}}:5000/'
+
+            echo "Tests complete. Reports:"
+            ls -la ./reports/ || true
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+        activeDeadlineSeconds: 7200  # 2 hours for tests
+
+    # ================================================================
+    # CLEANUP HANDLER — exit handler, always runs
+    # Replaces Jenkins post { always { ... } } block
+    # ================================================================
+    - name: cleanup-handler
+      dag:
+        tasks:
+          - name: archive-logs
+            template: archive-remaining-logs
+
+          - name: cleanup-deployment
+            depends: archive-logs
+            template: cleanup-deployment
+
+          - name: upload-results
+            templateRef:
+              name: reportportal-upload
+              template: upload-json-reports
+            arguments:
+              parameters:
+                - name: launch-name
+                  value: "k8s-local-{{workflow.parameters.source-version}}-{{workflow.parameters.target-version}}"
+
+    - name: cleanup-deployment
+      retryStrategy:
+        limit: 2
+        retryPolicy: Always
+        backoff:
+          duration: "10s"
+          factor: 2
+      container:
+        image: bitnami/kubectl:latest
+        command: [bash, -c]
+        args:
+          - |
+            set +e  # don't fail on cleanup errors
+
+            echo "Running cleanup..."
+
+            # Always do basic cleanup — works even if workspace/pipenv isn't available
+            helm uninstall ma -n ma 2>/dev/null || true
+
+            # Delete kyverno webhooks
+            kubectl delete mutatingwebhookconfigurations \
+              -l app.kubernetes.io/instance=kyverno --ignore-not-found || true
+            kubectl delete validatingwebhookconfigurations \
+              -l app.kubernetes.io/instance=kyverno --ignore-not-found || true
+
+            # Delete kyverno namespace
+            kubectl delete namespace kyverno-ma --ignore-not-found --grace-period=0 || true
+
+            # Wait for resources to terminate
+            for i in $(seq 1 30); do
+              REMAINING=$(kubectl get pods -n ma --no-headers 2>/dev/null | wc -l)
+              [ "$REMAINING" -eq 0 ] && break
+              echo "Waiting for $REMAINING pods to terminate... ($i/30)"
+              sleep 5
+            done
+
+            echo "Cleanup complete"
+        activeDeadlineSeconds: 900  # 15 min
+
+    - name: archive-remaining-logs
+      outputs:
+        artifacts:
+          - name: pod-logs
+            path: /tmp/pod-logs
+            optional: true
+            archive:
+              tar:
+                compressionLevel: 6
+            s3:
+              key: "{{workflow.name}}/pod-logs/"
+      container:
+        image: bitnami/kubectl:latest
+        command: [bash, -c]
+        args:
+          - |
+            set +e
+            echo "Archiving any remaining pod logs..."
+            mkdir -p /tmp/pod-logs
+            for pod in $(kubectl get pods -n ma -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+              kubectl logs -n ma "$pod" --all-containers > "/tmp/pod-logs/${pod}.log" 2>&1 || true
+            done
+            echo "Archived $(ls /tmp/pod-logs/ 2>/dev/null | wc -l) pod logs"

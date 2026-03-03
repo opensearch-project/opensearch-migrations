@@ -1,0 +1,275 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: common-ci-steps
+  namespace: ma
+  labels:
+    app: ci-pipeline
+spec:
+  templates:
+    # ================================================================
+    # GIT CHECKOUT — replaces Jenkins 'Checkout' stage
+    # Uses shallow clone for speed
+    # ================================================================
+    - name: git-checkout
+      inputs:
+        parameters:
+          - name: repo-url
+            default: "https://github.com/opensearch-project/opensearch-migrations.git"
+          - name: branch
+            default: "main"
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      script:
+        image: alpine/git:2.43.0
+        command: [sh]
+        source: |
+          set -euo pipefail
+          cd /workspace
+
+          echo "Cloning {{inputs.parameters.repo-url}} @ {{inputs.parameters.branch}}..."
+          git clone --depth 1 --branch "{{inputs.parameters.branch}}" \
+            "{{inputs.parameters.repo-url}}" .
+
+          COMMIT=$(git rev-parse --short HEAD)
+          echo "Checked out commit: ${COMMIT}"
+          echo "${COMMIT}" > /tmp/commit-sha
+          ls -la
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+      volumes:
+        - name: workspace
+          emptyDir: {}
+
+    # ================================================================
+    # GRADLE BUILD — compiles without running tests
+    # ================================================================
+    - name: gradle-build
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: gradle:8-jdk17
+        workingDir: /workspace
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            echo "Running Gradle build..."
+            ./gradlew clean build -x test --no-daemon --stacktrace 2>&1 | tail -100
+            echo "Gradle build complete"
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            memory: "8Gi"
+
+    # ================================================================
+    # BUILD DOCKER IMAGES — replaces Jenkins 'Build Docker Images (BuildKit)' stage
+    # ================================================================
+    - name: build-docker-images
+      inputs:
+        parameters:
+          - name: platform
+            default: "amd64"
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        parameters:
+          - name: registry-prefix
+            valueFrom:
+              path: /tmp/registry-prefix
+      sidecars:
+        - name: dind
+          image: docker:27-dind
+          securityContext:
+            privileged: true
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+          mirrorVolumeMounts: true
+      container:
+        image: docker:27-cli
+        workingDir: /workspace
+        env:
+          - name: DOCKER_HOST
+            value: tcp://localhost:2375
+          - name: USE_LOCAL_REGISTRY
+            value: "true"
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+
+            # Wait for Docker daemon
+            echo "Waiting for Docker daemon..."
+            for i in $(seq 1 30); do
+              docker info >/dev/null 2>&1 && break
+              sleep 2
+            done
+            docker info >/dev/null 2>&1 || { echo "Docker daemon failed to start"; exit 1; }
+
+            # Install required tools
+            apk add --no-cache bash helm kubectl gradle openjdk17 curl
+
+            # Setup BuildKit
+            helm uninstall buildkit -n buildkit 2>/dev/null || true
+            BUILDKIT_HELM_ARGS='--set buildkitd.maxParallelism=16 --set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0' \
+              ./buildImages/setUpK8sImageBuildServices.sh
+
+            # Get registry IP
+            REGISTRY_IP=$(kubectl get svc -n buildkit docker-registry -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "localhost")
+            echo "${REGISTRY_IP}:5000/" > /tmp/registry-prefix
+            echo "Registry prefix: ${REGISTRY_IP}:5000/"
+
+            # Build images
+            ./gradlew :buildImages:buildImagesToRegistry_{{inputs.parameters.platform}} \
+              -x test --info --stacktrace 2>&1 | tail -50
+
+            # Cleanup BuildKit
+            docker buildx rm local-remote-builder 2>/dev/null || true
+            helm uninstall buildkit -n buildkit 2>/dev/null || true
+
+            echo "Image build complete"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "8Gi"
+        activeDeadlineSeconds: 1800  # 30 min timeout
+
+    # ================================================================
+    # CLEANUP PREVIOUS MA — replaces Jenkins 'Cleanup Previous MA Deployment' stage
+    # ================================================================
+    - name: cleanup-ma
+      container:
+        image: bitnami/kubectl:latest
+        command: [bash, -c]
+        args:
+          - |
+            set +e
+            echo "Cleaning up previous MA deployment..."
+
+            helm uninstall ma -n ma || true
+
+            kubectl delete mutatingwebhookconfigurations \
+              -l app.kubernetes.io/instance=kyverno --ignore-not-found || true
+            kubectl delete validatingwebhookconfigurations \
+              -l app.kubernetes.io/instance=kyverno --ignore-not-found || true
+
+            kubectl delete namespace kyverno-ma --ignore-not-found --grace-period=0 || true
+            kubectl delete namespace ma --ignore-not-found --grace-period=0 --force || true
+
+            for i in $(seq 1 30); do
+              kubectl get namespace ma >/dev/null 2>&1 || break
+              echo "Waiting for ma namespace to terminate... ($i/30)"
+              sleep 2
+            done
+
+            kubectl create namespace ma 2>/dev/null || true
+            echo "Cleanup complete"
+        activeDeadlineSeconds: 180  # 3 min timeout
+
+    # ================================================================
+    # GET REGISTRY IP — utility to discover BuildKit registry ClusterIP
+    # ================================================================
+    - name: get-registry-ip
+      script:
+        image: bitnami/kubectl:latest
+        command: [bash]
+        source: |
+          REGISTRY_IP=$(kubectl get svc -n buildkit docker-registry \
+            -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "localhost")
+          echo "${REGISTRY_IP}"
+
+    # ================================================================
+    # NOTIFY GITHUB — post commit status to GitHub
+    # ================================================================
+    - name: notify-github-status
+      inputs:
+        parameters:
+          - name: sha
+          - name: state
+            default: ""  # auto-detect from workflow.status if empty
+          - name: context
+            default: "argo/integration-test"
+          - name: description
+            default: ""
+          - name: target-url
+            default: ""
+          - name: repo
+            default: "opensearch-project/opensearch-migrations"
+      script:
+        image: curlimages/curl:latest
+        command: [sh]
+        source: |
+          STATE="{{inputs.parameters.state}}"
+          if [ -z "$STATE" ]; then
+            case "{{workflow.status}}" in
+              Succeeded) STATE="success" ;;
+              Failed|Error) STATE="failure" ;;
+              *) STATE="error" ;;
+            esac
+          fi
+
+          DESC="{{inputs.parameters.description}}"
+          if [ -z "$DESC" ]; then
+            DESC="{{workflow.status}} ({{workflow.duration}}s)"
+          fi
+
+          TARGET_URL="{{inputs.parameters.target-url}}"
+          if [ -z "$TARGET_URL" ]; then
+            TARGET_URL="https://argo.internal/workflows/ma/{{workflow.name}}"
+          fi
+
+          echo "Posting status: ${STATE} for {{inputs.parameters.sha}}"
+
+          curl -sf -X POST \
+            "https://api.github.com/repos/{{inputs.parameters.repo}}/statuses/{{inputs.parameters.sha}}" \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"state\": \"${STATE}\",
+              \"target_url\": \"${TARGET_URL}\",
+              \"description\": \"${DESC}\",
+              \"context\": \"{{inputs.parameters.context}}\"
+            }" && echo "Status posted successfully" || echo "Warning: Failed to post status (token may not be configured)"
+        env:
+          - name: GITHUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: github-token
+                key: token
+                optional: true  # don't fail if secret doesn't exist (local testing)
+
+    # ================================================================
+    # HELM DEPENDENCY UPDATE — ensure chart deps are current
+    # ================================================================
+    - name: helm-dep-update
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: alpine/helm:3.14
+        workingDir: /workspace/deployment/k8s
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            helm dependency update charts/aggregates/testClusters
+            helm dependency update charts/aggregates/migrationAssistantWithArgo
+            echo "Helm dependencies updated"

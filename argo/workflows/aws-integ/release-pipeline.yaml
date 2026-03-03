@@ -1,0 +1,280 @@
+# Replaces: jenkins/release.jenkinsFile
+# Release pipeline: download artifacts → publish to S3/Maven → copy Docker images → mark non-draft
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: release-pipeline
+  namespace: ma
+  labels:
+    app: ci-pipeline
+    replaces: release.jenkinsFile
+spec:
+  entrypoint: release
+  serviceAccountName: ci-release-sa  # IRSA with prod S3 + ECR access
+  arguments:
+    parameters:
+      - name: release-tag
+        value: ""
+      - name: release-id
+        value: ""
+  activeDeadlineSeconds: 3600  # 1 hour
+
+  templates:
+    - name: release
+      dag:
+        tasks:
+          - name: download-artifacts
+            template: download-release-assets
+
+          - name: publish-s3
+            depends: download-artifacts
+            template: publish-to-s3
+            arguments:
+              artifacts:
+                - name: release-assets
+                  from: "{{tasks.download-artifacts.outputs.artifacts.release-assets}}"
+
+          - name: publish-maven
+            depends: download-artifacts
+            template: publish-to-maven
+            arguments:
+              artifacts:
+                - name: release-assets
+                  from: "{{tasks.download-artifacts.outputs.artifacts.release-assets}}"
+
+          - name: copy-images
+            depends: download-artifacts
+            template: copy-docker-images
+
+          - name: mark-released
+            depends: "publish-s3 && publish-maven && copy-images"
+            template: mark-release-non-draft
+
+    # ================================================================
+    # DOWNLOAD RELEASE ASSETS from GitHub
+    # ================================================================
+    - name: download-release-assets
+      outputs:
+        artifacts:
+          - name: release-assets
+            path: /release
+      script:
+        image: curlimages/curl:latest
+        command: [sh]
+        source: |
+          set -euo pipefail
+          mkdir -p /release
+          cd /release
+
+          TAG="{{workflow.parameters.release-tag}}"
+          REPO="opensearch-project/opensearch-migrations"
+          API="https://api.github.com/repos/${REPO}/releases/tags/${TAG}"
+
+          echo "Fetching release assets for ${TAG}..."
+          ASSETS=$(curl -sf -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" "${API}" | \
+            python3 -c "import sys,json; [print(a['url'],a['name']) for a in json.load(sys.stdin).get('assets',[])]")
+
+          echo "$ASSETS" | while read -r url name; do
+            echo "Downloading ${name}..."
+            curl -sfL -H "Accept: application/octet-stream" \
+              -H "Authorization: token ${GITHUB_TOKEN}" \
+              "${url}" -o "${name}"
+          done
+
+          # Extract tarballs
+          [ -f opensearch-migrations-source.tar.gz ] && tar -xf opensearch-migrations-source.tar.gz
+          [ -f opensearch-migrations-build.tar.gz ] && tar -xf opensearch-migrations-build.tar.gz
+
+          echo "Downloaded assets:"
+          ls -la
+        env:
+          - name: GITHUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: github-token
+                key: token
+
+    # ================================================================
+    # PUBLISH TO S3 — replaces publishToArtifactsProdBucket
+    # ================================================================
+    - name: publish-to-s3
+      inputs:
+        artifacts:
+          - name: release-assets
+            path: /release
+      container:
+        image: amazon/aws-cli:2.15.0
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            TAG="{{workflow.parameters.release-tag}}"
+
+            echo "Publishing to S3 artifacts bucket..."
+            aws s3 cp /release/opensearch-migrations-source.tar.gz \
+              "s3://artifacts.opensearch.org/migrations/${TAG}/opensearch-migrations-${TAG}.tar.gz"
+
+            echo "Published to S3 successfully"
+
+    # ================================================================
+    # PUBLISH TO MAVEN — replaces publishToMaven
+    # Uses Gradle publishToMaven task from opensearch-build-libraries
+    # ================================================================
+    - name: publish-to-maven
+      inputs:
+        artifacts:
+          - name: release-assets
+            path: /release
+      container:
+        image: release-runner:latest
+        workingDir: /release
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            echo "Publishing to Maven..."
+
+            if [ -d repository ]; then
+              cd repository
+
+              # Configure Maven settings with signing credentials
+              mkdir -p ~/.m2
+              cat > ~/.m2/settings.xml << 'SETTINGS'
+            <settings>
+              <servers>
+                <server>
+                  <id>sonatype-nexus-staging</id>
+                  <username>${env.SONATYPE_USERNAME}</username>
+                  <password>${env.SONATYPE_PASSWORD}</password>
+                </server>
+              </servers>
+              <profiles>
+                <profile>
+                  <id>sign</id>
+                  <activation><activeByDefault>true</activeByDefault></activation>
+                  <properties>
+                    <gpg.executable>gpg</gpg.executable>
+                    <gpg.passphrase>${env.GPG_PASSPHRASE}</gpg.passphrase>
+                  </properties>
+                </profile>
+              </profiles>
+            </settings>
+            SETTINGS
+
+              # Deploy all artifacts in the local repository
+              for POM in $(find . -name "*.pom" -type f); do
+                DIR=$(dirname "${POM}")
+                ARTIFACT=$(basename "${POM}" .pom)
+                JAR="${DIR}/${ARTIFACT}.jar"
+                SOURCES="${DIR}/${ARTIFACT}-sources.jar"
+                JAVADOC="${DIR}/${ARTIFACT}-javadoc.jar"
+
+                DEPLOY_ARGS="-DpomFile=${POM}"
+                [ -f "${JAR}" ] && DEPLOY_ARGS="${DEPLOY_ARGS} -Dfile=${JAR}" || DEPLOY_ARGS="${DEPLOY_ARGS} -Dfile=${POM} -Dpackaging=pom"
+                [ -f "${SOURCES}" ] && DEPLOY_ARGS="${DEPLOY_ARGS} -Dsources=${SOURCES}"
+                [ -f "${JAVADOC}" ] && DEPLOY_ARGS="${DEPLOY_ARGS} -Djavadoc=${JAVADOC}"
+
+                echo "Deploying ${ARTIFACT}..."
+                mvn gpg:sign-and-deploy-file \
+                  -DrepositoryId=sonatype-nexus-staging \
+                  -Durl=https://aws.oss.sonatype.org/service/local/staging/deploy/maven2/ \
+                  ${DEPLOY_ARGS} || echo "Warning: Failed to deploy ${ARTIFACT}"
+              done
+
+              echo "Maven publish complete"
+            else
+              echo "No Maven repository directory found in release assets, skipping"
+            fi
+        env:
+          - name: SONATYPE_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: maven-credentials
+                key: username
+                optional: true
+          - name: SONATYPE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: maven-credentials
+                key: password
+                optional: true
+          - name: GPG_PASSPHRASE
+            valueFrom:
+              secretKeyRef:
+                name: gpg-credentials
+                key: passphrase
+                optional: true
+
+    # ================================================================
+    # COPY DOCKER IMAGES — replaces docker-copy Jenkins jobs
+    # Uses skopeo to copy from opensearchstaging → public.ecr.aws
+    # ================================================================
+    - name: copy-docker-images
+      steps:
+        - - name: copy-image
+            template: copy-single-image
+            arguments:
+              parameters:
+                - name: image-name
+                  value: "{{item}}"
+            withItems:
+              - opensearch-migrations-console
+              - opensearch-migrations-traffic-replayer
+              - opensearch-migrations-traffic-capture-proxy
+              - opensearch-migrations-reindex-from-snapshot
+
+    - name: copy-single-image
+      inputs:
+        parameters:
+          - name: image-name
+      container:
+        image: release-runner:latest
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            TAG="{{workflow.parameters.release-tag}}"
+            IMAGE="{{inputs.parameters.image-name}}"
+            SRC="docker://opensearchstaging/${IMAGE}"
+            DST="docker://public.ecr.aws/opensearchproject/${IMAGE}"
+
+            echo "Copying ${IMAGE}:${TAG}..."
+            skopeo copy "${SRC}:${TAG}" "${DST}:${TAG}"
+
+            echo "Copying ${IMAGE}:latest..."
+            skopeo copy "${SRC}:${TAG}" "${DST}:latest"
+
+            echo "Image ${IMAGE} copied successfully"
+
+    # ================================================================
+    # MARK RELEASE NON-DRAFT — replaces Jenkins post.success block
+    # ================================================================
+    - name: mark-release-non-draft
+      script:
+        image: curlimages/curl:latest
+        command: [sh]
+        source: |
+          TAG="{{workflow.parameters.release-tag}}"
+          REPO="opensearch-project/opensearch-migrations"
+          RELEASE_URL="https://api.github.com/repos/${REPO}/releases/tags/${TAG}"
+
+          # Get release ID
+          RELEASE_ID=$(curl -sf -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" "${RELEASE_URL}" | \
+            python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+
+          echo "Marking release ${TAG} (ID: ${RELEASE_ID}) as non-draft..."
+          curl -sf -X PATCH \
+            "https://api.github.com/repos/${REPO}/releases/${RELEASE_ID}" \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -d '{"tag_name":"'"${TAG}"'","draft":false,"prerelease":false}'
+
+          echo "Release ${TAG} marked as non-draft"
+        env:
+          - name: GITHUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: github-token
+                key: token

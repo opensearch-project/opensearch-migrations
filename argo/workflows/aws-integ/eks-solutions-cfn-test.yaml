@@ -1,0 +1,239 @@
+# Replaces: vars/eksSolutionsCFNTest.groovy
+# EKS CFN deployment validation — tests Create-VPC and Import-VPC modes
+# Deploys EKS cluster via aws-bootstrap.sh, validates stack outputs, tears down
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: eks-solutions-cfn-test
+  namespace: ma
+  labels:
+    app: ci-pipeline
+    replaces: eksSolutionsCFNTest.groovy
+spec:
+  entrypoint: main
+  onExit: cleanup-handler
+  serviceAccountName: ci-deployment-sa
+  arguments:
+    parameters:
+      - name: repo-url
+        value: "https://github.com/opensearch-project/opensearch-migrations.git"
+      - name: branch
+        value: "main"
+      - name: stage
+        value: "eks-cfn-test"
+      - name: region
+        value: "us-east-1"
+  activeDeadlineSeconds: 10800  # 3 hours
+
+  synchronization:
+    semaphores:
+      - configMapKeyRef:
+          name: ci-stage-locks
+          key: eks-integ
+
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: checkout
+            templateRef:
+              name: common-ci-steps
+              template: git-checkout
+            arguments:
+              parameters:
+                - name: repo-url
+                  value: "{{workflow.parameters.repo-url}}"
+                - name: branch
+                  value: "{{workflow.parameters.branch}}"
+
+          - name: build
+            depends: checkout
+            templateRef:
+              name: default-integ-pipeline
+              template: gradle-build
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+
+          - name: test-create-vpc
+            depends: build
+            template: test-cfn-mode
+            arguments:
+              parameters:
+                - name: mode
+                  value: "create-vpc"
+              artifacts:
+                - name: source
+                  from: "{{tasks.build.outputs.artifacts.source}}"
+
+          - name: test-import-vpc
+            depends: test-create-vpc
+            template: test-cfn-mode
+            arguments:
+              parameters:
+                - name: mode
+                  value: "import-vpc"
+              artifacts:
+                - name: source
+                  from: "{{tasks.build.outputs.artifacts.source}}"
+
+    # ================================================================
+    # TEST CFN MODE — deploy EKS via aws-bootstrap.sh, validate, destroy
+    # ================================================================
+    - name: test-cfn-mode
+      inputs:
+        parameters:
+          - name: mode
+        artifacts:
+          - name: source
+            path: /workspace
+      retryStrategy:
+        limit: 1
+        retryPolicy: OnFailure
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+            MODE="{{inputs.parameters.mode}}"
+            STACK_NAME="Migration-Assistant-Infra-${MODE}-eks-${STAGE}-${REGION}"
+
+            CREDS=$(aws sts assume-role \
+              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
+              --role-session-name "argo-eks-cfn-${MODE}" --duration-seconds 5400)
+            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
+            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
+            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
+
+            echo "=== Testing ${MODE} mode ==="
+
+            BOOTSTRAP_ARGS="--stack-name ${STACK_NAME} --stage ${STAGE} --region ${REGION}"
+            BOOTSTRAP_ARGS="${BOOTSTRAP_ARGS} --build-cfn --build-images --build-chart-and-dashboards"
+            BOOTSTRAP_ARGS="${BOOTSTRAP_ARGS} --base-dir $(pwd) --skip-console-exec"
+
+            if [ "${MODE}" = "create-vpc" ]; then
+              BOOTSTRAP_ARGS="${BOOTSTRAP_ARGS} --deploy-create-vpc-cfn"
+            else
+              # Import-VPC: create a test VPC first, then import it
+              echo "Creating test VPC for import..."
+              VPC_ID=$(aws ec2 create-vpc --cidr-block 10.0.0.0/16 \
+                --tag-specifications "ResourceType=vpc,Tags=[{Key=Name,Value=test-import-${STAGE}}]" \
+                --query 'Vpc.VpcId' --output text)
+              SUBNET_ID=$(aws ec2 create-subnet --vpc-id "${VPC_ID}" \
+                --cidr-block 10.0.1.0/24 --query 'Subnet.SubnetId' --output text)
+              BOOTSTRAP_ARGS="${BOOTSTRAP_ARGS} --deploy-import-vpc-cfn --vpc-id ${VPC_ID} --subnet-ids ${SUBNET_ID}"
+            fi
+
+            # Deploy
+            ./deployment/k8s/aws/aws-bootstrap.sh ${BOOTSTRAP_ARGS} 2>&1 | \
+              while IFS= read -r line; do printf '%s | %s\n' "$(date '+%H:%M:%S')" "$line"; done
+
+            # Validate stack outputs
+            echo "Validating stack outputs..."
+            OUTPUTS=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" \
+              --query "Stacks[0].Outputs" --output json --region "${REGION}")
+            echo "${OUTPUTS}" | jq .
+
+            EXPORT_STRING=$(echo "${OUTPUTS}" | jq -r '.[] | select(.OutputKey=="MigrationsExportString") | .OutputValue')
+            if [ -z "${EXPORT_STRING}" ]; then
+              echo "ERROR: MigrationsExportString not found in stack outputs"
+              exit 1
+            fi
+            echo "Stack validated: MigrationsExportString present"
+
+            # Cleanup
+            echo "Deleting stack ${STACK_NAME}..."
+            aws cloudformation delete-stack --stack-name "${STACK_NAME}" --region "${REGION}"
+            aws cloudformation wait stack-delete-complete --stack-name "${STACK_NAME}" --region "${REGION}" || true
+
+            if [ "${MODE}" = "import-vpc" ]; then
+              echo "Cleaning up test VPC..."
+              aws ec2 delete-subnet --subnet-id "${SUBNET_ID}" || true
+              aws ec2 delete-vpc --vpc-id "${VPC_ID}" || true
+            fi
+
+            echo "=== ${MODE} mode test PASSED ==="
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+        activeDeadlineSeconds: 5400  # 90 min per mode
+
+    # ================================================================
+    # CLEANUP HANDLER
+    # ================================================================
+    - name: cleanup-handler
+      dag:
+        tasks:
+          - name: delete-create-vpc-stack
+            template: delete-cfn-stack-safe
+            arguments:
+              parameters:
+                - name: stack-name
+                  value: "Migration-Assistant-Infra-create-vpc-eks-{{workflow.parameters.stage}}-{{workflow.parameters.region}}"
+          - name: delete-import-vpc-stack
+            template: delete-cfn-stack-safe
+            arguments:
+              parameters:
+                - name: stack-name
+                  value: "Migration-Assistant-Infra-import-vpc-eks-{{workflow.parameters.stage}}-{{workflow.parameters.region}}"
+          - name: upload-results
+            templateRef:
+              name: reportportal-upload
+              template: upload-junit
+            arguments:
+              parameters:
+                - name: launch-name
+                  value: "eks-solutions-cfn-test"
+
+    - name: delete-cfn-stack-safe
+      inputs:
+        parameters:
+          - name: stack-name
+      retryStrategy:
+        limit: 2
+        retryPolicy: Always
+        backoff:
+          duration: "30s"
+          factor: 2
+      container:
+        image: amazon/aws-cli:2.15.0
+        command: [bash, -c]
+        args:
+          - |
+            set +e
+            CREDS=$(aws sts assume-role \
+              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
+              --role-session-name "argo-cleanup" --duration-seconds 3600)
+            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
+            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
+            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
+
+            STACK="{{inputs.parameters.stack-name}}"
+            STATUS=$(aws cloudformation describe-stacks --stack-name "${STACK}" \
+              --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+            if [ "${STATUS}" = "DOES_NOT_EXIST" ]; then
+              echo "Stack ${STACK} does not exist, skipping"
+              exit 0
+            fi
+            echo "Deleting stack ${STACK} (status: ${STATUS})..."
+            aws cloudformation delete-stack --stack-name "${STACK}" --region "{{workflow.parameters.region}}"
+            aws cloudformation wait stack-delete-complete --stack-name "${STACK}" --region "{{workflow.parameters.region}}" || true
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 1800

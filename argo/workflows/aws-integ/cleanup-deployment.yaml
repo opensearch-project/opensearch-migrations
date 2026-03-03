@@ -1,0 +1,81 @@
+# Replaces: vars/cleanupDeployment.groovy
+# Simple pipeline that runs cleanup_deployment.py for a given stage
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cleanup-deployment
+  namespace: ma
+  labels:
+    app: ci-pipeline
+    replaces: cleanupDeployment.groovy
+spec:
+  entrypoint: cleanup
+  serviceAccountName: ci-deployment-sa
+  arguments:
+    parameters:
+      - name: repo-url
+        value: "https://github.com/opensearch-project/opensearch-migrations.git"
+      - name: branch
+        value: "main"
+      - name: stage
+        value: ""  # required
+      - name: region
+        value: "us-east-1"
+  activeDeadlineSeconds: 3600  # 1 hour
+
+  synchronization:
+    mutexes:
+      - name: "cleanup-{{workflow.parameters.stage}}"
+
+  templates:
+    - name: cleanup
+      dag:
+        tasks:
+          - name: checkout
+            templateRef:
+              name: common-ci-steps
+              template: git-checkout
+            arguments:
+              parameters:
+                - name: repo-url
+                  value: "{{workflow.parameters.repo-url}}"
+                - name: branch
+                  value: "{{workflow.parameters.branch}}"
+
+          - name: run-cleanup
+            depends: checkout
+            template: run-cleanup
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+
+    - name: run-cleanup
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace/test/cleanupDeployment
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            CREDS=$(aws sts assume-role \
+              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
+              --role-session-name "argo-cleanup" --duration-seconds 3600)
+            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
+            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
+            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
+
+            pipenv install --deploy --ignore-pipfile
+            pipenv run python3 cleanup_deployment.py \
+              --stage "{{workflow.parameters.stage}}"
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 3600

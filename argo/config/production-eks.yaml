@@ -1,0 +1,103 @@
+# Production EKS Configuration
+# IRSA service accounts, Karpenter node pool, S3 artifact repository
+
+---
+# CI deployment service account with cross-account access
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ci-deployment-sa
+  namespace: ma
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/ArgoDeploymentRole
+  labels:
+    app: ci-pipeline
+
+---
+# Release pipeline service account with prod S3 + ECR access
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ci-release-sa
+  namespace: ma
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/ArgoReleaseRole
+  labels:
+    app: ci-pipeline
+
+---
+# Test account ID secret (populated by External Secrets Operator or manually)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: migrations-test-account-id
+  namespace: ma
+type: Opaque
+stringData:
+  account-id: "REPLACE_WITH_TEST_ACCOUNT_ID"
+
+---
+# GitHub token secret (populated by External Secrets Operator or manually)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-token
+  namespace: ma
+type: Opaque
+stringData:
+  token: "REPLACE_WITH_GITHUB_TOKEN"
+
+---
+# Karpenter NodePool for CI workloads
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: ci-workloads
+spec:
+  template:
+    metadata:
+      labels:
+        node-type: ci
+    spec:
+      requirements:
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: [c5.xlarge, c5.2xlarge, c5.4xlarge]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: [on-demand, spot]
+        - key: kubernetes.io/arch
+          operator: In
+          values: [amd64]
+      taints:
+        - key: ci-workload
+          value: "true"
+          effect: NoSchedule
+  limits:
+    cpu: 256
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30s
+
+---
+# Karpenter EC2NodeClass for CI nodes
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: ci-workloads
+spec:
+  amiSelectorTerms:
+    - alias: al2023@latest
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "CLUSTER_NAME"
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "CLUSTER_NAME"
+  role: "KarpenterNodeRole-CLUSTER_NAME"
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 100Gi
+        volumeType: gp3
+        deleteOnTermination: true

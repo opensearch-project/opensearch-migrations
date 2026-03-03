@@ -1,0 +1,202 @@
+# Replaces: vars/solutionsCFNTest.groovy
+# EC2-based Solutions CFN deployment validation
+# Deploys migration console EC2 via CDK, validates, tears down
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: solutions-cfn-test
+  namespace: ma
+  labels:
+    app: ci-pipeline
+    replaces: solutionsCFNTest.groovy
+spec:
+  entrypoint: main
+  onExit: cleanup-handler
+  serviceAccountName: ci-deployment-sa
+  arguments:
+    parameters:
+      - name: repo-url
+        value: "https://github.com/opensearch-project/opensearch-migrations.git"
+      - name: branch
+        value: "main"
+      - name: stage
+        value: "solutions-cfn"
+      - name: region
+        value: "us-east-1"
+  activeDeadlineSeconds: 7200  # 2 hours
+
+  synchronization:
+    semaphores:
+      - configMapKeyRef:
+          name: ci-stage-locks
+          key: integ-test
+
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: checkout
+            templateRef:
+              name: common-ci-steps
+              template: git-checkout
+            arguments:
+              parameters:
+                - name: repo-url
+                  value: "{{workflow.parameters.repo-url}}"
+                - name: branch
+                  value: "{{workflow.parameters.branch}}"
+
+          - name: build
+            depends: checkout
+            templateRef:
+              name: default-integ-pipeline
+              template: gradle-build
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+
+          - name: deploy-and-validate
+            depends: build
+            template: deploy-and-validate
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.build.outputs.artifacts.source}}"
+
+    # ================================================================
+    # DEPLOY AND VALIDATE — CDK deploy migration console EC2, validate it starts
+    # ================================================================
+    - name: deploy-and-validate
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+
+            CREDS=$(aws sts assume-role \
+              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
+              --role-session-name "argo-solutions-cfn" --duration-seconds 5400)
+            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
+            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
+            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
+
+            # Write CDK context for solutions deployment
+            cd deployment/migration-assistant-solution
+            cat > cdk.context.json << EOF
+            {
+              "stage": "${STAGE}",
+              "vpcEnabled": true,
+              "migrationConsoleServiceEnabled": true,
+              "sourceCluster": {
+                "endpoint": "https://vpc-source-${STAGE}.${REGION}.es.amazonaws.com:443",
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
+              },
+              "targetCluster": {
+                "endpoint": "https://vpc-target-${STAGE}.${REGION}.es.amazonaws.com:443",
+                "auth": {"type": "none"},
+                "version": "OS_2.19"
+              }
+            }
+            EOF
+
+            echo "Deploying Solutions CFN stack..."
+            npm ci
+            npx cdk synth --context stage="${STAGE}"
+            npx cdk deploy --require-approval never --context stage="${STAGE}" \
+              --outputs-file /tmp/cdk-outputs.json 2>&1 | tail -50
+
+            echo "Validating deployment..."
+            cat /tmp/cdk-outputs.json | jq .
+
+            # Validate migration console EC2 instance is running
+            INSTANCE_ID=$(aws ec2 describe-instances \
+              --filters "Name=tag:Name,Values=*${STAGE}*migration-console*" \
+                        "Name=instance-state-name,Values=running" \
+              --query "Reservations[0].Instances[0].InstanceId" --output text)
+
+            if [ "${INSTANCE_ID}" = "None" ] || [ -z "${INSTANCE_ID}" ]; then
+              echo "ERROR: Migration console EC2 instance not found or not running"
+              exit 1
+            fi
+            echo "Migration console EC2 instance running: ${INSTANCE_ID}"
+
+            # Validate SSM connectivity
+            aws ssm start-session --target "${INSTANCE_ID}" \
+              --document-name AWS-StartNonInteractiveCommand \
+              --parameters '{"command":["echo SSM connectivity validated"]}' || \
+              echo "Warning: SSM session failed (may need VPC endpoint)"
+
+            echo "Solutions CFN test PASSED"
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+        activeDeadlineSeconds: 5400  # 90 min
+
+    # ================================================================
+    # CLEANUP HANDLER — destroy CDK stack
+    # ================================================================
+    - name: cleanup-handler
+      dag:
+        tasks:
+          - name: destroy-stack
+            template: destroy-cdk-stack
+          - name: upload-results
+            templateRef:
+              name: reportportal-upload
+              template: upload-junit
+            arguments:
+              parameters:
+                - name: launch-name
+                  value: "solutions-cfn-test"
+
+    - name: destroy-cdk-stack
+      retryStrategy:
+        limit: 2
+        retryPolicy: Always
+        backoff:
+          duration: "30s"
+          factor: 2
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace/deployment/migration-assistant-solution
+        command: [bash, -c]
+        args:
+          - |
+            set +e
+            STAGE="{{workflow.parameters.stage}}"
+
+            CREDS=$(aws sts assume-role \
+              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
+              --role-session-name "argo-cleanup" --duration-seconds 3600)
+            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
+            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
+            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
+
+            echo "Destroying Solutions CFN stack for stage ${STAGE}..."
+            npm ci 2>/dev/null
+            npx cdk destroy --force --context stage="${STAGE}" 2>&1 | tail -30 || true
+            echo "CDK destroy complete"
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 1800

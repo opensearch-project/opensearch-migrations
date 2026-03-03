@@ -1,0 +1,206 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: k8s-matrix-test
+  namespace: ma
+  labels:
+    app: ci-pipeline
+    replaces: k8sMatrixTest.groovy
+spec:
+  entrypoint: matrix
+  onExit: aggregate-and-report
+  serviceAccountName: argo-workflow-executor
+  arguments:
+    parameters:
+      - name: repo-url
+        value: "https://github.com/opensearch-project/opensearch-migrations.git"
+      - name: branch
+        value: "main"
+      - name: source-version
+        value: "all"
+      - name: target-versions
+        value: '["OS_1.3","OS_2.19","OS_3.1"]'
+  activeDeadlineSeconds: 10800  # 3 hours
+
+  # Workflow-level semaphore: only 1 matrix at a time on minikube
+  synchronization:
+    semaphores:
+      - configMapKeyRef:
+          name: ci-stage-locks
+          key: k8s-matrix
+
+  templates:
+    # ================================================================
+    # MATRIX DAG — fans out to child workflows per target version
+    # ================================================================
+    - name: matrix
+      dag:
+        tasks:
+          - name: run-target
+            template: spawn-child
+            arguments:
+              parameters:
+                - name: target-version
+                  value: "{{item}}"
+            withParam: "{{workflow.parameters.target-versions}}"
+
+    # ================================================================
+    # SPAWN CHILD — creates a k8s-local-test Workflow per target version
+    # Replaces Jenkins build(job: childJobName, parameters: [...])
+    # ================================================================
+    - name: spawn-child
+      inputs:
+        parameters:
+          - name: target-version
+      # Per-child semaphore: limit concurrent k8s-local tests
+      synchronization:
+        semaphores:
+          - configMapKeyRef:
+              name: ci-stage-locks
+              key: k8s-local
+      resource:
+        action: create
+        successCondition: status.phase == Succeeded
+        failureCondition: status.phase in (Failed, Error)
+        manifest: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: Workflow
+          metadata:
+            generateName: k8s-local-{{inputs.parameters.target-version}}-
+            namespace: ma
+            labels:
+              parent-workflow: "{{workflow.name}}"
+              test-type: k8s-local-matrix-child
+              target-version: "{{inputs.parameters.target-version}}"
+          spec:
+            workflowTemplateRef:
+              name: k8s-local-test
+            arguments:
+              parameters:
+                - name: repo-url
+                  value: "{{workflow.parameters.repo-url}}"
+                - name: branch
+                  value: "{{workflow.parameters.branch}}"
+                - name: source-version
+                  value: "{{workflow.parameters.source-version}}"
+                - name: target-version
+                  value: "{{inputs.parameters.target-version}}"
+            # Child workflow TTL — auto-cleanup after completion
+            ttlStrategy:
+              secondsAfterCompletion: 3600
+              secondsAfterSuccess: 1800
+              secondsAfterFailure: 7200
+
+    # ================================================================
+    # AGGREGATE AND REPORT — exit handler
+    # Collects child workflow statuses and prints summary table
+    # ================================================================
+    - name: aggregate-and-report
+      dag:
+        tasks:
+          - name: collect-results
+            template: collect-child-results
+          - name: print-summary
+            depends: collect-results
+            template: print-summary
+            arguments:
+              artifacts:
+                - name: aggregated-reports
+                  from: "{{tasks.collect-results.outputs.artifacts.aggregated-reports}}"
+          - name: upload-results
+            depends: collect-results
+            templateRef:
+              name: reportportal-upload
+              template: upload-json-reports
+            arguments:
+              parameters:
+                - name: launch-name
+                  value: "k8s-matrix-nightly"
+
+    - name: collect-child-results
+      outputs:
+        artifacts:
+          - name: aggregated-reports
+            path: /tmp/reports
+            optional: true
+            archive:
+              none: {}
+            s3:
+              key: "{{workflow.name}}/aggregated-reports/"
+      script:
+        image: bitnami/kubectl:latest
+        command: [bash]
+        source: |
+          set -euo pipefail
+          mkdir -p /tmp/reports
+
+          echo "Collecting child workflow results..."
+
+          # Find all child workflows by parent label
+          CHILDREN=$(kubectl get workflows -n ma \
+            -l "parent-workflow={{workflow.name}}" \
+            -o json 2>/dev/null || echo '{"items":[]}')
+
+          echo "$CHILDREN" | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          items = data.get('items', [])
+          results = []
+          for w in items:
+              name = w['metadata']['name']
+              phase = w.get('status', {}).get('phase', 'Unknown')
+              target = w['metadata'].get('labels', {}).get('target-version', 'unknown')
+              duration = w.get('status', {}).get('estimatedDuration', 0)
+              results.append({'name': name, 'phase': phase, 'target': target, 'duration': duration})
+          with open('/tmp/reports/matrix-results.json', 'w') as f:
+              json.dump(results, f, indent=2)
+          print(f'Collected results from {len(results)} child workflows')
+          " 2>/dev/null || echo "No child results found"
+
+    - name: print-summary
+      inputs:
+        artifacts:
+          - name: aggregated-reports
+            path: /tmp/reports
+            optional: true
+      script:
+        image: python:3.11-alpine
+        command: [python]
+        source: |
+          import json, sys, os
+
+          results_file = "/tmp/reports/matrix-results.json"
+          if not os.path.exists(results_file):
+              print("No results file found — children may not have completed")
+              sys.exit(0)
+
+          with open(results_file) as f:
+              results = json.load(f)
+
+          passed = sum(1 for r in results if r["phase"] == "Succeeded")
+          failed = sum(1 for r in results if r["phase"] in ("Failed", "Error"))
+          total = len(results)
+
+          print("=" * 60)
+          print(f"MIGRATION TEST RESULTS SUMMARY")
+          print("=" * 60)
+
+          for r in results:
+              icon = "PASS" if r["phase"] == "Succeeded" else "FAIL"
+              target = r["target"]
+              name = r["name"]
+              phase = r["phase"]
+              print(f"  [{icon}] {target:20s} | {name} | {phase}")
+
+          print("=" * 60)
+          print(f"SUMMARY: {passed}/{total} tests passed, {failed} failed")
+          print("=" * 60)
+
+          if failed > 0:
+              if passed == 0:
+                  print("All tests failed!")
+              else:
+                  print("Some tests failed")
+              sys.exit(1)
+          else:
+              print("All tests passed successfully!")

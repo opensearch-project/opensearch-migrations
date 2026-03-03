@@ -1,0 +1,457 @@
+# Replaces: vars/eksIntegPipeline.groovy
+# EKS-based integration test: AOS source → AOS target via EKS/k8s
+# Deploys clusters, EKS infra via aws-bootstrap.sh, runs tests, ordered cleanup
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: eks-integ-pipeline
+  namespace: ma
+  labels:
+    app: ci-pipeline
+    replaces: eksIntegPipeline.groovy
+spec:
+  entrypoint: main
+  onExit: cleanup-handler
+  serviceAccountName: ci-deployment-sa
+  arguments:
+    parameters:
+      - name: repo-url
+        value: "https://github.com/opensearch-project/opensearch-migrations.git"
+      - name: branch
+        value: "main"
+      - name: stage
+        value: "eks-integ"
+      - name: source-version
+        value: "ES_7.10"
+      - name: target-version
+        value: "OS_2.19"
+      - name: source-cluster-type
+        value: "OPENSEARCH_MANAGED_SERVICE"
+      - name: target-cluster-type
+        value: "OPENSEARCH_MANAGED_SERVICE"
+      - name: test-ids
+        value: "all"
+      - name: region
+        value: "us-east-1"
+  activeDeadlineSeconds: 10800  # 3 hours
+
+  synchronization:
+    semaphores:
+      - configMapKeyRef:
+          name: ci-stage-locks
+          key: eks-integ
+
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: checkout
+            templateRef:
+              name: common-ci-steps
+              template: git-checkout
+            arguments:
+              parameters:
+                - name: repo-url
+                  value: "{{workflow.parameters.repo-url}}"
+                - name: branch
+                  value: "{{workflow.parameters.branch}}"
+
+          - name: build
+            depends: checkout
+            templateRef:
+              name: default-integ-pipeline
+              template: gradle-build
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+
+          - name: deploy-clusters
+            depends: build
+            template: deploy-clusters
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.build.outputs.artifacts.source}}"
+
+          - name: deploy-ma-on-eks
+            depends: deploy-clusters
+            template: deploy-ma-on-eks
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.deploy-clusters.outputs.artifacts.source}}"
+
+          - name: post-cluster-setup
+            depends: deploy-ma-on-eks
+            template: post-cluster-setup
+
+          - name: run-tests
+            depends: post-cluster-setup
+            template: run-eks-tests
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.deploy-ma-on-eks.outputs.artifacts.source}}"
+
+    # ================================================================
+    # DEPLOY CLUSTERS — creates AOS source + target domains via deployClustersStep
+    # ================================================================
+    - name: deploy-clusters
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace/test
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            CREDS=$(aws sts assume-role \
+              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
+              --role-session-name "argo-deploy-clusters" --duration-seconds 3600)
+            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
+            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
+            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
+
+            # Deploy source and target AOS domains
+            python3 deployClusters.py \
+              --stage "{{workflow.parameters.stage}}" \
+              --source-version "{{workflow.parameters.source-version}}" \
+              --source-cluster-type "{{workflow.parameters.source-cluster-type}}" \
+              --target-version "{{workflow.parameters.target-version}}" \
+              --target-cluster-type "{{workflow.parameters.target-cluster-type}}" \
+              --output-file /tmp/cluster-context.json
+
+            # Save cluster context for later stages
+            cp /tmp/cluster-context.json /workspace/test/cluster-context.json
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 3600  # 60 min
+
+    # ================================================================
+    # DEPLOY MA ON EKS — runs aws-bootstrap.sh to create EKS infra + helm install
+    # ================================================================
+    - name: deploy-ma-on-eks
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+            STACK_NAME="Migration-Assistant-Infra-Import-VPC-eks-${STAGE}-${REGION}"
+
+            CREDS=$(aws sts assume-role \
+              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
+              --role-session-name "argo-deploy-eks" --duration-seconds 3600)
+            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
+            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
+            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
+
+            # Read cluster context
+            CLUSTER_DETAILS=$(cat /workspace/test/cluster-context.json)
+            VPC_ID=$(echo "$CLUSTER_DETAILS" | jq -r '.target.vpcId')
+            SUBNET_IDS=$(echo "$CLUSTER_DETAILS" | jq -r '.target.subnetIds')
+
+            # Deploy EKS + MA via aws-bootstrap.sh
+            ./deployment/k8s/aws/aws-bootstrap.sh \
+              --deploy-import-vpc-cfn \
+              --build-cfn \
+              --stack-name "${STACK_NAME}" \
+              --vpc-id "${VPC_ID}" \
+              --subnet-ids "${SUBNET_IDS}" \
+              --stage "${STAGE}" \
+              --eks-access-principal-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
+              --build-images \
+              --build-chart-and-dashboards \
+              --base-dir "$(pwd)" \
+              --skip-console-exec \
+              --region "${REGION}" \
+              2>&1 | while IFS= read -r line; do printf '%s | %s\n' "$(date '+%H:%M:%S')" "$line"; done
+
+            # Capture exports for cleanup
+            RAW_OUTPUT=$(aws cloudformation describe-stacks \
+              --stack-name "${STACK_NAME}" \
+              --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
+              --output text)
+            echo "${RAW_OUTPUT}" > /workspace/test/cfn-exports.txt
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+        activeDeadlineSeconds: 9000  # 150 min
+
+    # ================================================================
+    # POST-CLUSTER SETUP — create configmaps, modify security groups
+    # Reads cluster-context.json from deploy-clusters and:
+    #   1. Creates source/target cluster configmaps for testAutomation
+    #   2. Adds SG ingress rules so EKS pods can reach AOS domains
+    #   3. Updates kubeconfig for the EKS cluster
+    # ================================================================
+    - name: post-cluster-setup
+      container:
+        image: ci-runner:latest
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+
+            CREDS=$(aws sts assume-role \
+              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
+              --role-session-name "argo-post-setup" --duration-seconds 3600)
+            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
+            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
+            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
+
+            CLUSTER_DETAILS=$(cat /workspace/test/cluster-context.json)
+
+            # 1. Update kubeconfig for the EKS cluster
+            EKS_CLUSTER_NAME="migration-${STAGE}"
+            echo "Updating kubeconfig for ${EKS_CLUSTER_NAME}..."
+            aws eks update-kubeconfig --name "${EKS_CLUSTER_NAME}" --region "${REGION}"
+
+            # 2. Get security group IDs for EKS node group and AOS domains
+            EKS_SG=$(aws eks describe-cluster --name "${EKS_CLUSTER_NAME}" \
+              --query "cluster.resourcesVpcConfig.clusterSecurityGroupId" --output text)
+            SOURCE_SG=$(echo "$CLUSTER_DETAILS" | jq -r '.source.securityGroupId // empty')
+            TARGET_SG=$(echo "$CLUSTER_DETAILS" | jq -r '.target.securityGroupId // empty')
+
+            # 3. Add SG ingress rules: allow EKS → AOS on port 443
+            for SG in ${SOURCE_SG} ${TARGET_SG}; do
+              if [ -n "${SG}" ]; then
+                echo "Adding ingress rule: ${SG} ← ${EKS_SG} (port 443)"
+                aws ec2 authorize-security-group-ingress \
+                  --group-id "${SG}" \
+                  --protocol tcp --port 443 \
+                  --source-group "${EKS_SG}" \
+                  --region "${REGION}" 2>/dev/null || echo "  (rule may already exist)"
+              fi
+            done
+
+            # 4. Create source/target configmaps for testAutomation
+            SOURCE_ENDPOINT=$(echo "$CLUSTER_DETAILS" | jq -r '.source.endpoint // empty')
+            TARGET_ENDPOINT=$(echo "$CLUSTER_DETAILS" | jq -r '.target.endpoint // empty')
+
+            if [ -n "${SOURCE_ENDPOINT}" ]; then
+              kubectl create configmap source-cluster-config -n ma \
+                --from-literal=endpoint="${SOURCE_ENDPOINT}" \
+                --from-literal=version="{{workflow.parameters.source-version}}" \
+                --from-literal=auth-type="none" \
+                --dry-run=client -o yaml | kubectl apply -f -
+            fi
+
+            if [ -n "${TARGET_ENDPOINT}" ]; then
+              kubectl create configmap target-cluster-config -n ma \
+                --from-literal=endpoint="${TARGET_ENDPOINT}" \
+                --from-literal=version="{{workflow.parameters.target-version}}" \
+                --from-literal=auth-type="none" \
+                --dry-run=client -o yaml | kubectl apply -f -
+            fi
+
+            # 5. Wait for MA pods to be ready
+            echo "Waiting for MA pods to be ready..."
+            kubectl wait --for=condition=ready pod -l app=migration-console -n ma --timeout=300s || true
+
+            echo "Post-cluster setup complete"
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 900  # 15 min
+
+    # ================================================================
+    # RUN EKS TESTS — runs pytest via testAutomation framework
+    # ================================================================
+    - name: run-eks-tests
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: test-results
+            path: /workspace/libraries/testAutomation/reports/
+            optional: true
+            archive:
+              none: {}
+            s3:
+              key: "{{workflow.name}}/test-results/"
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace/libraries/testAutomation
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            CREDS=$(aws sts assume-role \
+              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
+              --role-session-name "argo-eks-test" --duration-seconds 3600)
+            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
+            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
+            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
+
+            TEST_IDS_ARG=""
+            if [ "{{workflow.parameters.test-ids}}" != "all" ]; then
+              TEST_IDS_ARG="--test-ids='{{workflow.parameters.test-ids}}'"
+            fi
+
+            pipenv install --deploy
+            pipenv run app \
+              --source-version={{workflow.parameters.source-version}} \
+              --target-version={{workflow.parameters.target-version}} \
+              ${TEST_IDS_ARG} \
+              --reuse-clusters --skip-delete --skip-install
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 7200  # 2 hours
+
+    # ================================================================
+    # CLEANUP HANDLER — ordered CFN stack deletion
+    # Order: MA stack → domain stacks → network stack (VPC dependencies)
+    # ================================================================
+    - name: cleanup-handler
+      dag:
+        tasks:
+          - name: eks-cleanup
+            template: eks-cleanup
+          - name: delete-ma-stack
+            depends: eks-cleanup
+            template: delete-cfn-stack
+            arguments:
+              parameters:
+                - name: stack-name
+                  value: "Migration-Assistant-Infra-Import-VPC-eks-{{workflow.parameters.stage}}-{{workflow.parameters.region}}"
+          - name: delete-source-domain
+            depends: delete-ma-stack
+            template: delete-cfn-stack
+            arguments:
+              parameters:
+                - name: stack-name
+                  value: "OpenSearchDomain-source-{{workflow.parameters.stage}}-{{workflow.parameters.region}}"
+          - name: delete-target-domain
+            depends: delete-ma-stack
+            template: delete-cfn-stack
+            arguments:
+              parameters:
+                - name: stack-name
+                  value: "OpenSearchDomain-target-{{workflow.parameters.stage}}-{{workflow.parameters.region}}"
+          - name: delete-network-stack
+            depends: "delete-source-domain && delete-target-domain"
+            template: delete-cfn-stack
+            arguments:
+              parameters:
+                - name: stack-name
+                  value: "NetworkInfra-{{workflow.parameters.stage}}-{{workflow.parameters.region}}"
+          - name: upload-results
+            templateRef:
+              name: reportportal-upload
+              template: upload-junit
+            arguments:
+              parameters:
+                - name: launch-name
+                  value: "eks-integ"
+                - name: source-version
+                  value: "{{workflow.parameters.source-version}}"
+                - name: target-version
+                  value: "{{workflow.parameters.target-version}}"
+
+    # EKS-specific cleanup: helm uninstall, revoke SG rules
+    - name: eks-cleanup
+      container:
+        image: ci-runner:latest
+        command: [bash, -c]
+        args:
+          - |
+            set +e
+            CREDS=$(aws sts assume-role \
+              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
+              --role-session-name "argo-cleanup" --duration-seconds 4500)
+            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
+            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
+            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
+
+            # Helm uninstall + namespace cleanup
+            kubectl -n ma get pods || true
+            cd /workspace/libraries/testAutomation 2>/dev/null && pipenv install --deploy && pipenv run app --delete-only || true
+            kubectl delete namespace ma --ignore-not-found --timeout=60s || true
+            echo "EKS cleanup complete"
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 1800  # 30 min
+
+    # Generic CFN stack deletion with retry
+    - name: delete-cfn-stack
+      inputs:
+        parameters:
+          - name: stack-name
+      retryStrategy:
+        limit: 3
+        retryPolicy: Always
+        backoff:
+          duration: "30s"
+          factor: 2
+          maxDuration: "5m"
+      container:
+        image: amazon/aws-cli:2.15.0
+        command: [bash, -c]
+        args:
+          - |
+            set +e
+            CREDS=$(aws sts assume-role \
+              --role-arn "arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole" \
+              --role-session-name "argo-cfn-delete" --duration-seconds 3600)
+            export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)
+            export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)
+            export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)
+
+            STACK="{{inputs.parameters.stack-name}}"
+            echo "Deleting CFN stack: ${STACK}"
+            aws cloudformation delete-stack --stack-name "${STACK}" --region "{{workflow.parameters.region}}" || true
+            aws cloudformation wait stack-delete-complete --stack-name "${STACK}" --region "{{workflow.parameters.region}}" || true
+            echo "Stack ${STACK} deleted"
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 1800  # 30 min per stack

@@ -1,0 +1,147 @@
+# Replaces: vars/rfsDefaultE2ETest.groovy
+# RFS-only backfill test (ES 7.10 → OS 2.19)
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: rfs-default-e2e-
+  namespace: ma
+  labels:
+    test-type: aws-integ
+    replaces: rfsDefaultE2ETest.groovy
+spec:
+  workflowTemplateRef:
+    name: default-integ-pipeline
+  arguments:
+    parameters:
+      - name: stage
+        value: "rfs-integ"
+      - name: source-context-id
+        value: "source-single-node-ec2"
+      - name: migration-context-id
+        value: "migration-rfs"
+      - name: skip-capture-proxy
+        value: "true"
+      - name: integ-test-command
+        value: "/root/lib/integ_test/integ_test/backfill_tests.py"
+      - name: source-context
+        value: |
+          {
+            "source-single-node-ec2": {
+              "suffix": "ec2-source-<STAGE>",
+              "networkStackSuffix": "ec2-source-<STAGE>",
+              "distVersion": "7.10.2",
+              "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz",
+              "captureProxyEnabled": false,
+              "securityDisabled": true,
+              "minDistribution": false,
+              "cpuArch": "x64",
+              "isInternal": true,
+              "singleNodeCluster": true,
+              "networkAvailabilityZones": 2,
+              "dataNodeCount": 1,
+              "managerNodeCount": 0,
+              "serverAccessType": "ipv4",
+              "restrictServerAccessTo": "0.0.0.0/0",
+              "enableImdsCredentialRefresh": true
+            }
+          }
+      - name: migration-context
+        value: |
+          {
+            "migration-rfs": {
+              "stage": "<STAGE>",
+              "engineVersion": "OS_2.19",
+              "domainName": "os-cluster-<STAGE>",
+              "dataNodeCount": 2,
+              "openAccessPolicyEnabled": true,
+              "domainRemovalPolicy": "DESTROY",
+              "artifactBucketRemovalPolicy": "DESTROY",
+              "trafficReplayerServiceEnabled": false,
+              "reindexFromSnapshotServiceEnabled": true,
+              "tlsSecurityPolicy": "TLS_1_2",
+              "enforceHTTPS": true,
+              "nodeToNodeEncryptionEnabled": true,
+              "encryptionAtRestEnabled": true,
+              "vpcEnabled": true,
+              "vpcAZCount": 2,
+              "mskAZCount": 2,
+              "migrationAssistanceEnabled": true,
+              "replayerOutputEFSRemovalPolicy": "DESTROY",
+              "migrationConsoleServiceEnabled": true,
+              "otelCollectorEnabled": true
+            }
+          }
+---
+# Replaces: vars/trafficReplayDefaultE2ETest.groovy
+# Traffic capture & replay test (ES 7.10 → OS 2.19 with transformations)
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: traffic-replay-e2e-
+  namespace: ma
+  labels:
+    test-type: aws-integ
+    replaces: trafficReplayDefaultE2ETest.groovy
+spec:
+  workflowTemplateRef:
+    name: default-integ-pipeline
+  arguments:
+    parameters:
+      - name: stage
+        value: "aws-integ"
+      - name: source-context-id
+        value: "source-single-node-ec2"
+      - name: migration-context-id
+        value: "migration-default"
+      - name: integ-test-command
+        value: "/root/lib/integ_test/integ_test/replayer_tests.py"
+      - name: source-context
+        value: |
+          {
+            "source-single-node-ec2": {
+              "suffix": "ec2-source-<STAGE>",
+              "networkStackSuffix": "ec2-source-<STAGE>",
+              "distVersion": "7.10.2",
+              "cidr": "12.0.0.0/16",
+              "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz",
+              "captureProxyEnabled": true,
+              "securityDisabled": true,
+              "minDistribution": false,
+              "cpuArch": "x64",
+              "isInternal": true,
+              "singleNodeCluster": true,
+              "networkAvailabilityZones": 2,
+              "dataNodeCount": 1,
+              "managerNodeCount": 0,
+              "serverAccessType": "ipv4",
+              "restrictServerAccessTo": "0.0.0.0/0",
+              "enableImdsCredentialRefresh": true
+            }
+          }
+      - name: migration-context
+        value: |
+          {
+            "migration-default": {
+              "stage": "<STAGE>",
+              "engineVersion": "OS_2.19",
+              "domainName": "os-cluster-<STAGE>",
+              "dataNodeCount": 2,
+              "openAccessPolicyEnabled": true,
+              "domainRemovalPolicy": "DESTROY",
+              "artifactBucketRemovalPolicy": "DESTROY",
+              "trafficReplayerServiceEnabled": true,
+              "trafficReplayerExtraArgs": "--speedup-factor 10.0",
+              "reindexFromSnapshotServiceEnabled": true,
+              "tlsSecurityPolicy": "TLS_1_2",
+              "enforceHTTPS": true,
+              "nodeToNodeEncryptionEnabled": true,
+              "encryptionAtRestEnabled": true,
+              "vpcEnabled": true,
+              "vpcAZCount": 2,
+              "mskAZCount": 2,
+              "migrationAssistanceEnabled": true,
+              "replayerOutputEFSRemovalPolicy": "DESTROY",
+              "migrationConsoleServiceEnabled": true,
+              "otelCollectorEnabled": true
+            }
+          }

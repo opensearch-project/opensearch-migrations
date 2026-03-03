@@ -1,0 +1,45 @@
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: github-migrations
+  namespace: argo-events
+spec:
+  service:
+    ports:
+      - port: 12000
+        targetPort: 12000
+  github:
+    pr-events:
+      repositories:
+        - owner: opensearch-project
+          names: [opensearch-migrations]
+      webhook:
+        endpoint: /github/pr
+        port: "12000"
+      events:
+        - pull_request
+        - push
+      apiToken:
+        name: github-token
+        key: token
+      webhookSecret:
+        name: github-webhook-secret
+        key: secret
+      insecure: true  # HTTP for minikube; set false + TLS in production
+
+    release-events:
+      repositories:
+        - owner: opensearch-project
+          names: [opensearch-migrations]
+      webhook:
+        endpoint: /github/release
+        port: "12000"
+      events:
+        - release
+      apiToken:
+        name: github-token
+        key: token
+      webhookSecret:
+        name: github-webhook-secret
+        key: secret
+      insecure: true
