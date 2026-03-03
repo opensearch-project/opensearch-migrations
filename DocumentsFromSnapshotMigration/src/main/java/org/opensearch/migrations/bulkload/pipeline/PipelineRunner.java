@@ -6,13 +6,13 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
-import org.opensearch.migrations.bulkload.pipeline.adapter.SnapshotExtractor;
-import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
@@ -54,7 +54,7 @@ public class PipelineRunner {
     @Builder.Default
     private final DeltaMode deltaMode = null;
     @Builder.Default
-    private final BaseRootRfsContext deltaRootContext = null;
+    private final Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory = null;
 
     @Builder.Default
     private final ScopedWorkCoordinator workCoordinator = null;
@@ -105,7 +105,7 @@ public class PipelineRunner {
             log.info("Creating delta document source: previous={}, mode={}", previousSnapshotName, deltaMode);
             return new LuceneSnapshotSource(
                 extractor, snapshotName, workDir,
-                previousSnapshotName, deltaMode, deltaRootContext
+                previousSnapshotName, deltaMode, deltaContextFactory
             );
         }
         return new LuceneSnapshotSource(extractor, snapshotName, workDir);

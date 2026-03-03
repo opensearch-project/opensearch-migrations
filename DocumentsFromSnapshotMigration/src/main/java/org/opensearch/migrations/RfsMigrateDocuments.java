@@ -862,7 +862,8 @@ public class RfsMigrateDocuments {
         var strategy = (previousSnapshotName == null)
             ? new RegularDocumentReaderEngine(shardMetadataSupplier, indexMetadataFactory, snapshotName)
             : new DeltaDocumentReaderEngine(
-                shardMetadataSupplierFactory.apply(previousSnapshotName), shardMetadataSupplier, deltaMode);
+                shardMetadataSupplierFactory.apply(previousSnapshotName), shardMetadataSupplier, deltaMode,
+                () -> new org.opensearch.migrations.bulkload.tracing.RfsContexts.DeltaStreamContext(rootDocumentContext, null));
 
         DocumentsRunner runner = new DocumentsRunner(scopedWorkCoordinator,
             maxInitialLeaseDuration,
@@ -914,7 +915,7 @@ public class RfsMigrateDocuments {
      * (DocumentSource → MigrationPipeline → DocumentSink) instead of the legacy DocumentsRunner path.
      */
     public static CompletionStatus runWithPipeline(
-        org.opensearch.migrations.bulkload.pipeline.adapter.SnapshotExtractor extractor,
+        org.opensearch.migrations.bulkload.SnapshotExtractor extractor,
         OpenSearchClient targetClient,
         String snapshotName,
         java.nio.file.Path workDir,

@@ -15,7 +15,6 @@ import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
-import org.opensearch.migrations.reindexer.tracing.DocumentMigrationContexts;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
 import lombok.AllArgsConstructor;
@@ -150,13 +149,11 @@ public class DocumentsRunner {
              workItem.getIndexName(), workItem.getShardNumber());
 
         // Get the root context from the DocumentReindexContext
-        var rootContext = ((DocumentMigrationContexts.BaseDocumentMigrationContext) context).getRootInstrumentationScope();
         var documents = documentReaderEngine.prepareChangeset(
             reader,
             workItem.getIndexName(),
             workItem.getShardNumber(),
-            Math.toIntExact(workItem.getStartingDocId()),
-            rootContext
+            Math.toIntExact(workItem.getStartingDocId())
         );
 
         return reindexer.reindex(workItem.getIndexName(), documents, context)
