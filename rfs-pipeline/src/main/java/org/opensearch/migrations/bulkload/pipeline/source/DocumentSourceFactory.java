@@ -1,22 +1,20 @@
 package org.opensearch.migrations.bulkload.pipeline.source;
 
+import java.util.List;
+
 import org.opensearch.migrations.bulkload.pipeline.metrics.SourceExtractionMetrics;
 
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Factory for creating {@link DocumentSource} instances based on the configured {@link SourceType}.
+ * Factory for creating {@link DocumentSource} and {@link MetadataSource} instances
+ * based on the configured {@link SourceType}.
  *
- * <p>This is the central point for source type detection and selection. Callers provide
- * the desired source type and configuration, and the factory returns the appropriate
- * {@link DocumentSource} implementation.
+ * <p>For {@link SourceType#SNAPSHOT}, the caller must provide pre-built sources
+ * since snapshot reading requires external dependencies that rfs-pipeline does not include.
  *
- * <p>For {@link SourceType#SNAPSHOT}, the caller must provide a pre-built {@link DocumentSource}
- * (e.g. a LuceneSnapshotSource) since snapshot reading requires external dependencies
- * that rfs-pipeline intentionally does not include.
- *
- * <p>For {@link SourceType#SOURCELESS}, the factory creates a {@link SourcelessDocumentSource}
- * from the provided {@link SourcelessExtractionConfig}.
+ * <p>For {@link SourceType#SOURCELESS}, the factory creates sources from
+ * {@link SourcelessExtractionConfig} entries.
  */
 @Slf4j
 public final class DocumentSourceFactory {
@@ -25,10 +23,6 @@ public final class DocumentSourceFactory {
 
     /**
      * Create a {@link DocumentSource} for sourceless extraction mode.
-     *
-     * @param config  the sourceless extraction configuration
-     * @param metrics metrics collector (nullable — defaults to NOOP)
-     * @return a new {@link SourcelessDocumentSource}
      */
     public static DocumentSource createSourceless(SourcelessExtractionConfig config, SourceExtractionMetrics metrics) {
         log.info("Creating sourceless document source: {}", config);
@@ -36,17 +30,35 @@ public final class DocumentSourceFactory {
     }
 
     /**
+     * Create a multi-index {@link DocumentSource} for sourceless extraction mode.
+     */
+    public static DocumentSource createSourceless(List<SourcelessExtractionConfig> configs, SourceExtractionMetrics metrics) {
+        log.info("Creating multi-index sourceless document source: {} indices", configs.size());
+        return new SourcelessDocumentSource(configs, metrics);
+    }
+
+    /**
+     * Create a {@link MetadataSource} for sourceless extraction mode.
+     */
+    public static MetadataSource createSourcelessMetadata(SourcelessExtractionConfig config) {
+        return new SourcelessMetadataSource(config);
+    }
+
+    /**
+     * Create a multi-index {@link MetadataSource} for sourceless extraction mode.
+     */
+    public static MetadataSource createSourcelessMetadata(List<SourcelessExtractionConfig> configs) {
+        return new SourcelessMetadataSource(configs);
+    }
+
+    /**
      * Select the appropriate {@link DocumentSource} based on source type.
      *
-     * <p>For {@link SourceType#SNAPSHOT}, returns the provided snapshotSource.
-     * For {@link SourceType#SOURCELESS}, creates a new {@link SourcelessDocumentSource}.
-     *
-     * @param sourceType      the desired source type
-     * @param snapshotSource  a pre-built snapshot source (required when sourceType is SNAPSHOT, nullable otherwise)
-     * @param sourcelessConfig config for sourceless mode (required when sourceType is SOURCELESS, nullable otherwise)
-     * @param metrics         metrics collector (nullable — defaults to NOOP)
+     * @param sourceType       the desired source type
+     * @param snapshotSource   a pre-built snapshot source (required for SNAPSHOT, nullable otherwise)
+     * @param sourcelessConfig config for sourceless mode (required for SOURCELESS, nullable otherwise)
+     * @param metrics          metrics collector (nullable — defaults to NOOP)
      * @return the selected {@link DocumentSource}
-     * @throws IllegalArgumentException if required parameters are missing for the selected source type
      */
     public static DocumentSource select(
         SourceType sourceType,
