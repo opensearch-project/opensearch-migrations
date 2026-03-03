@@ -191,28 +191,6 @@ public class HttpRetryTest {
     }
 
     @Test
-    public void testRetransformFallsThroughWithoutCallback() throws Exception {
-        var requestsReceivedCounter = new AtomicInteger();
-        try (var rootContext = TestContext.withAllTracking();
-             var httpServer = SimpleHttpServer.makeServer(false,
-                 r -> requestsReceivedCounter.incrementAndGet() > 1
-                     ? TestHttpServerContext.makeResponse(r, Duration.ofMillis(100))
-                     : makeForbiddenResponse(Duration.ofMillis(100))))
-        {
-            var clientConnectionPool = TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
-                httpServer.localhostEndpoint(), false, 1,
-                "targetConnectionPool for testRetransformFallsThroughWithoutCallback");
-            // No retransformCallback — should fall through to DONE
-            var responseFuture = scheduleSingleRequest(clientConnectionPool, rootContext)
-                .whenComplete((v, t) -> clientConnectionPool.shutdownNow(), () -> "cleanup");
-            var response = Assertions.assertDoesNotThrow(() -> responseFuture.get());
-            Assertions.assertNotNull(response.responses());
-            Assertions.assertEquals(1, response.responses().size());
-            Assertions.assertEquals(403, response.responses().get(0).getRawResponse().status().code());
-        }
-    }
-
-    @Test
     @Tag("longTest")
     @WrapWithNettyLeakDetection(disableLeakChecks = true) // code is forcibly terminated so leaks are expected
     public void testConnectionFailuresNeverGiveUp() throws Exception {

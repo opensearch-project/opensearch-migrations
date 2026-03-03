@@ -434,11 +434,8 @@ public class RequestSenderOrchestrator {
                     return TextTrackedFuture.failedFuture(t, () -> "failed future");
                 }
                 if (dtr.directive == RetryDirective.RETRANSFORM) {
-                    if (retransformCallback == null) {
-                        log.atWarn().setMessage("RETRANSFORM requested but no callback available, treating as DONE").log();
-                        return TextTrackedFuture.completedFuture(dtr.value,
-                            () -> "done - no retransform callback available");
-                    }
+                    assert retransformCallback != null :
+                        "RETRANSFORM requested but no retransformCallback was provided";
                     var now = now();
                     var schedulingDelay = Duration.between(now, now.plus(nextRetryDelay));
                     log.atDebug().setMessage("RETRANSFORM: re-signing and retrying request after {}").addArgument(schedulingDelay).log();
