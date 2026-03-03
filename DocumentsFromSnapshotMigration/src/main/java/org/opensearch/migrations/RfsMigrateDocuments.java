@@ -426,7 +426,7 @@ public class RfsMigrateDocuments {
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
         var targetConnectionContext = arguments.targetArgs.toConnectionContext();
-        var targetClientFactory = new OpenSearchClientFactory(targetConnectionContext);
+        var targetClientFactory = new OpenSearchClientFactory(targetConnectionContext, arguments.maxConnections);
         OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate();
         var targetVersion = targetClient.getClusterVersion();
         

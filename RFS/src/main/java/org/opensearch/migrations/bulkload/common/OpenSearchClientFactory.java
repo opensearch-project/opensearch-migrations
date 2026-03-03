@@ -31,16 +31,22 @@ public class OpenSearchClientFactory {
             ((OpenSearchClient.UnexpectedStatusCode) throwable).response.statusCode < 500));
 
     private final ConnectionContext connectionContext;
+    private final int maxConnections;
     private Version version;
     private CompressionMode compressionMode;
     RestClient client;
 
     public OpenSearchClientFactory(ConnectionContext connectionContext) {
+        this(connectionContext, 0);
+    }
+
+    public OpenSearchClientFactory(ConnectionContext connectionContext, int maxConnections) {
         if (connectionContext == null) {
             throw new IllegalArgumentException("Connection context was not provided in constructor.");
         }
         this.connectionContext = connectionContext;
-        this.client = new RestClient(connectionContext);
+        this.maxConnections = maxConnections;
+        this.client = new RestClient(connectionContext, maxConnections);
     }
 
     public OpenSearchClient determineVersionAndCreate() {
@@ -66,8 +72,8 @@ public class OpenSearchClientFactory {
         var clientClass = getOpenSearchClientClass(version);
         try {
             if (restClient == null && failedRequestsLogger == null) {
-                return clientClass.getConstructor(ConnectionContext.class, Version.class, CompressionMode.class)
-                        .newInstance(connectionContext, version, compressionMode);
+                return clientClass.getConstructor(RestClient.class, FailedRequestsLogger.class, Version.class, CompressionMode.class)
+                        .newInstance(client, new FailedRequestsLogger(), version, compressionMode);
             }
             return clientClass.getConstructor(RestClient.class, FailedRequestsLogger.class, Version.class, CompressionMode.class)
                     .newInstance(restClient, failedRequestsLogger, version, compressionMode);

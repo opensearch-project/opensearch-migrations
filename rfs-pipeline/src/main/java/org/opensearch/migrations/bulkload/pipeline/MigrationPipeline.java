@@ -10,6 +10,7 @@ import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * Wires a {@link DocumentSource} to a {@link DocumentSink} with batching and optional
@@ -101,6 +102,8 @@ public class MigrationPipeline {
         log.info("Starting shard migration: {} from offset {} (batchConcurrency={})", shardId, startingDocOffset, batchConcurrency);
         final long[] cumulativeOffset = { startingDocOffset };
         return source.readDocuments(shardId, startingDocOffset)
+            .subscribeOn(Schedulers.boundedElastic())
+            .onBackpressureBuffer()
             .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
             .flatMapSequential(batch -> sink.writeBatch(shardId, indexName, batch)
                 .map(cursor -> {
