@@ -32,7 +32,8 @@ application {
 
 jib {
     to {
-        image = 'migrations/transformation_shim'
+        def registry = project.findProperty('registryEndpoint') ?: project.findProperty('intermediateRegistry') ?: 'localhost:5001'
+        image = "${registry}/migrations/transformation_shim"
     }
     from {
         image = 'amazoncorretto:17-al2023-headless'
