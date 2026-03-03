@@ -103,7 +103,6 @@ public class MigrationPipeline {
         final long[] cumulativeOffset = { startingDocOffset };
         return source.readDocuments(shardId, startingDocOffset)
             .subscribeOn(Schedulers.boundedElastic())
-            .onBackpressureBuffer()
             .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
             .flatMapSequential(batch -> sink.writeBatch(shardId, indexName, batch)
                 .map(cursor -> {
