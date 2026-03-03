@@ -66,7 +66,7 @@ functionName(jobName: jobNameOverride ?: null)
 - Pass as `childJobName` to the vars function
 - Default child job path follows parent job name:
   - `main-*` parent defaults to `Periodic runs from MAIN/main-k8s-local-integ-test`
-  - `pr-*` parent defaults to `Run on PRs/pr-k8s-local-integ-test`
+  - `pr-*` parent defaults to `pr-checks/pr-k8s-local-integ-test`
 - Periodic schedule is enabled by default for non-`pr-*` job names and disabled for `pr-*` job names
 
 ### Supported Cover Files
