@@ -17,6 +17,18 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 final class OpenSearchIndexCreator {
 
+    private static final String[] INTERNAL_SETTINGS = {
+        "creation_date", "provided_name", "uuid", "version", "mapping", "mapper",
+        "history.uuid", "verified_before_close",
+        "resize.source.name", "resize.source.uuid",
+        "routing.allocation.include._tier_preference",
+        "routing.allocation.include._name", "routing.allocation.include._id",
+        "routing.allocation.require._name", "routing.allocation.require._id",
+        "routing.allocation.exclude._name", "routing.allocation.exclude._id",
+        "blocks.write", "blocks.read_only", "blocks.read_only_allow_delete",
+        "blocks.read", "blocks.metadata",
+    };
+
     private OpenSearchIndexCreator() {}
 
     static void createIndex(OpenSearchClient client, IndexMetadataSnapshot metadata, ObjectMapper mapper) {
@@ -65,18 +77,7 @@ final class OpenSearchIndexCreator {
     }
 
     private static void stripInternalSettings(ObjectNode settings) {
-        String[] internalSettings = {
-            "creation_date", "provided_name", "uuid", "version", "mapping", "mapper",
-            "history.uuid", "verified_before_close",
-            "resize.source.name", "resize.source.uuid",
-            "routing.allocation.include._tier_preference",
-            "routing.allocation.include._name", "routing.allocation.include._id",
-            "routing.allocation.require._name", "routing.allocation.require._id",
-            "routing.allocation.exclude._name", "routing.allocation.exclude._id",
-            "blocks.write", "blocks.read_only", "blocks.read_only_allow_delete",
-            "blocks.read", "blocks.metadata",
-        };
-        for (String setting : internalSettings) {
+        for (String setting : INTERNAL_SETTINGS) {
             settings.remove(setting);
             ObjectNodeUtils.removeFieldsByPath(settings, "index." + setting);
             settings.remove("index." + setting);

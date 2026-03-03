@@ -96,7 +96,7 @@ public class PipelineEndToEndTest {
             var docSource = new SourcelessDocumentSource(configs, null);
 
             // Metadata first
-            new MetadataMigrationPipeline(metaSource, metaSink).migrateAll();
+            new MetadataMigrationPipeline(metaSource, metaSink).migrateAll().blockLast();
 
             // Then documents
             new MigrationPipeline(docSource, docSink, 10, 100_000).migrateAll().blockLast();
@@ -141,32 +141,35 @@ public class PipelineEndToEndTest {
             sink.createIndex(new IndexMetadataSnapshot("golden_test", 1, 0, null, null, null)).block();
 
             // Load golden fixture
+            Path fixturePath;
             var fixtureUrl = getClass().getClassLoader().getResource("golden/es710-wsoft-docs.json");
-            if (fixtureUrl == null) {
-                // Try from test-resources path
-                var fixturePath = Path.of("RFS/test-resources/golden/es710-wsoft-docs.json");
+            if (fixtureUrl != null) {
+                fixturePath = Path.of(fixtureUrl.toURI());
+            } else {
+                fixturePath = Path.of("RFS/test-resources/golden/es710-wsoft-docs.json");
                 if (!Files.exists(fixturePath)) {
                     log.warn("Golden fixture not found, skipping test");
                     return;
                 }
-                var content = Files.readString(fixturePath);
-                var goldenDocs = MAPPER.readValue(content, new TypeReference<List<java.util.Map<String, Object>>>() {});
-                var docs = goldenDocs.stream()
-                    .map(doc -> new DocumentChange(
-                        (String) doc.get("_id"),
-                        (String) doc.get("_type"),
-                        doc.get("_source") != null
-                            ? doc.get("_source").toString().getBytes(StandardCharsets.UTF_8)
-                            : null,
-                        (String) doc.get("_routing"),
-                        DocumentChange.ChangeType.INDEX
-                    ))
-                    .toList();
-
-                sink.writeBatch(shardId, "golden_test", docs).block();
-                verifyDocCount(cluster, "golden_test", docs.size());
-                log.info("Golden fixture test: wrote {} docs from es710-wsoft-docs.json", docs.size());
             }
+
+            var content = Files.readString(fixturePath);
+            var goldenDocs = MAPPER.readValue(content, new TypeReference<List<java.util.Map<String, Object>>>() {});
+            var docs = goldenDocs.stream()
+                .map(doc -> new DocumentChange(
+                    (String) doc.get("_id"),
+                    (String) doc.get("_type"),
+                    doc.get("_source") != null
+                        ? doc.get("_source").toString().getBytes(StandardCharsets.UTF_8)
+                        : null,
+                    (String) doc.get("_routing"),
+                    DocumentChange.ChangeType.INDEX
+                ))
+                .toList();
+
+            sink.writeBatch(shardId, "golden_test", docs).block();
+            verifyDocCount(cluster, "golden_test", docs.size());
+            log.info("Golden fixture test: wrote {} docs from es710-wsoft-docs.json", docs.size());
         }
     }
 

@@ -41,7 +41,8 @@ public class SourcelessDocumentSource implements DocumentSource {
         }
         this.configs = List.copyOf(configs);
         this.configByIndex = this.configs.stream()
-            .collect(Collectors.toMap(SourcelessExtractionConfig::indexName, Function.identity()));
+            .collect(Collectors.toMap(SourcelessExtractionConfig::indexName, Function.identity(),
+                (a, b) -> { throw new IllegalArgumentException("Duplicate index name: " + a.indexName()); }));
         this.metrics = metrics != null ? metrics : SourceExtractionMetrics.NOOP;
         for (var config : this.configs) {
             log.info("Sourceless extraction: index={}, shards={}, docsPerShard={}, docSizeBytes={}, deleteRatio={}, routing={}",
@@ -84,7 +85,7 @@ public class SourcelessDocumentSource implements DocumentSource {
     @Override
     public Flux<DocumentChange> readDocuments(ShardId shardId, long startingDocOffset) {
         var config = requireConfig(shardId.indexName());
-        int count = config.docsPerShard() - (int) startingDocOffset;
+        long count = config.docsPerShard() - startingDocOffset;
         if (count <= 0) {
             return Flux.empty();
         }
@@ -93,8 +94,9 @@ public class SourcelessDocumentSource implements DocumentSource {
         final long startNanos = System.nanoTime();
         final AtomicInteger docCount = new AtomicInteger(0);
         int deleteThreshold = (int) (config.docsPerShard() * (1.0 - config.deleteRatio()));
+        int offset = Math.toIntExact(startingDocOffset);
 
-        return Flux.range((int) startingDocOffset, count)
+        return Flux.range(offset, (int) count)
             .map(docNum -> {
                 boolean isDelete = docNum >= deleteThreshold;
                 byte[] body = isDelete ? null : generateDocumentBody(config, shardId, docNum);

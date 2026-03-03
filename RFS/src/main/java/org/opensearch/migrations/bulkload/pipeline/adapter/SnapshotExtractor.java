@@ -9,6 +9,7 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
+import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
@@ -55,7 +56,7 @@ public class SnapshotExtractor {
             .getRepoDataProvider()
             .getIndicesInSnapshot(snapshotName)
             .stream()
-            .map(idx -> idx.getName())
+            .map(SnapshotRepo.Index::getName)
             .toList();
     }
 

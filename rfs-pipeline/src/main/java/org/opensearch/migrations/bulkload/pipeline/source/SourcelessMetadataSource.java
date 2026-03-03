@@ -35,7 +35,8 @@ public class SourcelessMetadataSource implements MetadataSource {
         }
         this.configs = List.copyOf(configs);
         this.configByIndex = this.configs.stream()
-            .collect(Collectors.toMap(SourcelessExtractionConfig::indexName, Function.identity()));
+            .collect(Collectors.toMap(SourcelessExtractionConfig::indexName, Function.identity(),
+                (a, b) -> { throw new IllegalArgumentException("Duplicate index name: " + a.indexName()); }));
     }
 
     @Override

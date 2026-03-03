@@ -86,6 +86,11 @@ public class PipelineRunner {
             });
         } finally {
             source.close();
+            try {
+                sink.close();
+            } catch (Exception e) {
+                log.warn("Failed to close document sink", e);
+            }
         }
     }
 }
