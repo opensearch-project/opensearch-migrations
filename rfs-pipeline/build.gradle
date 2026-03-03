@@ -4,10 +4,6 @@ plugins {
 }
 
 dependencies {
-    // The adapter package bridges existing RFS types to the clean pipeline IR.
-    // Core pipeline types have ZERO dependency on RFS.
-    compileOnly project(':RFS')
-
     implementation libs.jackson.databind
     implementation libs.reactor.core
     implementation libs.slf4j.api
