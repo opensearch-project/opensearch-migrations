@@ -5,5 +5,6 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
          remote: "${gitUrl}"])
 
-// Shared library function (location from root: vars/solutionsCFNTest.groovy)
-solutionsCFNTest()
+// Allow job name override for webhook routing (e.g., pr-* vs main-*)
+def jobNameOverride = params.JOB_NAME_OVERRIDE ?: ''
+solutionsCFNTest(jobName: jobNameOverride ?: null)
