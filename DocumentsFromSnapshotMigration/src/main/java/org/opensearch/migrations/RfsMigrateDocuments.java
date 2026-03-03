@@ -549,6 +549,7 @@ public class RfsMigrateDocuments {
                 allowlist,
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,
+                arguments.maxConnections,
                 progressCursor,
                 workCoordinator,
                 arguments.initialLeaseDuration,
@@ -805,6 +806,7 @@ public class RfsMigrateDocuments {
         DocumentExceptionAllowlist allowlist,
         int maxDocsPerBatch,
         long maxBytesPerBatch,
+        int batchConcurrency,
         AtomicReference<WorkItemCursor> progressCursor,
         IWorkCoordinator workCoordinator,
         Duration maxInitialLeaseDuration,
@@ -828,6 +830,7 @@ public class RfsMigrateDocuments {
             .workDir(workDir)
             .maxDocsPerBatch(maxDocsPerBatch)
             .maxBytesPerBatch(maxBytesPerBatch)
+            .batchConcurrency(batchConcurrency)
             .transformerSupplier(transformerSupplier)
             .allowServerGeneratedIds(useServerGeneratedIds)
             .allowlist(allowlist)

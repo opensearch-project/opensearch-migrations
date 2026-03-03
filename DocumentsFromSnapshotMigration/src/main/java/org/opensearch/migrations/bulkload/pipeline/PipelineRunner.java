@@ -54,6 +54,8 @@ public class PipelineRunner {
     private final int maxDocsPerBatch = 1000;
     @Builder.Default
     private final long maxBytesPerBatch = 10_000_000L;
+    @Builder.Default
+    private final int batchConcurrency = 10;
 
     // Optional: document transformation
     @Builder.Default
@@ -112,6 +114,7 @@ public class PipelineRunner {
                 sink,
                 maxDocsPerBatch,
                 maxBytesPerBatch,
+                batchConcurrency,
                 snapshotName,
                 cursorConsumer,
                 cancellationTriggerConsumer

@@ -285,6 +285,7 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                 DocumentExceptionAllowlist.empty(),
                 1,              // 1 doc per bulk to slow migration (matches test timing assumptions)
                 Long.MAX_VALUE,
+                1,              // 1 batch at a time for predictable test timing
                 progressCursor,
                 workCoordinator,
                 Duration.ofMinutes(99),

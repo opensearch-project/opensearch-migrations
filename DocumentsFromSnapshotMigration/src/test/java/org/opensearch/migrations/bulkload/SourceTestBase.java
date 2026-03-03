@@ -357,6 +357,7 @@ public class SourceTestBase {
                     allowlist,
                     1000,
                     Long.MAX_VALUE,
+                    10,
                     progressCursor,
                     workCoordinator,
                     Duration.ofMinutes(10),

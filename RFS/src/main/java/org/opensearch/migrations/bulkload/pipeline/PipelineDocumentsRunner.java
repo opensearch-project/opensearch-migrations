@@ -47,6 +47,7 @@ public class PipelineDocumentsRunner {
     private final DocumentSink sink;
     private final int maxDocsPerBatch;
     private final long maxBytesPerBatch;
+    private final int batchConcurrency;
     private final String snapshotName;
     private final Consumer<WorkItemCursor> cursorConsumer;
     private final Consumer<Runnable> cancellationTriggerConsumer;
@@ -84,7 +85,7 @@ public class PipelineDocumentsRunner {
                     long startingOffset = wi.getStartingDocId() != null && wi.getStartingDocId() >= 0
                         ? wi.getStartingDocId() : 0;
 
-                    var pipeline = new MigrationPipeline(source, sink, maxDocsPerBatch, maxBytesPerBatch);
+                    var pipeline = new MigrationPipeline(source, sink, maxDocsPerBatch, maxBytesPerBatch, 1, batchConcurrency);
                     var latch = new CountDownLatch(1);
                     var lastCursor = new AtomicReference<ProgressCursor>();
                     var batchCount = new AtomicInteger();
