@@ -883,7 +883,10 @@ class WorkflowService:
             try:
                 response = requests.get(url, headers=headers, verify=not insecure, timeout=30)
                 if response.status_code != 200:
-                    raise Exception(f"Argo API returned {response.status_code}: {response.text}")
+                    raise requests.exceptions.HTTPError(
+                        f"Argo API returned {response.status_code}: {response.text}",
+                        response=response
+                    )
 
                 workflow = response.json()
                 phase = workflow.get("status", {}).get("phase", "Unknown")

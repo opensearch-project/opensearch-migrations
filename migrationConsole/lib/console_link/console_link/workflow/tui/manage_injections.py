@@ -112,7 +112,7 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
                 for node_id, node in archived.get("status", {}).get("nodes", {}).items():
                     slim_nodes[node_id] = _build_slim_node(node_id, node)
             else:
-                raise Exception(f"Workflow {name} not found in live or archive API")
+                raise RuntimeError(f"Workflow {name} not found in live or archive API")
 
         slim_data = {
             "metadata": {"name": name,
