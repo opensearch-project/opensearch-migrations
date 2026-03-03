@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 import org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor;
@@ -105,29 +106,40 @@ public class MigrationPipeline {
         final long[] cumulativeOffset = { startingDocOffset };
         final long[] cumulativeBytes = { 0 };
         final long[] lastLogTime = { System.currentTimeMillis() };
+        final AtomicInteger activeBatches = new AtomicInteger(0);
         return source.readDocuments(shardId, startingDocOffset)
             .subscribeOn(Schedulers.boundedElastic())
             .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
-            .flatMapSequential(batch -> sink.writeBatch(shardId, indexName, batch)
-                .map(cursor -> {
-                    cumulativeOffset[0] += cursor.docsInBatch();
-                    cumulativeBytes[0] += cursor.bytesInBatch();
-                    return new ProgressCursor(
-                        shardId,
-                        cumulativeOffset[0],
-                        cursor.docsInBatch(),
-                        cursor.bytesInBatch()
-                    );
-                })
-                .doOnNext(cursor -> {
-                    long now = System.currentTimeMillis();
-                    if (now - lastLogTime[0] >= PROGRESS_LOG_INTERVAL_MS) {
-                        lastLogTime[0] = now;
-                        log.info("{} progress: {} docs, {} MB sent",
-                            shardId, cumulativeOffset[0], cumulativeBytes[0] / (1024 * 1024));
-                    }
-                })
-            , batchConcurrency)
+            .flatMapSequential(batch -> {
+                long batchStart = System.nanoTime();
+                int batchDocs = batch.size();
+                long batchBytes = batch.stream().mapToLong(d -> d.source() != null ? d.source().length : 0).sum();
+                int inflight = activeBatches.incrementAndGet();
+                return sink.writeBatch(shardId, indexName, batch)
+                    .map(cursor -> {
+                        cumulativeOffset[0] += cursor.docsInBatch();
+                        cumulativeBytes[0] += cursor.bytesInBatch();
+                        return new ProgressCursor(
+                            shardId,
+                            cumulativeOffset[0],
+                            cursor.docsInBatch(),
+                            cursor.bytesInBatch()
+                        );
+                    })
+                    .doOnNext(cursor -> {
+                        int remaining = activeBatches.decrementAndGet();
+                        long totalMs = (System.nanoTime() - batchStart) / 1_000_000;
+                        long now = System.currentTimeMillis();
+                        if (now - lastLogTime[0] >= PROGRESS_LOG_INTERVAL_MS) {
+                            lastLogTime[0] = now;
+                            log.info("{} batch: {}ms, {} docs, {} KB, active {}/{} | progress: {} docs, {} MB total",
+                                shardId, totalMs, batchDocs, batchBytes / 1024,
+                                remaining + 1, batchConcurrency,
+                                cumulativeOffset[0], cumulativeBytes[0] / (1024 * 1024));
+                        }
+                    })
+                    .doOnError(e -> activeBatches.decrementAndGet());
+            }, batchConcurrency)
             .onErrorMap(e -> !(e instanceof PipelineException),
                 e -> new PipelineException("Failed migrating shard " + shardId, e))
             .doOnComplete(() -> log.info("Completed shard migration: {} — {} docs, {} MB total",
