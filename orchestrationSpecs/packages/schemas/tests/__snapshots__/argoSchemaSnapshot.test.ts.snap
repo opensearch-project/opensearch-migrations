@@ -589,7 +589,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 }
               },
               "required": [
-                "createSnapshotConfig",
                 "migrations",
                 "label",
                 "snapshotConfig"
@@ -1028,12 +1027,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       ]
                     },
                     "repoName": {
-                      "type": "string"
+                      "type": "string",
+                      "default": "default"
                     }
                   },
                   "required": [
-                    "snapshotNameConfig",
-                    "repoName"
+                    "snapshotNameConfig"
                   ]
                 },
                 "migrations": {
