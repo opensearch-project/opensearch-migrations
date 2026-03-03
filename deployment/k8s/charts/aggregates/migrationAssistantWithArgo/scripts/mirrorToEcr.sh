@@ -68,50 +68,46 @@ echo "$ECR_PASS" | helm registry login "$ECR_HOST" -u AWS --password-stdin
 aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
   crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
 
-# --- mirror container images ---
-echo ""
-echo "=== Mirroring container images ==="
-failed_images=""
-echo "$IMAGES" | while IFS= read -r image; do
-  image=$(echo "$image" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-  [ -z "$image" ] && continue
-  echo "$image" | grep -q '^#' && continue
+# --- DockerHub mirrors (tried in order for mirror.gcr.io/* images) ---
+# Override: DOCKERHUB_MIRRORS="mirror.gcr.io docker.io ghcr.io/dockerhub" ./mirrorToEcr.sh ...
+DOCKERHUB_MIRRORS="${DOCKERHUB_MIRRORS:-mirror.gcr.io docker.io}"
 
-  image_no_tag="${image%%:*}"
-  tag="${image##*:}"
-  ecr_repo="mirrored/${image_no_tag}"
+# Copies a single image to ECR, trying mirror sources for mirror.gcr.io/* images.
+copy_image() {
+  local image="$1" image_no_tag="${image%%:*}" tag="${image##*:}"
+  local ecr_repo="mirrored/${image_no_tag}" dest="${ECR_HOST}/${ecr_repo}:${tag}"
 
-  # Build list of source candidates: original + docker.io fallback for mirror.gcr.io
-  sources="$image"
-  case "$image" in
-    mirror.gcr.io/*)
-      # mirror.gcr.io proxies Docker Hub — add docker.io as fallback
-      docker_path="${image#mirror.gcr.io/}"
-      sources="$image docker.io/${docker_path}"
-      ;;
-  esac
+  # Build source candidates — for mirror.gcr.io/*, try each mirror
+  local sources="$image"
+  case "$image" in mirror.gcr.io/*)
+    local path="${image#mirror.gcr.io/}" ; sources=""
+    for m in $DOCKERHUB_MIRRORS; do sources="${sources:+$sources }${m}/${path}"; done
+  ;; esac
 
-  echo "  Copying $image → ${ECR_HOST}/${ecr_repo}:${tag}"
   aws ecr create-repository --repository-name "$ecr_repo" --region "$REGION" 2>/dev/null || true
-  copied=false
   for src in $sources; do
     for attempt in 1 2 3; do
-      if crane copy "$src" "${ECR_HOST}/${ecr_repo}:${tag}" 2>&1; then
-        [ "$src" != "$image" ] && echo "  ℹ️  Used fallback source: $src"
-        echo "  ✅ $image"
-        copied=true
-        break 2
+      if crane copy "$src" "$dest" 2>/dev/null; then
+        [ "$src" != "$image" ] && echo "  ℹ️  $image (via $src)"
+        echo "  ✅ $image"; return 0
       fi
-      echo "  ⚠️  Attempt $attempt failed for $src, retrying in 5s..." >&2
       sleep 5
     done
-    [ "$copied" = false ] && echo "  ⚠️  All attempts failed for source $src, trying next..." >&2
   done
-  if [ "$copied" = false ]; then
-    echo "  ❌ FAILED all sources for: $image" >&2
-    failed_images="$failed_images $image"
-  fi
-done
+  echo "  ❌ $image" >&2; return 1
+}
+
+# --- mirror container images (parallel) ---
+echo ""
+echo "=== Mirroring container images ==="
+# Write cleaned image list to temp file so we can loop without a pipe subshell
+_imglist=$(mktemp)
+echo "$IMAGES" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | grep -v '^#' | grep -v '^$' > "$_imglist"
+while IFS= read -r image; do
+  copy_image "$image" &
+done < "$_imglist"
+rm -f "$_imglist"
+wait || { echo "⚠️  Some image copies failed" >&2; }
 
 # --- mirror helm charts as OCI artifacts ---
 echo ""
