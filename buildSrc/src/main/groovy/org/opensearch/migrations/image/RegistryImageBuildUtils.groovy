@@ -387,7 +387,7 @@ class RegistryImageBuildUtils {
                             "--cache-from=type=registry,ref=${cacheDestination}${suffix}"
                     ]
                     buildArgFlags.each { fullArgs.add(it) }
-                    fullArgs.add(contextPath)
+                    fullArgs.add("\"${contextPath}\"")
                     commandLine 'sh', '-c', fullArgs.join(" ")
                 }
             }
@@ -414,7 +414,7 @@ class RegistryImageBuildUtils {
                         "--cache-from=type=registry,ref=${cacheDestination}_arm64"
                 ]
                 buildArgFlags.each { fullArgs.add(it) }
-                fullArgs.add(contextPath)
+                fullArgs.add("\"${contextPath}\"")
                 commandLine 'sh', '-c', fullArgs.join(" ")
             }
         }
