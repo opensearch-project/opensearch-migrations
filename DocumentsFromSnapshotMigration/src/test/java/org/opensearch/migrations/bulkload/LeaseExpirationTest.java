@@ -68,14 +68,16 @@ public class LeaseExpirationTest extends SourceTestBase {
                                            SearchClusterContainer.ContainerVersion sourceClusterVersion,
                                            SearchClusterContainer.ContainerVersion targetClusterVersion) {
         // Sending 10 docs per request with 2 requests concurrently with each taking 1 second is 40 docs/sec
-        // will process 1640 docs in 21 seconds. With 10s lease duration, expect to be finished in 3 leases.
+        // With PT20s lease and early trigger at max(20*0.75, 20-270) = 15s, effective work time is ~15s/lease.
+        // ~15s * 40 docs/sec = ~600 docs/lease (minus setup overhead).
+        // 1640 docs/shard needs ~4 leases (3 handoffs + 1 completion).
         // This is ensured with the toxiproxy settings, the migration should not be able to be completed
         // faster, but with a heavily loaded test environment, may be slower which is why this is marked as
         // isolated.
-        // 2 Shards, for each shard, expect two status code 2 and one status code 0 (3 leases)
+        // 2 shards, for each shard, expect at least three status code 2 and one status code 0.
         int shards = 2;
         int indexDocCount = 1640 * shards;
-        int migrationProcessesPerShard = 3;
+        int migrationProcessesPerShard = 4;
         int continueExitCode = 2;
         int finalExitCodePerShard = 0;
         runTestProcessWithCheckpoint(continueExitCode, (migrationProcessesPerShard - 1) * shards,
@@ -169,6 +171,7 @@ public class LeaseExpirationTest extends SourceTestBase {
             int initialExitCodeCount = 0;
             int finalExitCodeCount = 0;
             int runs = 0;
+            int maxRuns = expectedInitialExitCodeCount + expectedEventualExitCodeCount + (2 * shards);
             do {
                 exitCode = processRunner.apply(new RunData(tempDirSnapshot, tempDirLucene, proxyContainer));
                 runs++;
@@ -177,17 +180,14 @@ public class LeaseExpirationTest extends SourceTestBase {
                 log.atInfo().setMessage("Process exited with code: {}").addArgument(exitCode).log();
                 // Clean tree for subsequent run
                 FileSystemUtils.deleteDirectories(tempDirLucene.toString());
-            } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < expectedInitialExitCodeCount + expectedEventualExitCodeCount);
-
-            // Assert doc count on the target cluster matches source
-            checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer,
-                    DocumentMigrationTestContext.factory().noOtelTracking());
+            } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < maxRuns);
 
             // Check if the final exit code is as expected
             Assertions.assertEquals(
                     expectedEventualExitCodeCount,
                     finalExitCodeCount,
-                    "The program did not exit with the expected final exit code."
+                    "The program did not exit with the expected final exit code count before max runs. "
+                            + "runs=" + runs + ", initialExitCodeCount=" + initialExitCodeCount
             );
 
             Assertions.assertEquals(
@@ -196,11 +196,15 @@ public class LeaseExpirationTest extends SourceTestBase {
                     "The program did not exit with the expected final exit code."
             );
 
-            Assertions.assertEquals(
-                    expectedInitialExitCodeCount,
-                    initialExitCodeCount,
-                    "The program did not exit with the expected number of " + expectedInitialExitCode +" exit codes"
+            Assertions.assertTrue(
+                    initialExitCodeCount >= expectedInitialExitCodeCount,
+                    "The program did not exit with at least " + expectedInitialExitCodeCount + " occurrences of "
+                            + expectedInitialExitCode + ". Actual=" + initialExitCodeCount
             );
+
+            // Assert doc count on the target cluster matches source
+            checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer,
+                    DocumentMigrationTestContext.factory().noOtelTracking());
         } finally {
             FileSystemUtils.deleteDirectories(tempDirSnapshot.toString());
         }
