@@ -110,10 +110,16 @@ class RegistryImageBuildUtils {
                         }
                         extraDirectories {
                             paths {
-                                path { from = project.file("docker"); into = '/' }
+                                def dockerDir = project.file("docker")
+                                if (dockerDir.exists()) {
+                                    path { from = dockerDir; into = '/' }
+                                }
                                 path { from = project.file("build/versionDir"); into = '/' }
                             }
-                            permissions = ['/runJavaWithClasspath.sh': '755']
+                            def extraPerms = (Map<String, String>) config.get("extraPermissions", [:])
+                            if (extraPerms) {
+                                permissions = extraPerms
+                            }
                         }
                         allowInsecureRegistries = true
                         container { entrypoint = ['tail', '-f', '/dev/null'] }
