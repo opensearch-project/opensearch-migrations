@@ -283,6 +283,11 @@ spec:
                   value: "ES_6.8"
                 - name: target-version
                   value: "OS_2.19"
+              artifacts:
+                - name: junit-xml
+                  s3:
+                    key: "{{workflow.name}}/test-results/"
+                  optional: true
           - name: notify
             depends: destroy-stacks
             templateRef:

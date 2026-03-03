@@ -190,6 +190,11 @@ spec:
               parameters:
                 - name: launch-name
                   value: "k8s-local-{{workflow.parameters.source-version}}-{{workflow.parameters.target-version}}"
+              artifacts:
+                - name: test-reports
+                  s3:
+                    key: "{{workflow.name}}/test-reports/"
+                  optional: true
 
     - name: cleanup-deployment
       retryStrategy:

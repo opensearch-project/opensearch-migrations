@@ -454,6 +454,19 @@ spec:
               parameters:
                 - name: stack-name
                   value: "NetworkInfra-{{workflow.parameters.stage}}-{{workflow.parameters.region}}"
+          - name: upload-results
+            templateRef:
+              name: reportportal-upload
+              template: upload-junit
+            arguments:
+              parameters:
+                - name: launch-name
+                  value: "eks-integ-{{workflow.parameters.stage}}"
+              artifacts:
+                - name: junit-xml
+                  s3:
+                    key: "{{workflow.name}}/test-results/"
+                  optional: true
 
     # EKS cleanup: helm uninstall, SG revocation (matches Jenkins post block)
     - name: eks-cleanup

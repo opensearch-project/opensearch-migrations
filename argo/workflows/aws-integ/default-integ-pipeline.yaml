@@ -318,6 +318,11 @@ spec:
               parameters:
                 - name: launch-name
                   value: "integ-{{workflow.parameters.stage}}"
+              artifacts:
+                - name: junit-xml
+                  s3:
+                    key: "{{workflow.name}}/test-results/"
+                  optional: true
           - name: notify-github
             depends: destroy-migration-stack
             templateRef:

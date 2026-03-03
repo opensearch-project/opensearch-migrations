@@ -181,6 +181,8 @@ spec:
             optional: true
             archive:
               none: {}
+            s3:
+              key: "{{workflow.name}}/junit-xml/"
       container:
         image: gradle:8-jdk17
         workingDir: /workspace
@@ -419,6 +421,11 @@ spec:
               parameters:
                 - name: launch-name
                   value: "ci-{{workflow.parameters.branch}}"
+              artifacts:
+                - name: junit-xml
+                  s3:
+                    key: "{{workflow.name}}/junit-xml/"
+                  optional: true
           - name: notify-github
             templateRef:
               name: common-ci-steps

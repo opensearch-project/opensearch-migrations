@@ -19,7 +19,7 @@ spec:
           - name: target-version
             default: ""
           - name: rp-endpoint
-            default: "http://reportportal-serviceapi.reportportal:8585"
+            default: "http://reportportal-api.reportportal.svc:8585"
           - name: rp-project
             default: "opensearch_migrations"
         artifacts:
@@ -30,7 +30,7 @@ spec:
         image: python:3.11-alpine
         command: [python]
         source: |
-          import os, glob, json
+          import os, glob, json, sys
           try:
               import requests
           except ImportError:
@@ -39,12 +39,23 @@ spec:
 
           rp_endpoint = "{{inputs.parameters.rp-endpoint}}"
           rp_project = "{{inputs.parameters.rp-project}}"
-          rp_token = os.environ.get("RP_TOKEN", "superadmin_personal")
+          rp_token = os.environ.get("RP_TOKEN", "")
 
           xml_files = glob.glob("/results/**/*.xml", recursive=True)
           if not xml_files:
-              print("No JUnit XML files found in /results/")
-              exit(0)
+              print("No JUnit XML files found — skipping ReportPortal upload")
+              sys.exit(0)
+
+          if not rp_token:
+              print("No RP_TOKEN set — skipping ReportPortal upload")
+              sys.exit(0)
+
+          # Check connectivity
+          try:
+              requests.get(f"{rp_endpoint}/health", timeout=5)
+          except Exception:
+              print(f"ReportPortal not reachable at {rp_endpoint} — skipping upload")
+              sys.exit(0)
 
           print(f"Found {len(xml_files)} XML files to upload")
 
@@ -83,8 +94,6 @@ spec:
                   print(f"  Error uploading {xml_file}: {e}")
 
           print(f"\nUploaded {success}/{len(xml_files)} files to ReportPortal")
-          if success == 0 and xml_files:
-              print("Warning: No files uploaded successfully. Check ReportPortal connectivity.")
         env:
           - name: RP_TOKEN
             valueFrom:
@@ -101,7 +110,7 @@ spec:
         parameters:
           - name: launch-name
           - name: rp-endpoint
-            default: "http://reportportal-serviceapi.reportportal:8585"
+            default: "http://reportportal-api.reportportal.svc:8585"
           - name: rp-project
             default: "opensearch_migrations"
         artifacts:
@@ -112,7 +121,7 @@ spec:
         image: python:3.11-alpine
         command: [python]
         source: |
-          import os, glob, json
+          import os, glob, json, sys
           try:
               import requests
           except ImportError:
@@ -121,20 +130,36 @@ spec:
 
           rp_endpoint = "{{inputs.parameters.rp-endpoint}}"
           rp_project = "{{inputs.parameters.rp-project}}"
-          rp_token = os.environ.get("RP_TOKEN", "superadmin_personal")
+          rp_token = os.environ.get("RP_TOKEN", "")
+
+          json_files = glob.glob("/reports/**/*.json", recursive=True)
+          if not json_files:
+              print("No JSON report files found — skipping ReportPortal upload")
+              sys.exit(0)
+
+          if not rp_token:
+              print("No RP_TOKEN set — skipping ReportPortal upload")
+              sys.exit(0)
+
+          # Check connectivity before proceeding
+          try:
+              requests.get(f"{rp_endpoint}/health", timeout=5)
+          except Exception:
+              print(f"ReportPortal not reachable at {rp_endpoint} — skipping upload")
+              sys.exit(0)
+
           headers = {
               "Authorization": f"Bearer {rp_token}",
               "Content-Type": "application/json"
           }
 
-          json_files = glob.glob("/reports/**/*.json", recursive=True)
-          if not json_files:
-              print("No JSON report files found")
-              exit(0)
-
           for json_file in json_files:
-              with open(json_file) as f:
-                  data = json.load(f)
+              try:
+                  with open(json_file) as f:
+                      data = json.load(f)
+              except (json.JSONDecodeError, IOError) as e:
+                  print(f"Skipping {json_file}: {e}")
+                  continue
 
               summary = data.get("summary", {})
               tests = data.get("tests", [])
@@ -164,7 +189,6 @@ spec:
               # Report each test
               for test in tests:
                   status = "PASSED" if test["result"] == "passed" else "FAILED"
-                  # Start test item
                   item_resp = requests.post(
                       f"{rp_endpoint}/api/v2/{rp_project}/item",
                       headers=headers,
@@ -214,7 +238,7 @@ spec:
           - name: target-version
           - name: registry-prefix
           - name: rp-endpoint
-            default: "http://reportportal-serviceapi.reportportal:8585"
+            default: "http://reportportal-api.reportportal.svc:8585"
           - name: rp-project
             default: "opensearch_migrations"
         artifacts:

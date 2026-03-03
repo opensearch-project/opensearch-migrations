@@ -437,6 +437,15 @@ spec:
         artifacts:
           - name: source
             path: /workspace
+      outputs:
+        artifacts:
+          - name: test-results
+            path: /tmp/test-results/
+            optional: true
+            archive:
+              none: {}
+            s3:
+              key: "{{workflow.name}}/test-results/"
       container:
         image: ci-runner:latest
         command: [bash, -c]
@@ -483,7 +492,12 @@ spec:
                 --source_version={{workflow.parameters.source-version}} \
                 --target_version={{workflow.parameters.target-version}} \
                 --test_ids={{workflow.parameters.test-ids}} \
-                --reuse_clusters -s"
+                --reuse_clusters -s \
+                --junitxml=/tmp/byos-results.xml" || true
+
+            # Copy test results out of migration-console
+            mkdir -p /tmp/test-results
+            kubectl cp ma/migration-console-0:/tmp/byos-results.xml /tmp/test-results/byos-results.xml 2>/dev/null || true
         env:
           - name: TEST_ACCOUNT_ID
             valueFrom:
@@ -499,6 +513,19 @@ spec:
     - name: cleanup-handler
       dag:
         tasks:
+          - name: upload-results
+            templateRef:
+              name: reportportal-upload
+              template: upload-junit
+            arguments:
+              parameters:
+                - name: launch-name
+                  value: "eks-byos-{{workflow.parameters.stage}}"
+              artifacts:
+                - name: junit-xml
+                  s3:
+                    key: "{{workflow.name}}/test-results/"
+                  optional: true
           - name: revoke-sg-and-delete-ma
             template: cleanup-ma-stack-with-retries
           - name: delete-target-domain

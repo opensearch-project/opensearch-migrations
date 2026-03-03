@@ -38,6 +38,9 @@ uat:
     requests:
       cpu: 50m
       memory: 256Mi
+  extraEnvs:
+    - name: RP_INITIAL_ADMIN_PASSWORD
+      value: "erebus"
 
 serviceui:
   resources:
@@ -50,3 +53,4 @@ serviceanalyzer:
     requests:
       cpu: 50m
       memory: 256Mi
+  enabled: false  # image not available for all platforms; enable when needed

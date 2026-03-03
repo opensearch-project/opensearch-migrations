@@ -116,6 +116,10 @@ spec:
               parameters:
                 - name: launch-name
                   value: "k8s-matrix-nightly"
+              artifacts:
+                - name: test-reports
+                  from: "{{tasks.collect-results.outputs.artifacts.aggregated-reports}}"
+                  optional: true
 
     - name: collect-child-results
       outputs:
