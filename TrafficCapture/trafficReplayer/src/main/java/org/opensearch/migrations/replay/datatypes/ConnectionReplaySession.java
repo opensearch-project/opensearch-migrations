@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.datatypes;
 
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.utils.OnlineRadixSorter;
@@ -10,6 +11,7 @@ import org.opensearch.migrations.utils.TrackedFuture;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
 import lombok.Getter;
+import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -37,6 +39,17 @@ public class ConnectionReplaySession {
     public final TimeToResponseFulfillmentFutureMap schedule;
     @Getter
     private final IReplayContexts.IChannelKeyContext channelKeyContext;
+    /** Generation of the Kafka consumer assignment when this session was created. */
+    public final int generation;
+    /** Called when the session's channel is closed (regardless of cause). */
+    public final Consumer<ConnectionReplaySession> onClose;
+    /**
+     * When true, this session has been cancelled due to a traffic source reader interruption.
+     * {@link #getChannelFutureInActiveState} will return a failed future rather than reconnecting,
+     * preventing self-healing reconnects after a partition reassignment cancel.
+     */
+    @Setter
+    private volatile boolean cancelled = false;
 
     @SneakyThrows
     public ConnectionReplaySession(
@@ -44,11 +57,34 @@ public class ConnectionReplaySession {
         IReplayContexts.IChannelKeyContext channelKeyContext,
         BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory
     ) {
+        this(eventLoop, channelKeyContext, channelFutureFutureFactory, 0);
+    }
+
+    @SneakyThrows
+    public ConnectionReplaySession(
+        EventLoop eventLoop,
+        IReplayContexts.IChannelKeyContext channelKeyContext,
+        BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory,
+        int generation
+    ) {
+        this(eventLoop, channelKeyContext, channelFutureFutureFactory, generation, ignored -> {});
+    }
+
+    @SneakyThrows
+    public ConnectionReplaySession(
+        EventLoop eventLoop,
+        IReplayContexts.IChannelKeyContext channelKeyContext,
+        BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory,
+        int generation,
+        Consumer<ConnectionReplaySession> onClose
+    ) {
         this.eventLoop = eventLoop;
         this.channelKeyContext = channelKeyContext;
         this.scheduleSequencer = new OnlineRadixSorter(0);
         this.schedule = new TimeToResponseFulfillmentFutureMap();
         this.channelFutureFutureFactory = channelFutureFutureFactory;
+        this.generation = generation;
+        this.onClose = onClose;
     }
 
     public TrackedFuture<String, ChannelFuture> getChannelFutureInAnyState() {
@@ -62,6 +98,11 @@ public class ConnectionReplaySession {
     {
         TextTrackedFuture<ChannelFuture> trigger = new TextTrackedFuture<>("procuring a connection");
         eventLoop.submit(() -> {
+            if (cancelled) {
+                trigger.future.completeExceptionally(
+                    new IllegalStateException("Session cancelled due to traffic source reader interruption — not reconnecting"));
+                return;
+            }
             if (cachedChannel != null && cachedChannel.channel().isActive()) {
                 trigger.future.complete(cachedChannel);
             } else {

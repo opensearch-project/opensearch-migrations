@@ -18,7 +18,7 @@ spec:
           - name: dr
             value: "{{=sprig.dig('documentBackfillConfigs', 'indices2', \"zoo\", fromJSON(inputs.parameters.migrationConfig)) }}"
       container:
-        image: alpine:latest
+        image: mirror.gcr.io/library/alpine:latest
         command: [sh, -c]
         args:
           - |

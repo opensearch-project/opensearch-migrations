@@ -98,6 +98,33 @@ See the [project wiki](https://github.com/opensearch-project/opensearch-migratio
 for additional deployment guidance.
 
 
+## Isolated / Air-Gapped Networks
+
+For subnets without internet access, the bootstrap script can mirror all required
+container images and helm charts to your private ECR registry, and create the VPC
+endpoints needed for EKS to pull from ECR. Add `--push-all-images-to-private-ecr`
+and `--create-vpc-endpoints` (unless you're managing those endpoints elsewhere) 
+and the script handles the rest.
+
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --deploy-import-vpc-cfn \
+  --push-all-images-to-private-ecr \
+  --create-vpc-endpoints \
+  --stack-name MA-Prod \
+  --stage prod \
+  --vpc-id vpc-xxx \
+  --subnet-ids subnet-aaa,subnet-bbb \
+  --region us-east-1 \
+  --version 2.6.4
+```
+
+The mirroring step runs from your machine (which has internet), copies ~50 images
+and 11 helm charts to ECR, then the EKS cluster pulls everything through VPC
+endpoints. Seven endpoints are created: ECR API, ECR Docker, S3, CloudWatch Logs,
+EFS, STS, and EKS Auth.
+
+
 ## Developer Workflow
 
 ### Prerequisites

@@ -140,7 +140,8 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                     t -> {
                         var wasNew = tuplesReceived.add(t.getRequestKey().toString());
                         Assertions.assertTrue(wasNew);
-                    }
+                    },
+                    Duration.ofSeconds(5)
                 );
                 Assertions.assertEquals(numRequests, tuplesReceived.size());
                 Thread.sleep(1000);

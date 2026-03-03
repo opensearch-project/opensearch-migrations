@@ -36,6 +36,6 @@ spec:
         parameters:
           - name: message
       container:
-        image: alpine:latest
+        image: mirror.gcr.io/library/alpine:latest
         command: [echo]
         args: ["{{inputs.parameters.message}}"]

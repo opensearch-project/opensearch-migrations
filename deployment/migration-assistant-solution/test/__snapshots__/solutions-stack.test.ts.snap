@@ -1147,12 +1147,6 @@ npm install 2>&1
           {
             "Ref": "VpcPrivateSubnet2RouteTableA678073B",
           },
-          {
-            "Ref": "VpcPublicSubnet1RouteTable6C95E38E",
-          },
-          {
-            "Ref": "VpcPublicSubnet2RouteTable94F7E489",
-          },
         ],
         "ServiceName": {
           "Fn::Join": [

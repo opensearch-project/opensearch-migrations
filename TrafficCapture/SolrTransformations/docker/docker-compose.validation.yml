@@ -1,0 +1,136 @@
+# Validation Shim multi-mode demo.
+# Runs Solr 8, OpenSearch 3.3, and 4 validation shim instances:
+#   :8081 — solr-only passthrough
+#   :8082 — opensearch-only (with request/response transforms)
+#   :8083 — dual-target, solr primary (returns Solr response, validates against OpenSearch)
+#   :8084 — dual-target, opensearch primary (returns OpenSearch response, validates against Solr)
+
+x-shim-base: &shim-base
+  image: migrations/transformation_shim
+  entrypoint: ["java", "-cp", "/app/resources:/app/classes:/app/libs/*",
+    "org.opensearch.migrations.transform.shim.ShimMain"]
+  volumes:
+    - transform-dist:/transforms:ro
+  depends_on:
+    opensearch:
+      condition: service_healthy
+    solr:
+      condition: service_healthy
+    transform-watcher:
+      condition: service_started
+
+services:
+  opensearch:
+    image: mirror.gcr.io/opensearchproject/opensearch:3.3.0
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Admin_1234!
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  solr:
+    image: mirror.gcr.io/library/solr:8
+    ports:
+      - "8983:8983"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8983/solr/admin/info/system || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  transform-watcher:
+    image: node:20-slim
+    working_dir: /transforms
+    volumes:
+      - ../transforms/src:/transforms/src:ro
+      - ../transforms/build.mjs:/transforms/build.mjs:ro
+      - ../transforms/package.json:/transforms/package.json:ro
+      - ../transforms/tsconfig.json:/transforms/tsconfig.json:ro
+      - transform-dist:/transforms/dist
+    command: ["sh", "-c", "npm install && npm run build && npm run watch"]
+
+  # Mode 1: Solr-only passthrough — no transforms, just proxies to Solr
+  shim-solr-only:
+    <<: *shim-base
+    ports:
+      - "8081:8080"
+    command:
+      - --listenPort
+      - "8080"
+      - --target
+      - solr=http://solr:8983
+      - --primary
+      - solr
+
+  # Mode 2: OpenSearch-only — applies request/response transforms
+  shim-opensearch-only:
+    <<: *shim-base
+    ports:
+      - "8082:8080"
+    command:
+      - --listenPort
+      - "8080"
+      - --target
+      - opensearch=http://opensearch:9200
+      - --primary
+      - opensearch
+      - --targetTransform
+      - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
+      - --watchTransforms
+
+  # Mode 3: Dual-target, Solr primary — returns Solr response, validates against OpenSearch
+  shim-solr-primary:
+    <<: *shim-base
+    ports:
+      - "8083:8080"
+    command:
+      - --listenPort
+      - "8080"
+      - --target
+      - solr=http://solr:8983
+      - --target
+      - opensearch=http://opensearch:9200
+      - --targetTransform
+      - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
+      - --primary
+      - solr
+      - --validator
+      - field-equality:solr,opensearch:ignore=responseHeader.QTime,responseHeader.params.NOW
+      - --validator
+      - doc-count:solr,opensearch:assert=solr==opensearch
+      - --timeout
+      - "5000"
+      - --watchTransforms
+
+  # Mode 4: Dual-target, OpenSearch primary — returns OpenSearch response, validates against Solr
+  shim-opensearch-primary:
+    <<: *shim-base
+    ports:
+      - "8084:8080"
+    command:
+      - --listenPort
+      - "8080"
+      - --target
+      - solr=http://solr:8983
+      - --target
+      - opensearch=http://opensearch:9200
+      - --targetTransform
+      - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
+      - --primary
+      - opensearch
+      - --validator
+      - field-equality:solr,opensearch:ignore=responseHeader.QTime,responseHeader.params.NOW
+      - --validator
+      - doc-count:solr,opensearch:assert=solr==opensearch
+      - --timeout
+      - "5000"
+      - --watchTransforms
+
+volumes:
+  transform-dist:

@@ -61,6 +61,10 @@ images:
     repository: migrations/migration_console
     tag: latest
     pullPolicy: IfNotPresent
+  coordinatorCluster:
+    repository: docker.io/opensearchproject/opensearch
+    tag: "3.1.0"
+    pullPolicy: IfNotPresent
 
 # Default AWS values are dummy values for LocalStack usage
 aws:

@@ -82,6 +82,9 @@ tasks.register('cdkSynth', CdkSynthTask) {
 
 abstract class CdkMinifyTask extends DefaultTask {
 
+    // AWS CloudFormation --template-body limit
+    static final long MAX_TEMPLATE_BODY_BYTES = 51_200
+
     @InputDirectory
     @PathSensitive(PathSensitivity.RELATIVE)
     abstract DirectoryProperty getCdkOutDir()
@@ -103,6 +106,7 @@ abstract class CdkMinifyTask extends DefaultTask {
 
         def minifiedCount = 0
         def slurper = new JsonSlurper()
+        def oversized = []
 
         templateFiles.each { File templateFile ->
             def relativePath = inputDir.asFile.toPath().relativize(templateFile.toPath())
@@ -116,6 +120,17 @@ abstract class CdkMinifyTask extends DefaultTask {
 
             targetFile.text = minifiedJson
             minifiedCount++
+
+            if (targetFile.length() > MAX_TEMPLATE_BODY_BYTES) {
+                oversized << "${relativePath} (${targetFile.length()} bytes)"
+            }
+        }
+
+        if (oversized) {
+            throw new GradleException(
+                "Minified templates exceed CloudFormation --template-body limit of ${MAX_TEMPLATE_BODY_BYTES} bytes:\n  " +
+                oversized.join('\n  ')
+            )
         }
     }
 }
