@@ -4,7 +4,7 @@ def call(Map config = [:]) {
     if (jobName.startsWith("main-")) {
         defaultChildJobName = "Periodic runs from MAIN/main-k8s-local-integ-test"
     } else if (jobName.startsWith("pr-")) {
-        defaultChildJobName = "Run on PRs/pr-k8s-local-integ-test"
+        defaultChildJobName = "pr-checks/pr-k8s-local-integ-test"
     }
     def childJobName = config.childJobName ?: defaultChildJobName
     // Default behavior: keep periodic cadence for non-PR jobs, disable for pr-* jobs.
@@ -14,6 +14,22 @@ def call(Map config = [:]) {
 
     def allSourceVersions = ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10']
     def allTargetVersions = ['OS_1.3', 'OS_2.19', 'OS_3.1']
+
+    // Build trigger list before pipeline block
+    def genericTrigger = GenericTrigger(
+            genericVariables: [
+                    [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
+                    [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
+                    [key: 'job_name', value: '$.job_name']
+            ],
+            tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
+            causeString: 'Triggered by PR on opensearch-migrations repository',
+            regexpFilterExpression: "^${jobName}\$",
+            regexpFilterText: '$job_name'
+    )
+    def triggerList = enablePeriodicSchedule
+            ? [genericTrigger, cron('H 22 * * *')]
+            : [genericTrigger]
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -34,27 +50,10 @@ def call(Map config = [:]) {
         }
 
         options {
+            pipelineTriggers(triggerList)
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
-        }
-
-        triggers {
-            GenericTrigger(
-                    genericVariables: [
-                            [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
-                            [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
-                            [key: 'job_name', value: '$.job_name']
-                    ],
-                    tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
-                    causeString: 'Triggered by PR on opensearch-migrations repository',
-                    regexpFilterExpression: "^$jobName\$",
-                    regexpFilterText: "\$job_name",
-            )
-            if (enablePeriodicSchedule) {
-                // Trigger once per day at a hashed minute around 10 PM
-                cron('H 22 * * *')
-            }
         }
 
         stages {
