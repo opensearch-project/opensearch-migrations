@@ -25,6 +25,7 @@ public class LuceneReader {
     /* Start reading docs from a specific segment and document id.
        If the startSegmentIndex is 0, it will start from the first segment.
        If the startDocId is 0, it will start from the first document in the segment.
+       Reads all segments in parallel for maximum throughput.
      */
     public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId) {
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
@@ -33,12 +34,17 @@ public class LuceneReader {
             .log();
 
         return getSegmentsFromStartingSegment(reader.leaves(), startDocId)
-            .concatMapDelayError(c -> readDocsFromSegment(c,
-                    startDocId,
-                    reader.getIndexDirectoryPath(),
-                    DocumentChangeType.INDEX)
-            )
-            .subscribeOn(Schedulers.boundedElastic());
+            .collectList()
+            .flatMapMany(segments -> {
+                var segmentFluxes = segments.stream()
+                    .map(c -> readDocsFromSegment(c,
+                            startDocId,
+                            reader.getIndexDirectoryPath(),
+                            DocumentChangeType.INDEX)
+                        .subscribeOn(Schedulers.boundedElastic()))
+                    .toList();
+                return Flux.merge(segmentFluxes);
+            });
     }
 
     /**

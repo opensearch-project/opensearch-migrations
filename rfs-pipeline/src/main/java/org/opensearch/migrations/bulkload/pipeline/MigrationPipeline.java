@@ -103,7 +103,7 @@ public class MigrationPipeline {
      */
     public Flux<ProgressCursor> migrateShard(ShardId shardId, String indexName, long startingDocOffset) {
         log.info("Starting shard migration: {} from offset {} (batchConcurrency={})", shardId, startingDocOffset, batchConcurrency);
-        final long[] cumulativeOffset = { startingDocOffset };
+        final long[] cumulativeDocs = { 0 };
         final long[] cumulativeBytes = { 0 };
         final long[] lastLogTime = { System.currentTimeMillis() };
         final AtomicInteger activeBatches = new AtomicInteger(0);
@@ -114,14 +114,26 @@ public class MigrationPipeline {
                 long batchStart = System.nanoTime();
                 int batchDocs = batch.size();
                 long batchBytes = batch.stream().mapToLong(d -> d.source() != null ? d.source().length : 0).sum();
+                // Track the minimum luceneDocNumber in this batch as the safe resume point
+                int minDocNum = batch.stream()
+                    .mapToInt(DocumentChange::luceneDocNumber)
+                    .filter(n -> n >= 0)
+                    .min().orElse(-1);
+                int maxDocNum = batch.stream()
+                    .mapToInt(DocumentChange::luceneDocNumber)
+                    .filter(n -> n >= 0)
+                    .max().orElse(-1);
                 int inflight = activeBatches.incrementAndGet();
                 return sink.writeBatch(shardId, indexName, batch)
                     .map(cursor -> {
-                        cumulativeOffset[0] += cursor.docsInBatch();
+                        cumulativeDocs[0] += cursor.docsInBatch();
                         cumulativeBytes[0] += cursor.bytesInBatch();
+                        // Use minDocNum as the progress checkpoint — on resume, we restart
+                        // from this doc ID. Some docs after this point may be re-indexed
+                        // (idempotent), but we never skip unprocessed docs.
                         return new ProgressCursor(
                             shardId,
-                            cumulativeOffset[0],
+                            minDocNum >= 0 ? minDocNum : cumulativeDocs[0],
                             cursor.docsInBatch(),
                             cursor.bytesInBatch()
                         );
@@ -132,10 +144,11 @@ public class MigrationPipeline {
                         long now = System.currentTimeMillis();
                         if (now - lastLogTime[0] >= PROGRESS_LOG_INTERVAL_MS) {
                             lastLogTime[0] = now;
-                            log.info("{} batch: {}ms, {} docs, {} KB, active {}/{} | progress: {} docs, {} MB total",
+                            log.info("{} batch: {}ms, {} docs, {} KB, active {}/{}, docRange [{}-{}] | progress: {} docs, {} MB total",
                                 shardId, totalMs, batchDocs, batchBytes / 1024,
                                 remaining + 1, batchConcurrency,
-                                cumulativeOffset[0], cumulativeBytes[0] / (1024 * 1024));
+                                minDocNum, maxDocNum,
+                                cumulativeDocs[0], cumulativeBytes[0] / (1024 * 1024));
                         }
                     })
                     .doOnError(e -> activeBatches.decrementAndGet());
@@ -143,7 +156,7 @@ public class MigrationPipeline {
             .onErrorMap(e -> !(e instanceof PipelineException),
                 e -> new PipelineException("Failed migrating shard " + shardId, e))
             .doOnComplete(() -> log.info("Completed shard migration: {} — {} docs, {} MB total",
-                shardId, cumulativeOffset[0], cumulativeBytes[0] / (1024 * 1024)));
+                shardId, cumulativeDocs[0], cumulativeBytes[0] / (1024 * 1024)));
     }
 
     /**
