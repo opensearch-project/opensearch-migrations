@@ -1,4 +1,4 @@
-FROM mirror.gcr.io/jenkins/jenkins:lts
+FROM docker.io/jenkins/jenkins:lts
 
 USER root
 RUN apt -y update
