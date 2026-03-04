@@ -4,11 +4,23 @@ set -euo pipefail
 
 MIGRATIONS_REPO_ROOT_DIR=$(git rev-parse --show-toplevel)
 
+# Use KUBE_CONTEXT env var if set, for explicit context targeting
+CONTEXT_ARGS=()
+HELM_CONTEXT_ARGS=()
+if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+  CONTEXT_ARGS=("--context=${KUBE_CONTEXT}")
+  HELM_CONTEXT_ARGS=("--kube-context=${KUBE_CONTEXT}")
+fi
+
 echo "Installing buildImages helm chart for nodepool..."
-if ! helm list -n buildkit | grep -q buildkit; then
+if ! helm "${HELM_CONTEXT_ARGS[@]}" list -n buildkit 2>/dev/null | grep -q buildkit; then
   # Detect if we're on EKS (cloud) vs local K8s
-  CONTEXT=$(kubectl config current-context 2>/dev/null)
-  if [[ "$CONTEXT" =~ (eks:|gke_|aks-) ]]; then
+  if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+    CONTEXT="${KUBE_CONTEXT}"
+  else
+    CONTEXT=$(kubectl config current-context 2>/dev/null)
+  fi
+  if [[ "$CONTEXT" =~ (eks:|gke_|aks-|migration-eks-) ]]; then
     AWS_EKS_ENABLED=true
     DEPLOY_BUILDKIT_PODS=false  # kubernetes driver creates its own pods
   else
@@ -18,6 +30,7 @@ if ! helm list -n buildkit | grep -q buildkit; then
 
   # shellcheck disable=SC2086
   helm install buildkit "${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s/charts/components/buildImages" \
+    "${HELM_CONTEXT_ARGS[@]}" \
     --create-namespace \
     -n buildkit \
     --set skipBuildJob=true \
@@ -33,17 +46,17 @@ fi
 
 if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
   echo "Setting up a local registry"
-  if ! kubectl get deployment docker-registry -n buildkit >/dev/null 2>&1; then
-    kubectl apply -f "${MIGRATIONS_REPO_ROOT_DIR}/buildImages/docker-registry.yaml" -n buildkit
+  if ! kubectl "${CONTEXT_ARGS[@]}" get deployment docker-registry -n buildkit >/dev/null 2>&1; then
+    kubectl "${CONTEXT_ARGS[@]}" apply -f "${MIGRATIONS_REPO_ROOT_DIR}/buildImages/docker-registry.yaml" -n buildkit
   else
     echo "docker-registry already exists, skipping apply"
   fi
 
   echo "Waiting for docker-registry deployment to be available..."
-  kubectl rollout status deployment/docker-registry -n buildkit --timeout=120s
+  kubectl "${CONTEXT_ARGS[@]}" rollout status deployment/docker-registry -n buildkit --timeout=120s
 
   if ! pgrep -f "kubectl port-forward.*docker-registry.*5001:5000" >/dev/null; then
-    nohup kubectl port-forward -n buildkit svc/docker-registry 5001:5000 --address 0.0.0.0 > /tmp/registry-forward.log 2>&1 &
+    nohup kubectl "${CONTEXT_ARGS[@]}" port-forward -n buildkit svc/docker-registry 5001:5000 --address 0.0.0.0 > /tmp/registry-forward.log 2>&1 &
   else
     echo "registry port-forward already running"
   fi

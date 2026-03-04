@@ -155,20 +155,24 @@ run_aws_bootstrap() {
     echo "Invoking aws-bootstrap.sh with extra args: ${BOOTSTRAP_ARGS[*]}"
     ./aws-bootstrap.sh \
       --skip-console-exec \
+      --skip-setting-k8s-context \
       --stage "${STAGE}" \
       "${BOOTSTRAP_ARGS[@]}"
   else
     echo "Invoking aws-bootstrap.sh with default args (public images)."
     ./aws-bootstrap.sh \
       --skip-console-exec \
+      --skip-setting-k8s-context \
       --stage "${STAGE}"
   fi
 
   echo "aws-bootstrap.sh completed successfully."
   popd >/dev/null
 
-  echo "Current kubectl context:"
-  kubectl config current-context || echo "Warning: Unable to get current context"
+  # Derive the kube context name (matches the EKS cluster name / alias set by aws-bootstrap.sh)
+  KUBE_CONTEXT="migration-eks-cluster-${STAGE}-${REGION}"
+  export KUBE_CONTEXT
+  echo "Using kubectl context: ${KUBE_CONTEXT}"
   echo
 }
 
@@ -176,7 +180,7 @@ run_aws_bootstrap() {
 wait_for_migration_console_pod() {
   echo "Waiting for migration-console-0 pod in namespace 'ma' to become Ready."
 
-  if ! kubectl wait \
+  if ! kubectl --context="${KUBE_CONTEXT}" wait \
     --namespace ma \
     --for=condition=ready pod/migration-console-0 \
     --timeout=600s; then
@@ -188,7 +192,7 @@ wait_for_migration_console_pod() {
 
   echo "Validating migration console by running 'console --version' inside the pod."
 
-  if ! kubectl exec -n ma migration-console-0 -- /bin/bash -lc 'console --version'; then
+  if ! kubectl --context="${KUBE_CONTEXT}" exec -n ma migration-console-0 -- /bin/bash -lc 'console --version'; then
     fail "console --version command failed inside migration-console-0."
   fi
 

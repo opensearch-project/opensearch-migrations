@@ -3,6 +3,12 @@ set -euo pipefail
 
 BUILDER_NAME="local-remote-builder"
 
+# Use KUBE_CONTEXT env var if set, for explicit context targeting
+CONTEXT_ARGS=()
+if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+  CONTEXT_ARGS=("--context=${KUBE_CONTEXT}")
+fi
+
 # Check if builder already exists and is healthy
 if docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
   echo "Builder '$BUILDER_NAME' already configured and healthy"
@@ -16,8 +22,12 @@ docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
 NAMESPACE="${BUILDKIT_NAMESPACE:-buildkit}"
 
 # Detect cloud vs local K8s
-CONTEXT=$(kubectl config current-context 2>/dev/null)
-if [[ "$CONTEXT" =~ (eks:|gke_|aks-) ]]; then
+if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+  CONTEXT="${KUBE_CONTEXT}"
+else
+  CONTEXT=$(kubectl config current-context 2>/dev/null)
+fi
+if [[ "$CONTEXT" =~ (eks:|gke_|aks-|migration-eks-) ]]; then
   echo "Detected cloud K8s, using kubernetes driver with native multi-arch builds"
   
   docker buildx create \
@@ -45,12 +55,12 @@ else
   
   # Wait for buildkitd pod
   echo "Waiting for buildkitd pod..."
-  kubectl wait --for=condition=ready pod -l app=buildkitd -n "$NAMESPACE" --timeout=120s
+  kubectl "${CONTEXT_ARGS[@]}" wait --for=condition=ready pod -l app=buildkitd -n "$NAMESPACE" --timeout=120s
   
   # Set up port-forward if not running
   if ! pgrep -f "kubectl port-forward.*buildkitd.*1234:1234" >/dev/null; then
     echo "Starting buildkit port-forward..."
-    nohup kubectl port-forward -n "$NAMESPACE" svc/buildkitd 1234:1234 --address 0.0.0.0 > /tmp/buildkit-forward.log 2>&1 &
+    nohup kubectl "${CONTEXT_ARGS[@]}" port-forward -n "$NAMESPACE" svc/buildkitd 1234:1234 --address 0.0.0.0 > /tmp/buildkit-forward.log 2>&1 &
     sleep 2
   else
     echo "buildkit port-forward already running"
