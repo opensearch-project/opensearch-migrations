@@ -72,6 +72,7 @@ import org.slf4j.MDC;
 public class RfsMigrateDocuments {
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
+    public static final int NO_WORK_AVAILABLE_EXIT_CODE = 4;
 
     // Arbitrary value, increasing from 5 to 15 seconds due to prevalence of clock skew exceptions
     // observed on production clusters during migrations
@@ -539,7 +540,7 @@ public class RfsMigrateDocuments {
 
             var extractor = SnapshotExtractor.create(
                 arguments.sourceVersion, sourceResourceProvider, sourceRepo);
-            runWithPipeline(
+            var status = runWithPipeline(
                 extractor,
                 targetClient,
                 arguments.snapshotName,
@@ -561,6 +562,10 @@ public class RfsMigrateDocuments {
                 arguments.experimental.previousSnapshotName,
                 arguments.experimental.experimentalDeltaMode);
             cleanShutdownCompleted.set(true);
+            if (status == CompletionStatus.NOTHING_DONE) {
+                log.atInfo().setMessage("Work exists but none available to this worker. Exiting with exit code " + NO_WORK_AVAILABLE_EXIT_CODE).log();
+                System.exit(NO_WORK_AVAILABLE_EXIT_CODE);
+            }
         } catch (NoWorkLeftException e) {
             log.atInfo().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
             cleanShutdownCompleted.set(true);
