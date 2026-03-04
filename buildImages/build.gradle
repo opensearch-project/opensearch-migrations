@@ -7,6 +7,10 @@ def intermediateUrl = rootProject.findProperty('intermediateRegistry') ?: publis
 def publishedRegistry = new Registry(publishedUrl.toString())
 def intermediateRegistry = new Registry(intermediateUrl.toString())
 
+// When set, Jib base images from docker.io are pulled from this registry instead.
+// Use with the mirrorJibBaseImages step in k8sLocalDeployment to avoid Docker Hub rate limits.
+def jibBaseImageOverride = rootProject.findProperty('jibBaseImageRegistry')?.toString()
+
 def publishStyle = (rootProject.findProperty("publishStyle") ?: "paths").toString()
 def publishedRepoByImageName = [
         migration_console     : "opensearch-migrations-console",
@@ -61,6 +65,10 @@ def jibProjects = [
 ]
 jibProjects.values().each { cfg ->
     cfg.repoName = getRepoNameIfPublishing(cfg)
+    // Override docker.io base images with the specified registry (e.g. local registry on CI)
+    if (jibBaseImageOverride && cfg.baseImageRegistryEndpoint == "docker.io") {
+        cfg.baseImageRegistryEndpoint = jibBaseImageOverride
+    }
 }
 
 def buildKitProjects = [
