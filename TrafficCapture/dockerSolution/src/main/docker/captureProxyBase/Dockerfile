@@ -1,8 +1,7 @@
 # =======================
 # Stage 1: Certificate Generation
 # =======================
-ARG CERT_BUILDER_IMAGE=docker.io/library/amazonlinux:2023
-FROM ${CERT_BUILDER_IMAGE} AS cert-builder
+FROM docker.io/library/amazonlinux:2023 AS cert-builder
 
 # Install OpenSSL
 RUN yum update -y && \
@@ -22,8 +21,7 @@ RUN mkdir -p /certs && \
 # =======================
 # Stage 2: Final Image
 # =======================
-ARG BASE_IMAGE=docker.io/library/amazoncorretto:11-al2023-headless
-FROM ${BASE_IMAGE}
+FROM docker.io/library/amazoncorretto:11-al2023-headless
 
 # Set environment variables
 ENV CONFIG_HOME=/usr/share/captureProxy/config
