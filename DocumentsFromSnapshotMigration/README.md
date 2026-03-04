@@ -124,12 +124,12 @@ When RFS finishes migrating documents for a shard, it marks the work item as com
 
 #### Early Checkpoint Before Lease Expiry
 
-Until `MIGRATIONS-2864` change is released, workers checkpoint only in the lease-expiry path.
+Workers checkpoint in the lease-timeout path before hard lease expiry.
 
-Planned lease-timeout trigger:
+Lease-timeout trigger:
 - `checkpointTriggerTime = max(leaseDuration * 0.75, leaseDuration - PT4M30S)`
 
-Planned behavior at trigger time:
+Behavior at trigger time:
 - Cancel active shard migration work in the current process.
 - Capture the latest progress cursor.
 - Persist handoff metadata on the coordinator (`successor_items` + successor work item creation + parent completion).
@@ -138,6 +138,7 @@ Planned behavior at trigger time:
 Why this exists:
 - Reduces the risk of losing in-memory progress when coordinator connectivity drops near lease expiry.
 - Provides extra time for coordinator retry/backoff to succeed before the hard lease boundary.
+- Retries in the lease-timeout path are deadline-bounded by the original lease expiry and will never outlive the lease.
 
 Dedicated coordinator outage example (PT60S lease):
 - `t=0s`: worker starts migrating shard docs

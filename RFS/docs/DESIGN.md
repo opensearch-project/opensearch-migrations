@@ -81,11 +81,9 @@ Lease timing is deterministic as a function of 1/ the "initial lease time" param
 
 Claiming a lease involves a clock-check (rejecting the lease if the worker's clock is too far off from the CMS's clock), after which the RFS workers monitor the time remaining until the lease expires. When it expires without the work being completed, they (in most cases) create a successor work item including a progress cursor of the current progress through the shard, mark the original work item as completed, and kill the worker process. If shard setup (downloading, unpacking, and beginning to read the shard) takes too little (<2.5%) or too much (>10%) of the lease time, the lease time is considered wrong-sized and is adjusted for the successor item. This adjustment is done by setting the number of attempt field when creating the successor item. If the lease was too short (setup took too large a percent of the time), the number of attempts on the successor item will be the number of attempts on the original item plus one. In the opposite case, it will be initialized as the attempts on the original item minus one. And if the lease was "right-sized", the successor item will get the same number of attempts value as the original currently has.
 
-#### Planned lease-timeout checkpoint timing (MIGRATIONS-2864)
+#### Lease-timeout checkpoint timing
 
-This section documents intended behavior for `MIGRATIONS-2864`. Until that change is released, lease-timeout checkpointing is only initiated at lease expiry.
-
-Planned trigger time for cancellation/checkpoint:
+Trigger time for cancellation/checkpoint:
 - `trigger = max(leaseDuration * 0.75, leaseDuration - PT4M30S)`
 
 At this trigger, the worker:
@@ -123,10 +121,11 @@ If this process fails at any point before step 4 is successful, another worker w
 
 If this process fails before the `successorWorkItems` field is updated, a new worker will acquire the lease, but it won't be clear to that worker that this work was already started, so it will begin from the progress cursor in the original work item. While this means that excess document processing and reindexing work is being done, it does not put the CMS in an inconsistent state. Additionally, as detailed below, reindexing documents is idempotent by ID, so re-writing a document does not cause duplicate copies on the target cluster.
 
-Coordinator outage contract around the planned early-checkpoint trigger:
+Coordinator outage contract around the early-checkpoint trigger:
 - If coordinator is unavailable at trigger time, worker retries coordinator operations using existing retry/backoff policies.
-- If retries succeed before retry budget exhaustion, handoff metadata is persisted and successor work can be reclaimed.
-- If retries are exhausted, worker exits and later workers may need to re-drive work from the last persisted cursor.
+- Retries are deadline-bounded by the original lease expiry and will never outlive the lease.
+- If retries succeed before the deadline, handoff metadata is persisted and successor work can be reclaimed.
+- If retries hit the deadline, worker exits and later workers may need to re-drive work from the last persisted cursor.
 
 ```mermaid
 sequenceDiagram
