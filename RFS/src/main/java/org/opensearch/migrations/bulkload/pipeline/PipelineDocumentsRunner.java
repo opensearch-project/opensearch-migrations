@@ -25,7 +25,7 @@ import reactor.core.scheduler.Schedulers;
 /**
  * Work-coordination-aware document migration using the clean pipeline.
  *
- * <p>This is the pipeline equivalent of {@link org.opensearch.migrations.bulkload.worker.DocumentsRunner}.
+ * <p>This is the pipeline equivalent of the legacy {@code DocumentsRunner}.
  * It acquires work items (shards) via {@link ScopedWorkCoordinator}, processes them using
  * {@link MigrationPipeline#migrateShard}, and reports progress via {@link WorkItemCursor}.
  *
