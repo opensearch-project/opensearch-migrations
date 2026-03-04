@@ -2,7 +2,6 @@ package org.opensearch.migrations.bulkload.version_universal;
 
 import java.util.Map;
 
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 
@@ -56,7 +55,7 @@ class RemoteReaderClientTest {
     @Test
     public void testGetJsonForTemplateApis_WithInvalidComponentTemplate() {
         var jsonResponse = "{\"component_templates\":[\"invalid\"]}";
-        Exception exception = Assertions.assertThrows(OpenSearchClient.OperationFailed.class, () -> getJsonResult(jsonResponse));
+        Exception exception = Assertions.assertThrows(RemoteReaderClient.OperationFailed.class, () -> getJsonResult(jsonResponse));
         Assertions.assertEquals("Unable to get json response: Expected ObjectNode, got: STRING\n" +
                 "Body:\n" +
                 "HttpResponse(statusCode=200, statusText=OK, headers={}, body="+ jsonResponse+ ")", exception.getMessage());

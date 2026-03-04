@@ -20,7 +20,9 @@ public class TestResources {
     public static final Snapshot SNAPSHOT_ES_7_10_WO_SOFT;
 
     static {
-        Path rfsBaseDir = Paths.get(System.getProperty("user.dir"));
+        // Allow other modules to point at the RFS test-resources directory via a system property.
+        // When tests run inside the RFS module itself, user.dir is already the RFS directory.
+        Path rfsBaseDir = Paths.get(System.getProperty("rfs.test.resources.dir", System.getProperty("user.dir")));
 
         SNAPSHOT_ES_5_6 = new Snapshot(
             rfsBaseDir.resolve(Paths.get("test-resources", "snapshots", "ES_5_6_Updates_Deletes")),
