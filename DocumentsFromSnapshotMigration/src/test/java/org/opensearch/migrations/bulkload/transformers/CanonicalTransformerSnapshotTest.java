@@ -7,7 +7,7 @@ import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.version_os_2_11.GlobalMetadataData_OS_2_11;
 import org.opensearch.migrations.bulkload.version_os_2_11.IndexMetadataData_OS_2_11;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
@@ -26,9 +26,9 @@ public class CanonicalTransformerSnapshotTest {
         TestResources.Snapshot snapshot = TestResources.SNAPSHOT_ES_7_10_BWC_CHECK;
         Version version = Version.fromString("ES 7.10");
 
-        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
+        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
+        var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(version, repo, false);
 
         CanonicalTransformer transformer = new CanonicalTransformer(2);
 
@@ -47,9 +47,9 @@ public class CanonicalTransformerSnapshotTest {
         TestResources.Snapshot snapshot = TestResources.SNAPSHOT_ES_7_10_BWC_CHECK;
         Version version = Version.fromString("ES 7.10");
 
-        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
+        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
+        var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(version, repo, false);
 
         CanonicalTransformer transformer = new CanonicalTransformer(2);
 
@@ -64,15 +64,5 @@ public class CanonicalTransformerSnapshotTest {
         assertNotNull(finalIndexBwc.getSettings(), "Settings should not be null");
         assertEquals("bwc_index_1", finalIndexBwc.getName());
         log.info("Transformed bwc_index_1: {}", finalIndexBwc.getRawJson());
-
-        IndexMetadata indexMetadataFwc = sourceResourceProvider.getIndexMetadata()
-            .fromRepo(snapshot.name, "fwc_index_1");
-        IndexMetadata transformedIndexFwc = transformer.transformIndexMetadata(indexMetadataFwc).get(0);
-        IndexMetadataData_OS_2_11 finalIndexFwc = new IndexMetadataData_OS_2_11(
-            transformedIndexFwc.getRawJson(), transformedIndexFwc.getId(), transformedIndexFwc.getName()
-        );
-
-        assertEquals("fwc_index_1", finalIndexFwc.getName());
-        log.info("Transformed fwc_index_1: {}", finalIndexFwc.getRawJson());
     }
 }

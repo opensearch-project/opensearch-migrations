@@ -24,7 +24,7 @@ import reactor.core.scheduler.Schedulers;
 
 /**
  * Work-coordination-aware document migration using the clean pipeline.
- * Pipeline equivalent of {@link org.opensearch.migrations.bulkload.worker.DocumentsRunner}.
+ * Pipeline-based document migration runner using work coordination.
  */
 @Slf4j
 @AllArgsConstructor
@@ -112,9 +112,9 @@ public class PipelineDocumentsRunner {
                     cancellationTriggerConsumer.accept(disposable::dispose);
 
                     try {
-                        long start = System.nanoTime();
+                        long start = System.currentTimeMillis();
                         latch.await();
-                        long durationMs = (System.nanoTime() - start) / 1_000_000;
+                        long durationMs = System.currentTimeMillis() - start;
                         log.atInfo()
                             .setMessage("Shard migration stats: index={}, shard={}, docs={}, bytes={}, batches={}, duration={}ms")
                             .addArgument(wi.getIndexName())

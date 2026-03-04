@@ -16,7 +16,12 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Reconstructs document _source from doc_values and stored fields when _source is disabled or has excluded fields.
- * Implements fallback chain: _source blob -> doc_values -> stored fields
+ * Implements fallback chain: _source blob -> doc_values -> stored fields.
+ *
+ * <p><b>Integration-branch enhancement:</b> This class is not present in PR-2275, which handles
+ * no-source documents by returning null source and letting the sink handle it. This implementation
+ * provides best-effort source reconstruction for indices with {@code _source} disabled, enabling
+ * migration of such indices without data loss.
  */
 @Slf4j
 public class SourceReconstructor {

@@ -28,7 +28,7 @@ import org.opensearch.migrations.bulkload.lucene.LuceneLeafReaderContext;
 import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -88,10 +88,10 @@ public class LuceneDocumentsReaderTest {
     @ParameterizedTest
     @MethodSource("provideSnapshots")
     public void ReadDocuments_AsExpected(TestResources.Snapshot snapshot, Version version) {
-        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
+        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
-        DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
+        var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(version, repo, false);
+        SourceRepoAccessor repoAccessor = new SourceRepoAccessor(repo);
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
@@ -154,10 +154,10 @@ public class LuceneDocumentsReaderTest {
         TestResources.Snapshot snapshot = TestResources.SNAPSHOT_ES_6_8_MERGED;
         Version version = Version.fromString("ES 6.8");
 
-        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
+        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
-        DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
+        var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(version, repo, false);
+        SourceRepoAccessor repoAccessor = new SourceRepoAccessor(repo);
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
@@ -310,10 +310,10 @@ public class LuceneDocumentsReaderTest {
                 List.of("unchangeddoc"));
         List<Integer> documentStartingIndices = List.of(0, 2, 5);
 
-        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
+        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
-        DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
+        var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(version, repo, false);
+        SourceRepoAccessor repoAccessor = new SourceRepoAccessor(repo);
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
@@ -350,10 +350,10 @@ public class LuceneDocumentsReaderTest {
                 List.of("updateddoc", "unchangeddoc"),
                 List.of("unchangeddoc"));
 
-        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
+        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
-        DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
+        var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(version, repo, false);
+        SourceRepoAccessor repoAccessor = new SourceRepoAccessor(repo);
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
