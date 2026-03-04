@@ -152,28 +152,6 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Deploy AOS Target Cluster') {
-                steps {
-                    timeout(time: 45, unit: 'MINUTES') {
-                        dir('test') {
-                            script {
-                                env.sourceVer = sourceVersion ?: params.SOURCE_VERSION
-                                env.targetVer = targetVersion ?: params.TARGET_VERSION
-                                env.targetClusterSize = targetClusterSize ?: params.TARGET_CLUSTER_SIZE
-                                
-                                def sizeConfig = targetClusterSizes[env.targetClusterSize]
-                                deployTargetClusterOnly(
-                                    stage: "${maStageName}",
-                                    clusterContextFilePath: "${clusterContextFilePath}",
-                                    targetVer: env.targetVer,
-                                    sizeConfig: sizeConfig
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
             stage('Deploy & Bootstrap MA') {
                 steps {
                     timeout(time: 150, unit: 'MINUTES') {
@@ -222,8 +200,32 @@ def call(Map config = [:]) {
                                     env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']
                                     env.eksClusterName = exportsMap['MIGRATIONS_EKS_CLUSTER_NAME']
                                     env.clusterSecurityGroup = exportsMap['EKS_CLUSTER_SECURITY_GROUP']
+                                    env.maVpcId = exportsMap['VPC_ID']
                                     env.eksKubeContext = "migration-eks-cluster-${maStageName}-${params.REGION}"
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            stage('Deploy AOS Target Cluster') {
+                steps {
+                    timeout(time: 45, unit: 'MINUTES') {
+                        dir('test') {
+                            script {
+                                env.sourceVer = sourceVersion ?: params.SOURCE_VERSION
+                                env.targetVer = targetVersion ?: params.TARGET_VERSION
+                                env.targetClusterSize = targetClusterSize ?: params.TARGET_CLUSTER_SIZE
+                                
+                                def sizeConfig = targetClusterSizes[env.targetClusterSize]
+                                deployTargetClusterOnly(
+                                    stage: "${maStageName}",
+                                    clusterContextFilePath: "${clusterContextFilePath}",
+                                    targetVer: env.targetVer,
+                                    sizeConfig: sizeConfig,
+                                    vpcId: env.maVpcId
+                                )
                             }
                         }
                     }
@@ -345,7 +347,6 @@ ENVEOF
                         def region = params.REGION
                         def maStackName = "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${region}"
                         def domainStackName = "OpenSearchDomain-target-${maStageName}-${region}"
-                        def networkStackName = "NetworkInfra-${maStageName}-${region}"
 
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: region, duration: 4500, roleSessionName: 'jenkins-session') {
@@ -370,19 +371,14 @@ ENVEOF
                                     """
                                 }
 
-                                // Delete all deployed CloudFormation stacks
-                                // Order: MA stack first (owns its own VPC, no ENI issues), then domain, then network
-                                echo "CLEANUP: Deleting MA stack ${maStackName}"
-                                sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
-                                sh "aws cloudformation wait stack-delete-complete --stack-name ${maStackName} --region ${region} || true"
-
+                                // Delete domain stack first (it's in the MA VPC), then MA stack (owns the VPC)
                                 echo "CLEANUP: Deleting domain stack ${domainStackName}"
                                 sh "aws cloudformation delete-stack --stack-name ${domainStackName} --region ${region} || true"
                                 sh "aws cloudformation wait stack-delete-complete --stack-name ${domainStackName} --region ${region} || true"
 
-                                echo "CLEANUP: Deleting network stack ${networkStackName}"
-                                sh "aws cloudformation delete-stack --stack-name ${networkStackName} --region ${region} || true"
-                                sh "aws cloudformation wait stack-delete-complete --stack-name ${networkStackName} --region ${region} || true"
+                                echo "CLEANUP: Deleting MA stack ${maStackName}"
+                                sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
+                                sh "aws cloudformation wait stack-delete-complete --stack-name ${maStackName} --region ${region} || true"
                             }
                         }
                     }
@@ -398,7 +394,7 @@ ENVEOF
 def deployTargetClusterOnly(Map config) {
     def clusterContextValues = [
         stage: "${config.stage}",
-        vpcAZCount: 2,
+        vpcId: "${config.vpcId}",
         clusters: [[
             clusterId: "target",
             clusterVersion: "${config.targetVer}",
@@ -421,7 +417,7 @@ def deployTargetClusterOnly(Map config) {
     sh "echo 'Using cluster context file options:' && cat ${config.clusterContextFilePath}"
     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
         withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-            sh "./awsDeployCluster.sh --stage ${config.stage} --context-file ${config.clusterContextFilePath}"
+            sh "./awsDeployCluster.sh --stage ${config.stage} --context-file ${config.clusterContextFilePath} --vpc-id ${config.vpcId}"
         }
     }
 
