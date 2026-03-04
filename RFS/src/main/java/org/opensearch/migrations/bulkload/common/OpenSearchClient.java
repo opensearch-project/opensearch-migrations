@@ -541,67 +541,14 @@ public abstract class OpenSearchClient {
                                                   boolean allowServerGeneratedIds,
                                                   DocumentExceptionAllowlist allowlist) {
         final AtomicInteger attemptCounter = new AtomicInteger(0);
-        // On retry, fall back to the standard path with BulkOperationSpec
         final var pendingDocs = new ArrayList<>(docs);
-        // Track BulkOperationSpec versions for retry (lazy — only built on first failure)
         final var pendingOps = new ArrayList<BulkOperationSpec>();
 
         return Mono.defer(() -> {
-            final String targetPath = getBulkRequestPath(indexName);
-            log.atTrace().setMessage("Creating raw bulk body with {} documents").addArgument(pendingDocs::size).log();
-
-            byte[] bodyBytes;
-            if (pendingOps.isEmpty()) {
-                // First attempt: use raw bytes path
-                bodyBytes = buildRawNdjsonBytes(pendingDocs, indexName, allowServerGeneratedIds);
-            } else {
-                // Retry: use standard path with remaining ops
-                List<BulkOperationSpec> operationsToSend = pendingOps;
-                if (allowServerGeneratedIds) {
-                    operationsToSend = pendingOps.stream()
-                        .map(this::stripDocumentId)
-                        .collect(Collectors.toList());
-                }
-                bodyBytes = BulkNdjson.toBulkNdjsonBytes(operationsToSend, OBJECT_MAPPER);
-            }
-
-            var additionalHeaders = new HashMap<String, List<String>>();
-            if (CompressionMode.GZIP_BODY_COMPRESSION.equals(compressionMode)) {
-                RestClient.addGzipRequestHeaders(additionalHeaders);
-                RestClient.addGzipResponseHeaders(additionalHeaders);
-            }
-            return client.postAsyncBytes(targetPath, bodyBytes, additionalHeaders, context)
-                .flatMap(response -> {
-                    var resp = new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
-
-                    if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {
-                        return Mono.just(resp);
-                    }
-                    log.atDebug().setMessage("Response has some errors...: {}").addArgument(response.body).log();
-
-                    // Build BulkOperationSpec list for retry compaction (only on first failure)
-                    if (pendingOps.isEmpty()) {
-                        for (var doc : pendingDocs) {
-                            pendingOps.add(docToBulkOp(doc, indexName));
-                        }
-                        pendingDocs.clear();
-                    }
-
-                    int successCount = compactPendingDocs(pendingOps, resp, allowlist);
-
-                    if (pendingOps.isEmpty()) {
-                        return Mono.just(resp);
-                    }
-                    log.atWarn()
-                        .setMessage("After bulk request attempt {} on index '{}', {} more documents have succeeded, {} remain. The error response message was: {}")
-                        .addArgument(attemptCounter.incrementAndGet())
-                        .addArgument(indexName)
-                        .addArgument(successCount)
-                        .addArgument(pendingOps::size)
-                        .addArgument(truncateMessageIfNeeded(response.body, BULK_TRUNCATED_RESPONSE_MAX_LENGTH))
-                        .log();
-                    return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
-                });
+            byte[] bodyBytes = buildBulkBodyBytes(pendingDocs, pendingOps, indexName, allowServerGeneratedIds);
+            return postBulkRequest(indexName, bodyBytes, context)
+                .flatMap(response -> handleBulkResponse(
+                    response, indexName, pendingDocs, pendingOps, attemptCounter, allowlist));
         })
         .retryWhen(getBulkRetryStrategy())
         .doOnError(error -> {
@@ -616,14 +563,69 @@ public abstract class OpenSearchClient {
         });
     }
 
+    private byte[] buildBulkBodyBytes(List<DocumentChange> pendingDocs, List<BulkOperationSpec> pendingOps,
+                                      String indexName, boolean allowServerGeneratedIds) {
+        if (pendingOps.isEmpty()) {
+            return buildRawNdjsonBytes(pendingDocs, indexName, allowServerGeneratedIds);
+        }
+        List<BulkOperationSpec> operationsToSend = allowServerGeneratedIds
+            ? pendingOps.stream().map(this::stripDocumentId).collect(Collectors.toList())
+            : pendingOps;
+        return BulkNdjson.toBulkNdjsonBytes(operationsToSend, OBJECT_MAPPER);
+    }
+
+    private Mono<HttpResponse> postBulkRequest(String indexName, byte[] bodyBytes,
+                                                       IRfsContexts.IRequestContext context) {
+        var additionalHeaders = new HashMap<String, List<String>>();
+        if (CompressionMode.GZIP_BODY_COMPRESSION.equals(compressionMode)) {
+            RestClient.addGzipRequestHeaders(additionalHeaders);
+            RestClient.addGzipResponseHeaders(additionalHeaders);
+        }
+        return client.postAsyncBytes(getBulkRequestPath(indexName), bodyBytes, additionalHeaders, context);
+    }
+
+    private Mono<BulkResponse> handleBulkResponse(HttpResponse response, String indexName,
+                                                    List<DocumentChange> pendingDocs,
+                                                    ArrayList<BulkOperationSpec> pendingOps,
+                                                    AtomicInteger attemptCounter,
+                                                    DocumentExceptionAllowlist allowlist) {
+        var resp = new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
+        if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {
+            return Mono.just(resp);
+        }
+        log.atDebug().setMessage("Response has some errors...: {}").addArgument(response.body).log();
+
+        if (pendingOps.isEmpty()) {
+            for (var doc : pendingDocs) {
+                pendingOps.add(docToBulkOp(doc, indexName));
+            }
+            pendingDocs.clear();
+        }
+
+        int successCount = compactPendingDocs(pendingOps, resp, allowlist);
+        if (pendingOps.isEmpty()) {
+            return Mono.just(resp);
+        }
+        log.atWarn()
+            .setMessage("After bulk request attempt {} on index '{}', {} more documents have succeeded, {} remain. The error response message was: {}")
+            .addArgument(attemptCounter.incrementAndGet())
+            .addArgument(indexName)
+            .addArgument(successCount)
+            .addArgument(pendingOps::size)
+            .addArgument(truncateMessageIfNeeded(response.body, BULK_TRUNCATED_RESPONSE_MAX_LENGTH))
+            .log();
+        return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
+    }
+
     @lombok.SneakyThrows
     private byte[] buildRawNdjsonBytes(List<DocumentChange> docs, String indexName, boolean stripIds) {
         try (var baos = new java.io.ByteArrayOutputStream()) {
             for (var doc : docs) {
                 String opType = doc.operation() == DocumentChange.ChangeType.DELETE ? "delete" : "index";
+                String docId = stripIds ? null : doc.id();
                 var meta = doc.operation() == DocumentChange.ChangeType.DELETE
-                    ? DeleteOperationMeta.builder().id(stripIds ? null : doc.id()).index(indexName).routing(doc.routing()).build()
-                    : IndexOperationMeta.builder().id(stripIds ? null : doc.id()).index(indexName).routing(doc.routing()).build();
+                    ? DeleteOperationMeta.builder().id(docId).index(indexName).routing(doc.routing()).build()
+                    : IndexOperationMeta.builder().id(docId).index(indexName).routing(doc.routing()).build();
                 BulkNdjson.writeRawOperation(opType, meta, doc.source(), baos, OBJECT_MAPPER);
                 baos.write('\n');
             }
