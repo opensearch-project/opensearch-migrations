@@ -48,7 +48,8 @@ def call(Map config = [:]) {
             dedicatedManagerNodeType: "m6g.2xlarge.search",
             dataNodeCount: 24,
             dedicatedManagerNodeCount: 4,
-            ebsVolumeSize: 2048
+            ebsVolumeSize: 2048,
+            ebsThroughput: 250
         ]
     ]
     pipeline {
@@ -857,6 +858,7 @@ def deployTargetClusterOnly(Map config) {
             dedicatedManagerNodeCount: config.sizeConfig.dedicatedManagerNodeCount,
             ebsEnabled: true,
             ebsVolumeSize: config.sizeConfig.ebsVolumeSize,
+            ebsThroughput: config.sizeConfig.ebsThroughput,
             nodeToNodeEncryption: true
         ]]
     ]
