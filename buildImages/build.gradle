@@ -91,7 +91,7 @@ def buildKitProjects = [
                 contextDir: "migrationConsole/build/dockerContext",
                 imageName:  "migration_console_base",
                 buildArgs: [
-                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImage(
+                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
                                 intermediateRegistry, "migrations", "elasticsearch_test_console", "latest")
                 ],
                 requiredDependencies: [
@@ -105,7 +105,7 @@ def buildKitProjects = [
                 imageName:  "migration_console",
                 imageTag:   "latest",
                 buildArgs: [
-                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImage(
+                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
                                 intermediateRegistry, "migrations", "migration_console_base", "latest")
                 ],
                 requiredDependencies: [
