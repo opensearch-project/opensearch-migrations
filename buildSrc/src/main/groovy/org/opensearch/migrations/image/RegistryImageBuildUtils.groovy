@@ -56,88 +56,56 @@ class RegistryImageBuildUtils {
         return candidates.unique()
     }
 
+    /** Ensure crane binary is available, installing it if not on PATH. */
+    private static String cranePath = null
+    static String ensureCrane() {
+        if (cranePath != null) return cranePath
+        // Check if already on PATH
+        try {
+            def check = ["which", "crane"].execute()
+            check.waitForOrKill(5000)
+            if (check.exitValue() == 0) {
+                cranePath = check.text.trim()
+                return cranePath
+            }
+        } catch (Exception ignored) {}
+        // Auto-install to ~/.crane/bin
+        def installDir = new File(System.getProperty("user.home"), ".crane/bin")
+        def craneBin = new File(installDir, "crane")
+        if (craneBin.canExecute()) {
+            cranePath = craneBin.absolutePath
+            return cranePath
+        }
+        println "Installing crane..."
+        installDir.mkdirs()
+        def arch = System.getProperty("os.arch")
+        arch = (arch == "aarch64" || arch == "arm64") ? "arm64" : "x86_64"
+        def os = System.getProperty("os.name").toLowerCase().contains("mac") ? "Darwin" : "Linux"
+        def url = "https://github.com/google/go-containerregistry/releases/latest/download/go-containerregistry_${os}_${arch}.tar.gz"
+        def proc = ["sh", "-c", "curl -sL '${url}' | tar xz -C '${installDir.absolutePath}' crane"].execute()
+        proc.waitForOrKill(60000)
+        if (proc.exitValue() != 0 || !craneBin.exists()) {
+            throw new GradleException("Failed to install crane from ${url}")
+        }
+        craneBin.setExecutable(true)
+        println "crane installed to ${craneBin.absolutePath}"
+        cranePath = craneBin.absolutePath
+        return cranePath
+    }
+
     /**
-     * Probe a registry image to check if it exists via the Docker Registry v2 API.
-     * Parses the image reference into registry/repository/tag, then does a HEAD on
-     * /v2/{repo}/manifests/{tag}. Handles Docker Hub token auth and insecure (HTTP) registries.
+     * Probe a registry image to check if it exists using crane.
      */
     static boolean probeImage(String image) {
         try {
-            def (String registry, String repository, String tag) = parseImageRef(image)
-            def scheme = registry.startsWith("localhost") ? "http" : "https"
-            def registryHost = (registry == "docker.io") ? "registry-1.docker.io" : registry
-
-            def url = new URL("${scheme}://${registryHost}/v2/${repository}/manifests/${tag}")
-            def conn = (HttpURLConnection) url.openConnection()
-            conn.requestMethod = "HEAD"
-            conn.connectTimeout = 5000
-            conn.readTimeout = 5000
-            conn.setRequestProperty("Accept",
-                "application/vnd.docker.distribution.manifest.v2+json, " +
-                "application/vnd.docker.distribution.manifest.list.v2+json, " +
-                "application/vnd.oci.image.manifest.v1+json, " +
-                "application/vnd.oci.image.index.v1+json")
-
-            def code = conn.responseCode
-            // 401 with Www-Authenticate: try bearer token auth (Docker Hub, etc.)
-            if (code == 401) {
-                def authHeader = conn.getHeaderField("Www-Authenticate")
-                if (authHeader?.startsWith("Bearer ")) {
-                    def token = fetchBearerToken(authHeader)
-                    if (token) {
-                        conn = (HttpURLConnection) url.openConnection()
-                        conn.requestMethod = "HEAD"
-                        conn.connectTimeout = 5000
-                        conn.readTimeout = 5000
-                        conn.setRequestProperty("Accept",
-                            "application/vnd.docker.distribution.manifest.v2+json, " +
-                            "application/vnd.docker.distribution.manifest.list.v2+json, " +
-                            "application/vnd.oci.image.manifest.v1+json, " +
-                            "application/vnd.oci.image.index.v1+json")
-                        conn.setRequestProperty("Authorization", "Bearer ${token}")
-                        code = conn.responseCode
-                    }
-                }
-            }
-            return code == 200
+            def crane = ensureCrane()
+            def proc = [crane, "manifest", image].execute()
+            proc.consumeProcessOutput(new StringBuilder(), new StringBuilder())
+            proc.waitForOrKill(15000)
+            return proc.exitValue() == 0
         } catch (Exception e) {
             return false
         }
-    }
-
-    /** Parse "registry/repo:tag" into [registry, repository, tag]. */
-    private static List<String> parseImageRef(String image) {
-        def tag = "latest"
-        def ref = image
-        def colonIdx = ref.lastIndexOf(':')
-        // Only treat as tag if the colon is after the last slash (not a port number)
-        if (colonIdx > 0 && colonIdx > ref.lastIndexOf('/')) {
-            tag = ref.substring(colonIdx + 1)
-            ref = ref.substring(0, colonIdx)
-        }
-        def parts = ref.split('/', 2)
-        // First component is a registry if it contains a dot or colon (port), otherwise it's docker.io
-        if (parts.length == 2 && (parts[0].contains('.') || parts[0].contains(':'))) {
-            return [parts[0], parts[1], tag]
-        }
-        return ["docker.io", ref, tag]
-    }
-
-    /** Fetch a bearer token from the realm/service/scope in a Www-Authenticate header. */
-    private static String fetchBearerToken(String authHeader) {
-        def params = [:]
-        (authHeader - "Bearer ").findAll(/(\w+)="([^"]*)"/) { match, k, v -> params[k] = v }
-        def realm = params.realm
-        if (!realm) return null
-        def tokenUrl = "${realm}?service=${URLEncoder.encode(params.service ?: '', 'UTF-8')}&scope=${URLEncoder.encode(params.scope ?: '', 'UTF-8')}"
-        def conn = (HttpURLConnection) new URL(tokenUrl).openConnection()
-        conn.connectTimeout = 5000
-        conn.readTimeout = 5000
-        if (conn.responseCode == 200) {
-            def json = new groovy.json.JsonSlurper().parseText(conn.inputStream.text)
-            return json.token ?: json.access_token
-        }
-        return null
     }
 
     /**
