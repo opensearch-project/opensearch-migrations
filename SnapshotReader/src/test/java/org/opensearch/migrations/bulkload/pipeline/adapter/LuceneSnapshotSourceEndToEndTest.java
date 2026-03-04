@@ -102,7 +102,7 @@ public class LuceneSnapshotSourceEndToEndTest {
     @MethodSource("supportedSources")
     void listIndicesFromRealSnapshot(ContainerVersion sourceVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
-        var source = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, localDirectory.toPath());
+        var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, localDirectory.toPath()).build();
 
         var indices = source.listIndices();
 
@@ -114,7 +114,7 @@ public class LuceneSnapshotSourceEndToEndTest {
     @MethodSource("supportedSources")
     void listShardsFromRealSnapshot(ContainerVersion sourceVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
-        var source = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, localDirectory.toPath());
+        var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, localDirectory.toPath()).build();
 
         var shards = source.listShards(INDEX_NAME);
 
@@ -128,7 +128,7 @@ public class LuceneSnapshotSourceEndToEndTest {
     @MethodSource("supportedSources")
     void readIndexMetadataFromRealSnapshot(ContainerVersion sourceVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
-        var source = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, localDirectory.toPath());
+        var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, localDirectory.toPath()).build();
 
         var metadata = source.readIndexMetadata(INDEX_NAME);
 
@@ -143,7 +143,7 @@ public class LuceneSnapshotSourceEndToEndTest {
         var extractor = createSnapshot(sourceVersion);
         Path workDir = Files.createTempDirectory("pipeline_source_e2e");
         try {
-            var source = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, workDir);
+            var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
             source.listShards(INDEX_NAME); // populate cache
 
             var shardId = source.listShards(INDEX_NAME).get(0);
@@ -170,7 +170,7 @@ public class LuceneSnapshotSourceEndToEndTest {
         var extractor = createSnapshot(sourceVersion);
         Path workDir = Files.createTempDirectory("pipeline_source_resume");
         try {
-            var source = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, workDir);
+            var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
             var shardId = source.listShards(INDEX_NAME).get(0);
 
             // Read all 3 docs
@@ -180,7 +180,7 @@ public class LuceneSnapshotSourceEndToEndTest {
             // Resume from offset 2 — should get only the last doc (use fresh source to avoid unpack conflict)
             Path workDir2 = Files.createTempDirectory("pipeline_source_resume2");
             try {
-                var source2 = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, workDir2);
+                var source2 = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir2).build();
                 source2.listShards(INDEX_NAME);
                 var resumed = source2.readDocuments(shardId, 2).collectList().block();
                 assertThat("Resuming from offset 2 should yield 1 doc", resumed, hasSize(1));

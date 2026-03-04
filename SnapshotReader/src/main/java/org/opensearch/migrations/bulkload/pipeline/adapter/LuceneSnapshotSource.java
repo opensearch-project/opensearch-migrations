@@ -26,6 +26,8 @@ import reactor.core.publisher.Flux;
  *
  * <p>Supports optional delta mode: when {@code previousSnapshotName} and {@code deltaMode}
  * are set, reads delta changes (deletions first, then additions) between two snapshots.
+ *
+ * <p>Use {@link #builder(SnapshotExtractor, String, Path)} to construct instances.
  */
 @Slf4j
 public class LuceneSnapshotSource implements DocumentSource {
@@ -46,45 +48,51 @@ public class LuceneSnapshotSource implements DocumentSource {
     // Max shard size enforcement (0 = no limit)
     private final long maxShardSizeBytes;
 
-    /** Regular (non-delta) constructor. */
-    public LuceneSnapshotSource(SnapshotExtractor extractor, String snapshotName, Path workDir) {
-        this(extractor, snapshotName, workDir, 0L, null, null, null);
+    private LuceneSnapshotSource(Builder builder) {
+        this.extractor = builder.extractor;
+        this.snapshotName = builder.snapshotName;
+        this.workDir = builder.workDir;
+        this.maxShardSizeBytes = builder.maxShardSizeBytes;
+        this.previousSnapshotName = builder.previousSnapshotName;
+        this.deltaMode = builder.deltaMode;
+        this.deltaContextFactory = builder.deltaContextFactory;
     }
 
-    /** Constructor with shard size limit. */
-    public LuceneSnapshotSource(SnapshotExtractor extractor, String snapshotName, Path workDir, long maxShardSizeBytes) {
-        this(extractor, snapshotName, workDir, maxShardSizeBytes, null, null, null);
+    public static Builder builder(SnapshotExtractor extractor, String snapshotName, Path workDir) {
+        return new Builder(extractor, snapshotName, workDir);
     }
 
-    /** Delta-aware constructor. */
-    public LuceneSnapshotSource(
-        SnapshotExtractor extractor,
-        String snapshotName,
-        Path workDir,
-        String previousSnapshotName,
-        DeltaMode deltaMode,
-        Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory
-    ) {
-        this(extractor, snapshotName, workDir, 0L, previousSnapshotName, deltaMode, deltaContextFactory);
-    }
+    public static class Builder {
+        private final SnapshotExtractor extractor;
+        private final String snapshotName;
+        private final Path workDir;
+        private long maxShardSizeBytes;
+        private String previousSnapshotName;
+        private DeltaMode deltaMode;
+        private Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory;
 
-    /** Full constructor with all options. */
-    public LuceneSnapshotSource(
-        SnapshotExtractor extractor,
-        String snapshotName,
-        Path workDir,
-        long maxShardSizeBytes,
-        String previousSnapshotName,
-        DeltaMode deltaMode,
-        Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory
-    ) {
-        this.extractor = extractor;
-        this.snapshotName = snapshotName;
-        this.workDir = workDir;
-        this.maxShardSizeBytes = maxShardSizeBytes;
-        this.previousSnapshotName = previousSnapshotName;
-        this.deltaMode = deltaMode;
-        this.deltaContextFactory = deltaContextFactory;
+        private Builder(SnapshotExtractor extractor, String snapshotName, Path workDir) {
+            this.extractor = extractor;
+            this.snapshotName = snapshotName;
+            this.workDir = workDir;
+        }
+
+        public Builder maxShardSizeBytes(long maxShardSizeBytes) {
+            this.maxShardSizeBytes = maxShardSizeBytes;
+            return this;
+        }
+
+        public Builder delta(String previousSnapshotName, DeltaMode deltaMode,
+                Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory) {
+            this.previousSnapshotName = previousSnapshotName;
+            this.deltaMode = deltaMode;
+            this.deltaContextFactory = deltaContextFactory;
+            return this;
+        }
+
+        public LuceneSnapshotSource build() {
+            return new LuceneSnapshotSource(this);
+        }
     }
 
     public boolean isDeltaMode() {
@@ -165,7 +173,7 @@ public class LuceneSnapshotSource implements DocumentSource {
         SnapshotExtractor.ShardEntry entry, ShardId shardId, long startingDocOffset
     ) {
         log.info("Reading documents from {} starting at docIdx {}", shardId, startingDocOffset);
-        return extractor.readDocuments(entry, workDir, (int) startingDocOffset)
+        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset))
             .map(LuceneAdapter::fromLucene);
     }
 

@@ -80,7 +80,7 @@ public class PipelineEndToEndTest {
             targetCluster.start();
             var targetClient = createClient(targetCluster);
 
-            var source = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, workDir);
+            var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
             var sink = new OpenSearchDocumentSink(targetClient, null, false, DocumentExceptionAllowlist.empty(), null);
             var pipeline = new MigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
 
@@ -108,7 +108,7 @@ public class PipelineEndToEndTest {
             targetCluster.start();
             var targetClient = createClient(targetCluster);
 
-            var source = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, workDir);
+            var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
             var sink = new OpenSearchDocumentSink(targetClient, null, false, DocumentExceptionAllowlist.empty(), null);
             // Batch size of 2 → should produce 3 batches for 5 docs
             var pipeline = new MigrationPipeline(source, sink, 2, Long.MAX_VALUE);
@@ -162,7 +162,7 @@ public class PipelineEndToEndTest {
             targetCluster.start();
             var targetClient = createClient(targetCluster);
 
-            var source = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, workDir);
+            var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
             var sink = new OpenSearchDocumentSink(targetClient, null, false, DocumentExceptionAllowlist.empty(), null);
             var pipeline = new MigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
 

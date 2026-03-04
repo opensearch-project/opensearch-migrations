@@ -136,14 +136,13 @@ public class PipelineRunner {
     }
 
     private LuceneSnapshotSource createDocumentSource() {
+        var builder = LuceneSnapshotSource.builder(extractor, snapshotName, workDir)
+            .maxShardSizeBytes(maxShardSizeBytes);
         if (previousSnapshotName != null && deltaMode != null) {
             log.info("Creating delta document source: previous={}, mode={}", previousSnapshotName, deltaMode);
-            return new LuceneSnapshotSource(
-                extractor, snapshotName, workDir,
-                maxShardSizeBytes, previousSnapshotName, deltaMode, deltaContextFactory
-            );
+            builder.delta(previousSnapshotName, deltaMode, deltaContextFactory);
         }
-        return new LuceneSnapshotSource(extractor, snapshotName, workDir, maxShardSizeBytes);
+        return builder.build();
     }
 
     private static void closeQuietly(AutoCloseable closeable) {
