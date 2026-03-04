@@ -15,10 +15,16 @@ import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 @Slf4j
 public class LuceneReader {
+
+    /** Dedicated scheduler for Lucene I/O — more threads than boundedElastic on small pods. */
+    private static final Scheduler LUCENE_IO_SCHEDULER = Schedulers.newBoundedElastic(
+        64, Integer.MAX_VALUE, "lucene-io", 60, true
+    );
 
     private LuceneReader() {}
 
@@ -40,7 +46,7 @@ public class LuceneReader {
                     reader.getIndexDirectoryPath(),
                     DocumentChangeType.INDEX)
             )
-            .subscribeOn(Schedulers.boundedElastic());
+            .subscribeOn(LUCENE_IO_SCHEDULER);
     }
 
     /**
@@ -130,7 +136,7 @@ public class LuceneReader {
                         return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
-                }).subscribeOn(Schedulers.boundedElastic()), 100, 1);
+                }).subscribeOn(LUCENE_IO_SCHEDULER), 500, 1);
     }
 
     public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation) {

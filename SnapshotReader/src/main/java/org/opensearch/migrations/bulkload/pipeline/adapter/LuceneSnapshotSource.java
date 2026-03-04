@@ -134,9 +134,8 @@ public class LuceneSnapshotSource implements DocumentSource {
     private Flux<DocumentChange> readRegularDocuments(
         SnapshotExtractor.ShardEntry entry, ShardId shardId, long startingDocOffset
     ) {
-        log.info("Reading documents from {} starting at offset {}", shardId, startingDocOffset);
-        return extractor.readDocuments(entry, workDir)
-            .skip(startingDocOffset)
+        log.info("Reading documents from {} starting at docIdx {}", shardId, startingDocOffset);
+        return extractor.readDocuments(entry, workDir, (int) startingDocOffset)
             .map(LuceneAdapter::fromLucene);
     }
 
