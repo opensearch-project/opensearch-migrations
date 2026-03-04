@@ -46,4 +46,3 @@ orchestrationSpecs/packages/argo-workflow-builders/src/generated
 orchestrationSpecs/packages/config-processor/bundled
 orchestrationSpecs/packages/migration-workflow-templates/workflowTemplates
 orchestrationSpecs/packages/argo-workflow-builders/k8sSchemas
-.kiro
