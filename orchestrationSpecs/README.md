@@ -121,7 +121,7 @@ from the root orchestrationSpecs directory
 
 ```shell
 rm k8sResources/*yaml ; \
-npm run -w packages/config-processor bundle && \
+npm run make-config-processor-bundle && \
 npm run make-templates -- --outputDirectory ${PWD}/k8sResources && \
 for file in k8sResources/*.yaml; do kc delete -f "$file" --ignore-not-found=true; done && \
 kubectl create -f k8sResources && \ 
