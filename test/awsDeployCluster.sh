@@ -23,7 +23,7 @@ write_cluster_outputs() {
   network_stack_name=$(echo "$stacks" | grep "NetworkInfra-${stage}" | head -n 1)
   vpc_id=$(aws cloudformation describe-stacks \
     --stack-name "$network_stack_name" \
-    --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue" \
+    --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue | [0]" \
     --output text)
 
   cluster_stack_names=$(echo "$stacks" | grep -E "^$CLUSTER_STACK_TYPE_REGEX-.*-${stage}-")
