@@ -1,0 +1,31 @@
+{
+  "name" : "bwc_index_1",
+  "id" : "0edrmuSPR1CIr2B6BZbMJA",
+  "numberOfShards" : 1,
+  "numberOfReplicas" : 0,
+  "settings" : {
+    "index" : {
+      "creation_date" : "1727459371883",
+      "number_of_replicas" : "0",
+      "number_of_shards" : "1",
+      "provided_name" : "bwc_index_1",
+      "uuid" : "tBmFXxGhTeiDlznQiKfNCA",
+      "version" : {
+        "created" : "7100299"
+      }
+    }
+  },
+  "mappings" : {
+    "properties" : {
+      "content" : {
+        "type" : "text"
+      },
+      "title" : {
+        "type" : "text"
+      }
+    }
+  },
+  "aliases" : {
+    "bwc_alias" : { }
+  }
+}

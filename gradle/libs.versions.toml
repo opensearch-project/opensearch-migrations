@@ -38,6 +38,8 @@ opensearch-testcontainers = "2.0.1"
 opentelemetry = "1.59.0"
 opentelemetry-semconv = "1.23.1-alpha"
 protobuf = "4.34.0"
+blockhound = "1.0.10.RELEASE"
+reactor-core = "3.7.12"
 reactor-netty = "1.2.11"
 reactor-test = "3.7.12"
 semver4j = "6.0.0"
@@ -151,10 +153,12 @@ polyglot-js-community = { module = "org.graalvm.polyglot:js-community", version.
 protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
 protobuf-protoc = { module = "com.google.protobuf:protoc", version.ref = "protobuf" }
 
+reactor-core = {module = "io.projectreactor:reactor-core", version.ref = "reactor-core" }
 reactor-netty-core = {module = "io.projectreactor.netty:reactor-netty-core", version.ref = "reactor-netty" }
 reactor-netty-http = {module = "io.projectreactor.netty:reactor-netty-http", version.ref = "reactor-netty" }
 
 reactor-test = {module = "io.projectreactor:reactor-test", version.ref = "reactor-test" }
+blockhound = {module = "io.projectreactor.tools:blockhound", version.ref = "blockhound" }
 
 semver4j = { module = "org.semver4j:semver4j", version.ref = "semver4j" }
 

@@ -381,6 +381,12 @@ else
 fi
 
 TOOLS_ARCH=$(uname -m)
+
+# --- compute immutable image tag ---
+# Use git short SHA for a unique, immutable tag per commit. This allows
+# pullPolicy: IfNotPresent since each build produces a distinct tag.
+IMAGE_TAG=$(git -C "$base_dir" rev-parse --short HEAD 2>/dev/null || echo "latest")
+echo "Image tag: $IMAGE_TAG"
 case "$TOOLS_ARCH" in
   x86_64 | amd64) TOOLS_ARCH="amd64" ;;
   aarch64 | arm64) TOOLS_ARCH="arm64" ;;
@@ -562,8 +568,6 @@ fi
 # --- CFN deployment (optional) ---
 if [[ "$deploy_cfn" == "true" ]]; then
   # Determine template source
-  cfn_template_flag=""
-  cfn_template_value=""
   if [[ "$build_cfn" == "true" ]]; then
     echo "Building CloudFormation templates from source..."
     # Clear STACK_NAME_SUFFIX so CDK produces predictable template filenames.
@@ -573,11 +577,10 @@ if [[ "$deploy_cfn" == "true" ]]; then
     # the CDK has safe defaults when they're unset.
     STACK_NAME_SUFFIX="" \
       "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified
-    cfn_template_flag="--template-body"
     if [[ "$deploy_create_vpc" == "true" ]]; then
-      cfn_template_value="file://$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
+      cfn_template_file="$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
     else
-      cfn_template_value="file://$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Import-VPC-eks.template.json"
+      cfn_template_file="$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Import-VPC-eks.template.json"
     fi
   else
     if [[ "$deploy_create_vpc" == "true" ]]; then
@@ -590,22 +593,20 @@ if [[ "$deploy_cfn" == "true" ]]; then
     curl -fL -o "$cfn_template_file" \
       "https://github.com/opensearch-project/opensearch-migrations/releases/download/${RELEASE_VERSION}/${cfn_template_name}" \
       || { echo "Failed to download CFN template for version ${RELEASE_VERSION}"; rm -f "$cfn_template_file"; exit 1; }
-    cfn_template_flag="--template-body"
-    cfn_template_value="file://${cfn_template_file}"
   fi
 
-  # Build parameter overrides (use separate array to handle comma-separated subnet IDs)
-  cfn_params=("ParameterKey=Stage,ParameterValue=${stage_filter}")
+  # Build parameter overrides for `aws cloudformation deploy`
+  cfn_params=("Stage=${stage_filter}")
   if [[ "$deploy_import_vpc" == "true" ]]; then
-    cfn_params+=("ParameterKey=VPCId,ParameterValue=${vpc_id}")
-    cfn_params+=("ParameterKey=VPCSubnetIds,ParameterValue=\"${subnet_ids}\"")
+    cfn_params+=("VPCId=${vpc_id}")
+    cfn_params+=("VPCSubnetIds=${subnet_ids}")
     # Add VPC endpoint creation parameters
     if [[ -n "$create_vpc_endpoints" ]]; then
       IFS=',' read -ra ep_arr <<< "$create_vpc_endpoints"
       for ep in "${ep_arr[@]}"; do
         case "$ep" in
           s3)
-            cfn_params+=("ParameterKey=CreateS3Endpoint,ParameterValue=true")
+            cfn_params+=("CreateS3Endpoint=true")
             # Resolve route tables for the subnets so the S3 gateway endpoint gets associated
             s3_route_table_ids=$(aws ec2 describe-route-tables \
               --filters "Name=association.subnet-id,Values=${subnet_ids}" \
@@ -616,14 +617,14 @@ if [[ "$deploy_cfn" == "true" ]]; then
                 --filters "Name=vpc-id,Values=${vpc_id}" "Name=association.main,Values=true" \
                 --query 'RouteTables[0].RouteTableId' --output text ${region:+--region "$region"})
             fi
-            cfn_params+=("ParameterKey=S3EndpointRouteTableIds,ParameterValue=\"${s3_route_table_ids}\"")
+            cfn_params+=("S3EndpointRouteTableIds=${s3_route_table_ids}")
             ;;
-          ecr)             cfn_params+=("ParameterKey=CreateECREndpoint,ParameterValue=true") ;;
-          ecrDocker)       cfn_params+=("ParameterKey=CreateECRDockerEndpoint,ParameterValue=true") ;;
-          cloudwatchLogs)  cfn_params+=("ParameterKey=CreateCloudWatchLogsEndpoint,ParameterValue=true") ;;
-          efs)             cfn_params+=("ParameterKey=CreateEFSEndpoint,ParameterValue=true") ;;
-          sts)             cfn_params+=("ParameterKey=CreateSTSEndpoint,ParameterValue=true") ;;
-          eksAuth)         cfn_params+=("ParameterKey=CreateEKSAuthEndpoint,ParameterValue=true") ;;
+          ecr)             cfn_params+=("CreateECREndpoint=true") ;;
+          ecrDocker)       cfn_params+=("CreateECRDockerEndpoint=true") ;;
+          cloudwatchLogs)  cfn_params+=("CreateCloudWatchLogsEndpoint=true") ;;
+          efs)             cfn_params+=("CreateEFSEndpoint=true") ;;
+          sts)             cfn_params+=("CreateSTSEndpoint=true") ;;
+          eksAuth)         cfn_params+=("CreateEKSAuthEndpoint=true") ;;
           *) echo "Warning: Unknown VPC endpoint type: $ep (valid: s3,ecr,ecrDocker,cloudwatchLogs,efs)" >&2 ;;
         esac
       done
@@ -631,48 +632,248 @@ if [[ "$deploy_cfn" == "true" ]]; then
   fi
 
   echo "Deploying CloudFormation stack: $cfn_stack_name"
-  # Clean up DELETE_FAILED stacks so they can be recreated
-  if stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} --query 'Stacks[0].StackStatus' --output text 2>/dev/null) \
-      && [[ "$stack_status" == "DELETE_FAILED" ]]; then
-    echo "Stack $cfn_stack_name is in DELETE_FAILED state. Deleting before recreating..."
-    aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"}
-    aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-      || { echo "Failed to delete DELETE_FAILED stack: $cfn_stack_name"; exit 1; }
-  fi
-  # create-stack/update-stack to support both --template-file and --template-url
-  if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
-    update_output=$(aws cloudformation update-stack \
-      "$cfn_template_flag" "$cfn_template_value" \
-      --stack-name "$cfn_stack_name" \
-      --parameters "${cfn_params[@]}" \
-      --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-      ${region:+--region "$region"} 2>&1) && update_started=true || update_started=false
-    if [[ "$update_started" == "true" ]]; then
-      echo "Waiting for stack update to complete..."
-      aws cloudformation wait stack-update-complete \
-        --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-        || { echo "CloudFormation stack update failed for: $cfn_stack_name"; exit 1; }
-    elif echo "$update_output" | grep -q "No updates are to be performed"; then
-      echo "No updates needed for stack: $cfn_stack_name"
-    else
-      echo "CloudFormation update-stack failed: $update_output" >&2
-      exit 1
+
+  # Delete stack if it's in a terminal failed state
+  delete_stuck_stack() {
+    if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
+      local status
+      status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+        --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
+      echo "Current stack status: $status"
+      if [[ "$status" == "ROLLBACK_COMPLETE" || "$status" == "UPDATE_ROLLBACK_COMPLETE" || "$status" == "DELETE_FAILED" ]]; then
+        echo "Stack $cfn_stack_name is in $status state. Deleting before re-creating..."
+        local retain_args=()
+        if [[ "$status" == "DELETE_FAILED" ]]; then
+          local failed_resources
+          failed_resources=$(aws cloudformation list-stack-resources --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+            --query "StackResourceSummaries[?ResourceStatus=='DELETE_FAILED'].LogicalResourceId" --output text 2>/dev/null)
+          if [[ -n "$failed_resources" ]]; then
+            echo "Retaining stuck resources: $failed_resources"
+            retain_args=(--retain-resources $failed_resources)
+          fi
+        fi
+        aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"} "${retain_args[@]}"
+        aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+          || { echo "Failed to delete $status stack: $cfn_stack_name"; exit 1; }
+        echo "Deleted $status stack: $cfn_stack_name"
+      fi
     fi
-  else
-    aws cloudformation create-stack \
-      "$cfn_template_flag" "$cfn_template_value" \
+  }
+
+  # Stream CloudFormation stack events in the background while deploy runs.
+  # Polls describe-stack-events every 10s, prints new resource status changes.
+  stream_cfn_events() {
+    local seen_file
+    seen_file=$(mktemp)
+    trap "rm -f '$seen_file'" RETURN
+    while true; do
+      aws cloudformation describe-stack-events --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+        --query 'StackEvents[].[EventId,Timestamp,ResourceStatus,ResourceType,LogicalResourceId,ResourceStatusReason]' \
+        --output text 2>/dev/null | tac | while IFS=$'\t' read -r eid ts status rtype logical reason; do
+          grep -qxF "$eid" "$seen_file" 2>/dev/null && continue
+          echo "$eid" >> "$seen_file"
+          [[ "$reason" == "None" ]] && reason=""
+          printf "  %-26s %-30s %-40s %s%s\n" "$ts" "$status" "$rtype" "$logical" "${reason:+  ($reason)}"
+        done
+      sleep 10
+    done
+  }
+
+  run_cfn_deploy() {
+    stream_cfn_events &
+    local stream_pid=$!
+
+    aws cloudformation deploy \
+      --template-file "$cfn_template_file" \
       --stack-name "$cfn_stack_name" \
-      --parameters "${cfn_params[@]}" \
+      --parameter-overrides "${cfn_params[@]}" \
       --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-      ${region:+--region "$region"} \
-      || { echo "CloudFormation deployment failed for stack: $cfn_stack_name"; exit 1; }
-    echo "Waiting for stack creation to complete..."
-    aws cloudformation wait stack-create-complete \
-      --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-      || { echo "CloudFormation stack creation failed for: $cfn_stack_name"; exit 1; }
+      --no-fail-on-empty-changeset \
+      ${region:+--region "$region"}
+    local rc=$?
+
+    kill $stream_pid 2>/dev/null; wait $stream_pid 2>/dev/null
+    return $rc
+  }
+
+  # --- parallel task helpers ---
+  # When deploying CFN with --build-images or --push-all-images-to-private-ecr,
+  # we can overlap slow tasks (mirror, buildkit setup, image build) with the
+  # CFN deploy. The EKS cluster and ECR repo are created early in the stack,
+  # while CFN continues creating access entries, node pools, etc.
+  #
+  # Timeline without parallelization:
+  #   CFN deploy (18m) → mirror (23s) → buildkit (44s) → image build (4m) → helm (3m) = ~26m
+  # Timeline with parallelization:
+  #   CFN deploy (18m) ─────────────────────────────────────────────────┐
+  #     ├─ ECR ready (~1m in) → mirror starts in background            │
+  #     └─ EKS ACTIVE (~15m in) → buildkit + image build start         │
+  #                                                                     ├→ helm (3m) = ~21m
+  _parallel_status_dir=$(mktemp -d)
+  _mirror_pid=""
+  _build_pid=""
+
+  # Predict resource names from CFN naming convention
+  _predicted_region="${region:-$(aws configure get region)}"
+  _predicted_account="$(aws sts get-caller-identity --query Account --output text)"
+  _predicted_eks_name="migration-eks-cluster-${stage_filter}-${_predicted_region}"
+  _predicted_ecr_repo="migration-ecr-${stage_filter}-${_predicted_region}"
+  _predicted_ecr_registry="${_predicted_account}.dkr.ecr.${_predicted_region}.amazonaws.com/${_predicted_ecr_repo}"
+
+  # Run mirror to ECR in background. Writes ecr_values_file path to status dir.
+  run_mirror_background() {
+    local ecr_host="${_predicted_ecr_registry%%/*}"
+    local scripts_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
+    echo "⏳ [parallel] Starting mirror to ECR (background)..."
+
+    # Wait for ECR repo to exist
+    while ! aws ecr describe-repositories --repository-names "$_predicted_ecr_repo" \
+        --region "$_predicted_region" >/dev/null 2>&1; do
+      sleep 10
+    done
+    echo "✅ [parallel] ECR repo ready, mirroring images..."
+
+    # Login to ECR for crane
+    aws ecr get-login-password --region "$_predicted_region" | \
+      crane auth login "$ecr_host" -u AWS --password-stdin 2>/dev/null || true
+
+    "$scripts_dir/mirrorToEcr.sh" "$ecr_host" --region "$_predicted_region" || {
+      echo "1" > "$_parallel_status_dir/mirror_failed"
+      echo "❌ [parallel] Mirror to ECR failed"
+      return 1
+    }
+
+    # Generate ECR values override
+    local vals_file
+    vals_file=$(mktemp)
+    "$scripts_dir/generatePrivateEcrValues.sh" "$ecr_host" > "$vals_file"
+    echo "$vals_file" > "$_parallel_status_dir/ecr_values_file"
+    echo "✅ [parallel] Mirror to ECR complete"
+  }
+
+  # Run buildkit setup + image build in background. Needs EKS cluster ACTIVE.
+  run_build_background() {
+    echo "⏳ [parallel] Waiting for EKS cluster to become ACTIVE..."
+    aws eks wait cluster-active --name "$_predicted_eks_name" --region "$_predicted_region" 2>/dev/null || {
+      # Cluster may not exist yet during early CFN — poll manually
+      while true; do
+        local status
+        status=$(aws eks describe-cluster --name "$_predicted_eks_name" --region "$_predicted_region" \
+          --query 'cluster.status' --output text 2>/dev/null) || { sleep 15; continue; }
+        [[ "$status" == "ACTIVE" ]] && break
+        sleep 15
+      done
+    }
+    echo "✅ [parallel] EKS cluster ACTIVE"
+
+    # Configure kubectl for this background process
+    aws eks update-kubeconfig --region "$_predicted_region" --name "$_predicted_eks_name" 2>/dev/null
+
+    # Buildkit setup
+    local multi_arch_native=true
+    export MULTI_ARCH_NATIVE="$multi_arch_native"
+    if docker buildx inspect local-remote-builder 2>/dev/null | grep -q "Status: running"; then
+      echo "✅ [parallel] Buildkit already running"
+    elif timeout 120 docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
+      echo "✅ [parallel] Buildkit bootstrapped"
+    else
+      echo "⏳ [parallel] Setting up buildkit..."
+      docker buildx rm local-remote-builder 2>/dev/null || true
+      "${base_dir}/buildImages/setUpK8sImageBuildServices.sh" || {
+        echo "1" > "$_parallel_status_dir/build_failed"
+        echo "❌ [parallel] Buildkit setup failed"
+        return 1
+      }
+    fi
+
+    # ECR login
+    local ecr_domain="${_predicted_ecr_registry%%/*}"
+    aws ecr get-login-password --region "$_predicted_region" \
+      | docker login --username AWS --password-stdin "$ecr_domain" || {
+      echo "1" > "$_parallel_status_dir/build_failed"
+      echo "❌ [parallel] ECR login failed"
+      return 1
+    }
+
+    # Image build with retry
+    echo "⏳ [parallel] Building images to ${_predicted_ecr_registry}..."
+    "$base_dir/gradlew" -p "$base_dir" :buildImages:buildImagesToRegistry \
+      -PregistryEndpoint="$_predicted_ecr_registry" -PimageVersion="$IMAGE_TAG" -x test \
+      || { echo "Image build failed, retrying in 10s..."; sleep 10; \
+           "$base_dir/gradlew" -p "$base_dir" :buildImages:buildImagesToRegistry \
+             -PregistryEndpoint="$_predicted_ecr_registry" -PimageVersion="$IMAGE_TAG" -x test; } \
+      || {
+        echo "1" > "$_parallel_status_dir/build_failed"
+        echo "❌ [parallel] Image build failed"
+        return 1
+      }
+
+    echo "✅ [parallel] Image build complete"
+    echo "Cleaning up docker buildx builder to free buildkit pods..."
+    docker buildx rm local-remote-builder 2>/dev/null || true
+  }
+
+  delete_stuck_stack
+
+  # Start parallel tasks after stuck stack cleanup but before CFN deploy.
+  # These poll for resources (ECR repo, EKS cluster) that CFN will create.
+  if [[ "$push_images_to_ecr" == "true" ]]; then
+    run_mirror_background &
+    _mirror_pid=$!
+    echo "Started mirror in background (PID $_mirror_pid)"
+  fi
+  if [[ "$build_images" == "true" ]]; then
+    run_build_background &
+    _build_pid=$!
+    echo "Started image build in background (PID $_build_pid)"
+  fi
+
+  # Run deploy; if changeset fails ResourceExistenceCheck, delete the stack and retry.
+  _kill_parallel() {
+    [[ -n "$_mirror_pid" ]] && { kill "$_mirror_pid" 2>/dev/null; wait "$_mirror_pid" 2>/dev/null; } || true
+    [[ -n "$_build_pid" ]] && { kill "$_build_pid" 2>/dev/null; wait "$_build_pid" 2>/dev/null; } || true
+  }
+  if ! run_cfn_deploy; then
+    echo "Deploy failed. Attempting recovery — deleting stack and retrying..."
+    delete_stuck_stack
+    run_cfn_deploy \
+      || { _kill_parallel; echo "CloudFormation deployment failed for: $cfn_stack_name"; exit 1; }
   fi
 
   echo "CloudFormation stack deployed successfully: $cfn_stack_name"
+
+  # --- wait for parallel tasks ---
+  if [[ -n "$_mirror_pid" ]]; then
+    echo "Waiting for mirror background task (PID $_mirror_pid)..."
+    if wait "$_mirror_pid"; then
+      echo "Mirror completed successfully"
+      # Pick up the ecr_values_file path from the background task
+      if [[ -f "$_parallel_status_dir/ecr_values_file" ]]; then
+        ecr_values_file=$(cat "$_parallel_status_dir/ecr_values_file")
+        if [[ -n "$extra_helm_values" ]]; then
+          extra_helm_values="$extra_helm_values,$ecr_values_file"
+        else
+          extra_helm_values="$ecr_values_file"
+        fi
+        echo "Private ECR values written to $ecr_values_file"
+      fi
+      _mirror_done=true
+    else
+      echo "❌ Mirror background task failed" >&2
+      # Non-fatal for mirror — will retry below if needed
+    fi
+  fi
+  if [[ -n "$_build_pid" ]]; then
+    echo "Waiting for image build background task (PID $_build_pid)..."
+    if wait "$_build_pid"; then
+      echo "Image build completed successfully"
+      _build_done=true
+    else
+      echo "❌ Image build background task failed" >&2
+      # Will retry below in the normal flow
+    fi
+  fi
+  rm -rf "$_parallel_status_dir"
 fi
 
 if ! output=$(get_cfn_export); then
@@ -893,7 +1094,8 @@ kubectl config set-context "${KUBE_CONTEXT}" --namespace="$namespace" >/dev/null
 
 # --- mirror public images to private ECR (optional) ---
 # Run before build so that buildkit image is available in ECR for isolated clusters.
-if [[ "$push_images_to_ecr" == "true" ]]; then
+# Skip if already completed by parallel task during CFN deploy.
+if [[ "$push_images_to_ecr" == "true" && "${_mirror_done:-}" != "true" ]]; then
   echo "Mirroring public images and helm charts to private ECR..."
   ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
   SCRIPTS_DIR="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
@@ -909,35 +1111,58 @@ if [[ "$push_images_to_ecr" == "true" ]]; then
     extra_helm_values="$ecr_values_file"
   fi
   echo "Private ECR values written to $ecr_values_file"
+elif [[ "${_mirror_done:-}" == "true" ]]; then
+  echo "Mirror already completed during CFN deploy (parallel task)"
+fi
 
+# Mirror MA images — runs regardless of whether base mirror was parallel or sequential
+if [[ "$push_images_to_ecr" == "true" ]]; then
   # Mirror MA images to the private ECR repo with expected tags
   # Skip if --build-images is set — locally-built images take precedence
   if [[ "$build_images" != "true" ]]; then
     echo "Mirroring MA images to private ECR..."
     export PATH="${HOME}/bin:${PATH}"
+
+    # crane copy with single retry
+    crane_copy_retry() {
+      local src="$1" dst="$2"
+      crane copy "$src" "$dst" 2>&1 | tail -1 || { sleep 5; crane copy "$src" "$dst" 2>&1 | tail -1; } \
+        || echo "  ❌ FAILED: $src → $dst" >&2
+    }
+
+    # MA image mapping: build_tag_name|public_ecr_suffix
+    # build_tag_name: what the build system produces (migrations_<name>_latest)
+    # public_ecr_suffix: the public.ecr.aws image name suffix (opensearch-migrations-<suffix>)
+    MA_IMAGES="capture_proxy|traffic-capture-proxy
+traffic_replayer|traffic-replayer
+reindex_from_snapshot|reindex-from-snapshot
+migration_console|console"
+
     if [[ -n "${ma_images_source:-}" ]]; then
       # Copy from another ECR registry using build tag names
-      for tag in migrations_capture_proxy_latest migrations_traffic_replayer_latest migrations_reindex_from_snapshot_latest migrations_migration_console_latest; do
-        src="${ma_images_source}:${tag}"
-        dst="${MIGRATIONS_ECR_REGISTRY}:${tag}"
-        echo "  $tag → $dst"
-        crane copy "$src" "$dst" 2>&1 | tail -1 || { sleep 5; crane copy "$src" "$dst" 2>&1 | tail -1; } || echo "  ❌ FAILED: $tag" >&2
+      echo "$MA_IMAGES" | while IFS='|' read -r build_name _; do
+        src="${ma_images_source}:migrations_${build_name}_latest"
+        dst="${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest"
+        echo "  $build_name → $dst"
+        crane_copy_retry "$src" "$dst"
       done
     else
       # Copy from public ECR using release image names
       aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
         crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
-      for img in traffic-capture-proxy traffic-replayer reindex-from-snapshot console; do
-        src="public.ecr.aws/opensearchproject/opensearch-migrations-${img}:${RELEASE_VERSION}"
-        tag="migrations_${img//-/_}_latest"
-        dst="${MIGRATIONS_ECR_REGISTRY}:${tag}"
-        echo "  $img → $dst"
-        crane copy "$src" "$dst" 2>&1 | tail -1 || { sleep 5; crane copy "$src" "$dst" 2>&1 | tail -1; } || echo "  ❌ FAILED: $img" >&2
+      echo "$MA_IMAGES" | while IFS='|' read -r build_name public_suffix; do
+        src="public.ecr.aws/opensearchproject/opensearch-migrations-${public_suffix}:${RELEASE_VERSION}"
+        dst="${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest"
+        echo "  $public_suffix → $dst"
+        crane_copy_retry "$src" "$dst"
       done
-      # installer uses migration_console image
-      crane copy "${MIGRATIONS_ECR_REGISTRY}:migrations_console_latest" \
-        "${MIGRATIONS_ECR_REGISTRY}:migrations_migration_console_latest" 2>&1 | tail -1 || true
     fi
+    # Tag mirrored images with the immutable IMAGE_TAG
+    echo "Tagging MA images with $IMAGE_TAG..."
+    echo "$MA_IMAGES" | while IFS='|' read -r build_name _; do
+      crane_copy_retry "${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest" \
+        "${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_${IMAGE_TAG}"
+    done
   else
     echo "Skipping MA image mirroring — --build-images will push locally-built images."
   fi
@@ -946,7 +1171,8 @@ if [[ "$push_images_to_ecr" == "true" ]]; then
   use_public_images=false
 fi
 
-if [[ "$build_images" == "true" ]]; then
+# Skip if already completed by parallel task during CFN deploy.
+if [[ "$build_images" == "true" && "${_build_done:-}" != "true" ]]; then
   # Always build for both architectures on EKS
   MULTI_ARCH_NATIVE=true
   BUILD_TARGET="buildImagesToRegistry"
@@ -955,10 +1181,13 @@ if [[ "$build_images" == "true" ]]; then
   # When mirroring, buildkit still pulls from public registries — building on
   # isolated clusters is not supported. Use --ma-images-source instead.
 
-  if docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
-    echo "Buildkit already configured and healthy, skipping setup"
+  if docker buildx inspect local-remote-builder 2>/dev/null | grep -q "Status: running"; then
+    echo "Buildkit already running, skipping setup"
+  elif timeout 120 docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
+    echo "Buildkit bootstrapped successfully, skipping setup"
   else
     echo "Setting up buildkit for local builds..."
+    docker buildx rm local-remote-builder 2>/dev/null || true
     "${base_dir}/buildImages/setUpK8sImageBuildServices.sh"
   fi
 
@@ -969,11 +1198,16 @@ if [[ "$build_images" == "true" ]]; then
     | docker login --username AWS --password-stdin "$ecr_domain" \
     || { echo "ECR login failed"; exit 1; }
 
-  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
+  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -PimageVersion="$IMAGE_TAG" -x test \
+    || { echo "Image build failed, retrying in 10s..."; sleep 10; \
+         "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -PimageVersion="$IMAGE_TAG" -x test; } \
+    || { echo "Image build failed on retry, giving up."; exit 1; }
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."
   docker buildx rm local-remote-builder 2>/dev/null || true
   echo "Builder removed. Buildkit pods will be terminated by kubernetes driver."
+elif [[ "${_build_done:-}" == "true" ]]; then
+  echo "Image build already completed during CFN deploy (parallel task)"
 fi
 
 # --- image source selection ---
@@ -984,15 +1218,15 @@ fi
 if [[ "$use_public_images" == "false" ]]; then
   IMAGE_FLAGS="\
     --set images.captureProxy.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.captureProxy.tag=migrations_capture_proxy_latest \
+    --set images.captureProxy.tag=migrations_capture_proxy_${IMAGE_TAG} \
     --set images.trafficReplayer.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.trafficReplayer.tag=migrations_traffic_replayer_latest \
+    --set images.trafficReplayer.tag=migrations_traffic_replayer_${IMAGE_TAG} \
     --set images.reindexFromSnapshot.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.reindexFromSnapshot.tag=migrations_reindex_from_snapshot_latest \
+    --set images.reindexFromSnapshot.tag=migrations_reindex_from_snapshot_${IMAGE_TAG} \
     --set images.migrationConsole.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.migrationConsole.tag=migrations_migration_console_latest \
+    --set images.migrationConsole.tag=migrations_migration_console_${IMAGE_TAG} \
     --set images.installer.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.installer.tag=migrations_migration_console_latest"
+    --set images.installer.tag=migrations_migration_console_${IMAGE_TAG}"
 # Use latest public images
 else
   echo "Using public images tagged '$RELEASE_VERSION'"
@@ -1042,13 +1276,43 @@ fi
 
 check_existing_ma_release "$namespace" "$namespace"
 
+echo "=== Helm install configuration ==="
+echo "Chart: ${ma_chart_dir}"
+echo "Namespace: ${namespace}"
+echo "Values flags: ${HELM_VALUES_FLAGS}"
+if [[ -n "$extra_helm_values" ]]; then
+  echo "Extra values files: ${extra_helm_values}"
+  IFS=',' read -ra EXTRA_FILES <<< "$extra_helm_values"
+  for f in "${EXTRA_FILES[@]}"; do
+    echo "--- Contents of $f ---"
+    cat "$f"
+    echo "--- End $f ---"
+  done
+fi
+echo "Set flags:"
+echo "  stageName=${STAGE}"
+echo "  aws.region=${AWS_CFN_REGION}"
+echo "  aws.account=${AWS_ACCOUNT}"
+echo "  defaultBucketConfiguration.snapshotRoleArn=${SNAPSHOT_ROLE}"
+echo "Image flags:"
+echo "  ${IMAGE_FLAGS}"
+echo "=== End helm install configuration ==="
+
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
+# Build extra values flags — split comma-separated list into individual -f args
+EXTRA_VALUES_FLAGS=""
+if [[ -n "$extra_helm_values" ]]; then
+  IFS=',' read -ra _evf <<< "$extra_helm_values"
+  for f in "${_evf[@]}"; do
+    EXTRA_VALUES_FLAGS="$EXTRA_VALUES_FLAGS -f $f"
+  done
+fi
 helm install "$namespace" "${ma_chart_dir}" \
   --kube-context="${KUBE_CONTEXT}" \
   --namespace $namespace \
-  --timeout 10m \
+  --timeout 15m \
   $HELM_VALUES_FLAGS \
-  ${extra_helm_values:+-f "$extra_helm_values"} \
+  $EXTRA_VALUES_FLAGS \
   --set stageName="${STAGE}" \
   --set aws.region="${AWS_CFN_REGION}" \
   --set aws.account="${AWS_ACCOUNT}" \
