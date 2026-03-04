@@ -138,7 +138,7 @@ Behavior at trigger time:
 Why this exists:
 - Reduces the risk of losing in-memory progress when coordinator connectivity drops near lease expiry.
 - Provides extra time for coordinator retry/backoff to succeed before the hard lease boundary.
-- Retries in the lease-timeout path are deadline-bounded by the original lease expiry and will never outlive the lease.
+- Retry backoff waits in the lease-timeout path are deadline-bounded by the original lease expiry. A retry will not begin a new backoff sleep if it would exceed the lease boundary.
 
 Dedicated coordinator outage example (PT60S lease):
 - `t=0s`: worker starts migrating shard docs

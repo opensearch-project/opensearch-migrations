@@ -123,7 +123,7 @@ If this process fails before the `successorWorkItems` field is updated, a new wo
 
 Coordinator outage contract around the early-checkpoint trigger:
 - If coordinator is unavailable at trigger time, worker retries coordinator operations using existing retry/backoff policies.
-- Retries are deadline-bounded by the original lease expiry and will never outlive the lease.
+- Retry backoff waits are deadline-bounded by the original lease expiry. A retry will not begin a new backoff sleep if it would exceed the lease boundary.
 - If retries succeed before the deadline, handoff metadata is persisted and successor work can be reclaimed.
 - If retries hit the deadline, worker exits and later workers may need to re-drive work from the last persisted cursor.
 
