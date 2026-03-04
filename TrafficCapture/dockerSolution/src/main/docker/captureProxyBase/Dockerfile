@@ -1,7 +1,7 @@
 # =======================
 # Stage 1: Certificate Generation
 # =======================
-FROM mirror.gcr.io/library/amazonlinux:2023 AS cert-builder
+FROM docker.io/library/amazonlinux:2023 AS cert-builder
 
 # Install OpenSSL
 RUN yum update -y && \
@@ -21,7 +21,7 @@ RUN mkdir -p /certs && \
 # =======================
 # Stage 2: Final Image
 # =======================
-FROM mirror.gcr.io/library/amazoncorretto:11-al2023-headless
+FROM docker.io/library/amazoncorretto:11-al2023-headless
 
 # Set environment variables
 ENV CONFIG_HOME=/usr/share/captureProxy/config
