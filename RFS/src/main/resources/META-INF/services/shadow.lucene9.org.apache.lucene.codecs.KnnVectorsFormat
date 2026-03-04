@@ -1,3 +1,0 @@
-org.opensearch.migrations.bulkload.lucene.version_9.IgnoreES814HnswScalarQuantizedVectorsFormat
-org.opensearch.migrations.bulkload.lucene.version_9.IgnoreES816BinaryQuantizedVectorsFormat
-org.opensearch.migrations.bulkload.lucene.version_9.IgnoreES816HnswBinaryQuantizedVectorsFormat
