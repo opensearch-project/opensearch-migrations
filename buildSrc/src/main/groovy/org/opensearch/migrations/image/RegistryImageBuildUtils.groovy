@@ -30,112 +30,6 @@ class RegistryImageBuildUtils {
         return formatter.getFullBaseImageIdentifier(registry.containerUrl, group, image, tag)
     }
 
-    /**
-     * Build a list of candidate base images to try, in priority order.
-     * If intermediateRegistry is ECR, the ECR mirrored path comes first.
-     * Then the configured endpoint (e.g. docker.io), then fallback mirrors.
-     */
-    static List<String> buildBaseImageCandidates(Registry intermediateRegistry, String endpoint, String group, String name, String tag) {
-        def candidates = []
-        // ECR mirrored paths first (if available)
-        if (intermediateRegistry.isEcr()) {
-            candidates << "${intermediateRegistry.registryDomain}/mirrored/${endpoint}/${group}/${name}:${tag}"
-            // mirrorToEcr.sh uses mirror.gcr.io as the manifest source, so also try that path
-            if (endpoint == "docker.io") {
-                candidates << "${intermediateRegistry.registryDomain}/mirrored/mirror.gcr.io/${group}/${name}:${tag}"
-            }
-        }
-        // Configured endpoint (e.g. docker.io)
-        def formatter = ImageRegistryFormatterFactory.getFormatter(endpoint)
-        candidates << formatter.getFullBaseImageIdentifier(endpoint, group, name, tag)
-        // Fallback mirrors for docker.io images
-        if (endpoint == "docker.io") {
-            candidates << "mirror.gcr.io/${group}/${name}:${tag}"
-            candidates << "public.ecr.aws/docker/${group}/${name}:${tag}"
-        }
-        return candidates.unique()
-    }
-
-    /** Ensure crane binary is available, installing it if not on PATH. */
-    private static String cranePath = null
-    static String ensureCrane() {
-        if (cranePath != null) return cranePath
-        // Check if already on PATH
-        try {
-            def check = ["which", "crane"].execute()
-            check.waitForOrKill(5000)
-            if (check.exitValue() == 0) {
-                cranePath = check.text.trim()
-                return cranePath
-            }
-        } catch (Exception ignored) {}
-        // Auto-install to ~/.crane/bin
-        def installDir = new File(System.getProperty("user.home"), ".crane/bin")
-        def craneBin = new File(installDir, "crane")
-        if (craneBin.canExecute()) {
-            cranePath = craneBin.absolutePath
-            return cranePath
-        }
-        println "Installing crane..."
-        installDir.mkdirs()
-        def arch = System.getProperty("os.arch")
-        arch = (arch == "aarch64" || arch == "arm64") ? "arm64" : "x86_64"
-        def os = System.getProperty("os.name").toLowerCase().contains("mac") ? "Darwin" : "Linux"
-        def url = "https://github.com/google/go-containerregistry/releases/latest/download/go-containerregistry_${os}_${arch}.tar.gz"
-        def proc = ["sh", "-c", "curl -sL '${url}' | tar xz -C '${installDir.absolutePath}' crane"].execute()
-        proc.waitForOrKill(60000)
-        if (proc.exitValue() != 0 || !craneBin.exists()) {
-            throw new GradleException("Failed to install crane from ${url}")
-        }
-        craneBin.setExecutable(true)
-        println "crane installed to ${craneBin.absolutePath}"
-        cranePath = craneBin.absolutePath
-        return cranePath
-    }
-
-    /**
-     * Probe a registry image to check if it exists using crane.
-     */
-    static boolean probeImage(String image) {
-        try {
-            def crane = ensureCrane()
-            def proc = [crane, "manifest", image].execute()
-            proc.consumeProcessOutput(new StringBuilder(), new StringBuilder())
-            proc.waitForOrKill(15000)
-            return proc.exitValue() == 0
-        } catch (Exception e) {
-            return false
-        }
-    }
-
-    /**
-     * Resolve the base image by trying each candidate in order.
-     * Returns the first accessible image, or the first candidate as fallback.
-     * If the base image endpoint matches the intermediate registry (i.e. it's a locally-built image),
-     * skip mirror resolution entirely — just use the direct registry path.
-     */
-    static String resolveBaseImageFromMirrors(Registry intermediateRegistry, String endpoint, String group, String name, String tag) {
-        // If the base image is already on the intermediate registry (e.g. captureProxyBase built by buildKit),
-        // don't apply mirror resolution — just resolve it directly.
-        if (endpoint == intermediateRegistry.hostUrl) {
-            def directImage = resolveBaseImage(intermediateRegistry, group, name, tag)
-            println "Base image is on intermediate registry, skipping mirror resolution: ${directImage}"
-            return directImage
-        }
-        def candidates = buildBaseImageCandidates(intermediateRegistry, endpoint, group, name, tag)
-        println "Resolving base image from mirrors: ${candidates}"
-        for (candidate in candidates) {
-            if (probeImage(candidate)) {
-                println "  ✅ Using base image: ${candidate}"
-                return candidate
-            }
-            println "  ❌ Not available: ${candidate}"
-        }
-        // Fallback to first candidate — Jib will fail with a clear error
-        println "  ⚠️ No mirror responded, falling back to: ${candidates[0]}"
-        return candidates[0]
-    }
-
     // Determine the build mode based on the tasks requested in the CLI, throwing if multiple variants are configured
     private String detectArchitecture(Project rootProject) {
         def startTasks = rootProject.gradle.startParameter.taskNames
@@ -175,13 +69,16 @@ class RegistryImageBuildUtils {
                     Registry targetReg = config.get("repoName", null) ? finalRegistry : intermediateRegistry
                     def targetFormatter = ImageRegistryFormatterFactory.getFormatter(targetReg.hostUrl)
 
-                    def baseImage = resolveBaseImageFromMirrors(
-                            intermediateRegistry,
-                            config.get("baseImageRegistryEndpoint", "").toString(),
-                            config.get("baseImageGroup", "").toString(),
-                            config.baseImageName.toString(),
-                            config.baseImageTag.toString()
-                        )
+                    def baseEndpoint = config.get("baseImageRegistryEndpoint", "").toString()
+                    def baseImage
+                    if (baseEndpoint == intermediateRegistry.hostUrl) {
+                        baseImage = resolveBaseImage(intermediateRegistry, config.get("baseImageGroup", "").toString(),
+                                config.baseImageName.toString(), config.baseImageTag.toString())
+                    } else {
+                        def formatter = ImageRegistryFormatterFactory.getFormatter(baseEndpoint)
+                        baseImage = formatter.getFullBaseImageIdentifier(baseEndpoint, config.get("baseImageGroup", "").toString(),
+                                config.baseImageName.toString(), config.baseImageTag.toString())
+                    }
 
                     def (registryDestination, _) = targetFormatter.getFullTargetImageIdentifier(
                             targetReg.hostUrl,
