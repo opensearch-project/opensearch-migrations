@@ -1,7 +1,7 @@
 import org.opensearch.migrations.image.RegistryImageBuildUtils
 import org.opensearch.migrations.image.RegistryImageBuildUtils.Registry
 
-def publishedUrl = rootProject.findProperty('registryEndpoint') ?: 'localhost:5001'
+def publishedUrl = rootProject.findProperty('registryEndpoint') ?: 'localhost:5002'
 def intermediateUrl = rootProject.findProperty('intermediateRegistry') ?: publishedUrl
 
 def publishedRegistry = new Registry(publishedUrl.toString())
@@ -24,14 +24,26 @@ def getRepoNameIfPublishing = { Map cfg ->
 
 def jibProjects = [
         "TrafficCapture:trafficReplayer": [
-                baseImageRegistryEndpoint: "mirror.gcr.io",
+                baseImageRegistryEndpoint: "docker.io",
                 baseImageGroup : "library",
                 baseImageName : "amazoncorretto",
                 baseImageTag  : "17-al2023-headless",
                 imageName     : "traffic_replayer",
                 imageTag      : "latest",
+                extraPermissions: ['/runJavaWithClasspath.sh': '755'],
                 requiredDependencies: [
                     ":TrafficCapture:trafficReplayer": ["syncVersionFile_traffic_replayer"]
+                ]
+        ],
+        "TrafficCapture:transformationShim": [
+                baseImageRegistryEndpoint: "docker.io",
+                baseImageGroup : "library",
+                baseImageName : "amazoncorretto",
+                baseImageTag  : "17-al2023-headless",
+                imageName     : "transformation_shim",
+                imageTag      : "latest",
+                requiredDependencies: [
+                    ":TrafficCapture:transformationShim": ["syncVersionFile_transformation_shim"]
                 ]
         ],
         "TrafficCapture:trafficCaptureProxyServer": [
@@ -79,7 +91,7 @@ def buildKitProjects = [
                 contextDir: "migrationConsole/build/dockerContext",
                 imageName:  "migration_console_base",
                 buildArgs: [
-                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImage(
+                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
                                 intermediateRegistry, "migrations", "elasticsearch_test_console", "latest")
                 ],
                 requiredDependencies: [
@@ -93,7 +105,7 @@ def buildKitProjects = [
                 imageName:  "migration_console",
                 imageTag:   "latest",
                 buildArgs: [
-                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImage(
+                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
                                 intermediateRegistry, "migrations", "migration_console_base", "latest")
                 ],
                 requiredDependencies: [
