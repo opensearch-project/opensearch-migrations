@@ -20,11 +20,22 @@ class RegistryImageBuildUtils {
                 this.containerUrl = rawUrl
             }
         }
+
+        String getRegistryDomain() { hostUrl.split('/')[0] }
+        boolean isEcr() { registryDomain.contains('.ecr.') && registryDomain.contains('.amazonaws.com') }
     }
 
     static String resolveBaseImage(Registry registry, String group, String image, String tag) {
-        def formatter = ImageRegistryFormatterFactory.getFormatter(registry.containerUrl)
-        return formatter.getFullBaseImageIdentifier(registry.containerUrl, group, image, tag)
+        return resolveBaseImageForUrl(registry.hostUrl, group, image, tag)
+    }
+
+    static String resolveBaseImageForContainer(Registry registry, String group, String image, String tag) {
+        return resolveBaseImageForUrl(registry.containerUrl, group, image, tag)
+    }
+
+    private static String resolveBaseImageForUrl(String url, String group, String image, String tag) {
+        def formatter = ImageRegistryFormatterFactory.getFormatter(url)
+        return formatter.getFullBaseImageIdentifier(url, group, image, tag)
     }
 
     // Determine the build mode based on the tasks requested in the CLI, throwing if multiple variants are configured
@@ -64,15 +75,18 @@ class RegistryImageBuildUtils {
 
                 project.plugins.withId('com.google.cloud.tools.jib') {
                     Registry targetReg = config.get("repoName", null) ? finalRegistry : intermediateRegistry
-                    def baseFormatter = ImageRegistryFormatterFactory.getFormatter(config.get("baseImageRegistryEndpoint", "").toString())
                     def targetFormatter = ImageRegistryFormatterFactory.getFormatter(targetReg.hostUrl)
 
-                    def baseImage = baseFormatter.getFullBaseImageIdentifier(
-                            config.get("baseImageRegistryEndpoint", "").toString(),
-                            config.get("baseImageGroup", "").toString(),
-                            config.baseImageName.toString(),
-                            config.baseImageTag.toString()
-                    )
+                    def baseEndpoint = config.get("baseImageRegistryEndpoint", "").toString()
+                    def baseImage
+                    if (baseEndpoint == intermediateRegistry.hostUrl) {
+                        baseImage = resolveBaseImage(intermediateRegistry, config.get("baseImageGroup", "").toString(),
+                                config.baseImageName.toString(), config.baseImageTag.toString())
+                    } else {
+                        def formatter = ImageRegistryFormatterFactory.getFormatter(baseEndpoint)
+                        baseImage = formatter.getFullBaseImageIdentifier(baseEndpoint, config.get("baseImageGroup", "").toString(),
+                                config.baseImageName.toString(), config.baseImageTag.toString())
+                    }
 
                     def (registryDestination, _) = targetFormatter.getFullTargetImageIdentifier(
                             targetReg.hostUrl,
@@ -100,15 +114,26 @@ class RegistryImageBuildUtils {
                             def versionTag = rootProject.findProperty("imageVersion")
                             if (versionTag) {
                                 def suffix = (targetArch != "multi") ? "_${targetArch}" : ""
-                                tags = ["${versionTag}${suffix}".toString()]
+                                def versionDest = targetFormatter.getFullTargetImageIdentifier(
+                                        targetReg.hostUrl, config.imageName.toString(), versionTag,
+                                        config.get("repoName", null)?.toString())[0]
+                                // Extract just the tag portion for Jib's tags list
+                                def formattedTag = versionDest.toString().split(":")[-1]
+                                tags = ["${formattedTag}${suffix}".toString()]
                             }
                         }
                         extraDirectories {
                             paths {
-                                path { from = project.file("docker"); into = '/' }
+                                def dockerDir = project.file("docker")
+                                if (dockerDir.exists()) {
+                                    path { from = dockerDir; into = '/' }
+                                }
                                 path { from = project.file("build/versionDir"); into = '/' }
                             }
-                            permissions = ['/runJavaWithClasspath.sh': '755']
+                            def extraPerms = (Map<String, String>) config.get("extraPermissions", [:])
+                            if (extraPerms) {
+                                permissions = extraPerms
+                            }
                         }
                         allowInsecureRegistries = true
                         container { entrypoint = ['tail', '-f', '/dev/null'] }
@@ -146,10 +171,10 @@ class RegistryImageBuildUtils {
     }
 
     void registerLoginTask(Project project, Registry registry) {
-        def registryDomain = registry.hostUrl.split("/")[0]
-        def isEcr = registryDomain.contains(".ecr.") && registryDomain.contains(".amazonaws.com")
+        def isEcr = registry.isEcr()
 
         if (isEcr) {
+            def registryDomain = registry.registryDomain
             def region = (registryDomain =~ /^(\d+)\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com$/)[0][2]
             project.tasks.register("loginToECR", Exec) {
                 group = "docker"
@@ -235,7 +260,7 @@ class RegistryImageBuildUtils {
                             "--cache-from=type=registry,ref=${cacheDestination}${suffix}"
                     ]
                     buildArgFlags.each { fullArgs.add(it) }
-                    fullArgs.add(contextPath)
+                    fullArgs.add("\"${contextPath}\"")
                     commandLine 'sh', '-c', fullArgs.join(" ")
                 }
             }
@@ -262,7 +287,7 @@ class RegistryImageBuildUtils {
                         "--cache-from=type=registry,ref=${cacheDestination}_arm64"
                 ]
                 buildArgFlags.each { fullArgs.add(it) }
-                fullArgs.add(contextPath)
+                fullArgs.add("\"${contextPath}\"")
                 commandLine 'sh', '-c', fullArgs.join(" ")
             }
         }
