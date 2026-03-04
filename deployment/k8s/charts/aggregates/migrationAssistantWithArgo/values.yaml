@@ -62,7 +62,7 @@ images:
     tag: latest
     pullPolicy: IfNotPresent
   coordinatorCluster:
-    repository: docker.io/opensearchproject/opensearch
+    repository: mirror.gcr.io/opensearchproject/opensearch
     tag: "3.1.0"
     pullPolicy: IfNotPresent
 
