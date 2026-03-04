@@ -26,8 +26,8 @@ class RegistryImageBuildUtils {
     }
 
     static String resolveBaseImage(Registry registry, String group, String image, String tag) {
-        def formatter = ImageRegistryFormatterFactory.getFormatter(registry.containerUrl)
-        return formatter.getFullBaseImageIdentifier(registry.containerUrl, group, image, tag)
+        def formatter = ImageRegistryFormatterFactory.getFormatter(registry.hostUrl)
+        return formatter.getFullBaseImageIdentifier(registry.hostUrl, group, image, tag)
     }
 
     // Determine the build mode based on the tasks requested in the CLI, throwing if multiple variants are configured
