@@ -237,8 +237,7 @@ public class TargetWriteEndToEndTest {
                 d.getId(), d.getType(), d.getSource(), d.getRouting(),
                 d.getOperation() == DocumentChangeType.DELETE
                     ? DocumentChange.ChangeType.DELETE
-                    : DocumentChange.ChangeType.INDEX,
-                d.getLuceneDocNumber()
+                    : DocumentChange.ChangeType.INDEX
             ))
             .toList();
     }

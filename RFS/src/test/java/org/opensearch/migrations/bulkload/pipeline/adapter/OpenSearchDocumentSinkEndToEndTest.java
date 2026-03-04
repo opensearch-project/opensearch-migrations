@@ -79,9 +79,9 @@ public class OpenSearchDocumentSinkEndToEndTest {
 
             // Write batch of INDEX operations
             var docs = List.of(
-                new DocumentChange("d1", null, "{\"title\":\"First\"}".getBytes(), null, DocumentChange.ChangeType.INDEX, -1),
-                new DocumentChange("d2", null, "{\"title\":\"Second\"}".getBytes(), null, DocumentChange.ChangeType.INDEX, -1),
-                new DocumentChange("d3", null, "{\"title\":\"Third\"}".getBytes(), null, DocumentChange.ChangeType.INDEX, -1)
+                new DocumentChange("d1", null, "{\"title\":\"First\"}".getBytes(), null, DocumentChange.ChangeType.INDEX),
+                new DocumentChange("d2", null, "{\"title\":\"Second\"}".getBytes(), null, DocumentChange.ChangeType.INDEX),
+                new DocumentChange("d3", null, "{\"title\":\"Third\"}".getBytes(), null, DocumentChange.ChangeType.INDEX)
             );
 
             var cursor = sink.writeBatch(shardId, "sink_docs", docs).block();
@@ -108,15 +108,15 @@ public class OpenSearchDocumentSinkEndToEndTest {
 
             // Write 3 docs
             var additions = List.of(
-                new DocumentChange("keep1", null, "{\"v\":1}".getBytes(), null, DocumentChange.ChangeType.INDEX, -1),
-                new DocumentChange("keep2", null, "{\"v\":2}".getBytes(), null, DocumentChange.ChangeType.INDEX, -1),
-                new DocumentChange("to_delete", null, "{\"v\":3}".getBytes(), null, DocumentChange.ChangeType.INDEX, -1)
+                new DocumentChange("keep1", null, "{\"v\":1}".getBytes(), null, DocumentChange.ChangeType.INDEX),
+                new DocumentChange("keep2", null, "{\"v\":2}".getBytes(), null, DocumentChange.ChangeType.INDEX),
+                new DocumentChange("to_delete", null, "{\"v\":3}".getBytes(), null, DocumentChange.ChangeType.INDEX)
             );
             sink.writeBatch(shardId, "sink_deletes", additions).block();
 
             // Delete one
             var deletions = List.of(
-                new DocumentChange("to_delete", null, null, null, DocumentChange.ChangeType.DELETE, -1)
+                new DocumentChange("to_delete", null, null, null, DocumentChange.ChangeType.DELETE)
             );
             sink.writeBatch(shardId, "sink_deletes", deletions).block();
 
@@ -137,8 +137,8 @@ public class OpenSearchDocumentSinkEndToEndTest {
             sink.createIndex(new IndexMetadataSnapshot("sink_routing", 1, 0, null, null, null)).block();
 
             var docs = List.of(
-                new DocumentChange("r1", null, "{\"score\":10}".getBytes(), "shard_a", DocumentChange.ChangeType.INDEX, -1),
-                new DocumentChange("r2", null, "{\"score\":20}".getBytes(), "shard_b", DocumentChange.ChangeType.INDEX, -1)
+                new DocumentChange("r1", null, "{\"score\":10}".getBytes(), "shard_a", DocumentChange.ChangeType.INDEX),
+                new DocumentChange("r2", null, "{\"score\":20}".getBytes(), "shard_b", DocumentChange.ChangeType.INDEX)
             );
             sink.writeBatch(shardId, "sink_routing", docs).block();
 

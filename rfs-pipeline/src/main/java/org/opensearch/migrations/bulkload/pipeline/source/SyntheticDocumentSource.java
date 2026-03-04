@@ -83,8 +83,7 @@ public class SyntheticDocumentSource implements DocumentSource {
                     null,
                     body.getBytes(StandardCharsets.UTF_8),
                     null,
-                    DocumentChange.ChangeType.INDEX,
-                    -1
+                    DocumentChange.ChangeType.INDEX
                 );
             });
     }

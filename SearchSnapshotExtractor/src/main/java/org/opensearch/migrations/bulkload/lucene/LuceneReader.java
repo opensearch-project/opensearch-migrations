@@ -25,7 +25,8 @@ public class LuceneReader {
     /* Start reading docs from a specific segment and document id.
        If the startSegmentIndex is 0, it will start from the first segment.
        If the startDocId is 0, it will start from the first document in the segment.
-       Reads all segments in parallel for maximum throughput.
+       Segments are read sequentially; within each segment, docs are read with bounded
+       concurrency via flatMapSequential to keep the source feeding batches fast enough.
      */
     public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId) {
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
@@ -34,17 +35,12 @@ public class LuceneReader {
             .log();
 
         return getSegmentsFromStartingSegment(reader.leaves(), startDocId)
-            .collectList()
-            .flatMapMany(segments -> {
-                var segmentFluxes = segments.stream()
-                    .map(c -> readDocsFromSegment(c,
-                            startDocId,
-                            reader.getIndexDirectoryPath(),
-                            DocumentChangeType.INDEX)
-                        .subscribeOn(Schedulers.boundedElastic()))
-                    .toList();
-                return Flux.merge(segmentFluxes);
-            });
+            .concatMapDelayError(c -> readDocsFromSegment(c,
+                    startDocId,
+                    reader.getIndexDirectoryPath(),
+                    DocumentChangeType.INDEX)
+            )
+            .subscribeOn(Schedulers.boundedElastic());
     }
 
     /**
@@ -121,13 +117,11 @@ public class LuceneReader {
         var idxStream = (liveDocs != null) ? liveDocs.stream().filter(idx -> idx >= startDocIdInSegment) :
             IntStream.range(startDocIdInSegment, segmentReader.maxDoc());
         return Flux.fromStream(idxStream.boxed())
-            .concatMap(docIdx -> {
+            .flatMapSequential(docIdx -> Mono.defer(() -> {
                     try {
-                        // Get document, returns null to skip malformed docs
                         LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation);
-                        return Mono.justOrEmpty(document); // Emit only non-null documents
+                        return Mono.justOrEmpty(document);
                     } catch (Exception e) {
-                        // Handle individual document read failures gracefully
                         log.atError().setMessage("Error reading document from reader {} with index: {}")
                             .addArgument(getSegmentReaderDebugInfo)
                             .addArgument(docIdx)
@@ -136,7 +130,7 @@ public class LuceneReader {
                         return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
-                });
+                }).subscribeOn(Schedulers.boundedElastic()), 100, 1);
     }
 
     public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation) {

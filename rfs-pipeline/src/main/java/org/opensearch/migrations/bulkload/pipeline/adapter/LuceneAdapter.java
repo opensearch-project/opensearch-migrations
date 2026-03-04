@@ -10,8 +10,8 @@ import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
  * <p>This adapter is the bridge between the existing codebase and the clean pipeline.
  * It lives in the adapter package — the pipeline core never imports Lucene types directly.
  *
- * <p>The conversion carries {@code luceneDocNumber} through for progress tracking —
- * the pipeline uses the minimum doc number across in-flight batches as the safe resume point.
+ * <p>The conversion intentionally drops {@code luceneDocNumber} — progress tracking
+ * is handled by {@link org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor} instead.
  */
 public final class LuceneAdapter {
 
@@ -21,7 +21,7 @@ public final class LuceneAdapter {
      * Convert a {@link LuceneDocumentChange} to a clean {@link DocumentChange}.
      *
      * @param luceneDoc the Lucene-specific document change
-     * @return a clean IR document change with luceneDocNumber preserved
+     * @return a clean IR document change (luceneDocNumber is dropped)
      */
     public static DocumentChange fromLucene(LuceneDocumentChange luceneDoc) {
         return new DocumentChange(
@@ -29,8 +29,7 @@ public final class LuceneAdapter {
             luceneDoc.getType(),
             luceneDoc.getSource(),
             luceneDoc.getRouting(),
-            mapChangeType(luceneDoc.getOperation()),
-            luceneDoc.getLuceneDocNumber()
+            mapChangeType(luceneDoc.getOperation())
         );
     }
 

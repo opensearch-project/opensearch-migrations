@@ -160,7 +160,7 @@ class BlockingCallDetectionTest {
                     .map(i -> new DocumentChange(
                         "doc-" + i, null,
                         ("{\"field\":\"value-" + i + "\"}").getBytes(),
-                        null, DocumentChange.ChangeType.INDEX, -1
+                        null, DocumentChange.ChangeType.INDEX
                     ));
             }
         };
