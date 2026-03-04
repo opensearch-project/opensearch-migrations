@@ -220,6 +220,39 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
         };
     }
 
+    @Test
+    public void testDeadlineAbortsRetriesBeforeExhaustion() throws Exception {
+        // Mock server that always returns 500 for update requests
+        try (SimpleNettyHttpServer testServer = SimpleNettyHttpServer.makeServer(false, null,
+            req -> makeResponse(500, "Internal Server Error", "{}".getBytes(StandardCharsets.UTF_8))))
+        {
+            var client = new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
+                .host("http://localhost:" + testServer.port)
+                .build()
+                .toConnectionContext());
+            var rootContext = WorkCoordinationTestContext.factory().withAllTracking();
+            try (var workCoordinator = factory.get(client, 2, TEST_WORKER_ID)) {
+                // Deadline already in the past — should abort on first retry attempt
+                var pastDeadline = java.time.Instant.now().minusSeconds(1);
+                var start = System.nanoTime();
+                var e = Assertions.assertThrows(OpenSearchWorkCoordinator.RetriesExceededException.class,
+                    () -> workCoordinator.createSuccessorWorkItemsAndMarkComplete(
+                        "test__0__0",
+                        java.util.List.of("test__0__1"),
+                        1,
+                        pastDeadline,
+                        rootContext::createSuccessorWorkItemsContext
+                    ));
+                var elapsedMs = (System.nanoTime() - start) / 1_000_000;
+                // Should abort almost immediately — well under the 10s that retries would take without deadline
+                Assertions.assertTrue(elapsedMs < 2000,
+                    "Deadline abort should be fast, took " + elapsedMs + "ms");
+                Assertions.assertTrue(e.retries <= 1,
+                    "Should abort after at most 1 retry with past deadline, got " + e.retries);
+            }
+        }
+    }
+
     private static SimpleHttpResponse makeResponse(int statusCode, String statusText, byte[] payloadBytes) {
         return new SimpleHttpResponse(Map.of("Content-Type", "text/plain",
             "Content-Length", "" + payloadBytes.length),
