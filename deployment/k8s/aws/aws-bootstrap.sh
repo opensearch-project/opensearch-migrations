@@ -61,6 +61,7 @@ ignore_checks=false
 push_images_to_ecr=false
 ma_images_source=""
 skip_setting_k8s_context=false
+skip_test_images=false
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -97,6 +98,7 @@ while [[ $# -gt 0 ]]; do
     --push-all-images-to-private-ecr) push_images_to_ecr=true; shift 1 ;;
     --ma-images-source) ma_images_source="$2"; shift 2 ;;
     --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
+    --skip-test-images) skip_test_images=true; shift 1 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo ""
@@ -153,6 +155,7 @@ while [[ $# -gt 0 ]]; do
       echo "                                            is left unchanged. Use this on hosts that manage multiple K8s"
       echo "                                            deployments. You will need to pass --context=<context-name>"
       echo "                                            to every kubectl/helm command, or set the context yourself."
+      echo "  --skip-test-images                        Skip building test-only images (e.g. elasticsearch_searchguard)"
       echo ""
       echo "Build options:"
       echo "  --base-dir <path>                         opensearch-migrations directory"
@@ -796,12 +799,14 @@ if [[ "$deploy_cfn" == "true" ]]; then
     }
 
     # Image build with retry
+    local skip_test_arg=""
+    [[ "$skip_test_images" == "true" ]] && skip_test_arg="-PskipTestImages=true"
     echo "⏳ [parallel] Building images to ${_predicted_ecr_registry}..."
     "$base_dir/gradlew" -p "$base_dir" :buildImages:buildImagesToRegistry \
-      -PregistryEndpoint="$_predicted_ecr_registry" -PimageVersion="$IMAGE_TAG" -x test \
+      -PregistryEndpoint="$_predicted_ecr_registry" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test \
       || { echo "Image build failed, retrying in 10s..."; sleep 10; \
            "$base_dir/gradlew" -p "$base_dir" :buildImages:buildImagesToRegistry \
-             -PregistryEndpoint="$_predicted_ecr_registry" -PimageVersion="$IMAGE_TAG" -x test; } \
+             -PregistryEndpoint="$_predicted_ecr_registry" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test; } \
       || {
         echo "1" > "$_parallel_status_dir/build_failed"
         echo "❌ [parallel] Image build failed"
@@ -1198,9 +1203,12 @@ if [[ "$build_images" == "true" && "${_build_done:-}" != "true" ]]; then
     | docker login --username AWS --password-stdin "$ecr_domain" \
     || { echo "ECR login failed"; exit 1; }
 
-  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -PimageVersion="$IMAGE_TAG" -x test \
+  local skip_test_arg=""
+  [[ "$skip_test_images" == "true" ]] && skip_test_arg="-PskipTestImages=true"
+
+  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test \
     || { echo "Image build failed, retrying in 10s..."; sleep 10; \
-         "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -PimageVersion="$IMAGE_TAG" -x test; } \
+         "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test; } \
     || { echo "Image build failed on retry, giving up."; exit 1; }
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."
