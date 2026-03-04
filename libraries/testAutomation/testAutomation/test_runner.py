@@ -184,11 +184,12 @@ class TestRunner:
 
         # Cleanup non-Helm Kubernetes resources (ES 1.x and 2.x)
         try:
-            self.k8s_service.run_command([
-                "kubectl", "delete", "all,configmap,secret",
-                "-l", "migration-test=true",
-                "--ignore-not-found"
-            ], ignore_errors=True)
+            self.k8s_service.run_command(
+                self.k8s_service._kubectl_base() + [
+                    "delete", "all,configmap,secret",
+                    "-l", "migration-test=true",
+                    "--ignore-not-found"
+                ], ignore_errors=True)
         except Exception as e:
             logger.warning(f"Failed to cleanup labeled Kubernetes resources: {e}")
 
@@ -433,12 +434,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip helm install (use when deployment already exists, e.g., from aws-bootstrap.sh)"
     )
+    parser.add_argument(
+        "--kube-context",
+        type=str,
+        default=None,
+        help="Kubernetes context to use for kubectl and helm commands. "
+             "If not set, uses the current kubectl context."
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    k8s_service = K8sService()
+    k8s_service = K8sService(kube_context=args.kube_context)
     helm_k8s_base_path = "../../deployment/k8s"
     helm_charts_base_path = f"{helm_k8s_base_path}/charts"
     ma_chart_path = f"{helm_charts_base_path}/aggregates/migrationAssistantWithArgo"

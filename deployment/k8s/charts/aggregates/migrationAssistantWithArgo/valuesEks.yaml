@@ -22,19 +22,22 @@ defaultBucketConfiguration:
   emptyBeforeDelete: true
   endpoint: ""
   snapshotRoleArn: ""
+  bucketOperationImagePullPolicy: "IfNotPresent"
 
-# Useful for updating images while developing
-#images:
-#  captureProxy:
-#    pullPolicy: Always
-#  trafficReplayer:
-#    pullPolicy: Always
-#  reindexFromSnapshot:
-#    pullPolicy: Always
-#  migrationConsole:
-#    pullPolicy: Always
-#  installer:
-#    pullPolicy: Always
+# Immutable image tags (git SHA) allow IfNotPresent — each build has a unique tag
+images:
+  captureProxy:
+    pullPolicy: IfNotPresent
+  trafficReplayer:
+    pullPolicy: IfNotPresent
+  reindexFromSnapshot:
+    pullPolicy: IfNotPresent
+  migrationConsole:
+    pullPolicy: IfNotPresent
+  installer:
+    pullPolicy: IfNotPresent
+  coordinatorCluster:
+    pullPolicy: IfNotPresent
 
 # For OTEL Daemonset
 otelConfiguration:

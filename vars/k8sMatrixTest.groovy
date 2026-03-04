@@ -18,6 +18,21 @@ def call(Map config = [:]) {
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
         
+        triggers {
+            GenericTrigger(
+                genericVariables: [
+                    [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
+                    [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
+                    [key: 'job_name', value: '$.job_name']
+                ],
+                tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
+                causeString: 'Triggered by PR on opensearch-migrations repository',
+                regexpFilterExpression: "^${jobName}\$",
+                regexpFilterText: '$job_name'
+            )
+            cron(enablePeriodicSchedule ? 'H 22 * * *' : '')
+        }
+        
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
@@ -37,24 +52,6 @@ def call(Map config = [:]) {
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
-        }
-
-        triggers {
-            GenericTrigger(
-                    genericVariables: [
-                            [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
-                            [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
-                            [key: 'job_name', value: '$.job_name']
-                    ],
-                    tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
-                    causeString: 'Triggered by PR on opensearch-migrations repository',
-                    regexpFilterExpression: "^$jobName\$",
-                    regexpFilterText: "\$job_name",
-            )
-            if (enablePeriodicSchedule) {
-                // Trigger once per day at a hashed minute around 10 PM
-                cron('H 22 * * *')
-            }
         }
 
         stages {
