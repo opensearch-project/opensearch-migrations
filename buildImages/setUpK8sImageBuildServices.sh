@@ -55,8 +55,8 @@ if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
   echo "Waiting for docker-registry deployment to be available..."
   kubectl "${CONTEXT_ARGS[@]}" rollout status deployment/docker-registry -n buildkit --timeout=120s
 
-  if ! pgrep -f "kubectl port-forward.*docker-registry.*5001:5000" >/dev/null; then
-    nohup kubectl "${CONTEXT_ARGS[@]}" port-forward -n buildkit svc/docker-registry 5001:5000 --address 0.0.0.0 > /tmp/registry-forward.log 2>&1 &
+  if ! pgrep -f "kubectl port-forward.*docker-registry.*5002:5000" >/dev/null; then
+    nohup kubectl "${CONTEXT_ARGS[@]}" port-forward -n buildkit svc/docker-registry 5002:5000 --address 0.0.0.0 > /tmp/registry-forward.log 2>&1 &
   else
     echo "registry port-forward already running"
   fi

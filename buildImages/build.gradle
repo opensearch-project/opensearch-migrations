@@ -1,7 +1,7 @@
 import org.opensearch.migrations.image.RegistryImageBuildUtils
 import org.opensearch.migrations.image.RegistryImageBuildUtils.Registry
 
-def publishedUrl = rootProject.findProperty('registryEndpoint') ?: 'localhost:5001'
+def publishedUrl = rootProject.findProperty('registryEndpoint') ?: 'localhost:5002'
 def intermediateUrl = rootProject.findProperty('intermediateRegistry') ?: publishedUrl
 
 def publishedRegistry = new Registry(publishedUrl.toString())
