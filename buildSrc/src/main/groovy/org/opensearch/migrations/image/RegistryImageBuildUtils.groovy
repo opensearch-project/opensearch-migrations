@@ -26,75 +26,16 @@ class RegistryImageBuildUtils {
     }
 
     static String resolveBaseImage(Registry registry, String group, String image, String tag) {
-        def formatter = ImageRegistryFormatterFactory.getFormatter(registry.containerUrl)
-        return formatter.getFullBaseImageIdentifier(registry.containerUrl, group, image, tag)
+        return resolveBaseImageForUrl(registry.hostUrl, group, image, tag)
     }
 
-    /**
-     * Build a list of candidate base images to try, in priority order.
-     * If intermediateRegistry is ECR, the ECR mirrored path comes first.
-     * Then the configured endpoint (e.g. docker.io), then fallback mirrors.
-     */
-    static List<String> buildBaseImageCandidates(Registry intermediateRegistry, String endpoint, String group, String name, String tag) {
-        def candidates = []
-        // ECR mirrored paths first (if available)
-        if (intermediateRegistry.isEcr()) {
-            candidates << "${intermediateRegistry.registryDomain}/mirrored/${endpoint}/${group}/${name}:${tag}"
-            // mirrorToEcr.sh uses mirror.gcr.io as the manifest source, so also try that path
-            if (endpoint == "docker.io") {
-                candidates << "${intermediateRegistry.registryDomain}/mirrored/mirror.gcr.io/${group}/${name}:${tag}"
-            }
-        }
-        // Configured endpoint (e.g. docker.io)
-        def formatter = ImageRegistryFormatterFactory.getFormatter(endpoint)
-        candidates << formatter.getFullBaseImageIdentifier(endpoint, group, name, tag)
-        // Fallback mirrors for docker.io images
-        if (endpoint == "docker.io") {
-            candidates << "mirror.gcr.io/${group}/${name}:${tag}"
-            candidates << "public.ecr.aws/docker/${group}/${name}:${tag}"
-        }
-        return candidates.unique()
+    static String resolveBaseImageForContainer(Registry registry, String group, String image, String tag) {
+        return resolveBaseImageForUrl(registry.containerUrl, group, image, tag)
     }
 
-    /**
-     * Probe a registry image to check if it exists using crane.
-     */
-    static boolean probeImage(String image) {
-        try {
-            def proc = ["crane", "manifest", image].execute()
-            proc.waitForOrKill(15000)
-            return proc.exitValue() == 0
-        } catch (Exception e) {
-            return false
-        }
-    }
-
-    /**
-     * Resolve the base image by trying each candidate in order.
-     * Returns the first accessible image, or the first candidate as fallback.
-     * If the base image endpoint matches the intermediate registry (i.e. it's a locally-built image),
-     * skip mirror resolution entirely — just use the direct registry path.
-     */
-    static String resolveBaseImageFromMirrors(Registry intermediateRegistry, String endpoint, String group, String name, String tag) {
-        // If the base image is already on the intermediate registry (e.g. captureProxyBase built by buildKit),
-        // don't apply mirror resolution — just resolve it directly.
-        if (endpoint == intermediateRegistry.hostUrl) {
-            def directImage = resolveBaseImage(intermediateRegistry, group, name, tag)
-            println "Base image is on intermediate registry, skipping mirror resolution: ${directImage}"
-            return directImage
-        }
-        def candidates = buildBaseImageCandidates(intermediateRegistry, endpoint, group, name, tag)
-        println "Resolving base image from mirrors: ${candidates}"
-        for (candidate in candidates) {
-            if (probeImage(candidate)) {
-                println "  ✅ Using base image: ${candidate}"
-                return candidate
-            }
-            println "  ❌ Not available: ${candidate}"
-        }
-        // Fallback to first candidate — Jib will fail with a clear error
-        println "  ⚠️ No mirror responded, falling back to: ${candidates[0]}"
-        return candidates[0]
+    private static String resolveBaseImageForUrl(String url, String group, String image, String tag) {
+        def formatter = ImageRegistryFormatterFactory.getFormatter(url)
+        return formatter.getFullBaseImageIdentifier(url, group, image, tag)
     }
 
     // Determine the build mode based on the tasks requested in the CLI, throwing if multiple variants are configured
@@ -136,13 +77,16 @@ class RegistryImageBuildUtils {
                     Registry targetReg = config.get("repoName", null) ? finalRegistry : intermediateRegistry
                     def targetFormatter = ImageRegistryFormatterFactory.getFormatter(targetReg.hostUrl)
 
-                    def baseImage = resolveBaseImageFromMirrors(
-                            intermediateRegistry,
-                            config.get("baseImageRegistryEndpoint", "").toString(),
-                            config.get("baseImageGroup", "").toString(),
-                            config.baseImageName.toString(),
-                            config.baseImageTag.toString()
-                        )
+                    def baseEndpoint = config.get("baseImageRegistryEndpoint", "").toString()
+                    def baseImage
+                    if (baseEndpoint == intermediateRegistry.hostUrl) {
+                        baseImage = resolveBaseImage(intermediateRegistry, config.get("baseImageGroup", "").toString(),
+                                config.baseImageName.toString(), config.baseImageTag.toString())
+                    } else {
+                        def formatter = ImageRegistryFormatterFactory.getFormatter(baseEndpoint)
+                        baseImage = formatter.getFullBaseImageIdentifier(baseEndpoint, config.get("baseImageGroup", "").toString(),
+                                config.baseImageName.toString(), config.baseImageTag.toString())
+                    }
 
                     def (registryDestination, _) = targetFormatter.getFullTargetImageIdentifier(
                             targetReg.hostUrl,
@@ -316,7 +260,7 @@ class RegistryImageBuildUtils {
                             "--cache-from=type=registry,ref=${cacheDestination}${suffix}"
                     ]
                     buildArgFlags.each { fullArgs.add(it) }
-                    fullArgs.add(contextPath)
+                    fullArgs.add("\"${contextPath}\"")
                     commandLine 'sh', '-c', fullArgs.join(" ")
                 }
             }
@@ -343,7 +287,7 @@ class RegistryImageBuildUtils {
                         "--cache-from=type=registry,ref=${cacheDestination}_arm64"
                 ]
                 buildArgFlags.each { fullArgs.add(it) }
-                fullArgs.add(contextPath)
+                fullArgs.add("\"${contextPath}\"")
                 commandLine 'sh', '-c', fullArgs.join(" ")
             }
         }
