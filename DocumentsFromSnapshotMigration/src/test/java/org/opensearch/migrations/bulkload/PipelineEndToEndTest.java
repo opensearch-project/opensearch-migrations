@@ -10,6 +10,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
+import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
@@ -80,7 +81,7 @@ public class PipelineEndToEndTest {
             var targetClient = createClient(targetCluster);
 
             var source = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, workDir);
-            var sink = new OpenSearchDocumentSink(targetClient);
+            var sink = new OpenSearchDocumentSink(targetClient, null, false, DocumentExceptionAllowlist.empty(), null);
             var pipeline = new MigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
 
             var cursors = pipeline.migrateAll().collectList().block();
@@ -108,7 +109,7 @@ public class PipelineEndToEndTest {
             var targetClient = createClient(targetCluster);
 
             var source = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, workDir);
-            var sink = new OpenSearchDocumentSink(targetClient);
+            var sink = new OpenSearchDocumentSink(targetClient, null, false, DocumentExceptionAllowlist.empty(), null);
             // Batch size of 2 → should produce 3 batches for 5 docs
             var pipeline = new MigrationPipeline(source, sink, 2, Long.MAX_VALUE);
 
@@ -162,7 +163,7 @@ public class PipelineEndToEndTest {
             var targetClient = createClient(targetCluster);
 
             var source = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, workDir);
-            var sink = new OpenSearchDocumentSink(targetClient);
+            var sink = new OpenSearchDocumentSink(targetClient, null, false, DocumentExceptionAllowlist.empty(), null);
             var pipeline = new MigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
 
             var cursors = pipeline.migrateAll().collectList().block();

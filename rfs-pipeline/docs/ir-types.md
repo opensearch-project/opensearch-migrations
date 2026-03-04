@@ -1,6 +1,6 @@
 # IR Types and Port Interfaces
 
-The pipeline defines a clean intermediate representation (IR) that is completely Lucene-agnostic. All types are Java `record`s with compact constructor validation and zero runtime dependencies.
+The pipeline defines a clean intermediate representation (IR) that is completely Lucene-agnostic. All types are Java `record`s with compact constructor validation and zero runtime dependencies. Port interfaces use Reactor's `Flux` and `Mono` for reactive streaming.
 
 ## IR Types
 

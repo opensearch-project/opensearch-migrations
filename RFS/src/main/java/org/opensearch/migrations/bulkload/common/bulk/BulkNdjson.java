@@ -6,11 +6,15 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
+import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
+import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
+import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -61,6 +65,36 @@ public final class BulkNdjson {
         if (rawSource != null && rawSource.length > 0) {
             out.write(NEWLINE_BYTES);
             out.write(rawSource);
+        }
+    }
+
+    /**
+     * Write a list of {@link DocumentChange} records as raw NDJSON bytes, skipping the
+     * byte[]→Map→byte[] round-trip for document bodies.
+     *
+     * @param docs       the documents to write
+     * @param indexName  the target index name
+     * @param stripIds   whether to strip document IDs (for server-generated IDs)
+     * @param mapper     the ObjectMapper to use for action-line serialization
+     * @return the raw NDJSON bytes
+     */
+    public static byte[] toRawNdjsonBytes(
+        List<? extends DocumentChange> docs,
+        String indexName, boolean stripIds, ObjectMapper mapper
+    ) {
+        try (var baos = new ByteArrayOutputStream()) {
+            for (var doc : docs) {
+                String opType = doc.operation() == DocumentChange.ChangeType.DELETE ? "delete" : "index";
+                String docId = stripIds ? null : doc.id();
+                var meta = doc.operation() == DocumentChange.ChangeType.DELETE
+                    ? DeleteOperationMeta.builder().id(docId).index(indexName).routing(doc.routing()).build()
+                    : IndexOperationMeta.builder().id(docId).index(indexName).routing(doc.routing()).build();
+                writeRawOperation(opType, meta, doc.source(), baos, mapper);
+                baos.write(NEWLINE_BYTES);
+            }
+            return baos.toByteArray();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 

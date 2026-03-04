@@ -8,11 +8,8 @@ import java.util.stream.Collectors;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
-import org.opensearch.migrations.bulkload.common.bulk.DeleteOp;
-import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
-import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
-import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor;
@@ -21,9 +18,7 @@ import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -48,11 +43,6 @@ public class OpenSearchDocumentSink implements DocumentSink {
     private final boolean allowServerGeneratedIds;
     private final DocumentExceptionAllowlist allowlist;
     private final Supplier<IRfsContexts.IRequestContext> requestContextSupplier;
-
-    /** Simple constructor — no transformation, no server-generated IDs, no allowlist, no metrics. */
-    public OpenSearchDocumentSink(OpenSearchClient client) {
-        this(client, null, false, DocumentExceptionAllowlist.empty(), null);
-    }
 
     /**
      * Full constructor with all options.
@@ -131,30 +121,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
         return ops;
     }
 
-    @SneakyThrows
     private static BulkOperationSpec toBulkOp(DocumentChange doc, String indexName) {
-        Map<String, Object> document = doc.source() != null
-            ? OBJECT_MAPPER.readValue(doc.source(), new TypeReference<>() {})
-            : Map.of();
-
-        if (doc.operation() == DocumentChange.ChangeType.DELETE) {
-            return DeleteOp.builder()
-                .operation(DeleteOperationMeta.builder()
-                    .id(doc.id())
-                    .index(indexName)
-                    .routing(doc.routing())
-                    .build())
-                .document(document)
-                .build();
-        } else {
-            return IndexOp.builder()
-                .operation(IndexOperationMeta.builder()
-                    .id(doc.id())
-                    .index(indexName)
-                    .routing(doc.routing())
-                    .build())
-                .document(document)
-                .build();
-        }
+        return BulkOperationConverter.fromDocumentChange(doc, indexName);
     }
 }

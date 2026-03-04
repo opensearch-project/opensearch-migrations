@@ -26,13 +26,17 @@ public class LuceneReader {
         64, Integer.MAX_VALUE, "lucene-io", 60, true
     );
 
+    /** Concurrency for flatMapSequential within a segment — matches the scheduler thread count. */
+    private static final int SEGMENT_READ_CONCURRENCY = 64;
+
     private LuceneReader() {}
 
     /* Start reading docs from a specific segment and document id.
        If the startSegmentIndex is 0, it will start from the first segment.
        If the startDocId is 0, it will start from the first document in the segment.
        Segments are read sequentially; within each segment, docs are read with bounded
-       concurrency via flatMapSequential to keep the source feeding batches fast enough.
+       concurrency (matching the Lucene I/O scheduler thread count) via flatMapSequential
+       to keep the source feeding batches fast enough.
      */
     public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId) {
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
@@ -136,7 +140,7 @@ public class LuceneReader {
                         return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
-                }).subscribeOn(LUCENE_IO_SCHEDULER), 500, 1);
+                }).subscribeOn(LUCENE_IO_SCHEDULER), SEGMENT_READ_CONCURRENCY, 1);
     }
 
     public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation) {

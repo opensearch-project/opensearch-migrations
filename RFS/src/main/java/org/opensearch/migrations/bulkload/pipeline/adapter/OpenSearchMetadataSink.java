@@ -1,5 +1,8 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.pipeline.ir.GlobalMetadataSnapshot;
@@ -29,9 +32,13 @@ public class OpenSearchMetadataSink implements MetadataSink {
     @Override
     public Mono<Void> writeGlobalMetadata(GlobalMetadataSnapshot metadata) {
         return Mono.fromRunnable(() -> {
-            createTemplates(metadata.templates(), "legacy");
-            createTemplates(metadata.indexTemplates(), "index");
-            createTemplates(metadata.componentTemplates(), "component");
+            var failures = new ArrayList<String>();
+            createTemplates(metadata.templates(), "legacy", failures);
+            createTemplates(metadata.indexTemplates(), "index", failures);
+            createTemplates(metadata.componentTemplates(), "component", failures);
+            if (!failures.isEmpty()) {
+                throw new TemplateCreationException(failures);
+            }
         });
     }
 
@@ -41,7 +48,7 @@ public class OpenSearchMetadataSink implements MetadataSink {
             .then();
     }
 
-    private void createTemplates(ObjectNode templates, String type) {
+    private void createTemplates(ObjectNode templates, String type, List<String> failures) {
         if (templates == null) {
             return;
         }
@@ -57,7 +64,17 @@ public class OpenSearchMetadataSink implements MetadataSink {
                 }
             } catch (Exception e) {
                 log.warn("Failed to create {} template '{}': {}", type, name, e.getMessage());
+                failures.add(type + " template '" + name + "': " + e.getMessage());
             }
         });
+    }
+
+    /**
+     * Thrown when one or more templates fail to create during metadata migration.
+     */
+    public static class TemplateCreationException extends RuntimeException {
+        public TemplateCreationException(List<String> failures) {
+            super("Failed to create " + failures.size() + " template(s): " + String.join("; ", failures));
+        }
     }
 }

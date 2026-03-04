@@ -5,7 +5,8 @@ plugins {
 
 dependencies {
     // The adapter package bridges existing rfs-common types to the clean pipeline IR.
-    // Core pipeline types have ZERO dependency on rfs-common.
+    // Core IR types have ZERO dependency on rfs-common.
+    // Port interfaces and pipeline orchestration depend on Reactor (Flux/Mono).
     compileOnly project(':rfs-common')
 
     implementation libs.jackson.databind

@@ -1,7 +1,10 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
@@ -79,41 +82,77 @@ final class OpenSearchIndexCreator {
         obj.fields().forEachRemaining(entry -> convertDeprecatedFieldTypes(entry.getValue()));
     }
 
+    /**
+     * Prefixes of internal settings that should be stripped by pattern.
+     * Any setting starting with these prefixes (after optional "index." prefix) is removed.
+     * This catches new sub-keys added in future ES/OS versions.
+     */
+    private static final Set<String> INTERNAL_SETTING_PREFIXES = Set.of(
+        "version.",       // index.version.created, index.version.upgraded, etc.
+        "blocks.",        // index.blocks.write, index.blocks.read_only, etc.
+        "resize.",        // index.resize.source.name, index.resize.source.uuid
+        "routing.allocation.include.",
+        "routing.allocation.require.",
+        "routing.allocation.exclude."
+    );
+
+    /**
+     * Exact internal settings to strip (after optional "index." prefix).
+     */
+    private static final Set<String> INTERNAL_SETTINGS_EXACT = Set.of(
+        "creation_date", "provided_name", "uuid", "version", "mapping", "mapper",
+        "history.uuid", "verified_before_close"
+    );
+
     private static void stripInternalSettings(ObjectNode settings) {
         // Strip settings that are internal to the source cluster and should not be
-        // applied to the target. Uses a broad strip list rather than an allowlist to
-        // avoid silently dropping user-configured settings.
+        // applied to the target. Uses both exact matches and prefix patterns to
+        // catch new internal settings added in future ES/OS versions.
 
-        // Internal metadata (always set by the cluster, never by users)
-        String[] internalSettings = {
-            "creation_date", "provided_name", "uuid", "version", "mapping", "mapper",
-            "history.uuid", "verified_before_close",
-            // Resize/split/shrink metadata
-            "resize.source.name", "resize.source.uuid",
-            // Routing allocation (node-specific, won't match target topology)
-            "routing.allocation.include._tier_preference",
-            "routing.allocation.include._name",
-            "routing.allocation.include._id",
-            "routing.allocation.require._name",
-            "routing.allocation.require._id",
-            "routing.allocation.exclude._name",
-            "routing.allocation.exclude._id",
-            // Blocks from source cluster state
-            "blocks.write", "blocks.read_only", "blocks.read_only_allow_delete", "blocks.read", "blocks.metadata",
-        };
+        // Collect keys to remove (flat dotted keys at top level)
+        var keysToRemove = new ArrayList<String>();
+        settings.fieldNames().forEachRemaining(key -> {
+            String normalized = key.startsWith("index.") ? key.substring(6) : key;
+            if (isInternalSetting(normalized)) {
+                keysToRemove.add(key);
+            }
+        });
+        keysToRemove.forEach(settings::remove);
 
-        for (String setting : internalSettings) {
-            // Normalized (no prefix) — after IndexMetadataConverter strips "index."
-            settings.remove(setting);
-            // Non-normalized: nested under "index" sub-object
-            ObjectNodeUtils.removeFieldsByPath(settings, "index." + setting);
-            // Flat dotted keys (ES 1.7/2.4)
-            settings.remove("index." + setting);
+        // Also strip from nested "index" sub-object (non-normalized form)
+        JsonNode indexNode = settings.get("index");
+        if (indexNode != null && indexNode.isObject()) {
+            var nestedKeysToRemove = new ArrayList<String>();
+            collectInternalKeys((ObjectNode) indexNode, "", nestedKeysToRemove);
+            for (String path : nestedKeysToRemove) {
+                ObjectNodeUtils.removeFieldsByPath((ObjectNode) indexNode, path);
+            }
         }
+    }
 
-        // Version sub-keys that use dotted paths
-        settings.remove("index.version.created");
-        settings.remove("index.mapping.single_type");
-        settings.remove("index.mapper.dynamic");
+    private static boolean isInternalSetting(String key) {
+        if (INTERNAL_SETTINGS_EXACT.contains(key)) {
+            return true;
+        }
+        for (String prefix : INTERNAL_SETTING_PREFIXES) {
+            if (key.startsWith(prefix) || key.equals(prefix.substring(0, prefix.length() - 1))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Recursively collect paths to internal settings within a nested object.
+     */
+    private static void collectInternalKeys(ObjectNode node, String pathPrefix, List<String> keysToRemove) {
+        node.fieldNames().forEachRemaining(key -> {
+            String fullPath = pathPrefix.isEmpty() ? key : pathPrefix + "." + key;
+            if (isInternalSetting(fullPath)) {
+                keysToRemove.add(fullPath);
+            } else if (node.get(key).isObject()) {
+                collectInternalKeys((ObjectNode) node.get(key), fullPath, keysToRemove);
+            }
+        });
     }
 }

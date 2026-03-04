@@ -29,6 +29,7 @@ import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
+import org.opensearch.migrations.bulkload.pipeline.PipelineDefaults;
 import org.opensearch.migrations.bulkload.pipeline.PipelineRunner;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
@@ -209,20 +210,20 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
         names =  {"--documents-per-bulk-request", "--documentsPerBulkRequest"},
         description = "Optional.  The number of documents to be included within each bulk request sent. " +
-            "Default no max (controlled by documents size)")
-        int numDocsPerBulkRequest = Integer.MAX_VALUE;
+            "Default " + PipelineDefaults.MAX_DOCS_PER_BATCH)
+        int numDocsPerBulkRequest = PipelineDefaults.MAX_DOCS_PER_BATCH;
 
         @Parameter(required = false,
             names = { "--documents-size-per-bulk-request", "--documentsSizePerBulkRequest" },
             description = "Optional. The maximum aggregate document size to be used in bulk requests in bytes. " +
                 "Note does not apply to single document requests. Default 10 MiB")
-        long numBytesPerBulkRequest = 10 * 1024L * 1024L;
+        long numBytesPerBulkRequest = PipelineDefaults.MAX_BYTES_PER_BATCH;
 
         @Parameter(required = false,
             names = {"--max-connections", "--maxConnections" },
             description = "Optional.  The maximum number of connections to simultaneously " +
-                "used to communicate to the target, default 10")
-        int maxConnections = 10;
+                "used to communicate to the target, default " + PipelineDefaults.BATCH_CONCURRENCY)
+        int maxConnections = PipelineDefaults.BATCH_CONCURRENCY;
 
         @Parameter(required = false,
             names = { "--server-generated-ids" },
@@ -551,10 +552,12 @@ public class RfsMigrateDocuments {
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,
                 arguments.maxConnections,
+                arguments.maxShardSizeBytes,
                 progressCursor,
                 workCoordinator,
                 arguments.initialLeaseDuration,
                 processManager,
+                workItemTimeProvider,
                 sourceResourceProvider.getIndexMetadata(),
                 arguments.indexAllowlist,
                 context,
@@ -812,10 +815,12 @@ public class RfsMigrateDocuments {
         int maxDocsPerBatch,
         long maxBytesPerBatch,
         int batchConcurrency,
+        long maxShardSizeBytes,
         AtomicReference<WorkItemCursor> progressCursor,
         IWorkCoordinator workCoordinator,
         Duration maxInitialLeaseDuration,
         LeaseExpireTrigger leaseExpireTrigger,
+        WorkItemTimeProvider workItemTimeProvider,
         IndexMetadata.Factory indexMetadataFactory,
         List<String> indexAllowlist,
         RootDocumentMigrationContext rootDocumentContext,
@@ -836,6 +841,7 @@ public class RfsMigrateDocuments {
             .maxDocsPerBatch(maxDocsPerBatch)
             .maxBytesPerBatch(maxBytesPerBatch)
             .batchConcurrency(batchConcurrency)
+            .maxShardSizeBytes(maxShardSizeBytes)
             .transformerSupplier(transformerSupplier)
             .allowServerGeneratedIds(useServerGeneratedIds)
             .allowlist(allowlist)
@@ -845,6 +851,7 @@ public class RfsMigrateDocuments {
                 ? () -> new RfsContexts.DeltaStreamContext(rootDocumentContext, null)
                 : null)
             .workCoordinator(scopedWorkCoordinator)
+            .workItemTimeProvider(workItemTimeProvider)
             .maxInitialLeaseDuration(maxInitialLeaseDuration)
             .cursorConsumer(progressCursor::set)
             .cancellationTriggerConsumer(cancellationRunnable::set)

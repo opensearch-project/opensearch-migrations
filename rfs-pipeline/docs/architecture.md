@@ -4,7 +4,7 @@ The pipeline uses a **ports-and-adapters** (hexagonal) architecture. The core mo
 
 ```mermaid
 graph TD
-    subgraph "Core — rfs-pipeline (zero external deps)"
+    subgraph "Core — rfs-pipeline (Reactor only, no Lucene/OpenSearch deps)"
         IR["IR Types<br/><i>DocumentChange, IndexMetadataSnapshot,<br/>GlobalMetadataSnapshot, ShardId, ProgressCursor</i>"]
         PORTS["Port Interfaces<br/><i>DocumentSource, DocumentSink,<br/>MetadataSource, MetadataSink</i>"]
         PIPES["Pipelines<br/><i>MigrationPipeline, MetadataMigrationPipeline</i>"]
@@ -55,7 +55,7 @@ Key constraint: **RFS does not depend on SnapshotReader** and vice versa. They o
 
 | Module | Responsibility | Dependencies |
 |---|---|---|
-| `rfs-pipeline` | IR types, port interfaces, pipeline orchestration | None (zero external deps) |
+| `rfs-pipeline` | IR types, port interfaces, pipeline orchestration | Reactor Core (port interfaces use `Flux`/`Mono`) |
 | `SnapshotReader` | Source adapters (`LuceneSnapshotSource`, `SnapshotMetadataSource`) | `rfs-pipeline`, Lucene |
 | `RFS` | Sink adapters (`OpenSearchDocumentSink`, `OpenSearchMetadataSink`), work coordination | `rfs-pipeline`, OpenSearch client |
 | `DocumentsFromSnapshotMigration` | Top-level wiring (`PipelineRunner`, CLI entry point) | All of the above |

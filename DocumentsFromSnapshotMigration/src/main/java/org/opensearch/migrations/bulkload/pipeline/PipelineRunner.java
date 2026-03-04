@@ -14,6 +14,7 @@ import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
@@ -51,11 +52,11 @@ public class PipelineRunner {
     private final Path workDir;
 
     @Builder.Default
-    private final int maxDocsPerBatch = 1000;
+    private final int maxDocsPerBatch = PipelineDefaults.MAX_DOCS_PER_BATCH;
     @Builder.Default
-    private final long maxBytesPerBatch = 10_000_000L;
+    private final long maxBytesPerBatch = PipelineDefaults.MAX_BYTES_PER_BATCH;
     @Builder.Default
-    private final int batchConcurrency = 10;
+    private final int batchConcurrency = PipelineDefaults.BATCH_CONCURRENCY;
 
     // Optional: document transformation
     @Builder.Default
@@ -64,6 +65,10 @@ public class PipelineRunner {
     private final boolean allowServerGeneratedIds = false;
     @Builder.Default
     private final DocumentExceptionAllowlist allowlist = DocumentExceptionAllowlist.empty();
+
+    // Optional: shard size limit (0 = no limit)
+    @Builder.Default
+    private final long maxShardSizeBytes = 0;
 
     // Optional: delta snapshot support
     @Builder.Default
@@ -76,6 +81,8 @@ public class PipelineRunner {
     // Optional: work coordination
     @Builder.Default
     private final ScopedWorkCoordinator workCoordinator = null;
+    @Builder.Default
+    private final WorkItemTimeProvider workItemTimeProvider = null;
     @Builder.Default
     private final Duration maxInitialLeaseDuration = Duration.ofMinutes(10);
     @Builder.Default
@@ -107,15 +114,13 @@ public class PipelineRunner {
             }
         );
         try {
+            var pipelineConfig = new PipelineConfig(source, sink, maxDocsPerBatch, maxBytesPerBatch, batchConcurrency);
             var runner = new PipelineDocumentsRunner(
+                pipelineConfig,
                 workCoordinator,
                 maxInitialLeaseDuration,
-                source,
-                sink,
-                maxDocsPerBatch,
-                maxBytesPerBatch,
-                batchConcurrency,
                 snapshotName,
+                workItemTimeProvider,
                 cursorConsumer,
                 cancellationTriggerConsumer
             );
@@ -135,10 +140,10 @@ public class PipelineRunner {
             log.info("Creating delta document source: previous={}, mode={}", previousSnapshotName, deltaMode);
             return new LuceneSnapshotSource(
                 extractor, snapshotName, workDir,
-                previousSnapshotName, deltaMode, deltaContextFactory
+                maxShardSizeBytes, previousSnapshotName, deltaMode, deltaContextFactory
             );
         }
-        return new LuceneSnapshotSource(extractor, snapshotName, workDir);
+        return new LuceneSnapshotSource(extractor, snapshotName, workDir, maxShardSizeBytes);
     }
 
     private static void closeQuietly(AutoCloseable closeable) {

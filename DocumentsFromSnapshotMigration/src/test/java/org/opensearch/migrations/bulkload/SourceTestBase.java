@@ -358,10 +358,12 @@ public class SourceTestBase {
                     1000,
                     Long.MAX_VALUE,
                     10,
+                    0,              // no shard size limit in tests
                     progressCursor,
                     workCoordinator,
                     Duration.ofMinutes(10),
                     processManager,
+                    null,           // no WorkItemTimeProvider in tests
                     sourceResourceProvider.getIndexMetadata(),
                     indexAllowlist,
                     context,

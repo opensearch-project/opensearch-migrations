@@ -1,9 +1,9 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
@@ -40,12 +40,20 @@ public class LuceneSnapshotSource implements DocumentSource {
     private final Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory;
 
     /** Cache ShardEntry lookups to avoid repeated metadata reads */
-    private final Map<ShardId, SnapshotExtractor.ShardEntry> shardEntryCache = new ConcurrentHashMap<>();
-    private final Map<ShardId, SnapshotExtractor.ShardEntry> previousShardEntryCache = new ConcurrentHashMap<>();
+    private final Map<ShardId, SnapshotExtractor.ShardEntry> shardEntryCache = new HashMap<>();
+    private final Map<ShardId, SnapshotExtractor.ShardEntry> previousShardEntryCache = new HashMap<>();
+
+    // Max shard size enforcement (0 = no limit)
+    private final long maxShardSizeBytes;
 
     /** Regular (non-delta) constructor. */
     public LuceneSnapshotSource(SnapshotExtractor extractor, String snapshotName, Path workDir) {
-        this(extractor, snapshotName, workDir, null, null, null);
+        this(extractor, snapshotName, workDir, 0L, null, null, null);
+    }
+
+    /** Constructor with shard size limit. */
+    public LuceneSnapshotSource(SnapshotExtractor extractor, String snapshotName, Path workDir, long maxShardSizeBytes) {
+        this(extractor, snapshotName, workDir, maxShardSizeBytes, null, null, null);
     }
 
     /** Delta-aware constructor. */
@@ -57,9 +65,23 @@ public class LuceneSnapshotSource implements DocumentSource {
         DeltaMode deltaMode,
         Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory
     ) {
+        this(extractor, snapshotName, workDir, 0L, previousSnapshotName, deltaMode, deltaContextFactory);
+    }
+
+    /** Full constructor with all options. */
+    public LuceneSnapshotSource(
+        SnapshotExtractor extractor,
+        String snapshotName,
+        Path workDir,
+        long maxShardSizeBytes,
+        String previousSnapshotName,
+        DeltaMode deltaMode,
+        Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory
+    ) {
         this.extractor = extractor;
         this.snapshotName = snapshotName;
         this.workDir = workDir;
+        this.maxShardSizeBytes = maxShardSizeBytes;
         this.previousSnapshotName = previousSnapshotName;
         this.deltaMode = deltaMode;
         this.deltaContextFactory = deltaContextFactory;
@@ -114,6 +136,14 @@ public class LuceneSnapshotSource implements DocumentSource {
         var entry = resolveShardEntry(shardId, shardEntryCache);
         if (entry == null) {
             return Flux.error(new IllegalArgumentException("Shard not found: " + shardId));
+        }
+
+        // Enforce shard size limit to prevent disk overflow
+        if (maxShardSizeBytes > 0) {
+            long shardSize = entry.metadata().getTotalSizeBytes();
+            if (shardSize > maxShardSizeBytes) {
+                return Flux.error(new ShardTooLargeException(shardId, shardSize, maxShardSizeBytes));
+            }
         }
 
         if (isDeltaMode()) {

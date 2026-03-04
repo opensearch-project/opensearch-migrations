@@ -52,7 +52,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
         try (var cluster = new SearchClusterContainer(targetVersion)) {
             cluster.start();
             var client = createClient(cluster);
-            var sink = new OpenSearchDocumentSink(client);
+            var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
 
             var metadata = new IndexMetadataSnapshot("sink_test_idx", 1, 0, null, null, null);
             sink.createIndex(metadata).block();
@@ -71,7 +71,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
         try (var cluster = new SearchClusterContainer(targetVersion)) {
             cluster.start();
             var client = createClient(cluster);
-            var sink = new OpenSearchDocumentSink(client);
+            var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
             var shardId = new ShardId("snap", "sink_docs", 0);
 
             // Create index first
@@ -131,7 +131,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
         try (var cluster = new SearchClusterContainer(targetVersion)) {
             cluster.start();
             var client = createClient(cluster);
-            var sink = new OpenSearchDocumentSink(client);
+            var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
             var shardId = new ShardId("snap", "sink_routing", 0);
 
             sink.createIndex(new IndexMetadataSnapshot("sink_routing", 1, 0, null, null, null)).block();

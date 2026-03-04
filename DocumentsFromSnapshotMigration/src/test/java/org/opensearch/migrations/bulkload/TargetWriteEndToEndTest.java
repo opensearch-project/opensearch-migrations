@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
+import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
@@ -166,7 +167,7 @@ public class TargetWriteEndToEndTest {
         var targetClient = new OpenSearchClientFactory(connectionContext).determineVersionAndCreate();
 
         var source = new SyntheticDocumentSource(indexName, shardCount, docsPerShard);
-        var sink = new OpenSearchDocumentSink(targetClient);
+        var sink = new OpenSearchDocumentSink(targetClient, null, false, DocumentExceptionAllowlist.empty(), null);
         var pipeline = new MigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
 
         var cursors = pipeline.migrateAll().collectList().block();
@@ -219,7 +220,8 @@ public class TargetWriteEndToEndTest {
         var connectionContext = ConnectionContextTestParams.builder()
             .host(cluster.getUrl()).build().toConnectionContext();
         var sink = new OpenSearchDocumentSink(
-            new OpenSearchClientFactory(connectionContext).determineVersionAndCreate()
+            new OpenSearchClientFactory(connectionContext).determineVersionAndCreate(),
+            null, false, DocumentExceptionAllowlist.empty(), null
         );
         var shardId = new ShardId("test", indexName, 0);
 

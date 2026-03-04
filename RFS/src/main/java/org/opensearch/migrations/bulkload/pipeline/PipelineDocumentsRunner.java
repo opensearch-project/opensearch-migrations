@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -10,15 +11,13 @@ import java.util.function.Consumer;
 
 import org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor;
 import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
-import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
-import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
-import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.scheduler.Schedulers;
 
@@ -38,19 +37,33 @@ import reactor.core.scheduler.Schedulers;
  * </ul>
  */
 @Slf4j
-@AllArgsConstructor
 public class PipelineDocumentsRunner {
 
+    private final PipelineConfig pipelineConfig;
     private final ScopedWorkCoordinator workCoordinator;
     private final Duration maxInitialLeaseDuration;
-    private final DocumentSource source;
-    private final DocumentSink sink;
-    private final int maxDocsPerBatch;
-    private final long maxBytesPerBatch;
-    private final int batchConcurrency;
     private final String snapshotName;
+    private final WorkItemTimeProvider workItemTimeProvider;
     private final Consumer<WorkItemCursor> cursorConsumer;
     private final Consumer<Runnable> cancellationTriggerConsumer;
+
+    public PipelineDocumentsRunner(
+        PipelineConfig pipelineConfig,
+        ScopedWorkCoordinator workCoordinator,
+        Duration maxInitialLeaseDuration,
+        String snapshotName,
+        WorkItemTimeProvider workItemTimeProvider,
+        Consumer<WorkItemCursor> cursorConsumer,
+        Consumer<Runnable> cancellationTriggerConsumer
+    ) {
+        this.pipelineConfig = pipelineConfig;
+        this.workCoordinator = workCoordinator;
+        this.maxInitialLeaseDuration = maxInitialLeaseDuration;
+        this.snapshotName = snapshotName;
+        this.workItemTimeProvider = workItemTimeProvider;
+        this.cursorConsumer = cursorConsumer;
+        this.cancellationTriggerConsumer = cancellationTriggerConsumer;
+    }
 
     /**
      * Acquire the next available shard and migrate its documents using the pipeline.
@@ -81,11 +94,20 @@ public class PipelineDocumentsRunner {
                     var wi = workItem.getWorkItem();
                     log.info("Pipeline acquired work item: {}", wi);
 
+                    // Record lease acquisition time for successor lease duration heuristics
+                    if (workItemTimeProvider != null) {
+                        workItemTimeProvider.getLeaseAcquisitionTimeRef().set(Instant.now());
+                    }
+
                     var shardId = new ShardId(snapshotName, wi.getIndexName(), wi.getShardNumber());
                     long startingOffset = wi.getStartingDocId() != null && wi.getStartingDocId() >= 0
                         ? wi.getStartingDocId() : 0;
 
-                    var pipeline = new MigrationPipeline(source, sink, maxDocsPerBatch, maxBytesPerBatch, 1, batchConcurrency);
+                    var pipeline = new MigrationPipeline(
+                        pipelineConfig.source(), pipelineConfig.sink(),
+                        pipelineConfig.maxDocsPerBatch(), pipelineConfig.maxBytesPerBatch(),
+                        1, pipelineConfig.batchConcurrency()
+                    );
                     var latch = new CountDownLatch(1);
                     var lastCursor = new AtomicReference<ProgressCursor>();
                     var batchCount = new AtomicInteger();
@@ -96,6 +118,12 @@ public class PipelineDocumentsRunner {
 
                     var disposable = pipeline.migrateShard(shardId, wi.getIndexName(), startingOffset)
                         .subscribeOn(finishScheduler)
+                        .doFirst(() -> {
+                            // Record document migration start time (after shard unpacking)
+                            if (workItemTimeProvider != null) {
+                                workItemTimeProvider.getDocumentMigraionStartTimeRef().set(Instant.now());
+                            }
+                        })
                         .doFinally(s -> finishScheduler.dispose())
                         .subscribe(
                             cursor -> {
