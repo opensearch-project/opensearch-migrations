@@ -68,19 +68,33 @@ def buildKitProjects = [
                 serviceName: "elasticsearchTestConsole",
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole",
                 imageName:  "elasticsearch_test_console",
-                imageTag:   "latest"
+                imageTag:   "latest",
+                buildArgs: [
+                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
+                                intermediateRegistry, "library", "amazonlinux", "2023")
+                ]
         ],
         [
                 serviceName: "captureProxyBase",
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/captureProxyBase",
                 imageName:  "capture_proxy_base",
-                imageTag:   "latest"
+                imageTag:   "latest",
+                buildArgs: [
+                        CERT_BUILDER_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
+                                intermediateRegistry, "library", "amazonlinux", "2023"),
+                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
+                                intermediateRegistry, "library", "amazoncorretto", "11-al2023-headless")
+                ]
         ],
         [
                 serviceName: "reindexFromSnapshot",
                 contextDir: "DocumentsFromSnapshotMigration/docker",
                 imageName:  "reindex_from_snapshot",
                 imageTag:   "latest",
+                buildArgs: [
+                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
+                                intermediateRegistry, "library", "amazoncorretto", "17-al2023-headless")
+                ],
                 requiredDependencies: [
                         ":DocumentsFromSnapshotMigration:copyDockerRuntimeJars",
                         ":DocumentsFromSnapshotMigration:syncVersionFile_reindexFromSnapshot"

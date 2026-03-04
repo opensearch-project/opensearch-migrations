@@ -1,5 +1,6 @@
 # ---------- 1) Builder ----------
-FROM docker.io/library/amazonlinux:2023 AS builder
+ARG BASE_IMAGE=docker.io/library/amazonlinux:2023
+FROM ${BASE_IMAGE} AS builder
 
 # Build deps (toolchain + headers)
 RUN dnf install -y \
@@ -36,7 +37,8 @@ COPY Pipfile Pipfile.lock ./
 RUN pipenv install --deploy
 
 # ---------- 2) Runtime ----------
-FROM docker.io/library/amazonlinux:2023
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ENV LANG=C.UTF-8
