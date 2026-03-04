@@ -2,11 +2,7 @@ package org.opensearch.migrations.bulkload.transformers;
 
 import java.util.List;
 
-import org.opensearch.migrations.bulkload.version_os_2_11.GlobalMetadataData_OS_2_11;
 import org.opensearch.migrations.bulkload.version_os_2_11.IndexMetadataData_OS_2_11;
-import org.opensearch.migrations.transformation.CanApplyResult;
-import org.opensearch.migrations.transformation.TransformationRule;
-import org.opensearch.migrations.transformation.entity.Index;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -20,6 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CanonicalTransformerTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    // --- transformIndexMetadata ---
 
     @Test
     void transformIndexMetadata_stripsTypeMappingWrapper() {
@@ -63,6 +61,7 @@ class CanonicalTransformerTest {
         var settings = MAPPER.createObjectNode();
         settings.put("index.number_of_shards", "1");
         settings.put("index.number_of_replicas", "0");
+        settings.put("index.analysis.analyzer.my_analyzer.type", "custom");
         root.set("settings", settings);
 
         var index = new IndexMetadataData_OS_2_11(root, "idx1", "test_index");
@@ -71,6 +70,7 @@ class CanonicalTransformerTest {
         var result = transformer.transformIndexMetadata(index);
 
         var resultSettings = result.get(0).getSettings();
+        // Flat settings should be converted to tree
         assertEquals("1", resultSettings.path("number_of_shards").asText());
         assertEquals("0", resultSettings.path("number_of_replicas").asText());
     }
@@ -99,8 +99,12 @@ class CanonicalTransformerTest {
 
     @Test
     void transformIndexMetadata_fixesReplicasForDimensionality() {
-        var root = indexRoot("{}", "{\"number_of_shards\":\"1\",\"number_of_replicas\":\"1\"}");
+        var root = indexRoot(
+            "{}",
+            "{\"number_of_shards\":\"1\",\"number_of_replicas\":\"1\"}"
+        );
         var index = new IndexMetadataData_OS_2_11(root, "idx1", "test_index");
+        // dimensionality=3 means total copies must be multiple of 3
         var transformer = new CanonicalTransformer(3);
 
         var result = transformer.transformIndexMetadata(index);
@@ -118,14 +122,15 @@ class CanonicalTransformerTest {
         );
         var index = new IndexMetadataData_OS_2_11(root, "idx1", "test_index");
 
-        TransformationRule<Index> addFieldRule = new TransformationRule<>() {
+        // Custom rule that adds a field to mappings
+        var addFieldRule = new org.opensearch.migrations.transformation.TransformationRule<org.opensearch.migrations.transformation.entity.Index>() {
             @Override
-            public CanApplyResult canApply(Index entity) {
-                return CanApplyResult.YES;
+            public org.opensearch.migrations.transformation.CanApplyResult canApply(org.opensearch.migrations.transformation.entity.Index entity) {
+                return org.opensearch.migrations.transformation.CanApplyResult.YES;
             }
 
             @Override
-            public boolean applyTransformation(Index entity) {
+            public boolean applyTransformation(org.opensearch.migrations.transformation.entity.Index entity) {
                 var props = (ObjectNode) entity.getRawJson().path("mappings").path("properties");
                 props.putObject("added_field").put("type", "keyword");
                 return true;
@@ -152,34 +157,43 @@ class CanonicalTransformerTest {
         assertNotNull(result.get(0).getMappings());
     }
 
+    // --- transformGlobalMetadata ---
+
     @Test
     void transformGlobalMetadata_transformsLegacyTemplates() {
         var root = MAPPER.createObjectNode();
         var templates = MAPPER.createObjectNode();
         var template = MAPPER.createObjectNode();
         template.put("order", 0);
-        template.set("mappings", MAPPER.createObjectNode().set("properties",
-            MAPPER.createObjectNode().set("title", MAPPER.createObjectNode().put("type", "text"))));
-        template.set("settings", MAPPER.createObjectNode().put("number_of_shards", "1").put("number_of_replicas", "0"));
+        var templateMappings = MAPPER.createObjectNode();
+        templateMappings.putObject("properties").putObject("title").put("type", "text");
+        template.set("mappings", templateMappings);
+        var templateSettings = MAPPER.createObjectNode();
+        templateSettings.put("number_of_shards", "1");
+        templateSettings.put("number_of_replicas", "0");
+        template.set("settings", templateSettings);
         template.set("aliases", MAPPER.createObjectNode());
         templates.set("my_template", template);
         root.set("templates", templates);
 
-        var globalMetadata = new GlobalMetadataData_OS_2_11(root);
+        var globalMetadata = new org.opensearch.migrations.bulkload.version_os_2_11.GlobalMetadataData_OS_2_11(root);
         var transformer = new CanonicalTransformer(1);
 
         var result = transformer.transformGlobalMetadata(globalMetadata);
 
-        assertNotNull(result.getTemplates());
-        assertTrue(result.getTemplates().has("my_template"));
+        var resultTemplates = result.getTemplates();
+        assertNotNull(resultTemplates);
+        assertTrue(resultTemplates.has("my_template"));
     }
 
     @Test
     void transformGlobalMetadata_handlesNullTemplates() {
         var root = MAPPER.createObjectNode();
-        var globalMetadata = new GlobalMetadataData_OS_2_11(root);
+        // No templates at all
+        var globalMetadata = new org.opensearch.migrations.bulkload.version_os_2_11.GlobalMetadataData_OS_2_11(root);
         var transformer = new CanonicalTransformer(1);
 
+        // Should not throw
         var result = transformer.transformGlobalMetadata(globalMetadata);
         assertNotNull(result);
     }

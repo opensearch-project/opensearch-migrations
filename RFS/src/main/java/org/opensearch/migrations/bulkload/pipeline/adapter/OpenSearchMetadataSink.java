@@ -12,8 +12,8 @@ import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
 /**
- * Production {@link MetadataSink} that writes metadata to an OpenSearch cluster
- * via {@link OpenSearchClient}.
+ * Real {@link MetadataSink} adapter that writes metadata to an OpenSearch cluster
+ * via the existing {@link OpenSearchClient}.
  */
 @Slf4j
 public class OpenSearchMetadataSink implements MetadataSink {
@@ -42,7 +42,9 @@ public class OpenSearchMetadataSink implements MetadataSink {
     }
 
     private void createTemplates(ObjectNode templates, String type) {
-        if (templates == null) return;
+        if (templates == null) {
+            return;
+        }
         templates.fieldNames().forEachRemaining(name -> {
             ObjectNode body = (ObjectNode) templates.get(name);
             log.info("Creating {} template: {}", type, name);

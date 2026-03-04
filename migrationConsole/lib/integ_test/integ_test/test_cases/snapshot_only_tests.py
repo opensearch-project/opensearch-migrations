@@ -63,7 +63,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         self.s3_region = os.environ.get('BYOS_S3_REGION', 'us-west-2')
         self.s3_endpoint = os.environ.get('BYOS_S3_ENDPOINT', '')
         self.pod_replicas = int(os.environ.get('BYOS_POD_REPLICAS', '1'))
-        # Monitor retry limit: ~1 retry/min after backoff cap. Default 33 (~30 min), 900 for ~15 hours
+        # Monitor retry limit: number of 60-second workflow monitor intervals (default 900 ≈ 15 hours)
         self.monitor_retry_limit = int(os.environ.get('BYOS_MONITOR_RETRY_LIMIT', '900'))
 
     def import_existing_clusters(self):
@@ -88,7 +88,8 @@ class Test0010ExternalSnapshotMigration(MATestBase):
             "snapshotConfig": {
                 "snapshotNameConfig": {
                     "externallyManagedSnapshot": self.snapshot_name
-                }
+                },
+                "repoName": "default"
             },
             "migrations": [{
                 "metadataMigrationConfig": {},
@@ -106,7 +107,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
             "endpoint": "",
             "version": f"{self.source_version.cluster_type} "
                        f"{self.source_version.major_version}.{self.source_version.minor_version}",
-            "snapshotRepo": snapshot_repo
+            "snapshotRepos": {"default": snapshot_repo}
         }
 
         self.workflow_template = "full-migration-imported-clusters"
@@ -127,7 +128,8 @@ class Test0010ExternalSnapshotMigration(MATestBase):
 
     def display_final_cluster_state(self):
         """Display target cluster indices."""
-        target_response = cat_indices(cluster=self.target_cluster, refresh=True).decode("utf-8")
+        response = cat_indices(cluster=self.target_cluster, refresh=True)
+        target_response = response.decode("utf-8") if isinstance(response, bytes) else response
         logger.info("Target cluster indices after migration:")
         logger.info("TARGET CLUSTER")
         logger.info(target_response)

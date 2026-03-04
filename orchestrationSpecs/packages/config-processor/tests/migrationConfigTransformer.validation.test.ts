@@ -48,7 +48,6 @@ describe('MigrationConfigTransformer validation', () => {
                 "snapshotExtractAndLoadConfigs": [
                     {
                         "snapshotConfig": {
-                            "repoName": "default",
                             "snapshotNameConfig": {
                                 "snapshotNamePrefix": "test-snapshot"
                             }

@@ -5,6 +5,10 @@ import java.nio.file.Paths;
 
 import lombok.RequiredArgsConstructor;
 
+/**
+ * References to pre-built snapshot test fixtures stored in RFS/test-resources/.
+ * Resolves paths relative to the root project directory so this works from any submodule.
+ */
 public class TestResources {
     @RequiredArgsConstructor
     public static class Snapshot {
@@ -19,10 +23,23 @@ public class TestResources {
     public static final Snapshot SNAPSHOT_ES_7_10_W_SOFT;
     public static final Snapshot SNAPSHOT_ES_7_10_WO_SOFT;
 
+    /** Golden files directory for document/metadata extraction tests */
+    public static final Path GOLDEN_DIR;
+
+    private static Path findRfsDir() {
+        Path cwd = Paths.get(System.getProperty("user.dir"));
+        // If we're already in RFS, use cwd directly
+        if (cwd.getFileName().toString().equals("RFS")) {
+            return cwd;
+        }
+        // Otherwise, resolve relative to cwd (works from SnapshotReader, DocumentsFromSnapshotMigration, etc.)
+        return cwd.resolve("../RFS").normalize();
+    }
+
     static {
-        // Allow other modules to point at the RFS test-resources directory via a system property.
-        // When tests run inside the RFS module itself, user.dir is already the RFS directory.
-        Path rfsBaseDir = Paths.get(System.getProperty("rfs.test.resources.dir", System.getProperty("user.dir")));
+        Path rfsBaseDir = findRfsDir();
+
+        GOLDEN_DIR = rfsBaseDir.resolve("test-resources/golden");
 
         SNAPSHOT_ES_5_6 = new Snapshot(
             rfsBaseDir.resolve(Paths.get("test-resources", "snapshots", "ES_5_6_Updates_Deletes")),

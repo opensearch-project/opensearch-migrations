@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
@@ -250,8 +251,7 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
         var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(SOURCE_VERSION, true);
         var sourceRepo = new FileSystemRepo(snapshotDir, fileFinder);
         var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(SOURCE_VERSION, sourceRepo, false);
-        var extractor = org.opensearch.migrations.bulkload.SnapshotExtractor.create(
-            SOURCE_VERSION, sourceResourceProvider, sourceRepo);
+        var extractor = SnapshotExtractor.create(SOURCE_VERSION, sourceResourceProvider, sourceRepo);
 
         var docTransformer = new TransformationLoader().getTransformerFactoryLoader(
             RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
@@ -282,9 +282,10 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                 luceneDir,
                 () -> docTransformer,
                 false,
-                null,
-                1,
+                DocumentExceptionAllowlist.empty(),
+                1,              // 1 doc per bulk to slow migration (matches test timing assumptions)
                 Long.MAX_VALUE,
+                1,              // 1 batch at a time for predictable test timing
                 progressCursor,
                 workCoordinator,
                 Duration.ofMinutes(99),

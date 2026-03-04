@@ -19,11 +19,6 @@ dependencies {
     compileOnly libs.jcommander
     implementation libs.slf4j.api
 
-    testImplementation testFixtures(project(':RFS'))
-    testImplementation testFixtures(project(':coreUtilities'))
-    testImplementation testFixtures(project(':testHelperFixtures'))
-    testImplementation libs.testcontainers
-    testImplementation libs.hamcrest
     testImplementation libs.junit.jupiter.api
     testImplementation libs.junit.jupiter.params
     testRuntimeOnly libs.junit.jupiter.engine

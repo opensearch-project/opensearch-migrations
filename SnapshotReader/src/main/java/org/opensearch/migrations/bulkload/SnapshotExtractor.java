@@ -128,6 +128,19 @@ public class SnapshotExtractor {
      * @return a Flux of document changes (additions and deletions)
      */
     public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir) {
+        return readDocuments(shard, workDir, 0);
+    }
+
+    /**
+     * Reads documents from a shard entry starting at the given Lucene doc index.
+     * Uses binary search to skip directly to the right segment — no re-reading.
+     *
+     * @param shard       the shard to read (from {@link #listShards})
+     * @param workDir     temporary directory for unpacked Lucene files
+     * @param startDocIdx the Lucene doc index to resume from (0 for start)
+     * @return a Flux of document changes starting from startDocIdx
+     */
+    public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir, int startDocIdx) {
         var repoAccessor = new SourceRepoAccessor(sourceRepo);
         var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, workDir);
         var readerFactory = new LuceneIndexReader.Factory(snapshotReader);
@@ -141,10 +154,10 @@ public class SnapshotExtractor {
         );
         unpacker.unpack();
 
-        // Read documents
+        // Read documents from startDocIdx (binary search to segment)
         Path shardPath = workDir.resolve(shard.indexName()).resolve(String.valueOf(shard.shardId()));
         LuceneIndexReader indexReader = readerFactory.getReader(shardPath);
-        return indexReader.streamDocumentChanges(shard.metadata().getSegmentFileName());
+        return indexReader.streamDocumentChanges(shard.metadata().getSegmentFileName(), startDocIdx);
     }
 
     /**

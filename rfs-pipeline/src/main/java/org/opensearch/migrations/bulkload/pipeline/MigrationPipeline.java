@@ -1,7 +1,7 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 import org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor;
@@ -11,6 +11,7 @@ import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * Wires a {@link DocumentSource} to a {@link DocumentSink} with batching and optional
@@ -24,40 +25,48 @@ import reactor.core.publisher.Flux;
  * <ul>
  *   <li>{@code shardConcurrency = 1}: shards are processed sequentially (default, safest)</li>
  *   <li>{@code shardConcurrency > 1}: up to N shards are processed in parallel</li>
+ *   <li>{@code batchConcurrency}: max bulk write requests in flight per shard (default 10).
+ *       Higher values improve throughput by overlapping network I/O with batch preparation.</li>
  * </ul>
- * Within a single shard, batches are always sequential to preserve document ordering.
+ * Within a single shard, batch results are emitted in order (via {@code flatMapSequential})
+ * even when multiple writes are in flight.
  */
 @Slf4j
 public class MigrationPipeline {
+
+    private static final long PROGRESS_LOG_INTERVAL_MS = 30_000;
 
     private final DocumentSource source;
     private final DocumentSink sink;
     private final int maxDocsPerBatch;
     private final long maxBytesPerBatch;
     private final int shardConcurrency;
+    private final int batchConcurrency;
 
     /**
-     * Create a pipeline with sequential shard processing.
+     * Create a pipeline with sequential shard processing and default batch concurrency.
      */
     public MigrationPipeline(DocumentSource source, DocumentSink sink, int maxDocsPerBatch, long maxBytesPerBatch) {
-        this(source, sink, maxDocsPerBatch, maxBytesPerBatch, 1);
+        this(source, sink, maxDocsPerBatch, maxBytesPerBatch, 1, 10);
     }
 
     /**
-     * Create a pipeline with configurable shard concurrency.
+     * Create a pipeline with configurable concurrency.
      *
      * @param source            the document source
      * @param sink              the document sink
      * @param maxDocsPerBatch   max documents per batch (must be >= 1)
      * @param maxBytesPerBatch  max bytes per batch (must be >= 1)
      * @param shardConcurrency  max shards to process in parallel (must be >= 1)
+     * @param batchConcurrency  max bulk write requests in flight per shard (must be >= 1)
      */
     public MigrationPipeline(
         DocumentSource source,
         DocumentSink sink,
         int maxDocsPerBatch,
         long maxBytesPerBatch,
-        int shardConcurrency
+        int shardConcurrency,
+        int batchConcurrency
     ) {
         this.source = Objects.requireNonNull(source, "source must not be null");
         this.sink = Objects.requireNonNull(sink, "sink must not be null");
@@ -70,9 +79,13 @@ public class MigrationPipeline {
         if (shardConcurrency < 1) {
             throw new IllegalArgumentException("shardConcurrency must be >= 1, got " + shardConcurrency);
         }
+        if (batchConcurrency < 1) {
+            throw new IllegalArgumentException("batchConcurrency must be >= 1, got " + batchConcurrency);
+        }
         this.maxDocsPerBatch = maxDocsPerBatch;
         this.maxBytesPerBatch = maxBytesPerBatch;
         this.shardConcurrency = shardConcurrency;
+        this.batchConcurrency = batchConcurrency;
     }
 
     /**
@@ -89,28 +102,48 @@ public class MigrationPipeline {
      * @return a Flux of progress cursors, one per batch written
      */
     public Flux<ProgressCursor> migrateShard(ShardId shardId, String indexName, long startingDocOffset) {
-        log.info("Starting shard migration: {} from offset {}", shardId, startingDocOffset);
-        final AtomicLong cumulativeOffset = new AtomicLong(startingDocOffset);
+        log.info("Starting shard migration: {} from offset {} (batchConcurrency={})", shardId, startingDocOffset, batchConcurrency);
+        final long[] cumulativeOffset = { startingDocOffset };
+        final long[] cumulativeBytes = { 0 };
+        final long[] lastLogTime = { System.currentTimeMillis() };
+        final AtomicInteger activeBatches = new AtomicInteger(0);
         return source.readDocuments(shardId, startingDocOffset)
+            .subscribeOn(Schedulers.boundedElastic())
             .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
-            .concatMap(batch -> sink.writeBatch(shardId, indexName, batch)
-                .map(cursor -> {
-                    long newOffset = cumulativeOffset.addAndGet(cursor.docsInBatch());
-                    return new ProgressCursor(
-                        shardId,
-                        newOffset,
-                        cursor.docsInBatch(),
-                        cursor.bytesInBatch()
-                    );
-                })
-                .doOnNext(cursor -> log.debug(
-                    "Batch written for {}: {} docs, {} bytes, cumulative offset {}",
-                    shardId, cursor.docsInBatch(), cursor.bytesInBatch(), cursor.lastDocProcessed()
-                ))
-            )
+            .flatMapSequential(batch -> {
+                long batchStart = System.nanoTime();
+                int batchDocs = batch.size();
+                long batchBytes = batch.stream().mapToLong(d -> d.source() != null ? d.source().length : 0).sum();
+                int inflight = activeBatches.incrementAndGet();
+                return sink.writeBatch(shardId, indexName, batch)
+                    .map(cursor -> {
+                        cumulativeOffset[0] += cursor.docsInBatch();
+                        cumulativeBytes[0] += cursor.bytesInBatch();
+                        return new ProgressCursor(
+                            shardId,
+                            cumulativeOffset[0],
+                            cursor.docsInBatch(),
+                            cursor.bytesInBatch()
+                        );
+                    })
+                    .doOnNext(cursor -> {
+                        int remaining = activeBatches.decrementAndGet();
+                        long totalMs = (System.nanoTime() - batchStart) / 1_000_000;
+                        long now = System.currentTimeMillis();
+                        if (now - lastLogTime[0] >= PROGRESS_LOG_INTERVAL_MS) {
+                            lastLogTime[0] = now;
+                            log.info("{} batch: {}ms, {} docs, {} KB, active {}/{} | progress: {} docs, {} MB total",
+                                shardId, totalMs, batchDocs, batchBytes / 1024,
+                                remaining + 1, batchConcurrency,
+                                cumulativeOffset[0], cumulativeBytes[0] / (1024 * 1024));
+                        }
+                    })
+                    .doOnError(e -> activeBatches.decrementAndGet());
+            }, batchConcurrency)
             .onErrorMap(e -> !(e instanceof PipelineException),
                 e -> new PipelineException("Failed migrating shard " + shardId, e))
-            .doOnComplete(() -> log.info("Completed shard migration: {}", shardId));
+            .doOnComplete(() -> log.info("Completed shard migration: {} — {} docs, {} MB total",
+                shardId, cumulativeOffset[0], cumulativeBytes[0] / (1024 * 1024)));
     }
 
     /**
@@ -154,8 +187,8 @@ public class MigrationPipeline {
      * Batching predicate that groups documents by count and byte size.
      * Stateful — tracks current batch metrics and resets on batch boundary.
      *
-     * <p>Not thread-safe — relies on single-threaded execution via {@code concatMap} in
-     * {@link #migrateShard}. Do not use with concurrent operators (e.g. flatMap).
+     * <p>Thread-safe for single-threaded use by {@code bufferUntil}, which invokes this
+     * predicate sequentially before handing batches to {@code flatMapSequential}.
      *
      * <p>Used with {@link Flux#bufferUntil} to create batches that respect both
      * document count and byte size limits.

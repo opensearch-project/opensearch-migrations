@@ -106,15 +106,17 @@ class BlockingCallDetectionTest {
 
             @Override
             public Mono<ProgressCursor> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch) {
-                // Wrap in flatMap to prevent fusion — ensures execution on Reactor thread
-                return Mono.just(batch).flatMap(b -> {
-                    try {
-                        Thread.sleep(10); // Blocking call on Reactor thread
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                    return Mono.just(new ProgressCursor(shardId, b.size(), b.size(), 0));
-                });
+                // Force onto a non-blocking parallel thread so BlockHound detects Thread.sleep
+                return Mono.just(batch)
+                    .subscribeOn(Schedulers.parallel())
+                    .flatMap(b -> {
+                        try {
+                            Thread.sleep(10); // Blocking call on non-blocking thread
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        return Mono.just(new ProgressCursor(shardId, b.size(), b.size(), 0));
+                    });
             }
         };
         var pipeline = new MigrationPipeline(nonBlockingSource(3), blockingSink, 3, 100_000);

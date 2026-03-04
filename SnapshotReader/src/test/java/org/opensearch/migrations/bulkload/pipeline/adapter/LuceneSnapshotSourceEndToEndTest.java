@@ -3,7 +3,6 @@ package org.opensearch.migrations.bulkload.pipeline.adapter;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -35,8 +34,8 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * Source-side E2E tests for {@link LuceneSnapshotSource} and {@link SnapshotMetadataSource}
- * against real snapshots from Docker containers.
+ * Source-side e2e tests for the pipeline adapters: {@link LuceneSnapshotSource} and
+ * {@link SnapshotMetadataSource} against real snapshots from Docker containers.
  *
  * <p>No target cluster needed — validates the N side of the N+M testing strategy.
  */
@@ -48,8 +47,7 @@ public class LuceneSnapshotSourceEndToEndTest {
     private static final String REPO_NAME = "test_repo";
     private static final String INDEX_NAME = "pipeline_source_test";
 
-    @TempDir
-    private File localDirectory;
+    @TempDir private File localDirectory;
 
     private static final SnapshotFixtureCache fixtureCache = new SnapshotFixtureCache();
 
@@ -136,6 +134,7 @@ public class LuceneSnapshotSourceEndToEndTest {
 
         assertThat(metadata.indexName(), equalTo(INDEX_NAME));
         assertThat(metadata.numberOfShards(), equalTo(1));
+        // Settings/mappings may be null for versions where the underlying reader returns non-ObjectNode types
     }
 
     @ParameterizedTest(name = "readDocuments from {0}")
@@ -145,10 +144,15 @@ public class LuceneSnapshotSourceEndToEndTest {
         Path workDir = Files.createTempDirectory("pipeline_source_e2e");
         try {
             var source = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, workDir);
+            source.listShards(INDEX_NAME); // populate cache
+
             var shardId = source.listShards(INDEX_NAME).get(0);
             var docs = source.readDocuments(shardId, 0).collectList().block();
 
             assertThat("Should read 3 documents", docs, hasSize(3));
+            var ids = docs.stream().map(DocumentChange::id).sorted().toList();
+            assertThat(ids, equalTo(List.of("doc1", "doc2", "doc3")));
+
             for (var doc : docs) {
                 assertThat(doc.source(), notNullValue());
                 assertThat(doc.source().length, greaterThan(0));
@@ -169,16 +173,18 @@ public class LuceneSnapshotSourceEndToEndTest {
             var source = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, workDir);
             var shardId = source.listShards(INDEX_NAME).get(0);
 
+            // Read all 3 docs
             var allDocs = source.readDocuments(shardId, 0).collectList().block();
             assertThat(allDocs, hasSize(3));
 
-            // Resume from offset 2 — should get only the last doc
+            // Resume from offset 2 — should get only the last doc (use fresh source to avoid unpack conflict)
             Path workDir2 = Files.createTempDirectory("pipeline_source_resume2");
             try {
                 var source2 = new LuceneSnapshotSource(extractor, SNAPSHOT_NAME, workDir2);
                 source2.listShards(INDEX_NAME);
                 var resumed = source2.readDocuments(shardId, 2).collectList().block();
                 assertThat("Resuming from offset 2 should yield 1 doc", resumed, hasSize(1));
+                assertThat(resumed.get(0).id(), equalTo(allDocs.get(2).id()));
             } finally {
                 deleteDir(workDir2);
             }
@@ -217,7 +223,7 @@ public class LuceneSnapshotSourceEndToEndTest {
         try {
             if (Files.exists(dir)) {
                 try (var walk = Files.walk(dir)) {
-                    walk.sorted(Comparator.reverseOrder())
+                    walk.sorted(java.util.Comparator.reverseOrder())
                         .map(Path::toFile)
                         .forEach(File::delete);
                 }

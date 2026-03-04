@@ -17,7 +17,6 @@ dependencies {
     api project(':rfs-http')
     api project(':rfs-pipeline')
     api project(':SearchSnapshotExtractor')
-    api project(':SnapshotReader')
     implementation project(':awsUtilities')
     implementation project(':coreUtilities')
     implementation project(':transformation')
@@ -41,12 +40,6 @@ dependencies {
 
     implementation libs.slf4j.api
 
-    // Shadow lucene jars from SearchSnapshotExtractor
-    implementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene5').map { it.outputs.files }
-    implementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene6').map { it.outputs.files }
-    implementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene7').map { it.outputs.files }
-    implementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene9').map { it.outputs.files }
-
     implementation libs.aws.crt
     implementation libs.aws.s3
 
@@ -55,6 +48,12 @@ dependencies {
 
     testImplementation libs.docker.java.core
     testImplementation libs.docker.java.transport.httpclient5
+
+    // Shadow lucene jars from SearchSnapshotExtractor (needed by test code)
+    testImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene5').map { it.outputs.files }
+    testImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene6').map { it.outputs.files }
+    testImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene7').map { it.outputs.files }
+    testImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene9').map { it.outputs.files }
 
     testImplementation testFixtures(project(path: ':RFS'))
     testImplementation libs.lucene.v9.backward.codecs
@@ -80,10 +79,6 @@ dependencies {
     testImplementation libs.hamcrest
     testImplementation libs.junit.jupiter.api
     testRuntimeOnly libs.junit.jupiter.engine
-    implementation libs.httpclient5
-    implementation libs.jackson.databind
-    implementation libs.jackson.core
-    implementation libs.jackson.annotations
 
     testFixturesImplementation project(':transformation')
     testFixturesImplementation testFixtures(project(":coreUtilities"))

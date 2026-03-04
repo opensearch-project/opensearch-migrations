@@ -70,9 +70,11 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
             previousReader = reader.getReader(previousShardMetadata.getSegmentFileName());
             currentReader  = reader.getReader(shardMetadata.getSegmentFileName());
 
+            DeltaLuceneReader.DeltaResult deltaResult;
             try (var deltaContext = deltaContextFactory.get()) {
-                var deltaResult = DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(
+                deltaResult = DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(
                     previousReader, currentReader, startingDocId, deltaContext);
+            }
 
                 var deletions = switch (deltaMode) {
                     case UPDATES_ONLY -> Flux.<LuceneDocumentChange>empty();

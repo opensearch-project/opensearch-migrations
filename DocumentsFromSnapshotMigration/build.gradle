@@ -21,6 +21,8 @@ class DockerServiceProps {
 dependencies {
     implementation project(":coreUtilities")
     implementation project(":RFS")
+    implementation project(":SnapshotReader")
+    implementation project(":rfs-pipeline")
     implementation project(":transformation")
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
@@ -41,6 +43,7 @@ dependencies {
     testImplementation testFixtures(project(":RFS"))
     testImplementation testFixtures(project(":coreUtilities"))
     testImplementation testFixtures(project(":testHelperFixtures"))
+    testImplementation project(":SearchSnapshotExtractor")
     testImplementation project(":DataGenerator")
     testImplementation project(":CreateSnapshot")
     testImplementation project(":MetadataMigration")

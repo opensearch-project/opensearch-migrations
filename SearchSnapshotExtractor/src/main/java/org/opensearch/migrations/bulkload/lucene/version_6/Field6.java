@@ -1,5 +1,7 @@
 package org.opensearch.migrations.bulkload.lucene.version_6;
 
+import java.util.Arrays;
+
 import org.opensearch.migrations.bulkload.common.Uid;
 import org.opensearch.migrations.bulkload.lucene.LuceneField;
 
@@ -30,6 +32,15 @@ public class Field6 implements LuceneField {
     @Override
     public String stringValue() {
         return wrapped.stringValue();
+    }
+
+    @Override
+    public byte[] utf8Value() {
+        var bytesRef = wrapped.binaryValue();
+        if (bytesRef != null && bytesRef.bytes != null && bytesRef.bytes.length != 0) {
+            return Arrays.copyOfRange(bytesRef.bytes, bytesRef.offset, bytesRef.offset + bytesRef.length);
+        }
+        return null;
     }
 
     @Override

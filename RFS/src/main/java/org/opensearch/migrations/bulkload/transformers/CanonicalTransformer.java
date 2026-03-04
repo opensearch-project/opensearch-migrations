@@ -15,8 +15,9 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Single unified transformer that replaces all version-specific transformers.
- * Applies TransformationRules first, then normalizes structural quirks,
- * then applies target-specific fixes.
+ * Applies TransformationRules first (semantic transforms like type removal),
+ * then normalizes structural quirks (flat→tree settings, type wrappers),
+ * then applies target-specific fixes (replica dimensionality).
  */
 @Slf4j
 public class CanonicalTransformer implements Transformer {
@@ -36,6 +37,7 @@ public class CanonicalTransformer implements Transformer {
         this.indexTemplateTransformations = indexTemplateTransformations;
     }
 
+    /** Convenience: no transformation rules (e.g. ES 7.10+ → OS) */
     public CanonicalTransformer(int awarenessAttributes) {
         this(awarenessAttributes, List.of(), List.of());
     }
@@ -44,6 +46,7 @@ public class CanonicalTransformer implements Transformer {
     public GlobalMetadata transformGlobalMetadata(GlobalMetadata globalData) {
         ObjectNode newRoot = MAPPER.createObjectNode();
 
+        // Transform legacy templates
         var templatesRoot = globalData.getTemplates();
         if (templatesRoot != null) {
             var templates = MAPPER.createObjectNode();
@@ -57,6 +60,7 @@ public class CanonicalTransformer implements Transformer {
             newRoot.set("templates", templates);
         }
 
+        // Transform index templates (ES 7.8+)
         var indexTemplatesRoot = globalData.getIndexTemplates();
         ObjectNode indexTemplatesOut = MAPPER.createObjectNode();
         if (indexTemplatesRoot != null && !indexTemplatesRoot.isEmpty()) {
@@ -74,6 +78,7 @@ public class CanonicalTransformer implements Transformer {
         indexTemplateWrapper.set("index_template", indexTemplatesOut);
         newRoot.set("index_template", indexTemplateWrapper);
 
+        // Transform component templates (ES 7.8+)
         var componentTemplatesRoot = globalData.getComponentTemplates();
         ObjectNode componentTemplatesOut = MAPPER.createObjectNode();
         if (componentTemplatesRoot != null && !componentTemplatesRoot.isEmpty()) {
@@ -93,21 +98,31 @@ public class CanonicalTransformer implements Transformer {
         var copy = index.deepCopy();
         var root = copy.getRawJson();
 
+        // Apply semantic transformation rules (e.g. type removal)
         indexTransformations.forEach(rule -> rule.applyTransformation(copy));
+
+        // Normalize structural quirks
         normalizeIndex(root);
 
         return List.of(new IndexMetadataData_OS_2_11(root, copy.getId(), copy.getName()));
     }
 
+    /** Normalize settings (flat→tree, remove intermediate level) and mappings (strip type wrapper), then fix replicas */
     private void normalizeIndex(ObjectNode root) {
+        // Normalize mappings — strip intermediate type wrapper
         TransformFunctions.removeIntermediateMappingsLevels(root);
+
+        // Normalize settings — flat→tree, remove intermediate index level
         if (root.has(SETTINGS_KEY)) {
             root.set(SETTINGS_KEY, TransformFunctions.convertFlatSettingsToTree((ObjectNode) root.get(SETTINGS_KEY)));
         }
         TransformFunctions.removeIntermediateIndexSettingsLevel(root);
+
+        // Target-specific: fix replica count for awareness dimensionality
         TransformFunctions.fixReplicasForDimensionality(root, awarenessAttributes);
     }
 
+    /** Simple Index implementation for template transformation */
     private static class InlineIndex implements Index {
         private final String name;
         private final ObjectNode rawJson;

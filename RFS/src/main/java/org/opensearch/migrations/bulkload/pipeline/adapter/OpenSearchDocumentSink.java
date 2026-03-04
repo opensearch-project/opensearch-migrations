@@ -29,8 +29,14 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
- * Production {@link DocumentSink} that writes documents to an OpenSearch cluster
- * via {@link OpenSearchClient}. Converts pipeline IR to bulk API operations.
+ * Real {@link DocumentSink} adapter that writes documents to an OpenSearch cluster
+ * via the existing {@link OpenSearchClient}.
+ *
+ * <p>Converts clean pipeline IR ({@link DocumentChange}) to bulk API operations
+ * ({@link BulkOperationSpec}) and sends them via {@link OpenSearchClient#sendBulkRequest}.
+ *
+ * <p>Supports optional document transformation via {@link IJsonTransformer} and
+ * configurable exception allowlisting for idempotent migrations.
  */
 @Slf4j
 public class OpenSearchDocumentSink implements DocumentSink {
@@ -38,15 +44,25 @@ public class OpenSearchDocumentSink implements DocumentSink {
     private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
 
     private final OpenSearchClient client;
-    private final Supplier<IJsonTransformer> transformerSupplier;
+    private final IJsonTransformer transformer;
     private final boolean allowServerGeneratedIds;
     private final DocumentExceptionAllowlist allowlist;
     private final Supplier<IRfsContexts.IRequestContext> requestContextSupplier;
 
+    /** Simple constructor — no transformation, no server-generated IDs, no allowlist, no metrics. */
     public OpenSearchDocumentSink(OpenSearchClient client) {
         this(client, null, false, DocumentExceptionAllowlist.empty(), null);
     }
 
+    /**
+     * Full constructor with all options.
+     *
+     * @param client                    the OpenSearch client
+     * @param transformerSupplier       supplier for document transformers, null for no transformation
+     * @param allowServerGeneratedIds   whether to strip document IDs for server-generated IDs
+     * @param allowlist                 exception types to treat as success during bulk writes
+     * @param requestContextSupplier    supplier for request contexts (enables HTTP metering), null to skip
+     */
     public OpenSearchDocumentSink(
         OpenSearchClient client,
         Supplier<IJsonTransformer> transformerSupplier,
@@ -55,7 +71,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
         Supplier<IRfsContexts.IRequestContext> requestContextSupplier
     ) {
         this.client = client;
-        this.transformerSupplier = transformerSupplier;
+        this.transformer = transformerSupplier != null ? transformerSupplier.get() : null;
         this.allowServerGeneratedIds = allowServerGeneratedIds;
         this.allowlist = allowlist != null ? allowlist : DocumentExceptionAllowlist.empty();
         this.requestContextSupplier = requestContextSupplier;
@@ -70,31 +86,39 @@ public class OpenSearchDocumentSink implements DocumentSink {
 
     @Override
     public Mono<ProgressCursor> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch) {
-        var bulkOps = batch.stream()
-            .map(doc -> toBulkOp(doc, indexName))
-            .collect(Collectors.toList());
-
-        List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
-
         long bytesInBatch = batch.stream()
             .mapToLong(doc -> doc.source() != null ? doc.source().length : 0)
             .sum();
 
-        return client.sendBulkRequest(indexName, opsToSend,
+        Mono<OpenSearchClient.BulkResponse> bulkMono;
+        if (transformer == null) {
+            // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
+            bulkMono = client.sendBulkRequestRaw(indexName, batch,
                 requestContextSupplier != null ? requestContextSupplier.get() : null,
-                allowServerGeneratedIds, allowlist)
-            .then(Mono.just(new ProgressCursor(
-                shardId,
-                (long) batch.size(),
-                batch.size(),
-                bytesInBatch
-            )));
+                allowServerGeneratedIds, allowlist);
+        } else {
+            var bulkOps = batch.stream()
+                .map(doc -> toBulkOp(doc, indexName))
+                .collect(Collectors.toList());
+            List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
+            bulkMono = client.sendBulkRequest(indexName, opsToSend,
+                requestContextSupplier != null ? requestContextSupplier.get() : null,
+                allowServerGeneratedIds, allowlist);
+        }
+
+        return bulkMono.then(Mono.just(new ProgressCursor(
+            shardId,
+            (long) batch.size(),
+            batch.size(),
+            bytesInBatch
+        )));
     }
 
     @SuppressWarnings("unchecked")
     private List<BulkOperationSpec> applyTransformation(List<BulkOperationSpec> ops) {
-        if (transformerSupplier == null) return ops;
-        var transformer = transformerSupplier.get();
+        if (transformer == null) {
+            return ops;
+        }
         var asMaps = ops.stream()
             .map(op -> OBJECT_MAPPER.convertValue(op, Map.class))
             .toList();
@@ -116,13 +140,19 @@ public class OpenSearchDocumentSink implements DocumentSink {
         if (doc.operation() == DocumentChange.ChangeType.DELETE) {
             return DeleteOp.builder()
                 .operation(DeleteOperationMeta.builder()
-                    .id(doc.id()).index(indexName).routing(doc.routing()).build())
+                    .id(doc.id())
+                    .index(indexName)
+                    .routing(doc.routing())
+                    .build())
                 .document(document)
                 .build();
         } else {
             return IndexOp.builder()
                 .operation(IndexOperationMeta.builder()
-                    .id(doc.id()).index(indexName).routing(doc.routing()).build())
+                    .id(doc.id())
+                    .index(indexName)
+                    .routing(doc.routing())
+                    .build())
                 .document(document)
                 .build();
         }

@@ -10,6 +10,7 @@ import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
+import org.opensearch.migrations.cluster.SnapshotCapabilities;
 
 import lombok.Getter;
 
@@ -65,13 +66,11 @@ public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
 
 
     @Override
-    public boolean getSoftDeletesPossible() {
-        return ElasticsearchConstants_ES_2_4.SOFT_DELETES_POSSIBLE;
-    }
-
-    @Override
-    public String getSoftDeletesFieldData() {
-        return ElasticsearchConstants_ES_2_4.SOFT_DELETES_FIELD;
+    public SnapshotCapabilities getCapabilities() {
+        return new SnapshotCapabilities(
+            SnapshotCapabilities.LuceneVersion.LUCENE_5,
+            new SnapshotCapabilities.SoftDeleteSupport.None()
+        );
     }
 
     @Override

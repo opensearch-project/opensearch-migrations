@@ -40,8 +40,8 @@ public class SnapshotFixtureCache {
     }
 
     /**
-     * Restores cached snapshot data into {@code targetDir} if available.
-     * Returns true if cache hit, false if miss.
+     * Returns the cached snapshot directory for the given key, or null if not cached.
+     * If cached, copies the data into {@code targetDir}.
      */
     public boolean restoreIfCached(String cacheKey, Path targetDir) {
         if (isDisabled()) {
@@ -71,6 +71,7 @@ public class SnapshotFixtureCache {
         }
         Path cached = cacheDir.resolve(sanitize(cacheKey));
         try {
+            // Remove stale cache entry if present
             if (Files.exists(cached)) {
                 deleteDirectory(cached);
             }

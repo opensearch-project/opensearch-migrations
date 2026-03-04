@@ -1,7 +1,5 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
-import java.nio.charset.StandardCharsets;
-
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
@@ -29,9 +27,7 @@ public final class LuceneAdapter {
         return new DocumentChange(
             luceneDoc.getId(),
             luceneDoc.getType(),
-            luceneDoc.getSource() != null
-                ? luceneDoc.getSource().getBytes(StandardCharsets.UTF_8)
-                : null,
+            luceneDoc.getSource(),
             luceneDoc.getRouting(),
             mapChangeType(luceneDoc.getOperation())
         );

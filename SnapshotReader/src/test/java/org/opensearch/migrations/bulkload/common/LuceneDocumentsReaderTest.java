@@ -91,7 +91,7 @@ public class LuceneDocumentsReaderTest {
         var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
         var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(version, repo, false);
-        SourceRepoAccessor repoAccessor = new SourceRepoAccessor(repo);
+        var repoAccessor = new SourceRepoAccessor(repo);
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
@@ -119,7 +119,7 @@ public class LuceneDocumentsReaderTest {
             String actualType = doc.type;
 
             String expectedSource = "{\"title\":\"This is a doc with complex history\",\"content\":\"Updated!\"}";
-            String actualSource = doc.source;
+            String actualSource = new String(doc.source, java.nio.charset.StandardCharsets.UTF_8);
             assertDocsEqual(expectedId, actualId, expectedType, actualType, expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
@@ -130,7 +130,7 @@ public class LuceneDocumentsReaderTest {
             String actualType = doc.type;
 
             String expectedSource = "{\"title\":\"This is doc that will be updated\",\"content\":\"Updated!\"}";
-            String actualSource = doc.source;
+            String actualSource = new String(doc.source, java.nio.charset.StandardCharsets.UTF_8);
             assertDocsEqual(expectedId, actualId, expectedType, actualType,
                     expectedSource, actualSource);
             return true;
@@ -142,7 +142,7 @@ public class LuceneDocumentsReaderTest {
             String actualType = doc.type;
 
             String expectedSource = "{\"title\":\"This doc will not be changed\\nIt has multiple lines of text\\nIts source doc has extra newlines.\",\"content\":\"bluh bluh\"}";
-            String actualSource = doc.source;
+            String actualSource = new String(doc.source, java.nio.charset.StandardCharsets.UTF_8);
             assertDocsEqual(expectedId, actualId, expectedType, actualType,
                     expectedSource, actualSource);
             return true;
@@ -157,7 +157,7 @@ public class LuceneDocumentsReaderTest {
         var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
         var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(version, repo, false);
-        SourceRepoAccessor repoAccessor = new SourceRepoAccessor(repo);
+        var repoAccessor = new SourceRepoAccessor(repo);
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
@@ -185,7 +185,7 @@ public class LuceneDocumentsReaderTest {
             String actualType = doc.type;
 
             String expectedSource = "{\"content\":\"This doc will not be changed\nIt has multiple lines of text\nIts source doc has extra newlines.\"}";
-            String actualSource = doc.source;
+            String actualSource = new String(doc.source, java.nio.charset.StandardCharsets.UTF_8);
             assertDocsEqual(expectedId, actualId, expectedType, actualType, expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
@@ -196,7 +196,7 @@ public class LuceneDocumentsReaderTest {
             String actualType = doc.type;
 
             String expectedSource = "{\"content\":\"Updated!\"}";
-            String actualSource = doc.source;
+            String actualSource = new String(doc.source, java.nio.charset.StandardCharsets.UTF_8);
             assertDocsEqual(expectedId, actualId, expectedType, actualType,
                     expectedSource, actualSource);
             return true;
@@ -208,7 +208,7 @@ public class LuceneDocumentsReaderTest {
              String actualType = doc.type;
 
             String expectedSource = "{\"title\":\"This is a doc with complex history. Updated!\"}";
-            String actualSource = doc.source;
+            String actualSource = new String(doc.source, java.nio.charset.StandardCharsets.UTF_8);
             assertDocsEqual(expectedId, actualId, expectedType, actualType,
                     expectedSource, actualSource);
             return true;
@@ -253,7 +253,7 @@ public class LuceneDocumentsReaderTest {
                 when(field1.asUid()).thenReturn("doc" + invocation.getArgument(0));
                 var field2 = mock(LuceneField.class);
                 when(field2.name()).thenReturn("_source");
-                when(field2.utf8ToStringValue()).thenReturn("{\"field\":\"value\"}");
+                when(field2.utf8Value()).thenReturn("{\"field\":\"value\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 when(doc.getFields()).thenAnswer(inv -> List.of(field1, field2));
 
                 return doc;
@@ -313,7 +313,7 @@ public class LuceneDocumentsReaderTest {
         var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
         var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(version, repo, false);
-        SourceRepoAccessor repoAccessor = new SourceRepoAccessor(repo);
+        var repoAccessor = new SourceRepoAccessor(repo);
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
@@ -353,7 +353,7 @@ public class LuceneDocumentsReaderTest {
         var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
         var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(version, repo, false);
-        SourceRepoAccessor repoAccessor = new SourceRepoAccessor(repo);
+        var repoAccessor = new SourceRepoAccessor(repo);
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 

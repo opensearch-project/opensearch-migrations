@@ -18,6 +18,7 @@ import java.util.regex.Pattern;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
+import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
@@ -28,7 +29,9 @@ import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
+import org.opensearch.migrations.bulkload.pipeline.PipelineRunner;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
+import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
@@ -69,6 +72,7 @@ import org.slf4j.MDC;
 public class RfsMigrateDocuments {
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
+    public static final int NO_WORK_AVAILABLE_EXIT_CODE = 4;
 
     // Arbitrary value, increasing from 5 to 15 seconds due to prevalence of clock skew exceptions
     // observed on production clusters during migrations
@@ -274,6 +278,7 @@ public class RfsMigrateDocuments {
                 "allowing specific errors (e.g., 'version_conflict_engine_exception') to be treated as success " +
                 "rather than failure. Example: --allowed-doc-exception-types version_conflict_engine_exception")
         public List<String> allowedDocExceptionTypes = List.of();
+
     }
 
     public static class ExperimentalArgs {
@@ -422,7 +427,7 @@ public class RfsMigrateDocuments {
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
         var targetConnectionContext = arguments.targetArgs.toConnectionContext();
-        var targetClientFactory = new OpenSearchClientFactory(targetConnectionContext);
+        var targetClientFactory = new OpenSearchClientFactory(targetConnectionContext, arguments.maxConnections);
         OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate();
         var targetVersion = targetClient.getClusterVersion();
         
@@ -533,9 +538,9 @@ public class RfsMigrateDocuments {
 
             var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo, arguments.versionStrictness.allowLooseVersionMatches);
 
-            var extractor = org.opensearch.migrations.bulkload.SnapshotExtractor.create(
+            var extractor = SnapshotExtractor.create(
                 arguments.sourceVersion, sourceResourceProvider, sourceRepo);
-            runWithPipeline(
+            var status = runWithPipeline(
                 extractor,
                 targetClient,
                 arguments.snapshotName,
@@ -545,6 +550,7 @@ public class RfsMigrateDocuments {
                 allowlist,
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,
+                arguments.maxConnections,
                 progressCursor,
                 workCoordinator,
                 arguments.initialLeaseDuration,
@@ -556,6 +562,10 @@ public class RfsMigrateDocuments {
                 arguments.experimental.previousSnapshotName,
                 arguments.experimental.experimentalDeltaMode);
             cleanShutdownCompleted.set(true);
+            if (status == CompletionStatus.NOTHING_DONE) {
+                log.atInfo().setMessage("Work exists but none available to this worker. Exiting with exit code " + NO_WORK_AVAILABLE_EXIT_CODE).log();
+                System.exit(NO_WORK_AVAILABLE_EXIT_CODE);
+            }
         } catch (NoWorkLeftException e) {
             log.atInfo().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
             cleanShutdownCompleted.set(true);
@@ -788,6 +798,82 @@ public class RfsMigrateDocuments {
             workerId
         );
         return new RootDocumentMigrationContext(otelSdk, compositeContextTracker);
+    }
+
+
+    public static CompletionStatus runWithPipeline(
+        SnapshotExtractor extractor,
+        OpenSearchClient targetClient,
+        String snapshotName,
+        java.nio.file.Path workDir,
+        Supplier<IJsonTransformer> transformerSupplier,
+        boolean useServerGeneratedIds,
+        DocumentExceptionAllowlist allowlist,
+        int maxDocsPerBatch,
+        long maxBytesPerBatch,
+        int batchConcurrency,
+        AtomicReference<WorkItemCursor> progressCursor,
+        IWorkCoordinator workCoordinator,
+        Duration maxInitialLeaseDuration,
+        LeaseExpireTrigger leaseExpireTrigger,
+        IndexMetadata.Factory indexMetadataFactory,
+        List<String> indexAllowlist,
+        RootDocumentMigrationContext rootDocumentContext,
+        AtomicReference<Runnable> cancellationRunnable,
+        String previousSnapshotName,
+        DeltaMode deltaMode
+    ) throws IOException, InterruptedException, NoWorkLeftException {
+        var scopedWorkCoordinator = prepareWorkCoordination(
+            workCoordinator, leaseExpireTrigger, indexMetadataFactory,
+            snapshotName, indexAllowlist, rootDocumentContext
+        );
+
+        var runner = PipelineRunner.builder()
+            .extractor(extractor)
+            .targetClient(targetClient)
+            .snapshotName(snapshotName)
+            .workDir(workDir)
+            .maxDocsPerBatch(maxDocsPerBatch)
+            .maxBytesPerBatch(maxBytesPerBatch)
+            .batchConcurrency(batchConcurrency)
+            .transformerSupplier(transformerSupplier)
+            .allowServerGeneratedIds(useServerGeneratedIds)
+            .allowlist(allowlist)
+            .previousSnapshotName(previousSnapshotName)
+            .deltaMode(deltaMode)
+            .deltaContextFactory(previousSnapshotName != null && deltaMode != null
+                ? () -> new RfsContexts.DeltaStreamContext(rootDocumentContext, null)
+                : null)
+            .workCoordinator(scopedWorkCoordinator)
+            .maxInitialLeaseDuration(maxInitialLeaseDuration)
+            .cursorConsumer(progressCursor::set)
+            .cancellationTriggerConsumer(cancellationRunnable::set)
+            .build();
+
+        return runner.migrateNextShard(rootDocumentContext::createReindexContext);
+    }
+
+    /**
+     * Shared work-coordination setup: creates a scoped coordinator, ensures shard prep
+     * is complete, and verifies there is still work to do.
+     */
+    private static ScopedWorkCoordinator prepareWorkCoordination(
+        IWorkCoordinator workCoordinator,
+        LeaseExpireTrigger leaseExpireTrigger,
+        IndexMetadata.Factory indexMetadataFactory,
+        String snapshotName,
+        List<String> indexAllowlist,
+        RootDocumentMigrationContext rootDocumentContext
+    ) throws IOException, InterruptedException, NoWorkLeftException {
+        var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
+        confirmShardPrepIsComplete(indexMetadataFactory, snapshotName, indexAllowlist,
+            scopedWorkCoordinator, rootDocumentContext);
+        if (!workCoordinator.workItemsNotYetComplete(
+            rootDocumentContext.getWorkCoordinationContext()::createItemsPendingContext
+        )) {
+            throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
+        }
+        return scopedWorkCoordinator;
     }
 
     private static void confirmShardPrepIsComplete(

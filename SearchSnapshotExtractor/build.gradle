@@ -99,7 +99,6 @@ dependencies {
 
     testImplementation libs.mockito.core
     testImplementation libs.mockito.junit.jupiter
-    testImplementation libs.hamcrest
 
     lucene5 libs.lucene.v5.core
     lucene5 libs.lucene.v5.backward.codecs

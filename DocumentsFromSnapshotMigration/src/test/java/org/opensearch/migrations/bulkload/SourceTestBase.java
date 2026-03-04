@@ -31,6 +31,7 @@ import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.bulkload.framework.SnapshotFixtureCache;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
@@ -59,9 +60,10 @@ import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNA
 
 @Slf4j
 public class SourceTestBase {
-    public static final long MAX_SHARD_SIZE_BYTES = 1024 * 1024 * 1024L; // 1 GB
     public static final String SOURCE_SERVER_ALIAS = "source";
     public static final long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
+
+    protected static final SnapshotFixtureCache fixtureCache = new SnapshotFixtureCache();
 
     @NotNull
     protected static Process runAndMonitorProcess(ProcessBuilder processBuilder) throws IOException {
@@ -267,21 +269,16 @@ public class SourceTestBase {
     ) {
         for (int runNumber = 1; runNumber <= maxRuns; ++runNumber) {
             try {
-                var workResult = migrateDocumentsWithOneWorker(
-                    sourceRepo,
-                    snapshotName,
-                    previousSnapshotName,
-                    indexAllowlist,
-                    target.getUrl(),
-                    clockJitter,
-                    testContext,
-                    sourceVersion,
-                    targetVersion,
-                    transformationConfig,
-                    allowlist
+                CompletionStatus workResult = migrateDocumentsWithPipeline(
+                    sourceRepo, snapshotName, previousSnapshotName, indexAllowlist,
+                    target.getUrl(), clockJitter, testContext,
+                    sourceVersion, targetVersion, transformationConfig, allowlist
                 );
                 if (workResult == CompletionStatus.NOTHING_DONE) {
-                    return runNumber;
+                    throw new ExpectedMigrationWorkTerminationException(
+                        new RfsMigrateDocuments.NoWorkLeftException("Pipeline returned NOTHING_DONE"),
+                        runNumber
+                    );
                 } else {
                     runCounter.incrementAndGet();
                 }
@@ -291,6 +288,8 @@ public class SourceTestBase {
                         + "Presuming that work was complete and that all worker processes should terminate"
                 );
                 throw new ExpectedMigrationWorkTerminationException(e, runNumber);
+            } catch (ExpectedMigrationWorkTerminationException e) {
+                throw e;
             } catch (Exception e) {
                 log.atError().setCause(e).setMessage("Caught an exception, " +
                     "but just going to run again with this worker to simulate task/container recycling").log();
@@ -299,80 +298,23 @@ public class SourceTestBase {
         throw new AssertionError("Migration did not complete within " + maxRuns + " runs");
     }
 
-    static class LeasePastError extends Error {
-    }
-
-    @SuppressWarnings("unchecked")
-    @SneakyThrows
-    public static CompletionStatus migrateDocumentsWithOneWorker(
-        SourceRepo sourceRepo,
-        String snapshotName,
-        String previousSnapshotName,
-        List<String> indexAllowlist,
-        String targetAddress,
-        Random clockJitter,
-        DocumentMigrationTestContext context,
-        Version sourceVersion,
-        Version targetVersion,
-        String transformationConfig
-    ) throws RfsMigrateDocuments.NoWorkLeftException {
-        return migrateDocumentsWithOneWorker(
-            sourceRepo,
-            snapshotName,
-            previousSnapshotName,
-            indexAllowlist,
-            targetAddress,
-            clockJitter,
-            context,
-            sourceVersion,
-            targetVersion,
-            transformationConfig,
-            DocumentExceptionAllowlist.empty()
-        );
-    }
-
-    @SuppressWarnings("unchecked")
-    @SneakyThrows
-    public static CompletionStatus migrateDocumentsWithOneWorker(
-        SourceRepo sourceRepo,
-        String snapshotName,
-        String previousSnapshotName,
-        List<String> indexAllowlist,
-        String targetAddress,
-        Random clockJitter,
-        DocumentMigrationTestContext context,
-        Version sourceVersion,
-        Version targetVersion,
-        String transformationConfig,
-        DocumentExceptionAllowlist allowlist
-    ) throws RfsMigrateDocuments.NoWorkLeftException {
-        return migrateDocumentsWithOneWorker(sourceRepo, snapshotName, previousSnapshotName, indexAllowlist,
-            targetAddress, null, clockJitter, context, sourceVersion, targetVersion, null,
-            transformationConfig, allowlist);
-    }
-
     /**
-     * @param coordinatorAddress if null, uses targetAddress for coordination
-     * @param coordinatorVersion if null, uses targetVersion for coordination
+     * Pipeline-based migration: uses the clean pipeline (LuceneSnapshotSource → OpenSearchDocumentSink).
      */
     @SneakyThrows
-    public static CompletionStatus migrateDocumentsWithOneWorker(
+    public static CompletionStatus migrateDocumentsWithPipeline(
         SourceRepo sourceRepo,
         String snapshotName,
         String previousSnapshotName,
         List<String> indexAllowlist,
         String targetAddress,
-        String coordinatorAddress,
         Random clockJitter,
         DocumentMigrationTestContext context,
         Version sourceVersion,
         Version targetVersion,
-        Version coordinatorVersion,
         String transformationConfig,
         DocumentExceptionAllowlist allowlist
     ) throws RfsMigrateDocuments.NoWorkLeftException {
-        var resolvedCoordinatorAddress = coordinatorAddress != null ? coordinatorAddress : targetAddress;
-        var resolvedCoordinatorVersion = coordinatorVersion != null ? coordinatorVersion : targetVersion;
         var tempDir = Files.createTempDirectory("opensearchMigrationPipeline_test_lucene");
         try (var processManager = new LeaseExpireTrigger(workItemId -> {
             log.atDebug().setMessage("Lease expired for {} (pipeline mode)")
@@ -382,8 +324,7 @@ public class SourceTestBase {
             final var nextClockShift = (int) (clockJitter.nextDouble() * ms_window) - (ms_window / 2);
 
             var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(sourceVersion, sourceRepo, false);
-            var extractor = org.opensearch.migrations.bulkload.SnapshotExtractor.create(
-                sourceVersion, sourceResourceProvider, sourceRepo);
+            var extractor = SnapshotExtractor.create(sourceVersion, sourceResourceProvider, sourceRepo);
 
             var docTransformer = new TransformationLoader().getTransformerFactoryLoader(
                 Optional.ofNullable(transformationConfig).orElse(
@@ -391,25 +332,21 @@ public class SourceTestBase {
                 ));
 
             AtomicReference<WorkItemCursor> progressCursor = new AtomicReference<>();
-            var coordinatorFactory = new WorkCoordinatorFactory(resolvedCoordinatorVersion);
-            var coordinatorConnectionContext = ConnectionContextTestParams.builder()
-                    .host(resolvedCoordinatorAddress)
-                    .build()
-                    .toConnectionContext();
-            var targetConnectionContext = ConnectionContextTestParams.builder()
-                    .host(targetAddress)
-                    .build()
-                    .toConnectionContext();
+            var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
+            var connectionContext = ConnectionContextTestParams.builder()
+                .host(targetAddress)
+                .build()
+                .toConnectionContext();
             var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
 
             try (var workCoordinator = coordinatorFactory.get(
-                    new CoordinateWorkHttpClient(coordinatorConnectionContext),
-                    TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                    UUID.randomUUID().toString(),
-                    Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift)),
-                    workItemRef::set
+                new CoordinateWorkHttpClient(connectionContext),
+                TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                UUID.randomUUID().toString(),
+                Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift)),
+                workItemRef::set
             )) {
-                var clientFactory = new OpenSearchClientFactory(targetConnectionContext);
+                var clientFactory = new OpenSearchClientFactory(connectionContext);
                 return RfsMigrateDocuments.runWithPipeline(
                     extractor,
                     clientFactory.determineVersionAndCreate(),
@@ -420,6 +357,7 @@ public class SourceTestBase {
                     allowlist,
                     1000,
                     Long.MAX_VALUE,
+                    10,
                     progressCursor,
                     workCoordinator,
                     Duration.ofMinutes(10),
@@ -436,7 +374,6 @@ public class SourceTestBase {
             FileSystemUtils.deleteDirectories(tempDir.toString());
         }
     }
-
     @AllArgsConstructor
     @Getter
     public static class RunData {

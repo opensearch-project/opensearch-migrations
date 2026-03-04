@@ -135,6 +135,13 @@ public class RestClient {
 
     public Mono<HttpResponse> asyncRequest(HttpMethod method, String path, String body, Map<String, List<String>> additionalHeaders,
                                            @Nullable IRfsContexts.IRequestContext context) {
+        return asyncRequestBytes(method, path,
+            body != null ? body.getBytes(StandardCharsets.UTF_8) : null,
+            additionalHeaders, context);
+    }
+
+    public Mono<HttpResponse> asyncRequestBytes(HttpMethod method, String path, byte[] body, Map<String, List<String>> additionalHeaders,
+                                                @Nullable IRfsContexts.IRequestContext context) {
         assert connectionContext.getUri() != null;
         Map<String, List<String>> headers = new HashMap<>();
         headers.put(USER_AGENT_HEADER_NAME, List.of(USER_AGENT));
@@ -158,7 +165,7 @@ public class RestClient {
             new GzipPayloadRequestTransformer(),
             connectionContext.getRequestTransformer()
         ).transform(method.name(), path, headers, Mono.justOrEmpty(body)
-                .map(b -> ByteBuffer.wrap(b.getBytes(StandardCharsets.UTF_8)))
+                .map(ByteBuffer::wrap)
             )
             .flatMap(transformedRequest ->
                 client.doOnRequest((r, conn) -> contextCleanupRef.set(addSizeMetricsHandlersAndGetCleanup(context).apply(r, conn)))
@@ -222,6 +229,15 @@ public class RestClient {
         IRfsContexts.IRequestContext context
     ) {
         return asyncRequest(HttpMethod.POST, path, body, additionalHeaders, context);
+    }
+
+    public Mono<HttpResponse> postAsyncBytes(
+        String path,
+        byte[] body,
+        Map<String, List<String>> additionalHeaders,
+        IRfsContexts.IRequestContext context
+    ) {
+        return asyncRequestBytes(HttpMethod.POST, path, body, additionalHeaders, context);
     }
 
     public Mono<HttpResponse> postAsync(String path, String body, IRfsContexts.IRequestContext context) {

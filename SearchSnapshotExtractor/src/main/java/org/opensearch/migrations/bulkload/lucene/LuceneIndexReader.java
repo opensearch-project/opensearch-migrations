@@ -3,7 +3,6 @@ package org.opensearch.migrations.bulkload.lucene;
 import java.io.IOException;
 import java.nio.file.Path;
 
-import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.lucene.version_5.IndexReader5;
 import org.opensearch.migrations.bulkload.lucene.version_6.IndexReader6;
@@ -89,31 +88,17 @@ public interface LuceneIndexReader {
         private final ClusterSnapshotReader snapshotReader;
 
         public LuceneIndexReader getReader(Path path) {
-            if (VersionMatchers.isES_2_X.or(VersionMatchers.isES_1_X).test(snapshotReader.getVersion())) {
-                log.atInfo().setMessage("Creating IndexReader5").log();
-                return new IndexReader5(
-                    path
-                );
-            } else if (VersionMatchers.isES_5_X.test(snapshotReader.getVersion())) {
-                log.atInfo().setMessage("Creating IndexReader6").log();
-                return new IndexReader6(
-                        path
-                );
-            } else if (VersionMatchers.isES_6_X.test(snapshotReader.getVersion())) {
-                log.atInfo().setMessage("Creating IndexReader7").log();
-                return new IndexReader7(
-                    path,
-                    snapshotReader.getSoftDeletesPossible(),
-                    snapshotReader.getSoftDeletesFieldData()
-                );
-            } else {
-                log.atInfo().setMessage("Creating IndexReader9").log();
-                return new IndexReader9(
-                    path,
-                    snapshotReader.getSoftDeletesPossible(),
-                    snapshotReader.getSoftDeletesFieldData()
-                );
-            }
+            var caps = snapshotReader.getCapabilities();
+            log.atInfo()
+                .setMessage("Creating IndexReader for Lucene version: {}")
+                .addArgument(caps.luceneVersion())
+                .log();
+            return switch (caps.luceneVersion()) {
+                case LUCENE_5 -> new IndexReader5(path);
+                case LUCENE_6 -> new IndexReader6(path);
+                case LUCENE_7 -> new IndexReader7(path, caps.softDeletesPossible(), caps.softDeletesFieldName());
+                case LUCENE_9 -> new IndexReader9(path, caps.softDeletesPossible(), caps.softDeletesFieldName());
+            };
         }
     }
 }

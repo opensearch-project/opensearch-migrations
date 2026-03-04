@@ -70,12 +70,11 @@ public class SyntheticDocumentSource implements DocumentSource {
 
     @Override
     public Flux<DocumentChange> readDocuments(ShardId shardId, long startingDocOffset) {
-        long count = docsPerShard - startingDocOffset;
+        int count = docsPerShard - (int) startingDocOffset;
         if (count <= 0) {
             return Flux.empty();
         }
-        int offset = Math.toIntExact(startingDocOffset);
-        return Flux.range(offset, (int) count)
+        return Flux.range((int) startingDocOffset, count)
             .map(docNum -> {
                 String id = shardId.indexName() + "-" + shardId.shardNumber() + "-" + docNum;
                 String body = "{\"field\":\"value-" + docNum + "\",\"shard\":" + shardId.shardNumber() + "}";

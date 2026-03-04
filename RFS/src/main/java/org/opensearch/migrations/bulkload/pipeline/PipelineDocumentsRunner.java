@@ -24,7 +24,18 @@ import reactor.core.scheduler.Schedulers;
 
 /**
  * Work-coordination-aware document migration using the clean pipeline.
- * Pipeline-based document migration runner using work coordination.
+ *
+ * <p>This is the pipeline equivalent of the legacy {@code DocumentsRunner}.
+ * It acquires work items (shards) via {@link ScopedWorkCoordinator}, processes them using
+ * {@link MigrationPipeline#migrateShard}, and reports progress via {@link WorkItemCursor}.
+ *
+ * <p>Key behaviors:
+ * <ul>
+ *   <li>Lease-based shard assignment — only processes shards it has acquired a lease for</li>
+ *   <li>Progress tracking — emits {@link WorkItemCursor} for each batch, enabling successor work items</li>
+ *   <li>Cancellation — supports cancellation on lease expiry via the cancellation trigger</li>
+ *   <li>Resumability — uses {@code startingDocId} from work items to resume mid-shard</li>
+ * </ul>
  */
 @Slf4j
 @AllArgsConstructor
@@ -36,6 +47,7 @@ public class PipelineDocumentsRunner {
     private final DocumentSink sink;
     private final int maxDocsPerBatch;
     private final long maxBytesPerBatch;
+    private final int batchConcurrency;
     private final String snapshotName;
     private final Consumer<WorkItemCursor> cursorConsumer;
     private final Consumer<Runnable> cancellationTriggerConsumer;
@@ -73,7 +85,7 @@ public class PipelineDocumentsRunner {
                     long startingOffset = wi.getStartingDocId() != null && wi.getStartingDocId() >= 0
                         ? wi.getStartingDocId() : 0;
 
-                    var pipeline = new MigrationPipeline(source, sink, maxDocsPerBatch, maxBytesPerBatch);
+                    var pipeline = new MigrationPipeline(source, sink, maxDocsPerBatch, maxBytesPerBatch, 1, batchConcurrency);
                     var latch = new CountDownLatch(1);
                     var lastCursor = new AtomicReference<ProgressCursor>();
                     var batchCount = new AtomicInteger();
@@ -103,8 +115,7 @@ public class PipelineDocumentsRunner {
                                 latch.countDown();
                             },
                             () -> {
-                                log.info("Pipeline completed for index={}, shard={}",
-                                    wi.getIndexName(), wi.getShardNumber());
+                                log.info("Pipeline completed for index={}, shard={}", wi.getIndexName(), wi.getShardNumber());
                                 latch.countDown();
                             }
                         );

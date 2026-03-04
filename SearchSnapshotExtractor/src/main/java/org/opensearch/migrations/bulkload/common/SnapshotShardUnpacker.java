@@ -21,8 +21,9 @@ import shadow.lucene9.org.apache.lucene.util.BytesRef;
 @RequiredArgsConstructor
 @Slf4j
 public class SnapshotShardUnpacker {
-    // Maximum number of concurrent file extractions
-    private static final int MAX_CONCURRENT_EXTRACTIONS = Runtime.getRuntime().availableProcessors();
+    // Concurrency for file extractions — I/O-bound (S3 downloads), not CPU-bound,
+    // so use a fixed value higher than availableProcessors() to saturate network bandwidth.
+    private static final int MAX_CONCURRENT_EXTRACTIONS = 16;
     
     private final SourceRepoAccessor repoAccessor;
     private final Set<ShardFileInfo> filesToUnpack;
@@ -111,17 +112,28 @@ public class SnapshotShardUnpacker {
             Files.createDirectories(targetDirectory);
 
             try (FSDirectory primaryDirectory = FSDirectory.open(targetDirectory, lockFactory)) {
+                long totalBytes = filesToUnpack.stream().mapToLong(ShardFileInfo::getLength).sum();
                 log.atInfo()
-                    .setMessage("Starting parallel unpacking of {} files for shard {} with {} threads")
+                    .setMessage("Starting parallel unpacking of {} files ({} MB) for shard {} with concurrency {}")
                     .addArgument(filesToUnpack.size())
+                    .addArgument(totalBytes / (1024 * 1024))
                     .addArgument(shardId)
                     .addArgument(MAX_CONCURRENT_EXTRACTIONS)
                     .log();
+
+                final int[] completedFiles = { 0 };
+                int totalFiles = filesToUnpack.size();
 
                 // Use Flux to process files in parallel with controlled concurrency
                 Flux.fromIterable(filesToUnpack)
                     .flatMap(
                         fileMetadata -> unpackFile(primaryDirectory, fileMetadata)
+                            .doOnSuccess(v -> {
+                                int done = ++completedFiles[0];
+                                if (done % 5 == 0 || done == totalFiles) {
+                                    log.info("Shard {} unpack progress: {}/{} files", shardId, done, totalFiles);
+                                }
+                            })
                             .subscribeOn(Schedulers.boundedElastic()),
                         MAX_CONCURRENT_EXTRACTIONS
                     )
