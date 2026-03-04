@@ -103,6 +103,8 @@ public class MigrationPipeline {
      */
     public Flux<ProgressCursor> migrateShard(ShardId shardId, String indexName, long startingDocOffset) {
         log.info("Starting shard migration: {} from offset {} (batchConcurrency={})", shardId, startingDocOffset, batchConcurrency);
+        // Mutable state for cumulative tracking. Safe because flatMapSequential processes
+        // results in order on a single thread — do NOT change to flatMap without switching to AtomicLong.
         final long[] cumulativeOffset = { startingDocOffset };
         final long[] cumulativeBytes = { 0 };
         final long[] lastLogTime = { System.currentTimeMillis() };
@@ -113,17 +115,17 @@ public class MigrationPipeline {
             .flatMapSequential(batch -> {
                 long batchStart = System.nanoTime();
                 int batchDocs = batch.size();
-                long batchBytes = batch.stream().mapToLong(d -> d.source() != null ? d.source().length : 0).sum();
+                long batchBytes = batch.stream().mapToLong(DocumentChange::sourceLength).sum();
                 int inflight = activeBatches.incrementAndGet();
                 return sink.writeBatch(shardId, indexName, batch)
-                    .map(cursor -> {
-                        cumulativeOffset[0] += cursor.docsInBatch();
-                        cumulativeBytes[0] += cursor.bytesInBatch();
+                    .map(result -> {
+                        cumulativeOffset[0] += result.docsInBatch();
+                        cumulativeBytes[0] += result.bytesInBatch();
                         return new ProgressCursor(
                             shardId,
                             cumulativeOffset[0],
-                            cursor.docsInBatch(),
-                            cursor.bytesInBatch()
+                            result.docsInBatch(),
+                            result.bytesInBatch()
                         );
                     })
                     .doOnNext(cursor -> {
@@ -187,8 +189,8 @@ public class MigrationPipeline {
      * Batching predicate that groups documents by count and byte size.
      * Stateful — tracks current batch metrics and resets on batch boundary.
      *
-     * <p>Thread-safe for single-threaded use by {@code bufferUntil}, which invokes this
-     * predicate sequentially before handing batches to {@code flatMapSequential}.
+     * <p>Not thread-safe — relies on {@code bufferUntil} invoking the predicate
+     * sequentially before handing batches to {@code flatMapSequential}.
      *
      * <p>Used with {@link Flux#bufferUntil} to create batches that respect both
      * document count and byte size limits.
@@ -207,7 +209,7 @@ public class MigrationPipeline {
         @Override
         public boolean test(DocumentChange doc) {
             currentCount++;
-            currentBytes += doc.source() != null ? doc.source().length : 0;
+            currentBytes += doc.sourceLength();
 
             if (currentCount >= maxDocs || currentBytes >= maxBytes) {
                 currentCount = 0;

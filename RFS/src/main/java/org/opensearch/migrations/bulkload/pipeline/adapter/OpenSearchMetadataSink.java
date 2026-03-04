@@ -44,7 +44,7 @@ public class OpenSearchMetadataSink implements MetadataSink {
 
     @Override
     public Mono<Void> createIndex(IndexMetadataSnapshot metadata) {
-        return Mono.fromRunnable(() -> OpenSearchIndexCreator.createIndex(client, metadata, OBJECT_MAPPER))
+        return Mono.fromRunnable(() -> OpenSearchIndexCreator.createIndex(client, metadata, OBJECT_MAPPER, null))
             .then();
     }
 

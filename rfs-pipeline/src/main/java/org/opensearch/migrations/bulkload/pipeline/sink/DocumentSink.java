@@ -2,9 +2,9 @@ package org.opensearch.migrations.bulkload.pipeline.sink;
 
 import java.util.List;
 
+import org.opensearch.migrations.bulkload.pipeline.ir.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
-import org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor;
 import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
 
 import reactor.core.publisher.Mono;
@@ -27,17 +27,16 @@ public interface DocumentSink extends AutoCloseable {
     /**
      * Write a batch of documents to the target.
      *
-     * <p>The returned {@link ProgressCursor} should report batch-local stats:
-     * {@code docsInBatch} and {@code bytesInBatch}. The {@code lastDocProcessed} field
-     * should be set to the batch size — the pipeline will overwrite it with the
-     * cumulative offset for resumability tracking.
+     * <p>Returns batch-local stats only. The pipeline is responsible for tracking
+     * cumulative offsets and constructing {@link org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor}
+     * for resumability.
      *
      * @param shardId   the shard these documents belong to
      * @param indexName the target index name
      * @param batch     the documents to write, must not be empty
-     * @return a progress cursor with batch-local stats
+     * @return batch-local stats (docs written, bytes written)
      */
-    Mono<ProgressCursor> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch);
+    Mono<BatchResult> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch);
 
     @Override
     default void close() throws Exception {

@@ -39,4 +39,9 @@ public record DocumentChange(
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(operation, "operation must not be null");
     }
+
+    /** Returns the length of the source bytes, or 0 if source is null (e.g. DELETE operations). */
+    public int sourceLength() {
+        return source != null ? source.length : 0;
+    }
 }

@@ -8,6 +8,7 @@ import java.util.Set;
 
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.parsing.ObjectNodeUtils;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -27,7 +28,12 @@ final class OpenSearchIndexCreator {
 
     private OpenSearchIndexCreator() {}
 
-    static void createIndex(OpenSearchClient client, IndexMetadataSnapshot metadata, ObjectMapper mapper) {
+    static void createIndex(
+        OpenSearchClient client,
+        IndexMetadataSnapshot metadata,
+        ObjectMapper mapper,
+        IRfsContexts.ICheckedIdempotentPutRequestContext context
+    ) {
         ObjectNode body = mapper.createObjectNode();
         if (metadata.mappings() != null) {
             ObjectNode mappings = metadata.mappings().deepCopy();
@@ -43,7 +49,7 @@ final class OpenSearchIndexCreator {
         if (metadata.aliases() != null) {
             body.set("aliases", metadata.aliases());
         }
-        client.createIndex(metadata.indexName(), body, null);
+        client.createIndex(metadata.indexName(), body, context);
     }
 
     /**

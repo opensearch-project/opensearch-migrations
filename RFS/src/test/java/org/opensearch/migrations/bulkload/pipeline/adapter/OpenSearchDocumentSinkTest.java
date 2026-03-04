@@ -2,17 +2,16 @@ package org.opensearch.migrations.bulkload.pipeline.adapter;
 
 import java.util.List;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -44,10 +43,10 @@ class OpenSearchDocumentSinkTest {
         var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
         var docs = List.of(doc("d1", "{\"a\":1}"), doc("d2", "{\"b\":2}"));
 
-        var cursor = sink.writeBatch(SHARD, "idx", docs).block();
+        var result = sink.writeBatch(SHARD, "idx", docs).block();
 
-        assertNotNull(cursor);
-        assertEquals(2, cursor.docsInBatch());
+        assertNotNull(result);
+        assertEquals(2, result.docsInBatch());
         verify(client).sendBulkRequestRaw(eq("idx"), eq(docs), isNull(), eq(false), any());
         verify(client, never()).sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any());
     }
@@ -67,7 +66,7 @@ class OpenSearchDocumentSinkTest {
     }
 
     @Test
-    void writeBatch_returnsCursorWithCorrectByteCounts() {
+    void writeBatch_returnsBatchResultWithCorrectByteCounts() {
         when(client.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
         var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
         byte[] src1 = "{\"x\":1}".getBytes();
@@ -77,13 +76,11 @@ class OpenSearchDocumentSinkTest {
             new DocumentChange("d2", null, src2, null, DocumentChange.ChangeType.INDEX)
         );
 
-        var cursor = sink.writeBatch(SHARD, "idx", docs).block();
+        var result = sink.writeBatch(SHARD, "idx", docs).block();
 
-        assertNotNull(cursor);
-        assertEquals(SHARD, cursor.shardId());
-        assertEquals(2, cursor.docsInBatch());
-        assertEquals(2, cursor.lastDocProcessed());
-        assertEquals(src1.length + src2.length, cursor.bytesInBatch());
+        assertNotNull(result);
+        assertEquals(2, result.docsInBatch());
+        assertEquals(src1.length + src2.length, result.bytesInBatch());
     }
 
     @Test
@@ -94,11 +91,11 @@ class OpenSearchDocumentSinkTest {
             new DocumentChange("d1", null, null, null, DocumentChange.ChangeType.DELETE)
         );
 
-        var cursor = sink.writeBatch(SHARD, "idx", docs).block();
+        var result = sink.writeBatch(SHARD, "idx", docs).block();
 
-        assertNotNull(cursor);
-        assertEquals(1, cursor.docsInBatch());
-        assertEquals(0, cursor.bytesInBatch());
+        assertNotNull(result);
+        assertEquals(1, result.docsInBatch());
+        assertEquals(0, result.bytesInBatch());
     }
 
     @Test

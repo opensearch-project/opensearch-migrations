@@ -1,8 +1,8 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
 import java.io.IOException;
-import java.time.Instant;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;

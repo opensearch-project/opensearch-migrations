@@ -10,9 +10,9 @@ import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
+import org.opensearch.migrations.bulkload.pipeline.ir.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
-import org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor;
 import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -69,39 +69,33 @@ public class OpenSearchDocumentSink implements DocumentSink {
 
     @Override
     public Mono<Void> createIndex(IndexMetadataSnapshot metadata) {
-        return Mono.fromRunnable(() -> OpenSearchIndexCreator.createIndex(client, metadata, OBJECT_MAPPER))
+        return Mono.fromRunnable(() -> OpenSearchIndexCreator.createIndex(client, metadata, OBJECT_MAPPER, null))
             .subscribeOn(Schedulers.boundedElastic())
             .then();
     }
 
     @Override
-    public Mono<ProgressCursor> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch) {
+    public Mono<BatchResult> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch) {
         long bytesInBatch = batch.stream()
-            .mapToLong(doc -> doc.source() != null ? doc.source().length : 0)
+            .mapToLong(DocumentChange::sourceLength)
             .sum();
+        var requestContext = requestContextSupplier != null ? requestContextSupplier.get() : null;
 
         Mono<OpenSearchClient.BulkResponse> bulkMono;
         if (transformer == null) {
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
             bulkMono = client.sendBulkRequestRaw(indexName, batch,
-                requestContextSupplier != null ? requestContextSupplier.get() : null,
-                allowServerGeneratedIds, allowlist);
+                requestContext, allowServerGeneratedIds, allowlist);
         } else {
             var bulkOps = batch.stream()
                 .map(doc -> toBulkOp(doc, indexName))
                 .collect(Collectors.toList());
             List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
             bulkMono = client.sendBulkRequest(indexName, opsToSend,
-                requestContextSupplier != null ? requestContextSupplier.get() : null,
-                allowServerGeneratedIds, allowlist);
+                requestContext, allowServerGeneratedIds, allowlist);
         }
 
-        return bulkMono.then(Mono.just(new ProgressCursor(
-            shardId,
-            (long) batch.size(),
-            batch.size(),
-            bytesInBatch
-        )));
+        return bulkMono.then(Mono.just(new BatchResult(batch.size(), bytesInBatch)));
     }
 
     @SuppressWarnings("unchecked")

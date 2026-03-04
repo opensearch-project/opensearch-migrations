@@ -3,9 +3,9 @@ package org.opensearch.migrations.bulkload.pipeline;
 import java.time.Duration;
 import java.util.List;
 
+import org.opensearch.migrations.bulkload.pipeline.ir.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
-import org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor;
 import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
@@ -81,9 +81,9 @@ class BlockingCallDetectionTest {
             }
 
             @Override
-            public Mono<ProgressCursor> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch) {
+            public Mono<BatchResult> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch) {
                 return Mono.delay(Duration.ofMillis(10))
-                    .map(ignored -> new ProgressCursor(shardId, batch.size(), batch.size(), 0));
+                    .map(ignored -> new BatchResult(batch.size(), 0));
             }
         };
         var pipeline = new MigrationPipeline(nonBlockingSource(5), delaySink, 5, 100_000);
@@ -105,7 +105,7 @@ class BlockingCallDetectionTest {
             }
 
             @Override
-            public Mono<ProgressCursor> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch) {
+            public Mono<BatchResult> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch) {
                 // Force onto a non-blocking parallel thread so BlockHound detects Thread.sleep
                 return Mono.just(batch)
                     .subscribeOn(Schedulers.parallel())
@@ -115,7 +115,7 @@ class BlockingCallDetectionTest {
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         }
-                        return Mono.just(new ProgressCursor(shardId, b.size(), b.size(), 0));
+                        return Mono.just(new BatchResult(b.size(), 0));
                     });
             }
         };
@@ -176,11 +176,11 @@ class BlockingCallDetectionTest {
             }
 
             @Override
-            public Mono<ProgressCursor> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch) {
+            public Mono<BatchResult> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch) {
                 long bytes = batch.stream()
-                    .mapToLong(d -> d.source() != null ? d.source().length : 0)
+                    .mapToLong(DocumentChange::sourceLength)
                     .sum();
-                return Mono.just(new ProgressCursor(shardId, batch.size(), batch.size(), bytes));
+                return Mono.just(new BatchResult(batch.size(), bytes));
             }
         };
     }
