@@ -39,14 +39,14 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
     ) {
         ShardMetadata previousShardMetadata = previousShardMetadataFactory.apply(indexName, shardNumber);
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexName, shardNumber);
-
+        
         // For delta unpacking, combine files from both current and base shard metadata
         Set<ShardFileInfo> filesToUnpack = Stream.concat(
                 shardMetadata.getFiles().stream(),
                 previousShardMetadata.getFiles().stream())
             .collect(Collectors.toCollection(
                 () -> new TreeSet<>(Comparator.comparing(ShardFileInfo::key))));
-
+        
         return unpackerFactory.create(
             filesToUnpack,
             indexName,
@@ -54,6 +54,7 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
             shardNumber
         );
     }
+
 
     @Override
     public DocumentChangeset prepareChangeset(
@@ -76,16 +77,15 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
                     previousReader, currentReader, startingDocId, deltaContext);
             }
 
-                var deletions = switch (deltaMode) {
-                    case UPDATES_ONLY -> Flux.<LuceneDocumentChange>empty();
-                    case UPDATES_AND_DELETES, DELETES_ONLY -> deltaResult.deletions;
-                };
-                var additions = switch (deltaMode) {
-                    case DELETES_ONLY -> Flux.<LuceneDocumentChange>empty();
-                    case UPDATES_ONLY, UPDATES_AND_DELETES -> deltaResult.additions;
-                };
-                return new DocumentChangeset(deletions, additions, LuceneDirectoryReader.getCleanupRunnable(previousReader, currentReader));
-            }
+            var deletions = switch (deltaMode) {
+                case UPDATES_ONLY -> Flux.<LuceneDocumentChange>empty();
+                case UPDATES_AND_DELETES, DELETES_ONLY -> deltaResult.deletions;
+            };
+            var additions = switch (deltaMode) {
+                case DELETES_ONLY -> Flux.<LuceneDocumentChange>empty();
+                case UPDATES_ONLY, UPDATES_AND_DELETES -> deltaResult.additions;
+            };
+            return new DocumentChangeset(deletions, additions, LuceneDirectoryReader.getCleanupRunnable(previousReader, currentReader));
         } catch (Exception e) {
             log.atError()
                 .setMessage("Exception during delta prepareChangeset")

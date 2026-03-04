@@ -160,8 +160,6 @@ reactor-netty-http = {module = "io.projectreactor.netty:reactor-netty-http", ver
 reactor-test = {module = "io.projectreactor:reactor-test", version.ref = "reactor-test" }
 blockhound = {module = "io.projectreactor.tools:blockhound", version.ref = "blockhound" }
 
-blockhound = {module = "io.projectreactor.tools:blockhound", version.ref = "blockhound" }
-
 semver4j = { module = "org.semver4j:semver4j", version.ref = "semver4j" }
 
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }

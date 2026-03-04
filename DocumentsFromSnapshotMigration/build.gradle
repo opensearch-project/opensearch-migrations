@@ -129,8 +129,3 @@ tasks.named('composeUp') {
 tasks.named('slowTest') {
     testLogging.showStandardStreams = false
 }
-
-test {
-    // TestResources resolves snapshot fixtures relative to this property; point it at the RFS module
-    systemProperty 'rfs.test.resources.dir', project(':RFS').projectDir.absolutePath
-}

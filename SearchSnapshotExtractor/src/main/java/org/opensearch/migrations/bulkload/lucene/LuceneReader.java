@@ -44,15 +44,9 @@ public class LuceneReader {
             .concatMapDelayError(c -> readDocsFromSegment(c,
                     startDocId,
                     reader.getIndexDirectoryPath(),
-                    DocumentChangeType.INDEX,
-                    mappingContext)
+                    DocumentChangeType.INDEX)
             )
             .subscribeOn(LUCENE_IO_SCHEDULER);
-    }
-
-    /** Backwards-compatible overload without mapping context */
-    public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId) {
-        return readDocsByLeavesFromStartingPosition(reader, startDocId, null);
     }
 
     /**
@@ -145,15 +139,7 @@ public class LuceneReader {
                 }).subscribeOn(LUCENE_IO_SCHEDULER), 500, 1);
     }
 
-    /** Backwards-compatible overload without mapping context */
-    public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId, Scheduler scheduler,
-                                                int concurrency, Path indexDirectoryPath, DocumentChangeType operation) {
-        return readDocsFromSegment(readerAndBase, docStartingId, scheduler, concurrency, indexDirectoryPath, operation, null);
-    }
-
-    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, 
-            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
-            FieldMappingContext mappingContext) {
+    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation) {
         LuceneDocument document;
         try {
             document = reader.document(luceneDocId);
@@ -235,11 +221,5 @@ public class LuceneReader {
 
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
         return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes, routing, operation);
-    }
-
-    /** Backwards-compatible overload without mapping context */
-    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, 
-            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation) {
-        return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, null);
     }
 }

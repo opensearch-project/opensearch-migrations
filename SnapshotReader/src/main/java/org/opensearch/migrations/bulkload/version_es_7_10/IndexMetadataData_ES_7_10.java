@@ -6,7 +6,6 @@ import org.opensearch.migrations.bulkload.transformers.TransformFunctions;
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -18,7 +17,7 @@ public class IndexMetadataData_ES_7_10 implements IndexMetadata {
     @Getter
     @JsonProperty("body")
     private final ObjectNode rawJson;
-    private JsonNode mappings;
+    private ObjectNode mappings;
     private ObjectNode settings;
     @Getter
     @JsonProperty("id")
@@ -42,11 +41,12 @@ public class IndexMetadataData_ES_7_10 implements IndexMetadata {
     }
 
     @Override
-    public JsonNode getMappings() {
+    public ObjectNode getMappings() {
         if (mappings != null) {
             return mappings;
         }
-        mappings = rawJson.get("mappings");
+        ObjectNode mappingsNode = (ObjectNode) rawJson.get("mappings");
+        mappings = mappingsNode;
         return mappings;
     }
 
