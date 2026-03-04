@@ -48,7 +48,8 @@ def call(Map config = [:]) {
             dedicatedManagerNodeType: "m6g.2xlarge.search",
             dataNodeCount: 24,
             dedicatedManagerNodeCount: 4,
-            ebsVolumeSize: 2048
+            ebsVolumeSize: 2048,
+            ebsThroughput: 500
         ]
     ]
     pipeline {
@@ -145,7 +146,7 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
-                            sh './gradlew clean build --no-daemon --stacktrace'
+                            sh './gradlew clean build -x test --no-daemon --stacktrace'
                         }
                     }
                 }
@@ -173,71 +174,36 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Synth MA Stack') {
+            stage('Deploy & Bootstrap MA') {
                 steps {
-                    timeout(time: 20, unit: 'MINUTES') {
-                        dir('deployment/migration-assistant-solution') {
-                            script {
-                                echo "Synthesizing CloudFormation templates via CDK"
-                                sh "npm install --dev"
-                                sh "npx cdk synth '*'"
-                                echo "CDK synthesis completed"
-                            }
-                        }
-                    }
-                }
-            }
-
-            stage('Deploy EKS CFN Stack') {
-                steps {
-                    timeout(time: 30, unit: 'MINUTES') {
-                        dir('deployment/migration-assistant-solution') {
-                            script {
-                                env.STACK_NAME_SUFFIX = "${maStageName}-${params.REGION}"
-                                env.MA_STACK_NAME = "Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}"
-                                def clusterDetails = readJSON text: env.clusterDetailsJson
-                                def targetCluster = clusterDetails.target
-                                def vpcId = targetCluster.vpcId
-                                def subnetIds = "${targetCluster.subnetIds}"
-
-                                echo "Deploying CloudFormation stack ${env.MA_STACK_NAME} in region ${params.REGION}"
-                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh """
-                                            set -euo pipefail
-                                            aws cloudformation create-stack \
-                                                --stack-name "${env.MA_STACK_NAME}" \
-                                                --template-body file://cdk.out/Migration-Assistant-Infra-Import-VPC-eks.template.json \
-                                                --parameters ParameterKey=Stage,ParameterValue=${maStageName} \
-                                                    ParameterKey=VPCId,ParameterValue=${vpcId} \
-                                                    ParameterKey=VPCSubnetIds,ParameterValue=\\"${subnetIds}\\" \
-                                                --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-                                                --region "${params.REGION}"
-
-                                            echo "Waiting for stack ${env.MA_STACK_NAME} to reach CREATE_COMPLETE status"
-                                            aws cloudformation wait stack-create-complete \
-                                                --stack-name "${env.MA_STACK_NAME}" \
-                                                --region "${params.REGION}"
-                                            echo "Stack ${env.MA_STACK_NAME} creation completed successfully"
-                                        """
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            stage('Configure EKS') {
-                steps {
-                    timeout(time: 10, unit: 'MINUTES') {
+                    timeout(time: 150, unit: 'MINUTES') {
                         script {
+                            env.STACK_NAME_SUFFIX = "${maStageName}-${params.REGION}"
+                            env.MA_STACK_NAME = "Migration-Assistant-Infra-Create-VPC-eks-${env.STACK_NAME_SUFFIX}"
+
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 1200, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                    sh """
+                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                          --deploy-create-vpc-cfn \
+                                          --build-cfn \
+                                          --stack-name "${env.MA_STACK_NAME}" \
+                                          --stage "${maStageName}" \
+                                          --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
+                                          --build-images \
+                                          --build-chart-and-dashboards \
+                                          --base-dir "\$(pwd)" \
+                                          --skip-console-exec \
+                                          --skip-setting-k8s-context \
+                                          --region ${params.REGION} \
+                                          2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
+                                    """
+
+                                    // Capture env vars for later stages and cleanup
                                     def rawOutput = sh(
                                         script: """
                                             aws cloudformation describe-stacks \
-                                                --stack-name Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} \
+                                                --stack-name ${env.MA_STACK_NAME} \
                                                 --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
                                                 --output text
                                         """,
@@ -256,36 +222,25 @@ def call(Map config = [:]) {
                                     env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']
                                     env.eksClusterName = exportsMap['MIGRATIONS_EKS_CLUSTER_NAME']
                                     env.clusterSecurityGroup = exportsMap['EKS_CLUSTER_SECURITY_GROUP']
-                                    def principalArn = 'arn:aws:iam::$MIGRATIONS_TEST_ACCOUNT_ID:role/JenkinsDeploymentRole'
-                                    sh """
-                                        if aws eks describe-access-entry --cluster-name $env.eksClusterName --principal-arn $principalArn >/dev/null 2>&1; then
-                                            echo "EKS access entry already exists, skipping creation"
-                                        else
-                                            aws eks create-access-entry --cluster-name $env.eksClusterName --principal-arn $principalArn --type STANDARD
-                                        fi
-                                        
-                                        aws eks associate-access-policy \
-                                            --cluster-name $env.eksClusterName \
-                                            --principal-arn $principalArn \
-                                            --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
-                                            --access-scope type=cluster
+                                    env.eksKubeContext = "migration-eks-cluster-${maStageName}-${params.REGION}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
-                                        aws eks update-kubeconfig --region ${params.REGION} --name $env.eksClusterName
-
-                                        for i in {1..10}; do
-                                            if kubectl get namespace default >/dev/null 2>&1; then
-                                                echo "kubectl configured and ready"
-                                                break
-                                            fi
-                                            echo "Waiting for kubectl to be ready (attempt \$i of 10)"
-                                            sleep 5
-                                        done
-                                    """
-                                    sh 'kubectl create namespace ma --dry-run=client -o yaml | kubectl apply -f -'
+            stage('Post-Cluster Setup') {
+                steps {
+                    timeout(time: 15, unit: 'MINUTES') {
+                        script {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 1200, roleSessionName: 'jenkins-session') {
                                     def clusterDetails = readJSON text: env.clusterDetailsJson
                                     def targetCluster = clusterDetails.target
-                                    def targetVersionExpanded = expandVersionString("${params.TARGET_VERSION}")
-                                    // Target configmap only (no source cluster)
+                                    def targetVersionExpanded = expandVersionString("${env.targetVer}")
+
+                                    // Target configmap (no source cluster for BYOS)
                                     writeJSON file: '/tmp/target-cluster-config.json', json: [
                                             endpoint: targetCluster.endpoint,
                                             allow_insecure: true,
@@ -296,9 +251,9 @@ def call(Map config = [:]) {
                                             version: params.TARGET_VERSION
                                     ]
                                     sh """
-                                        kubectl create configmap target-${targetVersionExpanded}-migration-config \
+                                        kubectl --context=${env.eksKubeContext} create configmap target-${targetVersionExpanded}-migration-config \
                                             --from-file=cluster-config=/tmp/target-cluster-config.json \
-                                            --namespace ma --dry-run=client -o yaml | kubectl apply -f -
+                                            --namespace ma --dry-run=client -o yaml | kubectl --context=${env.eksKubeContext} apply -f -
                                     """
 
                                     // Modify target security group to allow EKS cluster security group
@@ -326,49 +281,6 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Build Docker Images') {
-                steps {
-                    timeout(time: 1, unit: 'HOURS') {
-                        script {
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                    // Install QEMU for cross-architecture builds (arm64 on x86_64 host)
-                                    sh "docker run --privileged --rm tonistiigi/binfmt --install all"
-                                    def builderExists = sh(
-                                        script: "docker buildx ls | grep -q '^ecr-builder'",
-                                        returnStatus: true
-                                    ) == 0
-                                    if (builderExists) {
-                                        echo "Removing existing buildx builder ecr-builder"
-                                        sh "docker buildx rm ecr-builder"
-                                    }
-                                    echo "Creating buildx builder ecr-builder"
-                                    sh "docker buildx create --name ecr-builder --driver docker-container --bootstrap"
-                                    sh "docker buildx use ecr-builder"
-                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -Pbuilder=ecr-builder"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            stage('Install Helm Chart') {
-                steps {
-                    timeout(time: 10, unit: 'MINUTES') {
-                        dir('deployment/k8s/aws') {
-                            script {
-                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir ${WORKSPACE} --use-public-images false --skip-console-exec --stage ${maStageName}"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             stage('Run BYOS Migration Test') {
                 steps {
                     timeout(time: 12, unit: 'HOURS') {
@@ -378,12 +290,12 @@ def call(Map config = [:]) {
                                     // Wait for migration-console pod to be ready
                                     sh """
                                         echo "Waiting for migration-console pod to be ready"
-                                        kubectl wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=600s
+                                        kubectl --context=${env.eksKubeContext} wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=600s
                                         echo "Migration console pod is ready"
                                     """
                                     sh """
                                         echo "Applying workflow template"
-                                        kubectl apply -f ${WORKSPACE}/migrationConsole/lib/integ_test/testWorkflows/fullMigrationImportedClusters.yaml -n ma
+                                        kubectl --context=${env.eksKubeContext} apply -f ${WORKSPACE}/migrationConsole/lib/integ_test/testWorkflows/fullMigrationImportedClusters.yaml -n ma
                                         echo "Workflow template applied successfully"
                                     """
 
@@ -406,8 +318,8 @@ export BYOS_POD_REPLICAS='${params.RFS_WORKERS}'
 export BYOS_MONITOR_RETRY_LIMIT='${params.MONITOR_RETRY_LIMIT}'
 ENVEOF
 
-                                        kubectl cp /tmp/byos-env.sh ma/migration-console-0:/tmp/byos-env.sh
-                                        kubectl exec migration-console-0 -n ma -- bash -c '
+                                        kubectl --context=${env.eksKubeContext} cp /tmp/byos-env.sh ma/migration-console-0:/tmp/byos-env.sh
+                                        kubectl --context=${env.eksKubeContext} exec migration-console-0 -n ma -- bash -c '
                                             source /tmp/byos-env.sh && \
                                             cd /root/lib/integ_test && \
                                             pipenv run pytest integ_test/ma_workflow_test.py \
@@ -428,407 +340,49 @@ ENVEOF
 
         post {
             always {
-                timeout(time: 3, unit: 'HOURS') {
+                timeout(time: 75, unit: 'MINUTES') {
                     script {
                         def region = params.REGION
-                        def networkStackName = "NetworkInfra-${maStageName}-${region}"
+                        def maStackName = "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${region}"
                         def domainStackName = "OpenSearchDomain-target-${maStageName}-${region}"
-                        def maStackName = "Migration-Assistant-Infra-Import-VPC-eks-${maStageName}-${region}"
-                        def eksClusterName = env.eksClusterName ?: "migration-eks-cluster-${maStageName}-${region}"
+                        def networkStackName = "NetworkInfra-${maStageName}-${region}"
+
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: region, duration: 4500, roleSessionName: 'jenkins-session') {
-                                // Stage 1: Delete MA stack (EKS cluster) and cleanup orphaned EKS security groups
-                                stage('Destroy EKS CFN & EKS Resources') {
-                                    sh "echo 'CLEANUP: Listing pods in ma namespace' && kubectl -n ma get pods || true"
-                                    
-                                    // Revoke SG ingress rule added during setup (skip helm/namespace deletion - CFN handles EKS cleanup)
-                                    if (env.clusterDetailsJson && env.clusterSecurityGroup) {
-                                        def clusterDetails = readJSON text: env.clusterDetailsJson
-                                        def targetCluster = clusterDetails.target
-                                        sh """
-                                            echo "CLEANUP: Checking for EKS SG ingress rule on target cluster SG"
-                                            if aws ec2 describe-security-groups --group-ids ${targetCluster.securityGroupId} >/dev/null 2>&1; then
-                                                exists=\$(aws ec2 describe-security-groups --group-ids ${targetCluster.securityGroupId} \
-                                                    --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='${env.clusterSecurityGroup}']]" --output json)
-                                                if [ "\$exists" != "[]" ]; then
-                                                    echo "CLEANUP: Revoking EKS SG ingress rule from target cluster SG"
-                                                    aws ec2 revoke-security-group-ingress --group-id ${targetCluster.securityGroupId} \
-                                                        --protocol -1 --port -1 --source-group ${env.clusterSecurityGroup} || true
-                                                else
-                                                    echo "CLEANUP: No EKS SG ingress rule found on target cluster SG"
-                                                fi
-                                            else
-                                                echo "CLEANUP: Target cluster SG ${targetCluster.securityGroupId} not found, skipping"
-                                            fi
-                                        """
-                                    }
-
-                                    // Delete MA stack with retries
-                                    // We skip helm uninstall and 'ma' namespace deletion because namespace deletion triggers EKS internal updates (restarts) that can block cluster deletion.
+                                // Revoke SG ingress rule added during setup
+                                if (env.clusterDetailsJson && env.clusterSecurityGroup) {
+                                    def clusterDetails = readJSON text: env.clusterDetailsJson
+                                    def targetCluster = clusterDetails.target
                                     sh """
-                                        set -euo pipefail
-                                        
-                                        stack_status() {
-                                            local stack="\$1"
-                                            local out rc
-                                            out=\$(aws cloudformation describe-stacks --stack-name "\$stack" --query 'Stacks[0].StackStatus' --output text 2>&1) || rc=\$?
-                                            if [ "\${rc:-0}" -ne 0 ]; then
-                                                # Only treat as deleted if CFN says stack doesn't exist
-                                                if echo "\$out" | grep -qiE 'does not exist|ValidationError'; then
-                                                    echo "DELETED"
-                                                    return 0
-                                                fi
-                                                echo "ERROR: \$out" >&2
-                                                return 2
+                                        if aws ec2 describe-security-groups --group-ids ${targetCluster.securityGroupId} >/dev/null 2>&1; then
+                                            exists=\$(aws ec2 describe-security-groups \
+                                                --group-ids ${targetCluster.securityGroupId} \
+                                                --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='${env.clusterSecurityGroup}']]" \
+                                                --output json)
+                                            if [ "\$exists" != "[]" ]; then
+                                                echo "CLEANUP: Revoking EKS SG ingress rule"
+                                                aws ec2 revoke-security-group-ingress \
+                                                    --group-id ${targetCluster.securityGroupId} \
+                                                    --protocol -1 --port -1 \
+                                                    --source-group ${env.clusterSecurityGroup} || true
                                             fi
-                                            echo "\$out"
-                                        }
-                                        
-                                        MAX_ATTEMPTS=3
-                                        ATTEMPT=1
-                                        while [ \$ATTEMPT -le \$MAX_ATTEMPTS ]; do
-                                            echo "CLEANUP: Attempt \$ATTEMPT/\$MAX_ATTEMPTS - Deleting MA stack ${maStackName}"
-                                            aws cloudformation delete-stack --stack-name ${maStackName} || true
-                                            deadline=\$((SECONDS + 1800))
-                                            while [ \$SECONDS -lt \$deadline ]; do
-                                                rc=0
-                                                status=\$(stack_status "${maStackName}") || rc=\$?
-                                                if [ "\${rc:-0}" -eq 2 ]; then
-                                                    echo "CLEANUP: describe-stacks transient failure; retrying in 20s"
-                                                    sleep 20
-                                                    continue
-                                                fi
-                                                echo "CLEANUP: MA stack status: \$status"
-                                                if [ "\$status" = "DELETED" ] || [ "\$status" = "DELETE_COMPLETE" ]; then
-                                                    echo "CLEANUP: MA stack deleted"
-                                                    break
-                                                fi
-                                                if [ "\$status" = "DELETE_FAILED" ]; then
-                                                    echo "CLEANUP: MA stack DELETE_FAILED; recent events:"
-                                                    aws cloudformation describe-stack-events --stack-name ${maStackName} \
-                                                        --query 'StackEvents[0:10].[Timestamp,ResourceStatus,LogicalResourceId,ResourceStatusReason]' --output table || true
-                                                    break
-                                                fi
-                                                sleep 60
-                                            done
-                                            # If deleted, stop retry loop (don’t treat transient errors as “ERROR”)
-                                            rc=0
-                                            status=\$(stack_status "${maStackName}") || rc=\$?
-                                            if [ "\${rc:-0}" -eq 2 ]; then
-                                                echo "CLEANUP: transient describe-stacks failure after poll loop; retrying in 20s"
-                                                sleep 20
-                                                continue
-                                            fi
-                                            if [ "\$status" = "DELETED" ] || [ "\$status" = "DELETE_COMPLETE" ]; then
-                                                break
-                                            fi
-                                            [ \$ATTEMPT -lt \$MAX_ATTEMPTS ] && sleep 120
-                                            ATTEMPT=\$((ATTEMPT + 1))
-                                        done
-                                        
-                                        # Final check
-                                        final=""
-                                        for i in 1 2 3 4 5; do
-                                            rc=0
-                                            final=\$(stack_status "${maStackName}") || rc=\$?
-                                            if [ "\${rc:-0}" -eq 2 ]; then
-                                                echo "CLEANUP: transient describe-stacks failure during final check; retrying..."
-                                                sleep 10
-                                                continue
-                                            fi
-                                            break
-                                        done
-                                        if [ "\${rc:-0}" -eq 2 ]; then
-                                            echo "CLEANUP: FAILED - unable to determine MA stack status after retries"
-                                            exit 1
-                                        fi
-                                        if [ "\$final" != "DELETED" ] && [ "\$final" != "DELETE_COMPLETE" ]; then
-                                            echo "CLEANUP: FAILED - MA stack deletion did not complete (status=\$final)"
-                                            echo "CLEANUP: Dumping remaining stack resources:"
-                                            aws cloudformation describe-stack-resources --stack-name "${maStackName}" --output table || true
-                                            exit 1
-                                        fi
-                                    """
-
-                                    // Wait for EKS cluster to be truly gone
-                                    sh """
-                                        set -euo pipefail
-                                        echo "CLEANUP: Waiting for EKS cluster to disappear (best-effort): ${eksClusterName}"
-                                        deadline=\$((SECONDS + 900)) # 15 min best effort gate
-                                        while [ \$SECONDS -lt \$deadline ]; do
-                                            if aws eks describe-cluster --name "${eksClusterName}" >/dev/null 2>&1; then
-                                                echo "CLEANUP: EKS cluster still exists; waiting..."
-                                                sleep 30
-                                            else
-                                                echo "CLEANUP: EKS cluster not found (or access denied). Proceeding."
-                                                break
-                                            fi
-                                        done
-                                    """
-                                    
-                                    // Delete orphaned EKS security groups by tag (EKS creates SGs that may not be cleaned up and often throw DependencyViolation until ENIs drain)
-                                    sh """
-                                        set -euo pipefail
-                                        echo "CLEANUP: Finding EKS security groups by tag aws:eks:cluster-name=${eksClusterName}"
-                                        eks_sgs=\$(aws ec2 describe-security-groups \
-                                            --filters "Name=tag:aws:eks:cluster-name,Values=${eksClusterName}" \
-                                            --query 'SecurityGroups[*].GroupId' --output text 2>/dev/null || echo "")
-                                        
-                                        if [ -z "\$eks_sgs" ]; then
-                                            echo "CLEANUP: No orphaned EKS security groups found"
-                                            exit 0
-                                        fi
-                                        
-                                        for sg in \$eks_sgs; do
-                                            echo "CLEANUP: Attempting to delete EKS security group \$sg"
-                                            for i in 1 2 3 4 5; do
-                                                if aws ec2 delete-security-group --group-id "\$sg" >/dev/null 2>&1; then
-                                                    echo "CLEANUP: Deleted SG \$sg"
-                                                    break
-                                                fi
-                                                echo "CLEANUP: SG \$sg delete failed (attempt \$i). Dumping dependent ENIs:"
-                                                aws ec2 describe-network-interfaces --filters Name=group-id,Values="\$sg" \
-                                                    --query 'NetworkInterfaces[*].{Id:NetworkInterfaceId,Status:Status,Subnet:SubnetId,Desc:Description,Type:InterfaceType}' \
-                                                    --output table || true
-                                                sleep 30
-                                            done
-                                        done
-                                    """
-                                }
-
-                                // Stage 2: Destroy OpenSearch domain stack with retries
-                                stage('Destroy AOS Target Cluster') {
-                                    sh """
-                                        set -euo pipefail
-
-                                        stack_status() {
-                                            local stack="\$1"
-                                            local out rc
-                                            out=\$(aws cloudformation describe-stacks --stack-name "\$stack" --query 'Stacks[0].StackStatus' --output text 2>&1) || rc=\$?
-                                            if [ "\${rc:-0}" -ne 0 ]; then
-                                                if echo "\$out" | grep -qiE 'does not exist|ValidationError'; then
-                                                    echo "DELETED"
-                                                    return 0
-                                                fi
-                                                echo "ERROR: \$out" >&2
-                                                return 2
-                                            fi
-                                            echo "\$out"
-                                        }
-
-                                        MAX_ATTEMPTS=2
-                                        ATTEMPT=1
-                                        while [ \$ATTEMPT -le \$MAX_ATTEMPTS ]; do
-                                            echo "CLEANUP: Attempt \$ATTEMPT/\$MAX_ATTEMPTS - Deleting domain stack ${domainStackName}"
-                                            aws cloudformation delete-stack --stack-name ${domainStackName} || true
-                                            deadline=\$((SECONDS + 3600))
-                                            while [ \$SECONDS -lt \$deadline ]; do
-                                                rc=0
-                                                status=\$(stack_status "${domainStackName}") || rc=\$?
-                                                if [ "\${rc:-0}" -eq 2 ]; then
-                                                    echo "CLEANUP: describe-stacks transient failure; retrying in 20s"
-                                                    sleep 20
-                                                    continue
-                                                fi
-                                                echo "CLEANUP: Domain stack status: \$status"
-                                                if [ "\$status" = "DELETED" ] || [ "\$status" = "DELETE_COMPLETE" ]; then
-                                                    echo "CLEANUP: Domain stack deleted"
-                                                    break 2
-                                                fi
-                                                if [ "\$status" = "DELETE_FAILED" ]; then
-                                                    echo "CLEANUP: Domain stack DELETE_FAILED; recent events:"
-                                                    aws cloudformation describe-stack-events --stack-name ${domainStackName} \
-                                                        --query 'StackEvents[0:10].[Timestamp,ResourceStatus,LogicalResourceId,ResourceStatusReason]' --output table || true
-                                                    break
-                                                fi
-                                                sleep 60
-                                            done
-                                            [ \$ATTEMPT -lt \$MAX_ATTEMPTS ] && sleep 120
-                                            ATTEMPT=\$((ATTEMPT + 1))
-                                        done
-                                        final=""
-                                        for i in 1 2 3 4 5; do
-                                            rc=0
-                                            final=\$(stack_status "${domainStackName}") || rc=\$?
-                                            if [ "\${rc:-0}" -eq 2 ]; then
-                                                echo "CLEANUP: transient describe-stacks failure during final check; retrying..."
-                                                sleep 10
-                                                continue
-                                            fi
-                                            break
-                                        done
-                                        if [ "\${rc:-0}" -eq 2 ]; then
-                                            echo "CLEANUP: FAILED - unable to determine domain stack status after retries"
-                                            exit 1
-                                        fi
-                                        if [ "\$final" != "DELETED" ] && [ "\$final" != "DELETE_COMPLETE" ]; then
-                                            echo "CLEANUP: FAILED - Domain stack deletion did not complete (status=\$final)"
-                                            echo "CLEANUP: Dumping remaining stack resources:"
-                                            aws cloudformation describe-stack-resources --stack-name "${domainStackName}" --output table || true
-                                            exit 1
                                         fi
                                     """
                                 }
 
-                                // Stage 3: Delete network stack with VPC dependency cleanup on retries
-                                stage('Cleanup Network Stack') {
-                                    sh """
-                                        set -euo pipefail
+                                // Delete all deployed CloudFormation stacks
+                                // Order: MA stack first (owns its own VPC, no ENI issues), then domain, then network
+                                echo "CLEANUP: Deleting MA stack ${maStackName}"
+                                sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
+                                sh "aws cloudformation wait stack-delete-complete --stack-name ${maStackName} --region ${region} || true"
 
-                                        stack_status() {
-                                            local stack="\$1"
-                                            local out rc
-                                            out=\$(aws cloudformation describe-stacks --stack-name "\$stack" --query 'Stacks[0].StackStatus' --output text 2>&1) || rc=\$?
-                                            if [ "\${rc:-0}" -ne 0 ]; then
-                                                if echo "\$out" | grep -qiE 'does not exist|ValidationError'; then
-                                                    echo "DELETED"
-                                                    return 0
-                                                fi
-                                                echo "ERROR: \$out" >&2
-                                                return 2
-                                            fi
-                                            echo "\$out"
-                                        }
+                                echo "CLEANUP: Deleting domain stack ${domainStackName}"
+                                sh "aws cloudformation delete-stack --stack-name ${domainStackName} --region ${region} || true"
+                                sh "aws cloudformation wait stack-delete-complete --stack-name ${domainStackName} --region ${region} || true"
 
-                                        # Get VPC ID from CFN resources or parse from error message
-                                        get_vpc_id() {
-                                            echo "CLEANUP: Looking up VPC ID from CloudFormation resources" >&2
-                                            aws cloudformation describe-stack-resources --stack-name "${networkStackName}" \
-                                                --query 'StackResources[?ResourceType==`AWS::EC2::VPC`].PhysicalResourceId' \
-                                                --output text 2>/dev/null || true
-                                        }
-
-                                        list_private_subnets_from_stack() {
-                                            aws cloudformation describe-stack-resources --stack-name "${networkStackName}" \
-                                                --query 'StackResources[?ResourceType==`AWS::EC2::Subnet`].PhysicalResourceId' \
-                                                --output text 2>/dev/null || true
-                                        }
-
-                                        delete_available_enis_in_subnet() {
-                                            local subnet_id="\$1"
-                                            [ -z "\$subnet_id" ] && return 0
-                                            echo "CLEANUP: Deleting available ENIs in subnet \$subnet_id" >&2
-
-                                            enis=\$(aws ec2 describe-network-interfaces --filters Name=subnet-id,Values="\$subnet_id" \
-                                                --query 'NetworkInterfaces[?Status==`available` && InterfaceType==`interface`].NetworkInterfaceId' \
-                                                --output text 2>/dev/null || true)
-
-                                            for eni in \$enis; do
-                                                echo "CLEANUP: delete ENI \$eni (subnet \$subnet_id)" >&2
-                                                aws ec2 delete-network-interface --network-interface-id "\$eni" 2>&1 || echo "CLEANUP: Failed to delete \$eni" >&2
-                                            done
-                                        }
-
-                                        # Parse failing subnet from CFN events
-                                        get_failed_subnet_id() {
-                                            aws cloudformation describe-stack-events --stack-name "${networkStackName}" \
-                                                --query 'StackEvents[?ResourceStatus==`DELETE_FAILED`].ResourceStatusReason' \
-                                                --output text 2>/dev/null | grep -oE 'subnet-[a-f0-9]+' | head -1 || true
-                                        }
-
-                                        # Drain gate (between MA deletion and Network deletion)
-                                        VPC_ID=\$(get_vpc_id) || true
-                                        echo "CLEANUP: VPC_ID=\$VPC_ID"
-
-                                        subnets=\$(list_private_subnets_from_stack) || true
-                                        if [ -n "\$subnets" ]; then
-                                            echo "CLEANUP: Drain gate: ensure subnets have zero ENIs before deleting network stack"
-                                            deadline=\$((SECONDS + 1800)) # 30 min drain gate
-                                            while [ \$SECONDS -lt \$deadline ]; do
-                                                remaining=0
-                                                for s in \$subnets; do
-                                                    count=\$(aws ec2 describe-network-interfaces --filters Name=subnet-id,Values="\$s" \
-                                                        --query 'length(NetworkInterfaces)' --output text 2>/dev/null || echo 0)
-                                                    if [ "\$count" != "0" ]; then
-                                                        remaining=1
-                                                        delete_available_enis_in_subnet "\$s"
-                                                    fi
-                                                done
-                                                if [ "\$remaining" = "0" ]; then
-                                                    echo "CLEANUP: Drain gate satisfied (no ENIs in stack subnets)"
-                                                    break
-                                                fi
-                                                echo "CLEANUP: Drain gate waiting... (ENIs still present in one or more subnets)"
-                                                sleep 30
-                                            done
-                                        else
-                                            echo "CLEANUP: No subnets found in stack resources (maybe already deleted)"
-                                        fi
-
-                                        # Delete network stack with subnet-aware retry loop
-                                        MAX_ATTEMPTS=5
-                                        ATTEMPT=1
-                                        while [ \$ATTEMPT -le \$MAX_ATTEMPTS ]; do
-                                            echo "CLEANUP: Attempt \$ATTEMPT/\$MAX_ATTEMPTS - Deleting network stack ${networkStackName}"
-                                            aws cloudformation delete-stack --stack-name ${networkStackName} || true
-                                            deadline=\$((SECONDS + 1800))
-                                            while [ \$SECONDS -lt \$deadline ]; do
-                                                rc=0
-                                                status=\$(stack_status "${networkStackName}") || rc=\$?
-                                                if [ "\${rc:-0}" -eq 2 ]; then
-                                                    echo "CLEANUP: describe-stacks transient failure; retrying in 20s"
-                                                    sleep 20
-                                                    continue
-                                                fi
-                                                echo "CLEANUP: Network stack status: \$status"
-                                                if [ "\$status" = "DELETED" ] || [ "\$status" = "DELETE_COMPLETE" ]; then
-                                                    echo "CLEANUP: Network stack deleted"
-                                                    break 2
-                                                fi
-                                                if [ "\$status" = "DELETE_FAILED" ]; then
-                                                    echo "CLEANUP: Network stack DELETE_FAILED; recent events:"
-                                                    aws cloudformation describe-stack-events --stack-name ${networkStackName} \
-                                                        --query 'StackEvents[0:10].[Timestamp,ResourceStatus,LogicalResourceId,ResourceStatusReason]' --output table || true
-                                                    break
-                                                fi
-                                                sleep 60
-                                            done
-                                            
-                                            # On failure, subnet aware cleanup
-                                            if [ \$ATTEMPT -lt \$MAX_ATTEMPTS ]; then
-                                                failed_subnet=\$(get_failed_subnet_id) || true
-                                                if [ -n "\$failed_subnet" ]; then
-                                                    echo "CLEANUP: Detected failing subnet \$failed_subnet; cleaning ENIs and retrying"
-                                                    delete_available_enis_in_subnet "\$failed_subnet"
-                                                else
-                                                    echo "CLEANUP: No failing subnet parsed; dumping ENIs in stack subnets (best-effort)"
-                                                    for s in \$subnets; do
-                                                        aws ec2 describe-network-interfaces --filters Name=subnet-id,Values="\$s" \
-                                                            --query 'NetworkInterfaces[*].{Id:NetworkInterfaceId,Status:Status,Type:InterfaceType,Desc:Description}' \
-                                                            --output table || true
-                                                    done
-                                                fi
-                                                echo "CLEANUP: Waiting 60s for eventual consistency before retry"
-                                                sleep 60
-                                            fi
-                                            ATTEMPT=\$((ATTEMPT + 1))
-                                        done
-                                        
-                                        # Final assert
-                                        final=""
-                                        for i in 1 2 3 4 5; do
-                                            rc=0
-                                            final=\$(stack_status "${networkStackName}") || rc=\$?
-                                            if [ "\${rc:-0}" -eq 2 ]; then
-                                                echo "CLEANUP: transient describe-stacks failure during final check; retrying..."
-                                                sleep 10
-                                                continue
-                                            fi
-                                            break
-                                        done
-                                        if [ "\${rc:-0}" -eq 2 ]; then
-                                            echo "CLEANUP: FAILED - unable to determine Network stack status after retries"
-                                            exit 1
-                                        fi
-                                        if [ "\$final" != "DELETED" ] && [ "\$final" != "DELETE_COMPLETE" ]; then
-                                            echo "CLEANUP: FINAL ASSERT FAILED - Network stack still exists (status=\$final)"
-                                            echo "CLEANUP: Dumping remaining stack resources:"
-                                            aws cloudformation describe-stack-resources --stack-name "${networkStackName}" --output table || true
-                                            exit 1
-                                        fi
-                                        echo "CLEANUP: FINAL ASSERT PASSED - NetworkInfra stack removed"
-                                    """
-                                }
+                                echo "CLEANUP: Deleting network stack ${networkStackName}"
+                                sh "aws cloudformation delete-stack --stack-name ${networkStackName} --region ${region} || true"
+                                sh "aws cloudformation wait stack-delete-complete --stack-name ${networkStackName} --region ${region} || true"
                             }
                         }
                     }
@@ -857,6 +411,7 @@ def deployTargetClusterOnly(Map config) {
             dedicatedManagerNodeCount: config.sizeConfig.dedicatedManagerNodeCount,
             ebsEnabled: true,
             ebsVolumeSize: config.sizeConfig.ebsVolumeSize,
+            ebsThroughput: config.sizeConfig.ebsThroughput,
             nodeToNodeEncryption: true
         ]]
     ]
