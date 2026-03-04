@@ -68,36 +68,65 @@ echo "$ECR_PASS" | helm registry login "$ECR_HOST" -u AWS --password-stdin
 aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
   crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
 
-# --- mirror container images ---
+# --- DockerHub mirrors (tried in order for mirror.gcr.io/* images) ---
+# Override: DOCKERHUB_MIRRORS="mirror.gcr.io docker.io public.ecr.aws" ./mirrorToEcr.sh ...
+DOCKERHUB_MIRRORS="${DOCKERHUB_MIRRORS:-mirror.gcr.io docker.io public.ecr.aws}"
+
+# Copies a single image to ECR, trying mirror sources for mirror.gcr.io/* images.
+copy_image() {
+  local image="$1" image_no_tag="${image%%:*}" tag="${image##*:}"
+  local ecr_repo="mirrored/${image_no_tag}"
+  local dest="${ECR_HOST}/${ecr_repo}:${tag}"
+
+  # Build source candidates — for mirror.gcr.io/*, try each mirror
+  local sources="$image"
+  case "$image" in mirror.gcr.io/*)
+    local path="${image#mirror.gcr.io/}" ; sources=""
+    for m in $DOCKERHUB_MIRRORS; do
+      # public.ecr.aws hosts official library images under docker/library/
+      if [ "$m" = "public.ecr.aws" ]; then
+        case "$path" in library/*) sources="${sources:+$sources }${m}/docker/${path}" ;; esac
+      else
+        sources="${sources:+$sources }${m}/${path}"
+      fi
+    done
+  ;; esac
+
+  aws ecr create-repository --repository-name "$ecr_repo" --region "$REGION" 2>/dev/null || true
+  for src in $sources; do
+    for attempt in 1 2 3; do
+      if crane copy "$src" "$dest" 2>/dev/null; then
+        [ "$src" != "$image" ] && echo "  ℹ️  $image (via $src)"
+        echo "  ✅ $image"; return 0
+      fi
+      sleep 5
+    done
+  done
+  echo "  ❌ $image" >&2; return 1
+}
+
+# --- mirror container images (parallel) ---
 echo ""
 echo "=== Mirroring container images ==="
-failed_images=""
-echo "$IMAGES" | while IFS= read -r image; do
-  image=$(echo "$image" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-  [ -z "$image" ] && continue
-  echo "$image" | grep -q '^#' && continue
-
-  image_no_tag="${image%%:*}"
-  tag="${image##*:}"
-  ecr_repo="mirrored/${image_no_tag}"
-
-  echo "  Copying $image → ${ECR_HOST}/${ecr_repo}:${tag}"
-  aws ecr create-repository --repository-name "$ecr_repo" --region "$REGION" 2>/dev/null || true
-  if crane copy "$image" "${ECR_HOST}/${ecr_repo}:${tag}" 2>&1; then
-    echo "  ✅ $image"
-  else
-    echo "  ❌ FAILED: $image" >&2
-    failed_images="$failed_images $image"
-  fi
-done
+# Write cleaned image list to temp file so we can loop without a pipe subshell
+_imglist=$(mktemp)
+echo "$IMAGES" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | grep -v '^#' | grep -v '^$' > "$_imglist"
+while IFS= read -r image; do
+  copy_image "$image" &
+done < "$_imglist"
+rm -f "$_imglist"
+wait || { echo "⚠️  Some image copies failed" >&2; }
 
 # --- mirror helm charts as OCI artifacts ---
 echo ""
 echo "=== Mirroring Helm charts ==="
-echo "$CHARTS" | while IFS='|' read -r name version repo; do
-  name=$(echo "$name" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-  version=$(echo "$version" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-  repo=$(echo "$repo" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+_chartlist=$(mktemp)
+echo "$CHARTS" | grep -v '^[[:space:]]*$' > "$_chartlist"
+_chart_fail=0
+while IFS='|' read -r name version repo; do
+  name="${name#"${name%%[![:space:]]*}"}"; name="${name%"${name##*[![:space:]]}"}"
+  version="${version#"${version%%[![:space:]]*}"}"; version="${version%"${version##*[![:space:]]}"}"
+  repo="${repo#"${repo%%[![:space:]]*}"}"; repo="${repo%"${repo##*[![:space:]]}"}"
   [ -z "$name" ] && continue
 
   echo "  Pulling $name $version from $repo..."
@@ -116,10 +145,12 @@ echo "$CHARTS" | while IFS='|' read -r name version repo; do
 
   aws ecr create-repository --repository-name "charts/${name}" --region "$REGION" 2>/dev/null || true
   echo "  Pushing $tgz → oci://${ECR_HOST}/charts"
-  helm push "$tgz" "oci://${ECR_HOST}/charts" 2>&1 || echo "  ❌ FAILED to push $name" >&2
+  helm push "$tgz" "oci://${ECR_HOST}/charts" 2>&1 || { echo "  ❌ FAILED to push $name" >&2; _chart_fail=1; }
   rm -f "$tgz"
   echo "  ✅ $name $version"
-done
+done < "$_chartlist"
+rm -f "$_chartlist"
+[ "$_chart_fail" -eq 0 ] || echo "⚠️  Some chart copies failed" >&2
 
 echo ""
 echo "=== Mirroring complete ==="
