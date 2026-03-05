@@ -101,6 +101,7 @@ CLUSTER_CDK_CONTEXT_FILE_PATH="$CLUSTER_CDK_PATH/cdk.context.json"
 STAGE="aws-integ"
 PROVIDED_CONTEXT_FILE_PATH=""
 VPC_ID=""
+DESTROY=false
 
 # Argument parser
 while [[ $# -gt 0 ]]; do
@@ -117,12 +118,17 @@ while [[ $# -gt 0 ]]; do
       VPC_ID="$2"
       shift 2
       ;;
+    --destroy)
+      DESTROY=true
+      shift
+      ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo "Options:"
       echo "  -s, --stage <val>              Stage name (default: $STAGE)"
       echo "  -c, --context-file <path>      Path to context file (REQUIRED)"
       echo "  --vpc-id <id>                  VPC ID to use in cluster outputs (skips NetworkInfra stack lookup)"
+      echo "  --destroy                      Destroy all stacks instead of deploying"
       exit 0
       ;;
     *)
@@ -151,7 +157,13 @@ cd ..
 cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
 
 cd amazon-opensearch-service-sample-cdk
-cdk deploy "*" --require-approval never --concurrency 3
 
-CLUSTER_DETAILS_OUTPUT_FILE_PATH="$ROOT_REPO_PATH/test/tmp/cluster-details-${STAGE}.json"
-write_cluster_outputs "$STAGE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH" "$VPC_ID"
+if [[ "$DESTROY" == true ]]; then
+  cdk destroy "*" --force
+else
+  cdk deploy "*" --require-approval never --concurrency 3
+
+  CLUSTER_DETAILS_OUTPUT_FILE_PATH="$ROOT_REPO_PATH/test/tmp/cluster-details-${STAGE}.json"
+  cd ..
+  write_cluster_outputs "$STAGE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH" "$VPC_ID"
+fi

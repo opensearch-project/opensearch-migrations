@@ -346,7 +346,6 @@ ENVEOF
                     script {
                         def region = params.REGION
                         def maStackName = "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${region}"
-                        def domainStackName = "OpenSearchDomain-target-${maStageName}-${region}"
 
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: region, duration: 4500, roleSessionName: 'jenkins-session') {
@@ -371,10 +370,11 @@ ENVEOF
                                     """
                                 }
 
-                                // Delete domain stack first (it's in the MA VPC), then MA stack (owns the VPC)
-                                echo "CLEANUP: Deleting domain stack ${domainStackName}"
-                                sh "aws cloudformation delete-stack --stack-name ${domainStackName} --region ${region} || true"
-                                sh "aws cloudformation wait stack-delete-complete --stack-name ${domainStackName} --region ${region} || true"
+                                // Destroy domain stacks via CDK (uses same context file from deploy)
+                                dir('test') {
+                                    echo "CLEANUP: Destroying domain stacks via CDK"
+                                    sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${clusterContextFilePath} --destroy || true"
+                                }
 
                                 echo "CLEANUP: Deleting MA stack ${maStackName}"
                                 sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
